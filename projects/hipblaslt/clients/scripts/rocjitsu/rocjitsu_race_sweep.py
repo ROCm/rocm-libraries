@@ -4,6 +4,7 @@
 """Run a range of packaged solution indices under rocJITsu."""
 
 import argparse
+import bisect
 import copy
 import csv
 import functools
@@ -25,6 +26,7 @@ from rocjitsu_known_failures import apply_known_failures
 from rocjitsu_sweep_plan import (
     POLICY,
     REGULAR_POLICY,
+    catalogue_end,
     derive_devices,
     make_batches,
     make_plan,
@@ -199,6 +201,14 @@ def render_report(manifest, summary):
         f"policy: `{cell(manifest['policy'])}`.",
         *(
             [
+                "Selected from an index list with SHA-256 "
+                f"`{manifest['solution_index_list_sha256']}`."
+            ]
+            if "solution_index_list_sha256" in manifest
+            else []
+        ),
+        *(
+            [
                 "Case parameters: "
                 f"reduction blocks `{cell(manifest['case_parameters']['reduction_blocks'])}`, "
                 f"alpha `{cell(manifest['case_parameters']['alpha'])}`, "
@@ -316,6 +326,7 @@ def prepare(args):
         alpha=getattr(args, "alpha", 1),
         beta=getattr(args, "beta", 0),
         workers=args.workers,
+        indices=getattr(args, "solution_indices", None),
     )
     manifest.update(
         backend=args.backend,
@@ -1300,6 +1311,9 @@ def resume_results(directory, manifest):
     ):
         if previous[key] != manifest[key]:
             raise ValueError(f"Cannot resume: {key} changed")
+    for key in ("selection", "solution_index_list_sha256"):
+        if previous.get(key) != manifest.get(key):
+            raise ValueError(f"Cannot resume: {key} changed")
     prior_parameters = previous.get("case_parameters")
     if "case_parameters" not in previous and previous["policy"] == REGULAR_POLICY:
         prior_parameters = {"reduction_blocks": 8, "alpha": 1, "beta": 0}
@@ -1745,6 +1759,7 @@ def run(args):
         summary.update(
             backend=args.backend,
             solution_index_range=manifest["solution_index_range"],
+            solution_index_list_sha256=manifest.get("solution_index_list_sha256"),
             artifact_fingerprint=manifest["artifact_fingerprint"],
             seconds=time.monotonic() - start,
             suite_seconds=time.monotonic() - suite_start,
@@ -1863,6 +1878,137 @@ def run(args):
         raise
 
 
+def chunk_complete(directory):
+    """Whether a chunk's run finished its whole selection, so a campaign reuses it."""
+    path = directory / "summary.json"
+    return path.is_file() and json.loads(path.read_text(encoding="utf-8"))["stop"] is None
+
+
+def run_campaign(args):
+    """Run the selection as consecutive chunks of original indices, then summarize them.
+
+    Each chunk is an ordinary run in its own report directory under --reports.
+    Rerunning the same command reuses finished chunks and resumes an unfinished
+    one from its retained results, which move to a numbered sibling directory.
+    A chunk that stops early (a failure without --continue-on-failure, or the
+    suite timeout) ends the campaign.
+    """
+    root = args.reports
+    root.mkdir(parents=True, exist_ok=True)
+    begin = args.solution_index_range_begin
+    end = args.solution_index_range_end
+    if end is None:
+        end = catalogue_end(args.library_dir, args.target, args.workers)
+    listed = None if args.solution_indices is None else sorted(set(args.solution_indices))
+    deadline = math.inf if args.suite_timeout is None else time.monotonic() + args.suite_timeout
+    ranges = [(b, min(b + args.chunk_size, end)) for b in range(begin, end, args.chunk_size)]
+    if listed is not None:
+        # A chunk without listed indices has nothing to select.
+        ranges = [
+            (b, e)
+            for b, e in ranges
+            if bisect.bisect_left(listed, b) < len(listed)
+            and listed[bisect.bisect_left(listed, b)] < e
+        ]
+    status, chunks = 0, []
+    for chunk_begin, chunk_end in ranges:
+        directory = root / f"chunk-{chunk_begin:07}-{chunk_end:07}"
+        if not chunk_complete(directory):
+            if time.monotonic() >= deadline:
+                status = 1
+                break
+            chunk = copy.copy(args)
+            chunk.chunk_size = None
+            chunk.reports = directory
+            chunk.solution_index_range_begin = chunk_begin
+            chunk.solution_index_range_end = chunk_end
+            chunk.resume_from = None
+            if args.suite_timeout is not None:
+                chunk.suite_timeout = deadline - time.monotonic()
+            if directory.exists():
+                attempt = 1
+                while directory.with_name(f"{directory.name}.attempt-{attempt}").exists():
+                    attempt += 1
+                previous = directory.rename(
+                    directory.with_name(f"{directory.name}.attempt-{attempt}")
+                )
+                if (previous / "manifest.json").is_file():
+                    chunk.resume_from = previous
+            print(f"campaign: running {directory.name}", flush=True)
+            run(chunk)
+        summary = json.loads((directory / "summary.json").read_text(encoding="utf-8"))
+        outcomes = summary["index_outcomes"]
+        chunks.append(
+            {
+                "name": directory.name,
+                "begin": chunk_begin,
+                "end": chunk_end,
+                "passed": summary["passed"],
+                "stop": summary["stop"],
+                "outcome_counts": summary["outcome_counts"],
+                "not_passed": [
+                    {"index": r["index"], "outcome": r["outcome"]}
+                    for r in outcomes
+                    if not r["outcome"].startswith("PASS")
+                ],
+            }
+        )
+        del summary, outcomes
+        if chunks[-1]["stop"] is not None:
+            status = 1
+            break
+        status |= 0 if chunks[-1]["passed"] else 1
+    totals = Counter()
+    for chunk in chunks:
+        totals.update(chunk["outcome_counts"])
+    complete = len(chunks) == len(ranges) and all(c["stop"] is None for c in chunks)
+    campaign = {
+        "target": args.target,
+        "solution_index_range": {"begin": begin, "end": end},
+        "chunk_size": args.chunk_size,
+        "complete": complete,
+        "passed": status == 0,
+        "outcome_counts": dict(totals),
+        "chunks": chunks,
+    }
+    write_json(root / "campaign.json", campaign)
+    attention = [
+        r
+        for chunk in chunks
+        for r in chunk["not_passed"]
+        if r["outcome"] not in ("UNSUPPORTED_FEATURE", "EXCLUDED_HARDWARE")
+    ]
+    lines = [
+        f"### Solution-index campaign: {args.target}, indices {begin} to {end} (exclusive)",
+        "",
+        f"Status: {'PASS' if status == 0 else 'FAIL'}; "
+        f"{'all chunks ran' if complete else 'incomplete; rerun the same command to continue'}.",
+        "Outcomes: " + ", ".join(f"{k} {v}" for k, v in sorted(totals.items())) + ".",
+        "",
+        "| Chunk | Result | Outcomes |",
+        "|:---|:---|:---|",
+        *(
+            f"| {c['name']} | {'PASS' if c['passed'] else 'FAIL'} | "
+            + ", ".join(f"{k} {v}" for k, v in sorted(c["outcome_counts"].items()))
+            + " |"
+            for c in chunks
+        ),
+        "",
+        f"Indices that neither passed nor were outside the adapter scope: {len(attention)}.",
+        "",
+        *(f"- {r['index']}: {r['outcome']}" for r in attention),
+        "",
+    ]
+    write_text(root / "campaign.md", "\n".join(lines))
+    print(
+        f"campaign: {len(chunks)} chunks; "
+        + ", ".join(f"{k} {v}" for k, v in sorted(totals.items()))
+        + f". Summary: {root / 'campaign.md'}",
+        flush=True,
+    )
+    return status
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("rocjitsu", "client", "library-dir", "reports"):
@@ -1924,6 +2070,22 @@ def main():
         "--solution-index-range-end",
         type=int,
         help="Exclusive original catalogue index limit (default: catalogue end)",
+    )
+    parser.add_argument(
+        "--solution-indices",
+        type=Path,
+        help=(
+            "File of original catalogue indices, one per line ('#' starts a comment); "
+            "selects only these within the index range"
+        ),
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        help=(
+            "Run the selection as consecutive chunks of this many original indices, each "
+            "in its own directory under --reports; rerunning continues an interrupted campaign"
+        ),
     )
     parser.add_argument("--backend", choices=("tensile", "bench"), required=True)
     parser.add_argument(
@@ -2031,6 +2193,19 @@ def main():
             "finite positive timeouts and memory budget, positive reduction blocks, "
             "and finite scalars"
         )
+    if args.chunk_size is not None and (args.chunk_size < 1 or args.resume_from is not None):
+        parser.error("Chunk size must be positive; a campaign resumes its own chunks")
+    if args.solution_indices is not None:
+        try:
+            args.solution_indices = [
+                int(line.split("#", 1)[0])
+                for line in args.solution_indices.read_text(encoding="utf-8").splitlines()
+                if line.split("#", 1)[0].strip()
+            ]
+        except (OSError, ValueError) as error:
+            parser.error(f"Cannot read solution indices: {error}")
+        if not args.solution_indices or not all(0 <= i < (1 << 31) for i in args.solution_indices):
+            parser.error("Solution indices must be a nonempty list of native indices")
     for key in (
         "rocjitsu",
         "client",
@@ -2042,7 +2217,7 @@ def main():
     ):
         if getattr(args, key) is not None:
             setattr(args, key, getattr(args, key).resolve())
-    return run(args)
+    return run(args) if args.chunk_size is None else run_campaign(args)
 
 
 if __name__ == "__main__":

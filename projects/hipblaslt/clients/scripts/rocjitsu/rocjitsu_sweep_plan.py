@@ -330,6 +330,16 @@ def derive_devices(library_dir, target, template, workers=1):
     return devices
 
 
+def _shard_last_index(path):
+    return max((solution["index"] for _, solution in iterSolutionRecords(path)), default=-1)
+
+
+def catalogue_end(library_dir, target, workers=1):
+    """One past the largest solution index in the target's catalogue."""
+    _, paths = metadata_shards(library_dir, target)
+    return max(_map_shards(_shard_last_index, paths, workers)) + 1
+
+
 class _UnsupportedInInventory(Exception):
     """A selected solution that the inventory found outside the adapter scope."""
 
@@ -346,18 +356,27 @@ def _profile_for(solution, target, profiles):
 
 
 def _inventory_shard(
-    path, *, target, library_dir, policy, case_parameters, profiles, range_begin, range_end
+    path,
+    *,
+    target,
+    library_dir,
+    policy,
+    case_parameters,
+    profiles,
+    range_begin,
+    range_end,
+    indices=None,
 ):
-    """Count one metadata shard's solutions and keep those in the selected range.
+    """Count one metadata shard's solutions and keep those selected.
 
     Each selected entry is (index, solution, profile, planned). For regular-v1,
     planned is the problem and its bench input, or the reason it is unsupported.
     """
     counts, coverage_gaps = Counter(), Counter()
-    names, eligible_names, indices, selected = set(), set(), [], []
+    names, eligible_names, shard_indices, selected = set(), set(), [], []
     for _, solution in iterSolutionRecords(path):
         index = solution["index"]
-        indices.append(index)
+        shard_indices.append(index)
         counts["solutions"] += 1
         name = hashlib.sha256(solution["kernelName"].encode()).digest()
         names.add(name)
@@ -385,11 +404,12 @@ def _inventory_shard(
         else:
             counts["eligible_solutions"] += 1
             eligible_names.add(name)
-        if range_begin <= index and (range_end is None or index < range_end):
+        in_range = range_begin <= index and (range_end is None or index < range_end)
+        if in_range and (indices is None or index in indices):
             selected.append((index, solution, profile, planned))
     return {
         "sha256": sha256(path),
-        "indices": indices,
+        "indices": shard_indices,
         "counts": counts,
         "coverage_gaps": coverage_gaps,
         "names": names,
@@ -410,10 +430,13 @@ def make_plan(
     alpha=1,
     beta=0,
     workers=1,
+    indices=None,
 ):
     """Plan the selected indices and inventory the whole catalogue.
 
-    ``workers`` processes inventory the metadata shards in parallel.
+    ``indices``, if given, selects only those indices within the range; each
+    must be in the catalogue. ``workers`` processes inventory the metadata
+    shards in parallel.
     """
     if type(range_begin) is not int or not 0 <= range_begin < (1 << 31):
         raise ValueError("Solution index range begin must be a nonnegative native index")
@@ -451,22 +474,29 @@ def make_plan(
         profiles=profiles,
         range_begin=range_begin,
         range_end=range_end,
+        indices=None if indices is None else frozenset(indices),
     )
     shards = _map_shards(inventory, paths, workers)
     counts, inputs, coverage_gaps = Counter(), {}, Counter()
-    names, eligible_names, indices, requested = set(), set(), set(), {}
+    names, eligible_names, seen, requested = set(), set(), set(), {}
     for path, shard in zip(paths, shards):
         inputs[path.name] = shard["sha256"]
         repeated = Counter(shard["indices"])
-        duplicates = indices.intersection(repeated) | {i for i, n in repeated.items() if n > 1}
+        duplicates = seen.intersection(repeated) | {i for i, n in repeated.items() if n > 1}
         if duplicates:
             raise ValueError(f"Duplicate solution index {min(duplicates)} in {path}")
-        indices.update(shard["indices"])
+        seen.update(shard["indices"])
         counts.update(shard["counts"])
         coverage_gaps.update(shard["coverage_gaps"])
         names |= shard["names"]
         eligible_names |= shard["eligible_names"]
         requested.update((entry[1]["index"], (path, *entry[1:])) for entry in shard["selected"])
+    if indices is not None:
+        missing = {
+            i for i in indices if range_begin <= i and (range_end is None or i < range_end)
+        } - requested.keys()
+        if missing:
+            raise ValueError(f"Solution indices not in the catalogue: {sorted(missing)[:10]}")
     selected = [requested[i] for i in sorted(requested)]
     if not selected:
         raise ValueError("No solution indices in the requested range")
@@ -547,8 +577,17 @@ def make_plan(
         "case_parameters": case_parameters,
         "coverage_gaps": dict(coverage_gaps),
         "target": target,
-        "selection": "solution-index-range",
+        "selection": "solution-index-range" if indices is None else "solution-index-list",
         "solution_index_range": {"begin": range_begin, "end": range_end},
+        **(
+            {}
+            if indices is None
+            else {
+                "solution_index_list_sha256": hashlib.sha256(
+                    "".join(f"{i}\n" for i in sorted(set(indices))).encode()
+                ).hexdigest()
+            }
+        ),
         "solutions": len(selected),
         "kernels": len({s["kernelName"] for _, s, _, _ in selected}),
         "planned_cases": sum(len(job["cases"]) for job in jobs),

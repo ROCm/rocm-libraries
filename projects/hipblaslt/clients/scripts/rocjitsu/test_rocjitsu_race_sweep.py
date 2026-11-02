@@ -13,6 +13,7 @@ import threading
 import time
 import unittest
 import zlib
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -435,6 +436,107 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(sweep.checkpoint_after(100, 100.1), 100.1 + sweep.CHECKPOINT_SECONDS)
         self.assertEqual(sweep.checkpoint_after(100, 102), 102 + 2 * sweep.CHECKPOINT_COST_RATIO)
 
+    def test_index_list_selects_within_the_range_and_must_exist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in (3, 5, 8, 9)]
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(root, "gfx942", {}, 4, None, indices=[9, 5, 3, 5])
+            self.assertEqual([j["solutions"][0]["index"] for j in manifest["jobs"]], [5, 9])
+            self.assertEqual(manifest["selection"], "solution-index-list")
+            same = plan.make_plan(root, "gfx942", {}, 0, None, indices=[3, 5, 9])
+            self.assertEqual(
+                same["solution_index_list_sha256"], manifest["solution_index_list_sha256"]
+            )
+            self.assertEqual(
+                plan.make_plan(root, "gfx942", {}, 0, None)["inventory"]["solutions"], 4
+            )
+            self.assertEqual(plan.catalogue_end(root, "gfx942"), 10)
+            with self.assertRaisesRegex(ValueError, r"not in the catalogue: \[4\]"):
+                plan.make_plan(root, "gfx942", {}, 0, None, indices=[3, 4])
+
+    def test_campaign_runs_chunks_reuses_finished_ones_and_resumes_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls = []
+            stop_at = {}
+
+            def fake_run(args):
+                begin, end = args.solution_index_range_begin, args.solution_index_range_end
+                calls.append((begin, end, args.resume_from and args.resume_from.name))
+                args.reports.mkdir()
+                (args.reports / "manifest.json").write_text("{}")
+                if begin in stop_at:
+                    if stop_at.pop(begin) == "crash":
+                        raise KeyboardInterrupt
+                    stop = {"reason": "suite-timeout"}
+                else:
+                    stop = None
+                indices = [i for i in range(begin, end) if i in (args.solution_indices or [i])]
+                outcomes = [
+                    {"index": i, "outcome": "LAUNCHED_NO_RESULT" if i == 13 else "PASS"}
+                    for i in indices
+                ]
+                summary = {
+                    "stop": stop,
+                    "passed": stop is None and 13 not in indices,
+                    "outcome_counts": dict(Counter(r["outcome"] for r in outcomes)),
+                    "index_outcomes": outcomes,
+                }
+                (args.reports / "summary.json").write_text(json.dumps(summary))
+                return 0 if summary["passed"] else 1
+
+            args = SimpleNamespace(
+                reports=root / "campaign",
+                target="gfx942",
+                library_dir=root,
+                workers=1,
+                solution_index_range_begin=0,
+                solution_index_range_end=25,
+                solution_indices=None,
+                suite_timeout=None,
+                resume_from=None,
+                chunk_size=10,
+            )
+            with patch.object(sweep, "run", side_effect=fake_run):
+                stop_at[10] = "crash"
+                with self.assertRaises(KeyboardInterrupt):
+                    sweep.run_campaign(args)
+                stop_at[20] = "timeout"
+                self.assertEqual(sweep.run_campaign(args), 1)
+                self.assertFalse(
+                    json.loads((args.reports / "campaign.json").read_text())["complete"]
+                )
+                self.assertEqual(sweep.run_campaign(args), 1)
+            self.assertEqual(
+                calls,
+                [
+                    (0, 10, None),
+                    (10, 20, None),
+                    (10, 20, "chunk-0000010-0000020.attempt-1"),
+                    (20, 25, None),
+                    (20, 25, "chunk-0000020-0000025.attempt-1"),
+                ],
+            )
+            campaign = json.loads((args.reports / "campaign.json").read_text())
+            self.assertTrue(campaign["complete"])
+            self.assertFalse(campaign["passed"])
+            self.assertEqual(campaign["outcome_counts"], {"PASS": 24, "LAUNCHED_NO_RESULT": 1})
+            self.assertIn("- 13: LAUNCHED_NO_RESULT", (args.reports / "campaign.md").read_text())
+
+            calls.clear()
+            args.reports = root / "listed"
+            args.solution_indices = [3, 21]
+            args.solution_index_range_end = None
+            with (
+                patch.object(sweep, "run", side_effect=fake_run),
+                patch.object(sweep, "catalogue_end", return_value=40),
+            ):
+                self.assertEqual(sweep.run_campaign(args), 0)
+            self.assertEqual(calls, [(0, 10, None), (20, 30, None)])
+
     def test_parallel_regular_inventory_matches_serial(self):
         from tensilelite.Utilities.BinaryLibraryIO import writeMessagePack
 
@@ -611,6 +713,9 @@ class SweepTests(unittest.TestCase):
             ["--reduction-blocks", "0"],
             ["--alpha", "nan"],
             ["--beta", "inf"],
+            ["--chunk-size", "0"],
+            ["--chunk-size", "10", "--resume-from", "old"],
+            ["--solution-indices", "/nonexistent/indices.txt"],
         ):
             with (
                 self.subTest(flags=flags),
@@ -621,6 +726,24 @@ class SweepTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     sweep.main()
                 run.assert_not_called()
+        with tempfile.TemporaryDirectory() as tmp:
+            listed = Path(tmp) / "indices.txt"
+            listed.write_text("# gradient\n12\n\n7  # E\n")
+            flags = ["--solution-indices", str(listed), "--chunk-size", "5"]
+            with (
+                patch.object(sys, "argv", required + flags),
+                patch.object(sweep, "run_campaign", return_value=0) as campaign,
+            ):
+                self.assertEqual(sweep.main(), 0)
+                self.assertEqual(campaign.call_args.args[0].solution_indices, [12, 7])
+                self.assertEqual(campaign.call_args.args[0].chunk_size, 5)
+            listed.write_text("# none\n")
+            with (
+                patch.object(sys, "argv", required + flags[:2]),
+                patch.object(sys, "stderr", io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                sweep.main()
 
     def test_cli_hardware_profiles_do_not_require_a_redundant_config(self):
         required = [

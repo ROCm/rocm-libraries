@@ -40,6 +40,12 @@ summary record the original range, and every input and result retains the origin
 solution index. Batch IDs are separate execution bookkeeping. There is no
 solution sampling or sampling seed.
 
+`--solution-indices FILE` further restricts the selection to the listed original
+IDs within the range, one per line; `#` starts a comment. Every listed ID within
+the range must exist in the catalogue. The manifest records
+`selection: solution-index-list` and the SHA-256 of the sorted, distinct list, and
+a resumed run must use the same list.
+
 The `tile-depth-v1` adapters support ordinary GEMM with matching C/D types, optional
 bias/scaling and no activation. Grouped, fused, sparse, MX, gradient, auxiliary
 output and swizzled problems are outside their scope. Inventory counts include
@@ -314,6 +320,22 @@ Earlier failed process IDs are retained in the source manifest/receipts and
 the continuation's `resume` metadata. The final summary still accounts for every selected original
 index and distinguishes numerical results, race reports, process failures,
 planning gaps and unstarted work.
+
+### Campaigns
+
+A whole catalogue is too large for one report directory: the manifest and
+checkpoints grow with the selection (a 30,000-index gfx942 run writes a 380 MB
+manifest). `--chunk-size N` runs the selection as consecutive chunks of `N`
+original IDs, each an ordinary run in `REPORTS/chunk-BEGIN-END` with the same
+options. Without an explicit end, the campaign ends after the catalogue's last
+index. Chunks without a listed index are skipped. Rerunning the same command
+reuses each chunk whose `summary.json` records a complete run, and resumes an
+unfinished chunk from its retained results, which move to
+`chunk-BEGIN-END.attempt-N`. A chunk that stops early, from a failure without
+`--continue-on-failure` or from `--suite-timeout` (which covers the whole
+campaign), ends the campaign. `campaign.json` and `campaign.md` total the chunks'
+outcomes and list each index that did not pass; the markdown omits unsupported
+features and hardware exclusions. `--resume-from` does not apply to a campaign.
 
 ## Nightly execution requirements
 
