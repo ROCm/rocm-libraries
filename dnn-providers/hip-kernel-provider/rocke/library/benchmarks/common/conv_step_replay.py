@@ -247,6 +247,33 @@ class Case:
         self.runs[i % len(self.runs)]()
 
 
+def load_pins_cases(path: str, arch: str) -> dict:
+    """``{case: {cmd, kernel, calls}}`` of a pins file, or of one mode of a pin
+    table (``PATH#MODE``, ``dispatch/conv_pins.py``). A table's cases are
+    resolved through the dispatcher (:func:`dispatch.conv_pins.dispatch_conv_pinned`
+    on a ``ConvGroupedRequest`` built from each case's command), so a replay of
+    a table runs exactly the instances and launches dispatch hands a runtime."""
+    file, _, mode = path.partition("#")
+    doc = json.load(open(file))
+    if "modes" not in doc:
+        if mode:
+            raise SystemExit(f"{file}: not a pin table (no modes); drop #{mode}")
+        return doc["cases"]
+    from dispatch.conv_pins import dispatch_conv_pinned, load_conv_pins, request_from_miopen_cmd
+
+    table = load_conv_pins(file, mode or None)
+    out = {}
+    for k, row in doc["modes"][table.mode]["cases"].items():
+        res = dispatch_conv_pinned(request_from_miopen_cmd(row["cmd"], arch), table)
+        lp = res.spec.launch_params()
+        label = res.spec.name
+        if "split_k" in lp:
+            label += f" @split_k={lp['split_k']}" + (f"/full{lp['tail_full']}" if "tail_full" in lp else "")
+        out[k] = dict(row, kernel=label)
+    print(f"[replay] {path}: {len(out)} cases resolved by dispatch_conv_pinned ({table.mode})", flush=True)
+    return out
+
+
 def _u8(host_bits, nbytes):
     import ctypes
 
@@ -255,7 +282,7 @@ def _u8(host_bits, nbytes):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pins", required=True)
+    ap.add_argument("--pins", required=True, help="pins file, or PIN_TABLE#MODE (resolved through dispatch)")
     ap.add_argument("--cache", required=True)
     ap.add_argument("--arch", default="gfx942")
     ap.add_argument("--mode", action="append", choices=["staged", "parts", "b2b", "step", "ab", "stepsel", "energy"])
@@ -328,7 +355,7 @@ def main(argv=None) -> int:
 
         rc = _hm._resolve_hip().hipSetDeviceFlags(ctypes.c_uint(args.sched))
         print(f"[replay] hipSetDeviceFlags({args.sched}) -> {rc}", flush=True)
-    pins = json.load(open(args.pins))["cases"]
+    pins = load_pins_cases(args.pins, args.arch)
     keys = args.cases.split(",") if args.cases else list(pins)
     need = set(keys)
     if "step" in modes:
@@ -368,7 +395,7 @@ def main(argv=None) -> int:
                     os.environ[k_] = v_
     for spec in args.pins_variant:
         name, _, path = spec.partition(":")
-        vp = json.load(open(path))["cases"]
+        vp = load_pins_cases(path, args.arch)
         variants[name] = {
             k: Case(k, dict(pins[k], kernel=vp[k]["kernel"]) if k in vp else pins[k], cache, args.arch, B, rt,
                     host_bits, stage2, args, share_from=cases[k])

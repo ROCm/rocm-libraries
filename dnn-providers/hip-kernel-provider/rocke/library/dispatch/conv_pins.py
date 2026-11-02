@@ -29,6 +29,38 @@ This module lets dispatch use it the way a tuned table is used:
 
 Nothing reads a pins file unless a caller passes one; registry order stays the
 default policy.
+
+Pin tables (several modes in one file)
+--------------------------------------
+A *pin table* holds one pins set per selection mode -- e.g. ``deterministic``
+(only bitwise run-to-run reproducible launches) and ``fastest`` -- for one
+arch::
+
+    {"arch": "gfx942", "llvm_flavor": "llvm22",
+     "modes": {"deterministic": {"cases": {...}}, "fastest": {"cases": {...}}}}
+
+:func:`load_conv_pins` reads one mode of it (``mode=``). The shipped tables are
+under ``conv_pin_tables/`` (:func:`shipped_conv_pin_tables`).
+
+Consuming a table the way dispatch consumes the opt-in Winograd forward
+(``dispatch.grouped_convolution``: a candidate with ``opt_in=True``, never
+picked under ``algorithm="auto"``, reached by pinning its ``algorithm``):
+
+* :func:`pinned_conv_candidate` turns one mode of a table into an opt-in
+  ``KernelCandidate`` per direction (``algorithm="pinned"``,
+  ``spec_id="conv_pinned_<mode>"``). It admits a request only when the table
+  pins its exact problem and the pinned binary's own admission rule
+  (:func:`kernels.conv.kernel_identity.identity_supports_problem`) accepts it;
+  its spec (:class:`ConvPinnedSpec`) is the instance's AOT identity plus the
+  launch parameters it was benchmarked with; ``build`` is the IR of the cached
+  binary (the job ``--compile-all`` builds the identity from).
+* :func:`dispatch_conv_pinned` answers a ``ConvGroupedRequest`` of any
+  direction (fwd, dgrad, wgrad) from a table: a ``DispatchResult`` whose
+  ``spec.launch_params()`` carries ``split_k`` / ``tail_full``.
+* :func:`register_conv_pin_table` adds the fwd / dgrad candidates to the
+  grouped-convolution registries, so ``dispatch_conv_grouped`` with
+  ``algorithm="pinned"`` returns the pinned instance (wgrad has no
+  grouped-convolution registry; :func:`dispatch_conv_pinned` serves it).
 """
 
 from __future__ import annotations
@@ -138,11 +170,16 @@ class ConvPins:
 
     source: str = ""
     pins: dict = field(default_factory=dict)  # key -> ConvPin
+    arch: str = ""
+    mode: str = ""
+    llvm_flavor: str = ""
 
     def __len__(self) -> int:
         return len(self.pins)
 
     def lookup(self, req) -> ConvPin | None:
+        if self.arch and getattr(req, "arch", self.arch) != self.arch:
+            return None
         return self.pins.get(request_key(req))
 
     def ranker(self):
@@ -182,7 +219,299 @@ def pins_from_mapping(data: Mapping, source: str = "") -> ConvPins:
     return out
 
 
-def load_conv_pins(path) -> ConvPins:
-    """Read a pins JSON file."""
+def table_modes(data: Mapping) -> tuple[str, ...]:
+    """The modes of a pin table (``()`` for a plain pins document)."""
+    return tuple((data.get("modes") or {}).keys())
+
+
+def load_conv_pins(path, mode: str | None = None) -> ConvPins:
+    """Read a pins JSON file, or one ``mode`` of a pin table.
+
+    A table with one mode reads that mode when ``mode`` is ``None``; a table
+    with several needs ``mode``. ``mode`` on a plain pins file is refused.
+    """
     p = Path(path)
-    return pins_from_mapping(json.loads(p.read_text()), source=str(p))
+    data = json.loads(p.read_text())
+    modes = table_modes(data)
+    if not modes:
+        if mode is not None:
+            raise ValueError(f"{p}: a plain pins file has no mode {mode!r}")
+        out = pins_from_mapping(data, source=str(p))
+        out.arch = str(data.get("arch", "") or "")
+        return out
+    if mode is None:
+        if len(modes) != 1:
+            raise ValueError(f"{p}: pin table with modes {', '.join(modes)}: name one")
+        mode = modes[0]
+    if mode not in modes:
+        raise ValueError(f"{p}: no mode {mode!r} (modes: {', '.join(modes)})")
+    out = pins_from_mapping(data["modes"][mode], source=f"{p}#{mode}")
+    out.arch = str(data.get("arch", "") or "")
+    out.mode = mode
+    out.llvm_flavor = str(data.get("llvm_flavor", "") or "")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Pin tables as an opt-in dispatch candidate
+# ---------------------------------------------------------------------------
+
+#: Shipped pin tables (``<arch>_<name>.json``), beside this module.
+PIN_TABLE_DIR = Path(__file__).resolve().with_name("conv_pin_tables")
+
+_FAMILY = {"fwd": "conv_fwd", "dgrad": "conv_dgrad", "wgrad": "conv_wgrad"}
+PINNED_ALGORITHM = "pinned"
+PINNED_ABI_VERSION = "hipkg-conv-grouped/v1+pinned-launch"
+
+
+def shipped_conv_pin_tables() -> dict[str, Path]:
+    """The pin tables shipped beside this module, by file stem."""
+    if not PIN_TABLE_DIR.is_dir():
+        return {}
+    return {f.stem: f for f in sorted(PIN_TABLE_DIR.glob("*.json"))}
+
+
+@dataclass(frozen=True)
+class ConvPinnedSpec:
+    """A pinned instance selected for a request.
+
+    ``identity`` is the AOT identity (the cache key of the binary), ``block``
+    its workgroup size and ``launch`` the launch parameters the pin was
+    benchmarked with (``split_k``; ``tail_full``: a tail split's full-tile count),
+    which the launcher applies as the ``--run-from-cache`` path does
+    (``benchmark_implicit_gemm_conv._cached_bind``).
+    """
+
+    name: str
+    identity: object  # kernels.conv.kernel_identity.KernelIdentity
+    block: tuple[int, int, int]
+    launch: tuple[tuple[str, int], ...] = ()
+    mode: str = ""
+    case: str = ""
+
+    @property
+    def direction(self) -> str:
+        return self.identity.direction
+
+    @property
+    def dtype(self) -> str:
+        return self.identity.dtype_a
+
+    @property
+    def algorithm(self) -> str:
+        return self.identity.algorithm
+
+    def kernel_name(self) -> str:
+        return self.name
+
+    def launch_params(self) -> dict:
+        return dict(self.launch)
+
+
+def pinned_kernel_signature(identity, dtype: str | None = None) -> tuple[dict, ...]:
+    """Kernarg signature of a pinned implicit-GEMM binary: the one it was built
+    with (the ``--run-from-cache`` launcher's ``_signature_for_identity``)."""
+    from kernels.common.conv_abi import conv_args_signature
+
+    dt = dtype or identity.dtype_a
+    if identity.direction == "wgrad":
+        flags = {"split_flags": True} if (getattr(identity, "ws_fuse", 0) or getattr(identity, "ws_tree", 0)) else {}
+        return tuple(conv_args_signature(
+            dt, direction="wgrad", is_3d=identity.is_3d, two_stage=identity.two_stage,
+            streamk=identity.streamk_reduction if identity.streamk != "off" else None, **flags))
+    if identity.direction == "dgrad":
+        return tuple(conv_args_signature(dt, direction="dgrad", is_3d=identity.is_3d))
+    extra = {"split_det": True} if getattr(identity, "split_det", False) else {}
+    return tuple(conv_args_signature(
+        dt, is_3d=identity.is_3d, two_stage=identity.two_stage,
+        split_k=identity.split_k > 1 and not identity.two_stage,
+        split_tail=bool(getattr(identity, "split_tail", False)),
+        split_flags=bool(getattr(identity, "split_flag_store", False) or getattr(identity, "split_zero_first", False)),
+        **extra))
+
+
+def _nominal_grid(spec: ConvPinnedSpec, req) -> tuple[int, int, int]:
+    """The data-parallel tile grid of the pinned tile on ``req`` (z: groups x
+    the pinned split degree). Persistent / stream-K / box-list launches size
+    their own grid from the device's CU count at launch time; this is the tile
+    grid they cover."""
+    from kernels.common.conv_args import ConvArgs
+
+    from .grouped_convolution import _conv_problem
+
+    ident = spec.identity
+    p = _conv_problem(req)
+    sk = int(spec.launch_params().get("split_k", 1) or 1)
+    if ident.direction == "wgrad":
+        gx, gy, _ = ConvArgs.from_problem(
+            p, direction="wgrad", tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+        ).grid()
+        return gx, gy, max(1, p.groups) * sk
+    gx, gy, gz = ConvArgs.from_problem(
+        p, direction=ident.direction, tile_m=ident.tile_m, tile_n=ident.tile_n
+    ).grid()
+    return gx, gy, gz * sk
+
+
+def _pinned_spec(pins: ConvPins, pin: ConvPin) -> ConvPinnedSpec:
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    ident = KernelIdentity.from_label(pin.instance)
+    return ConvPinnedSpec(
+        name=pin.instance,
+        identity=ident,
+        block=(ident.warp_m * ident.warp_n * ident.wave_size, 1, 1),
+        launch=tuple(sorted(pin.launch.items())),
+        mode=pins.mode,
+        case=pin.case,
+    )
+
+
+def pinned_conv_candidate(pins: ConvPins, direction: str):
+    """One mode of a pin table as an opt-in dispatch candidate for ``direction``.
+
+    Mirrors ``grouped_convolution``'s Winograd candidate: ``opt_in=True`` (no
+    ``algorithm="auto"`` request ever selects it), reached by
+    ``algorithm="pinned"`` (plus ``spec_id="conv_pinned_<mode>"`` to name the
+    mode when several tables are registered).
+    """
+    from rocke.dispatch.core import Capability, KernelCandidate, selector_matches
+
+    from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+    from kernels.conv.kernel_identity import identity_supports_problem
+
+    from .grouped_convolution import _conv_problem
+
+    if direction not in _FAMILY:
+        raise ValueError(f"unknown direction {direction!r}")
+    mode = pins.mode or "pins"
+    name = f"conv_pinned_{mode}"
+    specs: dict = {}
+
+    def spec_for(req) -> tuple[ConvPinnedSpec | None, str]:
+        if str(req.direction).lower() != direction:
+            return None, f"{name} serves {direction}, not {req.direction}"
+        pin = pins.lookup(req)
+        if pin is None:
+            return None, f"{name}: the table pins no kernel for this problem"
+        # Keyed by the whole label: one instance may be pinned with different
+        # launches on different problems.
+        spec = specs.get(pin.label)
+        if spec is None:
+            spec = specs[pin.label] = _pinned_spec(pins, pin)
+        p = _conv_problem(req)
+        if p is None:
+            return None, "not a valid convolution shape"
+        ok, why = identity_supports_problem(spec.identity, p, getattr(req, "llvm_flavor", None))
+        if not ok:
+            return None, f"{name}: pinned {pin.instance} cannot run it: {why}"
+        return spec, "ok"
+
+    def support(req) -> tuple[bool, str]:
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        spec, why = spec_for(req)
+        return spec is not None, why
+
+    def select(req) -> ConvPinnedSpec:
+        spec, why = spec_for(req)
+        if spec is None:
+            raise ValueError(f"{name} does not support request: {why}")
+        return spec
+
+    def build(spec: ConvPinnedSpec, arch: str):
+        if arch != spec.identity.arch:
+            raise ValueError(f"{spec.name} is a {spec.identity.arch} instance, not {arch}")
+        return kernel_for_job(job_for_identity(spec.identity), arch, spec.identity.dtype_a)[0]
+
+    dtypes = tuple(sorted({key[1] for key in pins.pins})) or ("bf16", "fp16")
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY[direction],
+        algorithm=PINNED_ALGORITHM,
+        spec_id=name,
+        abi_version=PINNED_ABI_VERSION,
+        # After every listed instance and the Winograd forward; opt-in anyway.
+        priority=2_000_000,
+        capability=Capability(arches=(pins.arch,) if pins.arch else (), dtypes=dtypes, layouts=("NHWC",)),
+        _supports=support,
+        select_spec=select,
+        signature=lambda spec: pinned_kernel_signature(spec.identity),
+        grid=_nominal_grid,
+        block=lambda spec: spec.block,
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=build,
+        opt_in=True,
+    )
+    return candidate
+
+
+_PIN_REGISTRIES: dict = {}
+
+
+def _pin_registry(pins: ConvPins, direction: str):
+    from rocke.dispatch.core import CandidateRegistry
+
+    key = (id(pins), direction)
+    reg = _PIN_REGISTRIES.get(key)
+    if reg is None or reg[0] is not pins:
+        reg = (pins, CandidateRegistry(_FAMILY[direction]))
+        reg[1].register(pinned_conv_candidate(pins, direction))
+        _PIN_REGISTRIES[key] = reg
+    return reg[1]
+
+
+def dispatch_conv_pinned(req, pins: ConvPins):
+    """The pinned instance of ``req`` (any direction) from one mode of a table.
+
+    ``req`` is a ``ConvGroupedRequest`` (``direction`` fwd / dgrad / wgrad);
+    ``algorithm="auto"`` is read as ``"pinned"``. Raises ``ValueError`` when
+    the table pins nothing that can run it -- the caller then falls back to
+    its default selection.
+    """
+    import dataclasses
+
+    from rocke.dispatch.core import make_dispatch_result, make_kernel_id
+
+    direction = str(req.direction).lower()
+    if direction not in _FAMILY:
+        raise ValueError(f"unknown direction {req.direction!r}")
+    if str(getattr(req, "algorithm", "auto")).strip().lower() == "auto":
+        req = dataclasses.replace(req, algorithm=PINNED_ALGORITHM)
+    candidate = _pin_registry(pins, direction).select(req)
+    spec = candidate.select_spec(req)
+    return make_dispatch_result(
+        req,
+        candidate,
+        spec,
+        kernel_id=make_kernel_id(req, candidate, spec, op=_FAMILY[direction]),
+        headline=f"pinned {spec.name} on {req.arch} ({pins.mode or 'pins'}: {spec.case})",
+    )
+
+
+def register_conv_pin_table(pins: ConvPins) -> tuple:
+    """Add one mode of a table to the grouped-convolution registries (fwd and
+    dgrad; opt-in, so ``algorithm="auto"`` routing is unchanged). Returns the
+    candidates added (none when a candidate of that name is registered)."""
+    from . import grouped_convolution as gc
+
+    done = []
+    for direction in ("fwd", "dgrad"):
+        cand = pinned_conv_candidate(pins, direction)
+        regs = (gc._REGISTRIES[direction], gc._EXECUTION_REGISTRIES[direction])
+        if any(c.name == cand.name for c in regs[0].candidates()):
+            continue
+        for reg in regs:
+            reg.register(cand)
+        done.append(cand)
+    return tuple(done)
+
+
+def request_from_miopen_cmd(cmd: str, arch: str, **kw):
+    """A ``ConvGroupedRequest`` for a MIOpenDriver conv command line."""
+    from .grouped_convolution import ConvGroupedRequest
+
+    direction, dtype, key = parse_miopen_cmd(cmd)
+    vals = dict(zip(_KEY_FIELDS, key))
+    return ConvGroupedRequest(arch=arch, dtype=dtype, direction=direction, **vals, **kw)
