@@ -202,6 +202,75 @@ generic processor -- and the compiler evidence binds the same value beside the s
 `arch`, so a reader can tell a generic object from a native one and a relabelled one fails
 the agreement check.
 
+## Op-schema registry for `graph_match.nodes`
+
+A Universal Engine Descriptor (UED) fills `graph_match` with one of two arms: `native`, a
+symbol the provider registers, or `nodes`, a declarative graph pattern
+([RFC 0020 §4.3](../../../projects/hipdnn/docs/rfcs/0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)).
+The packer checks a `nodes` pattern as the runtime does, against the op-schema registry
+generated from the hipDNN graph schemas. Only a UED with a `nodes` pattern reads the
+registry. A `native` UED never does.
+
+`hkp_pack` takes the first of these that applies:
+
+1. `--op-schema-registry <path>`.
+2. The `HKP_OP_SCHEMA_REGISTRY` environment variable.
+3. The `HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE` environment variable. When it is set, a
+   `nodes` pattern fails the pack with its text as the reason.
+4. The committed `projects/hipdnn/flatbuffers_sdk/op_schema_registry.json` of the
+   repository the tool lives in.
+
+An empty flag or environment value counts as absent, so `--op-schema-registry ""` falls
+through to the next step.
+
+To check an authored root by hand, run the packer into scratch directories. The pack
+fails on a malformed descriptor, including one with a duplicate JSON key or a `nodes`
+pattern that does not resolve:
+
+```bash
+cd dnn-providers/hip-kernel-provider/descriptor-packaging
+python3 tools/hkp_pack.py \
+    --source-root <authored root> \
+    --out-root /tmp/hkp-check/out \
+    --inter-root /tmp/hkp-check/inter \
+    --arches gfx942 \
+    --hipcc /opt/rocm/bin/hipcc \
+    --generic-targets-json ../../../projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json \
+    --kpack-python-dir /opt/rocm-kpack/python \
+    --source-label manual-check \
+    --op-schema-registry <hipDNN prefix>/share/hipdnn_flatbuffers_sdk/op_schema_registry.json
+```
+
+Omit `--op-schema-registry` to use the repository copy. Add `--disable-kind rocke` when
+rocKE is not installed.
+
+In the build, the `HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY` CMake cache variable names the
+registry. Its default is the registry of the hipDNN the provider builds against:
+
+| hipDNN | Default |
+|---|---|
+| Installed, built with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` | `HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY` from its package config, under `<prefix>/share/hipdnn_flatbuffers_sdk/` |
+| Installed, built without the kernel ingestor | empty |
+| In-tree | `op_schema_registry.json` in the `hipdnn_flatbuffers_sdk` source directory |
+| No `hipdnn_flatbuffers_sdk` target | the repository copy above |
+
+Configure recomputes the default each time. A cached value equal to the previous default
+follows the new one; a value you set is kept.
+
+The build never passes `--op-schema-registry`. Every pack step, configure probe and
+registered test runs with `HKP_OP_SCHEMA_REGISTRY` set to the cache value. When the cache
+value is empty, the pack steps and probes run with `HKP_OP_SCHEMA_REGISTRY` unset, so a
+value in your shell cannot stand in for it, and with
+`HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE` set to the reason. The tests never receive that
+reason and fall back to the repository copy. Configure itself does not fail on an empty or
+missing registry: it prints a STATUS line. A root holding a `nodes` pattern then fails
+configure through its probe, with the packer's reason.
+
+The registry file is a `DEPENDS` input of every pack step and a configure dependency of
+every root probe, so changing it repacks every root. A registry path that does not exist
+is not a dependency. In-tree, each pack target also runs after
+`generate_hipdnn_op_schema_registry`, which regenerates the registry.
+
 ## Compiler-bound specialization agreement
 
 Packaging consumes UKD `provenance.specialization_contract` as data. It binds no
@@ -889,6 +958,10 @@ cd dnn-providers/hip-kernel-provider
 PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
     python3 -m pytest descriptor-packaging/tests -q
 ```
+
+The suite imports `pytest`; the build configure fails when the interpreter it tests with
+cannot import it. One test checks the shipped UED schema with `jsonschema` and skips
+when that module is absent.
 
 `rocm_kpack` (the second `PYTHONPATH` entry, or `--kpack-python-dir` /
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite

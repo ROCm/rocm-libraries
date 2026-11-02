@@ -14,6 +14,7 @@ hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN
 
 set(HIP_DNN_FLATBUFFERS_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/flatbuffers_sdk")
+set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR "${CMAKE_INSTALL_DATADIR}/hipdnn_flatbuffers_sdk")
 
 # --- FlatBuffers dependency ---
 # HIPDNN_FLATBUFFERS_VERSION (set in projects/hipdnn/CMakeLists.txt) is the
@@ -238,6 +239,34 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         )
         add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_cache_key)
 
+        # Generate the op-schema registry (RFC 0020 Appendix B) from the `matcher_*` schema
+        # annotations. flatc's C++ output does not expose them, so a script reads them. One run
+        # writes the header the kernel ingestor compiles and the JSON that hkp_pack validates
+        # against. It uses the same schema dependencies and flatc as the cache-key header, and
+        # depends on gen_cache_key.py because the generator imports it.
+        set(_op_schema_registry_header
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/op_schema_registry_generated.h"
+        )
+        set(_op_schema_registry_json "${CMAKE_CURRENT_SOURCE_DIR}/op_schema_registry.json")
+        add_custom_command(
+            OUTPUT "${_op_schema_registry_header}" "${_op_schema_registry_json}"
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_op_schema_registry.py" --flatc
+                    "${_cache_key_flatc}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_op_schema_registry.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/default_flatc_version.txt"
+                    ${_cache_key_schema_depends} ${_cache_key_flatc_dependency}
+            COMMENT "Generating the op-schema registry from the FlatBuffers schemas"
+            VERBATIM
+        )
+        add_custom_target(
+            generate_hipdnn_op_schema_registry
+            DEPENDS "${_op_schema_registry_header}" "${_op_schema_registry_json}"
+            COMMENT "Op-schema registry generation"
+        )
+        add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_op_schema_registry)
+
         # Same shape as the cache-key header: driven by `cache_uid` / `work_data_dependent`
         # annotations flatc's C++ output does not expose. Also depends on gen_cache_key.py.
         set(_node_operands_header
@@ -294,10 +323,19 @@ install(EXPORT hipdnn_flatbuffers_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR
         FILE hipdnn_flatbuffers_sdkTargets.cmake COMPONENT Development
 )
 
+# Tells the package config whether this install ships the op-schema registry JSON
+# installed below.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(HIPDNN_FLATBUFFERS_SDK_SHIPS_OP_SCHEMA_REGISTRY ON)
+else()
+    set(HIPDNN_FLATBUFFERS_SDK_SHIPS_OP_SCHEMA_REGISTRY OFF)
+endif()
+
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_sdkConfig.cmake.in"
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfig.cmake"
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
+    PATH_VARS HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR
 )
 
 # The build-tree Config needs the same version-check helper as the installed package.
@@ -330,5 +368,18 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
     COMPONENT Development
 )
+
+# The op-schema registry JSON for build-time tools (hkp_pack). Only a kernel ingestor
+# build packs descriptors against it, and only that build installs the ingestor headers,
+# so the JSON ships with them. The package config names its installed path in
+# HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY. The header installs with the include
+# directory above.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/op_schema_registry.json"
+        DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR}
+        COMPONENT Development
+    )
+endif()
 
 add_subdirectory(tests)

@@ -2,6 +2,7 @@ operation:
   name: "ResampleFwd"
   class_name: "ResampleFwdOperationDescriptor"
   fbs_table: "ResampleFwdAttributes"
+  matcher_opcode: "resample"
   fbs_generated_header: "resample_fwd_attributes_generated.h"
 
   descriptor_type:
@@ -69,18 +70,21 @@ operation:
   tensor_fields:
     - name: "x"
       fbs_field: "x_tensor_uid"
+      direction: "input"
       attr_suffix: "X"
       required: true
       frontend_getter: "get_x()"
 
     - name: "y"
       fbs_field: "y_tensor_uid"
+      direction: "output"
       attr_suffix: "Y"
       required: true
       frontend_getter: "get_y()"
 
     - name: "index"
       fbs_field: "index_tensor_uid"
+      direction: "output"
       attr_suffix: "INDEX"
       required: false
       frontend_getter: "get_index()"

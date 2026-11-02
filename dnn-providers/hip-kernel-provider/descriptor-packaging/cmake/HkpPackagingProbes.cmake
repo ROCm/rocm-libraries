@@ -37,29 +37,34 @@ endfunction()
 # _hkp_probe_derive_root(<name> <from_dir> <arch> <out_dir> <expect_var> [<ukd>...])
 #   Derive the probe root at configure time (FATAL with the tool's stderr when the root
 #   cannot be derived, e.g. a kept KDP references a standalone UKD, or a listed UKD is
-#   kept nowhere) and re-run configure when a source file or the derive tooling
-#   changes. Each <ukd> is passed as one --ukd; with none, derive selects per compile
-#   group (one UKD, or a value sweep for kinds with a sweep field). The tool writes
-#   <out_dir>/../expect.json, the list of kept UKDs the assertion expects, each with the
-#   pass it packs under (<arch>, or a generic target containing it); <expect_var> receives its path. FATAL when that list is empty: no
+#   kept nowhere) and re-run configure when a source file, the derive tooling or the
+#   op-schema registry changes. Derive resolves UED graph patterns against the registry
+#   the pack step gets (_hkp_op_schema_registry_env). Each <ukd> is passed as one --ukd;
+#   with none, derive selects per compile group (one UKD, or a value sweep for kinds
+#   with a sweep field). The tool writes <out_dir>/../expect.json, the list of kept UKDs
+#   the assertion expects, each with the pass it packs under (<arch>, or a generic
+#   target containing it); <expect_var> receives its path. FATAL when that list is empty: no
 #   KDP under <from_dir> ships for <arch>, so the pack would prune everything. Deriving
 #   is idempotent, so a reconfigure leaves the derived root's mtimes alone and does not
 #   re-pack.
 # ---------------------------------------------------------------------------
 function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
     file(GLOB_RECURSE _derive_inputs CONFIGURE_DEPENDS "${from_dir}/*")
+    _hkp_op_schema_registry_inputs(_registry_inputs)
     set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND
-                 PROPERTY CMAKE_CONFIGURE_DEPENDS ${_derive_inputs}
+                 PROPERTY CMAKE_CONFIGURE_DEPENDS ${_derive_inputs} ${_registry_inputs}
                           "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                           "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py"
                           "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
+    _hkp_op_schema_registry_env(_registry_env)
     get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_ukd_args "")
     foreach(_ukd IN LISTS ARGN)
         list(APPEND _ukd_args --ukd "${_ukd}")
     endforeach()
     execute_process(
-        COMMAND "${Python3_EXECUTABLE}"
+        COMMAND "${CMAKE_COMMAND}" -E env ${_registry_env} --
+                "${Python3_EXECUTABLE}"
                 "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                 --from "${from_dir}"
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
@@ -300,26 +305,28 @@ endfunction()
 #   already; the STATUS line shows each generic -> member mapping. A TheRock family name
 #   is skipped with a STATUS line: no build packs for it, because GPU_TARGETS drops it.
 #   FATAL with the tool's stderr when the packer's loader rejects the root, including a
-#   `*-generic` entry absent from the table. Configure
-#   re-runs when a file under the root, the generic target table or the derive tooling
-#   changes.
+#   `*-generic` entry absent from the table or a `nodes` pattern the op-schema registry
+#   cannot resolve. Configure re-runs when a file under the root, the generic target
+#   table, the derive tooling or the registry changes.
 # ---------------------------------------------------------------------------
 function(_hkp_probe_automatic_arches out_var)
     get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
     file(GLOB_RECURSE _root_inputs CONFIGURE_DEPENDS "${_root}/*")
+    _hkp_op_schema_registry_inputs(_registry_inputs)
     set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND
-                 PROPERTY CMAKE_CONFIGURE_DEPENDS ${_root_inputs}
+                 PROPERTY CMAKE_CONFIGURE_DEPENDS ${_root_inputs} ${_registry_inputs}
                           "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                           "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py"
                           "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
+    _hkp_op_schema_registry_env(_registry_env)
     hkp_selected_arches(_targets _targets_source)
-    set(_exclude_args "")
     foreach(_target IN LISTS _targets)
         list(APPEND _exclude_args --exclude "${_target}")
     endforeach()
     execute_process(
-        COMMAND "${Python3_EXECUTABLE}"
+        COMMAND "${CMAKE_COMMAND}" -E env ${_registry_env} --
+                "${Python3_EXECUTABLE}"
                 "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                 --list-arches --from "${_root}"
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
@@ -465,7 +472,10 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
 
     # Same environment contract as the pytest entries of hkp_register_tests: the probe
     # tooling tests read the kpack dir, hipcc and comgr from it and fail when absent.
-    set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}" "HKP_HIPCC=${hipcc}")
+    # HKP_OP_SCHEMA_REGISTRY is the registry derive and the pack resolve patterns against;
+    # empty, the tests use the repository's.
+    set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}" "HKP_HIPCC=${hipcc}"
+        "HKP_OP_SCHEMA_REGISTRY=${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()

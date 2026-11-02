@@ -70,9 +70,9 @@ binding decides everything below:
   separately.
 - **Operation**: the corpus_gen operation (`projects/hipdnn/tools/corpus_gen/operations/`)
   whose graph the engine serves -- not its name. For a descriptor engine, the one its UED's
-  graph matcher accepts (the native symbol in `graph_match.native`, plus any `scope: graph`
-  UMD); for an opaque engine, those of the plan builders it registers. When unsure, a census
-  run names them ([corpus-facets.md](corpus-facets.md)).
+  graph matcher accepts (its `graph_match`, either a `native` symbol or a `nodes` pattern,
+  plus any `scope: graph` UMD); for an opaque engine, those of the plan builders it
+  registers. When unsure, a census run names them ([corpus-facets.md](corpus-facets.md)).
 - **Closed shape set**: listed `coverage: pack` in
   `projects/hipdnn/tools/corpus_gen/operations/engines.json`.
 

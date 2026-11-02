@@ -20,6 +20,7 @@
 #include <system_error>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -53,7 +54,9 @@
  * descriptor structure, cross-references and completeness only. Whether a provider
  * implements those symbols is answered by the provider host checks, which run the real
  * typed registration (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
- * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle.
+ * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle. A UED whose
+ * `graph_match` uses the `nodes` arm needs no stub: the loader compiles its pattern
+ * against the op-schema registry while reading the file.
  *
  * Every UHD bound through a role map, for every architecture and metric, is also admitted
  * as the runtime admits that role: KMD fields and `features_hash` must match, kernel-scoped
@@ -264,7 +267,7 @@ void forEachRoleModel(const std::map<std::string, std::vector<DescriptorId>>& re
 }
 
 /// Every native symbol name one DescriptorSet references, across all its hook kinds:
-/// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
+/// the engine's native `graph_match` symbol, every `matchers[].matchSymbol` (dispatched by
 /// `matcher.scope` onto the graph- or kernel-scoped registry), every
 /// `dispatches[].dispatchSymbol`, and the `native.symbol` of every native UHD any role
 /// map binds, for every architecture. Harvested from pass 1's unresolved-symbol sets,
@@ -294,9 +297,9 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
     HarvestedSymbols harvested;
     for(const auto& set : sets)
     {
-        if(!set.engine.graphMatchNativeSymbol.empty())
+        if(const auto* native = std::get_if<NativeGraphMatch>(&set.engine.graphMatch))
         {
-            harvested.graphMatch.insert(set.engine.graphMatchNativeSymbol);
+            harvested.graphMatch.insert(native->symbol);
         }
         for(const auto& matcher : set.matchers)
         {
@@ -785,6 +788,10 @@ void printHelp(const char* programName)
               << "NOT check that a provider implements those symbols -- the provider host\n"
               << "checks do that, by running the real typed registration and censusing what\n"
               << "loads.\n"
+              << "A UED's graph_match is validated in either arm: a `native` symbol gets a\n"
+              << "stub like the other native symbols, and a `nodes` pattern is compiled\n"
+              << "against the op-schema registry built into this hipDNN, so a pattern error\n"
+              << "fails its UED.\n"
               << "Options:\n"
               << "  <root>                    Descriptor root directory (repeatable)\n"
               << "  --expect-engine <name>    Require this engine name in the validated set "

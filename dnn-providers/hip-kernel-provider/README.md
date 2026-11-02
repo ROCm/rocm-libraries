@@ -31,6 +31,49 @@ HipKernelEngine
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
 
+### Native kernel-ingestor bindings
+
+With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, the pointwise and convolution reference
+engines publish bindings through the plugin SDK's
+[`BindingPublication.hpp`](../../projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/BindingPublication.hpp),
+which documents every published field. Pointwise tensor roots are `input_a`,
+`input_b`, and `output`; convolution roots are `x`, `w`, and `y`. Node roots are
+separate from tensor roots: `pointwise` exposes `operation`, `compute_data_type`,
+and scalar pointwise attributes present on the node (including `axis_tensor_uid`,
+an axis index); `conv` exposes `conv_mode` and `compute_data_type`. Compute types
+come from the node, not graph defaults. Vector attributes and tensor-edge UIDs are
+omitted. Both reference engines reject pass-by-value (stored or runtime) and
+virtual operands, so their bindings never contain `.value_f32`.
+
+Reference-engine limits:
+
+- **Pointwise:** binary operations on single-element, rank-four or rank-five
+    tensors, with channel-first or channel-last stride order. Graph matching requires
+    uniform dtype; kernel criteria select the matching dtype.
+- **Convolution:** rank-four FLOAT/HALF tensors, unit stride and dilation, no
+    padding, cross-correlation, and exact row-major strides, including singletons.
+
+Packedness does not relax these limits. Launch dimensions and grid sizes must
+fit their kernel and HIP argument types.
+
+Each engine's UED fills `graph_match` with one of two arms. The shipped UEDs use
+`native`, which names the registered C++ match above. A UED may instead carry a
+declarative `graph_match.nodes` pattern
+([RFC 0020 §4.3](../../projects/hipdnn/docs/rfcs/0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative))
+and keep the native criteria and dispatch. The pattern checks topology only, so
+these limits are enforced again by the criteria both arms run: the pointwise
+operation criteria re-check the bound operands and their roles, and the
+convolution kernel criterion re-checks the bound operands and reads stride,
+dilation, and padding from the node. Use the node ids `pointwise` and `conv` and
+the tensor roots above, or the criteria decline the graph.
+
+Bindings own their data and are created once per engine reached during a catalog
+build. Cached catalogs reuse them for criteria, ranking, workspace queries, and
+plan construction. Operation and dtype criteria read published values; dispatch
+uses bound UIDs and dimensions, accessing raw tensors only for compile options.
+Prepared dispatch owns its launch state and can run after the graph and bindings
+are destroyed. Eviction or an uncacheable graph requires a new catalog build.
+
 ## Building
 
 This plugin is built as a standalone project outside of the main hipDNN build. It depends on the hipDNN SDK packages (`hipdnn_data_sdk` and `hipdnn_plugin_sdk`), which must be available on the system before building.

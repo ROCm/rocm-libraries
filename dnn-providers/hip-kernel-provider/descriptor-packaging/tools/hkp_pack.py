@@ -74,7 +74,18 @@ def _parse_args(argv):
             "the first\n"
             "                 variant that fails to compile stops the pack and "
             "the queued\n"
-            "                 variants are cancelled."
+            "                 variants are cancelled.\n"
+            "  HKP_OP_SCHEMA_REGISTRY\n"
+            "                 The op-schema registry JSON when "
+            "--op-schema-registry is not\n"
+            "                 given.\n"
+            "  HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE\n"
+            "                 Why the build has no registry. Used only when "
+            "neither the\n"
+            "                 argument nor HKP_OP_SCHEMA_REGISTRY names one: a "
+            "UED with a\n"
+            "                 graph_match.nodes pattern then fails with this "
+            "text."
         ),
     )
     p.add_argument(
@@ -165,6 +176,15 @@ def _parse_args(argv):
         "pruned like arch-pruned ones, and a KDP left with none is dropped. "
         "Repeatable; an unknown kind is an error.",
     )
+    p.add_argument(
+        "--op-schema-registry",
+        default=None,
+        help="Path to the op-schema registry JSON a UED's graph_match.nodes "
+        "pattern resolves against. Defaults to HKP_OP_SCHEMA_REGISTRY, then "
+        "to the committed projects/hipdnn/flatbuffers_sdk/op_schema_registry.json "
+        "of the repository this tool lives in. Read only when a UED carries a "
+        "pattern.",
+    )
     return p.parse_args(argv)
 
 
@@ -184,6 +204,7 @@ def main(argv=None):
         source_label=args.source_label,
         exclude_folders=tuple(args.exclude_folder),
         disabled_kinds=tuple(args.disable_kind),
+        op_schema_registry=args.op_schema_registry,
     )
     return 0
 

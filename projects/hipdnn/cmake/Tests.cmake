@@ -235,7 +235,8 @@ endfunction() # _create_check_targets_internal
 
 
 
-# Registers the schema generators' own unit tests (cache key, node operands) as a ctest test.
+# Registers the schema generators' own unit tests (cache key, node operands, op-schema registry)
+# as a ctest test.
 #
 # The policy under test belongs to the schemas, so this runs regardless of
 # HIPDNN_ENABLE_KERNEL_INGESTOR.

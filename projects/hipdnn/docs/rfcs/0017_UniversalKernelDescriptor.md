@@ -2,7 +2,7 @@
 
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
 - **Status**: In progress
-- **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UMD, UDD, and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. The declarative `nodes`/`criteria` forms, UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
+- **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UMD, UDD, and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. The UED `graph_match.nodes` pattern is built (compiled against the generated op-schema registry). The declarative `criteria` forms, UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
@@ -123,7 +123,7 @@ adapter yet.
 | Capability | This RFC (day-one) | Deferred to a follow-up |
 |---|---|---|
 | Single-kernel path: UKD + UMD + UDD + UED + UHD + KMD, bound by a KDP | Yes | None |
-| Fusion **matching**: one engine's pattern matches a bounded multi-op subgraph that is the entire graph, run as one kernel | Via the pattern's `native` arm, which is what ships; the declarative `nodes` arm is specified but not yet implemented ([RFC 0020 §4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)) | matching a fused pattern *inside* a larger graph: JIT |
+| Fusion **matching**: one engine's pattern matches a bounded multi-op subgraph that is the entire graph, run as one kernel | Via the pattern's declarative `nodes` arm, or its `native` arm for a shape `nodes` cannot state ([RFC 0020 §4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)) | matching a fused pattern *inside* a larger graph: JIT |
 | Match criteria: dtype, rank, dim value and relation, stride order, packed, divisibility, attribute value and set, optional-operand presence, graph structure, cross-tensor arithmetic, device property, bounded `or` ([RFC 0018 §3](0018_UniversalMatchDescriptor.md#3-criteria-vocabulary)); opcode is the engine's pattern, not a criterion | Yes | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT |
 | Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
@@ -472,7 +472,7 @@ each format are specified in that format's follow-up RFC.
   "metadata":    "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD: the variant schema this engine's kernels fill
   "graph_match": {        // how this engine matches a graph and binds the symbols every consumer reads
     "nodes": [            // the declarative arm: the graph this engine serves
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {"q": "$q", "k": "$k", "v": "$v", "attn_mask": "$attn_mask?"},
        "results":  {"o": "$o"}}
     ]
@@ -492,9 +492,8 @@ that table.
 
 It takes one of two forms. The **declarative arm**, `nodes`, is a structural pattern over the op
 DAG: named op nodes and the operand and result edges connecting them to the graph's tensors, each
-mapped to a pattern variable. The **native arm**, `native`, is the escape hatch — a registered
-symbol resolving to C++ that returns the binding or declines the graph — for a match the
-declarative form cannot yet state; it is what ships today. Either way the match is engine-wide: a
+mapped to a pattern variable. The **native arm**, `native`, is a registered symbol resolving to
+C++ that returns the binding or declines the graph. Both arms are supported. Either way the match is engine-wide: a
 UED carries exactly one, so every pack naming that engine matches the same graph shape and
 constrains it differently. An engine may also omit `graph_match` entirely, binding nothing and
 leaving applicability to its packs' criteria.
@@ -810,7 +809,7 @@ five namespaces, and every criteria and dispatch expression draws from the same 
   to `false` and gates a matcher out before its criteria run
   ([RFC 0018 A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
 - **Attributes:** a matched op node's attributes, named by the node's pattern `id`: an SDPA node
-  `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.attn_scale_value`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
+  `{"id": "sdpa"}` exposes `$sdpa.attn_scale_value`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
   Only what the operation's schema declares an attribute is here: head size, batch, and head count
   are tensor extents, read positionally from the Tensor namespace, not attributes.
 - **Kernel metadata:** `$kernel.<field>`, the values a kernel descriptor (UKD) supplies for the fields
@@ -922,7 +921,7 @@ it constrains them:
   "metadata":  "9ae0b215-32a7-49d1-96df-e9b05e1927ea",   // one KMD, supplying $kernel.*
   "graph_match": {
     "nodes": [
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
     ]
   }
@@ -951,15 +950,15 @@ it constrains them:
     {"==":    ["$k.dims[3]", "$q.dims[3]"]},                    // one head size across Q, K, V
     {"==":    ["$v.dims[3]", "$q.dims[3]"]},
     {"==":    ["$q.dims[3]", "$kernel.head_size"]},             // head size is a tensor extent, not an attribute
-    {"!":     ["$sdpa_fwd.causal_mask"]},                       // an unmasked graph, served by a
-    {"!":     ["$sdpa_fwd.causal_mask_bottom_right"]},          // kernel built for no mask mode
+    {"!":     ["$sdpa.causal_mask"]},                       // an unmasked graph, served by a
+    {"!":     ["$sdpa.causal_mask_bottom_right"]},          // kernel built for no mask mode
     {"==":    ["$kernel.mask_mode", "none"]},
     {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
   ]}
 }
 ```
 
-Every graph `$`-token the criteria read, the tensors `$q`, `$k`, `$v` and the node `$sdpa_fwd`, is
+Every graph `$`-token the criteria read, the tensors `$q`, `$k`, `$v` and the node `$sdpa`, is
 something the engine's pattern published; that is the whole interface between the two descriptors,
 and the loader checks it. `$kernel.dtype`, `$kernel.head_size`, and `$kernel.mask_mode` are the
 other kind of token, fields the engine's KMD declares and each UKD supplies. They are what makes
@@ -994,12 +993,12 @@ probe into a backing library's own support query whose logic lives in vendor cod
 reduced to schema fields, is written as **native code standing beside the descriptor** rather than
 inside it: the descriptor names a registered symbol, never inline code.
 
-That hatch has **two roles, at two scopes**, and they are not interchangeable:
+Native code beside a descriptor has **two roles, at two scopes**, and they are not interchangeable:
 
 - A **native match** is the engine's, named by its UED's `graph_match.native`
   ([RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)). It runs at
   stage one, and it *produces* the binding: it either declines the graph or returns the bound
-  tokens. This is the arm that ships today, ahead of the declarative pattern it substitutes for.
+  tokens. It is one of the two `graph_match` arms; the `nodes` pattern is the other.
 - A **native criterion** is a pack's, named by a UMD, and it runs at stage two as one of the
   pack's applicability checks. It *reads* the binding the engine's match produced and returns a
   verdict; it cannot add to the binding.
@@ -1110,7 +1109,7 @@ chain as a single kernel.
   "metadata":  "c07e4b31-95a2-4d68-b1fc-3e8a06d25b7c",
   "graph_match": {
     "nodes": [
-      {"kind": "op", "id": "conv", "op": "convolution_fwd",
+      {"kind": "op", "id": "conv", "op": "convolution",
        "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
       {"kind": "op", "id": "bias", "op": "pointwise_add",
        "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
@@ -1162,7 +1161,7 @@ follow-up ([Section 14.2](#142-follow-up-rfcs)), describes grid, block, shared m
 workspace as formulas over the schema's declared fields. A UDD formula draws on the same five
 namespaces as the criteria: tensor fields (a bound
 operand's dims and attributes, `$q.*`), graph facts (`$graph.*`), node attributes (`$conv.*`,
-`$sdpa_fwd.*`), kernel metadata (`$kernel.*`, the values this UKD supplies for fields its engine's
+`$sdpa.*`), kernel metadata (`$kernel.*`, the values this UKD supplies for fields its engine's
 KMD declares), and device properties (`$device.*`). A safe interpreter evaluates each formula,
 failing closed on an undeclared field or invalid operation and never executing arbitrary code, so
 descriptors stay pure data.
@@ -2097,8 +2096,9 @@ Four areas are new here:
 
 ### 14.2 Follow-up RFCs
 
-The state of each row is: KDP + AOT packaging is built (kpack). For UED, UMD, and UHD, only the
-native arms are built (`graph_match.native`, `matchSymbol`, `NATIVE`). UDD + dispatch and KMD +
+The state of each row is: KDP + AOT packaging is built (kpack). For the UED, both `graph_match`
+arms are built (`nodes` and `native`). For the UMD and UHD, only the native arms are built
+(`matchSymbol`, `NATIVE`). UDD + dispatch and KMD +
 metadata schema have no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as
 `MetadataSchema`. The expression language has no RFC yet; its `jsonexpr` interpreter exists but
 the loader does not use it. Shape matching, runtime drop-in, adapters, composition, and JIT are
@@ -2111,7 +2111,7 @@ a descriptor format with the subsystem it drives. Together they form the planned
 |---|---|
 | KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§12](#12-packaging-and-delivery)) |
 | Expression language | The shared dialect every descriptor is written in: its grammar, type system, closed operator set, three-valued semantics, safe bounded interpreter, and conformance suite |
-| UED + graph matching ([RFC 0020](0020_UniversalEngineDescriptor.md), landed) | The engine format and the graph-matching specification: the `graph_match` member and both its arms — the `nodes` structural pattern and the native escape hatch that produces an engine's binding — the matching semantics that bind them against a graph, the symbols matching publishes for every other descriptor to read, the op-schema registry that generates those bindings, and the registry that populates the generic engine and its plan builder from descriptor data |
+| UED + graph matching ([RFC 0020](0020_UniversalEngineDescriptor.md), landed) | The engine format and the graph-matching specification: the `graph_match` member and both its arms — the `nodes` structural pattern and the `native` match, either of which produces an engine's binding — the matching semantics that bind them against a graph, the symbols matching publishes for every other descriptor to read, the op-schema registry that generates those bindings, and the registry that populates the generic engine and its plan builder from descriptor data |
 | UMD + applicability ([RFC 0018](0018_UniversalMatchDescriptor.md), landed) | How the expression language is used to decide applicability: the criteria model over the symbols the engine's match published, evaluated per matcher with run-once memoization and fail-prune, the native-criterion escape hatch for a check that needs real C++, and arbitration when several packs match ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) |
 | Shape matching | Variable-rank tensors: how a criterion reasons over `$x.rank` across the ranks one engine serves, whether a dim may be named rather than read by position, and how that relates to variadic operands ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) |
 | UDD + dispatch | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument descriptions |
@@ -2612,8 +2612,8 @@ choices; none is a dependency.
   optionally, its role-scoped heuristics (UHDs, arch-keyed); many KDPs may share one engine, and they all inherit its one
   match.
 - **`graph_match`:** the UED member holding stage one, in one of two arms — the declarative
-  **structural pattern** (`nodes`) or the **native match** (`native`), the escape hatch that ships
-  today. Absent means the engine binds nothing and its packs' criteria decide alone.
+  **structural pattern** (`nodes`) or the **native match** (`native`), a registered C++
+  function. Absent means the engine binds nothing and its packs' criteria decide alone.
 - **Structural pattern:** a UED's `graph_match.nodes` block, the op nodes and named operand/result
   edges the engine matches against the graph. It runs at most once per engine per graph, and its
   binding is what a UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
@@ -2710,6 +2710,7 @@ choices; none is a dependency.
   adapter in the provider SDK; deferred to its own follow-up RFC.
 - **Escape hatch:** a named, registry-resolved handler for logic the declarative model cannot
   express, carried as a symbol name, never inline code. It stands beside a descriptor, never inside
-  an expression: the operator set is closed and admits no provider hook. Three instances, at three
-  scopes: the **native match** (engine, `graph_match.native` — produces the binding), the **native
-  criterion** (pack, named by a UMD — reads it), and the **custom plan** (dispatch side).
+  an expression: the operator set is closed and admits no provider hook. Two instances, at two
+  scopes: the **native criterion** (pack, named by a UMD — reads the binding) and the **custom
+  plan** (dispatch side). The **native match** (engine, `graph_match.native`) uses the same
+  named-symbol mechanism as one of the two `graph_match` arms.

@@ -18,8 +18,8 @@ from gen_cache_key import (
     SDK_DIR,
     UID_ATTRIBUTE,
     UID_DOMAIN_ATTRIBUTE,
-    _HIPDNN_DIR,
-    _resolve_flatc,
+    HIPDNN_DIR,
+    resolve_flatc,
     accessor,
     load_schema,
     short_name,
@@ -498,11 +498,9 @@ def main():
         help="flatc binary to use; defaults to the one on PATH. The build passes the "
         "binary CMake already resolved, which need not be on PATH.",
     )
-    flatc_path = _resolve_flatc(parser.parse_args().flatc)
-    schemas_dir = os.path.join(_HIPDNN_DIR, SDK_DIR, "schemas")
-    output_dir = os.path.join(
-        _HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects"
-    )
+    flatc_path = resolve_flatc(parser.parse_args().flatc)
+    schemas_dir = os.path.join(HIPDNN_DIR, SDK_DIR, "schemas")
+    output_dir = os.path.join(HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects")
     with tempfile.TemporaryDirectory() as work_dir:
         schema = load_schema(flatc_path, schemas_dir, SCHEMA_FILE, work_dir)
     header = OperandsEmitter(schema).emit()

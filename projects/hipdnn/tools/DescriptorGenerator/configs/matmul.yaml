@@ -2,6 +2,7 @@ operation:
   name: "Matmul"
   class_name: "MatmulOperationDescriptor"
   fbs_table: "MatmulAttributes"
+  matcher_opcode: "matmul"
   fbs_generated_header: "matmul_attributes_generated.h"
 
   descriptor_type:
@@ -46,16 +47,19 @@ operation:
   tensor_fields:
     - name: "a"
       fbs_field: "a_tensor_uid"
+      direction: "input"
       attr_suffix: "ADESC"
       required: true
 
     - name: "b"
       fbs_field: "b_tensor_uid"
+      direction: "input"
       attr_suffix: "BDESC"
       required: true
 
     - name: "c"
       fbs_field: "c_tensor_uid"
+      direction: "output"
       attr_suffix: "CDESC"
       required: true
 

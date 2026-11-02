@@ -15,7 +15,7 @@
   <rect x="20" y="122" width="104" height="76" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
   <text x="72" y="148" text-anchor="middle" font-family="Consolas, monospace" font-size="10">problem</text>
   <text x="72" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="10">graph</text>
-  <text x="72" y="186" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#666">op: sdpa_fwd</text>
+  <text x="72" y="186" text-anchor="middle" font-family="Consolas, monospace" font-size="9" fill="#666">op: sdpa</text>
 
   <line x1="126" y1="160" x2="148" y2="160" stroke="#444" stroke-width="1.5" marker-end="url(#arrowTS)"/>
 
@@ -49,7 +49,7 @@
   <text x="554" y="126" font-family="Consolas, monospace" font-size="10">$q $k $v $o</text>
   <text x="554" y="144" font-family="Consolas, monospace" font-size="10">$q.dims[..] .strides</text>
   <text x="554" y="162" font-family="Consolas, monospace" font-size="10">$q.dtype $q.rank</text>
-  <text x="554" y="180" font-family="Consolas, monospace" font-size="10">$sdpa_fwd.causal_mask</text>
+  <text x="554" y="180" font-family="Consolas, monospace" font-size="10">$sdpa.causal_mask</text>
   <text x="554" y="204" font-size="9" fill="#666">the hand-off artifact</text>
 
   <line x1="702" y1="160" x2="726" y2="160" stroke="#444" stroke-width="1.5" marker-end="url(#arrowTS)"/>

@@ -15,6 +15,7 @@ A contributor walkthrough for landing a new op across the hipDNN stack. The code
 - [Cache-Key Annotations](#cache-key-annotations)
 - [Operand Features](#operand-features)
 - [Work Model (FLOPs)](#work-model-flops)
+- [Op-Schema Registry Annotations](#op-schema-registry-annotations)
 - [File Map (PR Diff Template)](#file-map-pr-diff-template)
 - [Layer-by-Layer Reference](#layer-by-layer-reference)
 - [Testing Requirements](#testing-requirements)
@@ -101,6 +102,7 @@ Copy-paste this into your PR description.
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
 - [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not), plus `work_data_dependent` where the tensor's contents decide the work; `cachekey_generated.h` and `node_operands_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations) and [Operand Features](#operand-features)
+- [ ] Attribute table annotated `(matcher_opcode: "...")`; every scalar tensor-uid field carries `matcher_input_tensor` or `matcher_output_tensor` plus `matcher_name`, and every tensor-uid vector carries one direction flag only; `op_schema_registry_generated.h` and `op_schema_registry.json` regenerated and committed — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)
 - [ ] Work model: `nodeFlops` overload and `logicalFlops` case added in `EngineFeatures.hpp` with an entry in `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`, or the op listed in `NO_COUNTING_CONVENTION` with a reason — see [Work Model (FLOPs)](#work-model-flops)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
@@ -285,6 +287,113 @@ stub overload returns unknown, and the stub test entry's expected count of 0 fai
 
 ---
 
+## Op-Schema Registry Annotations
+
+A Universal Engine Descriptor (UED) pattern names ops by opcode and binds their tensors by
+edge name (RFC 0020 § 4.3). The op-schema registry supplies those names. It is generated
+from annotations on each `NodeAttributes` table by `scripts/gen_op_schema_registry.py`,
+which writes two files from one schema walk:
+
+- `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/op_schema_registry_generated.h`,
+  which the kernel ingestor compiles.
+- `flatbuffers_sdk/op_schema_registry.json`, each op's operand and result edges, which
+  `hkp_pack` validates descriptors against.
+
+### Annotating a table
+
+| Annotation | Where | Meaning |
+|---|---|---|
+| `(matcher_opcode: "matmul")` | Table | The opcode a pattern matches. Required on every `NodeAttributes` table; one opcode per table. |
+| `matcher_input_tensor` | Field | The field is an operand (input) tensor uid, or a vector of them. |
+| `matcher_output_tensor` | Field | The field is a result (output) tensor uid, or a vector of them. |
+| `matcher_name: "a"` | Field | The edge name a pattern binds a flagged scalar field by. Not allowed on a vector. |
+
+```fbs
+table MatmulAttributes (matcher_opcode: "matmul") {
+    a_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "a");
+    b_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "b");
+    c_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "c");
+}
+```
+
+Follow these conventions:
+
+- **Opcode:** lowercase snake case of the op. A forward op has no suffix (`convolution`,
+  `sdpa`); a backward op ends in `_bwd` (`sdpa_bwd`, or `convolution_bwd_data` and
+  `convolution_bwd_filter` for separate variants); a normalization name is one word
+  (`rmsnorm`, `rmsnorm_bwd`). Opcodes must be unique when compared case-insensitively; the
+  registry generator enforces it. A table that
+  serves several modes, such as `PointwiseAttributes`, still gets one opcode. Its mode stays
+  an enum attribute (`operation`), so a pattern matches `pointwise` and its criteria test
+  the mode.
+- **Edge name:** the field name without the `_tensor_uid` suffix (`x_tensor_uid` becomes
+  `x`).
+- **Direction:** match the frontend attribute class. A tensor set with `setInput` is an
+  input; one set with `setOutput` is an output.
+- **Optionality:** derived, not annotated. A field declared `= null` is an optional edge or
+  attribute; anything else is required.
+
+A `[long] (cache_uid)` field, such as `CustomOpAttributes.input_tensor_uids`, is an **edge
+list**: a variable-length set of tensor references. Give it exactly one direction flag and no
+`matcher_name`:
+
+```fbs
+    input_tensor_uids: [long] (cache_uid, matcher_input_tensor);
+    output_tensor_uids: [long] (cache_uid, matcher_output_tensor);
+```
+
+The registry lists it under `operandLists`/`resultLists`, named by the field. The ingestor
+counts a result list's uids as tensors the node produces, exactly like a scalar result, so a
+pattern can never treat a tensor an edge list produces as a graph input. A pattern cannot
+bind an edge list by name: an edge naming one fails to resolve like any undeclared edge.
+
+Every unflagged scalar field becomes a scalar attribute named by the field: integers as
+`ValueKind::INT`, `float`/`double` as `FLOAT`, `bool` as `BOOL`, and enum-typed fields as
+`ENUM_NAME`, the name of the enum value. The `Node` table's `compute_data_type` is added to
+every op. Other vectors, strings, and sub-tables are skipped. A `long` field that is not a
+tensor reference, such as `PointwiseAttributes.axis_tensor_uid`, stays unflagged and is an
+`INT` attribute.
+
+A new `.fbs` file must redeclare the `matcher_*` annotations it uses, as it does `cache_uid`.
+
+### Build errors
+
+When the registry cannot describe a table faithfully, the generator writes neither file and
+stops with an `ERROR:` that names the table, the field, and the broken rule (RFC 0020
+Appendix B.3).
+
+### Regenerating
+
+Like `cachekey_generated.h`, the registry does not come from the ordinary `flatc` step.
+A normal build regenerates both files: the `generate_hipdnn_op_schema_registry` target
+reruns the generator whenever a schema or the generator changes. It runs when
+`HIPDNN_GENERATE_SDK_HEADERS` is on (the default) and CMake finds Python 3.
+
+To regenerate both files by hand, run the generator from the repository root:
+
+```shell
+python3 projects/hipdnn/scripts/gen_op_schema_registry.py
+```
+
+This form needs `flatc` on `PATH`, at the exact version pinned in
+`projects/hipdnn/cmake/default_flatc_version.txt`. The generator stops with an `ERROR:` naming
+the required version if `flatc` is missing or a different version. A hipDNN build that fetches
+FlatBuffers places a pinned `flatc` in its `bin` directory, so you can pass that binary
+instead:
+
+```shell
+python3 projects/hipdnn/scripts/gen_op_schema_registry.py --flatc <build>/bin/flatc
+```
+
+The `op-schema-registry-hipdnn` pre-commit hook runs the first form on any change under
+`flatbuffers_sdk/schemas/` or to the generator, so it also needs the pinned `flatc` on
+`PATH`. The generator's own tests are
+`scripts/test_gen_op_schema_registry.py`; `flatbuffers_sdk/tests/TestOpSchemaRegistry.cpp`
+checks that the committed header covers every `NodeAttributes` member and reads real
+nodes.
+
+---
+
 ## File Map (PR Diff Template)
 
 The complete surface area for a single op, using **Matmul** as the canonical example. Use as the diff template when reviewing your own PR.
@@ -295,6 +404,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | FBS union entry | `flatbuffers_sdk/schemas/graph.fbs` (`NodeAttributes` union) |
 | FBS CMake list | `flatbuffers_sdk/CMakeLists.txt` (`_hipdnn_flatbuffers_sdk_schemas` variable) |
 | Cache-key annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`(cache_uid)` on tensor-uid fields — see [Cache-Key Annotations](#cache-key-annotations)) |
+| Op-schema registry annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`matcher_opcode` on the table, direction flag and `matcher_name` on tensor-uid fields — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)) |
 | Generated schema headers | `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/{cachekey,node_operands}_generated.h` (regenerated, committed — see [Operand Features](#operand-features)) |
 | Backend descriptor type enum | `backend/include/HipdnnBackendDescriptorType.h` |
 | Backend attribute name enum | `backend/include/HipdnnBackendAttributeName.h` |

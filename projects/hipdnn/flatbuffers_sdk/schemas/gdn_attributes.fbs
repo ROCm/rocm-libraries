@@ -3,8 +3,12 @@
 
 include "linear_attention_common.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -40,27 +44,27 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 //     gets (L - 1) // n + 1 rows, row 0 being its incoming state, packed by
 //     sequence; C = max(T // n + N, 1) rows are allocated
 //     (n = checkpoint_every_n_tokens).
-table GdnAttributes {
+table GdnAttributes (matcher_opcode: "gdn") {
     // Required input tensor UIDs
-    q_tensor_uid:          long (cache_uid);
-    k_tensor_uid:          long (cache_uid);
-    v_tensor_uid:          long (cache_uid);
-    g_tensor_uid:          long (cache_uid);  // scalar decay per token and head
-    beta_tensor_uid:       long (cache_uid);  // write strength (post-sigmoid by default)
-    cu_seqlens_tensor_uid: long (cache_uid);  // [N + 1] sequence offsets
+    q_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "q");
+    k_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "k");
+    v_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "v");
+    g_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "g");  // scalar decay per token and head
+    beta_tensor_uid:       long (cache_uid, matcher_input_tensor, matcher_name: "beta");  // write strength (post-sigmoid by default)
+    cu_seqlens_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "cu_seqlens");  // [N + 1] sequence offsets
 
     // Optional input tensor UIDs
-    initial_state_tensor_uid: long = null (cache_uid);  // absent: zero state
-    a_log_tensor_uid:         long = null (cache_uid);  // [HO], safe_gate only
-    dt_bias_tensor_uid:       long = null (cache_uid);  // [HO], safe_gate only
-    state_indices_tensor_uid: long = null (cache_uid);  // [N], state pool rows
+    initial_state_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "initial_state");  // absent: zero state
+    a_log_tensor_uid:         long = null (cache_uid, matcher_input_tensor, matcher_name: "a_log");  // [HO], safe_gate only
+    dt_bias_tensor_uid:       long = null (cache_uid, matcher_input_tensor, matcher_name: "dt_bias");  // [HO], safe_gate only
+    state_indices_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "state_indices");  // [N], state pool rows
 
     // Required output tensor UID
-    o_tensor_uid: long (cache_uid);
+    o_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "o");
 
     // Optional output tensor UIDs
-    final_state_tensor_uid:       long = null (cache_uid);
-    state_checkpoints_tensor_uid: long = null (cache_uid);  // [C, HO, V, K]
+    final_state_tensor_uid:       long = null (cache_uid, matcher_output_tensor, matcher_name: "final_state");
+    state_checkpoints_tensor_uid: long = null (cache_uid, matcher_output_tensor, matcher_name: "state_checkpoints");  // [C, HO, V, K]
 
     // Scalar attributes
     scale:                     float = null;  // absent: 1/sqrt(K)

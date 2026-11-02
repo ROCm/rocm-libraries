@@ -1712,7 +1712,7 @@ DescriptorSet engineSetRankingOnTileM(const std::filesystem::path& dir,
     set.engine.heuristicId = testId(0xEE);
     set.engine.metadataSchemaId = testing::SCHEMA_ID;
     set.engine.knobs = std::move(knobs);
-    set.engine.graphMatchNativeSymbol = testing::GRAPH_MATCH_SYMBOL;
+    set.engine.graphMatch = NativeGraphMatch{testing::GRAPH_MATCH_SYMBOL};
 
     set.schema.id = testing::SCHEMA_ID;
     set.schema.name = "test schema";

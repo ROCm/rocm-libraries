@@ -7,6 +7,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,6 +15,7 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
+#include "GraphPatternTestSupport.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 
 /**
@@ -396,7 +398,7 @@ EngineDescriptor populatedEngine()
     engine.behaviorNotes = {3};
     engine.sdkVersion = POPULATED_VERSION;
     engine.numericalNotes = {"fast-math"};
-    engine.graphMatchNativeSymbol = "graph.match";
+    engine.graphMatch = NativeGraphMatch{"graph.match"};
     engine.revision = POPULATED_VERSION;
     return engine;
 }
@@ -569,7 +571,12 @@ std::vector<EqualityCase> allEqualityCases()
                      "GraphMatchNativeSymbol",
                      true,
                      baseline,
-                     [](auto& v) { v.graphMatchNativeSymbol += "!"; }),
+                     [](auto& v) { std::get<NativeGraphMatch>(v.graphMatch).symbol += "!"; }),
+            fieldRow(type,
+                     "GraphMatchArm",
+                     true,
+                     baseline,
+                     [](auto& v) { v.graphMatch = compilePatternText(BINARY_POINTWISE_PATTERN); }),
             fieldRow(type, "Revision", true, baseline, [](auto& v) { v.revision = OTHER_VERSION; }),
         });
     }
@@ -706,6 +713,34 @@ INSTANTIATE_TEST_SUITE_P(EveryField,
                          [](const ::testing::TestParamInfo<EqualityCase>& info) {
                              return info.param.name;
                          });
+
+// The packer copies a UED into every arch shard, and each parse compiles its own pattern.
+// The copies must compare equal so the loader collapses them rather than dropping the id.
+TEST(TestIngestorDescriptors, SeparatelyCompiledCopiesOfOnePatternAreEqual)
+{
+    auto lhs = populatedEngine();
+    lhs.graphMatch = compileGraphPattern(nlohmann::json::parse(BINARY_POINTWISE_PATTERN),
+                                         "gfx942/engine.ued.json");
+    auto rhs = populatedEngine();
+    rhs.graphMatch = compileGraphPattern(nlohmann::json::parse(BINARY_POINTWISE_PATTERN),
+                                         "gfx950/engine.ued.json");
+
+    EXPECT_TRUE(lhs == rhs);
+    EXPECT_FALSE(lhs != rhs);
+}
+
+TEST(TestIngestorDescriptors, PatternsThatBindDifferentEdgesAreNotEqual)
+{
+    auto lhs = populatedEngine();
+    lhs.graphMatch = compilePatternText(R"([{"kind": "op", "id": "pointwise", "op": "pointwise",
+        "operands": {"in_0": "$a", "in_1": "$b"}, "results": {"out_0": "$y"}}])");
+    auto rhs = populatedEngine();
+    rhs.graphMatch = compilePatternText(R"([{"kind": "op", "id": "pointwise", "op": "pointwise",
+        "operands": {"in_0": "$b", "in_1": "$a"}, "results": {"out_0": "$y"}}])");
+
+    EXPECT_FALSE(lhs == rhs);
+    EXPECT_TRUE(lhs != rhs);
+}
 
 // Kernel metadata: values are typed by the KMD only at resolve, so an integer and a
 // floating-point spelling of one number are the same authored value.

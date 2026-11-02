@@ -1,0 +1,17 @@
+{
+  "description": "Node 0 binds the reserved root '$kernel', and node 1 repeats node 0's id and has kind 'tensor'. Each node is parsed whole before ids are compared or variables are named, so node 1's kind is reported.",
+  "valid": false,
+  "error": "must be \"op\", got \"tensor\"",
+  "ued": {
+    "version": "1.0",
+    "id": "b31359a7-b401-57a3-b1b4-88b209e9ee3b",
+    "name": "ued_fixture:node_parse_errors_precede_cross_node_checks",
+    "metadata": "76388c1d-a955-53b2-bb3b-db1f083b3f85",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pw", "op": "pointwise", "operands": {"in_0": "$kernel"}, "results": {"out_0": "$y"}},
+        {"kind": "tensor", "id": "pw", "op": "pointwise", "operands": {"in_0": "$y"}, "results": {"out_0": "$z"}}
+      ]
+    }
+  }
+}

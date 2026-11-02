@@ -27,6 +27,7 @@ import pytest
 from pack_helpers import _restem_uuid_ids
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
+from hkp_pack.graph_pattern import DEFAULT_OP_SCHEMA_REGISTRY, OP_SCHEMA_REGISTRY_ENV
 from hkp_pack.hip_compile import hip_variant_key
 from hkp_pack import pipeline
 from hkp_pack.pipeline import (
@@ -130,6 +131,24 @@ def test_duplicate_id_across_folders_rejected(tmp_path, empty_arch_fixture):
     _nest(root, "hip/b", empty_arch_fixture)
 
     with pytest.raises(HkpPackError, match="duplicate"):
+        load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+def test_kdp_duplicate_json_key_names_the_key_and_the_file(
+    tmp_path, empty_arch_fixture
+):
+    # Stricter than the runtime, which keeps the last occurrence in a KDP. Both
+    # values of the duplicated key are valid, so only the duplicate can fail.
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    kdp = folder / "solo.kdp.json"
+    text = kdp.read_text(encoding="utf-8")
+    duplicated = text.replace('"name": ', '"name": "Solo pack (first)", "name": ', 1)
+    assert duplicated != text
+    kdp.write_text(duplicated, encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="solo.kdp.json has duplicate key 'name'"):
         load_flat_input(root, GENERIC_TARGETS)
 
 
@@ -885,6 +904,25 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
         )
 
 
+def _named_native_symbols(path, doc):
+    """Return the native symbols a descriptor names, read from the naming fields.
+
+    A UED names one only in the `native` arm of `graph_match`. A `nodes` pattern
+    names no native symbol.
+    """
+    kind = path.name.split(".")[-2]
+    if kind == "ued":
+        native = (doc.get("graph_match") or {}).get("native")
+        return {native} if native else set()
+    if kind == "umd":
+        return {doc["match_symbol"]}
+    if kind == "udd":
+        return {doc["dispatch_symbol"]}
+    if kind == "uhd" and doc.get("kind") == "native":
+        return {doc["payload"]}
+    return set()
+
+
 @pytest.mark.quick
 def test_example_tree_native_symbols_are_registered():
     """Symbols the descriptors name must exist in a compiled native pack.
@@ -905,14 +943,23 @@ def test_example_tree_native_symbols_are_registered():
         registered.update(re.findall(r'"(hipkernel\.[\w.]+)"', cpp.read_text()))
     assert registered, "no native symbols found; the scan is broken, not the tree"
 
-    named = set()
+    named = {}
     for path in _descriptor_files(EXAMPLE_ROOT):
-        doc = json.dumps(_read(path))
-        named.update(re.findall(r'"(hipkernel\.[\w.]+)"', doc))
+        for symbol in _named_native_symbols(path, _read(path)):
+            named.setdefault(symbol, set()).add(path.name)
+    # Every example engine uses the native arm, so no UED symbol at all means the
+    # walk is broken.
+    assert any(
+        name.endswith(".ued.json") for names in named.values() for name in names
+    ), "no UED names a native graph_match; the walk is broken, not the tree"
 
-    unknown = named - registered
+    unknown = {
+        symbol: sorted(names)
+        for symbol, names in named.items()
+        if symbol not in registered
+    }
     assert not unknown, (
-        f"example descriptors name unregistered native symbols {sorted(unknown)}; "
+        f"example descriptors name unregistered native symbols {unknown}; "
         f"registered: {sorted(registered)}"
     )
 
@@ -1040,6 +1087,96 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
 
     with pytest.raises(HkpPackError, match=expected):
         load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("sdk_version", ["1.2.3", " 1. 2 .3", "1.2.3-rc1"])
+def test_ued_sdk_version_accepts_what_the_runtime_parses(
+    tmp_path, empty_arch_fixture, sdk_version
+):
+    """The runtime's Version{} skips whitespace and ignores trailing text, so a
+    stricter pack-time rule would refuse a UED the runtime loads."""
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    path = folder / "solo.ued.json"
+    document = _read(path)
+    document["sdk_version"] = sdk_version
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    load_flat_input(root, GENERIC_TARGETS)
+
+
+def _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=False):
+    """The empty-arch fixture, its UED matching by a `nodes` pattern. An `embedded`
+    root compiles nothing, so a full pack needs no hipcc."""
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    if embedded:
+        _make_embedded(folder)
+    path = folder / "solo.ued.json"
+    document = _read(path)
+    document["graph_match"] = {
+        "nodes": [
+            {
+                "kind": "op",
+                "id": "pointwise",
+                "op": "pointwise",
+                "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+                "results": {"out_0": "$output"},
+            }
+        ]
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return root
+
+
+# `hkp_pack.py --op-schema-registry ""` must mean "not given", not the current
+# directory.
+@pytest.mark.quick
+def test_an_empty_registry_argument_falls_back_to_the_repo_registry(
+    tmp_path, empty_arch_fixture, monkeypatch
+):
+    root = _empty_arch_pattern_root(tmp_path, empty_arch_fixture)
+    monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
+
+    load_flat_input(root, GENERIC_TARGETS, op_schema_registry="")
+
+
+@pytest.mark.quick
+def test_an_empty_registry_argument_falls_back_to_the_environment(
+    tmp_path, empty_arch_fixture, monkeypatch
+):
+    root = _empty_arch_pattern_root(tmp_path, empty_arch_fixture)
+    missing = tmp_path / "absent" / "op_schema_registry.json"
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(missing))
+
+    with pytest.raises(HkpPackError, match="cannot read op-schema registry") as exc:
+        load_flat_input(root, GENERIC_TARGETS, op_schema_registry="")
+    assert str(missing) in str(exc.value)
+
+
+@pytest.mark.quick
+def test_ued_publication_body_keeps_extensions(tmp_path, empty_arch_fixture):
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    path = folder / "solo.ued.json"
+    document = _read(path)
+    document.update(
+        graph_match={
+            "native": "hipkernel.pointwise.graph_match",
+            "x-producer": {"input_a": "tensor"},
+        },
+        knobs=[],
+        behavior_notes=["runtime_compilation"],
+        numerical_notes=["producer_note"],
+        provenance={"producer": "test"},
+        _internal=7,
+    )
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    flat = load_flat_input(root, GENERIC_TARGETS)
+    ued = next(d for d in flat.descriptors if d.path == path)
+    assert ued.doc == document
 
 
 @pytest.mark.quick
@@ -1671,6 +1808,24 @@ def test_embedded_source_generics_are_identical_across_shards(
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
     authored = root / "pointwise"
+    ued_path = authored / "solo.ued.json"
+    ued = _read(ued_path)
+    # A declarative pattern is validated and shipped byte for byte, like any other
+    # generic.
+    ued["graph_match"] = {
+        "nodes": [
+            {
+                "kind": "op",
+                "id": "pointwise",
+                "op": "pointwise",
+                "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+                "results": {"out_0": "$output"},
+            }
+        ],
+        "x-producer": {"build": "coherent"},
+    }
+    # Use unusual spacing to catch JSON rewriting.
+    ued_path.write_text(json.dumps(ued, indent=4) + "\n\n", encoding="utf-8")
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH, OTHER_ARCH])
 
@@ -2038,6 +2193,35 @@ def test_a_misspelled_disabled_kind_fails_the_command_naming_it(
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "rokce" in result.stderr
+
+
+@pytest.mark.quick
+def test_the_registry_flag_wins_over_the_environment_registry(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, monkeypatch
+):
+    """`--op-schema-registry` reaches the UED check and wins over
+    HKP_OP_SCHEMA_REGISTRY. The pattern's opcode resolves exactly when the flag's
+    registry declares it, whatever the environment's registry declares."""
+    root = _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=True)
+    ops = json.loads(DEFAULT_OP_SCHEMA_REGISTRY.read_text(encoding="utf-8"))["ops"]
+    declares = tmp_path / "declares.json"
+    declares.write_text(json.dumps({"ops": {"pointwise": ops["pointwise"]}}))
+    lacks = tmp_path / "lacks.json"
+    lacks.write_text(json.dumps({"ops": {"convolution": ops["convolution"]}}))
+
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(lacks))
+    accepted = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--op-schema-registry", str(declares)
+    )
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+
+    shutil.rmtree(tmp_path / "out", ignore_errors=True)
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(declares))
+    refused = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--op-schema-registry", str(lacks)
+    )
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    assert "opcode 'pointwise' is not in the op-schema registry" in refused.stderr
 
 
 def _separate_kdps_root(tmp_path, fixture):

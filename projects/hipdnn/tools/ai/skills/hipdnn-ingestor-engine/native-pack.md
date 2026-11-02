@@ -33,6 +33,12 @@ applicable virtual/pass-by-value restrictions before indexing. Keep independent 
 constraints; do not assume identical dimensions or copy a single-node gate into a
 fusion.
 
+This function is the UED's `native` arm. The `nodes` arm (RFC 0020 §4.3,
+`projects/hipdnn/docs/rfcs/0020_UniversalEngineDescriptor.md`) is also supported: the
+loader compiles the pattern and no function is registered. A pattern checks topology
+only, so with it the pack's criteria and dispatch must re-check every fact they rely on
+(`dnn-providers/hip-kernel-provider/README.md`, "Native kernel-ingestor bindings").
+
 Use [graph-contract.md](graph-contract.md)'s field dispositions and existing canonical
 semantic helpers. `field_audit.py` is a lexical accessor inventory, not proof of
 consumed/rejected semantics. Candidate matching uses KMD-typed values and defaults,
@@ -76,8 +82,8 @@ caught at load time or at plan time:
 
 - **Loader-time drop — silent, and indistinguishable from a decline.**
   `loadValidatedDescriptorSets` pre-flights each set and drops it, logging at ERROR and
-  continuing, when any graph or kernel match symbol, the engine's `graph_match` symbol,
-  a dispatch symbol or a `native` heuristic's score symbol is unregistered; when the
+  continuing, when any graph or kernel match symbol, the engine's `native` `graph_match`
+  symbol, a dispatch symbol or a `native` heuristic's score symbol is unregistered; when the
   engine name collides on engine id with an already-registered engine; or when the probe
   `makeStateManager` throws, logged as `does not validate: … dropping it`. A dropped set
   never reaches `GenericPlanBuilder`: the engine is absent from the registry and the

@@ -2,6 +2,7 @@ operation:
   name: "SdpaFwd"
   class_name: "SdpaFwdOperationDescriptor"
   fbs_table: "SdpaAttributes"
+  matcher_opcode: "sdpa"
   fbs_generated_header: "sdpa_attributes_generated.h"
 
   descriptor_type:
@@ -187,24 +188,28 @@ operation:
   tensor_fields:
     - name: "q"
       fbs_field: "q_tensor_uid"
+      direction: "input"
       attr_suffix: "QDESC"
       required: true
       frontend_getter: "get_q()"
 
     - name: "k"
       fbs_field: "k_tensor_uid"
+      direction: "input"
       attr_suffix: "KDESC"
       required: true
       frontend_getter: "get_k()"
 
     - name: "v"
       fbs_field: "v_tensor_uid"
+      direction: "input"
       attr_suffix: "VDESC"
       required: true
       frontend_getter: "get_v()"
 
     - name: "o"
       fbs_field: "o_tensor_uid"
+      direction: "output"
       attr_suffix: "ODESC"
       required: true
       frontend_getter: "get_o()"
@@ -212,6 +217,7 @@ operation:
     # Optional input tensors
     - name: "attn_mask"
       fbs_field: "attn_mask_tensor_uid"
+      direction: "input"
       attr_suffix: "ATTN_MASK_EXT"
       required: false
       # SdpaAttributes exposes attn_mask via the bias accessor — divergent
@@ -220,12 +226,14 @@ operation:
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
+      direction: "input"
       attr_suffix: "SCALEDESC"
       required: false
       frontend_getter: "get_attn_scale()"
 
     - name: "seq_len_q"
       fbs_field: "seq_len_q_tensor_uid"
+      direction: "input"
       attr_suffix: "SEQ_LEN_QDESC"
       required: false
       frontend_getter: "get_seq_len_q()"
@@ -233,6 +241,7 @@ operation:
 
     - name: "seq_len_kv"
       fbs_field: "seq_len_kv_tensor_uid"
+      direction: "input"
       attr_suffix: "SEQ_LEN_KVDESC"
       required: false
       frontend_getter: "get_seq_len_kv()"
@@ -240,30 +249,35 @@ operation:
 
     - name: "seed"
       fbs_field: "seed_tensor_uid"
+      direction: "input"
       attr_suffix: "SEED_EXT"
       required: false
       frontend_getter: "get_seed()"
 
     - name: "offset"
       fbs_field: "offset_tensor_uid"
+      direction: "input"
       attr_suffix: "OFFSET_EXT"
       required: false
       frontend_getter: "get_offset()"
 
     - name: "dropout_mask"
       fbs_field: "dropout_mask_tensor_uid"
+      direction: "input"
       attr_suffix: "DROPOUT_MASK_EXT"
       required: false
       frontend_getter: "get_dropout_mask()"
 
     - name: "dropout_scale"
       fbs_field: "dropout_scale_tensor_uid"
+      direction: "input"
       attr_suffix: "DROPOUT_SCALE_EXT"
       required: false
       frontend_getter: "get_dropout_scale()"
 
     - name: "page_table_k"
       fbs_field: "page_table_k_tensor_uid"
+      direction: "input"
       attr_suffix: "PAGE_TABLE_KDESC"
       required: false
       frontend_getter: "get_page_table_k()"
@@ -271,6 +285,7 @@ operation:
 
     - name: "page_table_v"
       fbs_field: "page_table_v_tensor_uid"
+      direction: "input"
       attr_suffix: "PAGE_TABLE_VDESC"
       required: false
       frontend_getter: "get_page_table_v()"
@@ -278,6 +293,7 @@ operation:
 
     - name: "block_mask"
       fbs_field: "block_mask_tensor_uid"
+      direction: "input"
       attr_suffix: "BLOCK_MASK_DESC"
       required: false
       frontend_getter: "get_block_mask()"
@@ -285,6 +301,7 @@ operation:
 
     - name: "sink_token"
       fbs_field: "sink_token_tensor_uid"
+      direction: "input"
       attr_suffix: "SINK_TOKEN_EXT"
       required: false
       frontend_getter: "get_sink_token()"
@@ -292,36 +309,42 @@ operation:
     # FP8 input tensors
     - name: "descale_q"
       fbs_field: "descale_q_tensor_uid"
+      direction: "input"
       attr_suffix: "DESCALE_Q_EXT"
       required: false
       frontend_getter: "get_descale_q()"
 
     - name: "descale_k"
       fbs_field: "descale_k_tensor_uid"
+      direction: "input"
       attr_suffix: "DESCALE_K_EXT"
       required: false
       frontend_getter: "get_descale_k()"
 
     - name: "descale_v"
       fbs_field: "descale_v_tensor_uid"
+      direction: "input"
       attr_suffix: "DESCALE_V_EXT"
       required: false
       frontend_getter: "get_descale_v()"
 
     - name: "descale_s"
       fbs_field: "descale_s_tensor_uid"
+      direction: "input"
       attr_suffix: "DESCALE_S_EXT"
       required: false
       frontend_getter: "get_descale_s()"
 
     - name: "scale_s"
       fbs_field: "scale_s_tensor_uid"
+      direction: "input"
       attr_suffix: "SCALE_S_EXT"
       required: false
       frontend_getter: "get_scale_s()"
 
     - name: "scale_o"
       fbs_field: "scale_o_tensor_uid"
+      direction: "input"
       attr_suffix: "SCALE_O_EXT"
       required: false
       frontend_getter: "get_scale_o()"
@@ -329,24 +352,28 @@ operation:
     # Optional output tensors
     - name: "stats"
       fbs_field: "stats_tensor_uid"
+      direction: "output"
       attr_suffix: "STATSDESC"
       required: false
       frontend_getter: "get_stats()"
 
     - name: "max_output"
       fbs_field: "max_tensor_uid"
+      direction: "output"
       attr_suffix: "MAX_EXT"
       required: false
       frontend_getter: "get_max()"
 
     - name: "sum_exp"
       fbs_field: "sum_exp_tensor_uid"
+      direction: "output"
       attr_suffix: "SUM_EXP_EXT"
       required: false
       frontend_getter: "get_sum_exp()"
 
     - name: "rng_dump"
       fbs_field: "rng_dump_tensor_uid"
+      direction: "output"
       attr_suffix: "RNG_DUMP_EXT"
       required: false
       frontend_getter: "get_rng_dump()"
@@ -354,12 +381,14 @@ operation:
     # FP8 output tensors
     - name: "amax_s"
       fbs_field: "amax_s_tensor_uid"
+      direction: "output"
       attr_suffix: "AMAX_S_EXT"
       required: false
       frontend_getter: "get_amax_s()"
 
     - name: "amax_o"
       fbs_field: "amax_o_tensor_uid"
+      direction: "output"
       attr_suffix: "AMAX_O_EXT"
       required: false
       frontend_getter: "get_amax_o()"

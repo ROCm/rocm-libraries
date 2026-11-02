@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -24,6 +25,7 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 
 /// @file Descriptors.hpp
 /// @brief The universal descriptor set, as parsed in-memory data: KMD (kernel
@@ -397,6 +399,53 @@ inline bool operator!=(const HeuristicDescriptor& lhs, const HeuristicDescriptor
     return !(lhs == rhs);
 }
 
+/// The `native` arm of a UED's `graph_match`: a GraphMatchRegistry symbol. The function it
+/// names decides the graph topology and publishes the binding.
+struct NativeGraphMatch
+{
+    std::string symbol;
+};
+
+inline bool operator==(const NativeGraphMatch& lhs, const NativeGraphMatch& rhs)
+{
+    return lhs.symbol == rhs.symbol;
+}
+
+inline bool operator!=(const NativeGraphMatch& lhs, const NativeGraphMatch& rhs)
+{
+    return !(lhs == rhs);
+}
+
+/// How an engine binds a graph, as declared by its UED's `graph_match`.
+///  - std::monostate: no `graph_match`. The engine binds nothing, and every graph reaches
+///    the UMDs with an empty binding.
+///  - NativeGraphMatch: the `native` arm, resolved through GraphMatchRegistry.
+///  - CompiledGraphPattern: the declarative `nodes` arm, compiled against the op-schema
+///    registry when the UED is read (see CompiledGraphPattern.hpp). Never null. Immutable
+///    and shared by every copy of the descriptor.
+using GraphMatch
+    = std::variant<std::monostate, NativeGraphMatch, std::shared_ptr<const CompiledGraphPattern>>;
+
+/// True when @p lhs and @p rhs declare the same arm with the same content. A compiled
+/// pattern compares by structure, not by pointer, because every parse of a UED compiles
+/// its own instance.
+inline bool sameGraphMatch(const GraphMatch& lhs, const GraphMatch& rhs)
+{
+    if(lhs.index() != rhs.index())
+    {
+        return false;
+    }
+    if(const auto* native = std::get_if<NativeGraphMatch>(&lhs))
+    {
+        return *native == std::get<NativeGraphMatch>(rhs);
+    }
+    if(const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&lhs))
+    {
+        return **pattern == *std::get<std::shared_ptr<const CompiledGraphPattern>>(rhs);
+    }
+    return true;
+}
+
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
 /// engine-id space; must be globally unique, e.g. "rocke:SDPA".
 ///
@@ -429,45 +478,67 @@ struct EngineDescriptor
     /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
     /// yet, so nothing consumes the strings.
     std::vector<std::string> numericalNotes;
-    /// Resolved through GraphMatchRegistry; empty means this engine declares no
-    /// graph-topology match.
-    std::string graphMatchNativeSymbol;
+    /// The graph-topology match; std::monostate when the UED declares none.
+    GraphMatch graphMatch;
     /// Authored knob and binding semantics, not the JSON file-format version.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
 inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
 {
-    return std::tie(lhs.id,
-                    lhs.name,
-                    lhs.sortKernelCatalog,
-                    lhs.predictEngine,
-                    lhs.predictApplicableKernels,
-                    lhs.metadataSchemaId,
-                    lhs.knobs,
-                    lhs.behaviorNotes,
-                    lhs.sdkVersion,
-                    lhs.numericalNotes,
-                    lhs.graphMatchNativeSymbol,
-                    lhs.revision)
-           == std::tie(rhs.id,
-                       rhs.name,
-                       rhs.sortKernelCatalog,
-                       rhs.predictEngine,
-                       rhs.predictApplicableKernels,
-                       rhs.metadataSchemaId,
-                       rhs.knobs,
-                       rhs.behaviorNotes,
-                       rhs.sdkVersion,
-                       rhs.numericalNotes,
-                       rhs.graphMatchNativeSymbol,
-                       rhs.revision);
+    return sameGraphMatch(lhs.graphMatch, rhs.graphMatch)
+           && std::tie(lhs.id,
+                       lhs.name,
+                       lhs.sortKernelCatalog,
+                       lhs.predictEngine,
+                       lhs.predictApplicableKernels,
+                       lhs.metadataSchemaId,
+                       lhs.knobs,
+                       lhs.behaviorNotes,
+                       lhs.sdkVersion,
+                       lhs.numericalNotes,
+                       lhs.revision)
+                  == std::tie(rhs.id,
+                              rhs.name,
+                              rhs.sortKernelCatalog,
+                              rhs.predictEngine,
+                              rhs.predictApplicableKernels,
+                              rhs.metadataSchemaId,
+                              rhs.knobs,
+                              rhs.behaviorNotes,
+                              rhs.sdkVersion,
+                              rhs.numericalNotes,
+                              rhs.revision);
 }
 
 inline bool operator!=(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
 {
     return !(lhs == rhs);
 }
+
+/// The engine's native graph_match symbol, or an empty string when its `graph_match` is not
+/// the `native` arm (a `nodes` pattern, or none).
+inline std::string nativeGraphMatchSymbol(const EngineDescriptor& engine)
+{
+    const auto* native = std::get_if<NativeGraphMatch>(&engine.graphMatch);
+    return native != nullptr ? native->symbol : std::string{};
+}
+
+namespace detail
+{
+
+/// The GraphMatch a native symbol spells: std::monostate for an empty symbol, otherwise the
+/// `native` arm. Backs the overloads that take the symbol as a string.
+inline GraphMatch graphMatchFromNativeSymbol(const std::string& symbol)
+{
+    if(symbol.empty())
+    {
+        return std::monostate{};
+    }
+    return NativeGraphMatch{symbol};
+}
+
+} // namespace detail
 
 /// Which inputs a matcher reads, and so what its failure prunes.
 enum class MatchScope
