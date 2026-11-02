@@ -935,9 +935,16 @@ TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 // indirectly downstream -- and because the runtime now degrades gracefully to the non-AI
 // heuristic on a load failure, it would otherwise be masked in CI. The .tn.model files are
 // frugally-deep models EXCEPT the "*_metadata.tn.model" siblings, which are plain JSON read by
-// MIOpen directly (not by fdeep). Pure CPU fdeep load -- no device required for the work itself.
+// MIOpen directly (not by fdeep). Pure CPU fdeep load -- the handle is only used to identify the
+// device. Archs that ship no bundled models (e.g. gfx1250) have nothing to load and are skipped.
 TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
 {
+    // Models are bundled only for archs that have a TunaNet model; elsewhere the system db has
+    // no .tn.model files.
+    const auto device_name = miopen::Handle{}.GetDeviceName();
+    if(!immed_mode::HasBundledTunaNetModels(device_name))
+        GTEST_SKIP() << device_name << " has no bundled fdeep models";
+
     const auto db = GetSystemDbPath();
     ASSERT_TRUE(fs::exists(db)) << "system db path does not exist: " << db;
 
