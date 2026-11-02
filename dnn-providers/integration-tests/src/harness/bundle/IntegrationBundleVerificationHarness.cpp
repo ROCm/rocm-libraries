@@ -401,12 +401,23 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
                                                          ReferenceExecutorType type)
 {
     const std::string label = refLabel(type);
+    if(_deps.policy.benchmarkReference)
+    {
+        ReferenceBenchmarkResult result;
+        result.reference = type == ReferenceExecutorType::GPU ? "gpu" : "cpu";
+        _referenceBenchmarks.push_back(std::move(result));
+    }
     // Still null in the catch below if creating the executor is what threw.
     IReferenceGraphExecutor* executor = nullptr;
     try
     {
-        executor = &_deps.referenceExecutors->get(type);
-        if(executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
+        bool applicable = false;
+        measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
+            executor = &_deps.referenceExecutors->get(type);
+            applicable
+                = executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size());
+        });
+        if(applicable)
         {
             return ResolvedReference{type, executor};
         }
@@ -415,6 +426,12 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
     catch(const ReferenceCapabilityError& e)
     {
         chain.declined(label + " (not applicable: " + e.what() + ")");
+    }
+    catch(const ReferenceBenchmarkError&)
+    {
+        // A failed synchronize is the harness's fault, not this reference's: let it
+        // fail the test rather than reach the catch below and fall back to the next.
+        throw;
     }
     catch(const std::exception& e)
     {
@@ -427,6 +444,12 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
         error.append(" ").append(detail);
         referenceErrored(chain, std::move(entry), std::move(error));
     }
+    // Still pending means neither catch above settled it, so it was not applicable.
+    if(_deps.policy.benchmarkReference
+       && _referenceBenchmarks.back().status == ReferenceBenchmarkStatus::PENDING)
+    {
+        _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::DECLINED;
+    }
     return std::nullopt;
 }
 
@@ -434,6 +457,10 @@ void IntegrationBundleVerificationHarness::referenceErrored(OracleChain& chain,
                                                             std::string entry,
                                                             std::string error)
 {
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+    }
     recordRefError(error);
     chain.tried.push_back({std::move(entry), std::move(error)});
 }
@@ -555,10 +582,18 @@ VerificationOutcome
         case RefStatus::RAN:
             return compareOutputs(engineOutputs, refOutputs, result.site, verifierFor(ref->type));
         case RefStatus::CAPABILITY_MISS:
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::DECLINED;
+            }
             chain.declined(label + " (cannot run this op: " + result.message + ")");
             break;
         case RefStatus::RUNTIME_ERROR:
         {
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+            }
             // "the next reference", not a name: the next candidate has not been probed
             // yet and may turn out not to be applicable.
             std::string context;
@@ -582,6 +617,10 @@ VerificationOutcome
             break;
         }
         case RefStatus::HARNESS_ERROR:
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+            }
             // Not the reference's fault, so it neither falls through to the next one nor
             // goes in the reference-error report.
             return VerificationOutcome::failed(VerificationDepth::EXECUTED,
@@ -677,10 +716,12 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
 
     // Read here, not at registration, so a golden bundle holds its tensors only while
     // its own test runs. A blob that is unreadable or the wrong size fails this test
-    // instead of quietly dropping it from the run.
+    // instead of quietly dropping it from the run. Under --benchmark-reference the
+    // golden outputs are read later, inside the reference timing; see
+    // compareAgainstGolden().
     try
     {
-        _inputs = _bundle->loadTensors();
+        _inputs = _deps.policy.benchmarkReference ? _bundle->loadInputs() : _bundle->loadTensors();
     }
     catch(const std::exception& e)
     {
@@ -776,6 +817,19 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 
 // ---- engine + reference runs -----------------------------------------------
 
+void IntegrationBundleVerificationHarness::measureReference(double ReferenceBenchmarkResult::*phase,
+                                                            const std::function<void()>& work)
+{
+    if(_deps.policy.benchmarkReference)
+    {
+        _deps.referenceTimer.measure(_referenceBenchmarks.back().*phase, work);
+    }
+    else
+    {
+        work();
+    }
+}
+
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
     const auto wrapper = _bundle->graphWrapper();
@@ -856,14 +910,25 @@ IntegrationBundleVerificationHarness::RefRunResult
     try
     {
         IReferenceGraphExecutor& executor = *ref.executor;
-        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
-        refOutputs = allocateSentinelOutputs(useDevice);
-        auto variantPack = buildVariantPack(refOutputs, useDevice);
-        executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+        VariantPack variantPack;
+        measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
+            useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
+            refOutputs = allocateSentinelOutputs(useDevice);
+            variantPack = buildVariantPack(refOutputs, useDevice);
+        });
+        measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
+            executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+        });
     }
     catch(const ReferenceCapabilityError& e)
     {
         return {RefStatus::CAPABILITY_MISS, e.what()};
+    }
+    catch(const ReferenceBenchmarkError& e)
+    {
+        // A failed synchronize: HARNESS_ERROR fails the test without a fallback,
+        // where the RUNTIME_ERROR the catch below gives would try the next reference.
+        return {RefStatus::HARNESS_ERROR, e.what()};
     }
     catch(const detail::DeviceOutputError& e)
     {
@@ -912,6 +977,35 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
+    if(_deps.policy.benchmarkReference)
+    {
+        ReferenceBenchmarkResult result;
+        result.reference = "golden";
+        _referenceBenchmarks.push_back(std::move(result));
+        // prepareInputs() left the golden outputs unread, so reading them is the
+        // golden reference's execute phase.
+        std::optional<std::string> loadError;
+        measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
+            try
+            {
+                _bundle->loadGoldenOutputs(_inputs);
+            }
+            catch(const std::exception& e)
+            {
+                loadError = e.what();
+            }
+        });
+        if(loadError.has_value())
+        {
+            // The same failure prepareInputs() reports for this blob without the flag,
+            // so the flag does not change the verdict.
+            _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               "tensor data failed to load: " + *loadError + " ("
+                                                   + _bundlePath.string() + ")");
+        }
+    }
     return compareAgainst(
         engineOutputs,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *_inputs.at(uid); },
@@ -936,6 +1030,28 @@ VerificationOutcome
                                                          Verifier verifier)
 {
     auto wrapper = _bundle->graphWrapper();
+    const auto validationSite = resolveValidationSite(_deps.policy.validator, site);
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().validator
+            = validationSite == ValidationSite::DEVICE ? "gpu" : "cpu";
+        // The comparison below would make these copies anyway. Doing them here moves
+        // the transfer into the reference's timing and out of the comparison's.
+        measureReference(&ReferenceBenchmarkResult::materializeMs, [&] {
+            for(const auto uid : _bundle->outputTensorUids)
+            {
+                auto& expected = expectedFor(uid);
+                if(validationSite == ValidationSite::DEVICE)
+                {
+                    static_cast<void>(expected.rawDeviceData());
+                }
+                else
+                {
+                    static_cast<void>(expected.rawHostData());
+                }
+            }
+        });
+    }
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
@@ -951,7 +1067,7 @@ VerificationOutcome
                                  engineOutputs,
                                  expectedFor,
                                  toleranceFor,
-                                 resolveValidationSite(_deps.policy.validator, site),
+                                 validationSite,
                                  "Bundle: " + _bundlePath.string() + inputFillNote());
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
@@ -961,6 +1077,12 @@ VerificationOutcome
         ADD_FAILURE() << mismatch.report;
     }
 
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().status = mismatches.empty()
+                                                 ? ReferenceBenchmarkStatus::VERIFIED
+                                                 : ReferenceBenchmarkStatus::MISMATCH;
+    }
     return comparisonOutcome(mismatches.empty(), verifier);
 }
 

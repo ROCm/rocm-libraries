@@ -35,6 +35,9 @@ struct HarnessDependencies
     /// every input is filled on the host.
     std::shared_ptr<DeviceInputFiller> deviceFiller;
     HarnessPolicy policy;
+    /// Times each reference phase under --benchmark-reference. The default never
+    /// synchronizes; productionDependencies() installs a real device synchronize.
+    ReferenceBenchmarkTimer referenceTimer;
 };
 
 /// The real collaborators, with the process-wide reference-executor pool.

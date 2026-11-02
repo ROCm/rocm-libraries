@@ -192,6 +192,13 @@ int main(int argc, char** argv) noexcept
                   "change = zero git diff. Run one at a time: concurrent "
                   "--write-support-claims runs against the same bundle tree race "
                   "on the sidecars and the last writer wins.");
+        parser.add_argument("--benchmark-reference")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Measure each bundle test's reference preparation, CPU/GPU compute or "
+                  "golden-output loading, and expected-output transfers, excluding engine "
+                  "execution and comparison (both still run). Print per-test wall times and "
+                  "reference_benchmark_* properties.");
         parser.add_argument("--benchmark")
             .default_value(false)
             .implicit_value(true)
@@ -415,6 +422,15 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        const bool benchmarkReference = parser.get<bool>("--benchmark-reference");
+        const auto referenceError = hipdnn_integration_tests::validateReferenceBenchmark(
+            {benchmarkReference, skipGraphValidation, captureDir.has_value(), writeSupportClaims});
+        if(referenceError.has_value())
+        {
+            std::cerr << "Error: " << *referenceError << '\n';
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.articlePath = std::move(articlePath);
         opts.engineName = std::move(engineName);
@@ -429,6 +445,7 @@ int main(int argc, char** argv) noexcept
         opts.captureDir = std::move(captureDir);
         opts.writeSupportClaims = writeSupportClaims;
         opts.benchmark = benchmark.settings;
+        opts.benchmarkReference = benchmarkReference;
         opts.enforceSupportClaims
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
@@ -462,6 +479,10 @@ int main(int argc, char** argv) noexcept
         // With --gtest_repeat=N the coverage summary's counts are the last iteration's;
         // the verifier tally printed beside them has to restart with each iteration too.
         listeners.Append(new hipdnn_integration_tests::bundle::VerifierTallyIterationReset);
+        if(benchmarkReference)
+        {
+            listeners.Append(new hipdnn_integration_tests::ReferenceBenchmarkSummary);
+        }
 
         // Create shared handle (triggers engine loading). The guards below own
         // teardown for every exit path from here on, including the outer catch,
