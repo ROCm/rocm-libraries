@@ -608,6 +608,49 @@ rocblas_trtri_diagonal_kernel(rocblas_fill     uplo,
     }
 }
 
+// Build an array of pointers to sub-blocks of one matrix in a batched array.
+template <int32_t NB, typename T>
+ROCBLAS_KERNEL(NB)
+rocblas_trtri_setup_gemm_pointer_array_kernel(T* const*      src,
+                                              rocblas_int    batch,
+                                              rocblas_stride offset,
+                                              rocblas_stride sub_stride,
+                                              T**            dst,
+                                              rocblas_int    sub_blocks)
+{
+    int32_t sub_block = blockIdx.x * blockDim.x + threadIdx.x;
+    if(sub_block < sub_blocks)
+        dst[sub_block] = src[batch] + offset + sub_block * sub_stride;
+}
+
+template <typename T>
+rocblas_status rocblas_trtri_setup_gemm_pointer_array(rocblas_handle handle,
+                                                      T* const*      src,
+                                                      rocblas_int    batch,
+                                                      rocblas_stride offset,
+                                                      rocblas_stride sub_stride,
+                                                      T**            dst,
+                                                      rocblas_int    sub_blocks)
+{
+    constexpr int32_t NB = 256;
+    dim3              grid((sub_blocks - 1) / NB + 1);
+    dim3              threads(NB);
+
+    ROCBLAS_LAUNCH_KERNEL((rocblas_trtri_setup_gemm_pointer_array_kernel<NB, T>),
+                          grid,
+                          threads,
+                          0,
+                          handle->get_stream(),
+                          src,
+                          batch,
+                          offset,
+                          sub_stride,
+                          dst,
+                          sub_blocks);
+
+    return rocblas_status_success;
+}
+
 // compute square block of invA
 template <bool BATCHED, typename T, typename U, typename V>
 rocblas_status rocblas_trtri_gemm_block(rocblas_handle handle,
@@ -635,42 +678,6 @@ rocblas_status rocblas_trtri_gemm_block(rocblas_handle handle,
                                         rocblas_stride offset_invAg2c = 0,
                                         rocblas_stride offset_C       = 0)
 {
-    std::unique_ptr<T*[]> host_A;
-    std::unique_ptr<T*[]> host_invAg1;
-    std::unique_ptr<T*[]> host_invAg2a;
-    std::unique_ptr<T*[]> host_invAg2c;
-    std::unique_ptr<T*[]> host_C;
-
-    if(BATCHED)
-    {
-        host_A       = std::make_unique<T*[]>(batch_count);
-        host_invAg1  = std::make_unique<T*[]>(batch_count);
-        host_invAg2a = std::make_unique<T*[]>(batch_count);
-        host_invAg2c = std::make_unique<T*[]>(batch_count);
-        host_C       = std::make_unique<T*[]>(batch_count);
-
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &host_A[0], A, batch_count * sizeof(T*), hipMemcpyDeviceToHost, handle->get_stream()));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&host_invAg1[0],
-                                           invAg1,
-                                           batch_count * sizeof(T*),
-                                           hipMemcpyDeviceToHost,
-                                           handle->get_stream()));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&host_invAg2a[0],
-                                           invAg2a,
-                                           batch_count * sizeof(T*),
-                                           hipMemcpyDeviceToHost,
-                                           handle->get_stream()));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&host_invAg2c[0],
-                                           invAg2c,
-                                           batch_count * sizeof(T*),
-                                           hipMemcpyDeviceToHost,
-                                           handle->get_stream()));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &host_C[0], C, batch_count * sizeof(T*), hipMemcpyDeviceToHost, handle->get_stream()));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->get_stream()));
-    }
-
     rocblas_status status       = rocblas_status_success;
     static const T one          = T(1);
     static const T zero         = T(0);
@@ -679,79 +686,182 @@ rocblas_status rocblas_trtri_gemm_block(rocblas_handle handle,
     // first batched gemm compute C = A21*invA11 (lower) or C = A12*invA22 (upper)
     // distance between each invA11 or invA22 is sub_stride_invA, sub_stride_A for each A21 or A12, C
     // of size IB * IB
-    for(int b = 0; b < batch_count; b++)
+
+    if constexpr(BATCHED)
+    {
+        // One set of sub-block pointers, rewritten for each batch before its GEMMs.
+        // Both kernels run on the handle stream, so the next rewrite cannot pass
+        // the GEMMs that still read the current pointers.
+        auto gemm_pointer_arrays = handle->device_malloc(sub_blocks * sizeof(T*),
+                                                         sub_blocks * sizeof(T*),
+                                                         sub_blocks * sizeof(T*),
+                                                         sub_blocks * sizeof(T*),
+                                                         sub_blocks * sizeof(T*));
+        if(!gemm_pointer_arrays)
+            return rocblas_status_memory_error;
+
+        auto aptr_array       = static_cast<const T* const*>(gemm_pointer_arrays[0]);
+        auto invAg1ptr_array  = static_cast<const T* const*>(gemm_pointer_arrays[1]);
+        auto invAg2ptr_array  = static_cast<const T* const*>(gemm_pointer_arrays[2]);
+        auto invAg2cptr_array = static_cast<T* const*>(gemm_pointer_arrays[3]);
+        auto cptr_array       = static_cast<T* const*>(gemm_pointer_arrays[4]);
+
+        for(int b = 0; b < batch_count; b++)
+        {
+            // const_cast drops const on the pointer slots only. The arrays live in
+            // workspace, and the element constness still matches the source.
+            RETURN_IF_ROCBLAS_ERROR(
+                rocblas_trtri_setup_gemm_pointer_array(handle,
+                                                       A,
+                                                       b,
+                                                       offset_A,
+                                                       sub_stride_A,
+                                                       const_cast<const T**>(aptr_array),
+                                                       sub_blocks));
+            RETURN_IF_ROCBLAS_ERROR(
+                rocblas_trtri_setup_gemm_pointer_array(handle,
+                                                       invAg1,
+                                                       b,
+                                                       offset_invAg1,
+                                                       sub_stride_invA,
+                                                       const_cast<const T**>(invAg1ptr_array),
+                                                       sub_blocks));
+            RETURN_IF_ROCBLAS_ERROR(
+                rocblas_trtri_setup_gemm_pointer_array(handle,
+                                                       invAg2a,
+                                                       b,
+                                                       offset_invAg2a,
+                                                       sub_stride_invA,
+                                                       const_cast<const T**>(invAg2ptr_array),
+                                                       sub_blocks));
+            RETURN_IF_ROCBLAS_ERROR(
+                rocblas_trtri_setup_gemm_pointer_array(handle,
+                                                       invAg2c,
+                                                       b,
+                                                       offset_invAg2c,
+                                                       sub_stride_invA,
+                                                       const_cast<T**>(invAg2cptr_array),
+                                                       sub_blocks));
+            RETURN_IF_ROCBLAS_ERROR(rocblas_trtri_setup_gemm_pointer_array(
+                handle, C, b, offset_C, sub_stride_C, const_cast<T**>(cptr_array), sub_blocks));
+
+            // C = A21 * invA11 (lower) or A12 * invA22 (upper)
+            status = rocblas_internal_gemm<true>(handle,
+                                                 rocblas_operation_none,
+                                                 rocblas_operation_none,
+                                                 M,
+                                                 N,
+                                                 N,
+                                                 &one,
+                                                 aptr_array,
+                                                 0,
+                                                 ld_A,
+                                                 0,
+                                                 invAg1ptr_array,
+                                                 0,
+                                                 ld_invA,
+                                                 0,
+                                                 &zero,
+                                                 cptr_array,
+                                                 0,
+                                                 ld_C,
+                                                 0,
+                                                 sub_blocks);
+            if(status != rocblas_status_success)
+                break;
+
+            // invA21 = -invA22 * C (lower) or invA12 = -invA11 * C (upper)
+            status = rocblas_internal_gemm<true>(handle,
+                                                 rocblas_operation_none,
+                                                 rocblas_operation_none,
+                                                 M,
+                                                 N,
+                                                 M,
+                                                 &negative_one,
+                                                 static_cast<const T* const*>(invAg2ptr_array),
+                                                 0,
+                                                 ld_invA,
+                                                 0,
+                                                 static_cast<const T* const*>(cptr_array),
+                                                 0,
+                                                 ld_C,
+                                                 0,
+                                                 &zero,
+                                                 invAg2cptr_array,
+                                                 0,
+                                                 ld_invA,
+                                                 0,
+                                                 sub_blocks);
+            if(status != rocblas_status_success)
+                break;
+        }
+    }
+    else
     {
         const T *aptr, *invAg1ptr, *invAg2ptr;
         T *      cptr, *invAg2cptr;
 
-        if(BATCHED)
+        for(int b = 0; b < batch_count; b++)
         {
-            aptr       = load_ptr_batch(&host_A[0], b, offset_A, stride_A);
-            invAg1ptr  = load_ptr_batch(&host_invAg1[0], b, offset_invAg1, stride_invA);
-            invAg2ptr  = load_ptr_batch(&host_invAg2a[0], b, offset_invAg2a, stride_invA);
-            cptr       = load_ptr_batch(&host_C[0], b, offset_C, stride_C);
-            invAg2cptr = load_ptr_batch(&host_invAg2c[0], b, offset_invAg2c, stride_invA);
-        }
-        else
-        {
+
             aptr       = load_ptr_batch(A, b, offset_A, stride_A);
             invAg1ptr  = load_ptr_batch(invAg1, b, offset_invAg1, stride_invA);
             invAg2ptr  = load_ptr_batch(invAg2a, b, offset_invAg2a, stride_invA);
             cptr       = load_ptr_batch(C, b, offset_C, stride_C);
             invAg2cptr = load_ptr_batch(invAg2c, b, offset_invAg2c, stride_invA);
+
+            // We are naively iterating through the batches, and uses sub-batches in a strided_batched style.
+            status = rocblas_internal_gemm<false>(handle,
+                                                  rocblas_operation_none,
+                                                  rocblas_operation_none,
+                                                  M,
+                                                  N,
+                                                  N,
+                                                  &one,
+                                                  aptr,
+                                                  0,
+                                                  ld_A,
+                                                  sub_stride_A,
+                                                  invAg1ptr,
+                                                  0,
+                                                  ld_invA,
+                                                  sub_stride_invA,
+                                                  &zero,
+                                                  cptr,
+                                                  0,
+                                                  ld_C,
+                                                  sub_stride_C,
+                                                  sub_blocks);
+
+            if(status != rocblas_status_success)
+                break;
+
+            // second batched gemm compute  invA21 = -invA22 * C (lower) or invA12 = -invA11*C (upper)
+            // distance between each invA21 or invA12 is stride_invA,
+            status = rocblas_internal_gemm<false>(handle,
+                                                  rocblas_operation_none,
+                                                  rocblas_operation_none,
+                                                  M,
+                                                  N,
+                                                  M,
+                                                  &negative_one,
+                                                  invAg2ptr,
+                                                  0,
+                                                  ld_invA,
+                                                  sub_stride_invA,
+                                                  (const T*)cptr,
+                                                  0,
+                                                  ld_C,
+                                                  sub_stride_C,
+                                                  &zero,
+                                                  invAg2cptr,
+                                                  0,
+                                                  ld_invA,
+                                                  sub_stride_invA,
+                                                  sub_blocks);
+            if(status != rocblas_status_success)
+                break;
         }
-
-        // We are naively iterating through the batches, and uses sub-batches in a strided_batched style.
-        status = rocblas_internal_gemm<false>(handle,
-                                              rocblas_operation_none,
-                                              rocblas_operation_none,
-                                              M,
-                                              N,
-                                              N,
-                                              &one,
-                                              aptr,
-                                              0,
-                                              ld_A,
-                                              sub_stride_A,
-                                              invAg1ptr,
-                                              0,
-                                              ld_invA,
-                                              sub_stride_invA,
-                                              &zero,
-                                              cptr,
-                                              0,
-                                              ld_C,
-                                              sub_stride_C,
-                                              sub_blocks);
-
-        if(status != rocblas_status_success)
-            break;
-
-        // second batched gemm compute  invA21 = -invA22 * C (lower) or invA12 = -invA11*C (upper)
-        // distance between each invA21 or invA12 is stride_invA,
-        status = rocblas_internal_gemm<false>(handle,
-                                              rocblas_operation_none,
-                                              rocblas_operation_none,
-                                              M,
-                                              N,
-                                              M,
-                                              &negative_one,
-                                              invAg2ptr,
-                                              0,
-                                              ld_invA,
-                                              sub_stride_invA,
-                                              (const T*)cptr,
-                                              0,
-                                              ld_C,
-                                              sub_stride_C,
-                                              &zero,
-                                              invAg2cptr,
-                                              0,
-                                              ld_invA,
-                                              sub_stride_invA,
-                                              sub_blocks);
-        if(status != rocblas_status_success)
-            break;
     }
 
     return status;
