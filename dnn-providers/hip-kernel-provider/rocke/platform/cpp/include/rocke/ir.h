@@ -1801,7 +1801,9 @@ void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
                                        int offset_bytes,
                                        int cachepolicy);
 /* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
- * IRBuilder.tdm_descriptor_2d). ``pad_interval`` < 0 disables LDS padding.
+ * IRBuilder.tdm_descriptor_2d). ``global_ptr`` is a global pointer or the i64
+ * address of one (rocke_b_global_addr_of). ``pad_interval`` < 0 disables LDS
+ * padding.
  * Writes out[0..4] (out[2] == out[3], both the zero v4i32) and returns 1, or
  * sets the builder error and returns 0. */
 int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,

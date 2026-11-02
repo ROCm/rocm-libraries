@@ -31,7 +31,6 @@
 
 #include "rocke/instance_gemm_internal.h" /* ROCKE_GEMM_TDM_MAX_DEPTH, helpers */
 #include "rocke/instance_gemm_universal.h"
-#include "rocke/tdm.h" /* rocke_tdm_encode_padding           */
 
 #include <stdio.h>
 #include <string.h>
@@ -416,6 +415,112 @@ static const char* ck_gemm_mma_family(const rocke_archtarget_t* target)
  *
  * On a validation failure returns NULL and (when `reason`/`reason_cap` are
  * non-NULL) writes the Python ValueError text. */
+/* TDM LDS padding. pad_interval is 3 bits and pad_amount 7 bits in the
+ * descriptor (rocke_b_tdm_descriptor_2d), both counted in dwords. Mirrors
+ * Python _encode_tdm_padding / _tdm_padding_for_tile. */
+#define CK_GEMM_TDM_PAD_INTERVAL_MAX 7
+#define CK_GEMM_TDM_PAD_AMOUNT_MAX 127
+
+rocke_status_t rocke_gemm_tdm_encode_padding(int64_t interval_bytes,
+                                             int64_t pad_bytes,
+                                             int* out_pad_interval,
+                                             int* out_pad_amount,
+                                             char* reason,
+                                             size_t reason_cap)
+{
+    int64_t interval_dwords;
+    int64_t pad_interval = 0;
+    int64_t pad_amount;
+    if(pad_bytes <= 0)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "encode_tdm_padding needs a positive pad; pad_enable=0 otherwise");
+        return ROCKE_ERR_VALUE;
+    }
+    if(interval_bytes % 4 || pad_bytes % 4)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM padding is dword-granular, got interval=%lldB pad=%lldB",
+                     (long long)interval_bytes,
+                     (long long)pad_bytes);
+        return ROCKE_ERR_VALUE;
+    }
+    interval_dwords = interval_bytes / 4;
+    if(interval_dwords < 2 || (interval_dwords & (interval_dwords - 1)))
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM pad interval must be a power-of-two dword count >= 2, got %lld",
+                     (long long)interval_dwords);
+        return ROCKE_ERR_VALUE;
+    }
+    /* Python: interval_dwords.bit_length() - 2 (interval_dwords is a power of 2). */
+    while((interval_dwords >> (pad_interval + 2)) != 0)
+        ++pad_interval;
+    pad_amount = pad_bytes / 4 - 1;
+    if(pad_interval > CK_GEMM_TDM_PAD_INTERVAL_MAX)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM pad_interval %lld exceeds %d (interval %lldB too large)",
+                     (long long)pad_interval,
+                     CK_GEMM_TDM_PAD_INTERVAL_MAX,
+                     (long long)interval_bytes);
+        return ROCKE_ERR_VALUE;
+    }
+    if(pad_amount > CK_GEMM_TDM_PAD_AMOUNT_MAX)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM pad_amount %lld exceeds %d (pad %lldB too large)",
+                     (long long)pad_amount,
+                     CK_GEMM_TDM_PAD_AMOUNT_MAX,
+                     (long long)pad_bytes);
+        return ROCKE_ERR_VALUE;
+    }
+    if(out_pad_interval != NULL)
+        *out_pad_interval = (int)pad_interval;
+    if(out_pad_amount != NULL)
+        *out_pad_amount = (int)pad_amount;
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_gemm_tdm_padding_for_tile(int64_t elem_bytes,
+                                               int64_t row_elems,
+                                               int64_t pad_elems,
+                                               int* out_pad_enable,
+                                               int* out_pad_interval,
+                                               int* out_pad_amount,
+                                               char* reason,
+                                               size_t reason_cap)
+{
+    int interval = 0;
+    int amount = 0;
+    int enable = 0;
+    if(pad_elems != 0)
+    {
+        rocke_status_t st = rocke_gemm_tdm_encode_padding(
+            elem_bytes * row_elems, elem_bytes * pad_elems, &interval, &amount, reason, reason_cap);
+        if(st != ROCKE_OK)
+            return st;
+        enable = 1;
+    }
+    if(out_pad_enable != NULL)
+        *out_pad_enable = enable;
+    if(out_pad_interval != NULL)
+        *out_pad_interval = interval;
+    if(out_pad_amount != NULL)
+        *out_pad_amount = amount;
+    return ROCKE_OK;
+}
+
 /* The single home of the GEMM storage-dtype rule (declared in
  * instance_gemm_internal.h): ck_gemm_storage_dtype below, the emitter's
  * storage dtype (gemm_universal.cpp) and the epilogue's C dtype
@@ -881,7 +986,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                 char why[256] = {0};
                 int pi = 0, pa = 0;
                 int pad_bytes = spec->trait.lds_k_pad * rocke_gemm_dtype_bytes(spec->data.dtype_a);
-                if(rocke_tdm_encode_padding(row_bytes, pad_bytes, &pi, &pa, why, sizeof(why))
+                if(rocke_gemm_tdm_encode_padding(row_bytes, pad_bytes, &pi, &pa, why, sizeof(why))
                    != ROCKE_OK)
                 {
                     CK_GEMM_REJECT("tdm cannot encode lds_k_pad: %s", why);

@@ -147,18 +147,20 @@ gfx1250 instance uses multicast yet. The ops check the mask type but not that
 it is wave-uniform or that it selects only workgroups inside the launched
 cluster; both are left to the caller.
 
-**TDM has a descriptor builder but no production user.**
+**TDM covers rank 2 only.**
 `IRBuilder.tdm_descriptor_2d` (C: `rocke_b_tdm_descriptor_2d`) packs rank-2
-D# groups, and `isa_features/tdm_verify.py` runs a real global -> LDS -> global
-round trip with a padded row pitch. That round trip passes on a gfx1250 device,
-so `has_tdm` is set for gfx1250, but no gfx1250 instance uses TDM yet. Other
-limits:
+D# groups from a global pointer or an i64 global address (`global_addr_of`),
+and `isa_features/tdm_verify.py` runs a real global -> LDS -> global round trip
+with a padded row pitch, so `has_tdm` is set for gfx1250. The universal GEMM
+loads A and B through it on gfx1250 (`TraitSpec.tdm`), with its own encode of
+`lds_k_pad` into the pad fields. Limits:
 
 - Only rank 2 is covered. D# groups 2 to 4 are zero, so there is no higher
   rank, gather, or iteration.
 - The multicast `workgroup_mask` is packed but never launched.
 - LDS padding is exposed only through the raw `pad_interval` and
-  `pad_amount` fields.
+  `pad_amount` fields; the universal GEMM is the only caller that encodes a
+  row pad into them.
 
 **The block-scaled GEMM prefetch flag is correctness-verified only.**
 `BlockScaledGemmSpec(prefetch=True)` is the named user of the data-prefetch

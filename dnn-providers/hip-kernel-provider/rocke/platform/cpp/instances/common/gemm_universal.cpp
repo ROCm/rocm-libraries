@@ -26,7 +26,6 @@
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
-#include "rocke/tdm.h" /* rocke_tdm_padding_for_tile */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h"
@@ -1476,14 +1475,14 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     if(spec->trait.tdm)
     {
         ctx.tdm_elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_a);
-        rocke_tdm_padding_for_tile(ctx.tdm_elem_bytes,
-                                   ctx.block_k,
-                                   spec->trait.lds_k_pad,
-                                   &ctx.tdm_pad_enable,
-                                   &ctx.tdm_pad_interval,
-                                   &ctx.tdm_pad_amount,
-                                   NULL,
-                                   0);
+        rocke_gemm_tdm_padding_for_tile(ctx.tdm_elem_bytes,
+                                        ctx.block_k,
+                                        spec->trait.lds_k_pad,
+                                        &ctx.tdm_pad_enable,
+                                        &ctx.tdm_pad_interval,
+                                        &ctx.tdm_pad_amount,
+                                        NULL,
+                                        0);
         ctx.tdm_a_lds_base = rocke_b_smem_addr_of(b, ctx.A_smem);
         ctx.tdm_b_lds_base = rocke_b_smem_addr_of(b, ctx.B_smem);
         ctx.tdm_a_buf_bytes = ctx.block_m * ctx.lds_k * ctx.tdm_elem_bytes;

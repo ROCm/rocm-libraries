@@ -242,34 +242,33 @@ def build_tdm_descriptor(b: IRBuilder) -> None:
     """A real rank-2 TDM descriptor, not the zeroed placeholder above.
 
     ``build_tensor_transfers`` pins the intrinsic's *call shape* with zeroed
-    descriptor groups. This pins the descriptor's *construction*: the GROUP0 /
-    GROUP1 bit packing, the ``readfirstlane`` on every runtime word (the
-    descriptor is read as SGPRs, so a VGPR-resident word is silently wrong),
-    and the row-pad encode. That is the half where a wrong bit gives garbage or
-    a hang rather than a compile error, so it is the half worth pinning across
-    the two engines.
+    descriptor groups. This pins the descriptor's *construction* by
+    ``IRBuilder.tdm_descriptor_2d`` from an i64 global address: the GROUP0 /
+    GROUP1 bit packing, the ``readfirstlane`` on every word (the descriptor is
+    read as SGPRs, so a VGPR-resident word is silently wrong) and the LDS pad
+    fields. That is the half where a wrong bit gives garbage or a hang rather
+    than a compile error, so it is the half worth pinning across the two engines.
 
     Built at a 1-byte element width on purpose: every 8-bit defect found in
-    this load path so far has been a 2-bytes-per-element assumption, and this
-    config is what would catch the next one in the descriptor math.
+    this load path so far has been a 2-bytes-per-element assumption. The pad is
+    a 128-byte row with an 80-byte gap: interval 4, amount 19.
     """
-    from rocke.core.tdm import build_tdm_descriptor_2d, tdm_padding_for_tile
-
-    pad_enable, pad_interval, pad_amount = tdm_padding_for_tile(1, 128, 80)
-    groups = build_tdm_descriptor_2d(
-        b,
-        global_addr=b.const_i64(0),
-        lds_addr=b.const_i64(0),
+    gaddr = b.const_i64(0)
+    lds = b.const_i64(0)
+    dim0 = b.const_i32(4096)
+    dim1 = b.const_i32(8192)
+    pitch = b.const_i32(8192)
+    groups = b.tdm_descriptor_2d(
+        gaddr,
+        lds,
         elem_bytes=1,
-        tensor_dim0=b.const_i32(4096),
-        tensor_dim1=b.const_i32(8192),
+        tensor_dim0=dim0,
+        tensor_dim1=dim1,
+        row_stride=pitch,
         tile_dim0=128,
         tile_dim1=128,
-        dim0_stride=8192,
-        dim1_stride=1,
-        pad_enable=pad_enable,
-        pad_interval=pad_interval,
-        pad_amount=pad_amount,
+        pad_interval=4,
+        pad_amount=19,
     )
     b.tensor_load_to_lds(*groups, cachepolicy=0)
     b.s_wait_tensorcnt(0)
@@ -279,15 +278,12 @@ def build_tdm_descriptor(b: IRBuilder) -> None:
 def _tdm_descriptor(runtime_pitch: bool):
     """A full rank-2 TDM descriptor fed by ``global_addr_of``.
 
-    The descriptor words are mostly a fixed op sequence of shifts, masks and
-    readfirstlanes, so this pins that sequence and the ``global_addr_of``
-    lowering. ``runtime_pitch`` switches word 5 between a folded constant and
-    a readfirstlane'd IR value, the one structural branch in the builder.
+    Pins the ``global_addr_of`` lowering and ``tdm_descriptor_2d`` on its i64
+    address. ``runtime_pitch`` switches the row pitch between a constant and the
+    kernel's ``K`` argument.
     """
 
     def build(b: IRBuilder) -> None:
-        from rocke.core.tdm import build_tdm_descriptor_2d
-
         a_ptr = b.param(
             "A", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
         )
@@ -297,18 +293,16 @@ def _tdm_descriptor(runtime_pitch: bool):
         gaddr = b.global_addr_of(a_ptr, zero)
         lds = b.smem_addr_of(smem)
         rows = b.const_i32(64)
-        groups = build_tdm_descriptor_2d(
-            b,
-            global_addr=gaddr,
-            lds_addr=lds,
+        pitch = k_dim if runtime_pitch else b.const_i32(4096)
+        groups = b.tdm_descriptor_2d(
+            gaddr,
+            lds,
             elem_bytes=2,
             tensor_dim0=k_dim,
             tensor_dim1=rows,
+            row_stride=pitch,
             tile_dim0=32,
             tile_dim1=64,
-            dim0_stride=k_dim if runtime_pitch else 4096,
-            dim1_stride=1,
-            pad_enable=1,
             pad_interval=3,
             pad_amount=7,
         )

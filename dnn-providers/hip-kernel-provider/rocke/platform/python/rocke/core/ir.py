@@ -5422,8 +5422,10 @@ class IRBuilder:
     ) -> tuple[Value, Value, Value, Value, Value]:
         """Build the five D# groups for a rank-2 TDM tile transfer.
 
-        Dimension 0 is the contiguous one. ``tensor_dim0`` / ``tensor_dim1``
-        are the extents (in elements) left from ``global_ptr`` — the hardware
+        ``global_ptr`` is a global pointer, or the i64 address of one (as
+        ``global_addr_of`` returns, for an origin that may lie past the end of
+        the buffer). Dimension 0 is the contiguous one. ``tensor_dim0`` /
+        ``tensor_dim1`` are the extents (in elements) left from it -- the hardware
         clips the tile against them. ``row_stride`` is the element distance
         between consecutive dimension-1 rows. The tile is
         ``tile_dim1 x tile_dim0`` elements, packed row-major at ``lds_addr``
@@ -5439,12 +5441,13 @@ class IRBuilder:
         matches CK Tile's ``TDM_GROUP0`` / ``TDM_GROUP1``.
         """
         name = "tdm_descriptor_2d"
-        if (
-            not isinstance(global_ptr.type, PtrType)
-            or global_ptr.type.space != "global"
-        ):
+        is_global_ptr = (
+            isinstance(global_ptr.type, PtrType) and global_ptr.type.space == "global"
+        )
+        if not is_global_ptr and global_ptr.type is not I64:
             raise TypeError(
-                f"{name} global_ptr must be a global pointer, got {global_ptr.type}"
+                f"{name} global_ptr must be a global pointer or an i64 global "
+                f"address, got {global_ptr.type}"
             )
         if lds_addr.type is not I64 and lds_addr.type is not I32:
             raise TypeError(f"{name} lds_addr must be i64 or i32, got {lds_addr.type}")
@@ -5483,7 +5486,7 @@ class IRBuilder:
         c16 = self.const_i32(16)
         # Group 0: count=1 | LDS byte address | global address lo | hi[24:0], type=2.
         lds32 = lds_addr if lds_addr.type is I32 else self.trunc(lds_addr, I32)
-        gaddr = self.global_ptr_to_i64(global_ptr)
+        gaddr = self.global_ptr_to_i64(global_ptr) if is_global_ptr else global_ptr
         g_hi = self.trunc(self.lshr(gaddr, self.const_i64(32)), I32)
         group0 = (
             self.const_i32(1),

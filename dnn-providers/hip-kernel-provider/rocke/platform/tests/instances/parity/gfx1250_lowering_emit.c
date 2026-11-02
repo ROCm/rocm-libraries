@@ -16,7 +16,6 @@
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
-#include "rocke/tdm.h"
 #include "rocke/verify.h"
 #include "rocke/wmma_scale_internal.h"
 
@@ -574,38 +573,23 @@ typedef struct config
  * emitter's CONFIGS list. */
 
 /* Mirrors gfx1250_lowering_emit.py build_tdm_descriptor: a real rank-2 TDM
- * descriptor rather than the zeroed placeholder build_tensor_transfers uses.
- * Pins the GROUP0 / GROUP1 bit packing, the readfirstlane on every runtime
- * word, and the row-pad encode -- the half where a wrong bit gives garbage or
- * a hang rather than a compile error. Built at a 1-byte element width because
- * every 8-bit defect in this load path has been a 2-bytes-per-element
- * assumption. */
+ * descriptor built by rocke_b_tdm_descriptor_2d from an i64 global address,
+ * rather than the zeroed placeholder build_tensor_transfers uses. Pins the
+ * GROUP0 / GROUP1 bit packing, the readfirstlane on every word and the LDS pad
+ * fields -- the half where a wrong bit gives garbage or a hang rather than a
+ * compile error. Built at a 1-byte element width because every 8-bit defect in
+ * this load path has been a 2-bytes-per-element assumption. The pad is a
+ * 128-byte row with an 80-byte gap: interval 4, amount 19. */
 static void build_tdm_descriptor(rocke_ir_builder_t* b)
 {
-    rocke_tdm_descriptor_2d_args_t args;
     rocke_value_t* groups[5];
-    int pad_enable = 0;
-    int pad_interval = 0;
-    int pad_amount = 0;
+    rocke_value_t* gaddr = rocke_b_const_i64(b, 0);
+    rocke_value_t* lds = rocke_b_const_i64(b, 0);
+    rocke_value_t* dim0 = rocke_b_const_i32(b, 4096);
+    rocke_value_t* dim1 = rocke_b_const_i32(b, 8192);
+    rocke_value_t* pitch = rocke_b_const_i32(b, 8192);
 
-    rocke_tdm_padding_for_tile(1, 128, 80, &pad_enable, &pad_interval, &pad_amount, NULL, 0);
-
-    memset(&args, 0, sizeof(args));
-    args.global_addr = rocke_b_const_i64(b, 0);
-    args.lds_addr = rocke_b_const_i64(b, 0);
-    args.tensor_dim0 = rocke_b_const_i32(b, 4096);
-    args.tensor_dim1 = rocke_b_const_i32(b, 8192);
-    args.dim0_stride_value = NULL;
-    args.elem_bytes = 1;
-    args.tile_dim0 = 128;
-    args.tile_dim1 = 128;
-    args.dim0_stride = 8192;
-    args.dim1_stride = 1;
-    args.pad_enable = pad_enable;
-    args.pad_interval = pad_interval;
-    args.pad_amount = pad_amount;
-
-    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+    if(!rocke_b_tdm_descriptor_2d(b, gaddr, lds, 1, dim0, dim1, pitch, 128, 128, 0, 4, 19, groups))
         return;
     rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
     rocke_b_s_wait_tensorcnt(b, 0);
@@ -613,12 +597,11 @@ static void build_tdm_descriptor(rocke_ir_builder_t* b)
 }
 
 /* A full rank-2 TDM descriptor fed by global_addr_of; runtime_pitch switches
- * word 5 between a folded constant and a readfirstlane'd IR value. */
+ * the row pitch between a constant and the kernel's K argument. */
 static void tdm_descriptor(rocke_ir_builder_t* b, bool runtime_pitch)
 {
     rocke_param_opts_t o;
     const int shape[] = {64, 48};
-    rocke_tdm_descriptor_2d_args_t args;
     rocke_value_t* groups[5];
 
     memset(&o, 0, sizeof(o));
@@ -635,22 +618,9 @@ static void tdm_descriptor(rocke_ir_builder_t* b, bool runtime_pitch)
     rocke_value_t* gaddr = rocke_b_global_addr_of(b, a_ptr, zero);
     rocke_value_t* lds = rocke_b_smem_addr_of(b, smem);
     rocke_value_t* rows = rocke_b_const_i32(b, 64);
+    rocke_value_t* pitch = runtime_pitch ? k_dim : rocke_b_const_i32(b, 4096);
 
-    memset(&args, 0, sizeof(args));
-    args.global_addr = gaddr;
-    args.lds_addr = lds;
-    args.elem_bytes = 2;
-    args.tensor_dim0 = k_dim;
-    args.tensor_dim1 = rows;
-    args.tile_dim0 = 32;
-    args.tile_dim1 = 64;
-    args.dim0_stride_value = runtime_pitch ? k_dim : NULL;
-    args.dim0_stride = 4096;
-    args.dim1_stride = 1;
-    args.pad_enable = 1;
-    args.pad_interval = 3;
-    args.pad_amount = 7;
-    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+    if(!rocke_b_tdm_descriptor_2d(b, gaddr, lds, 2, k_dim, rows, pitch, 32, 64, 0, 3, 7, groups))
         return;
     rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
     rocke_b_s_wait_tensorcnt(b, 0);

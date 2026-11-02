@@ -2093,15 +2093,22 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
 {
     static const char* name = "tdm_descriptor_2d";
     const rocke_type_t* lty = lds_addr ? lds_addr->type : NULL;
-    int lds_is_i32, lds_is_i64, data_size, pad_enable;
+    int lds_is_i32, lds_is_i64, gptr_is_i64, data_size, pad_enable;
     uint32_t flags;
     rocke_value_t *c16, *lds32, *gaddr, *g_hi, *lo, *hi, *group0[4], *group1[8], *zero4;
     int i;
     if(!rocke_i_live(b))
         return 0;
-    if(!rocke_i_is_global_ptr(global_ptr))
+    /* A global pointer, or the i64 address of one (tile.global_addr_of). */
+    gptr_is_i64 = global_ptr != NULL && global_ptr->type != NULL
+                  && global_ptr->type->kind == ROCKE_TYPE_SCALAR
+                  && global_ptr->type->scalar == ROCKE_SCALAR_I64;
+    if(!gptr_is_i64 && !rocke_i_is_global_ptr(global_ptr))
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s global_ptr must be a global pointer", name);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s global_ptr must be a global pointer or an i64 global address",
+                        name);
         return 0;
     }
     lds_is_i32 = lty && lty->kind == ROCKE_TYPE_SCALAR && lty->scalar == ROCKE_SCALAR_I32;
@@ -2177,7 +2184,7 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
     c16 = rocke_b_const_i32(b, 16);
     /* Group 0: count=1 | LDS byte address | global address lo | hi[24:0], type=2. */
     lds32 = lds_is_i32 ? lds_addr : rocke_b_trunc(b, lds_addr, rocke_i32());
-    gaddr = rocke_b_global_ptr_to_i64(b, global_ptr);
+    gaddr = gptr_is_i64 ? global_ptr : rocke_b_global_ptr_to_i64(b, global_ptr);
     g_hi = rocke_b_trunc(b, rocke_b_lshr(b, gaddr, rocke_b_const_i64(b, 32)), rocke_i32());
     group0[0] = rocke_b_const_i32(b, 1);
     group0[1] = lds32;

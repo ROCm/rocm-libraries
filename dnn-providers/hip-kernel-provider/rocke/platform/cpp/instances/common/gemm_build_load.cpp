@@ -29,7 +29,6 @@
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_gemm_internal.h"
-#include "rocke/tdm.h" /* rocke_tdm_build_descriptor_2d */
 
 /* Widest global A/B load vector, in elements: the 4-dword buffer_load limit is
  * 16 bytes, so a 1-byte operand tops out at 16 elements. The pad_k gather
@@ -129,28 +128,29 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* origin
         = rocke_b_add(b, batch_off, rocke_b_add(b, rocke_b_mul(b, row_off, ctx->K), k_off));
-    rocke_tdm_descriptor_2d_args_t args;
     rocke_value_t* groups[5];
-    memset(&args, 0, sizeof(args));
-    args.global_addr = rocke_b_global_addr_of(b, ptr, origin);
-    args.lds_addr = lds_base;
-    args.elem_bytes = ctx->tdm_elem_bytes;
-    args.tensor_dim0 = k_remaining;
+    /* One value per statement, in the Python engine's order: the address,
+     * then the row extent. */
+    rocke_value_t* gaddr = rocke_b_global_addr_of(b, ptr, origin);
     /* The TENSOR's remaining extent from this tile's origin, not the tile
      * height. The mover bounds its address generation on this, so a constant
      * tile height describes a tensor ending `rows` past every origin -- wrong
      * for every tile but the first. pad_m/pad_n are not consulted precisely
      * because OOB is handled here, by clipping the extent. */
-    args.tensor_dim1 = rocke_b_smax(b, rocke_b_sub(b, extent, row_off), zero);
-    args.tile_dim0 = ctx->block_k;
-    args.tile_dim1 = rows;
-    /* dim0_stride_value = K (runtime row pitch). Mirrors Python: dim0_stride=K. */
-    args.dim0_stride_value = ctx->K;
-    args.dim1_stride = 1;
-    args.pad_enable = ctx->tdm_pad_enable;
-    args.pad_interval = ctx->tdm_pad_interval;
-    args.pad_amount = ctx->tdm_pad_amount;
-    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+    rocke_value_t* rows_left = rocke_b_smax(b, rocke_b_sub(b, extent, row_off), zero);
+    if(!rocke_b_tdm_descriptor_2d(b,
+                                  gaddr,
+                                  lds_base,
+                                  ctx->tdm_elem_bytes,
+                                  k_remaining,
+                                  rows_left,
+                                  ctx->K,
+                                  ctx->block_k,
+                                  rows,
+                                  0,
+                                  ctx->tdm_pad_enable ? ctx->tdm_pad_interval : -1,
+                                  ctx->tdm_pad_amount,
+                                  groups))
     {
         return;
     }
@@ -195,7 +195,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* b_lds;
         rocke_value_t* k_remaining;
         /* Every builder call gets its own statement. C leaves the evaluation
-         * order of function arguments unspecified (see tdm.cpp). */
+         * order of function arguments unspecified. */
         if(parity_v != NULL)
         {
             rocke_value_t* a_off = rocke_b_zext(
