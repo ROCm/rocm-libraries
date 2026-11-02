@@ -185,6 +185,10 @@ typedef struct rocke_attention_tiled_2d_spec
      * Tagged "tl" right after "qqb" in kernel_name. right_bound is Python-only
      * (no C field); the binding rejects a non-zero one. */
     bool causal_top_left; /* False */
+    /* Also write the natural-log softmax normalizer (LSE) as FP32
+     * [total_q, num_query_heads] through a trailing lse_ptr param. Off emits
+     * no new IR; on appends the "lse" kernel-name token. */
+    bool emit_lse; /* False (Python kw_only) */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

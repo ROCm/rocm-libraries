@@ -201,7 +201,7 @@ class AttentionRequest(OperatorRequest):
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
     # candidates whose kernels implement it (dense, RDNA WMMA, and the
-    # gfx942/gfx950 unified split-KV path) admit it.
+    # gfx942/gfx950 unified split-KV and tiled 2D paths) admit it.
     emit_lse: bool = False
     # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
     # are the bucket maxima, and any widths the kernel takes up to them (RDNA
