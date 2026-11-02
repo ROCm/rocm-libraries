@@ -326,11 +326,7 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
             auto& launches = harvested.dispatch[bound->dispatchSymbol];
             if(!launches.has_value())
             {
-                launches.emplace();
-                for(const auto& launch : pack.kernels.front().sources)
-                {
-                    launches->insert(launch.first);
-                }
+                launches = launchNamesOf(pack.kernels.front().sources);
             }
         }
         // Every role, architecture and metric: the real provider registers all of them, so a

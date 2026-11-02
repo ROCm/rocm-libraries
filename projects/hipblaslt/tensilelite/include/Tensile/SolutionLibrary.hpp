@@ -67,6 +67,8 @@ namespace TensileLite
            && solutions.problemType.groupedGemm == problem.groupedGemm()
            && solutions.problemType.mxBlockA == problem.mxBlockA()
            && solutions.problemType.mxBlockB == problem.mxBlockB()
+           && solutions.problemType.mxBlockFreeA == problem.mxBlockFreeA()
+           && solutions.problemType.mxBlockFreeB == problem.mxBlockFreeB()
            && mxScaleRequestMatchesKernel(problem.mxScaleFormat(),
                                            solutions.problemType.mxScaleFormat))
             return true;
