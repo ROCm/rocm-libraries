@@ -257,10 +257,14 @@ If the machine has no HIP device, the binary prints
 `No HIP devices available; skipping …` and exits 0 immediately. It does this
 before it reads any other flag.
 
-Bundle inputs of at least 2^14 elements (float, half, bfloat16 and double) are
-generated on the device with rocRAND. Smaller tensors, sub-byte types and fixed
-fills use the host RNG. Device-filled values differ from the host fill's, so a
-failure that you saw with them reproduces bit for bit only on the same path.
+Bundle inputs of at least 2^14 allocated elements are generated on the device with rocRAND:
+`free` fills of float, half, bfloat16 and double, and the `nonzero`, `zeros`, `large`,
+`subnormal` and `special` [kinds](file-formats.md#inputs--fill-recipes) of float, half,
+bfloat16 and the fp8 formats, which a hipRTC kernel shapes from rocRAND's draws. Smaller
+tensors, other types (including every sub-byte type) and `fixed` fills use the host RNG, and a
+kind a data type cannot hold is reported by the host as unsupported. Device-filled values
+differ from the host fill's, so a failure that you saw with them reproduces bit for bit only
+on the same path, which the run's report and its `replay.sh` name.
 Set `HIPDNN_TEST_HOST_INPUT_FILL=1` to force the host fill for every input.
 A build without rocRAND always uses the host fill.
 
@@ -412,7 +416,8 @@ elements, that widens the leading (row) stride of the tensors `pad_on` names; th
 strides follow, and the `pad` elements after each row are gap elements that belong to no
 element. Strides enter the case through `derive` (a space's `tensor_patches` may set only the
 alignment). The harness fills and compares the elements and never the gaps: a gap element is not
-written by a host fill (a device fill of a free range draws over the whole allocation, gaps
+written by a host fill or by the device fill of the `nonzero`, `zeros`, `large`, `subnormal`
+and `special` kinds (a device fill of a `free` range draws over the whole allocation, gaps
 included, with finite values), the output sentinel and the placement shadows cover the whole
 allocation (the offset of the last element plus one), and the comparison walks the logical
 elements. Each space's `description` states the outcome expected on the engine it probes: every

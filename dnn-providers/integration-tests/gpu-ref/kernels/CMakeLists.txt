@@ -27,6 +27,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseBinary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/validator/GpuRefValidator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/GpuRefScaleUniform.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/GpuRefFillKinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/GpuRefUtils.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefConvArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefLayernormArgs.h

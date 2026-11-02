@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <random>
@@ -22,9 +23,11 @@
 #include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/PackedFp4Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/PackedFp6Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #if defined(USE_ROCRAND)
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFillKinds.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #endif
 
@@ -77,8 +80,9 @@ FillRecipe symmetricFullRange()
 // on (they are filled once in each layout).
 //
 // All draws come from one std::mt19937 seeded with the tensor's seed, so the same recipe,
-// element type, shape and seed give identical bytes. The stream is the host's only: the
-// device filler declines these kinds (DeviceInputFiller::tryFill).
+// element type, shape and seed give identical bytes. The stream is the host's only: a tensor
+// the DeviceInputFiller takes is generated on the device from rocRAND's draws instead
+// (deviceFillArgs), and holds the same kind of values but not the same ones.
 
 namespace types = hipdnn_data_sdk::types;
 using ITensor = hipdnn_data_sdk::utilities::ITensor;
@@ -252,6 +256,16 @@ FillResult unsupportedKind(const FillRecipe& recipe, const char* typeName, const
     return FillResult::unsupported(std::string("fill kind \"")
                                    + InputFillRecipes::kindToString(recipe.kind) + "\" on "
                                    + typeName + ": " + why);
+}
+
+// How many elements a SPECIAL fill plants: round(fraction * count), at least one when fraction
+// is positive, at most all of them.
+std::uint64_t specialQuota(float fraction, std::size_t count)
+{
+    const auto exact = std::llround(static_cast<double>(fraction) * static_cast<double>(count));
+    return std::min(
+        static_cast<std::uint64_t>(count),
+        std::max(static_cast<std::uint64_t>(exact), std::uint64_t{fraction > 0.0f ? 1U : 0U}));
 }
 
 // The value a SPECIAL recipe plants in T, or nullopt when T cannot hold it.
@@ -503,12 +517,7 @@ FillResult fillTyped(const FillRecipe& recipe,
                 return unsupportedKind(
                     recipe, typeName, "the data type cannot represent the value");
             }
-            const auto exact
-                = std::llround(static_cast<double>(recipe.fraction) * static_cast<double>(count));
-            const std::uint64_t quota
-                = std::min(static_cast<std::uint64_t>(count),
-                           std::max(static_cast<std::uint64_t>(exact),
-                                    std::uint64_t{recipe.fraction > 0.0f ? 1U : 0U}));
+            const std::uint64_t quota = specialQuota(recipe.fraction, count);
             std::uint64_t remaining = count;
             std::uint64_t pending = quota;
             std::uniform_real_distribution<Real> freeDist(static_cast<Real>(recipe.lo),
@@ -679,12 +688,17 @@ FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
     case FillRecipe::Kind::FIXED:
         tensor.fillTensorWithValue(recipe.value);
         return FillResult::ok();
-    // Host only: rocRAND has no generator for these, and the host stream defines their values.
+    // On the device when the filler takes the tensor, else from the host generators, which
+    // also decide whether the tensor's data type can hold the kind at all.
     case FillRecipe::Kind::NONZERO:
     case FillRecipe::Kind::ZEROS:
     case FillRecipe::Kind::LARGE:
     case FillRecipe::Kind::SUBNORMAL:
     case FillRecipe::Kind::SPECIAL:
+        if(device != nullptr && device->tryFill(tensor, recipe, seed))
+        {
+            return FillResult::ok(/*deviceFilled=*/1);
+        }
         return fillOnHost(tensor, recipe, seed);
     default:
         return FillResult::unsupported("unknown FillRecipe kind");
@@ -945,6 +959,68 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
 
 #if defined(USE_ROCRAND)
 using RocRandGenerator = hipdnn_gpu_ref::common::RocRandGenerator;
+
+namespace
+{
+
+// The kernel's parameters for a recipe fillTyped<T> has accepted. Each is derived from the
+// recipe and T as the host generator derives it, so the two paths agree on what the kind makes.
+template <typename T>
+hipdnn_gpu_ref::common::FillKindArgs
+    deviceFillArgs(const FillRecipe& recipe, unsigned int seed, std::size_t count)
+{
+    using hipdnn_gpu_ref::common::FillKind;
+
+    hipdnn_gpu_ref::common::FillKindArgs args{};
+    args.seed = seed;
+    args.lo = static_cast<double>(recipe.lo);
+    args.hi = static_cast<double>(recipe.hi);
+    switch(recipe.kind)
+    {
+    case FillRecipe::Kind::ZEROS:
+        args.kind = static_cast<int>(FillKind::ZEROS);
+        break;
+    case FillRecipe::Kind::NONZERO:
+        args.kind = static_cast<int>(FillKind::NONZERO);
+        args.fallback = static_cast<double>(
+            std::fabs(recipe.lo) >= std::fabs(recipe.hi) ? recipe.lo : recipe.hi);
+        break;
+    case FillRecipe::Kind::LARGE:
+    {
+        args.kind = static_cast<int>(FillKind::LARGE);
+        const double top
+            = std::min(static_cast<double>(recipe.scale), toDouble(std::numeric_limits<T>::max()));
+        args.lo = top / 2.0;
+        args.hi = top;
+        break;
+    }
+    case FillRecipe::Kind::SUBNORMAL:
+    {
+        args.kind = static_cast<int>(FillKind::SUBNORMAL);
+        const double smallest = toDouble(std::numeric_limits<T>::denorm_min());
+        const double smallestNormal = toDouble(std::numeric_limits<T>::min());
+        args.maxSubnormalCode = static_cast<std::uint64_t>(smallestNormal / smallest) - 1;
+        break;
+    }
+    case FillRecipe::Kind::SPECIAL:
+    {
+        args.kind = static_cast<int>(FillKind::SPECIAL);
+        static_assert(sizeof(T) <= sizeof(args.plantedBits));
+        const T planted = nonFiniteValue<T>(recipe.special).value();
+        // The low bytes of the little-endian word the kernel stores from.
+        std::memcpy(&args.plantedBits, &planted, sizeof(T));
+        args.quota = specialQuota(recipe.fraction, count);
+        break;
+    }
+    case FillRecipe::Kind::FREE:
+    case FillRecipe::Kind::FIXED:
+    default:
+        break;
+    }
+    return args;
+}
+
+} // anonymous namespace
 #endif
 
 struct DeviceInputFiller::Impl
@@ -982,6 +1058,47 @@ struct DeviceInputFiller::Impl
             /*synchronize=*/false);
         return true;
     }
+
+    // Starts the fill of a NONZERO, ZEROS, LARGE, SUBNORMAL or SPECIAL recipe when `tensor` is
+    // a T tensor the kernel can write and the host generator accepts the recipe for T; returns
+    // false otherwise, leaving the tensor untouched, so the host fill decides and reports it.
+    template <class T>
+    bool fillKindOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor,
+                          const FillRecipe& recipe,
+                          unsigned int seed)
+    {
+        auto* typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>*>(&tensor);
+        if(typed == nullptr)
+        {
+            return false;
+        }
+
+        // The kernel addresses elements through dims and strides only.
+        constexpr auto maxRank
+            = hipdnn_gpu_ref::common::gpu_fp_reference_tensor::FILL_KIND_MAX_RANK;
+        if(tensor.raggedIterationInfo().has_value() || tensor.dims().size() > maxRank)
+        {
+            return false;
+        }
+
+        // The host generator's checks, run without drawing: a store that writes nothing.
+        const auto count = tensor.elementCount();
+        if(!fillTyped<T>(recipe, seed, count, [](auto& /*gen*/) {}).filled)
+        {
+            return false;
+        }
+
+        if(generator == nullptr)
+        {
+            generator = std::make_unique<RocRandGenerator>(ROCRAND_RNG_PSEUDO_DEFAULT);
+        }
+
+        // Set before the launch: a fill that throws partway may already have queued work.
+        fillPending = true;
+        hipdnn_gpu_ref::common::gpu_fp_reference_tensor::gpuFillKind<T>(
+            *typed, deviceFillArgs<T>(recipe, seed, count), *generator);
+        return true;
+    }
 #endif
 };
 
@@ -1002,6 +1119,12 @@ DeviceInputFiller::~DeviceInputFiller()
     }
 }
 
+bool hostInputFillForced()
+{
+    const auto value = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_HOST_INPUT_FILL");
+    return !value.empty() && value != "0";
+}
+
 bool DeviceInputFiller::isSupported()
 {
 #if defined(USE_ROCRAND)
@@ -1016,8 +1139,9 @@ bool DeviceInputFiller::tryFill([[maybe_unused]] hipdnn_data_sdk::utilities::ITe
                                 [[maybe_unused]] unsigned int seed)
 {
 #if defined(USE_ROCRAND)
-    // rocRAND draws uniform floats; the other kinds are generated on the host.
-    if(recipe.kind != FillRecipe::Kind::FREE)
+    // The nonzero, zeros, large, subnormal and special kinds are drawn with rocRAND and then
+    // shaped by a kernel; FIXED is a constant fill, cheaper on the host than a launch.
+    if(recipe.kind == FillRecipe::Kind::FIXED)
     {
         return false;
     }
@@ -1029,15 +1153,25 @@ bool DeviceInputFiller::tryFill([[maybe_unused]] hipdnn_data_sdk::utilities::ITe
     try
     {
         auto& impl = *_impl;
-        return impl.fillOnDevice<float>(tensor, recipe, seed)
-               || impl.fillOnDevice<hipdnn_data_sdk::types::half>(tensor, recipe, seed)
-               || impl.fillOnDevice<hipdnn_data_sdk::types::bfloat16>(tensor, recipe, seed)
-               || impl.fillOnDevice<double>(tensor, recipe, seed);
+        if(recipe.kind == FillRecipe::Kind::FREE)
+        {
+            return impl.fillOnDevice<float>(tensor, recipe, seed)
+                   || impl.fillOnDevice<types::half>(tensor, recipe, seed)
+                   || impl.fillOnDevice<types::bfloat16>(tensor, recipe, seed)
+                   || impl.fillOnDevice<double>(tensor, recipe, seed);
+        }
+        return impl.fillKindOnDevice<float>(tensor, recipe, seed)
+               || impl.fillKindOnDevice<types::half>(tensor, recipe, seed)
+               || impl.fillKindOnDevice<types::bfloat16>(tensor, recipe, seed)
+               || impl.fillKindOnDevice<types::fp8_e4m3>(tensor, recipe, seed)
+               || impl.fillKindOnDevice<types::fp8_e5m2>(tensor, recipe, seed)
+               || impl.fillKindOnDevice<types::fp8_e4m3_fnuz>(tensor, recipe, seed)
+               || impl.fillKindOnDevice<types::fp8_e5m2_fnuz>(tensor, recipe, seed);
     }
     catch(const std::exception& e)
     {
-        // Generator creation, the scaling kernel's compile, scratch allocation and the
-        // launches are all device work; none of it is a fault in the graph under test.
+        // Generator creation, the kernels' compile, scratch allocation and the launches are
+        // all device work; none of it is a fault in the graph under test.
         throw DeviceInputError(std::string("device input fill failed: ") + e.what());
     }
 #else

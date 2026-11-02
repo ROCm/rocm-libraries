@@ -53,14 +53,18 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-/// Generates large FREE inputs straight into device memory with rocRAND, instead of by
-/// the host's serial RNG, which costs seconds per tensor at the largest shapes. A
-/// tensor filled this way is device-resident afterwards, so the first non-const host
-/// access migrates it; a const access cannot.
+/// Generates large inputs straight into device memory with rocRAND, instead of by the host's
+/// serial RNG, which costs seconds per tensor at the largest shapes. Takes the FREE, NONZERO,
+/// ZEROS, LARGE, SUBNORMAL and SPECIAL kinds: rocRAND draws the uniform floats and a
+/// hipRTC kernel turns them into the kind's values in the tensor's own data type. A tensor
+/// filled this way is device-resident afterwards, so the first non-const host access
+/// migrates it; a const access cannot.
 ///
 /// The values are not the host fill's: the stream differs, and rocRAND's uniform draw
-/// is in (0, 1], so the range is (lo, hi] rather than [lo, hi). A failure that cannot
-/// be reproduced should be re-run with the device fill off.
+/// is in (0, 1], so a range is (lo, hi] rather than [lo, hi). Each kind keeps its host value
+/// contract (range, sign, magnitude, the exact planted share of SPECIAL), but a NONZERO draw
+/// that rounds to zero is redrawn once, not up to 64 times. A failure that cannot be
+/// reproduced should be re-run with the device fill off (hostInputFillForced()).
 ///
 /// Owns the rocRAND generator, created on the first fill that needs one, so its
 /// lifetime is the owner's rather than the process's. Not thread-safe. Without rocRAND
@@ -83,11 +87,14 @@ public:
         return std::size_t{1} << 14;
     }
 
-    /// Starts a FREE fill of `tensor` on the device and returns true, or returns false
-    /// and leaves the tensor untouched when the recipe is of any other kind (the nonzero,
-    /// zeros, large, subnormal and special kinds are always filled on the host, since
-    /// rocRAND cannot generate them), when the tensor is too small to be worth it, or when
-    /// it is of a type rocRAND does not fill. The fill is left in flight: nothing may read
+    /// Starts the fill of `tensor` on the device and returns true, or returns false and
+    /// leaves the tensor untouched when the recipe is FIXED (a constant, cheaper on the host),
+    /// when the tensor is too small to be worth it, or when it is of a type or rank the device
+    /// fill does not cover. FREE covers float, half, bfloat16 and double; the other kinds
+    /// cover float, half, bfloat16 and the four fp8 formats. A kind the tensor's data type
+    /// cannot hold is also declined, so the host fill reports it as unsupported. Elements
+    /// are written through the tensor's strides; the bytes of a padded tensor between its
+    /// elements are left as they were. The fill is left in flight: nothing may read
     /// the tensor until waitForFills() returns. Throws DeviceInputError if the device
     /// work fails.
     bool tryFill(hipdnn_data_sdk::utilities::ITensor& tensor,
@@ -107,11 +114,15 @@ private:
     std::unique_ptr<Impl> _impl;
 };
 
-/// Fills every owned input of `graph`. With a `device` filler, large FREE inputs are
-/// generated on the device; with nullptr, which is what the unit tests rely on since
-/// they have no device, everything is filled on the host. All device fills have
-/// finished by the time this returns or throws. Throws DeviceInputError when a device
-/// fill fails.
+/// Whether HIPDNN_TEST_HOST_INPUT_FILL asks for every input to be filled on the host: the
+/// variable is set to anything but "0". The harness then withholds the DeviceInputFiller.
+bool hostInputFillForced();
+
+/// Fills every owned input of `graph`. With a `device` filler, the inputs it takes (see
+/// DeviceInputFiller::tryFill) are generated on the device; with nullptr, which is what
+/// most unit tests use since they have no device, everything is filled on the host. All
+/// device fills have finished by the time this returns or throws. Throws DeviceInputError
+/// when a device fill fails.
 ///
 /// After the fill, the O and stats inputs of each SDPA backward node are replaced by
 /// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever

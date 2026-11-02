@@ -609,12 +609,10 @@ int main(int argc, char** argv) noexcept
         // Device-filled inputs differ from the host fill's, so a failure seen with them
         // is reproduced bit-for-bit only on the same path. HIPDNN_TEST_HOST_INPUT_FILL=1
         // withholds the filler, which makes every input a host fill.
-        const auto hostInputFill
-            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_HOST_INPUT_FILL");
-        const bool forceHostInputFill = !hostInputFill.empty() && hostInputFill != "0";
         const auto deviceFiller
-            = forceHostInputFill ? std::shared_ptr<hipdnn_integration_tests::DeviceInputFiller>()
-                                 : std::make_shared<hipdnn_integration_tests::DeviceInputFiller>();
+            = hipdnn_integration_tests::hostInputFillForced()
+                  ? std::shared_ptr<hipdnn_integration_tests::DeviceInputFiller>()
+                  : std::make_shared<hipdnn_integration_tests::DeviceInputFiller>();
         const auto registrationStats
             = hipdnn_integration_tests::bundle::registerBundleTests(deviceFiller);
 

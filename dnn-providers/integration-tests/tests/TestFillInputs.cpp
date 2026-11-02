@@ -2198,12 +2198,12 @@ TEST(TestFillInputs, PackedSubByteTensorOfAnUnsupportedKindIsRefused)
 
 // ── Domain fills: the device and the existing kinds ─────────────────────────────────────────
 
-// rocRAND can only draw uniform floats, so every non-FREE kind must come out of the host
-// generator even for a tensor large enough to be sent to the device; a decline that failed
-// would put the new kinds through a path that cannot make them (or, with no device, throw). The
-// bytes must be the ones a host-only fill makes. Runs without a device: a decline never
-// reaches HIP.
-TEST(TestFillInputs, DeviceFillerDeclinesEveryNewKindAndTheHostFillsIt)
+// The device kernels write float, half, bfloat16 and the fp8 formats (TestDeviceInputFill.cpp).
+// A tensor of any other type must still come out of the host generator, even when it is large
+// enough to be sent to the device and the filler is given; a decline that failed would put the
+// kinds through a path that cannot make them (or, with no device, throw). The bytes must be the
+// ones a host-only fill makes. Runs without a device: a decline never reaches HIP.
+TEST(TestFillInputs, DeviceFillerLeavesATypeWithoutADeviceKernelToTheHost)
 {
     const std::vector<int64_t> dims = {256, 256};
     const std::vector<int64_t> strides = {256, 1};
@@ -2218,7 +2218,7 @@ TEST(TestFillInputs, DeviceFillerDeclinesEveryNewKindAndTheHostFillsIt)
     for(const auto& recipe : recipes)
     {
         SCOPED_TRACE(InputFillRecipes::kindToString(recipe.kind));
-        const auto gr = buildMatmulGraph(DataType::FLOAT, dims, strides);
+        const auto gr = buildMatmulGraph(DataType::DOUBLE, dims, strides);
         const std::vector<int64_t> ownedUids = {1};
         auto hostInputs = makeTensorsFromGraph(gr, ownedUids);
         auto deviceInputs = makeTensorsFromGraph(gr, ownedUids);

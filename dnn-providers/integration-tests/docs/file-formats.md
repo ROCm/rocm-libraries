@@ -378,6 +378,16 @@ every field for every kind and select the kind with one expression.
 Whether a data type can hold a kind is known only when the tensor is filled. A kind the
 type cannot hold (the "Unsupported" entries above) makes the case `UNEXERCISED`, never a pass.
 
+**Host and device fills.** The host generates these kinds from a per-uid generator, so they
+are deterministic per seed. A tensor of at least 2^14 allocated elements whose data type is
+`float`, `half`, `bfloat16` or one of the four fp8 formats is generated on the device instead
+(`free` also covers `double`): rocRAND draws the uniform floats and a kernel turns them into
+the kind's values in the tensor's data type, so the values are not the host's but each kind keeps
+its contract above, including the exact planted share of `special` and its at-least-one guarantee.
+A `nonzero` draw that rounds to zero is redrawn once on the device, then replaced by the
+endpoint. A tensor of another type, a smaller one, or a type that cannot hold the kind is
+filled by the host, which also reports the kind as unsupported.
+
 ### `validator`
 
 | Value | Grading |
