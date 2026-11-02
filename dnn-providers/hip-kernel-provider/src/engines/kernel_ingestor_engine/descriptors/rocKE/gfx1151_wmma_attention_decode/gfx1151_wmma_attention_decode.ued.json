@@ -15,5 +15,10 @@
     ],
   "behavior_notes": [
     "supports_graph_capture"
-  ]
+  ],
+  "predict_engine": {
+    "gfx1151": [
+      "011b9a83-7434-499a-a240-852370172d37"
+    ]
+  }
 }
