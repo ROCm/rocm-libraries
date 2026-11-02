@@ -71,13 +71,6 @@ namespace TensileLite
 {
     namespace
     {
-        size_t checkedAdd(size_t a, size_t b)
-        {
-            if(b > std::numeric_limits<size_t>::max() - a)
-                throw std::overflow_error("Spatial cluster workspace exceeds size_t");
-            return a + b;
-        }
-
         size_t checkedMultiply(size_t a, size_t b)
         {
             if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
@@ -1124,7 +1117,7 @@ namespace TensileLite
             uint32_t magicShift = 0;
             const uint32_t magic = solution.magicNumber(2, itersPerTile, &magicShift);
             if(solution.internalArgsSupport.perTileExtraIters
-               && problem.getParams().uniformSummationOrder())
+               && problem.getParams().uniformSummationOrder() != 0)
                 magicShift |= 0x20000000u;
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("magicNumberItersPerTile", magic);
@@ -1555,7 +1548,7 @@ namespace TensileLite
                     // AND mode, so a kernel without the runtime gate never sees
                     // the bit.
                     if(internalArgsSupport.perTileExtraIters
-                       && problem.getParams().uniformSummationOrder())
+                       && problem.getParams().uniformSummationOrder() != 0)
                         magicShiftItersPerTile |= 0x20000000u;
 
                     uint32_t sk3_skItersPerWG;
@@ -2231,7 +2224,7 @@ namespace TensileLite
         // could reintroduce a stagger, and BELOW the staggerUParamsCache write,
         // so the cache keeps holding the real origami prediction rather than
         // this mode's zeros for concurrent callers who did not request it.
-        if(problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() != 0)
         {
             const bool rowUniformStaggerCapable
                 = internalArgsSupport.staggerU
@@ -2926,6 +2919,36 @@ namespace TensileLite
                                problem.fusedA2AWorld(),
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
+
+        // CU-occupancy probe tail args (layout: Signature.py addOccupancyProbeArgs).
+        // A grid smaller than minGrid is padded with probe-only WGs so the probe
+        // covers minGrid CUs. Only a 1-D grid can be padded; otherwise the probe
+        // is disabled for this launch. !groupedGemm mirrors the codegen gate.
+        if(internalArgsSupport.occupancyProbe && !problemType.groupedGemm)
+        {
+            auto const&    params    = problem.getParams();
+            void*          probeAddr = params.occupancyProbeAddr();
+            const uint32_t minGrid   = params.occupancyProbeMinGrid();
+            auto&          wg        = rv.numWorkGroups;
+            const size_t   realGrid  = static_cast<size_t>(wg.x) * wg.y * wg.z;
+
+            const bool needsPad = probeAddr && realGrid < minGrid;
+            const bool canPad   = wg.y == 1 && wg.z == 1;
+            if(needsPad && !canPad)
+                probeAddr = nullptr;
+
+            rv.occupancyProbe = probeAddr != nullptr;
+            rv.args.appendAligned<void*>("ProbeAddr", probeAddr);
+            rv.args.append<uint32_t>("ProbeEpoch", params.occupancyProbeEpoch());
+            rv.args.append<uint32_t>("ProbeGrid", static_cast<uint32_t>(realGrid));
+
+            // Grow only the dispatch; the kernargs above keep the real grid.
+            if(needsPad && canPad)
+            {
+                wg.x              = minGrid;
+                rv.numWorkItems.x = rv.workGroupSize.x * minGrid;
+            }
+        }
 
         if(problemType.stochasticRounding)
         {
@@ -6297,7 +6320,7 @@ namespace TensileLite
         // force tree so query (requiredWorkspaceSize) and launch (solve)
         // stay on the steered tree path. Mirror the gate's
         // staticTwoTilePacking predicate.
-        if(problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() != 0)
         {
             const bool effectiveDynamic
                 = (sizeMapping.hasHybridAssignment()) ? streamK5EffectiveDynamic(problem, hardware)
@@ -6468,17 +6491,6 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
-    double ContractionSolution::streamKClusterUtilization(Problem const& problem) const
-    {
-        if(!usesStreamKSpatialCluster())
-            return 1.0;
-        const auto geometry = spatialClusterGeometry(*this, problem);
-        if(geometry.totalBlocks == 0)
-            return 1.0;
-        return static_cast<double>(geometry.totalTiles)
-               / (static_cast<double>(geometry.totalBlocks) * geometry.clusterSize);
-    }
-
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
         Problem const& problem, Hardware const& hardware) const
     {
@@ -6580,51 +6592,6 @@ namespace TensileLite
             launch.grid = std::min(launch.grid, cluster.blocks);
             cluster.split = {};
         };
-        // The tile predictor does not price spatial block padding or clustered
-        // tree fixup. Compare its resolved physical grid with a whole-block
-        // candidate, in units of DepthU iterations on the busiest CU. Count
-        // physical waves (including padded peers), not just logical workers.
-        // The fixup allowance is calibrated for gfx1250 dense clustered tree
-        // kernels at a full physical wave, scaled by the block footprint so
-        // underfilled waves still favor K parallelism. Keep small grids (<1/4
-        // CU coverage), other
-        // architectures and parallel reduction on their existing policies.
-        if(!cluster.fixedGridUsed && !wholeTileGrid && cluster.blocks % launch.grid != 0
-           && gpu->processor == AMDGPU::Processor::gfx1250
-           && gpu->persistentDynamicGrid == static_cast<int>(origami::grid_selection_t::k_split_aware)
-           && launch.reduction == origami::reduction_t::tree
-           && !handwrittenCustomKernel() && !sizeMapping.useSubtileImpl
-           && !problemType.useGradient && !problemType.sparse && k != 0)
-        {
-            size_t cuBudget = gpu->computeUnitCount;
-            if(gpu->persistentMaxCUs > 0)
-                cuBudget = std::min(cuBudget, static_cast<size_t>(gpu->persistentMaxCUs));
-            if(launch.smCountTarget > 0)
-                cuBudget = std::min(cuBudget, static_cast<size_t>(launch.smCountTarget));
-            const size_t clustersPerWave = std::max(size_t{1}, cuBudget / cluster.clusterSize);
-            const size_t wholeWaves = divideUp(cluster.blocks, clustersPerWave);
-            const size_t splitWaves = divideUp(launch.grid, clustersPerWave);
-            const size_t wholeWork = checkedMultiply(wholeWaves, iters);
-            const size_t splitWork = checkedMultiply(splitWaves, divideUp(totalIters, launch.grid));
-            constexpr size_t TreeFixupItersPerWave = 48;
-            const size_t fixupWork = checkedMultiply(
-                checkedMultiply(splitWaves, TreeFixupItersPerWave),
-                std::min(cluster.blocks, clustersPerWave)) / clustersPerWave;
-            const size_t splitCost = checkedAdd(splitWork, fixupWork);
-            if(cluster.blocks >= divideUp(clustersPerWave, size_t{4}) && wholeWork <= splitCost)
-            {
-                launch.grid = std::min(cluster.blocks, launchLimit / cluster.clusterSize);
-                // Respect a caller's CU cap even though whole blocks do not
-                // need the cooperative residency/flag limit.
-                if(cuBudget < static_cast<size_t>(gpu->computeUnitCount))
-                    launch.grid = std::min(launch.grid, checkedMultiply(clustersPerWave,
-                        static_cast<size_t>(std::max(sizeMapping.CUOccupancy, 1))));
-                wholeBlocks("whole-block-cost");
-                cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
-                launch.clusterGridClamp = cluster.physicalGrid != launch.selectedGrid;
-                return launch;
-            }
-        }
         // One logical worker owns one K interval of one spatial block. All
         // peers use the same split index and store at their real output
         // coordinates in [split][batch][N][M], as the conversion kernel expects.
@@ -7023,7 +6990,7 @@ namespace TensileLite
     bool ContractionSolution::uniformSummationOrderSupported(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
-        if(!problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() == 0)
             return true;
 
         PersistentLaunchSettings launch;
@@ -7206,13 +7173,13 @@ namespace TensileLite
                     // helper keeps meaning "the mapping the device will perform"
                     // if this region is ever refactored.
                     const bool perTileActive = internalArgsSupport.perTileExtraIters
-                                               && problem.getParams().uniformSummationOrder();
+                                               && problem.getParams().uniformSummationOrder() != 0;
                     if(!streamKStaticSplitRowUniform(split,
                                                      tiles,
                                                      itersPerTile,
                                                      launch.grid,
                                                      internalArgsSupport.perTileExtraIters,
-                                                     problem.getParams().uniformSummationOrder()))
+                                                     problem.getParams().uniformSummationOrder() != 0))
                         return refuse(
                             "StaticSplitNotRowUniform",
                             "the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
@@ -7222,18 +7189,6 @@ namespace TensileLite
                                 + " skItersPerWG=" + std::to_string(split.skItersPerWG)
                                 + " extraIters=" + std::to_string(split.extraIters)
                                 + " perTileExtraIters=" + (perTileActive ? "1" : "0"));
-                }
-                else if(tiles % launch.grid != 0)
-                {
-                    // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
-                    // the derivation above does not describe. They are additionally
-                    // held to SKTiles == 0 below, so the divisibility test is
-                    // redundant for them, but redundant and fail-closed is the
-                    // right side to err on.
-                    return refuse("GridDoesNotDivideTiles",
-                                  "StreamK grid " + std::to_string(launch.grid)
-                                      + " does not divide the tile count "
-                                      + std::to_string(tiles));
                 }
 
                 // Mirrors the arg-packing condition: the ws/Flags pair is only
@@ -7331,7 +7286,11 @@ namespace TensileLite
                                                          uint32_t    gsu,
                                                          void const* synchronizer) const
     {
-        if(!problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() == 0)
+            return;
+
+        // Dynamic work queue currently processes full tiles only
+        if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
             return;
 
         const std::string reason = uniformSummationOrderLaunchObstacle(
@@ -7620,7 +7579,7 @@ namespace TensileLite
             // run before the magic-division guard below so that guard still
             // validates the final grid (a snap after it can emit out-of-range
             // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
-            if(problem.getParams().uniformSummationOrder() && tiles > 0 && grid > 0)
+            if(problem.getParams().uniformSummationOrder() != 0 && tiles > 0 && grid > 0)
             {
                 const bool effectiveDynamic
                     = (self.sizeMapping.hasHybridAssignment())
@@ -7644,7 +7603,7 @@ namespace TensileLite
                     // the enclosing uniformSummationOrder() test but keeps the
                     // local meaning what the search below assumes.
                     const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters
-                                                   && problem.getParams().uniformSummationOrder();
+                                                   && problem.getParams().uniformSummationOrder() != 0;
 
                     // The flag-region bound is a constraint ON this selection, not
                     // a correction applied after it. Every grid this snap can emit
@@ -8386,8 +8345,7 @@ namespace TensileLite
         pp.staticModel = staticPerformanceModel(
             M, N, K, NumBatches, MT0, MT1, NumCUs, pp.granularities.totalGranularity, GlobalSplitU);
 
-        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity
-                        * streamKClusterUtilization(problem);
+        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity;
         pp.CUs         = NumCUs;
 
         return pp;

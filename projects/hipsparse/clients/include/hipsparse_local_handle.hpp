@@ -28,7 +28,6 @@
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
 #include "hipsparse_arguments.hpp"
 #include "utility.hpp"
 
@@ -39,33 +38,33 @@ class hipsparseLocalHandle_t
 
 public:
     hipsparseLocalHandle_t()
-        : capture_started(false)
-        , graph_testing(false)
+        : graph_testing(false)
     {
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreate", status);
         }
     }
     hipsparseLocalHandle_t(const Arguments& arg)
-        : capture_started(false)
-        , graph_testing(arg.graph_test)
+        : graph_testing(arg.graph_test)
     {
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreate", status);
         }
     }
     ~hipsparseLocalHandle_t()
     {
+        // An exception from the test can unwind past END_GRAPH_CAPTURE(). Finish the
+        // capture here so it does not stay active for later tests. Do not throw.
+        release_graph_capture();
+
         const hipsparseStatus_t status = hipsparseDestroy(this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            verify_hipsparse_status_success(status, "ERROR: hipsparseLocalHandle_t destructor");
+            log_hipsparse_error("hipsparseDestroy", status);
         }
     }
 
@@ -93,23 +92,31 @@ public:
             return;
         }
 
-#ifdef GOOGLE_TEST
-        ASSERT_EQ(capture_started, false);
-#endif
+        if(this->capture_started)
+        {
+            throw std::runtime_error(
+                "hipsparseStreamBeginCapture called while a capture is already active");
+        }
 
-        CHECK_HIP_ERROR(hipStreamCreate(&this->graph_stream));
-        CHECK_HIPSPARSE_ERROR(hipsparseGetStream(*this, &this->old_stream));
-        CHECK_HIPSPARSE_ERROR(hipsparseSetStream(*this, this->graph_stream));
+        throw_on_hip_error("hipStreamCreate", hipStreamCreate(&this->graph_stream));
+        this->graph_stream_created = true;
+        throw_on_hipsparse_error("hipsparseGetStream",
+                                 hipsparseGetStream(*this, &this->old_stream));
+        throw_on_hipsparse_error("hipsparseSetStream",
+                                 hipsparseSetStream(*this, this->graph_stream));
+        this->handle_on_graph_stream = true;
 
         // BEGIN GRAPH CAPTURE
-        CHECK_HIP_ERROR(hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
-
-        capture_started = true;
+        throw_on_hip_error("hipStreamBeginCapture",
+                           hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
+        this->capture_started = true;
 #endif
     }
 
     void hipsparseStreamEndCapture(int runs = 1)
     {
+        (void)runs;
+
 // As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by
 // __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE
 // with g++/clang, these graph APIs cannot be called from hipSPARSE.
@@ -119,42 +126,142 @@ public:
             return;
         }
 
-#ifdef GOOGLE_TEST
-        ASSERT_EQ(capture_started, true);
-#endif
-
-        hipGraph_t     graph;
-        hipGraphExec_t instance;
+        if(!this->capture_started)
+        {
+            throw std::runtime_error("hipsparseStreamEndCapture called without an active capture");
+        }
 
         // END GRAPH CAPTURE
-        CHECK_HIP_ERROR(hipStreamEndCapture(this->graph_stream, &graph));
-        CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
+        throw_on_hip_error("hipStreamEndCapture",
+                           hipStreamEndCapture(this->graph_stream, &this->graph));
+        this->capture_started = false;
 
-        CHECK_HIP_ERROR(hipGraphDestroy(graph));
-        CHECK_HIP_ERROR(hipGraphLaunch(instance, this->graph_stream));
-        CHECK_HIP_ERROR(hipStreamSynchronize(this->graph_stream));
-        CHECK_HIP_ERROR(hipGraphExecDestroy(instance));
+        throw_on_hip_error("hipGraphInstantiate",
+                           hipGraphInstantiate(&this->instance, this->graph, nullptr, nullptr, 0));
+        throw_on_hip_error("hipGraphDestroy", hipGraphDestroy(this->graph));
+        this->graph = nullptr;
 
-        CHECK_HIPSPARSE_ERROR(hipsparseSetStream(*this, this->old_stream));
-        CHECK_HIP_ERROR(hipStreamDestroy(this->graph_stream));
-        this->graph_stream = nullptr;
+        throw_on_hip_error("hipGraphLaunch", hipGraphLaunch(this->instance, this->graph_stream));
+        throw_on_hip_error("hipStreamSynchronize", hipStreamSynchronize(this->graph_stream));
+        throw_on_hip_error("hipGraphExecDestroy", hipGraphExecDestroy(this->instance));
+        this->instance = nullptr;
 
-        capture_started = false;
+        throw_on_hipsparse_error("hipsparseSetStream", hipsparseSetStream(*this, this->old_stream));
+        this->handle_on_graph_stream = false;
+        throw_on_hip_error("hipStreamDestroy", hipStreamDestroy(this->graph_stream));
+        this->graph_stream         = nullptr;
+        this->graph_stream_created = false;
 #endif
     }
 
     hipStream_t get_stream()
     {
-        hipStream_t stream;
-        hipsparseGetStream(*this, &stream);
+        hipStream_t stream{};
+        throw_on_hipsparse_error("hipsparseGetStream", hipsparseGetStream(*this, &stream));
         return stream;
     }
 
 private:
-    hipStream_t graph_stream;
-    hipStream_t old_stream;
-    bool        capture_started;
-    bool        graph_testing;
+    static void throw_on_hip_error(const char* call, hipError_t status)
+    {
+        if(status != hipSuccess)
+        {
+            throw_hip_error(call, status);
+        }
+    }
+
+    static void throw_on_hipsparse_error(const char* call, hipsparseStatus_t status)
+    {
+        if(status != HIPSPARSE_STATUS_SUCCESS)
+        {
+            throw_hipsparse_error(call, status);
+        }
+    }
+
+    // Drop any graph left by a failed begin or end capture, restore the previous
+    // stream, and destroy the capture stream. hipStream_t{} is the default stream,
+    // so the capture stream is destroyed only when this object created it.
+    void release_graph_capture()
+    {
+// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by
+// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE
+// with g++/clang, these graph APIs cannot be called from hipSPARSE.
+#if(!defined(CUDART_VERSION))
+        if(this->instance != nullptr)
+        {
+            const hipError_t status = hipGraphExecDestroy(this->instance);
+            if(status != hipSuccess)
+            {
+                log_hip_error("hipGraphExecDestroy", status);
+            }
+            this->instance = nullptr;
+        }
+
+        if(this->graph != nullptr)
+        {
+            const hipError_t status = hipGraphDestroy(this->graph);
+            if(status != hipSuccess)
+            {
+                log_hip_error("hipGraphDestroy", status);
+            }
+            this->graph = nullptr;
+        }
+
+        if(this->capture_started)
+        {
+            hipGraph_t       graph{};
+            const hipError_t status = hipStreamEndCapture(this->graph_stream, &graph);
+            if(status != hipSuccess)
+            {
+                log_hip_error("hipStreamEndCapture", status);
+            }
+            if(graph != nullptr)
+            {
+                const hipError_t status = hipGraphDestroy(graph);
+                if(status != hipSuccess)
+                {
+                    log_hip_error("hipGraphDestroy", status);
+                }
+            }
+            this->capture_started = false;
+        }
+
+        if(this->handle_on_graph_stream)
+        {
+            const hipsparseStatus_t status = hipsparseSetStream(*this, this->old_stream);
+            if(status != HIPSPARSE_STATUS_SUCCESS)
+            {
+                log_hipsparse_error("hipsparseSetStream", status);
+            }
+            this->handle_on_graph_stream = false;
+        }
+
+        if(this->graph_stream_created)
+        {
+            const hipError_t status = hipStreamDestroy(this->graph_stream);
+            if(status != hipSuccess)
+            {
+                log_hip_error("hipStreamDestroy", status);
+            }
+            this->graph_stream         = nullptr;
+            this->graph_stream_created = false;
+        }
+#endif
+    }
+
+    hipStream_t graph_stream{};
+    hipStream_t old_stream{};
+// As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by
+// __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE
+// with g++/clang, these graph APIs cannot be called from hipSPARSE.
+#if(!defined(CUDART_VERSION))
+    hipGraph_t     graph{};
+    hipGraphExec_t instance{};
+#endif
+    bool capture_started{};
+    bool graph_stream_created{};
+    bool handle_on_graph_stream{};
+    bool graph_testing{};
 };
 
 // Exact match for the wrapper, so this beats the implicit conversion to

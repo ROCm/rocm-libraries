@@ -113,13 +113,41 @@ def is_fence(line):
     return line.lstrip().startswith("```")
 
 
-def _scan_fields(text, labels, first):
-    """(blocks, skipped) of parse_fields; skipped counts `<first>:` lines inside fenced code."""
+# A `##` or deeper heading or a thematic break outside fenced code ends a field's
+# continuation; a single `#` line (a shell comment) does not.
+FIELD_END = re.compile(r"^(?:#{2,6}\s|\s*(?:-{3,}|\*{3,}|_{3,})\s*$)")
+
+
+def loose_label(label, value=""):
+    """A `<label>:` line in any markup a lane may wrap it in: bullets, numbering, quotes,
+    table pipes, headings, bold, italics, inline code or a space before the colon,
+    followed by `value` (a regex; empty matches anything). Flat prefix class: linear time.
+    """
+    return re.compile(
+        r"^[\s\-*+>|#]*(?:\d+[.)][\s\-*+>|#]*)*(?:\*\*|__|[*_`])?"
+        + re.escape(label)
+        + r"(?:\*\*|__|[*_`])?\s*:"
+        + value
+    )
+
+
+ID_LINE = loose_label("ID")
+# A `Tier:` line whose whole value is one tier; prose and quotes that mention a tier differ.
+TIER_LINE = loose_label("Tier", r"[\s*_`]*(?:" + "|".join(TIERS) + r")[\s*_`|]*$")
+
+
+def parse_fields(text, labels, first="ID"):
+    """Labelled-line blocks: a `<first>:` line starts a block; a later labelled line
+    starts the next field; any other line (blank lines and fenced code included)
+    continues the current field, until a `##` or deeper heading or a `---` line outside
+    fenced code ends it (a later labelled line still joins the block). A fence directly before a
+    `<first>:` line wraps the blocks up to the next bare fence outside nested code;
+    neither fence is read. Returns a list of {label: value} dicts."""
     label_re = re.compile(
         r"^(" + "|".join(re.escape(x) for x in labels) + r"):[ \t]*(.*)$"
     )
     lines = text.splitlines()
-    blocks, cur, field, fenced, wrapped, skipped = [], None, None, False, False, 0
+    blocks, cur, field, fenced, wrapped = [], None, None, False, False
     for i, line in enumerate(lines):
         if is_fence(line):
             bare = line.strip() == "```"
@@ -139,33 +167,34 @@ def _scan_fields(text, labels, first):
             if cur is not None:
                 field = m.group(1)
                 cur[field] = m.group(2)
+        elif not fenced and FIELD_END.match(line):
+            field = None
         elif cur is not None and field:
             cur[field] += "\n" + line
-        if fenced and label_re.match(line) and line.startswith(f"{first}:"):
-            skipped += 1
         if is_fence(line):
             fenced = not fenced
     for block in blocks:
         for key in block:
             block[key] = block[key].strip()
-    return blocks, skipped
+    return blocks
 
 
-def parse_fields(text, labels, first="ID"):
-    """Labelled-line blocks: a `<first>:` line starts a block; a later labelled line
-    starts the next field; any other line (blank lines and fenced code included)
-    continues the current field. A fence directly before a `<first>:` line wraps the
-    blocks up to the next bare fence outside nested code; neither fence is read.
-    Returns a list of {label: value} dicts."""
-    return _scan_fields(text, labels, first)[0]
-
-
-def unparsed_ids(text):
-    """Number of `ID:` lines of a lane report's Findings section that parse_findings
-    cannot read: those inside a code fence that does not wrap whole blocks."""
-    return _scan_fields(split_sections(text).get("Findings", ""), FINDING_LABELS, "ID")[
-        1
-    ]
+def unparsed_blocks(text):
+    """Number of finding blocks of a lane report's Findings section that parse_findings
+    does not read: the larger excess over the parsed findings of `ID:` lines (any markup,
+    fenced included) or of unfenced `Tier: <tier>` lines (any markup). Catches marked-up
+    or spaced labels, a block inside a code fence that does not wrap whole blocks, and a
+    block with no `ID:` line (its `Tier:` line is dropped or overwrites the previous
+    block's)."""
+    lines = split_sections(text).get("Findings", "").splitlines()
+    ids = tiers = 0
+    fenced = False
+    for line in lines:
+        ids += bool(ID_LINE.match(line))
+        tiers += not fenced and bool(TIER_LINE.match(line))
+        if is_fence(line):
+            fenced = not fenced
+    return max(ids, tiers) - len(parse_findings(text))
 
 
 def split_sections(text):
@@ -206,24 +235,29 @@ def parse_findings(text):
     ]
 
 
+SEPARATOR_CELL = re.compile(r":?-+:?")
+
+
 def coverage_rows(text):
-    """(path, read depth cell, tests) per table row of a lane report's Coverage section;
-    the header and separator rows come back too, with their text as the depth cell."""
-    rows = []
+    """(path, read depth cell, tests) per data row of a lane report's Coverage section;
+    a table's header and separator rows are dropped."""
+    rows, after_row = [], False
     for line in split_sections(text).get("Coverage", "").splitlines():
         cells = [
             c.strip().strip("`")
             for c in re.sub(r"^\s*(?:[-*]\s+)?\|?", "", line).rstrip("|").split("|")
         ]
-        if len(cells) >= 2:
-            rows.append((cells[0], cells[1], " | ".join(cells[2:]).strip() or "-"))
+        if len(cells) < 2:
+            after_row = False
+            continue
+        if all(SEPARATOR_CELL.fullmatch(c) for c in cells):
+            if after_row:
+                rows.pop()
+            after_row = False
+            continue
+        rows.append((cells[0], cells[1], " | ".join(cells[2:]).strip() or "-"))
+        after_row = True
     return rows
-
-
-def parse_coverage(text):
-    """(path, read depth, tests) rows of a lane report's Coverage section; rows whose
-    depth is not a read depth (the header, the separator) are skipped."""
-    return [r for r in coverage_rows(text) if r[1] in READ_DEPTHS]
 
 
 M_LINE = re.compile(

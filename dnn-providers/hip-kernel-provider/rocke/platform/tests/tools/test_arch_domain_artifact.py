@@ -17,10 +17,11 @@ Two gates fail for different reasons and run under different schedulers:
   removed while the artifact still looks authoritative.
 
 * **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
-  It re-probes the toolchain and asserts the committed measurements for *this
-  host's* flavor reproduce cell-for-cell; compiler-build provenance may differ.
-  It is the only check that can catch a wrong measurement rather than a missing
-  one. Its external compiler processes,
+  When the host has the exact compiler build recorded in the column, it
+  re-probes the toolchain and asserts the committed measurements reproduce
+  cell-for-cell. A different compiler build is explicitly unvalidated: an LLVM
+  major is not a stable intrinsic-availability contract. It is the only check
+  that can catch a wrong measurement rather than a missing one. Its external compiler processes,
   timeout, resource policy, and skip result do not belong in the unit-test pool.
 
 A host can only ever measure its own LLVM, so a flavor with no matching
@@ -39,6 +40,8 @@ registrations and the packaged helper list in step if either path is renamed.
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import json
 import os
 import re
@@ -122,6 +125,22 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                     self.assertEqual(clang_flavor, flavor, tc.get("clang"))
 
                 self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
+
+    def test_llvm24_changes_only_the_named_barrier_declarations(self):
+        llvm23 = G._decl_table("llvm23")
+        llvm24 = G._decl_table("llvm24")
+        self.assertEqual(llvm23.keys(), llvm24.keys())
+        changed = {key for key in llvm23 if llvm23[key] != llvm24[key]}
+        self.assertEqual(
+            changed,
+            {
+                "s.barrier.init",
+                "s.barrier.signal.var",
+                "s.barrier.join",
+                "s.wakeup.barrier",
+            },
+        )
+        self.assertTrue(all("addrspace(15)" in llvm24[key] for key in changed))
 
     def test_every_decl_key_is_covered_on_every_wired_arch(self):
         """The drift this file exists to catch: a decl key the artifact has no
@@ -303,12 +322,10 @@ class AvailableCpusTest(unittest.TestCase):
 
 
 class DriftTest(unittest.TestCase):
-    """What `--check` forgives, and what it must not.
+    """What an applicable ``--check`` treats as drift.
 
-    The column embeds the exact ROCm build that measured it, so a byte
-    comparison fails on any host at a different patch level -- not something
-    anyone can act on. But the fields saying *how* the probe was posed are
-    ours, not the host's, and forgiving those forgives real defects.
+    The caller rejects a compiler-provenance mismatch before probing. Once the
+    exact recorded compiler is present, every artifact field is load-bearing.
     """
 
     def _doc(self, **toolchain) -> str:
@@ -330,9 +347,11 @@ class DriftTest(unittest.TestCase):
             }
         )
 
-    def test_a_different_compiler_build_is_not_drift(self):
+    def test_a_different_compiler_build_is_drift_when_compared(self):
         other = "AMD clang version 22.0.0git (... roc-7.2.0 26014 def)"
-        self.assertIsNone(G._drift(self._doc(), self._doc(clang=other)))
+        why = G._drift(self._doc(), self._doc(clang=other))
+        self.assertIsNotNone(why)
+        self.assertIn("toolchain", why)
 
     def test_a_changed_measurement_is_drift_and_says_which(self):
         fresh = json.loads(self._doc())
@@ -715,6 +734,15 @@ class ClassifyTest(unittest.TestCase):
         )
         self.assertEqual(status, G.STATUS_ARCH_ABSENT)
         self.assertTrue(evidence)
+
+    def test_llvm24_missing_target_feature_is_arch_absent(self):
+        status, evidence = G._classify(
+            1,
+            "error: <unknown>:0:0: in function @probe void (ptr, i32): "
+            "llvm.amdgcn.mov.dpp8 requires target feature 'dpp8'",
+        )
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT)
+        self.assertIn("requires target feature 'dpp8'", evidence)
 
     def test_selection_dag_addresses_are_not_persisted(self):
         """Allocator-dependent node addresses must not make --check flaky."""
@@ -1266,6 +1294,35 @@ for line in open(src):
         self.assertEqual(rc, 77)
         self.assertFalse(out.exists())
 
+    def test_ctest_skips_a_column_from_a_different_compiler_build(self):
+        """One LLVM major does not make development builds interchangeable."""
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        blessed = "AMD clang version 22.0.0git (blessed-build)"
+        host = "AMD clang version 22.0.0git"
+        out.write_text(json.dumps({"toolchain": {"clang": blessed}}))
+        tools = {
+            "clang": self._clang_with_accepting_assembler(self._CLANG_ACCEPTS),
+            "opt": self._stub("opt", self._OPT_RESOLVES_AND_IDENTIFIES),
+        }
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+        ):
+            rc = self._run(
+                tools,
+                out,
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+
+        self.assertEqual(rc, 77)
+        self.assertIn("UNVALIDATED", stdout.getvalue())
+        self.assertIn(blessed, stdout.getvalue())
+        self.assertIn(host, stdout.getvalue())
+
     def test_ctest_can_translate_a_missing_column_to_a_skip(self):
         """A measured flavor with no baseline is unvalidated, not green."""
         out = Path(tempfile.mkdtemp()) / "missing-column.json"
@@ -1354,6 +1411,36 @@ while True:
         except (OSError, IndexError):
             return True
 
+    @contextlib.contextmanager
+    def _short_timeout_after_ready(self, pids: Path):
+        """Start each timeout only after its stub recorded both processes.
+
+        The production timeout remains part of the call under test. This patch
+        shortens only ``Popen.communicate`` after a deterministic readiness
+        handshake, avoiding a race between interpreter startup and a tiny test
+        timeout while retaining a real process group and descendant.
+        """
+        original = subprocess.Popen.communicate
+        expected_pids = 0
+
+        def communicate(proc, *args, **kwargs):
+            nonlocal expected_pids
+            if kwargs.get("timeout") is not None:
+                expected_pids += 2
+                deadline = time.monotonic() + 5
+                while True:
+                    started = len(self._started(pids)) if pids.exists() else 0
+                    if started >= expected_pids:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("stub process tree did not become ready")
+                    time.sleep(0.01)
+                kwargs["timeout"] = 0.05
+            return original(proc, *args, **kwargs)
+
+        with mock.patch.object(subprocess.Popen, "communicate", communicate):
+            yield
+
     def _survivors(self, pids: Path) -> list[int]:
         # Killing is asynchronous: give the kernel a moment to deliver it.
         deadline = time.monotonic() + 5
@@ -1378,9 +1465,14 @@ while True:
         clang, pids = self._stub("clang")
         scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, scratch, True)
-        status, _ = G._probe(
-            clang, scratch / "probe.ll", "gfx942", scratch / "probe.hsaco", timeout=2
-        )
+        with self._short_timeout_after_ready(pids):
+            status, _ = G._probe(
+                clang,
+                scratch / "probe.ll",
+                "gfx942",
+                scratch / "probe.hsaco",
+                timeout=60,
+            )
         self.assertEqual(status, G.STATUS_TOOLCHAIN_TIMEOUT)
         self.assertEqual(len(self._started(pids)), 2, "stub did not start its child")
         self.assertEqual(self._survivors(pids), [], "outlived the probe's timeout")
@@ -1389,7 +1481,7 @@ while True:
         opt, pids = self._stub("opt")
         scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, scratch, True)
-        with mock.patch.object(G, "PROBE_TIMEOUT_S", 2):
+        with self._short_timeout_after_ready(pids):
             verdict = G._name_exists(opt, "declare void @llvm.nope()", scratch)
         self.assertIsNone(verdict.exists)
         self.assertEqual(verdict.status, G.STATUS_TOOLCHAIN_TIMEOUT)
@@ -1405,8 +1497,9 @@ while True:
         tool, pids = self._stub(
             "clang", prelude='sys.stdout.buffer.write(b"\\xff"); sys.stdout.flush()'
         )
-        with self.assertRaises(subprocess.TimeoutExpired):
-            B.run_bounded([tool], timeout=2)
+        with self._short_timeout_after_ready(pids):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                B.run_bounded([tool], timeout=60)
         self.assertEqual(self._survivors(pids), [], "outlived the timeout")
 
     def test_a_batched_name_check_timeout_ends_the_whole_opt_run(self):
@@ -1417,7 +1510,7 @@ while True:
             ("a", "declare void @llvm.nope.a()"),
             ("b", "declare void @llvm.nope.b()"),
         ]
-        with mock.patch.object(G, "PROBE_TIMEOUT_S", 2):
+        with self._short_timeout_after_ready(pids):
             verdicts = G._name_exists_many(opt, items, scratch)
         self.assertEqual(
             {key: v.status for key, v in verdicts.items()},
@@ -1431,9 +1524,14 @@ while True:
         clang, pids = self._stub("clang")
         scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, scratch, True)
-        status, _ = G._assemble(
-            clang, scratch / "probe.ll", "gfx942", scratch / "probe.hsaco", timeout=2
-        )
+        with self._short_timeout_after_ready(pids):
+            status, _ = G._assemble(
+                clang,
+                scratch / "probe.ll",
+                "gfx942",
+                scratch / "probe.hsaco",
+                timeout=60,
+            )
         self.assertEqual(status, G.STATUS_TOOLCHAIN_TIMEOUT)
         self.assertEqual(len(self._started(pids)), 2, "stub did not start its child")
         self.assertEqual(self._survivors(pids), [], "outlived the assembly's timeout")
