@@ -86,12 +86,13 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  and \ref rocsparse_datatype_f32_c <-> \ref rocsparse_datatype_f64_c are supported, depending on
 *  the format of \p target:
 *  - same format as \p source: the values are converted.
-*  - \ref rocsparse_format_coo or \ref rocsparse_format_coo_aos: the values are converted. From
-*    the CSC, ELL and BSR formats, this needs \ref rocsparse_sparse_to_sparse_permissive, and the
-*    conversion goes through an intermediate CSR matrix.
-*  - \ref rocsparse_format_csr: the values are also converted from the COO and COO AoS formats.
-*  - \ref rocsparse_format_csc, \ref rocsparse_format_ell, \ref rocsparse_format_bsr: only from
-*    the same format.
+*  - \ref rocsparse_format_coo or \ref rocsparse_format_coo_aos target: the values are converted.
+*    From the CSC, ELL and BSR formats, this needs \ref rocsparse_sparse_to_sparse_permissive, and
+*    the conversion goes through an intermediate CSR matrix.
+*  - \ref rocsparse_format_csr target: the values are also converted from the COO and COO AoS
+*    formats.
+*  - \ref rocsparse_format_csc, \ref rocsparse_format_ell or \ref rocsparse_format_bsr target: only
+*    from the same format.
 *
 *  Other combinations return \ref rocsparse_status_not_implemented. For the conversions above
 *  that convert the values, a matrix with no values to convert (zero nonzeros) is an exception:
