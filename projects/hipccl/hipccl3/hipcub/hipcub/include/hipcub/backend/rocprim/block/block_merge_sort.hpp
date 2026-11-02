@@ -200,8 +200,7 @@ template<typename KeyT,
          typename ValueT,
          int NumThreads,
          int ItemsPerThread,
-         typename SynchronizationPolicy,
-         bool WARP_SORT = false>
+         typename SynchronizationPolicy>
 class BlockMergeSortStrategy
 {
     static_assert(_HIPCUB_LIBCXX::is_power_of_two(NumThreads), "NumThreads must be a power of two");
@@ -411,7 +410,7 @@ public:
           KeyT max_key = oob_default;
 
           _CCCL_SORT_MAYBE_UNROLL()
-          for(int item = WARP_SORT ? 1 : 0; item < ItemsPerThread; ++item)
+          for(int item = 1; item < ItemsPerThread; ++item)
           {
               if(ItemsPerThread * static_cast<int>(linear_tid) + item < valid_items)
               {
@@ -431,94 +430,94 @@ public:
           StableOddEvenSort(keys, items, compare_op);
       }
 
-    // each thread has sorted keys
-    // merge sort keys in shared memory
-    //
-    for(int target_merged_threads_number = 2; target_merged_threads_number <= NumThreads;
-        target_merged_threads_number *= 2)
-    {
-        const int merged_threads_number = target_merged_threads_number / 2;
-        const int mask                  = target_merged_threads_number - 1;
-
-        Sync();
-
-        // store keys in shmem
-        //
-        _CCCL_PRAGMA_UNROLL_FULL()
-        for(int item = 0; item < ItemsPerThread; ++item)
-        {
-            int idx                       = ItemsPerThread * linear_tid + item;
-            temp_storage.keys_shared[idx] = keys[item];
-        }
-
-      Sync();
-
-      int indices[ItemsPerThread];
-
-      const int first_thread_idx_in_thread_group_being_merged = ~mask & linear_tid;
-      const int start = ItemsPerThread * first_thread_idx_in_thread_group_being_merged;
-      const int size  = ItemsPerThread * merged_threads_number;
-
-      const int thread_idx_in_thread_group_being_merged = mask & linear_tid;
-
-      const int COMPARE_NUM = WARP_SORT ? valid_items : ItemsPerThread * blockDim.x;
-
-      const int diag
-          = (::rocprim::min)(COMPARE_NUM, ItemsPerThread * thread_idx_in_thread_group_being_merged);
-
-      const int keys1_beg = (::rocprim::min)(COMPARE_NUM, start);
-      const int keys1_end = (::rocprim::min)(COMPARE_NUM, keys1_beg + size);
-      const int keys2_beg = keys1_end;
-      const int keys2_end = (::rocprim::min)(COMPARE_NUM, keys2_beg + size);
-
-      const int keys1_count = keys1_end - keys1_beg;
-      const int keys2_count = keys2_end - keys2_beg;
-
-      const int partition_diag = MergePath<KeyT>(&temp_storage.keys_shared[keys1_beg],
-                                                 &temp_storage.keys_shared[keys2_beg],
-                                                 keys1_count,
-                                                 keys2_count,
-                                                 diag,
-                                                 compare_op);
-
-      const int keys1_beg_loc   = keys1_beg + partition_diag;
-      const int keys1_end_loc   = keys1_end;
-      const int keys2_beg_loc   = keys2_beg + diag - partition_diag;
-      const int keys2_end_loc   = keys2_end;
-      const int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
-      const int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
-      SerialMerge(&temp_storage.keys_shared[0],
-                  keys1_beg_loc,
-                  keys2_beg_loc,
-                  keys1_count_loc,
-                  keys2_count_loc,
-                  keys,
-                  indices,
-                  compare_op);
-
-      if constexpr(!KEYS_ONLY)
+      // each thread has sorted keys
+      // merge sort keys in shared memory
+      //
+      for(int target_merged_threads_number = 2; target_merged_threads_number <= NumThreads;
+          target_merged_threads_number *= 2)
       {
-        Sync();
+          const int merged_threads_number = target_merged_threads_number / 2;
+          const int mask                  = target_merged_threads_number - 1;
 
-        // store keys in shmem
-        //
-        _CCCL_PRAGMA_UNROLL_FULL()
-        for(int item = 0; item < ItemsPerThread; ++item)
-        {
-            int idx                        = ItemsPerThread * linear_tid + item;
-            temp_storage.items_shared[idx] = items[item];
-        }
+          Sync();
 
-        Sync();
+          // store keys in shmem
+          //
+          _CCCL_PRAGMA_UNROLL_FULL()
+          for(int item = 0; item < ItemsPerThread; ++item)
+          {
+              int idx                       = ItemsPerThread * linear_tid + item;
+              temp_storage.keys_shared[idx] = keys[item];
+          }
 
-        // gather items from shmem
-        //
-        _CCCL_PRAGMA_UNROLL_FULL()
-        for(int item = 0; item < ItemsPerThread; ++item)
-        {
-          items[item] = temp_storage.items_shared[indices[item]];
-        }
-      }
+          Sync();
+
+          int indices[ItemsPerThread];
+
+          const int first_thread_idx_in_thread_group_being_merged = ~mask & linear_tid;
+          const int start = ItemsPerThread * first_thread_idx_in_thread_group_being_merged;
+          const int size  = ItemsPerThread * merged_threads_number;
+
+          const int thread_idx_in_thread_group_being_merged = mask & linear_tid;
+
+          const int diag
+              = (_HIPCUB_STD::min)(valid_items,
+                                   ItemsPerThread * thread_idx_in_thread_group_being_merged);
+
+          const int keys1_beg = (_HIPCUB_STD::min)(valid_items, start);
+          const int keys1_end = (_HIPCUB_STD::min)(valid_items, keys1_beg + size);
+          const int keys2_beg = keys1_end;
+          const int keys2_end = (_HIPCUB_STD::min)(valid_items, keys2_beg + size);
+
+          const int keys1_count = keys1_end - keys1_beg;
+          const int keys2_count = keys2_end - keys2_beg;
+
+          const int partition_diag = MergePath<KeyT>(&temp_storage.keys_shared[keys1_beg],
+                                                     &temp_storage.keys_shared[keys2_beg],
+                                                     keys1_count,
+                                                     keys2_count,
+                                                     diag,
+                                                     compare_op);
+
+          const int keys1_beg_loc   = keys1_beg + partition_diag;
+          const int keys1_end_loc   = keys1_end;
+          const int keys2_beg_loc   = keys2_beg + diag - partition_diag;
+          const int keys2_end_loc   = keys2_end;
+          const int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
+          const int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
+          SerialMerge(&temp_storage.keys_shared[0],
+                      keys1_beg_loc,
+                      keys2_beg_loc,
+                      keys1_count_loc,
+                      keys2_count_loc,
+                      keys,
+                      indices,
+                      compare_op,
+                      oob_default);
+
+          if constexpr(!KEYS_ONLY)
+          {
+              Sync();
+
+              // store keys in shmem
+              //
+              _CCCL_PRAGMA_UNROLL_FULL()
+              for(int item = 0; item < ItemsPerThread; ++item)
+              {
+                  int idx                        = ItemsPerThread * linear_tid + item;
+                  temp_storage.items_shared[idx] = items[item];
+              }
+
+              Sync();
+
+              // gather items from shmem
+              //
+              _CCCL_PRAGMA_UNROLL_FULL()
+              for(int item = 0; item < ItemsPerThread; ++item)
+              {
+                  items[item] = temp_storage.items_shared[indices[item]];
+              }
+          }
     }
   } // func block_merge_sort
 

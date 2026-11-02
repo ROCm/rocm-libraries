@@ -54,6 +54,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Removed the deprecated thread operators `Equality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
 * Removed the `HIPCUB_TRAIT` macro in favor of the equivalent `_CCCL_TRAIT` from libhipcxx.
 * Deprecated `hipcub::PowerOfTwo`, use `hip::is_power_of_two(N)` instead.
+* Removed `WARP_SORT` template argument from `hipcub::BlockMergeSortStrategy`.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  
