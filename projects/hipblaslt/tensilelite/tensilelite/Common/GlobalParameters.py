@@ -221,6 +221,9 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # WorkAssignment values.
 globalParameters["StreamKHybridMode"] = [0]
 globalParameters["HybridAssignmentPolicy"] = ["Default"]
+# Runtime steering for USO guarantee
+# -1=use default, 0=off, 1=on
+globalParameters["UniformSummationOrder"] = -1
 # Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
@@ -266,6 +269,8 @@ globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
 globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
+# Print final matrix-staging LDS addresses and the gfx1250 segment map during kernel generation.
+globalParameters["PrintLDSLayout"] = False
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)

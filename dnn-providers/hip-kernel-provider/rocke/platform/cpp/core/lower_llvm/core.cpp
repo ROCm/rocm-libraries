@@ -36,102 +36,10 @@
 #include <exception>
 #include <new>
 
-/* ====================================================================== */
-/* Flavor ladder -- the single source for the C++ side                    */
-/* ====================================================================== */
-
-/* One rung: the flavor, its canonical name, and its minimum LLVM major.
- * Mirrors the Python LLVM_FLAVORS tuple and _LLVM_FLAVOR_LADDER, which
- * are a single source enforced by test_no_hand_rolled_flavor_membership_lists.
- * Everything on this side that names, parses, validates, enumerates, or
- * version-maps a flavor reads this table, so adding a rung is one row here
- * plus the enumerator in lower_llvm.h -- previously it was five coordinated
- * edits across three files, which is exactly the drift the Python lint bans.
- *
- * Ordered oldest first to match LLVM_FLAVORS, so error messages listing the
- * set read the same in both engines. */
-static const struct
-{
-    rocke_llvm_flavor_t flavor;
-    const char* name;
-    unsigned min_llvm_major;
-    /* Datalayout generation: false = the LLVM20 plain-p8 shape, true = the
-     * LLVM21+ indexed-p8 shape. Python's _DATALAYOUT_KIND_FLAVORS partition,
-     * as a column. */
-    bool modern;
-} ROCKE_LL_FLAVOR_LADDER[] = {
-    {ROCKE_LLVM_FLAVOR_LLVM20, "llvm20", 0, false},
-    {ROCKE_LLVM_FLAVOR_LLVM22, "llvm22", 21, true},
-    {ROCKE_LLVM_FLAVOR_LLVM23, "llvm23", 23, true},
-};
-
-static const int ROCKE_LL_FLAVOR_LADDER_COUNT
-    = (int)(sizeof(ROCKE_LL_FLAVOR_LADDER) / sizeof(ROCKE_LL_FLAVOR_LADDER[0]));
-
-int rocke_llvm_flavor_count(void)
-{
-    return ROCKE_LL_FLAVOR_LADDER_COUNT;
-}
-
-const char* rocke_llvm_flavor_at(int index)
-{
-    if(index < 0 || index >= ROCKE_LL_FLAVOR_LADDER_COUNT)
-        return "";
-    return ROCKE_LL_FLAVOR_LADDER[index].name;
-}
-
-const char* rocke_llvm_flavor_name(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return ROCKE_LL_FLAVOR_LADDER[i].name;
-    }
-    return ""; /* AUTO, or a value outside the enum */
-}
-
-rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name)
-{
-    int i;
-    if(name)
-    {
-        for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-        {
-            if(strcmp(name, ROCKE_LL_FLAVOR_LADDER[i].name) == 0)
-                return ROCKE_LL_FLAVOR_LADDER[i].flavor;
-        }
-    }
-    return ROCKE_LLVM_FLAVOR_AUTO;
-}
-
-bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return true;
-    }
-    return false;
-}
-
-/* The lowerer's private symbols live in namespace ckc; the public entry points
- * (rocke_llvm_flavor_name/from_name above, rocke_lower_kernel_to_llvm[_ex] below)
- * stay at global scope under their extern "C" header declarations. */
+/* The lowerer's private symbols live in namespace ckc; public entry points stay
+ * at global scope under their extern "C" header declarations. */
 namespace ckc
 {
-
-bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return ROCKE_LL_FLAVOR_LADDER[i].modern;
-    }
-    return false; /* AUTO / out of range: the legacy shape, as before */
-}
 
 /* Resolve from the compiler loaded by COMGR. Explicit flavors keep offline
  * emission independent of a runtime installation. If no compiler can be
@@ -139,24 +47,15 @@ bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
  * Python-driven C++ lowering passes its resolved flavor explicitly. */
 static rocke_llvm_flavor_t ll_resolve_flavor(void)
 {
-    const char* env = getenv("ROCKE_LLVM_FLAVOR");
-    if(env)
-    {
-        rocke_llvm_flavor_t flavor = rocke_llvm_flavor_from_name(env);
-        if(flavor != ROCKE_LLVM_FLAVOR_AUTO)
-            return flavor;
-    }
+    rocke_llvm_flavor_t explicit_flavor = rocke_ll_explicit_flavor(getenv("ROCKE_LLVM_FLAVOR"));
+    if(explicit_flavor != ROCKE_LLVM_FLAVOR_AUTO)
+        return explicit_flavor;
     const ckc::CompilerInfo* info = ckc::candidate_compiler_info();
     if(!info || !info->llvm_major)
         throw ckc::ValueError(
             "Cannot determine LLVM flavor: COMGR could not be loaded or queried. "
             "Select a queryable COMGR library or an explicit LLVM flavor for offline IR emission.");
-    for(int i = ROCKE_LL_FLAVOR_LADDER_COUNT - 1; i >= 0; --i)
-    {
-        if(info->llvm_major >= ROCKE_LL_FLAVOR_LADDER[i].min_llvm_major)
-            return ROCKE_LL_FLAVOR_LADDER[i].flavor;
-    }
-    return ROCKE_LLVM_FLAVOR_LLVM20;
+    return rocke_ll_flavor_for_llvm_major(info->llvm_major);
 }
 
 /* ====================================================================== */
@@ -371,7 +270,7 @@ void rocke_ll_require_llvm23_target_fact(rocke_lower_t* L,
                       ll_target_fact_name(fact),
                       gfx ? gfx : "(unknown)");
     }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
@@ -608,7 +507,7 @@ static void ll_check_arch_domain(rocke_lower_t* L, const char* key)
         return;
     }
     char msg[ROCKE_ERR_MSG_CAP];
-    const char* flavor = rocke_llvm_flavor_name(L->flavor);
+    const char* flavor = rocke_arch_domain_column_flavor(rocke_llvm_flavor_name(L->flavor));
     const rocke_arch_domain_cell_t* cell = rocke_arch_domain_negative(flavor, key, L->backend->gfx);
     if(cell == NULL || cell->waived)
     {

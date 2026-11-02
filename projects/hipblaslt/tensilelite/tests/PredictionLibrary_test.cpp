@@ -309,6 +309,8 @@ TEST(PredictionLibraryTest, SpatialPaddingChangesRankingButNotExplicitIndexLooku
         8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
     auto problem = ContractionProblemGemm::GEMM(
         false, false, 1, 8192, 8192, 1, 8192, 1, 1.0, false, 1);
+    // Compare padding costs without USO filtering out a candidate before ranking.
+    problem.setParams().setUniformSummationOrder(0);
     problem.setComputeInputTypeA(rocisa::DataType::Float);
     problem.setComputeInputTypeB(rocisa::DataType::Float);
     const auto ranked = lib.findTopSolutions(problem, device, 2);

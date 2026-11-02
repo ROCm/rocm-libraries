@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/lower_llvm_internal.h -- PRIVATE shared declarations for the C99 port of
- * rocke.core.lower_llvm. NOT a public API: only the lower_llvm_*.c translation
+ * rocke.core.lower_llvm. NOT a public API: only the lower_llvm translation
  * units include this. The public contract is rocke/lower_llvm.h.
  *
  * The Python lowerer is one stateful object, ``_Lowerer``, with ~140 per-op
@@ -37,45 +37,13 @@
 #include "rocke/arch_domain.h"
 #include "rocke/arena.h"
 #include "rocke/ir.h"
+#include "rocke/llvm_profile_internal.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
 
 namespace ckc
 {
-
-/* ====================================================================== */
-/* Constants (module-level Python data)                                   */
-/* ====================================================================== */
-
-/* Verbatim datalayout / triple copied from clang for gfx950 (Python
- * _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23 / _TRIPLE).
- * Shared by all CDNA backends per flavor, but the AMDGPU datalayout is
- * FLAVOR-KEYED: the buffer-resource address space (p8, the 128-bit buffer
- * descriptor, not the p7 fat pointer) drifts between LLVM 20 (ROCm 7.0/7.1) and
- * LLVM 22 (ROCm 7.2), and the ELF symbol-mangling spec (m:e) is present in
- * LLVM 23 (ROCm 7.13+) but absent in LLVM 20 / 22. ROCKE_LL_DATALAYOUT is a
- * back-compat alias
- * for the LLVM20 form; new code keys on the flavor via
- * rocke_ll_datalayout_for_flavor. */
-extern const char* const ROCKE_LL_DATALAYOUT_LLVM20;
-extern const char* const ROCKE_LL_DATALAYOUT_LLVM22;
-extern const char* const ROCKE_LL_DATALAYOUT_LLVM23; /* LLVM22 p8 layout + m:e */
-extern const char* const ROCKE_LL_DATALAYOUT; /* == ROCKE_LL_DATALAYOUT_LLVM20 */
-extern const char* const ROCKE_LL_TRIPLE;
-
-/* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, LLVM23 => its m:e
- * form, anything else (incl. unexpected values) => the modern LLVM22 layout. */
-const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor);
-
-/* Python _is_modern_flavor: true for LLVM 21+ IR shapes (llvm22 / llvm23),
- * which share the same datalayout + intrinsic declares.
- *
- * Reads the datalayout-generation column of the flavor ladder in
- * lower_llvm/core.cpp rather than naming the members here, mirroring Python,
- * where the answer comes from _DATALAYOUT_KIND_FLAVORS. Spelling the pair out
- * in an expression is what leaves a new flavor silently classed as legacy. */
-bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor);
 
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */
@@ -111,6 +79,11 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
  * set plus declarations whose ABI changed again. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
+
+/* The LLVM24 overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES): the LLVM23
+ * set with addrspace(15) named-barrier pointers. */
+extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[];
+extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
 
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);

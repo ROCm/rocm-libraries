@@ -314,6 +314,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        TENSOR,
     };
 
     Modifier(Type type) : type(type) {}
@@ -442,8 +443,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
 
     MUBUFModifiers(bool offen = false, int offset12 = 0, bool glc = false, bool slc = false,
                    bool nt = false, bool lds = false, bool isStore = false,
-                   bool hasMUBUFConst = false, bool hasGLCModifier = false,
-                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                   bool hasGLCModifier = false, bool hasSC0Modifier = false,
+                   MUBUFScope scope = MUBUFScope::SCOPE_NONE,
                    TemporalHint th = TemporalHint::TH_NONE, NonVolatile nv = NonVolatile::NV_NONE)
         : TypedModifier<MUBUFModifiers>(),
           offset12(offset12),
@@ -453,7 +454,6 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
           nt(nt),
           lds(lds),
           isStore(isStore),
-          hasMUBUFConst(hasMUBUFConst),
           hasGLCModifier(hasGLCModifier),
           hasSC0Modifier(hasSC0Modifier),
           scope(scope),
@@ -467,7 +467,6 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t nt : 1;
     uint32_t lds : 1;
     uint32_t isStore : 1;
-    uint32_t hasMUBUFConst : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
     MUBUFScope scope;
@@ -486,6 +485,22 @@ struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
         : TypedModifier<CacheScopeModifiers>(), scope(scope) {}
 
     MUBUFScope scope;
+};
+
+// Cache-policy fields of the gfx1250 tensor ops (tensor_load_to_lds), mirroring rocisa's
+// TENSORModifiers. Default (TH_NONE / SCOPE_NONE / NV_NONE) fields are not emitted.
+struct TENSORModifiers : public TypedModifier<TENSORModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::TENSOR;
+
+    TENSORModifiers(MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                    TemporalHint th = TemporalHint::TH_NONE, NonVolatile nv = NonVolatile::NV_NONE,
+                    bool isStore = false)
+        : TypedModifier<TENSORModifiers>(), scope(scope), th(th), nv(nv), isStore(isStore) {}
+
+    MUBUFScope scope;
+    TemporalHint th;
+    NonVolatile nv;
+    bool isStore;
 };
 
 struct SMEMModifiers : public TypedModifier<SMEMModifiers> {
