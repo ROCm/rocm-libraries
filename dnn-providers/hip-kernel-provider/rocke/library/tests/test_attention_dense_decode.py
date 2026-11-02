@@ -37,6 +37,9 @@ from kernels.gfx942.attention_dense import (
 from kernels.gfx950.attention_dense import (
     Gfx950AttentionDenseSpec,
 )
+from kernels.gfx950.attention_dense import (
+    attention_dense_runtime_args as gfx950_runtime_args,
+)
 
 
 def _sdiv(a, b):
@@ -86,9 +89,9 @@ def _runtime(built, launched, fastdiv=None, extra=None):
     return DecodeShape(B_, built, values, fastdiv=fastdiv)
 
 
-def _fastdiv(launched, dividends):
+def _fastdiv(launched, dividends, runtime_args=attention_dense_runtime_args):
     """The kernel's fast division, from the launch's real host kernargs."""
-    args = attention_dense_runtime_args(launched)
+    args = runtime_args(launched)
 
     def div(n, d):
         dividends.append(n)
@@ -292,8 +295,8 @@ def test_bt_hkv_minor_follows_its_documented_order():
             assert ((d.qb * gqa + hql) * Hkv + hkv) * B + d.bt == wi
 
 
-def _gfx942_persist(Hq, Hkv, B, S, name, causal=True, window=0, np_=256, **over):
-    return Gfx942AttentionDenseSpec(
+def _persist(spec_cls, Hq, Hkv, B, S, name, causal=True, window=0, np_=256, **over):
+    return spec_cls(
         batch=B,
         seqlen_q=S,
         seqlen_kv=S,
@@ -308,6 +311,10 @@ def _gfx942_persist(Hq, Hkv, B, S, name, causal=True, window=0, np_=256, **over)
         persist_decode=name,
         **over,
     )
+
+
+def _gfx942_persist(*args, **kw):
+    return _persist(Gfx942AttentionDenseSpec, *args, **kw)
 
 
 # (Hq, Hkv, B, S) launches of one persistent binary: NQB even and odd, W below,
@@ -335,23 +342,60 @@ def test_runtime_persist_decode_matches_the_launched_baked_decode(
     must decode exactly as the launch's own baked decode, every fast-division
     dividend must stay within the decode's bound, and the work must be covered
     once."""
-    if interleave and name != "qb_major":
+    _check_runtime_persist_decode(
+        Gfx942AttentionDenseSpec,
+        attention_dense_runtime_args,
+        name,
+        causal,
+        window,
+        interleave,
+    )
+
+
+# The gfx950 persistent orders on the runtime-shape path: every order that lists
+# fast-division divisors (gqa_pair and gqa_pair_2phase need a baked shape).
+_GFX950_RUNTIME_PERSIST_DECODES = sorted(
+    n
+    for n in Gfx950AttentionDenseSpec.supported_persist_decodes() - {"auto"}
+    if PERSIST_DECODES[n].fastdiv_divisors
+)
+
+
+@pytest.mark.parametrize("name", _GFX950_RUNTIME_PERSIST_DECODES)
+@pytest.mark.parametrize("causal,window", ((True, 0), (False, 0), (True, 1024)))
+@pytest.mark.parametrize("interleave", (False, True))
+def test_gfx950_runtime_persist_decode_matches_the_launched_baked_decode(
+    name, causal, window, interleave
+):
+    """The gfx950 twin: one runtime-shape persistent binary decodes every launch
+    exactly as that launch's own baked decode, through its fast-division kernargs."""
+    _check_runtime_persist_decode(
+        Gfx950AttentionDenseSpec, gfx950_runtime_args, name, causal, window, interleave
+    )
+
+
+def _check_runtime_persist_decode(spec_cls, runtime_args, name, causal, window, il):
+    if il and name != "qb_major":
         pytest.skip("interleave applies to qb_major only")
     decode = PERSIST_DECODES[name]
     built = None
     for Hq, Hkv, B, S in _PERSIST_LAUNCHES:
         try:
-            launched = _gfx942_persist(
-                Hq, Hkv, B, S, name, causal, window, interleave=interleave
+            launched = _persist(
+                spec_cls, Hq, Hkv, B, S, name, causal, window, interleave=il
             )
         except ValueError:
             continue  # not legal for this launch (e.g. hq_minor_swz, odd NQB)
+        assert launched.runtime_shape, (name, (Hq, Hkv, B, S))
         built = built or launched
         nqb = S // launched.block_m
         work = nqb * Hq * B
         dividends = []
         shape = _runtime(
-            built, launched, _fastdiv(launched, dividends), {"nqb": nqb, "w": work}
+            built,
+            launched,
+            _fastdiv(launched, dividends, runtime_args),
+            {"nqb": nqb, "w": work},
         )
         got = [decode.emit_decode(shape, wi) for wi in range(work)]
         want = [decode.emit_decode(_baked(launched), wi) for wi in range(work)]

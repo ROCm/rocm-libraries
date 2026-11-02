@@ -304,7 +304,9 @@ std::vector<KernelArgument> recordedSignature()
             KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
             KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
             KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"}};
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
+            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, carrying the
