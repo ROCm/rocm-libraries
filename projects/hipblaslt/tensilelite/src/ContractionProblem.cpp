@@ -902,13 +902,18 @@ namespace TensileLite
 
     size_t ContractionProblemGemm::getItersPerTile(SizeMapping const& sizeMapping) const
     {
+        return getItersPerTile(static_cast<size_t>(sizeMapping.depthU));
+    }
+
+    size_t ContractionProblemGemm::getItersPerTile(size_t depthU) const
+    {
         size_t boundSize = 1;
         for(size_t i = 0; i < m_boundIndices.size(); ++i)
         {
             boundSize *= m_boundSizes[i];
         }
 
-        size_t itersPerTile = CeilDivide(boundSize, sizeMapping.depthU);
+        size_t itersPerTile = CeilDivide(boundSize, depthU);
 
         return itersPerTile;
     }

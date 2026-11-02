@@ -25,6 +25,7 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/MLPNet.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PerformanceMetricTypes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScalarValueTypes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/StreamK.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorOps.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile.cpp"
