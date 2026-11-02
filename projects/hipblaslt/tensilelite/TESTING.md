@@ -232,10 +232,10 @@ Where each corpus check lives:
 
 | Check | Lives in | Runs |
 | --- | --- | --- |
-| Sibling logic files declare the same `DeviceNames` | `ValidCorpusConsistency.find_sibling_device_names_violations` | `TensileLogic --check-all`, every kernel-generating build |
-| A Range file matches its same-basename Equality sibling's header and effective `ProblemType` (same placeholder) | `ValidCorpusConsistency.find_range_sibling_violations` | `TensileLogic --check-all`, every kernel-generating build |
-| `SolutionUID` is unique across the corpus | [`test_solution_uid_uniqueness.py`](tensilelite/Tests/unit/test_solution_uid_uniqueness.py), `@needs_logic_corpus` | The `library-uniqueness` component CI job, on any change under `Tensile/Logic/`, with the corpus required |
-| The skinny TN Range files wire the right kernels, without overlap, inside their predicates | `test_CustomKernelMetadata.py::test_skinny_tn_range_logic`, `@needs_logic_corpus` | Unit lanes that have the corpus; reads only those two Range files |
+| Sibling logic files declare the same `DeviceNames` | `ValidCorpusConsistency.find_sibling_device_names_violations` | `TensileLogic --check-all`: every kernel-generating build, and the logic-corpus lane for every architecture a change touches |
+| A Range file matches its same-basename Equality sibling's header and effective `ProblemType` (same placeholder) | `ValidCorpusConsistency.find_range_sibling_violations` | `TensileLogic --check-all`: every kernel-generating build, and the logic-corpus lane for every architecture a change touches |
+| `SolutionUID` is unique across the corpus | [`test_solution_uid_uniqueness.py`](tensilelite/Tests/unit/test_solution_uid_uniqueness.py), `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
+| The skinny TN Range files wire the right kernels, without overlap, inside their predicates | `test_CustomKernelMetadata.py::test_skinny_tn_range_logic`, `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
 | Only gfx950 is chip-ID-aware | `test_PlaceholderMerge.py::test_supports_chip_id_predicate_only_gfx950` | Everywhere; it walks the architecture registry (`SUPPORTED_GFX`), not the corpus |
 | Generated kernels unpack the clamped `StaggerU` | `test_custom_kernel_staggeru_metadata.py`, against copies under `Tests/unit/logic_yaml/staggeru/` | Everywhere |
 
@@ -247,10 +247,18 @@ The hermetic suite
 [`test_valid_corpus_consistency.py`](tensilelite/Tests/unit/test_valid_corpus_consistency.py) tests the
 `ValidCorpusConsistency` checks themselves against synthetic corpora.
 
-What `--check-all` does not cover is a logic-only change on an architecture no pull-request build
-targets, because the build-wired invocation is scoped to the build's architectures. Triggering the
-right CI from a logic-only diff is tracked separately in
-[ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834).
+**The logic-corpus lane.** The corpus is tuning data outside `tensilelite/`, so a pull request that
+changes only logic YAML triggers no TensileLite lane, and the build-wired `--check-all` is scoped to
+the architectures that pull-request builds target. `Component CI: hipBLASLt Logic Corpus`
+([`component-ci-logic-corpus.yml`](../../../.github/workflows/component-ci-logic-corpus.yml)) closes
+both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, or the corpus
+test plumbing, and runs `tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
+every `@needs_logic_corpus` test with `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1`. The check covers the
+architectures whose logic the change touched, whether or not a pull-request build targets them, and
+the whole corpus when a validator or `known_bugs.yaml` changed or on a manual run. (The whole corpus
+takes about half an hour on the lane's four-core runner, which is why it is not the default.) It is CPU-only, on a
+GitHub-hosted runner, and rolls up to the required `Component CI Summary`, so a failure blocks the
+merge ([ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834)).
 
 ### How this one was learned: a naming drift silently dropped a working kernel
 
@@ -600,6 +608,11 @@ laying out once.
 | TheRock `Test tensilelite` | [`pytest_runner.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/pytest_runner.py) in TheRock, driven by [`test_categories.yaml`](test_categories.yaml) | GPU runner, Linux | **Yes**, via the required `Multi-Arch CI Summary` |
 | `tensilelite-unit-codecov` | Math CI (internal) | gfx950 | No |
 
+A fifth lane, `Component CI: hipBLASLt Logic Corpus`, runs only the `@needs_logic_corpus` subset, on
+logic-only changes that trigger none of the four above (see
+[Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)). It gates
+through the required `Component CI Summary`.
+
 Three observations follow from that table, and they are the ones that most often get stated
 backwards in review:
 
@@ -790,7 +803,7 @@ testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 | As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | On gfx942 and gfx950, TheRock's `tensilelite-common` runs `common` as its own job on every pull request, so a unit failure there no longer hides it; gfx90a and gfx12 still depend on `preliminary`'s ordering | AIHPBLAS-3354 |
 | `Tests/common` (real codegen, build, execution) runs in TheRock only on gfx90a/gfx942/gfx950/gfx120X, and only gfx942 and gfx950 on the pull-request path. gfx1250 and any family whose configs declare no `skip-gfxNNNN` for it (gfx1103, gfx115X) get none (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) | Medium | High if hit | Math CI's `preliminary` runs it per PR on `gfx90a`/`gfx942`/`gfx950`/`gfx12`; TheRock's `tensilelite-common` adds installed-artifact coverage on the same families | [#12491](https://github.com/ROCm/rocm-libraries/issues/12491) |
 | The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation | AIHPBLAS-3354 |
-| A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`. The cross-file corpus checks run in `TensileLogic --check-all` instead, but only for the architectures some pull-request build targets, and the skinny TN Range wiring test (`@needs_logic_corpus`) does not run on that path at all | Medium | Medium | `TensileLogic --check-all` in every kernel-generating build; the `library-uniqueness` component CI job runs on any change under `Tensile/Logic/` | [ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834) |
+| A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`, and Math CI is configured outside this repository | Low | Medium | The logic-corpus component lane runs `TensileLogic --check-all` on the changed architectures and every `@needs_logic_corpus` test on any change under `Tensile/Logic/`, and gates through `Component CI Summary` | [ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834) |
 | The `@needs_logic_corpus` tests (see [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)) always skip in TheRock CI, because the installed tree does not ship the corpus | Low | Low | Every run prints `needs_logic_corpus: N ran, M skipped`, so the skip is visible; the cross-file checks run in `TensileLogic --check-all` and the chip-ID-arch lock walks the architecture registry, so neither depends on the corpus being present | [#14887](https://github.com/ROCm/rocm-libraries/issues/14887) |
 | gfx1250 gets no TheRock Test stage at all: the CI configuration overlay leaves its runner empty, and the `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the missing runner | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
 | TheRock's `Test tensilelite` job runs the whole unit tree on one worker in every tier: `quick` and `standard` select the same tests in [`test_categories.yaml`](test_categories.yaml), and `quick` runs under a 15-minute step cap. Several unit tests read the embedded metadata of every shipped custom kernel, some at collection time, so the job's wall time grows with each custom kernel added. The gfx950 rocRoller kernels carry about 13k lines of metadata each, and adding 69 of them took the job from 11 to 14 minutes to 17 to 21 minutes | Medium | Medium | Metadata is parsed with libyaml (`CSafeLoader`). `readCustomKernelConfig` parses only the `custom.config` entry, and `getCustomKernelConfig` parses the whole block (for `amdhsa.kernels`) only for a kernel without an explicit `CustomKernel` block. `standard` runs under a 30-minute cap | [#14049](https://github.com/ROCm/rocm-libraries/issues/14049) |

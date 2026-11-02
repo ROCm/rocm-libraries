@@ -18,9 +18,9 @@ import pytest
 def _load_solution_id_gen() -> ModuleType:
     """Load SolutionIdGen without importing ``tensilelite.Common``.
 
-    The ``library-uniqueness`` tox env skips installing tensilelite and rocisa.
-    ``from tensilelite.Common.SolutionIdGen import ...`` still executes
-    ``tensilelite.Common.__init__``, which imports rocisa.
+    This keeps the test runnable on a bare Python with only pytest, without
+    tensilelite or rocisa installed. ``from tensilelite.Common.SolutionIdGen
+    import ...`` would execute ``tensilelite.Common.__init__``, which imports rocisa.
 
     Args:
         None.
@@ -51,10 +51,10 @@ from logic_corpus import needs_logic_corpus, require_logic_root
 
 pytestmark = pytest.mark.unit
 
-# The enforcement point for the corpus check below is the library-uniqueness
-# component job, which runs whenever the logic changes and sets
-# HIPBLASLT_REQUIRE_LOGIC_CORPUS so a missing corpus fails there. Elsewhere it is
-# a convenience signal that skips when the corpus is absent.
+# The enforcement point for the corpus check below is the logic-corpus
+# component job (tox -e logic-corpus), which runs whenever the logic changes
+# and sets HIPBLASLT_REQUIRE_LOGIC_CORPUS so a missing corpus fails there.
+# Elsewhere it is a convenience signal that skips when the corpus is absent.
 STRICT_ENV = "HIPBLASLT_REQUIRE_SOLUTION_UID"
 
 

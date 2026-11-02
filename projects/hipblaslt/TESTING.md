@@ -627,6 +627,7 @@ the C++ build and test.
 | --- | --- | --- | --- |
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
+| Logic corpus checks (`TensileLogic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
@@ -663,6 +664,7 @@ tracked as a gap.
 - TensileLite Python unit and characterization suites: on GPU across four architectures via
   `preliminary`, against installed artifacts via TheRock, and on CPU in the coverage lane
 - The TensileLite coverage floor and per-file ratchet, through `Component CI Summary`
+- The logic corpus checks on logic-only changes, through `Component CI Summary`
 - `pre-commit`
 
 **Informational.** Worth reading, cannot block a merge.
@@ -713,11 +715,12 @@ This last mechanism is a different shape from the other eight: it is not quarant
 at all, but gating on a precondition. In TheRock CI's installed-artifact layout the corpus never
 exists by design (see [CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)),
 so these tests skip there every time. That used to hide real corpus checks, which made it a **Blind**
-entry. Those checks now live where the corpus is: `TensileLogic --check-all` for cross-file facts, and
-the `library-uniqueness` component job, which requires the corpus, for `SolutionUID` uniqueness. What
-is left behind the gate reads one feature's own Range files, and every run prints a
-`needs_logic_corpus: N ran, M skipped` line so a lane that lacks the corpus says so
-([#14887](https://github.com/ROCm/rocm-libraries/issues/14887)).
+entry. Those checks now live where the corpus is: `TensileLogic --check-all` for cross-file facts.
+The `@needs_logic_corpus` tests themselves also run, with the corpus required, in the
+`Component CI: hipBLASLt Logic Corpus` lane on any change under `Tensile/Logic/`. Every run prints
+a `needs_logic_corpus: N ran, M skipped` line so a lane that lacks the corpus says so
+([#14887](https://github.com/ROCm/rocm-libraries/issues/14887),
+[ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834)).
 
 **The distinction that matters is the last column.** Format is cosmetic; what separates a healthy
 suppression from rot is whether the mechanism can tell you the underlying bug got fixed. That sorts

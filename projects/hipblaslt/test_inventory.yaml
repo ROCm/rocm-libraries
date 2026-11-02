@@ -528,9 +528,18 @@ suites:
         notes: "Gates implicitly: a failure stops the build. No check name and no test report."
         evidence: ["doc:tensilelite/TESTING.md#build-time-validation-of-library-logic"]
         action: keep
+      - system: github_actions
+        lane: "Component CI: hipBLASLt Logic Corpus"
+        cadence: presubmit
+        archs: [linux-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "Every architecture whose logic changed, or the whole corpus when a validator or known_bugs.yaml changed, with --strict-known-bugs."
+        evidence: ["repo:.github/workflows/component-ci-logic-corpus.yml", "repo:projects/hipblaslt/tensilelite/tox.ini"]
+        action: keep
     target:
       - {system: build, cadence: every_build}
-      - {system: github_actions, cadence: presubmit, notes: "a separate lane running with --strict-known-bugs"}
+      - {system: github_actions, cadence: presubmit, notes: "a separate lane running with --strict-known-bugs (the logic-corpus lane)"}
     disposition: keep
     rationale: >-
       The cheapest layer that can see a bad logic entry, and it reaches every build. Add the strict
@@ -823,7 +832,7 @@ suites:
     product: tensilelite
     kind: host_unit
     mode: default
-    oracle: "Unit tests that still read the logic corpus (@needs_logic_corpus): the skinny TN Range wiring"
+    oracle: "Unit tests that still read the logic corpus (@needs_logic_corpus): the skinny TN Range wiring and SolutionUID uniqueness"
     source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py
     current:
       - system: math_ci
@@ -834,8 +843,18 @@ suites:
         notes: "Only when the PR touches tensilelite/; skips in TheRock, where the corpus is not on disk. Every run prints a needs_logic_corpus ran/skipped count."
         evidence: ["doc:tensilelite/TESTING.md#logic-corpus-consistency-regression-tests", "external:math-ci"]
         action: keep
+      - system: github_actions
+        lane: "Component CI: hipBLASLt Logic Corpus"
+        cadence: presubmit
+        archs: [linux-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "On any change under Tensile/Logic/, the TensileLogic validators, or the corpus test plumbing. Runs these tests with the corpus required, after TensileLogic --check-all on the changed architectures."
+        evidence: ["repo:.github/workflows/component-ci-logic-corpus.yml", "doc:tensilelite/TESTING.md#logic-corpus-consistency-regression-tests"]
+        action: keep
     target:
       - {system: build, cadence: every_build, notes: "inside TensileLogic --check-all"}
+      - {system: github_actions, cadence: presubmit, notes: "the logic-corpus lane, on logic-only changes"}
     disposition: merge_into
     into: tensilelogic-check-all
     rationale: >-

@@ -16,8 +16,10 @@ session summary counts it, and reaches the corpus only through
 absent, or fail when ``HIPBLASLT_REQUIRE_LOGIC_CORPUS`` is set, for lanes that
 check the corpus out on purpose.
 
-This module imports neither tensilelite nor rocisa, so the library-uniqueness
-gate can use it under ``--noconftest`` without installing either.
+The logic-corpus component job (``tox -e logic-corpus``) runs every
+``@needs_logic_corpus`` test with the corpus required whenever the logic
+changes. This module imports neither tensilelite nor rocisa, so a test that
+needs only the corpus can still run on a bare Python with ``--noconftest``.
 """
 
 import os
