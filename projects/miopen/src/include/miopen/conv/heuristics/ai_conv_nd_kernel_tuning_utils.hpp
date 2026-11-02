@@ -428,18 +428,18 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
         MIOPEN_LOG_I2(solver_cfg.solver_name << ": Candidate Selection heuristics for " << arch);
         std::string solver_name = solver_cfg.GetSolverNameForArch(arch);
 
-        // Fast path: when the caller supplies an is_args_supported callback and a precomputed config
-        // vocabulary (v3 table) is installed, rank the whole vocabulary by model score and check
-        // applicability lazily top-down, skipping the (often ~200 ms) FillValidKernels enumeration.
-        // Behaviour-preserving: first applicable in score order is the argmax over applicable
-        // candidates. Falls through to the enumeration path when no vocab is installed or none of the
-        // ranked candidates is applicable.
+        // Fast path: when the caller supplies an is_args_supported callback and a precomputed
+        // config vocabulary (v3 table) is installed, rank the whole vocabulary by model score and
+        // check applicability lazily top-down, skipping the (often ~200 ms) FillValidKernels
+        // enumeration. Behaviour-preserving: first applicable in score order is the argmax over
+        // applicable candidates. Falls through to the enumeration path when no vocab is installed
+        // or none of the ranked candidates is applicable.
         if constexpr(!std::is_same_v<IsArgsSupportedFunc, std::nullptr_t>)
         {
             // Whole fast-path attempt (features + rank + lazy applicability). Compare against the
             // enumeration path's "GetDefaultPerformanceConfig(default path)" span to see the win.
-            const miopen::ScopedTimeLogger fastpath_timer(
-                std::string{solver_cfg.solver_name} + " CandidateSelection.lazy_fastpath");
+            const miopen::ScopedTimeLogger fastpath_timer(std::string{solver_cfg.solver_name} +
+                                                          " CandidateSelection.lazy_fastpath");
             std::map<std::string, float> fp_features =
                 GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
             auto lazy = ai::tuning::candidate_selection::SelectBestVocabCandidate(

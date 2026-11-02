@@ -371,15 +371,16 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         auto ck_val_creator = MakeCKValidatorCreator(
             loader, CKSolverType::GrpConv3dFwd, problem.GetInDataType(), mode_use_tf32);
 
-        // Per-candidate applicability for the lazy (precomputed-vocab) fast path (3D fwd: no split_k).
-        auto is_args_supported =
-            [&loader, &problem, mode_use_tf32](const std::string& kernel_id, int /*split_k*/) {
-                return loader.IsArgsSupported(CKSolverType::GrpConv3dFwd,
-                                              problem,
-                                              kernel_id,
-                                              problem.GetInDataType(),
-                                              mode_use_tf32);
-            };
+        // Per-candidate applicability for the lazy (precomputed-vocab) fast path (3D fwd: no
+        // split_k).
+        auto is_args_supported = [&loader, &problem, mode_use_tf32](const std::string& kernel_id,
+                                                                    int /*split_k*/) {
+            return loader.IsArgsSupported(CKSolverType::GrpConv3dFwd,
+                                          problem,
+                                          kernel_id,
+                                          problem.GetInDataType(),
+                                          mode_use_tf32);
+        };
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         if(RunAIHeuristics(k3DFwdSolverConfig,

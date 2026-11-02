@@ -1880,9 +1880,9 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                     ordered_emb.push_back(emb);
             }
             table.present = (read_rows == num_rows);
-            // v3: read the trailing kernel-id block (num_rows length-prefixed strings) and pair each
-            // non-empty kernel_id with its row embedding. A truncated/corrupt block only disables the
-            // lazy-applicability vocab; the rows map (fdeep fast path) stays usable.
+            // v3: read the trailing kernel-id block (num_rows length-prefixed strings) and pair
+            // each non-empty kernel_id with its row embedding. A truncated/corrupt block only
+            // disables the lazy-applicability vocab; the rows map (fdeep fast path) stays usable.
             if(table.present && has_vocab)
             {
                 table.vocab.reserve(num_rows);
@@ -1909,10 +1909,11 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                 }
                 if(!vocab_ok)
                 {
-                    MIOPEN_LOG_W("Config embedding table "
-                                 << path
-                                 << " has a truncated kernel-id block; disabling lazy-applicability "
-                                    "vocab (fdeep fast path still available)");
+                    MIOPEN_LOG_W(
+                        "Config embedding table "
+                        << path
+                        << " has a truncated kernel-id block; disabling lazy-applicability "
+                           "vocab (fdeep fast path still available)");
                     table.vocab.clear();
                 }
             }

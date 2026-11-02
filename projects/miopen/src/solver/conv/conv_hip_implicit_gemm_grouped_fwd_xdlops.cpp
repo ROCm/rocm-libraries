@@ -353,14 +353,14 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
             loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
 
         // Per-candidate applicability for the lazy (precomputed-vocab) fast path (fwd: no split_k).
-        auto is_args_supported =
-            [&loader, &problem, mode_use_tf32](const std::string& kernel_id, int /*split_k*/) {
-                return loader.IsArgsSupported(CKSolverType::GrpConvFwd,
-                                              problem,
-                                              kernel_id,
-                                              problem.GetInDataType(),
-                                              mode_use_tf32);
-            };
+        auto is_args_supported = [&loader, &problem, mode_use_tf32](const std::string& kernel_id,
+                                                                    int /*split_k*/) {
+            return loader.IsArgsSupported(CKSolverType::GrpConvFwd,
+                                          problem,
+                                          kernel_id,
+                                          problem.GetInDataType(),
+                                          mode_use_tf32);
+        };
 
         if(RunAIHeuristics(k2DFwdSolverConfig,
                            state,
