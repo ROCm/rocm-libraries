@@ -17,6 +17,7 @@
 #include <variant>
 #include <vector>
 
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -41,6 +42,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa
 
 using namespace hipdnn_plugin_sdk::ingestor;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+using hip_kernel_provider_common::declaredAlignmentCovers;
 
 /// hipDNN SDPA tensors are rank 4 in LOGICAL order (B, H, S, D) whatever the layout.
 inline constexpr uint32_t SDPA_RANK = 4;
@@ -84,14 +86,6 @@ inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
         return nullptr;
     }
     return &node.attributesAs<data_objects::SdpaAttributes>();
-}
-
-/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
-/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
-/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
-inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
-{
-    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
 }
 
 /// Whether the kernels' arithmetic meets the node's compute type. They compute the softmax,
@@ -279,7 +273,7 @@ inline std::optional<int64_t> servableSinkStride(const MatchContext& context,
        || sink->data_type() != dataType || sink->virtual_()
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink)
        || sink->ragged_offset_tensor_uid().has_value()
-       || !declaresAlignment(*sink, BYTES_PER_ELEMENT))
+       || !declaredAlignmentCovers(*sink, BYTES_PER_ELEMENT))
     {
         return std::nullopt;
     }

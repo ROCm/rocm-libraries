@@ -613,8 +613,8 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     const int64_t vectorBytes = VECTOR_ELEMENTS * BYTES_PER_ELEMENT;
     // O is written by many workgroups at once, so no two of its elements may share an
     // address.
-    if(!declaresAlignment(*q, vectorBytes) || !declaresAlignment(*k, vectorBytes)
-       || !declaresAlignment(*v, vectorBytes) || !declaresAlignment(*o, vectorBytes)
+    if(!declaredAlignmentCovers(*q, vectorBytes) || !declaredAlignmentCovers(*k, vectorBytes)
+       || !declaredAlignmentCovers(*v, vectorBytes) || !declaredAlignmentCovers(*o, vectorBytes)
        || !elementsDoNotOverlap(*o))
     {
         return std::nullopt;
@@ -697,7 +697,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     if(attributes.attn_mask_tensor_uid().has_value())
     {
         const auto* bias = findTensor(context, attributes.attn_mask_tensor_uid().value());
-        if(bias == nullptr || !declaresAlignment(*bias, vectorBytes)
+        if(bias == nullptr || !declaredAlignmentCovers(*bias, vectorBytes)
            || !servableBias(*bias, problem).has_value())
         {
             return std::nullopt;
@@ -715,7 +715,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
             = stats == nullptr
                   ? std::nullopt
                   : servableStatsStrides(*stats, problem.batch, problem.numHeads, problem.seqLenQ);
-        if(!lseStrides.has_value() || !declaresAlignment(*stats, sizeof(float))
+        if(!lseStrides.has_value() || !declaredAlignmentCovers(*stats, sizeof(float))
            || !elementsDoNotOverlap(*stats)
            || (attributes.generate_stats().has_value() && !attributes.generate_stats().value()))
         {

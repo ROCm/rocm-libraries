@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -306,15 +307,6 @@ inline constexpr int64_t K_FP8_KV_ROW_ALIGNMENT_BYTES = 8;
 inline constexpr int64_t K_STATS_ALIGNMENT_BYTES = 16;
 inline constexpr int64_t K_DESCALE_ALIGNMENT_BYTES = 4;
 
-// True when `tensor`'s declared alignment guarantees `needBytes`-byte alignment.
-inline bool
-    declaredAlignmentCovers(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor,
-                            int64_t needBytes)
-{
-    const int64_t declared = tensor.alignment();
-    return needBytes > 0 && declared > 0 && declared % needBytes == 0;
-}
-
 struct TensorAlignmentNeed
 {
     const char* name;
@@ -330,7 +322,8 @@ inline std::optional<std::string>
 {
     for(const auto& need : needs)
     {
-        if(need.tensor != nullptr && !declaredAlignmentCovers(*need.tensor, need.needBytes))
+        if(need.tensor != nullptr
+           && !hip_kernel_provider_common::declaredAlignmentCovers(*need.tensor, need.needBytes))
         {
             return std::string{need.name} + " tensor declares alignment "
                    + std::to_string(need.tensor->alignment()) + " bytes, but the kernel needs "

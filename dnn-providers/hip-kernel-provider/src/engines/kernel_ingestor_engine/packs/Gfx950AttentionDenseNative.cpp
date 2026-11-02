@@ -19,6 +19,7 @@
 #include <variant>
 #include <vector>
 
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -45,7 +46,6 @@
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
-#include "engines/kernel_ingestor_engine/packs/PackAlignment.hpp"
 
 /**
  * @file Gfx950AttentionDenseNative.cpp
@@ -110,7 +110,7 @@ constexpr uint32_t HEAD_SIZE_AXIS = 3;
 constexpr uint32_t SDPA_RANK = 4;
 
 /// The byte alignment each operand's DECLARED alignment must guarantee
-/// (TensorAttributes::alignment, RFC 0014; a multiple guarantee, see PackAlignment.hpp).
+/// (TensorAttributes::alignment, RFC 0014; a multiple guarantee, see DeclaredAlignment.hpp).
 /// One constant per operand role, so a probe that proves a looser need changes one line.
 ///
 /// Source: rocke/library/kernels/gfx950/attention_dense.py (the same for the default and the
@@ -498,7 +498,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
                                                  AlignedOperand{"V", v, KEY_VALUE_ALIGN_BYTES},
                                                  AlignedOperand{"O", o, OUTPUT_ALIGN_BYTES}})
     {
-        if(!pack_alignment::guaranteesAlignment(*tensor, needBytes))
+        if(!hip_kernel_provider_common::declaredAlignmentCovers(*tensor, needBytes))
         {
             HIPDNN_PLUGIN_LOG_INFO(Declined{"alignment"}
                                    << role << " (uid " << tensor->uid() << ") declares "

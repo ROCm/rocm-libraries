@@ -27,6 +27,7 @@ add_executable(
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
     device/TestScopedDevice.cpp
+    utilities/TestDeclaredAlignment.cpp
     utilities/TestDigest.cpp
 )
 

@@ -232,7 +232,7 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
         // An f32 mask is loaded as 8 x f32 at that type's natural alignment, 32 bytes (the
         // load states none), so its base must promise 32 rather than the 16 every other
         // operand needs.
-        if(f32 && !declaresAlignment(*biasTensor, 2 * VECTOR_BYTES))
+        if(f32 && !declaredAlignmentCovers(*biasTensor, 2 * VECTOR_BYTES))
         {
             return false;
         }

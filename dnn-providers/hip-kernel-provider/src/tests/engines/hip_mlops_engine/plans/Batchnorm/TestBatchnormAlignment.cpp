@@ -94,7 +94,6 @@ TEST(TestBatchnormAlignment, CommonDeclaredAlignmentIsTheGreatestCommonDivisor)
     const auto& bias = tensorNamed(graph, "bias");
 
     EXPECT_EQ(commonDeclaredAlignmentBytes({&x, &y}), 8U);
-    EXPECT_FALSE(alignmentCovers(commonDeclaredAlignmentBytes({&x, &y}), 16));
 
     // A tensor that guarantees nothing guarantees nothing for the group.
     EXPECT_EQ(commonDeclaredAlignmentBytes({&x, &scale}), 0U);

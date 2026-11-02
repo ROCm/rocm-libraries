@@ -428,8 +428,8 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     }
     // Rows move as 16-byte vectors from each operand's base; O is written by many
     // workgroups at once, so no two of its elements may share an address.
-    if(!declaresAlignment(*q, VECTOR_BYTES) || !declaresAlignment(*k, VECTOR_BYTES)
-       || !declaresAlignment(*v, VECTOR_BYTES) || !declaresAlignment(*o, VECTOR_BYTES)
+    if(!declaredAlignmentCovers(*q, VECTOR_BYTES) || !declaredAlignmentCovers(*k, VECTOR_BYTES)
+       || !declaredAlignmentCovers(*v, VECTOR_BYTES) || !declaredAlignmentCovers(*o, VECTOR_BYTES)
        || !elementsDoNotOverlap(*o))
     {
         return std::nullopt;
@@ -509,7 +509,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
     if(attributes.attn_mask_tensor_uid().has_value())
     {
         const auto* bias = findTensor(context, attributes.attn_mask_tensor_uid().value());
-        if(bias == nullptr || !declaresAlignment(*bias, VECTOR_BYTES)
+        if(bias == nullptr || !declaredAlignmentCovers(*bias, VECTOR_BYTES)
            || !servableBiasStrides(*bias,
                                    problem.batch,
                                    problem.numHeads,
@@ -587,7 +587,7 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext&
         // An LSE tensor with generate_stats explicitly false would be written anyway: the
         // two disagree, so the graph declines rather than one being ignored.
         const auto* stats = findTensor(context, attributes.stats_tensor_uid().value());
-        if(stats == nullptr || !declaresAlignment(*stats, sizeof(float))
+        if(stats == nullptr || !declaredAlignmentCovers(*stats, sizeof(float))
            || !elementsDoNotOverlap(*stats)
            || (attributes.generate_stats().has_value() && !attributes.generate_stats().value())
            || !isServableStats(*stats, problem.batch, problem.numHeads, problem.seqLenQ))

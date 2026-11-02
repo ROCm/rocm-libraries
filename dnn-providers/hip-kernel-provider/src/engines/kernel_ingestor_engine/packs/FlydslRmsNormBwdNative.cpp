@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -209,7 +210,7 @@ std::optional<BoundTokens> flydslRmsNormBwdGraphMatches(const MatchContext& cont
     // from gamma; inv_rms is read one f32 at a time and has its own rule below.
     for(const auto* tensor : {dy, x, scale, dx, dscale})
     {
-        if(!declaresVectorAlignment(*tensor))
+        if(!hip_kernel_provider_common::declaredAlignmentCovers(*tensor, VECTOR_ALIGNMENT_BYTES))
         {
             return std::nullopt;
         }

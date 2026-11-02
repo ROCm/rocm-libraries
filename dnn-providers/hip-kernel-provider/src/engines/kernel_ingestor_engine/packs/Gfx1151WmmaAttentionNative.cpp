@@ -22,6 +22,7 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -43,7 +44,6 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
-#include "engines/kernel_ingestor_engine/packs/PackAlignment.hpp"
 
 /**
  * @file Gfx1151WmmaAttentionNative.cpp
@@ -153,7 +153,7 @@ constexpr int64_t ROW_ALIGN_ELEMENTS = 8;
 constexpr uintptr_t ROW_ALIGN_BYTES = 16;
 
 // The byte alignment each operand's DECLARED alignment (TensorAttributes::alignment, RFC 0014,
-// a multiple guarantee; see PackAlignment.hpp) must guarantee. One constant per operand role,
+// a multiple guarantee; see DeclaredAlignment.hpp) must guarantee. One constant per operand role,
 // so a probe that proves a looser need changes one line. Sources, all in rocke/:
 //  - Q, K, V, O: 16 bytes. The shared prefill body loads every Q/K/V chunk as one 16-byte
 //    `buffer_load_vN(.., I32, 4)` (platform/python/rocke/helpers/rdna_attention.py:355-356,
@@ -578,7 +578,7 @@ std::optional<BiasParameters> biasFor(const MatchContext& context,
     {
         return std::nullopt;
     }
-    if(!pack_alignment::guaranteesAlignment(*tensor, elementBytes))
+    if(!hip_kernel_provider_common::declaredAlignmentCovers(*tensor, elementBytes))
     {
         return std::nullopt;
     }
@@ -723,7 +723,7 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
         // The backend rejects, at execute, a pointer that is not a multiple of the declared
         // alignment, so an operand declared below the kernels' 16-byte vector accesses cannot
         // be served: its buffer may sit anywhere the declaration allows.
-        if(!pack_alignment::guaranteesAlignment(*tensor, QKVO_ALIGN_BYTES))
+        if(!hip_kernel_provider_common::declaredAlignmentCovers(*tensor, QKVO_ALIGN_BYTES))
         {
             return std::nullopt;
         }
@@ -748,7 +748,7 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
         {
             return std::nullopt;
         }
-        if(!pack_alignment::guaranteesAlignment(*lse, LSE_ALIGN_BYTES))
+        if(!hip_kernel_provider_common::declaredAlignmentCovers(*lse, LSE_ALIGN_BYTES))
         {
             return std::nullopt;
         }

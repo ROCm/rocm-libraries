@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <numeric>
 
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
@@ -84,7 +86,8 @@ inline size_t
     const size_t elementBytes = dataTypeBytes(tensor.data_type());
     for(size_t vectorsize = MAX_VECTOR_SIZE; vectorsize > 0; vectorsize >>= 1)
     {
-        if(alignmentCovers(declared, vectorsize * elementBytes))
+        if(hip_kernel_provider_common::declaredAlignmentCovers(
+               static_cast<int64_t>(declared), static_cast<int64_t>(vectorsize * elementBytes)))
         {
             return vectorsize;
         }

@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -214,12 +215,12 @@ inline bool isDeviceOperand(const data_objects::TensorAttributes& tensor)
            && !tensor.ragged_offset_tensor_uid().has_value();
 }
 
-/// Whether @p tensor promises the 16-byte base alignment the kernels' vector copies assume.
-inline bool declaresVectorAlignment(const data_objects::TensorAttributes& tensor)
-{
-    constexpr int64_t VECTOR_BYTES = 16;
-    return tensor.alignment() >= VECTOR_BYTES && tensor.alignment() % VECTOR_BYTES == 0;
-}
+/// The base alignment the kernels' vector copies assume of every row operand and of gamma,
+/// in bytes; a graph's declared alignment must be a multiple of it.
+constexpr int64_t VECTOR_ALIGNMENT_BYTES = 16;
+
+/// The base alignment of the saved per-row statistic, one 32-bit store per row, in bytes.
+constexpr int64_t STATISTIC_ALIGNMENT_BYTES = 4;
 
 /// The saved statistic as the frontend shapes it (`RMSNormNode`): x's rank, x's extent on
 /// every row axis and 1 on every normalised one, so one f32 per row. The kernel writes it
@@ -232,7 +233,7 @@ inline bool isPerRowStatistic(const data_objects::TensorAttributes& invRms,
     const auto* dims = invRms.dims();
     const auto& xDims = *x.dims();
     if(dims->size() != xDims.size() || invRms.data_type() != data_objects::DataType::FLOAT
-       || invRms.alignment() < 4 || invRms.alignment() % 4 != 0)
+       || !hip_kernel_provider_common::declaredAlignmentCovers(invRms, STATISTIC_ALIGNMENT_BYTES))
     {
         return false;
     }

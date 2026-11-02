@@ -478,25 +478,6 @@ TEST(TestBatchnormBwdStashFix, ApplicabilityGateFlipsOnStashValues)
 // N-byte access exactly when N divides A.
 // ====================================================================================================
 
-// Bug caught: alignment treated as a minimum (declared >= need) rather than a multiple guarantee,
-// so a 24-byte declaration passes for a 16-byte access.
-TEST(TestAlignmentCovers, IsAMultipleGuarantee)
-{
-    EXPECT_TRUE(alignmentCovers(16, 16));
-    EXPECT_TRUE(alignmentCovers(16, 4));
-    EXPECT_TRUE(alignmentCovers(24, 8));
-    EXPECT_FALSE(alignmentCovers(8, 16));
-    EXPECT_FALSE(alignmentCovers(24, 16));
-    EXPECT_FALSE(alignmentCovers(4, 8));
-}
-
-// Bug caught: a missing declaration (0) or an empty need reported as covered.
-TEST(TestAlignmentCovers, ZeroGuaranteesNothing)
-{
-    EXPECT_FALSE(alignmentCovers(0, 4));
-    EXPECT_FALSE(alignmentCovers(16, 0));
-}
-
 // Bug caught: the declared-alignment default drifting from the 16 bytes every graph declared before
 // plugin API 1.3.0, which would change the choice for graphs that never set an alignment.
 TEST(TestSpatialAlignment, DefaultsToSixteenBytes)

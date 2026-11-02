@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -217,8 +218,9 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
     }
     // The fast path copies 128-bit vectors from each operand's base, and the backend enforces
     // only the alignment a graph declares.
-    if(!declaresVectorAlignment(*x) || !declaresVectorAlignment(*scale)
-       || !declaresVectorAlignment(*y))
+    if(!hip_kernel_provider_common::declaredAlignmentCovers(*x, VECTOR_ALIGNMENT_BYTES)
+       || !hip_kernel_provider_common::declaredAlignmentCovers(*scale, VECTOR_ALIGNMENT_BYTES)
+       || !hip_kernel_provider_common::declaredAlignmentCovers(*y, VECTOR_ALIGNMENT_BYTES))
     {
         return std::nullopt;
     }

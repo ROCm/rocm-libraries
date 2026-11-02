@@ -7,6 +7,7 @@
 #include <optional>
 #include <unordered_map>
 
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -55,16 +56,6 @@ inline int64_t wholeElementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType 
 }
 
 /**
- * True when the declared alignment of a tensor with elements of `elementBytes` bytes guarantees
- * that every element address is a valid typed address: it is a positive multiple of the element
- * size.
- */
-inline bool declaredAlignmentCoversElement(int64_t declaredBytes, int64_t elementBytes)
-{
-    return declaredBytes > 0 && elementBytes > 0 && declaredBytes % elementBytes == 0;
-}
-
-/**
  * The uid of a tensor of the graph whose declared alignment does not cover its own element size,
  * or nullopt when every tensor does. Only tensors backed by a device buffer are looked at:
  * virtual tensors have no buffer, and pass-by-value scalars are host values that the backend does
@@ -86,7 +77,8 @@ inline std::optional<int64_t> findTensorWithUncoveredElementAlignment(
         }
 
         const int64_t elementBytes = wholeElementBytes(tensor->data_type());
-        if(elementBytes == 0 || declaredAlignmentCoversElement(tensor->alignment(), elementBytes))
+        if(elementBytes == 0
+           || hip_kernel_provider_common::declaredAlignmentCovers(*tensor, elementBytes))
         {
             continue;
         }

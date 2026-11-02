@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 
 namespace hip_kernel_provider
 {
@@ -180,12 +183,6 @@ struct SpatialAlignmentNeed
     size_t output;
     size_t channel;
 };
-
-// True when a declared alignment of `declaredBytes` guarantees `needBytes`-byte alignment.
-inline bool alignmentCovers(size_t declaredBytes, size_t needBytes)
-{
-    return declaredBytes != 0 && needBytes != 0 && declaredBytes % needBytes == 0;
-}
 
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
 // It supports only 2D workgroups
@@ -563,9 +560,13 @@ inline SpatialAlignmentNeed spatialMultipleAlignmentNeed(const ProblemDescriptio
 inline bool fitsDeclaredAlignment(const SpatialAlignmentNeed& need,
                                   const SpatialAlignment& alignment)
 {
-    return alignmentCovers(alignment.input, need.input)
-           && alignmentCovers(alignment.output, need.output)
-           && alignmentCovers(alignment.channel, need.channel);
+    using hip_kernel_provider_common::declaredAlignmentCovers;
+    return declaredAlignmentCovers(static_cast<int64_t>(alignment.input),
+                                   static_cast<int64_t>(need.input))
+           && declaredAlignmentCovers(static_cast<int64_t>(alignment.output),
+                                      static_cast<int64_t>(need.output))
+           && declaredAlignmentCovers(static_cast<int64_t>(alignment.channel),
+                                      static_cast<int64_t>(need.channel));
 }
 
 // Sets `config` to the spatial multiple instance of the given vector size when the declared

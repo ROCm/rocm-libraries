@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <hip_kernel_provider_common/DeclaredAlignment.hpp>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -54,13 +55,6 @@ namespace
 constexpr int64_t K_Q_ALIGNMENT_BYTES = 8;
 constexpr int64_t K_KV_ALIGNMENT_BYTES = 2;
 constexpr int64_t K_O_ALIGNMENT_BYTES = 8;
-
-// True when `tensor`'s declared alignment guarantees `needBytes`-byte alignment.
-bool declaredAlignmentCovers(const data_objects::TensorAttributes& tensor, int64_t needBytes)
-{
-    const int64_t declared = tensor.alignment();
-    return needBytes > 0 && declared > 0 && declared % needBytes == 0;
-}
 
 std::string alignmentDeclineMessage(const char* name,
                                     const data_objects::TensorAttributes& tensor,
