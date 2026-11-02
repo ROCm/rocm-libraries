@@ -315,6 +315,19 @@ void BatchnormValidator::checkInferenceTensorConfigSupported(
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that at least one of "
+            "their types is float");
+    }
 }
 
 void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
@@ -327,6 +340,19 @@ void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that at least one of "
+            "their types is float");
+    }
 }
 
 void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
@@ -345,6 +371,19 @@ void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that at least one of "
+            "their types is float");
+    }
 }
 
 void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupported(
@@ -363,6 +402,19 @@ void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupporte
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that at least one of "
+            "their types is float");
+    }
 }
 
 void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
@@ -389,6 +441,19 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     }
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires that x and y are the same type or that at least "
+            "one of their types is float");
+    }
 }
 
 void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
@@ -421,6 +486,19 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires that x and y are the same type or that at least "
+            "one of their types is float");
+    }
 }
 
 void BatchnormValidator::checkBwdTensorConfigSupported(
@@ -448,12 +526,25 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
 
-    if(core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type()
-       != core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type())
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
+    auto dyDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dy_tensor_uid()).data_type();
+    auto dxDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
+    if(xDataType != dxDataType)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward requires that x and dx are the same type");
+    }
+    if(xDataType != dyDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && dyDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dy are the same type or that at least one of "
+            "their types is float");
     }
 }
 
@@ -502,12 +593,25 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
 
-    if(core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type()
-       != core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type())
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
+    auto dyDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dy_tensor_uid()).data_type();
+    auto dxDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
+    if(xDataType != dxDataType)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm backward requires that x and dx are the same type");
+    }
+    if(xDataType != dyDataType && xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+       && dyDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dy are the same type or that at least one of "
+            "their types is float");
     }
 }
 
