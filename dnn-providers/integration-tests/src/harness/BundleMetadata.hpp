@@ -208,8 +208,9 @@ inline bundle::EngineVariantSpec parseEngineVariant(const nlohmann::json& json,
     {
         if(key != "id" && key != "knobs")
         {
-            throw BundleMetadataError(where + " has engine_variant with unknown key \"" + key
-                                      + "\"");
+            std::string message = where;
+            message.append(" has engine_variant with unknown key \"").append(key).append("\"");
+            throw BundleMetadataError(message);
         }
     }
     if(!json.contains("id") || !json["id"].is_string() || json["id"].get<std::string>().empty())
