@@ -58,6 +58,7 @@ extern "C" {
 *  batchCount         The number of systems to solve.
 *  @param[out]
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p alg, \p batchCount, \p ds, \p dl,

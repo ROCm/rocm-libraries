@@ -70,6 +70,7 @@ extern "C" {
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by hipsparseXgebsr2gebsrNnz(),
 *                     hipsparseSgebsr2gebsr(), hipsparseDgebsr2gebsr(), hipsparseCgebsr2gebsr(), and
 *                     hipsparseZgebsr2gebsr().
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p rowBlockDimA, \p colBlockDimA,

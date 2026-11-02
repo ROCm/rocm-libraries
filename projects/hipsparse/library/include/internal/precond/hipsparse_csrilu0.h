@@ -90,8 +90,10 @@ hipsparseStatus_t
  *  enable_boost    enable/disable numeric boost.
  *  @param[in]
  *  tol             tolerance to determine whether a numerical value is replaced or not.
+ *                  \p tol can be in host or device memory.
  *  @param[in]
  *  boost_val       boost value to replace a numerical value.
+ *                  \p boost_val can be in host or device memory.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -160,6 +162,7 @@ hipsparseStatus_t hipsparseZcsrilu02_numericBoost(hipsparseHandle_t handle,
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -244,6 +247,7 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSize(hipsparseHandle_t         handle
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,

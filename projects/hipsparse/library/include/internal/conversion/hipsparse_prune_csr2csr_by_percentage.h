@@ -73,6 +73,7 @@ extern "C" {
  *  pBufferSizeInBytes  number of bytes of the temporary storage buffer required by hipsparseSpruneCsr2csrNnzByPercentage(),
  *                      hipsparseDpruneCsr2csrNnzByPercentage(), hipsparseSpruneCsr2csrByPercentage(),
  *                      and hipsparseDpruneCsr2csrByPercentage().
+ *                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes pointer is invalid.
@@ -161,6 +162,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSize(hipsparseHandle_
  *  pBufferSizeInBytes  number of bytes of the temporary storage buffer required by hipsparseSpruneCsr2csrNnzByPercentage(),
  *                      hipsparseDpruneCsr2csrNnzByPercentage(), hipsparseSpruneCsr2csrByPercentage(),
  *                      and hipsparseDpruneCsr2csrByPercentage().
+ *                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes pointer is invalid.
