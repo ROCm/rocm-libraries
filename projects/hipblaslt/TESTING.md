@@ -830,7 +830,8 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
 - **Random GEMMs under CPU rocjitsu.** The Multi-Arch nightly sidecar checks 100
   fixed-seed GEMMs per emulated target, currently gfx950 only (including MXFP8 and
   MXFP4), using the nightly run's BLAS artifacts for numerics and races. It is
-  advisory, requires no GPU, and retains every case's input and logs.
+  outside the Multi-Arch summary and gates nothing, though a failure marks that
+  nightly run as failed. It requires no GPU and retains every case's input and logs.
   The race detector sees only races within one workgroup: a register or LDS value
   read before the required `s_waitcnt` or `s_barrier`. It does not see races
   between workgroups through global memory, such as in stream-K fixups or split-K
@@ -929,7 +930,7 @@ manually dispatched runs.
 | **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a, quick tier, via `hipBLASLt ASAN CI` | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
-| **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No (advisory) |
+| **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No |
 | **TSAN** | Host-side data races between threads | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
