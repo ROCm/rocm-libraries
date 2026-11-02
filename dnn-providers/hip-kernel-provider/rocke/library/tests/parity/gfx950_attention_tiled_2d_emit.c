@@ -1123,6 +1123,19 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_alibi = true;
         s->emit_lse = true;
         break;
+    case 68: /* i64 K/V with two pages per tile (lane-free page lookups). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->use_i64_kv_addr = true;
+        break;
     default:
         return -1;
     }

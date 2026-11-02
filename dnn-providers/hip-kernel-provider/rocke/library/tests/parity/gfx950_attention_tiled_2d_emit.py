@@ -1084,6 +1084,19 @@ _CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
 _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+# i64 K/V with two pages per tile (lane-free page lookups, i64 page base).
+_CONFIGS[68] = dict(
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    tile_size=32,
+    use_i64_kv_addr=True,
+)
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

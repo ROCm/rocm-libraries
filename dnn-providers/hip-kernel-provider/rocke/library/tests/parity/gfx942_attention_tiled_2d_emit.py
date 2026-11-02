@@ -294,6 +294,20 @@ _CONFIGS = {
         use_q_major_grid=True,
         emit_lse=True,
     ),
+    # Fast paged-KV descriptor (bounded V tail per call).
+    18: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        tile_size=64,
+        use_fast_paged_kv_desc=True,
+    ),
 }
 
 

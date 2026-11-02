@@ -264,6 +264,19 @@ GFX942_ATTENTION_TILED_2D = [
         "use_q_major_grid": True,
         "emit_lse": True,
     },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_warps": 4,
+        "tile_size": 64,
+        "use_fast_paged_kv_desc": True,
+    },
 ]
 
 GFX950_ATTENTION_TILED_2D = [
@@ -1279,6 +1292,18 @@ GFX950_ATTENTION_TILED_2D = [
         "has_softcap": False,
         "use_alibi": True,
         "emit_lse": True,
+    },
+    {
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "tile_size": 32,
+        "use_i64_kv_addr": True,
     },
 ]
 
