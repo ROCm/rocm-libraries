@@ -1336,7 +1336,7 @@ def main() -> int:
             ap.error("--unvalidated-exit-code must be between 1 and 255")
 
     sys.path.insert(0, str(HERE))
-    from check_ir_validity import _llvm_tool  # same resolution order, one owner
+    from check_ir_validity import llvm_tool  # same resolution order, one owner
     from rocke.core import lower_llvm as L
     from rocke.core.isa.backend import wired_arches
 
@@ -1390,8 +1390,8 @@ def main() -> int:
         )
         return _unvalidated_exit(args.unvalidated_exit_code, 0)
 
-    clang = _llvm_tool("clang")
-    opt = _llvm_tool("opt")
+    clang = llvm_tool("clang")
+    opt = llvm_tool("opt")
 
     print("rocKE intrinsic arch-domain generator")
     print(f"   flavor : {flavor}")

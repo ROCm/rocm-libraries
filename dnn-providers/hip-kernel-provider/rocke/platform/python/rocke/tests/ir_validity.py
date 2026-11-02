@@ -77,22 +77,24 @@ def _compile_in(ir_text: str, target: str, work: Path) -> tuple[Verdict, str]:
     tool = _validity_tool()
     if tool is None:
         return "cannot_judge", "rocke platform tools not found"
-    clang = tool._llvm_tool("clang")
+    clang = tool.llvm_tool("clang")
     if clang is None:
         return "cannot_judge", "no host clang to compile lowered IR"
     source = work / "module.ll"
     source.write_text(ir_text)
-    accepted, diagnostic = tool._compile(clang, source, target, work / "module.hsaco")
+    accepted, diagnostic = tool.compile_code_object(
+        clang, source, target, work / "module.hsaco"
+    )
     if accepted:
         return "accepted", ""
-    if tool._target_unsupported(diagnostic):
+    if tool.target_unsupported(diagnostic):
         return "cannot_judge", f"host clang cannot target {target}"
     if _toolchain_incomplete(diagnostic):
         return (
             "cannot_judge",
             f"host clang {clang} cannot link: {diagnostic.splitlines()[0]}",
         )
-    return "rejected", tool._first_diagnostic(diagnostic)
+    return "rejected", tool.first_diagnostic(diagnostic)
 
 
 def _toolchain_incomplete(diagnostic: str) -> bool:
@@ -130,7 +132,7 @@ def target_instructions(ir_text: str, target: str) -> list[str]:
     """
     with tempfile.TemporaryDirectory() as work:
         _require_accepted(*_compile_in(ir_text, target, Path(work)), target)
-        objdump = _validity_tool()._llvm_tool("llvm-objdump")
+        objdump = _validity_tool().llvm_tool("llvm-objdump")
         if objdump is None:
             pytest.skip("no llvm-objdump to disassemble the code object")
         listing = subprocess.run(
