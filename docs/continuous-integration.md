@@ -9,11 +9,11 @@ This document is to detail the various continuous integration (CI) systems that 
 - [Continuous Integration](#continuous-integration)
   - [Table of Contents](#table-of-contents)
   - [Math CI](#math-ci)
-    - [Overview ](#overview--1)
+    - [Overview ](#math-overview)
   - [Windows CI](#windows-ci)
-    - [Overview ](#overview--2)
+    - [Overview ](#win-overview)
   - [TheRock CI](#therock-ci)
-    - [Overview ](#overview--3)
+    - [Overview ](#rock-overview)
 
 ## Math CI
 
