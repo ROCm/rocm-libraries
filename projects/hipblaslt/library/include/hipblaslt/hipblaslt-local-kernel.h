@@ -103,12 +103,11 @@ extern "C" {
  *                                          shard's kernels. Nothing is
  *                                          registered.
  *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
- *                                          current or initialized, or the local
- *                                          kernel index range is exhausted.
- *                                          Nothing is registered.
- *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The payload could not be saved to
- *                                          the local kernel library; nothing
- *                                          was registered.
+ *                                          current or initialized, the local
+ *                                          kernel index range is exhausted, or
+ *                                          the payload could not be saved to the
+ *                                          local kernel library. Nothing is
+ *                                          registered.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
@@ -170,8 +169,12 @@ hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
  *  @param[out]
  *  registered  Number of kernels newly registered, or NULL if not wanted.
  *
- *  \retval HIPBLAS_STATUS_SUCCESS  The library was read. Records that cannot
- *                                  be loaded are skipped with a warning.
+ *  \retval HIPBLAS_STATUS_SUCCESS          The library was read. Records that
+ *                                          cannot be loaded are skipped with a
+ *                                          warning.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED  \p handle is NULL.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
+ *                                          current or initialized.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelRefresh(hipblasLtHandle_t handle, size_t* registered);
