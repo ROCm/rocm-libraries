@@ -4564,9 +4564,10 @@ def _is_raw_device_buffer(x) -> bool:
     """Whether ``x`` is a raw device buffer (a ``data_ptr()`` duck type such as a
     ``rocke.runtime.DeviceMem`` wrapper) rather than a torch-style tensor. Torch
     tensors -- and the torch fakes the host tests install -- carry a device;
-    raw buffers have none (absent or ``None``), so they take the torch-free
-    launch path."""
-    return getattr(x, "device", None) is None
+    raw buffers expose ``data_ptr()`` but no device (absent or ``None``), so they
+    take the torch-free launch path. Anything without ``data_ptr`` (e.g. the
+    ``None`` placeholders of host-only routing tests) is not a raw buffer."""
+    return hasattr(x, "data_ptr") and getattr(x, "device", None) is None
 
 
 def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
