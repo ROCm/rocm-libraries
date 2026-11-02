@@ -117,7 +117,8 @@ struct FmhaMasks {
 };
 inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
 template <int, typename, bool, int, int, int, int, int, int, bool, auto, bool,
-          typename, auto, bool, bool, auto, bool, bool, bool, bool, bool, bool, bool, int = -1>
+          typename, auto, bool, bool, auto, bool, bool, bool, bool, bool, bool, bool, int = -1,
+          bool = false>
 struct fmha_fwd_traits_ {};
 struct fmha_fwd_traits {
     int hdim_q = 192, hdim_v = 128;
@@ -137,6 +138,7 @@ struct fmha_fwd_args {
     const void* sink_ptr = nullptr;
     const void* seqlen_k_ptr = nullptr;
     const void* cu_seqlen_k_ptr = nullptr;
+    void* max_logits_ptr = nullptr;
 };
 template <typename Trait, typename Arch> struct dispatch_id;
 template <typename Trait, typename Arch>
