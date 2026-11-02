@@ -97,9 +97,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                                        kBlockScale;
     static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale;
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
-    static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
     static constexpr bool kIsPagedKV       = Problem::kIsPagedKV;
+    // Paged walks start on a page-friendly boundary that can precede the split,
+    // so the head erase below is needed there whatever the split bounds look
+    // like. Everywhere else this follows the problem, as qr_ks_vs does.
+    static constexpr bool kHasUnevenSplits = kIsPagedKV || Problem::kHasUnevenSplits;
 
     // Tell FmhaFwdSplitKVKernel which K/V DRAM views this pipeline wants.
     //
@@ -555,8 +558,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // Split-kv: the split-aware overloads intersect that range with this
         // split's slice of the key sequence. The slice bound is
         // ceil(seqlen_k / num_splits) and is therefore not kN0 aligned, so the
-        // last tile of a split can reach past it -- kHasUnevenSplits (hardwired
-        // true above) erases that tail from s_acc in the main loop.
+        // last tile of a split can reach past it -- kHasUnevenSplits erases that
+        // tail from s_acc in the main loop.
         const auto tile_range_result = [&mask, &q_origin, num_splits, i_split]() {
             if constexpr(kHasSink)
                 return mask.GetSinkTileRangeAlongX(
