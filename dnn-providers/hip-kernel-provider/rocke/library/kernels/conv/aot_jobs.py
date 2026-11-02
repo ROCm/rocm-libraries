@@ -601,6 +601,23 @@ def _parse_dgrad_pp_knobs(text: str):
 CACHE_DGRAD_PLAIN_KNOBS = _parse_dgrad_pp_knobs(
     _os.environ.get("ROCKE_AOT_DGRAD_PPK", "")
 )
+
+
+def _dgrad_pbx8_twins(sets):
+    """ROCKE_AOT_DGRAD_PBX8=1 (ADD): every pixel-list PPK set (pbx 7 / 77,
+    no pzs) also with pbx=8 -- the makespan-planned records (conv_dgrad_box_plan);
+    same binary code, host-side plan."""
+    out = list(sets)
+    for kv in sets:
+        d = dict(kv)
+        if d.get("pbx") in (7, 77) and not d.get("pzs"):
+            d["pbx"] = 8
+            out.append(tuple(sorted(d.items())))
+    return tuple(dict.fromkeys(out))
+
+
+if _os.environ.get("ROCKE_AOT_DGRAD_PBX8", "0") not in ("", "0"):
+    CACHE_DGRAD_PLAIN_KNOBS = _dgrad_pbx8_twins(CACHE_DGRAD_PLAIN_KNOBS)
 # Extra dgrad tile extents (e.g. "512") built ONLY as ROCKE_AOT_DGRAD_PPK
 # variants of the plain tpf1 tap-outer binary (no base binary, no other loop):
 # ROCKE_AOT_DGRAD_PP_TILE_MN. Unset = none.
