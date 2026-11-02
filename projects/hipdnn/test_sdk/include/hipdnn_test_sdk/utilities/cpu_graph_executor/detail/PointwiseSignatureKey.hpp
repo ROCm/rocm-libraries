@@ -236,17 +236,21 @@ struct PointwiseSignatureKey
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
-        // GEN_INDEX may also produce an INT32 index tensor.
+        // GEN_INDEX always produces an INT32 index tensor as output
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
+        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
 
-        // Logical operations are BOOLEAN in / BOOLEAN out; the compute type does not affect them.
+        // Logical operations are BOOLEAN in / BOOLEAN out and compute type doesn't affect them
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOGICAL_NOT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
                             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -324,10 +328,6 @@ private:
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY,
-                            InputDataTypeEnum,
-                            ComputeDataTypeEnum,
-                            OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX,
                             InputDataTypeEnum,
                             ComputeDataTypeEnum,
                             OutputDataTypeEnum>(map);
