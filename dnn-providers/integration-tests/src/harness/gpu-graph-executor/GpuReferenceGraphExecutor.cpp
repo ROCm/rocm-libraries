@@ -6,13 +6,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include <hip/hip_runtime_api.h>
+#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/RaggedSdpaDensify.hpp>
+#include <hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp>
 
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
@@ -43,6 +49,39 @@ std::unordered_map<int64_t, void*> populateVariantPackWithMissingVirtualTensors(
         }
     }
     return updatedVariantPack;
+}
+
+// Owns one device allocation; frees it after the device is idle.
+struct DeviceBuffer
+{
+    void* ptr = nullptr;
+    // Graph tensors have positive dimensions and empty sequence-length lists are not
+    // bound, so a zero-byte buffer is a caller bug.
+    explicit DeviceBuffer(size_t bytes)
+    {
+        if(bytes == 0)
+        {
+            throw std::invalid_argument("ragged SDPA densify: empty device buffer");
+        }
+        hipdnn_gpu_ref::detail::throwOnHipError(hipMalloc(&ptr, bytes),
+                                                "ragged SDPA densify: hipMalloc");
+    }
+    DeviceBuffer(const DeviceBuffer&) = delete;
+    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+    ~DeviceBuffer()
+    {
+        (void)hipDeviceSynchronize();
+        (void)hipFree(ptr);
+    }
+};
+
+void copyBytes(void* to, const void* from, size_t bytes, hipMemcpyKind kind)
+{
+    if(bytes > 0)
+    {
+        hipdnn_gpu_ref::detail::throwOnHipError(hipMemcpy(to, from, bytes, kind),
+                                                "ragged SDPA densify: hipMemcpy");
+    }
 }
 
 detail::GpuPlanRegistrySignatureKey buildSignatureKey(
@@ -84,33 +123,24 @@ detail::GpuPlanRegistrySignatureKey buildSignatureKey(
             node, tensorMap, node.compute_data_type());
     case NodeAttrs::SdpaAttributes:
     {
-        // A ragged SDPA node (RFC-0014 packed layout) has a ragged_offset on a primary. Any
-        // ragged primary picks the ragged bucket, so a partly ragged node is rejected there
-        // instead of being run as dense.
+        // A node with any ragged primary is keyed as ragged. A partly ragged node is declined
+        // by both plans (the ragged plan needs all four primaries ragged, and the dense plan
+        // rejects any ragged tensor); isApplicable then tries the dense rewrite.
         const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
-        if(sdpaAttributes != nullptr)
+        if(sdpaAttributes != nullptr
+           && hipdnn_test_sdk::detail::hasRaggedSdpaPrimary(*sdpaAttributes, tensorMap))
         {
-            for(const auto uid : {sdpaAttributes->q_tensor_uid(),
-                                  sdpaAttributes->k_tensor_uid(),
-                                  sdpaAttributes->v_tensor_uid(),
-                                  sdpaAttributes->o_tensor_uid()})
-            {
-                const auto it = tensorMap.find(uid);
-                if(it != tensorMap.end() && it->second != nullptr
-                   && it->second->ragged_offset_tensor_uid().has_value())
-                {
-                    return detail::GpuSdpaRaggedFwdSignatureKey(node, tensorMap);
-                }
-            }
+            return detail::GpuSdpaRaggedFwdSignatureKey(node, tensorMap);
         }
         return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
     }
+    case NodeAttrs::SdpaBackwardAttributes:
+        return detail::GpuSdpaBwdSignatureKey(node, tensorMap);
 
     // Node types with no GPU plan yet - throw descriptive error
     case NodeAttrs::BatchnormBackwardAttributes:
     case NodeAttrs::ConvolutionBwdAttributes:
     case NodeAttrs::ConvolutionWrwAttributes:
-    case NodeAttrs::SdpaBackwardAttributes:
     case NodeAttrs::BlockScaleDequantizeAttributes:
     case NodeAttrs::BlockScaleQuantizeAttributes:
     {
@@ -149,6 +179,184 @@ struct GpuReferenceGraphExecutor::Impl
         }
     }
 
+    bool isApplicableAsIs(void* graphBuffer, size_t size)
+    {
+        auto graphWrap
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
+
+        for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
+        {
+            auto& node = graphWrap.getNode(i);
+            if(!isNodeApplicable(node, graphWrap.getTensorMap()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // A ragged SDPA graph no plan accepts as is runs as its dense padded equivalent
+    // (RaggedSdpaDensify.hpp), as in the CPU executor.
+    bool isApplicable(void* graphBuffer, size_t size)
+    {
+        if(isApplicableAsIs(graphBuffer, size))
+        {
+            return true;
+        }
+        auto dense = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(graphBuffer, size);
+        return dense.has_value() && isApplicableAsIs(dense->graph.data(), dense->graph.size());
+    }
+
+    void execute(void* graphBuffer,
+                 size_t size,
+                 const std::unordered_map<int64_t, void*>& variantPack)
+    {
+        if(!isApplicableAsIs(graphBuffer, size))
+        {
+            if(auto dense = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(graphBuffer, size);
+               dense.has_value())
+            {
+                executeRaggedAsDense(*dense, variantPack);
+                return;
+            }
+        }
+        executeAsIs(graphBuffer, size, variantPack);
+    }
+
+    void executeAsIs(void* graphBuffer,
+                     size_t size,
+                     const std::unordered_map<int64_t, void*>& variantPack)
+    {
+        auto graphWrap
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
+
+        std::vector<std::unique_ptr<detail::IGpuGraphNodePlanExecutor>> planExecutors;
+
+        // The graph in graphBuffer is guaranteed to be topologically sorted.
+        for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
+        {
+            auto& node = graphWrap.getNode(i);
+            planExecutors.push_back(buildPlanForNode(graphWrap, node));
+        }
+
+        std::vector<std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> virtualTensors;
+        const auto variantPackWithVirtualTensors = populateVariantPackWithMissingVirtualTensors(
+            variantPack, graphWrap.getTensorMap(), virtualTensors);
+
+        for(auto& executor : planExecutors)
+        {
+            executor->execute(variantPackWithVirtualTensors);
+        }
+    }
+
+    // The CPU executor's ragged-as-dense run with device buffers: offsets and packed inputs are
+    // read back, unpacked on the host and uploaded; dense outputs are read back, packed into a
+    // host copy of the packed output (so bytes outside live tokens are kept) and uploaded.
+    void executeRaggedAsDense(hipdnn_test_sdk::detail::DenseSdpaFromRagged& dense,
+                              const std::unordered_map<int64_t, void*>& variantPack)
+    {
+        namespace rd = hipdnn_test_sdk::detail;
+        const auto& primaries = dense.primaries;
+        std::vector<std::vector<int64_t>> offsets;
+        std::vector<std::vector<int64_t>> lengths;
+        for(const auto& primary : primaries)
+        {
+            std::vector<uint8_t> table(static_cast<size_t>(dense.batch + 1)
+                                       * primary.offsetElementSize);
+            copyBytes(table.data(),
+                      variantPack.at(primary.offsetUid),
+                      table.size(),
+                      hipMemcpyDeviceToHost);
+            offsets.push_back(rd::raggedElementOffsets(primary, table.data(), dense.batch));
+            lengths.push_back(rd::raggedLengths(primary, offsets.back()));
+        }
+        const auto [qLengths, kvLengths] = rd::raggedGroupLengths(dense, lengths);
+
+        auto densePack = variantPack;
+        std::vector<std::unique_ptr<DeviceBuffer>> deviceBuffers;
+        std::vector<std::vector<uint8_t>> hostDense(primaries.size());
+        for(size_t i = 0; i < primaries.size(); ++i)
+        {
+            hostDense[i].assign(rd::raggedDenseBytes(primaries[i]), 0);
+            if(!primaries[i].output)
+            {
+                std::vector<uint8_t> packed(
+                    rd::raggedPackedBytes(primaries[i], offsets[i], lengths[i]));
+                copyBytes(packed.data(),
+                          variantPack.at(primaries[i].uid),
+                          packed.size(),
+                          hipMemcpyDeviceToHost);
+                rd::copyRaggedTokens(
+                    primaries[i], offsets[i], lengths[i], packed.data(), hostDense[i].data(), true);
+            }
+            deviceBuffers.push_back(std::make_unique<DeviceBuffer>(hostDense[i].size()));
+            copyBytes(deviceBuffers.back()->ptr,
+                      hostDense[i].data(),
+                      hostDense[i].size(),
+                      hipMemcpyHostToDevice);
+            densePack[primaries[i].uid] = deviceBuffers.back()->ptr;
+        }
+        const auto bindSeqLens = [&](std::optional<int64_t> added,
+                                     int64_t uid,
+                                     const std::vector<int64_t>& packed,
+                                     const char* name) {
+            if(packed.empty())
+            {
+                return;
+            }
+            std::vector<int32_t> values(packed.size());
+            if(added.has_value())
+            {
+                values.assign(packed.begin(), packed.end());
+                deviceBuffers.push_back(
+                    std::make_unique<DeviceBuffer>(values.size() * sizeof(int32_t)));
+                copyBytes(deviceBuffers.back()->ptr,
+                          values.data(),
+                          values.size() * sizeof(int32_t),
+                          hipMemcpyHostToDevice);
+                densePack[uid] = deviceBuffers.back()->ptr;
+            }
+            else
+            {
+                copyBytes(values.data(),
+                          variantPack.at(uid),
+                          values.size() * sizeof(int32_t),
+                          hipMemcpyDeviceToHost);
+                rd::requireSeqLensWithinPacked(values.data(), packed, name);
+            }
+        };
+        bindSeqLens(dense.addedSeqLenQUid, dense.seqLenQUid, qLengths, "seq_len_q");
+        bindSeqLens(dense.addedSeqLenKvUid, dense.seqLenKvUid, kvLengths, "seq_len_kv");
+
+        executeAsIs(dense.graph.data(), dense.graph.size(), densePack);
+
+        for(size_t i = 0; i < primaries.size(); ++i)
+        {
+            if(!primaries[i].output)
+            {
+                continue;
+            }
+            copyBytes(hostDense[i].data(),
+                      densePack.at(primaries[i].uid),
+                      hostDense[i].size(),
+                      hipMemcpyDeviceToHost);
+            std::vector<uint8_t> packed(
+                rd::raggedPackedBytes(primaries[i], offsets[i], lengths[i]));
+            copyBytes(packed.data(),
+                      variantPack.at(primaries[i].uid),
+                      packed.size(),
+                      hipMemcpyDeviceToHost);
+            rd::copyRaggedTokens(
+                primaries[i], offsets[i], lengths[i], packed.data(), hostDense[i].data(), false);
+            copyBytes(variantPack.at(primaries[i].uid),
+                      packed.data(),
+                      packed.size(),
+                      hipMemcpyHostToDevice);
+        }
+    }
+
     std::unique_ptr<detail::IGpuGraphNodePlanExecutor>
         buildPlanForNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                          const hipdnn_flatbuffers_sdk::data_objects::Node& node)
@@ -179,44 +387,14 @@ GpuReferenceGraphExecutor::~GpuReferenceGraphExecutor() = default;
 
 bool GpuReferenceGraphExecutor::isApplicable(void* graphBuffer, size_t size)
 {
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
-        graphBuffer, size);
-
-    for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
-    {
-        auto& node = graphWrap.getNode(i);
-        if(!_impl->isNodeApplicable(node, graphWrap.getTensorMap()))
-        {
-            return false;
-        }
-    }
-    return true;
+    return _impl->isApplicable(graphBuffer, size);
 }
 
 void GpuReferenceGraphExecutor::execute(void* graphBuffer,
                                         size_t size,
                                         const std::unordered_map<int64_t, void*>& variantPack)
 {
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
-        graphBuffer, size);
-
-    std::vector<std::unique_ptr<detail::IGpuGraphNodePlanExecutor>> planExecutors;
-
-    // The graph in graphBuffer is guaranteed to be topologically sorted.
-    for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
-    {
-        auto& node = graphWrap.getNode(i);
-        planExecutors.push_back(_impl->buildPlanForNode(graphWrap, node));
-    }
-
-    std::vector<std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> virtualTensors;
-    const auto variantPackWithVirtualTensors = populateVariantPackWithMissingVirtualTensors(
-        variantPack, graphWrap.getTensorMap(), virtualTensors);
-
-    for(auto& executor : planExecutors)
-    {
-        executor->execute(variantPackWithVirtualTensors);
-    }
+    _impl->execute(graphBuffer, size, variantPack);
 }
 
 } // namespace hipdnn_integration_tests::gpu_graph_executor

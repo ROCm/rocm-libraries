@@ -19,12 +19,12 @@ strategy** for scaling to more toolchains and more targets.
 >
 > **Historical architecture snapshot.** §1–§2 predate the explicit LLVM24
 > compiler lane and emission-profile model. Current code separates qualified
-> compiler lanes from structural profiles; LLVM23 and LLVM24 share one profile,
-> and future compiler majors fail closed. The authoritative current description
+> compiler lanes from structural profiles; LLVM24 retains LLVM23's datalayout
+> and target-op surface but has a distinct named-barrier pointer ABI, and future
+> compiler majors fail closed. The authoritative current description
 > is [`../ir_lowering/backend_details.md`](../ir_lowering/backend_details.md#llvm-intrinsic-flavor).
-> §4's R1 also shipped as `tools/gen_arch_domain.py`; committed columns currently
-> cover llvm20, llvm22, and llvm23, while LLVM24 artifact generation is separate
-> follow-up work. Treat the remaining tables and proposals as historical design
+> §4's R1 also shipped as `tools/gen_arch_domain.py`; committed columns cover
+> llvm20, llvm22, llvm23, and llvm24. Treat the remaining tables and proposals as historical design
 > rationale, not current API documentation.
 
 ---
@@ -352,8 +352,11 @@ target that lacks the instruction and write it into the object, and only the
 text assembler checks each instruction against the target (`arch_absent`
 otherwise). Every decl key × every wired arch — the committed columns are the count of
 record, not this sentence — ~15 s wall across cores on `llvm22`. Managed like
-golden — a generator tool, a committed artifact, a test asserting regeneration is
-a no-op. Depends only on `clang`, never on install layout (§2.4).
+golden — a generator tool, a committed artifact, and a test asserting
+regeneration is a no-op when run with the exact compiler build recorded in the
+artifact. A different build is explicitly unvalidated because development builds
+within one LLVM major can disagree. Depends only on `clang`, never on install
+layout (§2.4).
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A
