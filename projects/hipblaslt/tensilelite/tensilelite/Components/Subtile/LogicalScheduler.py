@@ -4623,9 +4623,17 @@ class LogicalScheduler:
         # and availableBlockMaxVgpr only reaches that once the dead operand tiles are
         # freed.  Small tiles have no woven tail (every MFMA already retired), so lending
         # all operand tiles is safe; the batch sizer then grows to a coalesce-capable size.
-        # The coalesce is always compiled in for eligible subtile kernels (runtime branch on
-        # M,N > 4096 selects between coalesce and non-coalesce at dispatch time), so always lend.
-        if kernel.get("UseSubtileImpl"):
+        # Gate the lend to EXACTLY the coalesce-firing conditions (see
+        # GlobalWriteBatch.plsinStorePermlane16Active and the isSubtileCoalesce admission):
+        # gfx950, MXF4->bf16 TN subtile, MI16, MT256x256 (MIWT8).  Elsewhere (non-gfx950 /
+        # non-MXF4 / non-MIWT8 subtile, e.g. bf16 or gfx1250) the coalesce never fires, so
+        # keep develop's no-lend policy -- lending there changes the fused-store register
+        # allocation for no benefit.
+        _miwt = kernel.get("MIWaveTile", [0, 0])
+        if (isMxf4SubtilePath(kernel)
+                and tuple(kernel.get("ISA", ())) == (9, 5, 0)
+                and kernel.get("MatrixInstM") == 16
+                and len(_miwt) >= 2 and _miwt[0] == 8):
             return None, self._operandLendVgprs(None)
         return {}, []
 
