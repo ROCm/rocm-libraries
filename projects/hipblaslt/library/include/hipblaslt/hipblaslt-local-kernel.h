@@ -70,11 +70,17 @@ extern "C" {
  *                  output buffer still registers the payload.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS          The payload was registered.
- *  \retval HIPBLAS_STATUS_INVALID_VALUE    A file could not be read, the shard
- *                                          held no solutions or was built for
- *                                          another device, or the code object
- *                                          could not be loaded on this device
- *                                          or lacks one of the shard's kernels.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED  \p handle is NULL.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE    A path was NULL, a file could not be
+ *                                          read, the shard held no solutions or
+ *                                          was built for another device, or the
+ *                                          code object could not be loaded on
+ *                                          this device or lacks one of the
+ *                                          shard's kernels. Nothing is
+ *                                          registered.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
+ *                                          current or initialized, or the local
+ *                                          kernel index range is exhausted.
  *                                          Nothing is registered.
  */
 HIPBLASLT_EXPORT
@@ -109,9 +115,12 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  m, n, batch, k  The problem shape to map, matched exactly.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS          The mapping was published.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED  \p handle is NULL.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE    The index is not a registered local
  *                                          kernel or cannot run on the handle's
  *                                          device.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
+ *                                          current or initialized.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
@@ -128,7 +137,10 @@ hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
  *  selectable  Number of distinct (shape, transposes, data types) with at
  *              least one kernel mapped, or NULL if not wanted.
  *
- *  \retval HIPBLAS_STATUS_SUCCESS  The counts were written.
+ *  \retval HIPBLAS_STATUS_SUCCESS          The counts were written.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED  \p handle is NULL.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
+ *                                          current or initialized.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t
