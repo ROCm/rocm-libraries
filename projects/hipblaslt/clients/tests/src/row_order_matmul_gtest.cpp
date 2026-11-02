@@ -618,6 +618,8 @@ namespace
         const DescPtr plain     = makeDesc();
         const DescPtr invalidOp = makeDesc();
         setAttribute(invalidOp.get(), HIPBLASLT_MATMUL_DESC_TRANSA, HIPBLASLT_OPERATION_INVALID);
+        const DescPtr invalidOpB = makeDesc();
+        setAttribute(invalidOpB.get(), HIPBLASLT_MATMUL_DESC_TRANSB, HIPBLASLT_OPERATION_INVALID);
 
         const float alpha = 1.0f, beta = 0.0f;
         void* const data      = buffer.get();
@@ -671,6 +673,10 @@ namespace
              [&](hipblasLtMatrixLayout_t l) {
                  return int(matmul(handle, invalidOp.get(), &alpha, data, l, col));
              }},
+            {"matmul, invalid op on B, A row-major",
+             [&](hipblasLtMatrixLayout_t l) {
+                 return int(matmul(handle, invalidOpB.get(), &alpha, data, l, col));
+             }},
             {"matmul, invalid op, only D row-major",
              [&](hipblasLtMatrixLayout_t l) {
                  return int(matmul(handle, invalidOp.get(), &alpha, data, col, l));
@@ -701,5 +707,8 @@ namespace
         EXPECT_EQ(heuristic(handle, invalidOp.get(), row, col),
                   std::make_pair(HIPBLAS_STATUS_SUCCESS, 0))
             << "invalid op, A row-major";
+        EXPECT_EQ(heuristic(handle, invalidOpB.get(), row, col),
+                  std::make_pair(HIPBLAS_STATUS_SUCCESS, 0))
+            << "invalid op on B, A row-major";
     }
 } // namespace
