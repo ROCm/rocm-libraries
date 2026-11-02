@@ -22,7 +22,7 @@ import pytest
 
 from rocke.core.ir import BARRIER_FENCES, IRBuilder
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 
 REL = '  fence syncscope("workgroup") release'
 BAR = " call void @llvm.amdgcn.s.barrier()"
@@ -83,7 +83,7 @@ def test_fence_attr_is_set_only_when_asked():
         b.sync(fence="global")
 
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151"])
 def test_fenced_barrier_llvm_emission(arch, flavor):
     text = _lower_kernel_to_llvm_python(_probe(), arch=arch, llvm_flavor=flavor)
@@ -125,7 +125,7 @@ def test_fenced_barrier_hip_emission():
     assert HIP_CLOB not in hip and "__builtin_amdgcn_fence" not in hip
 
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_cpp_engine_emits_the_same_fenced_barriers(arch, flavor):
     rocke_engine = pytest.importorskip("rocke_engine")

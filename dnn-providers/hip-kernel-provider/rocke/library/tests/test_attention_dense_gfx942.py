@@ -49,6 +49,7 @@ from kernels.gfx942.attention_dense import (
     run_attention_dense_torch,
     supports_attention_dense,
     _BLOCK_M,
+    _as_gfx942_spec,
     _DEFAULT_LDS_ROW_PAD,
     _FASTDIV_DIVIDEND_LIMIT,
     _k_group_pad_active,
@@ -266,7 +267,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "paged",
         "block_size",
         "num_kv_blocks",
-        "causal_bottom_right",
         "lds_num_buffers",
     }
 )
@@ -294,7 +294,7 @@ _SPEC_PERTURBATIONS = {
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
     "causal": (False, True),
-    "causal_bottom_right": (),  # unbuildable on gfx942
+    "causal_bottom_right": (True,),
     "dtype": ("bf16", "fp16"),
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
@@ -334,7 +334,9 @@ _PRIVATE_PERTURBATIONS = {
     "pv_priority": (1, 3),
     "pv_sched_fence_mask": (0, 0x108),
     "causal_diag_split": (True,),
+    "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
+    "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -352,6 +354,8 @@ _INJECTIVITY_BASES = {
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
+    # The sliding-window base is what makes window_wave_skip reachable.
+    "d128_fp16_swa": dict(head_size=128, dtype="fp16", sliding_window=128),
     "persistent_d128_fp16": dict(
         head_size=128,
         dtype="fp16",
@@ -797,9 +801,10 @@ def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     assert marker in why
 
 
-def test_shared_bottom_right_field_is_rejected_by_support_and_build():
-    """The reflected common field is outside gfx942's concrete contract."""
-    spec = AttentionDenseSpec(
+def test_bottom_right_is_supported_without_a_window():
+    """Bottom-right causal is the plain causal band shifted by seqlen_kv - seqlen_q;
+    a window cannot shift with it, so that combination stays rejected."""
+    common = dict(
         batch=1,
         seqlen_q=2048,
         seqlen_kv=4096,
@@ -811,11 +816,52 @@ def test_shared_bottom_right_field_is_rejected_by_support_and_build():
         block_n=64,
         causal_bottom_right=True,
     )
+    spec = AttentionDenseSpec(**common)
     ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert "_br_" in _as_gfx942_spec(spec).kernel_name()
+    build_attention_dense(spec, arch="gfx942")
+    windowed = AttentionDenseSpec(**{**common, "sliding_window": 128})
+    ok, why = supports_attention_dense(windowed, arch="gfx942")
     assert not ok
     assert "causal_bottom_right" in why
-    with pytest.raises(ValueError, match="causal_bottom_right"):
-        build_attention_dense(spec, arch="gfx942")
+
+
+def test_kv_segments_admission():
+    """The KV-segment split runs on the default grid only, and tags the name."""
+    base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=8192,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+        block_m=128,
+        block_n=64,
+        causal_bottom_right=True,
+    )
+    spec = Gfx942AttentionDenseSpec(**base, kv_segments=4)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert spec.kernel_name().endswith("_kvs4")
+    assert (
+        attention_dense_grid(spec)[0]
+        == 4 * attention_dense_grid(Gfx942AttentionDenseSpec(**base))[0]
+    )
+    for over in (
+        {"persistent": True},
+        {"use_sinks": True},
+        {"emit_lse": True},
+    ):
+        bad = Gfx942AttentionDenseSpec(**{**base, **over}, kv_segments=4)
+        ok, why = supports_attention_dense(bad, arch="gfx942")
+        assert not ok and "kv_segments" in why, over
+    ok, _ = supports_attention_dense(
+        Gfx942AttentionDenseSpec(**base, kv_segments=0), arch="gfx942"
+    )
+    assert not ok
 
 
 @pytest.mark.parametrize("block_n", [96, 160, 224])
@@ -955,7 +1001,9 @@ def test_supports_rejects_over_budget_lds():
     flips to ACCEPT and this test's premise would silently invert into a tautology.
     The pad=0 boundary is pinned deliberately in the test below.
     """
-    spec = _spec(block_n=128, head_size=128, dtype="bf16", lds_row_pad=8)
+    spec = _spec(
+        block_n=128, head_size=128, dtype="bf16", lds_row_pad=8, use_cfvst=False
+    )
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert not ok and "LDS" in why
     # the arithmetic the rejection rests on, spelled out so a capacity/pad change is loud
@@ -1136,12 +1184,12 @@ _CONTRACT_GRID = [
     # --- private: lds_row_pad / v_row_pad (the pad-value sweep surface) ---
     dict(lds_row_pad=0),  # accepted: the unpadded A/B arm
     dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements
-    dict(v_row_pad=16),  # accepted
+    dict(v_row_pad=16, use_v_swizzle=False),  # accepted (non-pow2 row: swizzle off)
     dict(v_row_pad=-4),  # REJECTED: negative
     # --- private: use_cfvst (the one tri-state with a rejected direction) ---
     dict(dtype="fp16", use_cfvst=False),  # accepted: OFF is always legal
     dict(head_size=64, use_cfvst=True),  # REJECTED: policy says off at D64
-    dict(dtype="bf16", head_size=128, use_cfvst=True),  # REJECTED: spills
+    dict(dtype="bf16", head_size=128, use_cfvst=True),  # accepted: policy on at D128
     # --- private: use_v_swizzle (independent of the pad; cfvst-gated) ---
     dict(dtype="fp16", use_v_swizzle=False),  # accepted: OFF is always legal
     dict(head_size=64, use_v_swizzle=True),  # REJECTED: no V^T path at D64
@@ -1153,6 +1201,9 @@ _CONTRACT_GRID = [
     dict(dtype="fp16", iglp=True),
     dict(iglp=True, pv_sched_fence_mask=0),  # REJECTED: iglp owns the schedule
     # --- private: performance-only codegen knobs ---
+    # --- private: kv_segments (default grid only) ---
+    dict(kv_segments=4),  # accepted
+    dict(kv_segments=4, persistent=True, num_persistent=304),  # REJECTED
     dict(lds_num_buffers=1),  # accepted: the only implemented depth
     dict(lds_num_buffers=2),  # REJECTED: NBUF=2 is not implemented
     dict(iglp=True, iglp_mode=1),  # accepted
@@ -1169,6 +1220,8 @@ _CONTRACT_GRID = [
     dict(causal_diag_split=True),  # accepted
     dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
     dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
+    dict(sliding_window=128, window_wave_skip=True),  # accepted
+    dict(window_wave_skip=True),  # REJECTED: needs a sliding window
     # --- private: emit_lse (no rejected region -- see the comment above) ---
     dict(emit_lse=False),
     dict(emit_lse=True, persistent=True, num_persistent=304),
@@ -1467,13 +1520,14 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
 @pytest.mark.parametrize(
     "head_size, dtype, block_n, expected",
     [
-        # cfvst path (fp16-D128): pad is DERIVED so V_LDROW = block_n + pad is the
-        # smallest pow2 >= max(64, block_n) -> the XOR swizzle engages at EVERY tile
-        # width, not only block_n=64.
+        # cfvst path (D128, both dtypes): pad is DERIVED so V_LDROW = block_n + pad is
+        # the smallest pow2 >= max(64, block_n) -> the XOR swizzle engages at EVERY
+        # tile width, not only block_n=64.
         (128, "fp16", 64, 0),  # shipped tile; V_LDROW=64 (golden pinned here)
         (128, "fp16", 32, 32),  # small-tile double-K variant; V_LDROW=64, swizzle ON
         (128, "fp16", 128, 0),  # wide tile; V_LDROW=128, swizzle ON
-        (128, "bf16", 64, 8),  # no cfvst (bf16 D128 spills) -> no swizzle
+        (128, "bf16", 64, 0),  # bf16 D128 takes the same transposed-V path
+        (128, "bf16", 32, 32),
         (64, "fp16", 64, 8),  # D64 naive-V layout -> no swizzle
         (64, "bf16", 64, 8),
     ],
@@ -1481,7 +1535,7 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
 def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
     head_size, dtype, block_n, expected
 ):
-    """On the cfvst path (fp16-D128) v_row_pad is DERIVED from block_n so V_lds is the
+    """On the cfvst path (D128) v_row_pad is DERIVED from block_n so V_lds is the
     smallest pow2 >= max(64, block_n) wide and the XOR bank-conflict swizzle engages at
     any tile width; 8 (no swizzle) everywhere else. This
     pins the derived values so a future edit that flips one arm updates this on purpose.
@@ -1495,10 +1549,11 @@ def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     V_LDROW = block_n + pad a pow2 >= 64 at EVERY block_n, so the swizzle never silently
     turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
     path stays unpadded (no swizzle)."""
-    v_ldrow = block_n + _v_row_pad(128, "fp16", block_n)
-    assert v_ldrow == _v_swizzle_width(block_n), (block_n, v_ldrow)
-    assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
-    assert _v_row_pad(128, "bf16", block_n) == 8
+    for dtype in ("fp16", "bf16"):
+        v_ldrow = block_n + _v_row_pad(128, dtype, block_n)
+        assert v_ldrow == _v_swizzle_width(block_n), (dtype, block_n, v_ldrow)
+        assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
+    assert _v_row_pad(64, "bf16", block_n) == 8
 
 
 @pytest.mark.parametrize("block_n", [64, 32])
@@ -1542,19 +1597,21 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
 
 def test_default_v_row_pad_resolves_through_policy():
     """The shipped default leaves ``v_row_pad=None`` and resolves through the policy,
-    derived from (head_size, dtype, block_n): fp16-D128 -> a pow2 (>=64) V_LDROW at any
+    derived from (head_size, dtype, block_n): D128 -> a pow2 (>=64) V_LDROW at any
     width (swizzle on), 8 otherwise; an explicit override still wins. Guards that
     production picks up the swizzle without a hand-set pad, at block_n 64 AND 32."""
     fp16_d128 = _spec(head_size=128, dtype="fp16")  # block_n=64 default
     fp16_d128_bn32 = _spec(head_size=128, dtype="fp16", block_n=32)
     bf16_d128 = _spec(head_size=128, dtype="bf16")
+    bf16_d64 = _spec(head_size=64, dtype="bf16")
     # Tri-state: the shipped default is None ("resolve through the policy"), so a
     # harness that omits the field tracks whatever ships instead of freezing a value.
     assert Gfx942AttentionDenseSpec.__dataclass_fields__["v_row_pad"].default is None
     assert fp16_d128.v_row_pad is None
     assert fp16_d128.resolved_v_row_pad() == 0  # V_LDROW=64, swizzle on
     assert fp16_d128_bn32.resolved_v_row_pad() == 32  # V_LDROW=64 too
-    assert bf16_d128.resolved_v_row_pad() == 8
+    assert bf16_d128.resolved_v_row_pad() == 0  # same transposed-V path as fp16
+    assert bf16_d64.resolved_v_row_pad() == 8
     assert dataclasses.replace(fp16_d128, v_row_pad=16).resolved_v_row_pad() == 16
 
 
@@ -1621,6 +1678,15 @@ def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
     names = list(_walk_op_names(loops[0]))
     n_exp = names.count("math.exp2_fast") + names.count("math.exp2")
     n_cast = names.count("arith.cast_f32_to")
+    if dtype == "bf16" and spec.resolved_use_cfvst():
+        # bf16 on the transposed-V path packs P with one perm_b32 per element pair
+        # (_pack_p_bf16) instead of a generic cast per element; the V^T store adds
+        # two perms per 2x2 block it owns.
+        threads = spec.block_m // 32 * 64
+        v_items = (spec.block_n // 2) * (head_size // 2) // threads
+        assert n_cast == 0, n_cast
+        assert names.count("tile.perm_b32") == n_p // 2 + 2 * v_items
+        n_cast = n_p
     # exactly one P cast per P element -- no second pass (o_acc rescale uses
     # fmul/vec_pack, not cast; the final output cast lives outside the loop).
     assert n_cast == n_p, (
@@ -1978,8 +2044,13 @@ def test_codegen_knob_moves_ir_and_name_together(overrides, token, marker):
     assert kd.name.endswith(token), kd.name
     assert _ir_body_sha(alt) != _ir_body_sha(base)
     if marker is not None:
-        assert marker in _lower(kd)
-        assert marker not in _lower(build_attention_dense(base, arch="gfx942"))
+        # Store markers are matched on the global (output) stores only: the
+        # transposed-V path also writes <2 x elem> vectors to LDS.
+        def text(ir):
+            return "\n".join(_global_stores(ir)) if marker.startswith("store ") else ir
+
+        assert marker in text(_lower(kd))
+        assert marker not in text(_lower(build_attention_dense(base, arch="gfx942")))
 
 
 def test_o_store_width_splits_every_store():
