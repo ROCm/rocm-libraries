@@ -407,10 +407,10 @@ struct data_set_t
     //                        DEFAULT COPIES AND MOVES
     //-------------------------------------------------------------------------
 
-    data_set_t(const data_set_t&)            = default;
+    data_set_t(const data_set_t&) = default;
     data_set_t& operator=(const data_set_t&) = default;
     data_set_t(data_set_t&&)                 = default;
-    data_set_t& operator=(data_set_t&&)      = default;
+    data_set_t& operator=(data_set_t&&) = default;
 
     // Prevent ill-defined objects as much as possible by privatizing
     // content-modifying members and default constructor.

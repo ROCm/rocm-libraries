@@ -911,7 +911,7 @@ NodeMetaData
         // from the current location. Temporary buffers on current device are used for input
         // and output of the execution plan. In-place default layout operations are
         // used to minimize the library's memory footprint.
-        root_plan.placement    = rocfft_placement_inplace;
+        root_plan.placement = rocfft_placement_inplace;
         root_plan_input_layout
             = data_set_t::default_full_range(desc.input_layout.lengths(),
                                              desc.input_layout.batch(),
@@ -2775,9 +2775,9 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     //       a uniform per-pair element count.
     struct IntersectionInfo
     {
-        size_t            inBrickIdx;
-        size_t            outBrickIdx;
-        data_set_t        intersection;
+        size_t     inBrickIdx;
+        size_t     outBrickIdx;
+        data_set_t intersection;
     };
     std::vector<IntersectionInfo> intersections;
 
