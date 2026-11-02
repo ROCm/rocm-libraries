@@ -31,8 +31,14 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Debug.hpp>
-#include <tensilelitehost/export.h>
+#if ORIGAMI_ENABLE_NN
+#include <origami/nn/nn.hpp>
+#endif
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -44,6 +50,26 @@ namespace TensileLite
         {
             using Library = ProblemPredictionLibrary<MyProblem, MySolution>;
             using iot     = IOTraits<IO>;
+
+            static std::string logic_stem_from_path(const std::string& path)
+            {
+                std::string stem     = path;
+                const auto  slashPos = stem.find_last_of("/\\");
+                if(slashPos != std::string::npos)
+                    stem = stem.substr(slashPos + 1);
+                const auto periodPos = stem.find('.');
+                if(periodPos != std::string::npos)
+                    stem = stem.substr(0, periodPos);
+                return stem;
+            }
+
+            static std::string directory_from_path(const std::string& path)
+            {
+                const auto slashPos = path.find_last_of("/\\");
+                if(slashPos == std::string::npos)
+                    return ".";
+                return path.substr(0, slashPos);
+            }
 
             static void mapping(IO& io, Library& lib)
             {
@@ -72,7 +98,8 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
+                    for(std::size_t local_index = 0; local_index < mappingIndices.size();
+                        local_index++)
                     {
                         int  index    = mappingIndices[local_index];
                         auto solution = resolveContextSolution(ctx, index);
@@ -124,7 +151,7 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
-                                .subtile                   = solution->sizeMapping.useSubtileImpl,
+                                .subtile = solution->sizeMapping.useSubtileImpl,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
@@ -172,10 +199,40 @@ namespace TensileLite
                     }
                     // Once per library load. rank_configs reads the flags.
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
+                    if(auto const* observe = Library::deserializeObserver)
+                        (*observe)(lib);
+
+#if ORIGAMI_ENABLE_NN
+                    const std::string logicStem = logic_stem_from_path(ctx->filename);
+                    const std::string dataDir   = directory_from_path(ctx->filename);
+                    lib.nn_models = origami::nn::load_models_for_logic(logicStem, dataDir);
+                    if(const char* diag = std::getenv("ORIGAMI_NN_DIAG"))
+                    {
+                        if(diag[0] != '\0' && std::strcmp(diag, "0") != 0)
+                        {
+                            std::fprintf(stderr,
+                                         "[ORIGAMI_NN_DIAG] PredictionLibrary stem=%s dir=%s "
+                                         "tilewright_handle=%d\n",
+                                         logicStem.c_str(),
+                                         dataDir.c_str(),
+                                         lib.nn_models.tilewright);
+                            std::fflush(stderr);
+                        }
+                    }
+#endif
+                    // Not while a library manifest is collected (OrigamiBoost::libraryManifest).
+                    if(OrigamiBoost::enabled() && !Library::deserializeObserver)
+                    {
+                        lib.nn_models.boost
+                            = OrigamiBoost::loadForLogic(logic_stem_from_path(ctx->filename),
+                                                         directory_from_path(ctx->filename));
+                        if(lib.nn_models.boost >= 0)
+                            lib.solution_name_ids
+                                = OrigamiBoost::solutionNameIds(lib.solution_list);
+                    }
                 }
             }
             const static bool flow = false;
         };
     } // namespace Serialization
 } // namespace TensileLite
-

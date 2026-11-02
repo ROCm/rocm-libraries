@@ -1,4 +1,4 @@
-# Origami: Analytical Solution Selection for GEMM Kernels
+#Origami : Analytical Solution Selection for GEMM Kernels
 
 **Origami** provides a fast, analytical, deterministic methodology to select optimal GEMM configuration (such as tile size) for out-of-the-box GEMM performance. Origami estimates performance by sweeping over candidate configs (tile sizes and mapping) to select the optimal configuration based on **compute** and **memory latencies**.
 
@@ -16,6 +16,13 @@
   - [C++](#build-and-install-origami-c)
   - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
+  - [Neural Network (NN) Backend](#neural-network-nn-backend)
+    - [Supported Backends](#supported-backends)
+    - [Building with NN On or Off](#building-with-nn-on-or-off)
+    - [Model Weights](#model-weights)
+    - [Runtime Configuration](#runtime-configuration)
+    - [hipBLASLt Integration](#hipblaslt-integration)
+    - [NN Tests](#nn-tests)
 - [Debug Logging](#debug-logging)
   - [Text Log](#text-log)
   - [CSV Log](#csv-log)
@@ -41,11 +48,10 @@ pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/o
 
 ```python
 import origami
-
-# Get hardware information for device 0
+#Get hardware information for device 0
 hardware = origami.get_hardware_for_device(0)
 
-# Create a problem description
+#Create a problem description
 problem = origami.problem_t()
 problem.size = origami.dim3_t(2048, 2048, 2048)  # M, N, K dimensions
 problem.batch = 1
@@ -59,7 +65,7 @@ problem.mi_dtype = origami.data_type_t.Half
 problem.a_mx_block_size = 0
 problem.b_mx_block_size = 0
 
-# Create candidate configurations
+#Create candidate configurations
 configs = []
 config = origami.config_t()
 config.mt = origami.dim3_t(256, 256, 64)  # Macro tile dimensions
@@ -67,7 +73,7 @@ config.mi = origami.dim3_t(16, 16, 32)    # Matrix instruction dimensions
 config.occupancy = 4
 configs.append(config)
 
-# Select best configuration
+#Select best configuration
 best_result = origami.select_config(problem, hardware, configs)
 print(f"Best latency: {best_result.latency}")
 print(f"Best config: MT=({best_result.config.mt.m}, {best_result.config.mt.n}, {best_result.config.mt.k})")
@@ -76,69 +82,67 @@ print(f"Best config: MT=({best_result.config.mt.m}, {best_result.config.mt.n}, {
 ### C++ API
 
 ```cpp
+#include <iostream>
+#include <vector>
 #include "origami/origami.hpp"
 #include "origami/types.hpp"
-#include <vector>
-#include <iostream>
 
 int main() {
-    // Get hardware information for device 0
-    auto hardware = origami::hardware_t::get_hardware_for_device(0);
-    
-    // Create a problem description
-    origami::problem_t problem;
-    problem.size.m = 2048;  // M dimension
-    problem.size.n = 2048;  // N dimension
-    problem.size.k = 2048;  // K dimension
-    problem.batch = 1;
-    problem.a_transpose = origami::transpose_t::T;
-    problem.b_transpose = origami::transpose_t::N;
-    problem.a_dtype = origami::data_type_t::Half;
-    problem.b_dtype = origami::data_type_t::Half;
-    problem.c_dtype = origami::data_type_t::Half;
-    problem.d_dtype = origami::data_type_t::Half;
-    problem.mi_dtype = origami::data_type_t::Half;
-    problem.a_mx_block_size = 0;
-    problem.b_mx_block_size = 0;
-    
-    // Create candidate configurations
-    std::vector<origami::config_t> configs;
-    origami::config_t config;
-    config.mt.m = 256;  // Macro tile M
-    config.mt.n = 256;  // Macro tile N
-    config.mt.k = 64;   // Macro tile K
-    config.mi.m = 16;   // Matrix instruction M
-    config.mi.n = 16;   // Matrix instruction N
-    config.mi.k = 32;   // Matrix instruction K
-    config.occupancy = 4;
-    configs.push_back(config);
-    
-    // Select best configuration
-    auto best_result = origami::select_config(problem, hardware, configs);
-    std::cout << "Best latency: " << best_result.latency << std::endl;
-    std::cout << "Best config: MT=(" 
-              << best_result.config.mt.m << ", " 
-              << best_result.config.mt.n << ", " 
-              << best_result.config.mt.k << ")" << std::endl;
-    
-    // Alternative: Simple selection using just M, N, K
-    auto best_result_simple = origami::select_config_mnk(2048, 2048, 2048, hardware, configs);
-    
-    // Rank all configurations by performance
-    auto ranked_configs = origami::rank_configs(problem, hardware, configs);
-    std::cout << "Top 5 configs:" << std::endl;
-    for (size_t i = 0; i < std::min(ranked_configs.size(), size_t(5)); ++i) {
-        const auto& result = ranked_configs[i];
-        std::cout << "  Rank " << (i+1) << ": latency=" << result.latency 
-                  << ", MT=(" << result.config.mt.m << ", " 
-                  << result.config.mt.n << ", " << result.config.mt.k << ")" << std::endl;
-    }
-    
-    // Compute performance in GFLOPS
-    double gflops = origami::compute_perf_gflops(hardware, problem, best_result.latency);
-    std::cout << "Performance: " << gflops << " GFLOPS" << std::endl;
-    
-    return 0;
+  // Get hardware information for device 0
+  auto hardware = origami::hardware_t::get_hardware_for_device(0);
+
+  // Create a problem description
+  origami::problem_t problem;
+  problem.size.m          = 2048;  // M dimension
+  problem.size.n          = 2048;  // N dimension
+  problem.size.k          = 2048;  // K dimension
+  problem.batch           = 1;
+  problem.a_transpose     = origami::transpose_t::T;
+  problem.b_transpose     = origami::transpose_t::N;
+  problem.a_dtype         = origami::data_type_t::Half;
+  problem.b_dtype         = origami::data_type_t::Half;
+  problem.c_dtype         = origami::data_type_t::Half;
+  problem.d_dtype         = origami::data_type_t::Half;
+  problem.mi_dtype        = origami::data_type_t::Half;
+  problem.a_mx_block_size = 0;
+  problem.b_mx_block_size = 0;
+
+  // Create candidate configurations
+  std::vector<origami::config_t> configs;
+  origami::config_t config;
+  config.mt.m      = 256;  // Macro tile M
+  config.mt.n      = 256;  // Macro tile N
+  config.mt.k      = 64;   // Macro tile K
+  config.mi.m      = 16;   // Matrix instruction M
+  config.mi.n      = 16;   // Matrix instruction N
+  config.mi.k      = 32;   // Matrix instruction K
+  config.occupancy = 4;
+  configs.push_back(config);
+
+  // Select best configuration
+  auto best_result = origami::select_config(problem, hardware, configs);
+  std::cout << "Best latency: " << best_result.latency << std::endl;
+  std::cout << "Best config: MT=(" << best_result.config.mt.m << ", " << best_result.config.mt.n
+            << ", " << best_result.config.mt.k << ")" << std::endl;
+
+  // Alternative: Simple selection using just M, N, K
+  auto best_result_simple = origami::select_config_mnk(2048, 2048, 2048, hardware, configs);
+
+  // Rank all configurations by performance
+  auto ranked_configs = origami::rank_configs(problem, hardware, configs);
+  std::cout << "Top 5 configs:" << std::endl;
+  for (size_t i = 0; i < std::min(ranked_configs.size(), size_t(5)); ++i) {
+    const auto& result = ranked_configs[i];
+    std::cout << "  Rank " << (i + 1) << ": latency=" << result.latency << ", MT=("
+              << result.config.mt.m << ", " << result.config.mt.n << ", " << result.config.mt.k
+              << ")" << std::endl;
+  }
+
+  // Compute performance in GFLOPS
+  double gflops = origami::compute_perf_gflops(hardware, problem, best_result.latency);
+  std::cout << "Performance: " << gflops << " GFLOPS" << std::endl;
+
+  return 0;
 }
 ```
 
@@ -206,7 +210,7 @@ Build Python bindings using CMake from the `shared/origami` directory:
 ```bash
 cd shared/origami
 
-# configure with python bindings and tests enabled 
+#configure with python bindings and tests enabled 
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
@@ -214,10 +218,10 @@ cmake -S . -B build/ \
   -DORIGAMI_ENABLE_PYTHON=ON \
   -DORIGAMI_BUILD_TESTING=ON
 
-# build 
+#build 
 cmake --build build/ --parallel
 
-# run tests
+#run tests
 cd build/
 ctest --output-on-failure
 ```
@@ -229,20 +233,20 @@ Build the C++ library from the `shared/origami` directory:
 ```bash
 cd shared/origami
 
-# configure
+#configure
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
   -DCMAKE_INSTALL_PREFIX=/opt/rocm
 
-# build
+#build
 cmake --build build/ --parallel
 ```
 
 After configuring and building, run the following command to install:
 
 ```bash
-# install
+#install
 cmake --install build/
 ```
 
@@ -254,7 +258,7 @@ cmake --install build/
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
-
+| `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, TWREC loader, tilewright ranking in `rank_configs`). The boost backend is built either way. | `OFF` |
 
 ## Origami Tests
 
@@ -312,6 +316,242 @@ Run selector tests (requires torch):
 ```bash
 python -m pytest tests/test_selector.py -v
 ```
+
+## Neural Network (NN) Backend
+
+Origami can rank GEMM kernel candidates with an optional **neural-network backend** in addition to the default analytical roofline model. NN inference is wired through `origami::rank_configs` via `rank_options_t`: callers choose **analytical**, **NN-only**, **NN with analytical fallback**, or **analytical with a re-rank** of its top candidates.
+
+When `ORIGAMI_ENABLE_NN=OFF`, the tilewright code is compiled out and `rank_configs` never ranks with it (`inference_mode_t::nn` throws at runtime). The boost re-rank backend has no NN or YAML dependency and is built either way.
+
+### Supported Backends
+
+| Backend | `nn_backend_t` | Status | Weights format |
+|---------|----------------|--------|----------------|
+| **tilewright** | `tilewright` | Implemented (TWREC loader + in-tree inference) | TWREC YAML manifest (`.tilewright.yaml`) + int4 sidecar (`.tilewright.wts.yaml`) |
+| **embedding_similarity** | `embedding_similarity` | API stub only (not yet loadable) | — |
+| **boost** | `boost` | Implemented (ORIBOOST loader + in-tree evaluation); re-rank only (`analytical_rerank`) | ORIBOOST binary (`.orr`) |
+
+**tilewright** is a split-tree, per-cell two-tower MLP recommender. Models are keyed by Tensile logic-library stem (dtype + transpose) and discovered from `origami_nn_index` colocated with the kernel library.
+
+**gfx950 weights shipped in-tree** (`data/nn/tilewright/gfx950/`):
+
+| Dtype family | Tensile type | Transpose layouts |
+|------------|--------------|-------------------|
+| bf16 BBS (`bf16_r`) | `BB_BB` | TN, NN, TT, NT (all four) |
+| fp8 F8BS | `F8F8_BF8` | NN only |
+| mxfp8 S_MX_B | `SS_SS` | TN, NN, TT, NT (all four) |
+
+If no model exists for a given logic stem, `load_models_for_logic` returns `invalid_handle` (`-1`) and `rank_configs` falls back to analytical when `ORIGAMI_INFERENCE_MODE=nn_fallback`.
+
+**boost** (Origami Boost) is a gradient-boosted tree ensemble that predicts each candidate's `log(measured / origami_latency)`. With `inference_mode_t::analytical_rerank`, `rank_configs` ranks analytically and hands the results to the caller's `rerank_source_t::prepare` (its own adjustment of the order, if any); the backend then takes the first `top_n` (10) results the caller accepts, orders them by `origami_latency * exp(yhat)` (the prepared order on ties) and moves them to the front; every other result keeps its prepared order. Its 161 features (`features/gemm_boost`, schema c6-4) are a name mapping of Origami's own intermediates (`compute_gemm_intermediates` in `origami/gemm_intermediates.hpp`, also in the Python bindings) plus kernel fields the caller supplies per candidate (`nn/boost/types.hpp`: `rerank_source_t`, `kernel_fields_t`, including the kernel's Stream-K launch). One model serves a dtype class on one arch, shared by the class's logic stems: bf16 (A/B BFloat16), tf32 (A/B/C/D f32 with xf32 math) or fp8 (F8BS: A/B Float8 into Float8 math, C/D BFloat16, no MX blocks).
+
+A boost model is checked when it loads (`nn/boost/load_validate.hpp`) and refused unless it matches: arch, dtype class, feature-schema hash and Origami source hash (sha256 of the analytical sources at configure time; the `nn/` tree is excluded), and the kernel library by manifest diff (`nn/boost/library_stamp.hpp`): kernels may be removed, and added when their gated structural values (DTL, MFMA, LDS mode, one LDS buffer, MT_K) were seen in training. Every call it declines (problem of another dtype class or outside the training M/N/K/batch ranges, fewer than two candidates, a feature it cannot compute) leaves the prepared order unchanged and reports why to the caller (`rerank_source_t::outcome`). A CU budget (`problem_t::num_cus`) is not a range: the features see it. A model's RNGE section holds exactly M, N, K and batch, each once; a file with any other range (for example `num_cus`) is refused at load.
+
+### Building with NN On or Off
+
+**Default (analytical-only)** — `ORIGAMI_ENABLE_NN` is `OFF` unless explicitly enabled:
+
+```bash
+cd shared/origami
+
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_BUILD_TESTING=ON
+
+cmake --build build/ --parallel
+```
+
+**NN enabled** — opt in to the TWREC loader, tilewright inference, and filter stack:
+
+```bash
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_ENABLE_NN=ON \
+  -DORIGAMI_BUILD_TESTING=ON
+
+cmake --build build/ --parallel
+```
+
+With `ORIGAMI_ENABLE_NN=ON`, Origami can load TWREC YAML manifests/sidecars from `data/nn/tilewright/,<arch>` (typically fetched externally). Boost models (`data/nn/boost/<arch>`) load in both configurations.
+
+**hipBLASLt** uses the same `ORIGAMI_ENABLE_NN` option (default **OFF**). Enable NN when configuring hipBLASLt:
+
+```bash
+cmake -S projects/hipblaslt -B build/ -DORIGAMI_ENABLE_NN=ON
+```
+
+After a hipBLASLt build, YAML weights (with `ORIGAMI_ENABLE_NN=ON`) and boost models are copied next to each arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding both backends' entries, and installed with the library (`lib/hipblaslt/library/<arch>/` on Linux).
+
+Check whether NN was built:
+
+```bash
+grep ORIGAMI_ENABLE_NN build/origami-config.cmake
+# or inspect compile definitions on the origami target
+```
+
+### Model Weights
+
+Weights live under:
+
+```
+shared/origami/data/nn/tilewright/<arch>/
+  origami_nn_index          # maps logic_stem → backend → manifest
+  *.tilewright.yaml         # TWREC manifest (routing + cell metadata)
+  *.tilewright.wts.yaml     # int4_b64 weight sidecar
+```
+
+Index format (tab-separated):
+
+```
+<logic_stem>  tilewright  <manifest.yaml>
+```
+
+Load programmatically:
+
+```cpp
+#include "origami/nn/nn.hpp"
+
+auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
+// models.tilewright >= 0 on success; -1 if stem not in index
+```
+
+For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` when tilewright integration tests are added.
+
+Boost models live under `shared/origami/data/nn/boost/<arch>/` (`origami_nn_index` and the `origami_boost_<arch>_<dtype>.orr` models, all tracked) with index lines
+
+```
+<logic_stem>  boost  origami_boost_<arch>_<dtype>.orr
+```
+
+A boost model is loaded for the library it serves, since its checks need that library's manifest:
+
+```cpp
+#include "origami/nn/nn.hpp"
+
+const std::string path =
+    origami::nn::index_weights_path(logic_stem, origami::nn::backend_id_t::boost_v1, library_dir);
+origami::nn::boost::deployment_t target{"gfx950", "bf16", &library_manifest};
+origami::nn::boost::status_t status;
+std::string detail;
+auto handle = origami::nn::load_boost_model(path, target, &status, &detail);
+// handle >= 0 on success; -1 with status / detail saying why the model was refused
+```
+
+#### Shipped Origami Boost models
+
+`data/nn/boost/gfx950/` ships one model per dtype class (`origami_boost_gfx950_{bf16,tf32,fp8}.orr`). hipBLASLt colocates them next to the gfx950 kernel library and installs them with it; they are used only with `HIPBLASLT_ORIGAMI_BOOST=1`. A model is stamped with the Origami sources it was trained against (`origami_source_hash`: the configure-time `ORIGAMI_SOURCE_HASH` of `shared/origami/CMakeLists.txt`, over the `.hpp` files of `include/origami/` except `include/origami/nn/` and the `.cpp`/`.hpp` files of `src/origami/` and `src/simulator/`), so **any edit to those files makes every build refuse the shipped models** until they are re-stamped or retrained. Two tests fail loudly instead of letting that ship:
+
+* `origami-tests "[shipped]"` (`Origami Boost: shipped models load in this build`): every shipped model must be readable and match this build's arch, dtype, feature schema and Origami source hash. On a source-hash mismatch it computes the model features on the feature-parity samples (`tests/data/boost/parity_reference_v4*.csv`) and compares them bit for bit with `tests/data/boost/feature_digests.txt`, the features the models were validated with. Bit-identical: the models are still valid and the test prints the re-stamp command. Changed: the models must be retrained, and the test names the changed columns.
+* `tensilelite-tests` `OrigamiBoostLibrary.ShippedModelsAcceptBuiltLibrary`: every shipped model must be accepted against the kernel library the build made (the manifest diff hipBLASLt runs at load), so a library change the model was not trained for (`RETRAIN-REQUIRED`) fails too, and the library directory's copies must be the shipped files. It reads `<HIPBLASLT_TENSILE_LIBPATH>/library` (or the installed `lib/hipblaslt/library`, or `HIPBLASLT_ORIGAMI_BOOST_TEST_LIBRARY`) and skips without a built library or a HIP device.
+
+When `"[shipped]"` says the sources changed but the features are bit-identical, re-stamp and commit the models with the source change (from the repository root):
+
+```bash
+./build/tests/origami-tests "[boost]"                   # the parity tests pass
+python3 shared/origami/tools/origami_boost_restamp.py   # HEAD stamps only; trees, features, manifest byte-identical
+./build/tests/origami-tests "[shipped]"                 # passes now
+git add shared/origami/data/nn/boost
+```
+
+`origami_boost_restamp.py` needs only the Python standard library; it computes the source hash with the CMake rule (`--source-hash` prints it) and `--check` exits 1 while a model is stale.
+
+When the features changed, or the kernel library test reports `RETRAIN-REQUIRED`, the models must be retrained. Training and export live outside this repository (OrigamiML and its ORIBOOST exporter); contact the Origami Boost owners (@ROCm/origami-reviewers; models: @aliry95amd). A retrained model replaces the file here, and the digests are recorded at the same time:
+
+```bash
+ORIGAMI_BOOST_RECORD_FEATURE_DIGESTS=$PWD/shared/origami/tests/data/boost/feature_digests.txt \
+    ./build/tests/origami-tests "[shipped]"
+```
+
+
+### Runtime Configuration
+
+NN routing is controlled by `rank_options_t` fields and environment variables. Explicit `rank_options_t` values take precedence over environment defaults.
+
+#### Inference mode
+
+| `ORIGAMI_INFERENCE_MODE` | Behavior |
+|--------------------------|----------|
+| *(unset)* or `analytical` | Analytical roofline model (default) |
+| `nn` | ML ranking only; throws if no model resolves or inference fails |
+| `nn_fallback` | ML when a model is available; otherwise analytical |
+
+`inference_mode_t::analytical_rerank` (analytical, then the boost re-rank) is set through `rank_options_t` only, with the caller's `rank_options.nn.rerank_source`.
+
+#### Backend selection
+
+| `ORIGAMI_NN_BACKEND` | Behavior |
+|----------------------|----------|
+| *(unset)* or `auto` | Prefer tilewright handle from `library_models`, then session default |
+| `tilewright` | Force tilewright backend |
+| `embedding_similarity` | Force embedding-similarity backend (not yet implemented) |
+
+With `analytical_rerank`, `auto_select` and `nn_backend_t::boost` resolve the boost handle (`nn_model`, then `library_models->boost`, then the session default).
+
+#### Diagnostics
+
+| Variable | Description |
+|----------|-------------|
+| `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts) or a boost model (`arch`, dtype, schema, columns, trees) |
+| `ORIGAMI_NN_WEIGHTS` | Tests: override path to a `.tilewright.yaml` manifest |
+| `ORIGAMI_TW_LOG` | Log top-1 tilewright pick per `rank_configs` call (`[TW_PICK]` line on stderr) |
+| `ORIGAMI_TW_CELL` | Debug: force TWREC cell index (overrides routing); also via `rank_options.nn.force_cell` |
+
+#### hipBLASLt row filter
+
+| Variable | Description |
+|----------|-------------|
+| `TENSILE_PREDICTION_LIB=1` | Use `PredictionMatching` rows in `ExactLogicLibrary` (required for NN path in hipBLASLt bench) |
+| `HIPBLASLT_ORIGAMI_BOOST=1` | Load boost models with the prediction rows that use them and re-rank their candidates (default off) |
+
+### hipBLASLt Integration
+
+Example: run hipblaslt-bench with tilewright NN fallback on gfx950 bf16 TN layout:
+
+```bash
+export TENSILE_PREDICTION_LIB=1
+export ORIGAMI_INFERENCE_MODE=nn_fallback
+export ORIGAMI_NN_BACKEND=tilewright
+export HIPBLASLT_TENSILE_LIBPATH=/path/to/build/Tensile/library/gfx950
+
+hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
+  --transA T --transB N --bias_vector
+```
+
+Use `ORIGAMI_INFERENCE_MODE=nn` to require ML ranking (no silent analytical fallback). Set `ORIGAMI_NN_DIAG=1` to verify model load for the active logic stem.
+
+Example: the same layout with the boost re-rank:
+
+```bash
+export TENSILE_PREDICTION_LIB=1
+export HIPBLASLT_ORIGAMI_BOOST=1
+export HIPBLASLT_TENSILE_LIBPATH=/path/to/build/Tensile/library/gfx950
+
+hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
+  --transA T --transB N --bias_vector
+```
+
+hipBLASLt loads a prediction row's boost model when it deserializes the row (`OrigamiBoost::loadForLogic`: once per model file, against the build and the library directory's prediction-row manifest) and passes `analytical_rerank` with a `rerank_source_t`: its `prepare` applies the row's Stream-K cluster charge (as for the analytical order), and its candidates are the configs that pass the row's predicates, one per kernel name; their kernel fields are the solution's `NumLoadsCoalesced` and its Stream-K launch on the call (`ContractionSolution::computeStreamKDecisions`, including the `--sm_count_target` CU budget). FP8 re-ranks plain F8BS calls (Float8 compute input, A/B scales unset or scalar); vector-scaled (A/B or alpha), MX and swizzled calls keep Origami's order. Tuned `Equality`/`Range` rows still take precedence: only the `PredictionMatching` row's candidates are re-ranked. A boost request in `rank_options_t` takes precedence over `ORIGAMI_INFERENCE_MODE` / `ORIGAMI_NN_BACKEND`, as explicit options do. With `HIPBLASLT_LOG_MASK` including info, each call logs `Origami Boost ok ...` or `Origami Boost fallback (<reason>) ...`.
+
+### NN Tests
+
+Build with `ORIGAMI_ENABLE_NN=ON` and testing enabled, then run NN-specific Catch2 tags:
+
+```bash
+cd shared/origami
+
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_ENABLE_NN=ON \
+  -DORIGAMI_BUILD_TESTING=ON
+
+cmake --build build/ --parallel
+./build/tests/origami-tests "[nn]"
+```
+
+When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out; the boost tests (`[nn][boost]`) run in both configurations. Their models and feature-parity samples (bf16, tf32, fp8) are the small fixtures in `tests/data/boost/`; `[shipped]` checks the shipped models in `data/nn/boost/` (see "Shipped Origami Boost models").
 
 ## Debug Logging
 
@@ -372,7 +612,8 @@ If you want to submit an issue, you can do so on
 If you use Origami or reference it in your research, please cite our work:
 
 ```bibtex
-@misc{Swann:2025:TTB,
+@misc{
+Swann:2025:TTB,
   title={{tritonBLAS}: Triton-based Analytical Approach for GEMM Kernel Parameter Selection}, 
   author={Ryan Swann and Muhammad Osama and Xiaohu Guo and Bryant Nelson and Lixun Zhang and Alex Brown and Yen Ong and Ali Yazdani and Sean Siddens and Ganesh Dasika and Alex Underwood},
   year={2025},

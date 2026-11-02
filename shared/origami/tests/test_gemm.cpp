@@ -28,6 +28,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include "common.hpp"
+#include "origami/gemm_intermediates.hpp"
 
 using Catch::Approx;
 
@@ -2615,4 +2616,68 @@ TEST_CASE("GEMM: narrow local reads cost latency only when LDS-bound", "[gemm][l
       REQUIRE(tile(nn, 16, 64, 1, 4, 1) > tile(nn, 16, 64, 1, 4, 8));
     }
   }
+}
+
+TEST_CASE("GEMM: latency terms are the stock latencies' own", "[gemm][intermediates]") {
+  // compute_tile_latency_terms / compute_memory_latency_terms evaluate the same code as
+  // compute_tile_latency / compute_memory_latency, so the totals are bit-identical, and the
+  // recorded terms recombine to the tile total as gemm.cpp sums them.
+  int n = 0, tails = 0, lsus = 0, one_lds = 0, tf32 = 0;
+  for (int arch : test_architectures) {
+    const auto hw = make_hardware(arch);
+    for (const auto& s : std::vector<std::array<size_t, 4>>{
+             {4096, 4096, 4096, 1}, {8192, 1024, 4127, 1}, {7, 4096, 2050, 1}, {1024, 1024, 8192, 4}})
+      for (bool xf32 : {false, true})
+        for (const auto& t : std::vector<std::array<size_t, 6>>{{256, 256, 64, 16, 16, 32},
+                                                                {128, 128, 64, 16, 16, 32},
+                                                                {256, 128, 128, 32, 32, 16},
+                                                                {256, 256, 32, 16, 16, 32}})
+          for (int lsu : {1, 2})
+            for (bool one : {false, true}) {
+              auto p = make_problem(s[0], s[1], s[2], origami::transpose_t::N,
+                                    origami::transpose_t::T, s[3]);
+              set_problem_dtypes(p, xf32 ? origami::data_type_t::XFloat32
+                                         : origami::data_type_t::BFloat16);
+              auto c = make_config(t[0], t[1], t[2], t[3], t[4], t[5], false, 8, 2, 0, 0, 0);
+              auto& tp                = c.tensile();
+              tp.wave_group_m         = 2;
+              tp.wave_group_n         = 2;
+              tp.local_split_u        = lsu;
+              tp.one_lds_buffer       = one;
+              tp.prefetch_global_read = 2;
+              const origami::gemm::context_t ctx(p, hw, c);
+              if (!ctx.is_valid()) continue;
+              const auto terms = origami::gemm::compute_tile_latency_terms(p, hw, c, ctx);
+              REQUIRE(terms.L_tile_total == origami::gemm::compute_tile_latency(p, hw, c, ctx));
+              REQUIRE(terms.memory.L_mem == origami::gemm::compute_memory_latency(p, hw, c, ctx));
+              const auto mem = origami::gemm::compute_memory_latency_terms(p, hw, c, ctx);
+              REQUIRE(mem.L_mem == terms.memory.L_mem);
+              REQUIRE(mem.L_mem == std::max({mem.L_mem_l2, mem.L_mem_mall, mem.L_mem_dram}));
+              REQUIRE(terms.L_mt_compute ==
+                      static_cast<double>(origami::gemm::compute_mt_compute_latency(p, hw, c)));
+              REQUIRE(terms.L_mainloop == terms.L_main + terms.L_ngll + terms.L_nll + terms.L_tail +
+                                              terms.L_pgr_stall + terms.L_loop_overhead +
+                                              terms.L_single_lds_buffer + terms.L_du_waste);
+              REQUIRE(terms.L_tile_total == (terms.L_prologue + terms.L_mainloop +
+                                             terms.L_epilogue + terms.L_lsu_reduce) *
+                                                terms.weight_tile_total);
+
+              const double total = origami::gemm::compute_total_latency(p, hw, c);
+              const auto   I     = origami::gemm::compute_gemm_intermediates(p, hw, c, total);
+              REQUIRE(I.tile.L_tile_total == terms.L_tile_total);
+              REQUIRE(I.context.num_output_tiles == ctx.num_output_tiles);
+              REQUIRE(I.total_latency == total);
+              REQUIRE(I.tile_waves_304 == static_cast<double>(ctx.num_output_tiles) / 304.0);
+              ++n;
+              tails += terms.L_tail > 0.0;
+              lsus += terms.L_lsu_reduce > 0.0;
+              one_lds += terms.L_single_lds_buffer > 0.0;
+              tf32 += terms.L_cvt > 0.0;
+            }
+  }
+  REQUIRE(n > 0);
+  REQUIRE(tails > 0);
+  REQUIRE(lsus > 0);
+  REQUIRE(one_lds > 0);
+  REQUIRE(tf32 > 0);
 }

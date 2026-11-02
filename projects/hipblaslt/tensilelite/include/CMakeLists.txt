@@ -51,6 +51,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MasterSolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MatchingLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/OrigamiBoost.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PerformanceMetricTypes.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PlaceholderLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PredicateDebugger.hpp"

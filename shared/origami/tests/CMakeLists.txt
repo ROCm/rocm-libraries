@@ -22,10 +22,33 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_boost.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_boost_eval.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_boost_library.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_streamk.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_nn.cpp"
+)
+
+set(_origami_tw_weights_dir
+    "${CMAKE_CURRENT_SOURCE_DIR}/../data/nn/tilewright/gfx950"
+)
+set(_origami_tw_logic_stem
+    "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950"
+)
+
+target_compile_definitions(
+    origami-tests
+    PRIVATE ORIGAMI_TEST_TW_WEIGHTS_DIR="${_origami_tw_weights_dir}"
+            ORIGAMI_TEST_TW_LOGIC_STEM="${_origami_tw_logic_stem}"
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+get_filename_component(_origami_source_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+target_compile_definitions(
+    origami-tests PRIVATE ORIGAMI_BOOST_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data/boost"
+                          ORIGAMI_BOOST_SHIPPED_MODELS="${_origami_source_root}/data/nn/boost"
+                          ORIGAMI_SOURCE_ROOT="${_origami_source_root}"
+)
 
 target_link_libraries(origami-tests PRIVATE roc::origami Catch2::Catch2WithMain)
 

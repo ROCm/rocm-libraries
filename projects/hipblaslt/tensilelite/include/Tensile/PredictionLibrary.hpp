@@ -28,14 +28,22 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/OrigamiBoost.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
+
+#if ORIGAMI_ENABLE_NN
+#  include <origami/nn/nn.hpp>
+#endif
 
 #include <tensilelitehost/export.h>
 
@@ -56,7 +64,18 @@ namespace TensileLite
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
 
+        origami::nn::library_models_t nn_models;
+
+        /// With a Boost model: per solution_list entry, the position of the first entry with
+        /// the same solutionName (the re-rank skips repeated kernels by name; set with the model).
+        std::vector<std::uint32_t> solution_name_ids;
+
         mutable std::atomic<bool> lastFindTopRetAll = false;
+
+        /// When set, called with each prediction row as it is deserialized on this thread
+        /// (OrigamiBoost builds the library manifest of a model from it).
+        static inline thread_local std::function<void(ProblemPredictionLibrary const&)> const*
+            deserializeObserver = nullptr;
 
         static std::string Type()
         {
@@ -146,6 +165,8 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
+            if(numSolutions == 0)
+                return rv;
             size_t                     m     = 1;
             size_t                     n     = 1;
             size_t                     k     = 1;
@@ -171,7 +192,7 @@ namespace TensileLite
 
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
-            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+            auto matches = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
                 // With uniform summation order off, the filter stays
@@ -197,7 +218,40 @@ namespace TensileLite
                     PredicateDebugger::printFooter(std::cout, predicateMatch);
                 }
 
-                if(predicateMatch)
+                return predicateMatch;
+            };
+
+            // Origami currently models individual output tiles. A spatial
+            // StreamK block also launches its padded edge peers; charge for
+            // that footprint before truncating the analytical candidate list.
+            // Index lookup and measured/exact libraries do not use this path.
+            auto chargeStreamKClusters = [&](std::vector<origami::prediction_result_t>& results) {
+                for(auto& r : results)
+                {
+                    if(r.config.index < solution_list.size())
+                        r.latency /= solution_list[r.config.index].second
+                                         ->streamKClusterUtilization(problem);
+                }
+                std::stable_sort(results.begin(), results.end(),
+                                 [](auto const& a, auto const& b) { return a.latency < b.latency; });
+            };
+
+            // Origami Boost's re-rank: it re-orders the charged order and takes the predicate
+            // verdicts of the configs it offers.
+            OrigamiBoost::RerankSource<MyProblem,
+                                       MySolution,
+                                       decltype(matches),
+                                       decltype(chargeStreamKClusters)>
+                rerankSource(problem,
+                             hardware,
+                             solution_list,
+                             solution_name_ids,
+                             matches,
+                             chargeStreamKClusters);
+
+            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+                const int known = rerankSource.verdict(solution.get());
+                if(known < 0 ? matches(solution) : known == 1)
                 {
                     rv.emplace_back(solution);
                 }
@@ -225,21 +279,27 @@ namespace TensileLite
                     .b_mx_block_size = 0, // MX Data types come from rocroller
                 };
 
-                auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
-
-                // Origami currently models individual output tiles. A spatial
-                // StreamK block also launches its padded edge peers; charge for
-                // that footprint before truncating the analytical candidate list.
-                // Index lookup and measured/exact libraries do not use this path.
-                for(auto& r : prediction_result)
+                origami::rank_options_t rank_options;
+#if ORIGAMI_ENABLE_NN
+                rank_options.library_models = &nn_models;
+                const std::size_t nnDepth   = numSolutions < 0
+                                                  ? std::numeric_limits<std::size_t>::max()
+                                                  : static_cast<std::size_t>(numSolutions);
+                rank_options.nn.min_scored  = nnDepth;
+#endif
+                // nn_models.boost is set only with HIPBLASLT_ORIGAMI_BOOST=1 (deserialization).
+                if(nn_models.boost >= 0 && OrigamiBoost::problemClass(problem) != nullptr)
                 {
-                    if(r.config.index < solution_list.size())
-                        r.latency /= solution_list[r.config.index].second
-                                         ->streamKClusterUtilization(problem);
+                    rerankSource.activate(origami_problem);
+                    rank_options.inference        = origami::inference_mode_t::analytical_rerank;
+                    rank_options.nn_backend       = origami::nn_backend_t::boost;
+                    rank_options.library_models   = &nn_models;
+                    rank_options.nn.rerank_source = &rerankSource;
                 }
-                std::stable_sort(prediction_result.begin(), prediction_result.end(),
-                                 [](auto const& a, auto const& b) { return a.latency < b.latency; });
+                auto prediction_result = origami::rank_configs(
+                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
+                if(!rerankSource.prepared())
+                    chargeStreamKClusters(prediction_result);
 
                 for(const auto& r : prediction_result)
                 {
@@ -247,15 +307,37 @@ namespace TensileLite
                     {
                         continue;
                     }
+#if ORIGAMI_ENABLE_NN
+                    if(std::isnan(r.latency))
+                        continue;
+#endif
                     considerSolution(solution_list[r.config.index].second);
-                    if(rv.size() == numSolutions)
+                    if(rv.size() == static_cast<std::size_t>(numSolutions))
                     {
                         break;
                     }
                 }
+
+#if ORIGAMI_ENABLE_NN
+                if(rv.empty())
+                {
+                    for(const auto& r : prediction_result)
+                    {
+                        if(r.config.index >= solution_list.size())
+                        {
+                            continue;
+                        }
+                        considerSolution(solution_list[r.config.index].second);
+                        if(rv.size() == static_cast<std::size_t>(numSolutions))
+                        {
+                            break;
+                        }
+                    }
+                }
+#endif
             }
             // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
+            lastFindTopRetAll = (rv.size() < static_cast<std::size_t>(numSolutions));
             return rv;
         }
 

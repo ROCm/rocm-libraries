@@ -1,0 +1,6 @@
+# MLREC binaries are not stored under origami/data/nn (YAML manifests + sidecars only).
+*.tilewright.bin
+
+# TWREC manifests and sidecars are fetched externally (see data/nn/README.md).
+*.tilewright.yaml
+*.tilewright.wts.yaml
