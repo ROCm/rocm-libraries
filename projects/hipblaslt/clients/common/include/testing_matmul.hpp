@@ -70,6 +70,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <type_traits>
 
 // Convert element count to byte count, accounting for sub-byte packing.
 // FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
@@ -2148,9 +2149,13 @@ void testing_matmul_with_bias(const Arguments& arg,
     CHECK_HIP_ERROR(hipStreamCreate(stream_owner.put()));
     hipStream_t stream = stream_owner; // non-owning copy; some helpers take hipStream_t&
 
+    using HipEventOwner
+        = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, decltype(&hipEventDestroy)>;
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
+    HipEventOwner event_gpu_time_start_owner{event_gpu_time_start, &hipEventDestroy};
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
+    HipEventOwner event_gpu_time_end_owner{event_gpu_time_end, &hipEventDestroy};
 
     // If input type is complex then alpha is set to complex datatype else compute type 
     hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
@@ -7447,6 +7452,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                 (void)hipblasLtMatmulDescDestroy(h);
 
     // The stream is destroyed by stream_owner after the device buffers (see its declaration).
-    CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
-    CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
+    CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start_owner.release()));
+    CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end_owner.release()));
 }
