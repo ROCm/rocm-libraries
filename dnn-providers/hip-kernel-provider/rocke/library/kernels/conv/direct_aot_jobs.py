@@ -21,6 +21,7 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
+    DIRECT_DEPTHWISE_WIN_FWD as _DW_WIN_FWD,
     DIRECT_DGRAD_PATCH_WMMA as _DGRAD_PATCH,
     DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
@@ -180,6 +181,12 @@ DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
 DW_WIN_MFMA_PREFETCH = 2
+# The forward pass on the same Toeplitz MFMA kernel (rotated filter,
+# direct_depthwise_win): "same"-padded square filters, stride 1.
+DW_WIN_FWD_FILTERS = (3, 5, 7, 9)
+# ... and its grouped form (cpg = kpg, the ResNeXt 3x3 layers).
+DW_WIN_FWD_G8_FILTERS = (3,)
+DW_WIN_FWD_GROUP_CH = (8, 16, 24, 32, 40, 48, 56, 64)
 # Toeplitz WMMA depthwise forward (direct_dw_fwd_wmma, stride 1, wave32):
 # "same"-padded 3x3..7x7 plus "valid" 7x7 (a 9x9's register-resident
 # fragments overflow the budget). Tiles from 1 row (small maps, many blocks)
@@ -1252,6 +1259,23 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _all_pads(k)
         ),
     ),
+    # Depthwise forward on the windowed dgrad kernel's MFMA form (rotated
+    # filter over its stride-1 grid): stride 1 and 2, "same" padding; and its
+    # grouped form with 8..64 channels per group.
+    _DW_WIN_FWD: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k in DW_WIN_FWD_FILTERS
+            for s in _STRIDES
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_FWD_GROUP_CH
+            for s in _STRIDES
+        ),
+    ),
     # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
     # padding (it bounds its rows by p_Ho and its columns by p_Wo).
     "direct_depthwise_dgrad_win": (
@@ -1763,6 +1787,26 @@ def _knob_grid(
         ):
             yield dict(
                 mfma=True,
+                w_fold=fold,
+                block_waves=waves,
+                block_h=bh,
+                prefetch_rows=DW_WIN_MFMA_PREFETCH,
+            )
+    elif variant == _DW_WIN_FWD:
+        # A grouped block holds whole groups: one or two per block, plus the
+        # depthwise wave counts that are whole multiples of the group.
+        waves_grid = DW_WIN_MFMA_WAVES
+        if caps is not None and caps.cpg > 1:
+            per_group = caps.cpg // 8
+            waves_grid = tuple(
+                w
+                for w in sorted({per_group, 2 * per_group, *DW_WIN_MFMA_WAVES})
+                if w <= 8 and w % per_group == 0
+            )
+        for fold, waves, bh in itertools.product(
+            DW_WIN_MFMA_FOLDS, waves_grid, DW_WIN_MFMA_BLOCK_H
+        ):
+            yield dict(
                 w_fold=fold,
                 block_waves=waves,
                 block_h=bh,
