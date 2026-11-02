@@ -765,7 +765,7 @@ def pytest_configure(config):
     runs_cases = (
         hasattr(config, "workerinput") or config.getoption("dist", "no") == "no"
     )
-    if runs_cases and not fake:
+    if runs_cases and not fake and os.environ.get(contract.KERNEL_LOG_ENV) == "1":
         _install_kernel_log()
     results = config.getoption("results_dir")
     if results and not hasattr(config, "workerinput"):
