@@ -688,7 +688,10 @@ def test_run_two_stage_shortlist_sorts_dedupes_and_ranks_per_gemm(
 
     monkeypatch.setattr(search, "Runner", _PassRunner)
 
-    out = search.run(hip, [cfg1, cfg2], outdir, devices=[0], profile="balanced")
+    # Explicit max_chunk_size: this test cares about both GEMMs landing in
+    # the same chunk (so stage_a produces one shortlist covering both),
+    # not about the default chunk-size heuristic.
+    out = search.run(hip, [cfg1, cfg2], outdir, devices=[0], max_chunk_size=10, profile="balanced")
 
     stage_b_rows = dumped[1]
     # 2 GEMMs x k=2 shortlisted candidates each = 4 rows; the duplicate

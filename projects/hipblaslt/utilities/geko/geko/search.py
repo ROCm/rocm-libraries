@@ -233,7 +233,7 @@ def run(
     custom_lib_dir: str | Path | None = None,
     devices: Sequence[int] | None = None,
     bench_freq: bool = False,
-    max_chunk_size: int = 25,
+    max_chunk_size: int = 5,
     profile: str | None = None,
 ) -> pd.DataFrame:
     """Run GEMM dense benchmarks across multiple GPU devices.
@@ -254,7 +254,7 @@ def run(
             per-config dense-search benchmark (controls HIPBLASLT_BENCH_FREQ).
             Defaults to False.
         max_chunk_size (int, optional): Maximum number of configs per chunk. 
-            Defaults to 25.
+            Defaults to 5.
         profile (str | None, optional): Search profile name, a key of
             ``SEARCH_PROFILES`` (should match the profile passed to
             ``configure()`` for these same ``configs``). When the resolved
