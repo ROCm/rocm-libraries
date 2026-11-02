@@ -762,7 +762,7 @@ void testing_bdsqr_oob_regression()
     CHECK_ROCBLAS_ERROR(rocsolver_bdsqr(handle, uplo, n, nv, nu, nc, dD.data(), dE.data(), dV.data(),
                                         ldv, dU.data(), ldu, dC.data(), ldc, dInfo.data()));
     CHECK_HIP_ERROR(hipDeviceSynchronize());
-    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    EXPECT_EQ(hipGetLastError(), hipSuccess);
 
     // also verify correctness: resulting singular values should match the
     // LAPACK-equivalent CPU reference on the same data
