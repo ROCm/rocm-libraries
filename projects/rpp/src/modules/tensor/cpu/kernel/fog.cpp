@@ -462,8 +462,12 @@ RppStatus fog_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* ds
                 fogIntensityMaskPtrRow += srcDescPtr->w;
             }
         }
-        // Fog for 1-channel tensors, any layout pair (c = 1: NCHW and NHWC share a memory order)
-        else if (srcDescPtr->c == 1) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
             alignedLength = (bufferLength & ~15);
 
             Rpp8u *srcPtrRow, *dstPtrRow;
@@ -884,8 +888,12 @@ RppStatus fog_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f
                 fogIntensityMaskPtrRow += srcDescPtr->w;
             }
         }
-        // Fog for 1-channel tensors, any layout pair (c = 1: NCHW and NHWC share a memory order)
-        else if (srcDescPtr->c == 1) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
 #if __AVX2__
             alignedLength = bufferLength & ~7;
 #endif
@@ -1309,8 +1317,12 @@ RppStatus fog_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
                 fogIntensityMaskPtrRow += srcDescPtr->w;
             }
         }
-        // Fog for 1-channel tensors, any layout pair (c = 1: NCHW and NHWC share a memory order)
-        else if (srcDescPtr->c == 1) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
             alignedLength = bufferLength & ~7;
 
             Rpp32f *srcPtrRow, *dstPtrRow;
@@ -1725,8 +1737,12 @@ RppStatus fog_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* ds
             }
         }
 
-        // Fog for 1-channel tensors, any layout pair (c = 1: NCHW and NHWC share a memory order)
-        else if (srcDescPtr->c == 1) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
             alignedLength = (bufferLength & ~15);
 
             Rpp8s *srcPtrRow, *dstPtrRow;
