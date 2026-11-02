@@ -452,16 +452,17 @@ Python emitter and the compiled C emitter for each config index and diffs the
    host, so a new flavor fails until re-blessed). The bless path is `--write` on
    the parity harness ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py),
    golden at
-   [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json));
+   [rocke_representative_ir_sha256/](platform/tests/golden/rocke_representative_ir_sha256/),
+   one `<family>.json` shard per family; `--only <family>[,...]` rewrites just
+   those shards, so unrelated changes do not conflict in the golden);
    library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
 3. Re-run the gate GREEN at **every** flavor in `LLVM_FLAVORS` before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
 
-> Known layout-independent residuals reproduce on `develop` and are **not** your
+> Known layout-independent residual reproduces on `develop` and is **not** your
 > regression: 7 `TestDatalayoutDriftGuard` subtests on a mismatched local clang
-> vintage, and 6 `conv/*` golden cases when the C++ engine is not built (see
-> [BUILDING.md](BUILDING.md)).
+> vintage (see [BUILDING.md](BUILDING.md)).
 
 ### G. Promote a common optimization to platform
 

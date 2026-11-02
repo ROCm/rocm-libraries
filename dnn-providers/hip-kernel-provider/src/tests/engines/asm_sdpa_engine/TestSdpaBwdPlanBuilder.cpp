@@ -1195,7 +1195,7 @@ TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWin
               .front()
               ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
 
-    // left_bound = 64 keeps 64 keys (cuDNN), which is FlashAttention's window_size_left 63.
+    // left_bound = 64 (cuDNN: 64 keys including the diagonal) is 63 keys left of it for the kernel.
     const auto band = plan_utils::resolveDiagonalBand(attrs);
     EXPECT_EQ(band.leftBound, 63);
     EXPECT_EQ(band.rightBound, 0);
