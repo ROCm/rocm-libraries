@@ -30,9 +30,19 @@
 
 // A failed hipMalloc used to return nullptr. device_malloc must throw instead,
 // so the caller cannot continue with an invalid pointer.
-TEST(device_malloc, quick_throws_on_allocation_failure)
+//
+// The pre_checkin prefix is the name CI selects. TheRock matches pre_checkin/*
+// and Jenkins matches *checkin*. A plain TEST() has no such prefix, so it
+// never runs in either lane.
+class device_malloc : public testing::TestWithParam<int>
+{
+};
+
+TEST_P(device_malloc, throws_on_allocation_failure)
 {
     EXPECT_THROW(hipsparse_test::device_malloc(SIZE_MAX), std::runtime_error);
     // Reset the last error so later tests don't see the failed hipMalloc.
     (void)hipGetLastError();
 }
+
+INSTANTIATE_TEST_SUITE_P(pre_checkin, device_malloc, testing::Values(0));
