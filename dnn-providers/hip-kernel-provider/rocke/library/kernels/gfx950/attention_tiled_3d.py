@@ -324,6 +324,22 @@ class UnifiedAttention3DTiledSpec:
     def binary_search_iters(self) -> int:
         return binary_search_seq_idx_iters(self.num_seqs)
 
+    def mask_type(self) -> int:
+        """The band as one ``AttentionMaskType`` value, as
+        ``UnifiedAttention2DTiledSpec.mask_type`` reports it: 0 no mask, 1 top-left causal,
+        2 bottom-right causal, 3 any other band (a sliding window or a right bound above
+        zero).
+
+        A bound method so ``hkp_pack`` can observe it as an effective accessor. Note the
+        dispatcher builds no 0 at ``seqlen_q == 1``: full attention with one query row is
+        the bottom-right causal computation, and ``normalize_band`` folds it to that.
+        """
+        if self.sliding_window > 0 or self.right_bound > 0:
+            return 3
+        if self.right_bound < 0:
+            return 0
+        return 1 if self.causal_top_left else 2
+
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
@@ -1691,3 +1707,108 @@ def supports_tiled_3d_spec(
         kv_storage_dtype=spec.kv_storage_dtype,
         arch=arch,
     )
+
+
+# Two bounds the reduce builder relies on without checking: one wave64 owns
+# ``head_size // 64`` output dims per thread, and the per-segment factor is cached in
+# an LDS array of ``num_segments`` floats.
+_REDUCE_THREADS = 64
+_REDUCE_MAX_SEGMENTS = 4096
+
+
+def supports_tiled_reduce_spec(
+    spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-first predicate for ``build_unified_attention_reduce_tiled``.
+
+    The reduce kernel has no dispatcher gate of its own: it is only ever built beside the
+    3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
+    ``hkp_pack`` validate it as a companion at pack time, and states what the builder
+    otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
+    evenly, and the segment-factor cache fits in LDS. The kernel is arch-neutral, so
+    ``arch`` is only checked to be a gfx target.
+    """
+    if not isinstance(arch, str) or not arch.startswith("gfx"):
+        return False, f"tiled reduce kernel: {arch!r} is not a gfx target"
+    if spec.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"tiled reduce kernel currently supports fp16/bf16 (got {spec.dtype!r})",
+        )
+    if spec.head_size <= 0 or spec.head_size % _REDUCE_THREADS != 0:
+        return (
+            False,
+            "tiled reduce kernel needs head_size divisible by "
+            f"{_REDUCE_THREADS} (got {spec.head_size})",
+        )
+    if (
+        spec.num_kv_heads < 1
+        or spec.num_query_heads < 1
+        or spec.num_query_heads % spec.num_kv_heads != 0
+    ):
+        return (
+            False,
+            "tiled reduce kernel needs a positive num_query_heads divisible by "
+            f"num_kv_heads (got {spec.num_query_heads} / {spec.num_kv_heads})",
+        )
+    if spec.num_segments > _REDUCE_MAX_SEGMENTS:
+        return (
+            False,
+            f"tiled reduce kernel caches one LDS factor per segment; "
+            f"num_segments={spec.num_segments} exceeds {_REDUCE_MAX_SEGMENTS}",
+        )
+    return True, "supported"
+
+
+def reduce_spec_for(
+    spec: UnifiedAttention3DTiledSpec,
+) -> UnifiedAttentionReduceTiledSpec:
+    """The reduce kernel that pairs with segment kernel ``spec``.
+
+    Every reduce field but ``emit_lse`` is a segment field: the dispatcher builds the pair
+    from one problem and one config (``make_explicit_attention_3d_specs``), so deriving the
+    reduce from the segment spec reproduces what it launches. ``emit_lse`` comes from the
+    problem, not the segment spec, so LSE output is out of scope here: the derived reduce
+    keeps ``emit_lse=False`` and its module carries no ``lse_ptr``.
+    """
+    return UnifiedAttentionReduceTiledSpec(
+        head_size=spec.head_size,
+        num_query_heads=spec.num_query_heads,
+        num_kv_heads=spec.num_kv_heads,
+        dtype=spec.dtype,
+        num_segments=spec.num_segments,
+        waves_per_eu=spec.waves_per_eu,
+    )
+
+
+def build_unified_attention_3d_tiled_module(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx950"
+):
+    """The split-KV segment kernel with its reduce kernel as one code object.
+
+    Returns ``rocke.helpers.KernelModule(primary=<segment>, companions={"reduce":
+    <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack, so a host that loaded
+    the segment kernel finds the reduce in the same module by name. The reduce is
+    :func:`reduce_spec_for` ``(spec)``.
+    """
+    from rocke.helpers import KernelModule
+
+    return KernelModule(
+        primary=build_unified_attention_3d_tiled(spec, arch=arch),
+        companions={
+            "reduce": build_unified_attention_reduce_tiled(
+                reduce_spec_for(spec), arch=arch
+            )
+        },
+    )
+
+
+def supports_unified_attention_3d_tiled_module(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-first predicate for :func:`build_unified_attention_3d_tiled_module`: the
+    segment kernel's and its derived reduce kernel's predicates must both accept."""
+    ok, why = supports_tiled_3d_spec(spec, arch=arch)
+    if not ok:
+        return ok, why
+    return supports_tiled_reduce_spec(reduce_spec_for(spec), arch=arch)
