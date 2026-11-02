@@ -9,6 +9,8 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <exception>
+#include <optional>
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
@@ -335,6 +337,28 @@ bool SdpaFwdPlanBuilder::isApplicable(
         HIP_KERNEL_RETURN_FALSE_IF(
             !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
+
+    // The kernels mishandle a scale that is not a finite, positive, normal float
+    // (see plan_utils::isSupportedAttnScale). Check the scale here when it is known
+    // before execute; execute checks a pure runtime pass-by-value scale tensor.
+    std::optional<float> attnScale;
+    try
+    {
+        attnScale = plan_utils::attnScaleBeforeExecute(attrs, opGraph.getTensorMap());
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX}
+                               + "scale tensor value cannot be read: " + e.what());
+        return false;
+    }
+    if(attnScale.has_value())
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !plan_utils::isSupportedAttnScale(*attnScale),
+            "attention scale must be a finite, positive, normal float (Actual value: "
+                + plan_utils::attnScaleToString(*attnScale) + ")");
     }
 
     const auto& tensorMap = opGraph.getTensorMap();
