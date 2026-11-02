@@ -680,6 +680,23 @@ def test_brotate_mx_rejects_unsupported_scale_layouts():
     assert "InMemorySwizzle" in b_rotate_reason(_brot_mx_state(MXScaleFormat="NoSwizzle"))
     assert "(12, 5, 0)" in b_rotate_reason(_brot_mx_state(ISA=(12, 5, 1)))
 
+def test_brotate_mx_applies_on_full_wave_split():
+    # MatrixInstN == wave (32x16 MI with SourceSwap): one ds_load per vIdx, any even vIdx count.
+    from tensilelite.Common.MxScaleLayout import mxsbRotateSplit
+    for vwb in (4, 2):
+        s = _brot_mx_state(MatrixInstN=32, VectorWidthB=vwb)
+        assert b_rotate_reason(s) is None
+        assert mxsbRotateSplit(s)
+    assert not mxsbRotateSplit(_brot_mx_state())
+    assert not mxsbRotateSplit(_brot_mx_state(MatrixInstN=32, LDSSegmentBRotate=0))
+
+def test_brotate_mx_rejects_full_wave_unsupported():
+    assert "even" in b_rotate_reason(_brot_mx_state(MatrixInstN=32, VectorWidthB=8))
+    s = _brot_mx_state(MatrixInstN=32)
+    s["ProblemType"] = {**s["ProblemType"], "MXBlockFreeB": 128}
+    assert "2D MXSB" in b_rotate_reason(s)
+    assert "WavefrontSize/2 or WavefrontSize" in b_rotate_reason(_brot_mx_state(MatrixInstN=8))
+
 def _brot_rejects(state, text):
     reason = b_rotate_reason(state)
     assert reason is not None and text in reason, reason
@@ -712,7 +729,7 @@ def test_brotate_rejects_wave_config():
     _brot_rejects(_brot_state(VectorWidthB=0), "even")
 
 def test_brotate_rejects_mx_matrix_inst_and_sparse():
-    _brot_rejects(_brot_mx_state(MatrixInstN=32), "MatrixInstN")
+    _brot_rejects(_brot_mx_state(MatrixInstN=64), "MatrixInstN")
     s = _brot_state()
     s["ProblemType"] = {**s["ProblemType"], "Sparse": 1}
     _brot_rejects(s, "sparse")
