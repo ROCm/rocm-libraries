@@ -192,6 +192,7 @@ class TestSpecOverrideParsing(unittest.TestCase):
                 num_heads=128,
                 total_q=64,
                 num_seqs=2,
+                max_seqlen_q=32,
                 max_seqlen_k=96,
                 arch="gfx942",
                 num_cus=304,

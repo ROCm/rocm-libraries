@@ -30,7 +30,7 @@ import math
 import os
 from dataclasses import dataclass
 
-from .spec import ceil_div
+from .spec import MAX_GRID_DIM, ceil_div
 
 # gfx950 (MI350X) compute-unit count: 8 XCDs * 32 CUs. This is the number of
 # CTAs needed to give every CU one resident block; the heuristic targets it as
@@ -165,7 +165,7 @@ WGRAD_TARGET_WAVES_PER_CU = 16
 # gridDim.z is a 16-bit field in the HSA dispatch packet. Grouped wgrad rides
 # ``groups * split_k`` on z, so the degree has a hard ceiling; exceeding it fails
 # the launch with hipErrorInvalidValue rather than anything diagnosable.
-MAX_GRID_DIM_Z = 65535
+MAX_GRID_DIM_Z = MAX_GRID_DIM
 
 # Empirically (gfx950 decode-GEMM split-K sweep) the launch + atomic-reduce
 # overhead floor sits near a per-slice K-depth of ~512 elements. Splitting K so
