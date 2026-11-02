@@ -29,7 +29,6 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <stdexcept>
 
 #ifdef WIN32
 #define strSUITEcmp(A, B) _stricmp(A, B)
