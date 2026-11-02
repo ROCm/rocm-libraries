@@ -183,6 +183,7 @@ def get_yaml_docs():
 def get_datatypes(doc):
     """ Get datatypes from YAML doc"""
     dt = ctypes.__dict__.copy()
+    enums = []
     for declaration in doc.get('Datatypes') or ():
         for name, decl in declaration.items():
             if isinstance(decl, dict):
@@ -194,11 +195,10 @@ def get_datatypes(doc):
                                        for t in decl.get('bases') or ()
                                        if TYPE_RE.match(t)]
                                       ), decl.get('attr') or {})
+                enums.append(dt[name])
             elif isinstance(decl, str) and TYPE_RE.match(decl):
                 # An alias names a member of the enums declared above, or a type
-                owners = [t for t in dt.values()
-                          if isinstance(t, type) and t.__module__ == '__main__'
-                          and decl in vars(t)]
+                owners = [enum for enum in enums if decl in vars(enum)]
                 if owners:
                     for enum in owners:
                         setattr(enum, name, getattr(enum, decl))

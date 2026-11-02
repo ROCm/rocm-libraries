@@ -39,7 +39,7 @@ Datatypes:
         c_f64_pedantic_r: 8
         c_i32_r: 9
         c_i32_pedantic_r: 10
-        # hipblaslt-bench --compute_type spellings (hipblaslt_type_strings.hpp)
+        # Names hipblas_computetype_to_string prints (auxiliary.hpp)
         f16_r: 0
         f32_r: 2
         f32_f16_r: 4
