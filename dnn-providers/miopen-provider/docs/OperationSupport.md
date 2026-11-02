@@ -24,6 +24,7 @@ The following table lists all operations currently supported in hipDNN:
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
 | Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
 | Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
+| Resample Forward (pooling, standalone) | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Single-node graph<sup>9</sup>, Deterministic<sup>5</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
@@ -33,6 +34,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁶ 3D tensors are internally padded to 4D for MIOpen compatibility. For convolution, the padding also extends the padding, stride and dilation vectors with a trailing spatial dimension of length 1.
 ⁷ See Standalone Activation note below
 ⁸ See Standalone Binary Elementwise note below
+⁹ See Standalone Resample Forward note below
 
 ## Detailed Requirements
 
@@ -87,6 +89,15 @@ The following table lists all operations currently supported in hipDNN:
 > execution is not supported.
 
 > [!NOTE]
+> **Standalone Resample Forward:** A single-node graph supports MAXPOOL, AVGPOOL_EXCLUDE_PADDING
+> and AVGPOOL_INCLUDE_PADDING across ranks 4-5, with packed X and Y sharing one datatype and
+> layout, and an FP32 compute type. Padding must be symmetric and smaller than the window; unless
+> it is all zero, MAXPOOL needs NEG_INF_PAD and the average modes need ZERO_PAD. Y must have the
+> floor-mode output size. The index output (`generate_index`) is supported for MAXPOOL in
+> NCHW/NCDHW only, as INT8 or INT32; with INT8 the input spatial size may not exceed 128. Very
+> large windows on channels-last tensors are not supported. Max pooling ignores NaN inputs.
+
+> [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
 
 > [!NOTE]
@@ -94,7 +105,7 @@ The following table lists all operations currently supported in hipDNN:
 
 ## Deterministic Engine Support
 
-The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution, unary activation, and binary pointwise operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
+The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution, unary activation, binary pointwise and resample forward (pooling) operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
 
 To use the deterministic engine, set it as the preferred engine on your graph before building:
 
