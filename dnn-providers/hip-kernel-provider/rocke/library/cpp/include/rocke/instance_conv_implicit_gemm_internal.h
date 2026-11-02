@@ -653,6 +653,12 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
                                     rocke_value_t* bv,
                                     rocke_value_t* c);
 
+/* _fwd_kloop_conflict(spec) for the knobs the C port carries (xcd_remap,
+ * m_band): false with the reason when Python's returns a non-empty string. */
+bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                      char* reason,
+                                      size_t reason_cap);
+
 /* _ir_dtype(dtype): "fp16" -> f16, "bf16" -> bf16, "fp32" -> f32. Any other
  * spelling sets the builder's ValueError (a TF32 spelling with the "compute
  * mode, not a storage dtype" text) and returns NULL. */

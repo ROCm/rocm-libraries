@@ -940,6 +940,11 @@ def _tf32_split_k_spec(idx: int):
 #   55: bf16, groups=2, t256x64x32 w4x1 a16x16x16, mem/cshuffle
 #   56: bf16, groups=1, stride 2, t128x128x32 w2x2 a32x32x8, mem/default
 #   57: bf16, groups=2, 1x1x1 pointwise (no split addressing), t128x64x32 w2x2
+#   58: 55 + xcd_remap=6
+#   59: 55 + xcd_remap=6, m_band=32
+#   60: 54 + xcd_remap=8, waves_per_eu=2
+#   61: 55 + xcd_remap=6 + chiplet_swizzle: rejected by both engines
+#   62: 55 + m_band=32 without xcd_remap: rejected by both engines
 _GFX942_3D_OFFSET = 32
 
 
@@ -986,9 +991,20 @@ def _gfx942_3d_spec(idx: int):
             ),
         ),
     }
+    knobs = {
+        58: (55, dict(xcd_remap=6)),
+        59: (55, dict(xcd_remap=6, m_band=32)),
+        60: (54, dict(xcd_remap=8, waves_per_eu=2)),
+        61: (55, dict(xcd_remap=6, chiplet_swizzle=True)),
+        62: (55, dict(m_band=32)),
+    }
+    extra = {}
+    if idx in knobs:
+        idx, extra = knobs[idx]
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")
     p, dt, kw = cfgs[idx]
+    kw = dict(kw, **extra)
     return ImplicitGemmConvSpec(problem=p, data=data(dt), **kw), "gfx942"
 
 

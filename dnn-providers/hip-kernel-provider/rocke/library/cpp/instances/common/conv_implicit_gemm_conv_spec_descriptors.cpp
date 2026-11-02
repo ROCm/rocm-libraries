@@ -397,11 +397,9 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char a_buf[48];
     char pe_buf[64];
     char tag_buf[256];
-    char gm_buf[24];
-    char skc_buf[24];
     const char* parts[6];
-    const char* flag_names[7];
-    int flag_on[7];
+    const char* flag_names[64];
+    int flag_on[64];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -436,33 +434,54 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     parts[4] = pe_buf;
     parts[5] = tag_buf; /* "" when identity -> skipped by kernel_name_join */
 
-    flag_names[0] = "async";
-    flag_on[0] = s->async_dma ? 1 : 0;
-    flag_names[1] = "noalc";
-    flag_on[1] = s->cshuffle_no_alias ? 1 : 0;
+    /* The flags in the Python dict's order (kernel_name_join keeps it). The
+     * knobs the C port does not carry yet stay off; the flag table lists them
+     * anyway so a knob ported later only fills in its value. */
+    enum
+    {
+        NF = 64
+    };
+    char fbuf[NF][24];
+    int nf = 0;
+#define ROCKE_FLAG(on_, ...)                                       \
+    do                                                              \
+    {                                                               \
+        snprintf(fbuf[nf], sizeof(fbuf[nf]), __VA_ARGS__);          \
+        flag_names[nf] = fbuf[nf];                                  \
+        flag_on[nf] = (on_) ? 1 : 0;                                \
+        ++nf;                                                       \
+    } while(0)
+    ROCKE_FLAG(s->async_dma, "async");
+    ROCKE_FLAG(s->cshuffle_no_alias, "noalc");
     /* unroll_k: a different K-loop body under the same name otherwise. */
-    flag_names[2] = "unroll";
-    flag_on[2] = s->unroll_k ? 1 : 0;
+    ROCKE_FLAG(s->unroll_k, "unroll");
+    ROCKE_FLAG(0, "ukd");
+    ROCKE_FLAG(0, "rpf0");
+    ROCKE_FLAG(s->xcd_remap > 0, "xcd%d", s->xcd_remap);
+    /* (lxor, pfr, spt, sakd, adir, tapf, cg, lah, dfr, vmi, kprd, lbar, flate,
+     *  uxh, xdpp, prio, pp, ppm, ppbd, lxrk, mch, xws, saa, sapl, sapf, esf,
+     *  skx, fsk, sfs, szf, xsub, ppfd, fbse, ppeg, elb, shy, mss, stc, sdet,
+     *  psf, nag: Python-only knobs, off here.) */
+    ROCKE_FLAG(s->m_band > 0, "mb%d", s->m_band);
+    /* (xsm, fxd, xyr, eqx, nopad, dpw: Python-only knobs, off here.) */
+    /* The occupancy target changes the register allocation. */
+    ROCKE_FLAG(s->has_waves_per_eu, "wpe%d", s->waves_per_eu);
     /* Gm changes the emitted body, so it must reach the symbol: without it two
      * degrees collide on one name and the compile cache hands the second the
      * first's binary. Off at group_merge 1, so the default name is unchanged. */
-    snprintf(gm_buf, sizeof(gm_buf), "gm%d", s->group_merge);
-    flag_names[3] = gm_buf;
-    flag_on[3] = s->group_merge > 1 ? 1 : 0;
+    ROCKE_FLAG(s->group_merge > 1, "gm%d", s->group_merge);
     /* The split-K binary has its own ABI and epilogue; the degree is a kernarg,
      * so only the variant reaches the name. The cluster form bakes its degree. */
-    flag_names[4] = "splitk";
-    flag_on[4] = s->split_k > 1 ? 1 : 0;
-    snprintf(skc_buf, sizeof(skc_buf), "skc%d", s->split_k_cluster);
-    flag_names[5] = skc_buf;
-    flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
+    ROCKE_FLAG(s->split_k > 1, "splitk");
+    ROCKE_FLAG(s->split_k_cluster > 0, "skc%d", s->split_k_cluster);
     /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
      * from an fp32 kernel with the same atom shape. Last, and only when set,
      * so every existing name is unchanged. */
-    flag_names[6] = "tf32";
-    flag_on[6] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
+    ROCKE_FLAG(rocke_conv_data_is_tf32(s->mma_dtype), "tf32");
+#undef ROCKE_FLAG
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 7, out, out_cap, NULL);
+    return rocke_kernel_name_join(
+        s->name, parts, 6, flag_names, flag_on, (size_t)nf, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -1023,6 +1042,23 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
     *out = l;
     return true;
 }
+
+/* _fwd_kloop_conflict(spec) for the knobs the C port carries: false (with the
+ * reason) when Python's would return a non-empty string. Shared by validate
+ * and is_valid_spec, as in Python. */
+bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                      char* reason,
+                                      size_t reason_cap)
+{
+    if(s->xcd_remap < 0)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "xcd_remap must be >= 0");
+    if(s->xcd_remap && s->chiplet_swizzle)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "xcd_remap and chiplet_swizzle both remap the grid; set one");
+    if(s->m_band < 0 || (s->m_band && !s->xcd_remap))
+        ROCKE_SPEC_FAIL(reason, reason_cap, "m_band needs xcd_remap");
+    return true;
+}
+
 bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_t* s,
                                             char* reason,
                                             size_t reason_cap)
@@ -1139,6 +1175,10 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     {
         return false;
     }
+    if(!rocke_conv_fwd_kloop_conflict_ok(s, reason, reason_cap))
+    {
+        return false;
+    }
 
     return true;
 }
@@ -1230,6 +1270,10 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
      * Positioned to match Python is_valid_spec: after the block-size cap,
      * before the wave-size/catalog checks. */
     if(!rocke_conv_fwd_group_merge_available(s, arch, reason, reason_cap))
+    {
+        return false;
+    }
+    if(!rocke_conv_fwd_kloop_conflict_ok(s, reason, reason_cap))
     {
         return false;
     }

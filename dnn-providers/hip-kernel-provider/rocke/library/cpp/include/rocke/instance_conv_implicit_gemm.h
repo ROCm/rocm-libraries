@@ -217,6 +217,15 @@ typedef struct rocke_implicit_gemm_conv_spec
      * gets its own LDS bytes (pool = ab+c) and the barrier is elided -> lower
      * small-tile latency, more LDS. Only affects epilogue == "cshuffle". */
     bool cshuffle_no_alias; /* default false */
+
+    /* XCD-contiguous tile order (Python ImplicitGemmConvSpec.xcd_remap): each of
+     * the xcd_remap XCDs walks one contiguous run of num_wgs / xcd_remap tiles
+     * (M-major), so the input-row reuse between neighbouring M tiles stays in
+     * one L2. A bijection of the launch grid. 0 (default) = launch order. */
+    int xcd_remap; /* default 0 */
+    /* Output-plane band order of the M tiles on top of xcd_remap
+     * (kernels/common/conv_m_band.py). 0 (default) = off. */
+    int m_band; /* default 0 */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

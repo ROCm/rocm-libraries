@@ -55,6 +55,7 @@
 #include "rocke/instance_conv_abi.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
+#include "rocke/instance_conv_m_band.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 #include "rocke/lower_llvm.h"
 
@@ -552,6 +553,30 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->block_n_off_v = rocke_b_mul(b, swz.col, rocke_b_const_i32(b, ctx->block_n));
         /* grid = dc_replace(grid, block_m_off=..., block_n_off=...) so the
          * downstream loaders / epilogues pick up the remapped origins. */
+        ctx->grid.block_m_off = ctx->block_m_off_v;
+        ctx->grid.block_n_off = ctx->block_n_off_v;
+    }
+    else if(spec->xcd_remap)
+    {
+        /* XCD-contiguous tile order (ImplicitGemmConvSpec.xcd_remap), with the
+         * optional output-plane band order of the M tiles (m_band). */
+        rocke_value_t* num_wgs = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+        rocke_value_t* bid_y = rocke_b_block_id_y(b);
+        rocke_value_t* mul_y = rocke_b_mul(b, bid_y, ctx->p_num_pid_n);
+        rocke_value_t* bid_x = rocke_b_block_id_x(b);
+        rocke_value_t* wgid_flat = rocke_b_add(b, mul_y, bid_x);
+        rocke_value_t* logical
+            = rocke_chiplet_transform_chunked_runtime(b, wgid_flat, num_wgs, spec->xcd_remap, NULL);
+        rocke_value_t* mt = rocke_b_div(b, logical, ctx->p_num_pid_n);
+        if(spec->m_band)
+        {
+            rocke_value_t* plane = rocke_b_mul(b, ctx->p_Ho, ctx->p_Wo);
+            mt = rocke_conv_emit_m_band_order(
+                b, mt, ctx->p_num_pid_m, plane, ctx->block_m, NULL, spec->m_band);
+        }
+        ctx->block_m_off_v = rocke_b_mul(b, mt, rocke_b_const_i32(b, ctx->block_m));
+        rocke_value_t* nt = rocke_b_mod(b, logical, ctx->p_num_pid_n);
+        ctx->block_n_off_v = rocke_b_mul(b, nt, rocke_b_const_i32(b, ctx->block_n));
         ctx->grid.block_m_off = ctx->block_m_off_v;
         ctx->grid.block_n_off = ctx->block_n_off_v;
     }

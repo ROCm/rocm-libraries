@@ -843,7 +843,36 @@ static void set_t256(rocke_implicit_gemm_conv_spec_t* spec)
     spec->epilogue = "cshuffle";
 }
 
+static int make_cfg_3d_base(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch);
+
+/* Knob configs 58+: a base 3-D config with opt-in knobs layered on. */
 static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    switch(idx)
+    {
+    case 58:
+    case 59:
+    case 61:
+    case 62:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = idx == 62 ? 0 : 6;
+        spec->m_band = (idx == 59 || idx == 62) ? 32 : 0;
+        spec->chiplet_swizzle = idx == 61;
+        return 0;
+    case 60:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = 8;
+        spec->has_waves_per_eu = true;
+        spec->waves_per_eu = 2;
+        return 0;
+    default:
+        return make_cfg_3d_base(idx, spec, arch);
+    }
+}
+
+static int make_cfg_3d_base(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
     *spec = rocke_implicit_gemm_conv_spec_default();
     *arch = "gfx942";
