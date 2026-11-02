@@ -148,8 +148,9 @@ class UnifiedAttentionProblem:
     causal_top_left: bool = False
     right_bound: int = 0
     # Optional FP32 natural-log softmax normalizer, [total_q, num_query_heads, 1].
-    # Implemented by the gfx942/gfx950 split-KV (3D) reduce only; every other
-    # path declines it (see _reject_lse).
+    # Implemented by the gfx942/gfx950 split-KV (3D) reduce and tiled 2D
+    # kernels (not the gfx942 4-warp GQA builder); every other path declines it
+    # (see _reject_lse).
     emit_lse: bool = False
 
     def __post_init__(self):
@@ -560,27 +561,37 @@ def _reject_mask_on_arch(
     return None
 
 
-_LSE_SPLIT_KV_ARCHES = ("gfx942", "gfx950")
+_LSE_ARCHES = ("gfx942", "gfx950")
+_LSE_PATHS = {"3d": "split-KV", "tiled 2D": "tiled 2D"}
 
 
 def _reject_lse(
     problem: UnifiedAttentionProblem, arch: str, path: str
 ) -> Optional[Tuple[bool, str]]:
-    """The LSE output exists only in the gfx942/gfx950 split-KV reduce.
+    """The LSE output exists in the gfx942/gfx950 split-KV reduce and tiled 2D
+    kernels only.
 
-    ``path`` is ``"3d"`` for split-KV, else a label for the refused path."""
+    ``path`` is ``"3d"`` (split-KV) or ``"tiled 2D"``; any other label names a
+    path that writes no LSE and is refused."""
     if not problem.emit_lse:
         return None
-    if path != "3d":
+    label = _LSE_PATHS.get(path)
+    if label is None:
         return False, f"LSE output is not implemented on the {path} attention path"
-    if arch not in _LSE_SPLIT_KV_ARCHES:
-        return False, f"LSE output is not implemented on {arch} split-KV attention"
+    if arch not in _LSE_ARCHES:
+        return False, f"LSE output is not implemented on {arch} {label} attention"
     if problem.use_sinks:
         return False, (
-            "LSE output with attention sinks is not implemented on split-KV "
+            "LSE output with attention sinks is not implemented on unified "
             "attention (keyless rows would drop the sink)"
         )
     return None
+
+
+_GFX942_4WARP_LSE_REFUSAL = (
+    "LSE output is not implemented on the gfx942 4-warp GQA builder (finite "
+    "-1e30 max sentinel, no l == 0 guard, fixed 17-argument ABI)"
+)
 
 
 def supports_native_unified_attention(
@@ -607,6 +618,11 @@ def supports_native_unified_attention(
     - softcap: yes
     """
     arch = _canonical_arch_for_selection(arch)
+    # The scalar kernel writes no LSE; refusing here keeps the auto tail from
+    # ever launching it for an LSE request.
+    rejected = _reject_lse(problem, arch, "scalar 2D")
+    if rejected is not None:
+        return rejected
     if problem.head_size not in UNIFIED_HEAD_SIZES:
         return False, f"unsupported head_size {problem.head_size}"
     if problem.block_size not in UNIFIED_BLOCK_SIZES:
@@ -1100,7 +1116,7 @@ class _TiledRoute:
 
 
 def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> bool:
-    """Shared eligibility gate for the gfx942 4-warp GQA cohorts -- the eight
+    """Shared eligibility gate for the gfx942 4-warp GQA cohorts -- the
     clauses common to ``_d256_gfx942_fast`` and ``_d128_gfx942_swa_fast``.
     Extracting them here dedupes the two AND-walls; each cohort predicate adds
     only its distinctive clauses (head_size / dtype / sliding_window /
@@ -1116,6 +1132,10 @@ def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> boo
         # shipped default builder). Exclude caches > 2 GiB, which need the i64
         # path -- they fall back to the correct default builder.
         and not _enable_i64_kv_addr(problem)
+        # The 4-warp GQA bodies write no LSE (finite -1e30 max sentinel, no
+        # l == 0 guard, fixed 17-argument ABI): an LSE request takes the
+        # default gfx942 builder, which does.
+        and not problem.emit_lse
     )
 
 
@@ -1731,7 +1751,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     num_warps_2d = None if fp16_flash else _select_2d_num_warps(problem, arch)
     tile_size = _select_2d_tile_size(problem, arch)
     block_m_per_warp = _select_2d_block_m_per_warp(problem, arch)
-    return (
+    key = (
         "tiled",
         arch,
         _binary_search_iters(problem),
@@ -1870,6 +1890,11 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
             else None
         ),
     ) + _mask_key(problem)
+    if problem.emit_lse:
+        # Suffix only when on, so every LSE-off key is unchanged (same as the
+        # 3D key). The 4-warp exclusion is already keyed by _gfx942_4warp_fast.
+        key = key + ("lse",)
+    return key
 
 
 def _select_2d_waves_per_eu(
@@ -3390,6 +3415,9 @@ def _tiled_spec_from_problem(
     _spec = _impl(problem, arch)
     if overrides is not None:
         _spec = replace(_spec, **overrides)
+    if problem.emit_lse:
+        # Output contract, not a tuning choice; LSE-off specs stay as before.
+        _spec = replace(_spec, emit_lse=True)
     return _resolve_lds_budget(_spec, arch)
 
 
@@ -4304,6 +4332,7 @@ def _attn_signature(
     include_qq_bias_stride: bool = False,
     include_additive_bias: bool = False,
     kv_dtype: Optional[str] = None,
+    emit_lse: bool = False,
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -4335,9 +4364,13 @@ def _attn_signature(
         sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
         sb.scalar("qq_bias_stride_0", "i32")
-    # Appended last, matching the kernel's conditional param declarations.
+    # Appended last, matching the kernel's conditional param declarations:
+    # additive bias, then the LSE output (the tiled 2D builders declare
+    # lse_ptr after declare_additive_bias_params).
     if include_additive_bias:
         append_additive_bias_signature(sb)
+    if emit_lse:
+        sb.ptr("lse_ptr", "f32")
     return sb.build()
 
 
@@ -4368,6 +4401,7 @@ def _attn_values(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    lse=None,
     kv_addr_limit: _KvAddrLimit | None,
 ):
     _require_additive_bias(problem, additive_bias)
@@ -4404,6 +4438,8 @@ def _attn_values(
         vals["additive_bias_batch_stride"] = int(additive_bias_batch_stride)
         vals["additive_bias_head_stride"] = int(additive_bias_head_stride)
         vals["additive_bias_sq_stride"] = int(additive_bias_sq_stride)
+    if problem.emit_lse:
+        vals["lse_ptr"] = lse
     return vals
 
 
@@ -5074,7 +5110,8 @@ def _explicit_path_supported(
     """
     # LSE eligibility is an output contract, not a coverage gate: the
     # allow_unsupported escape hatch must not skip it (a keyless row would
-    # silently drop an attention sink, or a 2D path would write no LSE at all).
+    # silently drop an attention sink, or an arch without the store would
+    # write no LSE at all).
     rejected = _reject_lse(
         problem,
         _canonical_arch_for_selection(arch),
@@ -5095,6 +5132,26 @@ def _explicit_path_supported(
     if kind == "2d":
         return supports_native_unified_attention_tiled(problem, arch)
     raise ValueError(f"unknown attention path kind {kind!r}")
+
+
+def select_auto_path(problem: UnifiedAttentionProblem, arch: str) -> str:
+    """The path ``auto`` tries for ``problem`` on ``arch``: ``select_path(arch)``,
+    except an LSE request the tiled 2D gate declines goes to split-KV.
+
+    Only split-KV and tiled 2D write LSE (the scalar fallback writes none), so
+    when tiled 2D cannot take a 2D-routed LSE request, split-KV is the one path
+    left that can. Example: gfx942 D256 bf16 prefill at block size 32, whose
+    LSE-off form runs on the 4-warp builder (no LSE store) and whose default
+    tiled spec exceeds the LDS budget. LSE off, this is ``select_path(arch)``.
+    """
+    path = problem.select_path(arch)
+    if (
+        path == "2d"
+        and problem.emit_lse
+        and not _explicit_path_supported(problem, None, "2d", arch)[0]
+    ):
+        return "3d"
+    return path
 
 
 def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
@@ -5686,6 +5743,8 @@ def _get_2d_launcher(
                 if tuning_spec is not None
                 else _kv_storage_dtype(problem)
             ),
+            # The runner has already checked that an explicit spec agrees.
+            emit_lse=problem.emit_lse,
         ),
         cache_key=("2d",) + cache_key,
     )
@@ -6044,9 +6103,11 @@ def run_unified_attention_torch(
 
     ``lse`` is the optional caller-owned natural-log softmax normalizer, a
     contiguous FP32 ``[total_q, num_query_heads, 1]`` tensor, written only when
-    ``problem.emit_lse`` is set. Only the gfx942/gfx950 split-KV (3D) path
-    writes it; every other path raises ``NotImplementedError`` rather than
-    returning without it. Rows with no visible key get ``-inf`` (and O = 0).
+    ``problem.emit_lse`` is set. The gfx942/gfx950 split-KV (3D) and tiled 2D
+    paths write it (an LSE request skips the gfx942 2D graph replay and the
+    4-warp GQA builder); the scalar path, sinks and other arches raise
+    ``NotImplementedError`` rather than returning without it. Rows with no
+    visible key get ``-inf`` (and O = 0).
     """
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.
@@ -6246,9 +6307,9 @@ def run_unified_attention_torch(
         # Explicit specs are initially selected before framework tensors exist.
         # Refresh address-width state and tuning identity from the real cache.
         tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
-        # A path that cannot write LSE (a 2D spec, or a split-KV reduce without
-        # the output, e.g. gfx1250) is refused as NotImplementedError, the same
-        # error as the backend refusals below.
+        # A path that cannot write LSE (gfx1250, sinks, the gfx942 4-warp GQA
+        # builder) is refused as NotImplementedError, the same error as the
+        # backend refusals below.
         if problem.emit_lse:
             rejected = _reject_lse(
                 problem,
@@ -6257,14 +6318,19 @@ def run_unified_attention_torch(
             )
             if rejected is not None:
                 raise NotImplementedError(rejected[1])
-        # Otherwise the explicit spec owns the reduce kernel, so it must agree
-        # with the problem on the LSE output: a mismatch would either drop the
-        # output or launch a kernel whose argument list differs from the
-        # signature. A reduce spec without the field cannot emit LSE.
-        reduce_lse = tuning_spec.path == "3d" and bool(
-            getattr(tuning_spec.reduce_spec, "emit_lse", False)
+            if getattr(tuning_spec, "builder_kind", None) == "gfx942_4warp_gqa":
+                raise NotImplementedError(_GFX942_4WARP_LSE_REFUSAL)
+        # Otherwise the explicit spec owns the kernel that writes LSE (the 3D
+        # reduce, or the 2D kernel itself), so it must agree with the problem:
+        # a mismatch would either drop the output or launch a kernel whose
+        # argument list differs from the signature. A spec without the field
+        # cannot emit LSE.
+        lse_owner = (
+            tuning_spec.reduce_spec
+            if tuning_spec.path == "3d"
+            else tuning_spec.kernel_spec
         )
-        if reduce_lse != problem.emit_lse:
+        if bool(getattr(lse_owner, "emit_lse", False)) != problem.emit_lse:
             raise ValueError("tuning_spec LSE output disagrees with problem.emit_lse")
 
     # Auto path selection. Historically we *always* preferred 3D when
@@ -6289,8 +6355,16 @@ def run_unified_attention_torch(
     # buckets (where our old auto picked 3D for chunked prefill at 30-
     # 150× the right path's cost) while keeping the decode-shape 3D
     # wins on the parity harness (those shapes still satisfy the "3D
-    # is fine" branch of ``use_2d_kernel``).
-    prefer_2d = backend == "auto" and problem.select_path(_launch_arch) == "2d"
+    # is fine" branch of ``use_2d_kernel``). An LSE request the tiled 2D gate
+    # declines goes to split-KV, the only other path that writes LSE
+    # (``select_auto_path``); an explicit spec keeps ``select_path(arch)``.
+    auto_path = (
+        problem.select_path(_launch_arch)
+        if tuning_spec is not None
+        else select_auto_path(problem, _launch_arch)
+    )
+    prefer_2d = backend == "auto" and auto_path == "2d"
+    reason_3d = None  # split-KV verdict, named by the auto LSE refusal below
     # FP8 K/V prefill that no tiled 2D kernel serves (gfx942 has no FP8 2D
     # path) runs on the 3D split-KV kernel, which handles multi-token query
     # blocks, instead of the scalar fallback. use_fp8 is checked first so other
@@ -6340,37 +6414,6 @@ def run_unified_attention_torch(
         if backend == "3d":
             raise NotImplementedError(reason_3d)
 
-    if problem.emit_lse:
-        # Every remaining path (2D graph replay, tiled 2D, scalar) writes no LSE.
-        # Refuse here, BEFORE the 2D graph fast path: _run_2d_graphed replays a
-        # cache hit before any support gate, and _cheap_2d_sig does not encode
-        # emit_lse, so an LSE-off graph captured on the same buffers would
-        # otherwise serve this request and leave lse unwritten. In order: a
-        # split-KV LSE reason (sinks, arch); for ``auto``, the split-KV gate's
-        # verdict (name the backend='3d' way out only when that gate admits the
-        # problem); otherwise the explicitly requested 2D path.
-        rejected = _reject_lse(problem, _launch_arch, "3d")
-        if rejected is not None:
-            raise NotImplementedError(rejected[1])
-        if backend == "auto":
-            if prefer_2d:
-                ok_3d, reason_3d = _explicit_path_supported(
-                    problem, tuning_spec, "3d", _launch_arch
-                )
-                if ok_3d:
-                    raise NotImplementedError(
-                        "LSE output is not implemented on the tiled 2D attention "
-                        "path, which backend='auto' chose for this shape; the "
-                        "split-KV path can serve it: pass backend='3d' or pin a "
-                        "'*_u3d_*' tuning spec (it can be slower for this shape)"
-                    )
-            raise NotImplementedError(
-                "LSE output needs the split-KV attention path, which declined "
-                f"this problem: {reason_3d}"
-            )
-        _, why = _reject_lse(problem, _launch_arch, "tiled 2D")
-        raise NotImplementedError(why)
-
     if backend in ("tiled", "auto"):
         # Graphed fast path FIRST: for the short-context regime the launch is
         # auto-graphed (heuristic: _recommend_graph_replay). The graph is looked
@@ -6378,8 +6421,12 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
+        # Never for LSE: _run_2d_graphed replays a cache hit before any gate,
+        # and _cheap_2d_sig / the graph key / its refs carry no LSE, so an
+        # LSE-off graph on the same buffers would serve the request unwritten.
         if (
             tuning_spec is None
+            and not problem.emit_lse
             and _enable_2d_graph_replay(problem, _launch_arch)
             and not _torch_stream_capturing()
         ):
@@ -6459,6 +6506,7 @@ def run_unified_attention_torch(
                 v_scale=v_scale,
                 out_scale=out_scale,
                 kv_addr_limit=meta.kv_addr_limit,
+                lse=lse,
             )
             return launcher(
                 vals,
@@ -6470,6 +6518,17 @@ def run_unified_attention_torch(
             )
         if backend == "tiled":
             raise NotImplementedError(reason_t)
+
+    if problem.emit_lse and backend == "auto":
+        # Only split-KV and tiled 2D write LSE; the scalar fallback below does
+        # not (its gate refuses LSE), so name why each LSE path declined.
+        declined = f"tiled 2D: {reason_t}"
+        if reason_3d is not None:
+            declined = f"split-KV: {reason_3d}; {declined}"
+        raise NotImplementedError(
+            "LSE output needs the split-KV or tiled 2D attention path, which "
+            f"declined this problem ({declined})"
+        )
 
     # Scalar fallback. Uses the same KernelLauncher infrastructure as
     # the tiled paths so module load + arg lifetime + stream resolution
@@ -6573,13 +6632,10 @@ def _scalar_band_ok(
     context_len,
     query_pos,
     kpos,
-    *,
-    window: bool = True,
 ) -> Optional[Value]:
     """Visibility of key ``kpos`` for the query: the right bound ``k <= d + right``
     (``d = context_len + query_pos``) AND the left bound ``d - k < sliding_window``.
     ``None`` when neither bounds anything (the loop range already limits to kv_len).
-    ``window=False`` skips the left bound.
     """
     ok = None
     if p.right_bound >= 0:
@@ -6587,7 +6643,7 @@ def _scalar_band_ok(
         if p.right_bound > 0:
             upper = b.add(upper, b.const_i32(p.right_bound))
         ok = b.cmp_le(kpos, upper)
-    if window and p.sliding_window > 0:
+    if p.sliding_window > 0:
         dist = b.sub(b.add(context_len, query_pos), kpos)
         sw_ok = b.cmp_lt(dist, b.const_i32(p.sliding_window))
         ok = sw_ok if ok is None else b.land(ok, sw_ok)
@@ -6763,9 +6819,11 @@ def build_unified_attention_2d(
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
         new_m_raw = b.fmax(m_val, score)
-        # If both running max and current score are -inf, the row is fully
-        # masked; force m to 0 so the resulting alpha/prob are 0 instead of NaN
-        # (matches Triton's `m_j = tl.where(m_j > -inf, m_j, 0.0)`).
+        # If both running max and current score are -inf, the row has seen no key
+        # yet; use 0 as the exponent reference so alpha/prob are 0 instead of NaN
+        # (matches Triton's `m_j = tl.where(m_j > -inf, m_j, 0.0)`). Carry the raw
+        # max: carrying the 0 pins m at 0 past masked leading keys (sliding
+        # window), and exp2(s - 0) then underflows P for very negative scores.
         is_finite = b.fcmp("ogt", new_m_raw, neg_inf)
         new_m = b.select(is_finite, new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
@@ -6783,14 +6841,14 @@ def build_unified_attention_2d(
         if p.use_fp8:
             vv = b.fmul(vv, v_scale)
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
-        b.scf_yield(new_m, new_l, new_acc)
+        b.scf_yield(new_m_raw, new_l, new_acc)
 
     out_val = b.fmul(loop.results[2], b.rcp(loop.results[1]))
-    if not p.default_mask:
-        # Rows can see no key at all (e.g. top-left rows past ``kv_len`` with a window
-        # or a right bound): emit 0 instead of acc * rcp(0) == NaN, like the tiled
-        # kernels. The default mask never produces such a row, so its IR is unchanged.
-        out_val = b.select(b.fcmp("ogt", loop.results[1], zero_f), out_val, zero_f)
+    # Rows can see no key at all under any mask (bottom-right causal with Sq > Skv,
+    # or a window / right bound): store 0 instead of acc * rcp(0) == NaN. This is
+    # the tiled 2D epilogue's rule: only an exact-zero sum counts as keyless, so a
+    # NaN ``l`` still reaches O.
+    out_val = b.select(b.fcmp("oeq", loop.results[1], zero_f), zero_f, out_val)
     out_cast = b.cast_f32_to(out_val, dtype)
     out_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     valid = b.land(active, b.cmp_lt(dim, b.const_i32(p.head_size)))
@@ -6819,9 +6877,7 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
             flags={
                 "tl": p.causal_top_left,
                 **_right_bound_flag(p),
-                # The default-mask 3D scalar kernel never applied the window (its name
-                # and IR are pinned); every other mask does.
-                "sw": p.sliding_window > 0 and not p.default_mask,
+                "sw": p.sliding_window > 0,
             },
         )
 
@@ -6927,20 +6983,20 @@ def build_unified_attention_3d(
             scale,
             rcp_ln2,
         )
-        # The scalar 3D segment kernel has never applied the left bound; keep that
-        # for the default mask (its IR is pinned) and honour it for every other mask.
-        band_ok = _scalar_band_ok(
-            b, p, context_len, query_pos, kpos, window=not p.default_mask
-        )
+        # Every mask, the default one included: the right (causal) bound, and
+        # the left (sliding-window) bound whenever sliding_window > 0.
+        band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos)
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
-        new_m = b.fmax(m_val, score)
-        if not p.default_mask:
-            # Non-default masks can leave whole segments fully masked (top-left
-            # decode sees only key 0; a window or right bound skips others). Force m
-            # to 0 there so alpha/prob are 0 rather than NaN, which the reduce would
-            # propagate as NaN * 0. The default mask never hits this: IR unchanged.
-            new_m = b.select(b.fcmp("ogt", new_m, neg_inf), new_m, zero_f)
+        new_m_raw = b.fmax(m_val, score)
+        # A segment, or a segment's leading keys, can be fully masked for a row:
+        # a default-mask prefill row whose causal limit ends before a trailing
+        # segment, top-left decode (only key 0 visible), a window or right bound.
+        # Use 0 as the exponent reference there so alpha/prob are 0 rather than
+        # exp2(-inf - -inf) = NaN, but carry and store the raw max: it stays -inf
+        # until a key is seen, so the reduce ignores an empty segment and a
+        # masked prefix cannot pin m at 0.
+        new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
@@ -6948,7 +7004,7 @@ def build_unified_attention_3d(
             b, p, dtype, value, block_tables, bt_stride, seq_idx, kv_head, kpos, dim
         )
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
-        b.scf_yield(new_m, new_l, new_acc)
+        b.scf_yield(new_m_raw, new_l, new_acc)
 
     ml_desc, out_desc = _segm_descriptors(p, spec.num_segments)
     base, _ = out_desc.offset(b, token=q_tok, head=q_head, seg=segm_idx, dim=dim)
@@ -7033,11 +7089,20 @@ def build_unified_attention_reduce(
         [("mx", neg_inf)],
         iv_name="seg",
     )
+    # A segment that saw no key stores max = -inf with sum = 0: the segment kernel
+    # carries the raw max, so the max pass ignores that segment as is, and the
+    # combine pass weights it by exp2(-inf - ref) = 0 whenever ref is finite. ref
+    # is the overall max, or 0 when every segment is empty (overall = -inf), the
+    # same exponent-reference clamp the segment kernel uses: a row with no key at
+    # all then has den = 0 and gets O = 0 instead of NaN from exp2(-inf - -inf) or
+    # acc * rcp(0). Only an exact zero den counts as empty, so a NaN sum or
+    # denominator still yields NaN.
     with max_loop as (seg, (mx,)):
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         b.scf_yield(b.fmax(mx, mv))
     overall = max_loop.results[0]
+    ref = b.select(b.fcmp("ogt", overall, neg_inf), overall, zero)
     red = b.scf_for_iter(
         b.const_i32(0),
         b.const_i32(spec.num_segments),
@@ -7049,7 +7114,7 @@ def build_unified_attention_reduce(
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         lv = b.global_load_f32(segm_expsum, idx)
-        factor = b.exp2(b.fsub(mv, overall))
+        factor = b.exp2(b.fsub(mv, ref))
         den2 = b.fadd(den, b.fmul(lv, factor))
         out_idx, _ = seg_out_desc.offset(
             b,
@@ -7062,6 +7127,7 @@ def build_unified_attention_reduce(
         acc2 = b.fadd(acc, b.fmul(ov, factor))
         b.scf_yield(den2, acc2)
     result = b.fmul(red.results[1], b.rcp(red.results[0]))
+    result = b.select(b.fcmp("oeq", red.results[0], zero), zero, result)
     cast = b.cast_f32_to(result, dtype)
     out_idx, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     with b.scf_if(active):

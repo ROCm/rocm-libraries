@@ -10,6 +10,8 @@
 # build_unified_attention_2d_tiled(spec, arch="gfx950") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx950") to stdout so it can be
 # byte-compared with the C emitter gfx950_attention_tiled_2d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS in
+# platform/cpp/bindings/attention_tiled_parity_configs.py; update it in step.
 #
 # The config table is kept IN LOCKSTEP with the C make_spec() switch (same index
 # -> same UnifiedAttention2DTiledSpec). This is the "edge / feature-flag" cluster:
@@ -1070,6 +1072,18 @@ _CONFIGS = {
         use_qblock_reverse=True,
     ),
 }
+
+# --- idx64-67: emit_lse (trailing lse_ptr + FP32 LSE store), one per epilogue
+#     store site, each an existing config plus emit_lse=True.
+#   idx64: transposed32 scalar-state (idx55 + LSE).
+#   idx65: coalesced mfma32 Acc_lds epilogue (idx32 + LSE).
+#   idx66: striped16 epilogue, GQA-16 (idx3 + LSE).
+#   idx67: striped16 + ALiBi (idx5 + ALiBi + LSE): the LSE row index must use
+#          the query head, not the hoisted ALiBi slope.
+_CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
+_CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
+_CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
+_CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

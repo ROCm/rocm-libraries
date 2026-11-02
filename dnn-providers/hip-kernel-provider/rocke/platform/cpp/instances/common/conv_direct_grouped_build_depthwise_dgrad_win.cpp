@@ -58,6 +58,8 @@ rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_de
     s.w_fold = 1;
     s.prefetch_rows = 1;
     s.wave_size = 64;
+    s.fwd = false;
+    s.out_stride = 1;
     return s;
 }
 
@@ -89,6 +91,12 @@ static int dw_win_cdiv(int a, int b)
     return (a + b - 1) / b;
 }
 
+/* 8-channel input chunks a wave contracts (1 for depthwise). */
+static int dw_win_cin_chunks(const rocke_direct_conv_problem_t* p)
+{
+    return p->cpg > 1 ? p->cpg / ROCKE_DW_DGRAD_MFMA_CH : 1;
+}
+
 long long rocke_direct_depthwise_dgrad_win_unrolled_fmas(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
@@ -100,7 +108,7 @@ long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    return (long long)spec->block_h * p->KH * dw_win_passes(p->KW);
+    return (long long)spec->block_h * p->KH * dw_win_passes(p->KW) * dw_win_cin_chunks(p);
 }
 
 static int dw_win_mfma_in_passes(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
@@ -116,7 +124,7 @@ int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const int kwp = dw_win_passes(p->KW);
+    const int kwp = dw_win_passes(p->KW) * dw_win_cin_chunks(p);
     const int rows = spec->prefetch_rows * dw_win_mfma_in_passes(spec);
     return 4 * (p->KH * kwp + p->KH + kwp + rows);
 }
@@ -147,10 +155,13 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
     name = spec->name != NULL ? spec->name : "direct_depthwise_dgrad_win";
+    char gtag[16] = "";
+    if(p->cpg > 1)
+        snprintf(gtag, sizeof gtag, "_g%d", p->cpg);
     if(spec->mfma)
         n = snprintf(out,
                      out_cap,
-                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s",
+                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s%s%s",
                      name,
                      p->KH,
                      p->KW,
@@ -159,7 +170,10 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
                      spec->block_h,
                      spec->w_fold,
                      spec->prefetch_rows,
-                     dw_win_is_bf16(p) ? "_bf16" : "");
+                     dw_win_is_bf16(p) ? "_bf16" : "",
+                     spec->fwd ? "_fwd" : "",
+                     gtag,
+                     spec->out_stride == 2 ? "_s2" : "");
     else
         n = snprintf(out,
                      out_cap,
@@ -197,8 +211,15 @@ static bool
     } while(0)
     if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
         DW_WIN_FAIL("unsupported dtype '%s'; expected fp16 or bf16", dtype);
-    if(p->cpg != 1 || p->kpg != 1)
+    const bool grouped8 = spec->mfma && spec->fwd && p->cpg == p->kpg
+                          && p->cpg % ROCKE_DW_DGRAD_MFMA_CH == 0
+                          && p->cpg <= ROCKE_DW_WIN_MAX_GROUP_CH;
+    if((p->cpg != 1 || p->kpg != 1) && !grouped8)
         DW_WIN_FAIL("requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
+    if(grouped8 && rocke_direct_depthwise_dgrad_win_block_ch(spec) % p->cpg != 0)
+        DW_WIN_FAIL("a block must hold whole groups (block_ch=%d, cpg=%d)",
+                    rocke_direct_depthwise_dgrad_win_block_ch(spec),
+                    p->cpg);
     if(p->stride != 1)
         DW_WIN_FAIL("requires stride=1 (got %d)", p->stride);
     if(p->dil_h != 1 || p->dil_w != 1)
@@ -228,6 +249,16 @@ static bool
         DW_WIN_FAIL("dot2 requires ch_per_lane=1 (got %d)", cpl);
     if(spec->prefetch_rows < 1)
         DW_WIN_FAIL("prefetch_rows must be >= 1 (got %d)", spec->prefetch_rows);
+    if(spec->fwd && !spec->mfma)
+        DW_WIN_FAIL("fwd requires mfma");
+    if(spec->fwd && p->KH != p->KW)
+        /* One PAD serves both axes; only a square filter keeps it one value. */
+        DW_WIN_FAIL("fwd requires a square filter (got %dx%d)", p->KH, p->KW);
+    if((spec->out_stride != 1 && spec->out_stride != 2) || (spec->out_stride != 1 && !spec->fwd))
+        DW_WIN_FAIL("out_stride must be 1, or 2 with fwd (got %d)", spec->out_stride);
+    if(spec->block_h % spec->out_stride != 0)
+        DW_WIN_FAIL(
+            "block_h=%d must be a multiple of out_stride=%d", spec->block_h, spec->out_stride);
     if(spec->mfma)
     {
         if(spec->dot2 || cpl != 1)
@@ -242,7 +273,7 @@ static bool
             DW_WIN_FAIL("mfma needs block_waves <= %d (got %d)",
                         ROCKE_DW_DGRAD_MFMA_MAX_WAVES,
                         spec->block_waves);
-        if(p->groups % ROCKE_DW_DGRAD_MFMA_CH != 0)
+        if(!grouped8 && p->groups % ROCKE_DW_DGRAD_MFMA_CH != 0)
             DW_WIN_FAIL("mfma needs groups %% %d == 0 (got %d)", ROCKE_DW_DGRAD_MFMA_CH, p->groups);
         const int frag = rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(spec);
         if(frag > ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS)
@@ -255,8 +286,8 @@ static bool
                     spec->w_fold,
                     spec->prefetch_rows);
     {
-        const long long dy = (long long)p->N * Ho * Wo * p->groups * 2;
-        const long long dx = (long long)p->N * p->H * p->W * p->groups * 2;
+        const long long dy = (long long)p->N * Ho * Wo * p->groups * p->cpg * 2;
+        const long long dx = (long long)p->N * p->H * p->W * p->groups * p->cpg * 2;
         const long long mx = dy > dx ? dy : dx;
         if(mx > ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES)
             DW_WIN_FAIL("dY/dX of %lld bytes exceed the %lld-byte sentinel addressing range",
@@ -761,11 +792,13 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     const int PER_PX = BLOCK_CH / ROCKE_DW_DGRAD_MFMA_CH;
     const int CH_PAD = BLOCK_CH + ROCKE_DW_DGRAD_MFMA_CH;
     const int PF = spec->prefetch_rows;
+    const bool FWD = spec->fwd;
+    const int S = spec->out_stride;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
     rocke_dconv_params_t prm;
-    rocke_dconv_emit_params(b, &prm, "dgrad", io_type);
+    rocke_dconv_emit_params(b, &prm, FWD ? "fwd" : "dgrad", io_type);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     V* p_N = prm.p_N;
@@ -773,7 +806,33 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* p_Wi = prm.p_Wi;
     V* p_Ho = prm.p_Ho;
     V* p_Wo = prm.p_Wo;
+    V* c_S = NULL;
+    if(FWD)
+    {
+        /* The forward ABI: the rows produced (dX) are the forward output, the
+         * rows streamed (dY) the forward input; a stride-S output is every
+         * S-th row and column of the stride-1 grid walked, S times its extent. */
+        p_Hi = prm.p_Ho;
+        p_Wi = prm.p_Wo;
+        if(S > 1)
+        {
+            c_S = rocke_b_const_i32(b, S);
+            p_Hi = rocke_b_mul(b, p_Hi, c_S);
+            p_Wi = rocke_b_mul(b, p_Wi, c_S);
+        }
+        p_Ho = prm.p_Hi;
+        p_Wo = prm.p_Wi;
+    }
     V* p_G = prm.p_groups;
+    const bool G8 = p->cpg > 1;
+    const int CPG = p->cpg;
+    const int H8 = G8 ? CPG / ROCKE_DW_DGRAD_MFMA_CH : 1;
+    if(G8)
+    {
+        /* The channel count bounding every access: cpg channels per group. */
+        V* c_ch = rocke_b_const_i32(b, CPG);
+        p_G = rocke_b_mul(b, p_G, c_ch);
+    }
 
     V* c0 = rocke_b_const_i32(b, 0);
     V* oob_lane = rocke_b_const_i32(b, ROCKE_DW_DGRAD_WIN_OOB_LANE);
@@ -817,17 +876,23 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* b_rsrc = rocke_b_buffer_rsrc(b, prm.Bp, prm.B_bytes);
     V* d_rsrc = rocke_b_buffer_rsrc(b, prm.D, prm.D_bytes);
 
+    /* One-hot A fragments, or (grouped form) the group's dense row
+     * W[k, ., ., 0..7] as one 16-byte load. */
+    const int tap_bytes = CPG * 2;
     V* ck = rocke_b_add(b, c_wave, k);
-    V* c_taps = rocke_b_const_i32(b, KH * KW * 2);
+    V* c_taps = rocke_b_const_i32(b, KH * KW * tap_bytes);
     V* w_base = rocke_b_mul(b, ck, c_taps);
     V* c_KW = rocke_b_const_i32(b, KW);
     V* is_k[ROCKE_DW_DGRAD_MFMA_CH];
-    for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
-    {
-        V* c = rocke_b_const_i32(b, j);
-        is_k[j] = rocke_b_cmp_eq(b, k, c);
-    }
+    if(!G8)
+        for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
+        {
+            V* c = rocke_b_const_i32(b, j);
+            is_k[j] = rocke_b_cmp_eq(b, k, c);
+        }
     std::vector<std::vector<V*>> weights(KH, std::vector<V*>(KWP));
+    std::vector<std::vector<std::vector<V*>>> gweights(
+        KH, std::vector<std::vector<V*>>(KWP, std::vector<V*>(H8)));
     for(int r = 0; r < KH; ++r)
         for(int ph = 0; ph < KWP; ++ph)
         {
@@ -838,18 +903,46 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
             V* lt = rocke_b_cmp_lt(b, s, c_KW);
             V* in = rocke_b_land(b, ge, lt);
             V* ok = rocke_b_land(b, ch_ok, in);
-            V* cr = rocke_b_const_i32(b, r * KW + KW - 1);
-            V* tap = rocke_b_sub(b, cr, s);
-            V* c2 = rocke_b_const_i32(b, 2);
+            V* tap;
+            if(spec->fwd)
+            {
+                /* The rotated filter: W[k, KH - 1 - r, s]. */
+                V* cr = rocke_b_const_i32(b, (KH - 1 - r) * KW);
+                tap = rocke_b_add(b, cr, s);
+            }
+            else
+            {
+                V* cr = rocke_b_const_i32(b, r * KW + KW - 1);
+                tap = rocke_b_sub(b, cr, s);
+            }
+            V* c2 = rocke_b_const_i32(b, tap_bytes);
             V* tb = rocke_b_mul(b, tap, c2);
             V* a = rocke_b_add(b, w_base, tb);
             V* off = rocke_b_select(b, ok, a, oob_lane);
+            if(G8)
+            {
+                for(int h = 0; h < H8; ++h)
+                {
+                    V* ch = rocke_b_const_i32(b, 16 * h);
+                    V* oh = rocke_b_add(b, off, ch);
+                    gweights[r][ph][h] = dw_win_load_vN(b, bf16, b_rsrc, oh, c0, 4);
+                }
+                continue;
+            }
             V* w = dw_win_load_half(b, bf16, b_rsrc, off, c0);
             V* comps[ROCKE_DW_DGRAD_MFMA_CH];
             for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
                 comps[j] = rocke_b_select(b, is_k[j], w, zero_half);
             weights[r][ph] = rocke_b_vec_pack(b, comps, ROCKE_DW_DGRAD_MFMA_CH, io_type);
         }
+    V* grp_ch = NULL;
+    if(G8)
+    {
+        /* The first channel of the wave's group inside the block. */
+        V* c_cpg = rocke_b_const_i32(b, CPG);
+        V* gd = rocke_b_div(b, wave_ch, c_cpg);
+        grp_ch = rocke_b_mul(b, gd, c_cpg);
+    }
 
     V* c_sub = rocke_b_const_i32(b, SUB);
     V* f = rocke_b_div(b, col16, c_sub);
@@ -871,8 +964,15 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* c4 = rocke_b_const_i32(b, 4);
     V* tm4 = rocke_b_mul(b, tm, c4);
     V* o_ch = rocke_b_add(b, wave_ch, tm4);
-    const int n_out = F * TW * PER_PX;
+    const int n_out = F * (TW / S) * PER_PX;
     V* c_TW = rocke_b_const_i32(b, TW);
+    V* c_TWS = NULL;
+    V* x0_out = NULL;
+    if(S > 1)
+    {
+        c_TWS = rocke_b_const_i32(b, TW / S);
+        x0_out = rocke_b_div(b, x0, c_S);
+    }
     std::vector<dw_win_plan> drain;
     for(int i = 0; i < dw_win_cdiv(n_out, THREADS); ++i)
     {
@@ -881,10 +981,31 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         V* px = rocke_b_div(b, idx, c_per_px);
         V* im = rocke_b_mod(b, idx, c_per_px);
         V* ch8 = rocke_b_mul(b, im, c8);
-        V* pd = rocke_b_div(b, px, c_TW);
-        V* img_o = rocke_b_add(b, img0, pd);
-        V* pm = rocke_b_mod(b, px, c_TW);
-        V* wi_o = rocke_b_add(b, x0, pm);
+        V* img_o;
+        V* wi_o;
+        V* wi_st;
+        if(S > 1)
+        {
+            /* Output pixel px is staged column S * (px % (TW / S)) of image
+             * px / (TW / S); its stride-1 column bounds it against p_Wi. */
+            V* f_o = rocke_b_div(b, px, c_TWS);
+            V* cs = rocke_b_mod(b, px, c_TWS);
+            img_o = rocke_b_add(b, img0, f_o);
+            V* fm = rocke_b_mul(b, f_o, c_TW);
+            V* cm2 = rocke_b_mul(b, cs, c_S);
+            px = rocke_b_add(b, fm, cm2);
+            V* cm3 = rocke_b_mul(b, cs, c_S);
+            wi_o = rocke_b_add(b, x0, cm3);
+            wi_st = rocke_b_add(b, x0_out, cs);
+        }
+        else
+        {
+            V* pd = rocke_b_div(b, px, c_TW);
+            img_o = rocke_b_add(b, img0, pd);
+            V* pm = rocke_b_mod(b, px, c_TW);
+            wi_o = rocke_b_add(b, x0, pm);
+            wi_st = wi_o;
+        }
         V* ch_o = rocke_b_add(b, ch_blk, ch8);
         V* cn = rocke_b_const_i32(b, n_out);
         V* l1 = rocke_b_cmp_lt(b, idx, cn);
@@ -895,7 +1016,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         V* a2 = rocke_b_land(b, l3, l4);
         V* ok = rocke_b_land(b, a1, a2);
         V* m1 = rocke_b_mul(b, img_o, dx_img);
-        V* m2 = rocke_b_mul(b, wi_o, dx_px);
+        V* m2 = rocke_b_mul(b, wi_st, dx_px);
         V* c2 = rocke_b_const_i32(b, 2);
         V* m3 = rocke_b_mul(b, ch_o, c2);
         V* s1 = rocke_b_add(b, m2, m3);
@@ -983,7 +1104,9 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     auto dx_row_part = [&](int hi_local) -> V* {
         V* c = rocke_b_const_i32(b, hi_local);
         V* hi = rocke_b_add(b, h0, c);
-        V* part = rocke_b_mul(b, hi, dx_row_bytes);
+        /* A stride-S output row is stride-1 row hi / S. */
+        V* hr = S > 1 ? rocke_b_div(b, hi, c_S) : hi;
+        V* part = rocke_b_mul(b, hr, dx_row_bytes);
         V* lt = rocke_b_cmp_lt(b, hi, p_Hi);
         return rocke_b_select(b, lt, part, oob_uniform);
     };
@@ -1013,7 +1136,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         for(int r = 0; r < KH; ++r)
         {
             const int hl = y + r - (KH - 1);
-            if(hl >= 0 && hl < ROWS)
+            if(hl >= 0 && hl < ROWS && hl % S == 0)
             {
                 rs.push_back(r);
                 slots.push_back(hl % KH);
@@ -1032,6 +1155,28 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
             }
         };
         auto multiply = [&](const std::vector<V*>& accs) -> std::vector<V*> {
+            if(G8)
+            {
+                /* Input chunk h of the wave's group: its 8 channels at grp_ch + 8h. */
+                std::vector<std::vector<V*>> gx(KWP, std::vector<V*>(H8));
+                for(int ph = 0; ph < KWP; ++ph)
+                    for(int h = 0; h < H8; ++h)
+                    {
+                        V* c8h = rocke_b_const_i32(b, 8 * h);
+                        V* chh = rocke_b_add(b, grp_ch, c8h);
+                        V* idx[3] = {buf, b_px[ph], chh};
+                        gx[ph][h] = rocke_b_smem_load_vN(b, i_smem, idx, 3, io_type, 8);
+                    }
+                std::vector<V*> out = accs;
+                for(int ph = 0; ph < KWP; ++ph)
+                    for(int h = 0; h < H8; ++h)
+                        for(size_t i = 0; i < rs.size(); ++i)
+                            out[i] = bf16 ? rocke_b_mfma_f32_16x16x32_bf16(
+                                                b, gweights[rs[i]][ph][h], gx[ph][h], out[i])
+                                          : rocke_b_mfma_f32_16x16x32_f16(
+                                                b, gweights[rs[i]][ph][h], gx[ph][h], out[i]);
+                return out;
+            }
             std::vector<V*> xs(KWP);
             for(int ph = 0; ph < KWP; ++ph)
             {
@@ -1073,7 +1218,11 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         std::vector<V*> accs;
         for(int sl : slots)
             accs.push_back(acc[sl]);
-        if(halo)
+        if(slots.empty())
+        {
+            /* A stride-2 window row whose output rows are all dropped. */
+        }
+        else if(halo)
             dw_win_guarded(b, row_ok[y], c0, c1, accs, "dwm", y, true, multiply);
         else
             accs = multiply(accs);
@@ -1082,7 +1231,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         for(size_t i = 0; i < slots.size(); ++i)
             acc[slots[i]] = accs[i];
         const int hi_local = y - (KH - 1);
-        if(hi_local < 0 || hi_local >= ROWS)
+        if(hi_local < 0 || hi_local >= ROWS || hi_local % S != 0)
             continue;
         const int slot = hi_local % KH;
         pend_val = dw_win_trunc_vec(b, bf16, acc[slot]);

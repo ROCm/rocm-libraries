@@ -179,6 +179,10 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
     bool use_qblock_reverse; /* False (gfx950: longest-first query blocks) */
+    /* Also write the natural-log softmax normalizer (LSE) as FP32
+     * [total_q, num_query_heads] through a trailing lse_ptr param. Off emits
+     * no new IR; on appends the "lse" kernel-name token. */
+    bool emit_lse; /* False (Python kw_only) */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

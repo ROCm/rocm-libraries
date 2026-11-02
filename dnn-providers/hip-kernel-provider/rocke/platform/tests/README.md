@@ -37,7 +37,15 @@ command and any disabled or skipped stages; a runner invocation with
 
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
-across layers without `__init__.py`.
+across layers without `__init__.py`. That `sys.path` change belongs only to the
+pytest process. Tests that launch a Python child which imports `rocke` use
+`rocke.tests.subprocess_launcher.rocke_python_command()` together with
+`rocke_subprocess_env()`. The launcher puts the package under test ahead of the
+child's script and working directories, while the environment makes the same
+package available to grandchildren in both source and installed layouts. A
+Python grandchild that also requires package identity reuses the launcher; bare
+`PYTHONPATH` does not outrank its working directory. Never let an editable
+install or ambient `PYTHONPATH` choose the child's package accidentally.
 
 On Linux, `test_compiler_detection_native.py` compiles its wrapper and fake COMGR
 libraries from stdin and links the production `librocke_core.a`. Installed tests
@@ -180,11 +188,16 @@ expected crash or timeout whose normalized evidence still matches is not rerun
 serially; changed evidence, changed verdicts, unclassified results, and otherwise
 transient-looking results are.
 
-The migration preserves the former pytest item's result mapping:
+The artifact records the exact compiler build that measured it. LLVM development
+builds with the same major can disagree about intrinsic availability and ABI, so
+exact reproduction is applicable only when the host identity matches that
+provenance. A mismatch is reported with both identities and is an explicit
+unvalidated result, not a pass.
 
 | Condition | CTest result |
 |---|---|
-| Committed measurements reproduce cell-for-cell (compiler-build provenance may differ) | Pass |
+| Recorded compiler identity matches and measurements reproduce cell-for-cell | Pass |
+| Host compiler identity differs from the recorded identity | Skip |
 | No clang | Skip |
 | Clang flavor differs from rocKE's resolved flavor | Skip |
 | No committed column for the host flavor | Skip |
@@ -208,14 +221,16 @@ architecture-domain data or generation, LLVM discovery/classification, or this
 test's CMake/install wiring. Inspect a named skip rather than counting it as
 measurement validation.
 
-The runner has two independent selectors, neither of which scopes pytest or
-CTest:
+The runner has independent selectors for the corpus gates and pytest. None
+of them scopes CTest, and any selected run is an iteration aid rather than the
+complete pre-merge gate:
 
 | Change or intent | Focused route |
 |---|---|
 | One parity emitter family | `python tests/run_all.py --only <family>`; scopes byte identity only |
 | One representative emitted-IR corpus case | `python tests/run_all.py --only-ir <family/arch/variant>`; scopes IR validity and the arch-domain warning gate only |
-| One Python behavior | invoke its pytest module or node ID directly |
+| One or more Python behaviors while retaining the other runner stages | `python tests/run_all.py --pytest-target <path-or-node-id>`; repeat the option as needed, with paths relative to `tests/` |
+| The shortest Python-only inner loop | invoke its pytest module or node ID directly |
 | Arch-domain artifact reproduction | use the focused `ctest -R` command above |
 | Full pre-merge validation | run `python tests/run_all.py` with no selectors |
 

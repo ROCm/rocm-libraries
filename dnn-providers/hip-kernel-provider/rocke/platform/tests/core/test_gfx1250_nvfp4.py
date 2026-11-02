@@ -54,7 +54,8 @@ def test_nvfp4_output_type_has_distinct_name():
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize("k", [128, 256])
-def test_nvfp4_kernel_contract(dtype, k):
+@pytest.mark.parametrize("flavor", ["llvm23", "llvm24"])
+def test_nvfp4_kernel_contract(dtype, k, flavor):
     spec = NvFp4GemmSpec("nv", 32, 48, k, dtype)
     assert is_valid_spec(spec)[0]
     assert nvfp4_gemm_grid(spec) == (3, 2, 1)
@@ -63,7 +64,7 @@ def test_nvfp4_kernel_contract(dtype, k):
         {"name": "B_tensor_scale", "type": "f32"},
     ]
     kernel = build_nvfp4_gemm(spec)
-    llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
+    llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
     calls = [
         l
         for l in llvm.splitlines()

@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -46,6 +44,27 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
+          "arch": "gfx1250",
+          "bytes": 3410,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v4_b256_bf16",
+          "sha256": "e6b13e9985e7fcd3aa641ba3fc078d40c6e38f3b92edc8f4c64ac86067dff3dc",
+          "status": "ok"
+        },
+        "conv_fwd_split_k_reduce/gfx1250/fp16_v2_s4": {
+          "arch": "gfx1250",
+          "bytes": 2873,
+          "family": "conv_fwd_split_k_reduce",
+          "kernel_name": "conv_fwd_splitk_reduce_v2_b256_s4_fp16",
+          "sha256": "333a82f4dd3088e68945d7206f6346ee2c15aace62611f2ba1e74354be4cd0e4",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "conv_fwd_split_k_reduce/gfx1250/bf16_v4": {
           "arch": "gfx1250",
