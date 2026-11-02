@@ -16,6 +16,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <Tensile/AMDGPU.hpp>
@@ -388,20 +389,39 @@ namespace TensileLite
          */
         bool setExactMatch(LocalExactShape const& shape, int index)
         {
+            return setExactMatches({{shape, index}}) == 1;
+        }
+
+        /**
+         * setExactMatch for each mapping in order, published as one snapshot,
+         * so applying many mappings copies the table once. Returns how many
+         * were applied; one whose index is not registered is skipped.
+         */
+        size_t setExactMatches(std::vector<std::pair<LocalExactShape, int>> const& mappings)
+        {
             std::unique_lock<std::shared_mutex> lock(m_snapshotMutex);
 
-            auto it = m_snapshot->solutions.find(index);
-            if(it == m_snapshot->solutions.end())
-                return false;
+            std::shared_ptr<Snapshot> next;
+            size_t                    applied = 0;
+            for(auto const& [shape, index] : mappings)
+            {
+                auto it = m_snapshot->solutions.find(index);
+                if(it == m_snapshot->solutions.end())
+                    continue;
 
-            auto  next       = std::make_shared<Snapshot>(*m_snapshot);
-            auto& candidates = next->exactTable[localExactKeyFor(shape, it->second->problemType)];
-            candidates.erase(std::remove(candidates.begin(), candidates.end(), it->second),
-                             candidates.end());
-            candidates.insert(candidates.begin(), it->second);
+                if(!next)
+                    next = std::make_shared<Snapshot>(*m_snapshot);
+                auto& candidates
+                    = next->exactTable[localExactKeyFor(shape, it->second->problemType)];
+                candidates.erase(std::remove(candidates.begin(), candidates.end(), it->second),
+                                 candidates.end());
+                candidates.insert(candidates.begin(), it->second);
+                ++applied;
+            }
 
-            publishLocked(std::move(next));
-            return true;
+            if(next)
+                publishLocked(std::move(next));
+            return applied;
         }
 
         size_t registeredCount() const
