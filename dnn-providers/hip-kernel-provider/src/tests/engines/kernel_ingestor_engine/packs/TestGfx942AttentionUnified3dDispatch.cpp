@@ -252,11 +252,9 @@ void runCase(const DispatchCase& c)
         kView,
         vView,
         oView,
-        spec.attnScaleValue,
-        /*attnMask=*/nullptr,
-        /*leftBound=*/-1,
-        /*rightBound=*/0,
-        /*topLeftAlignment=*/false);
+        hipdnn_test_sdk::utilities::SdpaFwdOptions<float>{}
+            .setScale(spec.attnScaleValue)
+            .setBand(/*left=*/-1, /*right=*/0, /*topLeft=*/false));
 
     const DeviceBuffer dq(q.size() * sizeof(T));
     const DeviceBuffer dk(k.size() * sizeof(T));
