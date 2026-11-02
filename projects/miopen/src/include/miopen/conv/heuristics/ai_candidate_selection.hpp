@@ -30,6 +30,7 @@
 #include <memory>
 #include <optional>
 #include <map>
+#include <set>
 #include <functional>
 #include <miopen/config.hpp>
 
@@ -177,6 +178,19 @@ public:
     // common case). Loaded from the metadata's "conditional_layouts" section.
     MIOPEN_INTERNALS_EXPORT const ConditionalLayout*
     GetConditionalLayout(const std::string& kernel_name) const;
+    // Ordered names of the kernel-config derived features (metadata "kernel_config_derived_features";
+    // falls back to the legacy 10-feature list when absent). Drives the derived-feature registry in
+    // EngineerCandidateSelectionKernelConfigFeatures so training can declare the set in metadata.
+    MIOPEN_INTERNALS_EXPORT const std::vector<std::string>& kernel_config_derived_features() const
+    {
+        return kernel_config_derived_features_;
+    }
+    // Output params handled as a derived feature instead of raw passthrough (metadata
+    // "kernel_config_raw_exclude", e.g. 015_SplitK). Empty for legacy metadata.
+    MIOPEN_INTERNALS_EXPORT const std::set<std::string>& kernel_config_raw_exclude() const
+    {
+        return kernel_config_raw_exclude_;
+    }
 
 private:
     // Internal mappings and encodings
@@ -194,6 +208,8 @@ private:
     std::vector<int> split_k_values_;
     std::map<std::string, ConditionalLayout> conditional_layouts_;
     std::size_t num_cu_ = 0;
+    std::vector<std::string> kernel_config_derived_features_;
+    std::set<std::string> kernel_config_raw_exclude_;
 };
 
 class CandidateSelectionModel

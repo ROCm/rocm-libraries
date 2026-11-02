@@ -38,6 +38,8 @@
 #include <miopen/logger.hpp>
 #include <miopen/stringutils.hpp>
 #include <algorithm>
+#include <functional>
+#include <set>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -96,6 +98,31 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
     {
         MIOPEN_THROW("Metadata file does not contain 'encodings' section");
     }
+
+    // Kernel-config derived-feature schema (name-driven, mirrors the input tower's
+    // derived_features). The ordered names select which config derived features the registry in
+    // EngineerCandidateSelectionKernelConfigFeatures emits, so training can reorder / add features
+    // (declared in metadata) without a positional C++ convention. kernel_config_raw_exclude lists
+    // params handled as a derived feature instead of raw passthrough (e.g. 015_SplitK).
+    kernel_config_derived_features_ =
+        metadata.value("kernel_config_derived_features", std::vector<std::string>{});
+    {
+        const auto excl = metadata.value("kernel_config_raw_exclude", std::vector<std::string>{});
+        kernel_config_raw_exclude_ = std::set<std::string>(excl.begin(), excl.end());
+    }
+    // Back-compat: legacy metadata (pre-schema) carries neither field. Fall back to the original
+    // 10-feature positional list with no raw exclusion, reproducing prior behavior exactly.
+    if(kernel_config_derived_features_.empty())
+        kernel_config_derived_features_ = {"work_per_thread",
+                                           "block_aspect_ratio",
+                                           "log_block_size",
+                                           "xdl_ops_per_block",
+                                           "xdl_coverage_m",
+                                           "xdl_coverage_n",
+                                           "waves_per_block",
+                                           "vector_load_ratio",
+                                           "total_vector_transfer",
+                                           "log_k_per_block"};
 
     // Compute-unit count the model was trained with; normalizes hardware-aware derived features.
     if(metadata.contains("gpu") && metadata["gpu"].contains("num_cu"))
@@ -697,19 +724,20 @@ std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& me
     return active;
 }
 
-// Number of derived kernel-config features appended below (see the derived-feature block in
-// EngineerCandidateSelectionKernelConfigFeatures).
-constexpr std::size_t kKernelConfigDerivedFeatureCount = 10;
-
 std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMetadata& metadata,
                                                      const std::vector<std::string>& active_params)
 {
     const auto& sequence_encodings     = metadata.sequence_encodings();
+    const auto& raw_exclude            = metadata.kernel_config_raw_exclude();
     std::size_t onehot_features        = 0;
     std::size_t raw_numerical_features = 0;
 
     for(const auto& param_name : active_params)
     {
+        // A raw-excluded param (e.g. 015_SplitK) is consumed by a derived feature, not passed
+        // through as raw, and is not one-hot encoded -- skip it from both base counts.
+        if(raw_exclude.count(param_name) != 0)
+            continue;
         const auto enc_it = sequence_encodings.find(param_name);
         if(enc_it != sequence_encodings.end())
             onehot_features += enc_it->second.size();
@@ -717,7 +745,9 @@ std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMet
             ++raw_numerical_features;
     }
 
-    return onehot_features + raw_numerical_features + kKernelConfigDerivedFeatureCount;
+    // Derived-feature count is the length of the metadata-declared (or legacy) name list.
+    return onehot_features + raw_numerical_features +
+           metadata.kernel_config_derived_features().size();
 }
 
 float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
@@ -801,10 +831,13 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
         AppendKernelConfigOneHot(engineered, raw_config_features[i], enc_it->second, missing_token);
     }
 
-    // 2. Raw numerical features (non-categorical active params).
+    // 2. Raw numerical features (non-categorical active params, excluding those handled as a
+    //    derived feature instead of raw passthrough -- e.g. 015_SplitK).
+    const auto& raw_exclude = metadata.kernel_config_raw_exclude();
     for(std::size_t i = 0; i < active_params.size(); ++i)
     {
-        if(sequence_encodings.find(active_params[i]) == sequence_encodings.end())
+        if(sequence_encodings.find(active_params[i]) == sequence_encodings.end() &&
+           raw_exclude.count(active_params[i]) == 0)
             engineered.push_back(raw_config_features[i]);
     }
 
@@ -864,26 +897,66 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
     const bool a_block_vec_missing = is_missing("ABlockTransferSrcScalarPerVector");
     const bool b_block_vec_missing = is_missing("BBlockTransferSrcScalarPerVector");
 
-    // Block-level work distribution.
-    emit(m_per_block_missing || n_per_block_missing || block_size_missing,
-         (m_per_block * n_per_block) / (block_size + kEps));
-    emit(m_per_block_missing || n_per_block_missing, m_per_block / (n_per_block + kEps));
-    emit(block_size_missing, std::log1pf(block_size));
+    // Metadata-declared derived-feature registry. Each entry appends exactly one feature; the
+    // emit order is driven by metadata.kernel_config_derived_features() (legacy metadata falls back
+    // to the 10-feature list in the CandidateSelectionMetadata ctor). Training can reorder / extend
+    // the set by declaring it in metadata; a new feature still needs a registry entry here.
+    const std::unordered_map<std::string, std::function<void()>> derived_registry = {
+        {"work_per_thread",
+         [&] {
+             emit(m_per_block_missing || n_per_block_missing || block_size_missing,
+                  (m_per_block * n_per_block) / (block_size + kEps));
+         }},
+        {"block_aspect_ratio",
+         [&] {
+             emit(m_per_block_missing || n_per_block_missing, m_per_block / (n_per_block + kEps));
+         }},
+        {"log_block_size", [&] { emit(block_size_missing, std::log1pf(block_size)); }},
+        {"xdl_ops_per_block",
+         [&] { emit(m_xdl_wave_missing || n_xdl_wave_missing, m_xdl_wave * n_xdl_wave); }},
+        {"xdl_coverage_m",
+         [&] {
+             emit(m_per_xdl_missing || m_xdl_wave_missing || m_per_block_missing,
+                  (m_per_xdl * m_xdl_wave) / (m_per_block + kEps));
+         }},
+        {"xdl_coverage_n",
+         [&] {
+             emit(n_per_xdl_missing || n_xdl_wave_missing || n_per_block_missing,
+                  (n_per_xdl * n_xdl_wave) / (n_per_block + kEps));
+         }},
+        {"waves_per_block", [&] { emit(block_size_missing, block_size / 64.0f); }},
+        {"vector_load_ratio",
+         [&] {
+             emit(a_block_vec_missing || b_block_vec_missing, a_block_vec / (b_block_vec + kEps));
+         }},
+        {"total_vector_transfer",
+         [&] { emit(a_block_vec_missing || b_block_vec_missing, a_block_vec + b_block_vec); }},
+        {"log_k_per_block", [&] { emit(k_per_block_missing, std::log1pf(k_per_block)); }},
+        // SplitK: NOT routed through emit() -- autodeduce (SplitK<1) / absent is a real state, not
+        // "missing" (mirrors ConvKernConfigPreprocessor.compute_derived_features split encoding:
+        // log2 for the real {1,2,...,128} ladder, a separate is_autodeduce flag for the -1 mode).
+        {"log2_splitk",
+         [&] {
+             const float sk = get_param("SplitK");
+             engineered.push_back(sk >= 1.0f ? std::log2(sk) : 0.0f);
+         }},
+        {"is_autodeduce",
+         [&] {
+             const float sk = get_param("SplitK");
+             engineered.push_back(sk < 0.0f ? 1.0f : 0.0f);
+         }},
+    };
 
-    // XDL utilization.
-    emit(m_xdl_wave_missing || n_xdl_wave_missing, m_xdl_wave * n_xdl_wave);
-    emit(m_per_xdl_missing || m_xdl_wave_missing || m_per_block_missing,
-         (m_per_xdl * m_xdl_wave) / (m_per_block + kEps));
-    emit(n_per_xdl_missing || n_xdl_wave_missing || n_per_block_missing,
-         (n_per_xdl * n_xdl_wave) / (n_per_block + kEps));
-    emit(block_size_missing, block_size / 64.0f);
-
-    // Memory transfer efficiency.
-    emit(a_block_vec_missing || b_block_vec_missing, a_block_vec / (b_block_vec + kEps));
-    emit(a_block_vec_missing || b_block_vec_missing, a_block_vec + b_block_vec);
-
-    // K-dimension.
-    emit(k_per_block_missing, std::log1pf(k_per_block));
+    for(const auto& name : metadata.kernel_config_derived_features())
+    {
+        const auto it = derived_registry.find(name);
+        if(it == derived_registry.end())
+            MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: unknown kernel-config "
+                         "derived feature '" +
+                         name + "' in metadata; add its computer to the registry to match this "
+                                "model.");
+        it->second();
+    }
 
     if(engineered.size() != expected_output_dim)
     {
