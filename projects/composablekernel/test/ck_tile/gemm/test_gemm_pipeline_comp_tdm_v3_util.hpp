@@ -148,12 +148,13 @@ template <ck_tile::index_t TileM,
           typename BLayout,
           bool PadMN               = false,
           ck_tile::index_t VectorC = 0,
-          bool TdmEpilogue         = false>
+          bool TdmEpilogue         = false,
+          typename Policy          = ck_tile::GemmPipelineAgBgCrCompTDMV3Policy>
 using V3Bf16Config = V3Config<TileM,
                               TileN,
                               WarpsM,
                               WarpsN,
-                              ck_tile::GemmPipelineAgBgCrCompTDMV3Policy,
+                              Policy,
                               ck_tile::bf16_t,
                               ck_tile::bf16_t,
                               TileK,
@@ -466,6 +467,39 @@ using V3Bf16TdmEpilogueConfigs =
                      V3Bf16Config<128, 128, 64, 2, 2, CM, RM, false, 0, true>,
                      V3Bf16Config<256, 256, 64, 4, 4, CM, CM, false, 0, true>,
                      V3Bf16Config<128, 128, 64, 2, 2, CM, CM, false, 0, true>>;
+
+// Early refill (RefillPoint::AfterArrive) on M, N and K that are not multiples of the tile: the
+// refill path has its own K-tile bookkeeping, so it is checked on a partial last K tile too.
+// bf16 with TdmEpilogue, so every shape runs.
+using AfterArrive = comp_tdm_v3_test::RefillAfterArrivePolicy;
+using V3Bf16AfterArriveConfigs =
+    ::testing::Types<V3Bf16Config<256, 256, 64, 4, 4, RM, CM, false, 0, true, AfterArrive>,
+                     V3Bf16Config<128, 128, 64, 2, 2, RM, CM, false, 0, true, AfterArrive>,
+                     V3Bf16Config<256, 256, 64, 4, 4, CM, RM, false, 0, true, AfterArrive>>;
+
+// fp8 x fp8 -> bf16 (RCR, warp tile 32x32x128, K tile 256) with the default policy and with
+// early refill, unpadded CShuffle as the fp8 instances ship: M and K need no padding, an unaligned
+// N must be rejected. Plus early refill with TdmEpilogue, where an unaligned N runs too.
+using V3Fp8UnalignedConfigs = ::testing::Types<V3Config<256, 256, 4, 4, DefaultPolicy>,
+                                               V3Config<128, 128, 2, 2, DefaultPolicy>,
+                                               V3Config<256, 256, 4, 4, AfterArrive>,
+                                               V3Config<128, 128, 2, 2, AfterArrive>,
+                                               V3Config<256,
+                                                        256,
+                                                        4,
+                                                        4,
+                                                        AfterArrive,
+                                                        ck_tile::fp8_t,
+                                                        ck_tile::fp8_t,
+                                                        256,
+                                                        32,
+                                                        32,
+                                                        128,
+                                                        RM,
+                                                        CM,
+                                                        false,
+                                                        0,
+                                                        true>>;
 
 // The 4096^3 set: the three RCR tiles that matter for large shapes, and 256x256x64 in each other
 // layout.

@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// comp_tdm_v3 bf16 gtest, M, N and K that are not multiples of the tile (SMOKE_TEST):
-// M, N or K unaligned, all three unaligned with odd strides, a shape below one tile, and M = 1 or N
-// = 1.
+// comp_tdm_v3 gtest (bf16 and fp8), M, N and K that are not multiples of the tile (SMOKE_TEST):
+// M, N or K unaligned, all three unaligned with odd strides, a shape below one tile, and M = 1 or
+// N = 1.
 //
 // TDM clips every A/B box to the real extent (it handles ragged extents itself), so A/B never limit
 // the shape. C is written by the CShuffle epilogue with vector stores: an unaligned N needs kPadN,
@@ -15,6 +15,10 @@
 //   their C vector size divides (8 by default; 2 and 1 for the narrow-vector instances);
 // - the TdmEpilogue instances (V3Bf16TdmEpilogueConfigs), unpadded, accept every shape: the TDM
 //   store clips C in hardware.
+// - early refill (RefillPoint::AfterArrive), which has its own K-tile bookkeeping: bf16 with
+//   TdmEpilogue (V3Bf16AfterArriveConfigs) on every shape, and fp8 (V3Fp8UnalignedConfigs) with
+//   the default policy and early refill, unpadded CShuffle as fp8 ships (an unaligned N rejected)
+//   and early refill with TdmEpilogue.
 // Inputs and checks: test_gemm_pipeline_comp_tdm_v3_util.hpp.
 
 #include "test_gemm_pipeline_comp_tdm_v3_util.hpp"
@@ -67,6 +71,14 @@ class TestCompTDMV3Bf16UnalignedMnkTdmEpilogue : public TestCompTDMV3Bf16Unalign
 {
 };
 template <typename Config>
+class TestCompTDMV3Bf16UnalignedMnkAfterArrive : public TestCompTDMV3Bf16UnalignedMnk<Config>
+{
+};
+template <typename Config>
+class TestCompTDMV3Fp8UnalignedMnk : public TestCompTDMV3Bf16UnalignedMnk<Config>
+{
+};
+template <typename Config>
 class TestCompTDMV3Bf16UnalignedMnkPadded : public TestCompTDMV3Bf16UnalignedMnk<Config>
 {
 };
@@ -91,5 +103,19 @@ TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkTdmEpilogue, RandomUnaligned)
 {
     this->RunUnaligned(Init::Random);
 }
+
+TYPED_TEST_SUITE(TestCompTDMV3Bf16UnalignedMnkAfterArrive, V3Bf16AfterArriveConfigs);
+TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkAfterArrive, IntUnaligned)
+{
+    this->RunUnaligned(Init::Int);
+}
+TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkAfterArrive, RandomUnaligned)
+{
+    this->RunUnaligned(Init::Random);
+}
+
+TYPED_TEST_SUITE(TestCompTDMV3Fp8UnalignedMnk, V3Fp8UnalignedConfigs);
+TYPED_TEST(TestCompTDMV3Fp8UnalignedMnk, IntUnaligned) { this->RunUnaligned(Init::Int); }
+TYPED_TEST(TestCompTDMV3Fp8UnalignedMnk, RandomUnaligned) { this->RunUnaligned(Init::Random); }
 
 } // namespace
