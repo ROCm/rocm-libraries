@@ -62,17 +62,24 @@ GENERATED_HEADERS = {
 Result = Tuple[Path, int, str, bool]
 
 
-def clang_binary() -> str:
-    candidates = [
-        os.environ.get("HIPSPARSE_CLANG"),
-        "/opt/rocm/llvm/bin/clang",
+def clang_binary(rocm_path: Path) -> str:
+    requested = os.environ.get("HIPSPARSE_CLANG")
+    if requested:
+        found = shutil.which(requested)
+        if found is None:
+            raise FileNotFoundError(
+                f"HIPSPARSE_CLANG={requested}: no such executable"
+            )
+        return found
+    for candidate in (
+        shutil.which(str(rocm_path / "llvm" / "bin" / "clang")),
         shutil.which("clang"),
-    ]
-    for candidate in candidates:
-        if candidate and Path(candidate).exists():
+    ):
+        if candidate:
             return candidate
     raise FileNotFoundError(
-        "clang is required to audit documentation attachment"
+        "clang is required to audit documentation attachment; install it "
+        f"in {rocm_path / 'llvm' / 'bin'} or set HIPSPARSE_CLANG"
     )
 
 
@@ -120,6 +127,17 @@ def location_file(location: dict) -> Tuple[Optional[str], Optional[int]]:
     return location.get("file"), location.get("line")
 
 
+def has_text(comment: dict) -> bool:
+    # A /**@{*/ or /**@}*/ group marker is a doc comment to Clang too, so a
+    # declaration right after one gets a FullComment holding only "@{"/"@}".
+    kind = comment.get("kind")
+    if kind == "TextComment":
+        return comment.get("text", "").strip() not in ("", "@", "{", "}")
+    if kind not in ("FullComment", "ParagraphComment"):
+        return True
+    return any(has_text(child) for child in comment.get("inner", []))
+
+
 def parse_ast(dump: str) -> List[Result]:
     results: List[Result] = []
     for node in json_objects(dump):
@@ -134,7 +152,7 @@ def parse_ast(dump: str) -> List[Result]:
                 f"no source location in the AST dump for {name}"
             )
         documented = any(
-            child.get("kind") == "FullComment"
+            child.get("kind") == "FullComment" and has_text(child)
             for child in node.get("inner", [])
         )
         results.append((Path(file).resolve(), line, name, documented))
@@ -221,7 +239,7 @@ def main() -> int:
             args.umbrella.resolve(),
             args.include_dirs,
             args.rocm_path,
-            clang_binary(),
+            clang_binary(args.rocm_path),
         )
     except (FileNotFoundError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)

@@ -74,15 +74,15 @@ Also, githooks can be installed to format the code per-commit:
 
 ## Documenting Routine Families ##
 
-The S/D/C/Z variants of a routine are grouped between `/**@{*/` and `/**@}*/` in `library/include/internal/`. Edit only the documentation block directly before `/**@{*/`. Every other declaration in the group carries a generated copy of it, so libclang, clangd, binding generators and the published pages (which render the last variant in full) all show the same text. After editing that block, update the copies with:
+The S/D/C/Z variants of a routine are grouped between `/**@{*/` and `/**@}*/` in `library/include/internal/`. Edit only the documentation block directly before `/**@{*/`. Every other declaration in the group carries a generated copy of it, so libclang, clangd, binding generators and the published pages (which render the last variant in full) all show the same text. After editing that block, update the copies by running this from the rocm-libraries root:
 
 ```
-python3 scripts/sync_group_docs.py --write
+python3 projects/hipsparse/scripts/sync_group_docs.py --write
 ```
 
-The `hipsparse-group-docs` pre-commit hook runs the same script without `--write` on every pull request that touches the public headers. It fails if a copy is missing or differs, if a group holds anything other than declarations and their copies, or if a `#if`, `#else` or `#endif` line separates any documentation block from its declaration.
+The `hipsparse-group-docs` pre-commit hook runs the same script without `--write` on every pull request that touches the public headers. It fails if a copy is missing or differs, if a group holds anything other than declarations and their copies, if a preprocessor line other than `#define` follows any documentation block, or if the `DEPRECATED_*`, `HIPSPARSE_DEPRECATED_MSG` or `HIPSPARSE_EXPORT` prefix of a `hipsparseStatus_t` declaration contains `;`, `{`, `}`, `#` or `@`. Clang does not attach a documentation block across any of these.
 
-To check that Clang attaches a comment to every declaration, as libclang and clangd see them, run `python3 scripts/audit_doc_attachment.py`. It parses `hipsparse.h` with ROCm clang (`/opt/rocm/llvm/bin/clang`, or set `HIPSPARSE_CLANG`) and the HIP headers (`$ROCM_PATH`, default `/opt/rocm`), and fails if any function in `library/include/` is undocumented. It checks the AMD build, with `CUDART_VERSION` undefined. Keep each documentation block directly above its declaration: Clang does not attach it across a `#if` or other preprocessor line.
+To check that Clang attaches a comment to every `hipsparse*` function, as libclang and clangd see them, run `python3 projects/hipsparse/scripts/audit_doc_attachment.py` from the rocm-libraries root. It parses `hipsparse.h` with ROCm clang (`$ROCM_PATH/llvm/bin/clang`, or set `HIPSPARSE_CLANG` to a path or a command on `PATH`) and the HIP headers (`$ROCM_PATH`, default `/opt/rocm`), and fails if any function in `library/include/` is undocumented. It checks the AMD build, with `CUDART_VERSION` undefined. Types, enums and other declarations are only covered by the textual checks of `sync_group_docs.py`, and only the audit catches a detached comment on a function the hook does not parse, such as one returning something other than `hipsparseStatus_t`. Keep each documentation block directly above its declaration.
 
 ## Pull Request Guidelines ##
 

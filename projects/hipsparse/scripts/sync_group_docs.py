@@ -29,8 +29,10 @@ The full Doxygen block immediately before ``/**@{*/`` is the canonical
 documentation for that group. Each declaration after the first one must carry
 an exact literal copy so declaration-based tools such as libclang can see it.
 
-Every header is also checked for a documentation block separated from its
-declaration by a conditional preprocessor line, which Clang does not attach.
+Every header is also checked for a documentation block that Clang does not
+attach: one separated from what follows by a preprocessor line other than
+#define, or by a prefix of a hipsparseStatus_t declaration that contains one
+of ; { } # @.
 """
 
 import argparse
@@ -41,11 +43,16 @@ from typing import Iterable, List, Tuple
 
 
 DOC_PATTERN = r"/\*!(?:(?!\*/).)*\*/"
+# Macro arguments may span lines, as clang-format wraps long messages.
+ARGUMENTS_PATTERN = r'\((?:"(?:[^"\\]|\\.)*"|[^"()])*\)'
 PREFIX_PATTERN = (
-    r"(?:DEPRECATED_[A-Z0-9_]+\([^\n]*\)|"
-    r"HIPSPARSE_DEPRECATED_MSG\([^\n]*\)|"
+    r"(?:DEPRECATED_[A-Z0-9_]+" + ARGUMENTS_PATTERN + r"|"
+    r"HIPSPARSE_DEPRECATED_MSG" + ARGUMENTS_PATTERN + r"|"
     r"HIPSPARSE_EXPORT)"
 )
+# Clang does not attach a comment if the text up to the declaration holds any
+# of these (see getRawCommentNoCacheImpl in clang/lib/AST/ASTContext.cpp).
+DETACHING_CHARACTERS = ";{}#@"
 GROUP_PATTERN = re.compile(
     r"(?P<canonical>"
     + DOC_PATTERN
@@ -69,11 +76,12 @@ DECLARATION_PATTERN = re.compile(
     r"hipsparseStatus_t\s+hipsparse[A-Za-z0-9_]+\s*\([^;]*\);"
 )
 # A /*! or /** block (not a /**< or /*!< member comment, not a /**@{*/ or
-# /**@}*/ marker) followed, past blank and // lines, by a conditional.
+# /**@}*/ marker) followed, past blank and // lines, by a preprocessor line.
+# A block above a #define documents the macro.
 DETACHED_DOC_PATTERN = re.compile(
     r"/\*(?:!(?!<)|\*(?![*@<]))(?P<text>(?:(?!\*/).)*)\*/[ \t]*\n"
     r"(?:[ \t]*(?://[^\n]*)?\n)*"
-    r"[ \t]*(?P<directive>#[ \t]*(?:if|ifdef|ifndef|elif|else|endif)\b[^\n]*)",
+    r"[ \t]*(?P<directive>#(?![ \t]*define\b)[^\n]*)",
     re.DOTALL,
 )
 
@@ -132,6 +140,16 @@ def check_doc_placement(source: str) -> None:
             f"declaration by '{match.group('directive').strip()}', so Clang "
             "does not attach it; move the preprocessor line above the block"
         )
+    for entry in ENTRY_PATTERN.finditer(source):
+        prefix = entry.group("prefix")
+        found = [c for c in DETACHING_CHARACTERS if c in prefix]
+        if found:
+            line = source.count("\n", 0, entry.start("prefix")) + 1
+            raise SyncError(
+                f"line {line}: the prefix of {entry.group('name')} contains "
+                f"'{found[0]}', so Clang does not attach the documentation "
+                "block above it; remove it from the macro arguments"
+            )
 
 
 def synchronize_group(match: re.Match, write: bool) -> Tuple[str, List[str]]:
@@ -254,7 +272,8 @@ def main() -> int:
         print(
             f"{stale_count} declaration(s) have missing or stale documentation."
             " Edit only the block before /**@{*/ and run"
-            " projects/hipsparse/scripts/sync_group_docs.py --write.",
+            " python3 projects/hipsparse/scripts/sync_group_docs.py --write"
+            " from the repository root.",
             file=sys.stderr,
         )
         return 1

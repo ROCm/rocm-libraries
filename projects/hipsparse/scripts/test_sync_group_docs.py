@@ -25,10 +25,13 @@
 
 """Unit tests for sync_group_docs.py (run: python3 -m unittest test_sync_group_docs)."""
 
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -124,6 +127,34 @@ class SynchronizeFileTest(unittest.TestCase):
         )
         self.fix()
         self.assertEqual(self.text(), expected)
+
+    def test_wrapped_deprecated_msg_prefix_is_kept(self):
+        # clang-format wraps long messages, as in hipsparse_spsm.h.
+        prefix = (
+            "HIPSPARSE_DEPRECATED_MSG(\n"
+            '    "This routine will be removed, use (the) \\"_ex\\" one")\n'
+            "HIPSPARSE_EXPORT"
+        )
+        expected = group(
+            DOC,
+            declaration("hipsparseSaxpyi", prefix)
+            + "\n"
+            + DOC
+            + "\n"
+            + declaration("hipsparseDaxpyi", prefix),
+        )
+        self.write(
+            group(
+                DOC,
+                declaration("hipsparseSaxpyi", prefix)
+                + "\n"
+                + declaration("hipsparseDaxpyi", prefix),
+            )
+        )
+        self.assertEqual(self.check(), ["hipsparseDaxpyi"])
+        self.fix()
+        self.assertEqual(self.text(), expected)
+        self.assertEqual(self.check(), [])
 
     def test_trailing_whitespace_in_first_block_is_reported(self):
         self.write(SYNCED.replace("\\brief Scale.\n", "\\brief Scale. \n", 1))
@@ -234,6 +265,38 @@ class SynchronizeFileTest(unittest.TestCase):
             r"'#if\(!defined\(CUDART_VERSION\)\)'",
         )
 
+    def test_doc_above_other_preprocessor_line_is_refused(self):
+        for directive in ("#pragma once", '#include "x.h"', "#  undef X"):
+            with self.subTest(directive=directive):
+                self.assert_refused(
+                    DOC + "\n" + directive + "\n" + declaration("hipsparseA"),
+                    f"separated from its declaration by '{directive}'",
+                )
+
+    def test_detaching_character_in_prefix_is_refused(self):
+        for character in ";{}#@":
+            prefix = f'DEPRECATED_CUDA_12000("old {character} use X")'
+            with self.subTest(character=character):
+                self.assert_refused(
+                    SYNCED.replace(
+                        "HIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+                        prefix
+                        + "\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+                    ),
+                    f"line 11: the prefix of hipsparseDaxpyi contains "
+                    f"'{character}'",
+                )
+
+    def test_detaching_character_outside_group_is_refused(self):
+        self.assert_refused(
+            DOC
+            + "\n"
+            + declaration(
+                "hipsparseAxpby", 'HIPSPARSE_DEPRECATED_MSG("old; use X")'
+            ),
+            "the prefix of hipsparseAxpby contains ';'",
+        )
+
     def test_doc_below_conditional_passes(self):
         text = (
             "/*! \\file */\n#ifndef HIPSPARSE_TEST_H\n"
@@ -260,9 +323,82 @@ class SynchronizeFileTest(unittest.TestCase):
                 + declaration("hipsparseDaxpyi"),
             ).replace("\n", "\r\n")
         )
-        self.fix()
+        real_open = Path.open
+        with mock.patch.object(
+            Path, "open", autospec=True, side_effect=real_open
+        ) as opened:
+            self.fix()
+        # On Linux the bytes below come out as LF either way; the newline
+        # argument is what keeps a Windows checkout from writing CRLF.
+        opened.assert_called_with(
+            self.header, "w", encoding="utf-8", newline="\n"
+        )
         self.assertNotIn(b"\r", self.header.read_bytes())
         self.assertEqual(self.text(), SYNCED)
+
+
+class MainTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name)
+
+    def header(self, name, text):
+        path = self.directory / name
+        path.write_bytes(text.encode("utf-8"))
+        return path
+
+    def main(self, *args):
+        argv = ["sync_group_docs.py", *map(str, args)]
+        output, errors = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "argv", argv):
+            with contextlib.redirect_stdout(output):
+                with contextlib.redirect_stderr(errors):
+                    status = sync_group_docs.main()
+        return status, output.getvalue(), errors.getvalue()
+
+    def test_synchronized_headers_pass(self):
+        self.header("hipsparse_a.h", SYNCED)
+        self.assertEqual(self.main(self.directory), (0, "", ""))
+
+    def test_stale_copy_fails_with_status_1(self):
+        stale = self.header(
+            "hipsparse_a.h",
+            SYNCED.replace("\\brief Scale.\n", "\\brief Scale. \n", 1),
+        )
+        status, output, errors = self.main(self.directory)
+        self.assertEqual(status, 1)
+        self.assertEqual(output, f"{stale}:hipsparseSaxpyi: out of sync\n")
+        self.assertIn(
+            "run python3 projects/hipsparse/scripts/sync_group_docs.py "
+            "--write from the repository root",
+            errors,
+        )
+
+    def test_write_fixes_stale_copy(self):
+        stale = self.header(
+            "hipsparse_a.h",
+            SYNCED.replace("\\brief Scale.\n", "\\brief Scale. \n", 1),
+        )
+        status, output, _ = self.main("--write", self.directory)
+        self.assertEqual(status, 0)
+        self.assertEqual(output, f"{stale}:hipsparseSaxpyi: synchronized\n")
+        self.assertEqual(stale.read_bytes().decode("utf-8"), SYNCED)
+
+    def test_refused_header_fails_with_status_2(self):
+        self.header("hipsparse_a.h", SYNCED)
+        bad = self.header(
+            "hipsparse_b.h",
+            DOC + "\n#pragma once\n" + declaration("hipsparseB"),
+        )
+        status, _, errors = self.main(self.directory)
+        self.assertEqual(status, 2)
+        self.assertIn(f"error: {bad}: line 1:", errors)
+
+    def test_missing_path_fails_with_status_2(self):
+        status, _, errors = self.main(self.directory / "missing.h")
+        self.assertEqual(status, 2)
+        self.assertIn("missing.h: no such file or directory", errors)
 
 
 if __name__ == "__main__":
