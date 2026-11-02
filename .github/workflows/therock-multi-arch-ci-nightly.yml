@@ -134,21 +134,29 @@ jobs:
       contents: read
       id-token: write
 
-  rocjitsu_gemm_race_checks_gfx950:
-    name: rocjitsu GEMM race checks (gfx950)
+  rocjitsu_gemm_race_checks:
+    name: rocjitsu GEMM race checks (${{ matrix.amdgpu_families }})
     needs: [setup, linux_build_and_test]
+    # One CPU-emulation job per GPU target. Each entry must be a family that
+    # setup's linux_amdgpu_families builds, and the target needs a workload
+    # profile in projects/hipblaslt/clients/scripts/rocjitsu.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - amdgpu_families: gfx950-dcgpu
+            amdgpu_targets: gfx950
     if: >-
       ${{
         !cancelled() &&
-        contains(needs.setup.outputs.linux_build_config, 'gfx950-dcgpu') &&
         needs.linux_build_and_test.result != 'skipped'
       }}
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
     with:
       therock_ref: ${{ needs.setup.outputs.ref }}
       build_runs_on: ${{ fromJSON(needs.setup.outputs.linux_build_config).build_runs_on_medium }}
-      amdgpu_families: gfx950-dcgpu
-      amdgpu_targets: gfx950
+      amdgpu_families: ${{ matrix.amdgpu_families }}
+      amdgpu_targets: ${{ matrix.amdgpu_targets }}
       workload: random-gemms
       workers: 8
       random_gemm_count: 100

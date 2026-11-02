@@ -70,6 +70,8 @@ class RandomGemmTests(unittest.TestCase):
                 self.assertEqual(
                     runner.main(
                         [
+                            "--target",
+                            "gfx950",
                             "--count",
                             "2",
                             "--continue-on-failure",
@@ -102,10 +104,14 @@ class RandomGemmTests(unittest.TestCase):
     def test_dry_run_and_single_case_reproduce_the_same_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            runner.main(["--dry-run", "--count", "100", "--reports", str(root / "all")])
+            runner.main(
+                ["--dry-run", "--target", "gfx950", "--count", "100", "--reports", str(root / "all")]
+            )
             runner.main(
                 [
                     "--dry-run",
+                    "--target",
+                    "gfx950",
                     "--count",
                     "100",
                     "--case",
@@ -129,13 +135,14 @@ class RandomGemmTests(unittest.TestCase):
     def test_sampler_is_seeded_aligned_and_preserves_legal_profiles(self):
         def inputs(count, seed):
             rng = random.Random(seed)
-            return [sampler.sample_gemm(rng) for _ in range(count)]
+            return [sampler.sample_gemm(rng, "gfx950") for _ in range(count)]
 
         self.assertEqual(inputs(3, 0), inputs(7, 0)[:3])
         self.assertNotEqual(inputs(3, 0), inputs(3, 42))
         problems = inputs(1000, 0)
         self.assertEqual(
-            {p["family"] for p in problems}, set(sampler.NUMERICAL_FAMILIES)
+            {p["family"] for p in problems},
+            set(sampler.TARGET_PROFILES["gfx950"].families),
         )
         self.assertEqual(
             {p["transA"] + p["transB"] for p in problems}, {"NN", "NT", "TN", "TT"}
@@ -160,7 +167,7 @@ class RandomGemmTests(unittest.TestCase):
             self.assertNotIn("family", runner.bench_input(problem))
 
     def test_missing_wrong_failed_or_nonfinite_results_cannot_pass(self):
-        problem = sampler.sample_gemm(random.Random(0))
+        problem = sampler.sample_gemm(random.Random(0), "gfx950")
         text = bench_result(problem)
         race = '[rocjitsu] Kernel dispatch: "gemm_kernel" symbol="gemm_kernel"\n'
         self.assertIsNone(runner.check_result(problem, text, race))
@@ -261,6 +268,8 @@ class RandomGemmTests(unittest.TestCase):
             output = root / "results"
             status = runner.main(
                 [
+                    "--target",
+                    "gfx950",
                     "--count",
                     "3",
                     "--continue-on-failure",
@@ -322,6 +331,8 @@ class RandomGemmTests(unittest.TestCase):
                 with self.subTest(threads=threads, early_stop=early_stop):
                     output = root / f"threads-{threads}"
                     command = [
+                        "--target",
+                        "gfx950",
                         "--count",
                         "8",
                         "--workers",
@@ -381,6 +392,8 @@ class RandomGemmTests(unittest.TestCase):
                         )
                         output = root / f"{mode}-{early_stop}"
                         command = [
+                            "--target",
+                            "gfx950",
                             "--count",
                             "3",
                             "--timeout",
@@ -440,6 +453,8 @@ class RandomGemmTests(unittest.TestCase):
                     sys.executable,
                     "-B",
                     runner.__file__,
+                    "--target",
+                    "gfx950",
                     "--count",
                     "3",
                     "--client",
@@ -473,6 +488,8 @@ class RandomGemmTests(unittest.TestCase):
                 runner.main(
                     [
                         "--dry-run",
+                        "--target",
+                        "gfx950",
                         "--count",
                         "8",
                         "--workers",
@@ -505,18 +522,29 @@ class RandomGemmTests(unittest.TestCase):
             )
             self.assertEqual((status, timed_out), (3, False))
 
-    def test_execution_requires_gfx950(self):
+    def test_target_must_have_a_profile_and_match_the_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = root / "config.json"
             config.write_text(
                 json.dumps({"vm": {"gpu": {"device": {"gfx_target_version": 90402}}}})
             )
-            with self.assertRaises(SystemExit) as error:
-                runner.main(
-                    ["--config", str(config), "--reports", str(root / "results")]
-                )
-            self.assertEqual(error.exception.code, 2)
+            # A gfx942 config cannot run gfx950 samples, and gfx942 has no
+            # sampler profile yet.
+            for target in ("gfx950", "gfx942"):
+                with self.subTest(target=target):
+                    with self.assertRaises(SystemExit) as error:
+                        runner.main(
+                            [
+                                "--target",
+                                target,
+                                "--config",
+                                str(config),
+                                "--reports",
+                                str(root / "results"),
+                            ]
+                        )
+                    self.assertEqual(error.exception.code, 2)
             self.assertFalse((root / "results").exists())
 
 

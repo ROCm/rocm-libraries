@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: MIT
 set -euo pipefail
 
-# Builds rocjitsu and runs a gfx950 hipBLASLt GEMM workload under its race
-# detector, using hipBLASLt artifacts already unpacked at ROCM_PATH. The
-# workload runners live in projects/hipblaslt/clients/scripts/rocjitsu and write
-# their reports, including summary.md for the job summary, to
-# RACE_REPORT_DIR/<workload>.
+# Builds rocjitsu and runs a hipBLASLt GEMM workload under its race detector,
+# emulating the GPU target in AMDGPU_TARGETS with hipBLASLt artifacts for that
+# target already unpacked at ROCM_PATH. The workload runners live in
+# projects/hipblaslt/clients/scripts/rocjitsu and write their reports, including
+# summary.md for the job summary, to RACE_REPORT_DIR/<workload>.
 #
 # GEMM_WORKLOAD selects the workload:
 #   random-gemms  RANDOM_GEMM_COUNT fixed-seed sampled GEMMs, chosen by the
@@ -17,9 +17,9 @@ set -euo pipefail
 # and builds rocjitsu the same way.
 
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
+AMDGPU_TARGETS="${AMDGPU_TARGETS:-}"
 ROCJITSU_SOURCE_DIR="${ROCJITSU_SOURCE_DIR:-${PWD}/rocm-systems/emulation/rocjitsu}"
 ROCJITSU_BUILD_DIR="${ROCJITSU_BUILD_DIR:-${PWD}/rocjitsu-build}"
-ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json}"
 RACE_REPORT_DIR="${RACE_REPORT_DIR:-${PWD}/race-reports}"
 HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
 RUNNER_DIR="${RUNNER_DIR:-${PWD}/rocm-libraries/projects/hipblaslt/clients/scripts/rocjitsu}"
@@ -29,6 +29,18 @@ GEMM_TIMEOUT_SECONDS="${GEMM_TIMEOUT_SECONDS:-900}"
 RANDOM_GEMM_COUNT="${RANDOM_GEMM_COUNT:-100}"
 RANDOM_GEMM_SEED="${RANDOM_GEMM_SEED:-0}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
+
+# rocjitsu emulates one GPU at a time, so the job runs one target and selects
+# that target's emulator profile from the pinned rocjitsu source.
+case "${AMDGPU_TARGETS}" in
+  gfx942) default_config="gfx942_cdna3_kmd.json" ;;
+  gfx950) default_config="gfx950_mi355x_kmd.json" ;;
+  *)
+    echo "AMDGPU_TARGETS must name one supported target (gfx942 or gfx950), not '${AMDGPU_TARGETS}'" >&2
+    exit 1
+    ;;
+esac
+ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-${ROCJITSU_SOURCE_DIR}/configs/${default_config}}"
 
 mkdir -p "${RACE_REPORT_DIR}"
 : >"${TIMING_FILE}"
@@ -44,7 +56,7 @@ print_timing_summary() {
   done <"${TIMING_FILE}"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
-      echo "### rocjitsu GEMM race check stages (${GEMM_WORKLOAD}, gfx950)"
+      echo "### rocjitsu GEMM race check stages (${GEMM_WORKLOAD}, ${AMDGPU_TARGETS})"
       echo ""
       echo "| Stage | Seconds | Exit status |"
       echo "| --- | ---: | ---: |"
@@ -116,7 +128,7 @@ case "${GEMM_WORKLOAD}" in
       --client "${HIPBLASLT_BENCH}" \
       --config "${ROCJITSU_CONFIG}" \
       --reports "${RACE_REPORT_DIR}/${GEMM_WORKLOAD}" \
-      --target gfx950 \
+      --target "${AMDGPU_TARGETS}" \
       --workers "${GEMM_WORKERS}" \
       --timeout "${GEMM_TIMEOUT_SECONDS}" \
       --rocjitsu-revision "${ROCJITSU_REVISION}" \

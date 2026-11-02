@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from rocjitsu_gemm_sampler import SAMPLER_VERSION, sample_gemm
+from rocjitsu_gemm_sampler import TARGET_PROFILES, sample_gemm
 
 
 def bench_input(problem):
@@ -313,7 +313,12 @@ def main(argv=None):
     parser.add_argument(
         "--config", type=Path, help="CPU-emulation rocjitsu JSON config"
     )
-    parser.add_argument("--target", choices=("gfx950",), default="gfx950")
+    parser.add_argument(
+        "--target",
+        choices=sorted(TARGET_PROFILES),
+        required=True,
+        help="GPU architecture to sample for and emulate",
+    )
     parser.add_argument(
         "--workers", type=positive_int, default=1, help="number of concurrent GEMMs"
     )
@@ -357,9 +362,9 @@ def main(argv=None):
             .get("gpu", {})
             .get("device", {})
             .get("gfx_target_version")
-            != 90500
+            != TARGET_PROFILES[args.target].gfx_target_version
         ):
-            parser.error("--config must emulate gfx950")
+            parser.error(f"--config must emulate {args.target}")
         for name in ("client", "rocjitsu"):
             executable = shutil.which(getattr(args, name))
             if not executable:
@@ -373,7 +378,7 @@ def main(argv=None):
     args.reports = args.reports.resolve()
     args.reports.mkdir(parents=True, exist_ok=False)
     summary = {
-        "sampler": SAMPLER_VERSION,
+        "sampler": TARGET_PROFILES[args.target].version,
         "architecture": args.target,
         "rocjitsu_revision": args.rocjitsu_revision,
         "seed": args.seed,
@@ -436,7 +441,7 @@ def main(argv=None):
                 if stop.is_set():
                     return
                 for iteration in iterations:
-                    problem = sample_gemm(rng)
+                    problem = sample_gemm(rng, args.target)
                     if not args.case or iteration == args.case:
                         break
                 else:

@@ -7,8 +7,12 @@
 # The workload input selects what runs:
 #   smoke         Two small hipBLASLt and TensileLite workloads, through
 #                 run_rocjitsu_hipblaslt_race_check.sh.
-#   random-gemms  Fixed-seed sampled gfx950 GEMMs, through
+#   random-gemms  Fixed-seed sampled GEMMs for the emulated target, through
 #                 run_rocjitsu_hipblaslt_gemm_race_checks.sh.
+#
+# Each run emulates one GPU target: amdgpu_families selects the TheRock
+# artifact group to fetch and amdgpu_targets the target whose kernels and
+# emulator profile are used. Callers run one job per target.
 
 name: TheRock rocjitsu race check Linux
 
@@ -40,13 +44,21 @@ on:
       random_gemm_seed:
         type: number
         default: 0
-  # Test the gfx950 artifacts of a completed rocm-libraries Multi-Arch run.
+  # Test the artifacts of a completed rocm-libraries Multi-Arch run.
   workflow_dispatch:
     inputs:
       artifact_run_id:
         description: "Completed rocm-libraries Multi-Arch run to test"
         type: string
         required: true
+      amdgpu_families:
+        description: "Artifact group built by that run"
+        type: string
+        default: gfx950-dcgpu
+      amdgpu_targets:
+        description: "GPU target to emulate"
+        type: string
+        default: gfx950
       workload:
         type: choice
         options:
@@ -84,7 +96,7 @@ jobs:
         uses: ./.github/actions/ci-env
 
   rocjitsu-race-check-linux:
-    name: ${{ inputs.workload == 'smoke' && format('rocjitsu race check ({0})', inputs.amdgpu_families) || format('rocjitsu GEMM race checks ({0}, {1})', inputs.workload, inputs.amdgpu_families || 'gfx950-dcgpu') }}
+    name: ${{ inputs.workload == 'smoke' && format('rocjitsu race check ({0})', inputs.amdgpu_families) || format('rocjitsu GEMM race checks ({0}, {1})', inputs.workload, inputs.amdgpu_families) }}
     needs: ci-env
     # This job is advisory. Failures remain visible, but continue-on-error keeps
     # the calling Linux workflow successful. ROCm/rocm-libraries#10072 verifies
@@ -110,7 +122,8 @@ jobs:
       ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
-      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families || 'gfx950-dcgpu' }}
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
@@ -185,8 +198,8 @@ jobs:
         uses: ./.github/actions/setup_test_environment
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          ARTIFACT_GROUP: ${{ inputs.amdgpu_families || 'gfx950-dcgpu' }}
-          AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || (github.event_name == 'workflow_dispatch' && 'gfx950' || '') }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: --blas --tests${{ inputs.workload != 'smoke' && format(' --run-github-repo {0}', github.repository) || '' }}
@@ -233,6 +246,6 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
-          name: ${{ inputs.workload == 'smoke' && format('rocjitsu-race-reports-{0}', inputs.amdgpu_families) || format('rocjitsu-{0}-{1}', inputs.workload, inputs.amdgpu_families || 'gfx950-dcgpu') }}
+          name: ${{ inputs.workload == 'smoke' && format('rocjitsu-race-reports-{0}', inputs.amdgpu_families) || format('rocjitsu-{0}-{1}', inputs.workload, inputs.amdgpu_families) }}
           path: race-reports/
           if-no-files-found: ignore

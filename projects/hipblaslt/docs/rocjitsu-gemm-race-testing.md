@@ -1,8 +1,10 @@
 # Nightly GEMM race detection with rocjitsu
 
 The nightly job runs 100 sampled hipBLASLt GEMMs through rocjitsu with race
-detection enabled. It executes gfx950 GPU instructions on CPUs and checks the
-numerical output with `hipblaslt-bench`.
+detection enabled. rocjitsu executes the GPU instructions of one target
+architecture on CPUs, so no GPU is needed, and `hipblaslt-bench` checks the
+numerical output. Each architecture's kernels are separate code, so the job runs
+once per target; gfx950 is currently the only target.
 
 See [rocjitsu's race detector documentation](https://github.com/ROCm/rocm-systems/blob/6f5d9658a4b13656e0c1a3719d86a320c9206dbe/emulation/rocjitsu/docs/race-detector.md)
 for how detection works and its coverage limits.
@@ -34,6 +36,11 @@ changing the runner.
 
 ## Current sampling
 
+Sampling has a profile per target, because the available number formats differ
+between architectures. The gfx950 profile is described below; supporting
+another target starts with adding its profile to the
+[sampler](../clients/scripts/rocjitsu/rocjitsu_gemm_sampler.py).
+
 For a product of an M×K matrix and a K×N matrix, the output is M×N. M, N and K
 are independent uniform draws from `{32, 64, ..., 480}`. These dimensions are
 aligned to 32 to accommodate the low-precision formats used by this test.
@@ -57,10 +64,11 @@ GELU apply a function to each output value.
 
 ## Automated runs and reproduction
 
-The nightly Multi-Arch workflow runs 100 samples with seed 0 and eight
-concurrent GEMMs. It emulates gfx950, the GPU instruction set used by the MI350
-family. With a fixed seed, every night checks the same inputs against the
-latest library, so it works as a smoke test rather than a growing search.
+The nightly Multi-Arch workflow runs one job per entry in its target matrix,
+currently gfx950, the GPU instruction set used by the MI350 family. Each job
+runs 100 samples with seed 0 and eight concurrent GEMMs. With a fixed seed,
+every night checks the same inputs against the latest library, so it works as a
+smoke test rather than a growing search.
 
 The [CPU test job](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
 runs this as its `random-gemms` workload. It uses the library and benchmark
@@ -71,15 +79,16 @@ even after a failure. The job is advisory: its failure is visible, but does not
 fail the required Multi-Arch summary.
 
 The same job can be dispatched manually with the ID of a completed Multi-Arch
-run. It then tests that run's artifacts with the requested sample count, seed
-and number of concurrent GEMMs.
+run. It then tests that run's artifacts for the requested artifact group and
+target, with the requested sample count, seed and number of concurrent GEMMs.
 
-To run locally, provide a matching library and benchmark, rocjitsu, and its
-gfx950 configuration. The Python environment needs PyYAML, and the benchmark
-build must enable MX data generation.
+To run locally, provide a library and benchmark built for the target, rocjitsu,
+and its configuration for that target. The Python environment needs PyYAML, and
+the benchmark build must enable MX data generation.
 
 ```sh
 python3 projects/hipblaslt/clients/scripts/rocjitsu/rocjitsu_random_gemms.py \
+    --target gfx950 \
     --client /path/to/hipblaslt-bench --rocjitsu /path/to/rocjitsu \
     --library-dir /path/to/library/gfx950 \
     --config /path/to/gfx950_mi355x_kmd.json --count 100 --workers 8 \
