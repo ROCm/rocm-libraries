@@ -134,8 +134,9 @@ struct ExactProduct
                 limb[n++] = (uint32_t)(carry % 1000000000u);
                 carry /= 1000000000u;
             }
-            /* Five int32 factors need at most 5 limbs. A sixth factor that
-             * overflows the array must stop the process, not compare wrongly. */
+            /* Five int32 factors (|f| <= 2**31) make at most a 47-digit product,
+             * which fits the 6 limbs. A factor that overflows them must stop the
+             * process, not compare wrongly. */
             if(carry != 0)
                 abort();
         }
@@ -230,7 +231,7 @@ bool balance_causal(const rocke_attention_dense_spec_t* s)
 }
 
 /* AttentionDenseSpec._aligned_causal, with the concrete spec's lookahead veto
- * (gfx950: right_bound > 0) passed in. */
+ * (gfx950: right_bound != 0) passed in. */
 bool aligned_causal(const rocke_attention_dense_spec_t* s, bool lookahead)
 {
     const bool moving_diagonal = s->causal_bottom_right && s->seqlen_q != s->seqlen_kv;
@@ -658,12 +659,12 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
 
 int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* s)
 {
-    return (int)dense_num_waves(s);
+    return divisors_ok(s) ? (int)dense_num_waves(s) : 0;
 }
 
 int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* s)
 {
-    return (int)dense_gqa(s);
+    return divisors_ok(s) ? (int)dense_gqa(s) : 0;
 }
 
 const char*

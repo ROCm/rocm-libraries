@@ -440,6 +440,28 @@ void check_unknown_decode()
     CHECK(rocke_attention_dense_name_parts_base(&s, false, &parts) == ROCKE_ERR_VALUE);
 }
 
+/* An arch validator that rejects its own field, counting its calls: the arch
+ * half of preflight, which the vectors never reach because the shipped classes'
+ * own checks agree with the base ones on every recorded case. */
+struct RejectingCtx
+{
+    uint32_t magic;
+    int calls;
+};
+
+bool reject_arch(const void* ctx, char* reason, size_t cap)
+{
+    auto* c = const_cast<RejectingCtx*>(static_cast<const RejectingCtx*>(ctx));
+    if(c == nullptr || c->magic != k_ctx_magic)
+    {
+        std::snprintf(reason, cap, "bad validator context");
+        return false;
+    }
+    ++c->calls;
+    std::snprintf(reason, cap, "right_bound > 0 requires causal=True");
+    return false;
+}
+
 /* Preflight runs the base checks on the spec it is given, whatever the arch
  * validator and its ctx say, and takes the type name from the traits. */
 void check_preflight_contract()
@@ -472,6 +494,26 @@ void check_preflight_contract()
     unnamed.type_name = NULL;
     CHECK(!rocke_attention_dense_spec_preflight(
         &s, &unnamed, false, NULL, NULL, reason, sizeof(reason)));
+
+    /* The arch half: run after the base checks pass, its reason under the
+     * concrete type name, and its ctx is the one given. */
+    rocke_attention_dense_traits_t gfx950 = t;
+    gfx950.type_name = "Gfx950AttentionDenseSpec";
+    RejectingCtx arch{k_ctx_magic, 0};
+    CHECK(!rocke_attention_dense_spec_preflight(
+        &s, &gfx950, false, reject_arch, &arch, reason, sizeof(reason)));
+    CHECK_STR(reason, "invalid Gfx950AttentionDenseSpec: right_bound > 0 requires causal=True");
+    CHECK(arch.calls == 1);
+
+    /* Python's super().__post_init__() raises first, so a base reject wins and
+     * the arch validator never runs. */
+    s.num_query_heads = 7;
+    CHECK(!rocke_attention_dense_spec_preflight(
+        &s, &gfx950, false, reject_arch, &arch, reason, sizeof(reason)));
+    CHECK_STR(reason,
+              "invalid Gfx950AttentionDenseSpec: num_query_heads (7) must be a positive "
+              "multiple of num_kv_heads (2)");
+    CHECK(arch.calls == 1);
 }
 
 /* SPEC PRECONDITION: on a spec that never passed validation, the accessors and
@@ -489,6 +531,8 @@ void check_unvalidated_spec()
             = 0;
         CHECK(rocke_attention_dense_spec_resolved_persist_decode(&s, false) == NULL);
         CHECK(rocke_attention_dense_spec_resolved_nonpersist_decode(&s, false) == NULL);
+        CHECK(rocke_attention_dense_spec_num_queries_per_kv(&s) == 0);
+        CHECK(rocke_attention_dense_spec_num_waves(&s) == 0);
         rocke_attention_dense_name_parts_t parts;
         CHECK(rocke_attention_dense_name_parts_base(&s, false, &parts) == ROCKE_ERR_VALUE);
         rocke_attention_dense_spec_t good = base_spec();
@@ -497,6 +541,8 @@ void check_unvalidated_spec()
         CHECK(rocke_attention_dense_kernel_name(&s, &parts, name, sizeof(name)) == ROCKE_ERR_VALUE);
     }
     CHECK(rocke_attention_dense_spec_resolved_persist_decode(NULL, false) == NULL);
+    CHECK(rocke_attention_dense_spec_num_queries_per_kv(NULL) == 0);
+    CHECK(rocke_attention_dense_spec_num_waves(NULL) == 0);
 }
 
 /* The kernel name is the kernel's identity: a part that does not fit its slot, a

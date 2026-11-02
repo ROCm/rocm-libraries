@@ -56,8 +56,9 @@
  * resolved_*_decode), name_parts_base and kernel_name require a spec that has
  * passed rocke_attention_dense_spec_preflight with the same traits and
  * lookahead. They do not crash on an unvalidated spec with a zero divisor or a
- * NULL argument (the decode accessors return NULL, the other two
- * ROCKE_ERR_VALUE), but their answers are only Python's on a valid spec.
+ * NULL argument (num_waves and num_queries_per_kv return 0, the decode
+ * accessors NULL, the other two ROCKE_ERR_VALUE), but their answers are only
+ * Python's on a valid spec.
  *
  * Not ported: attention_dense_cache_key (a Python launcher-cache key over
  * dataclass fields and the spec's class object; it has no C caller).
@@ -171,10 +172,10 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* spe
                                          char* reason,
                                          size_t reason_cap);
 
-/* @property num_waves: block_m // 32. See SPEC PRECONDITION. */
+/* @property num_waves: block_m // 32; 0 on an unusable spec (SPEC PRECONDITION). */
 int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* spec);
-/* @property num_queries_per_kv: num_query_heads // num_kv_heads. See SPEC
- * PRECONDITION: a validated spec has positive head counts, so the int fits. */
+/* @property num_queries_per_kv: num_query_heads // num_kv_heads; 0 on an
+ * unusable spec. A validated spec has positive head counts, so the int fits. */
 int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* spec);
 /* @property resolved_persist_decode: explicit value, or the auto policy using
  * causal balance, chiplet locality, and persistent work thresholds.
