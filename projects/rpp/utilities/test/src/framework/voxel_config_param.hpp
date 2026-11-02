@@ -77,7 +77,7 @@ struct VoxelConfig {
     Roi roi;
     Roi3D roiType;
     VoxelSize size;
-    Rpp32u numThreads;  // passed to rppCreate; 0 = default
+    Rpp32u numThreads;  // passed to rppCreate; kDefaultThreads = rppCreate's default
 };
 
 inline std::string voxel_config_name(const VoxelConfig& c) {

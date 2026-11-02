@@ -33,6 +33,8 @@ SOFTWARE.
 #include <stdexcept>
 #include <string>
 
+#include "framework/backend_param.hpp"
+
 #if RPP_BACKEND_HIP
 #include <hip/hip_runtime.h>
 #define RPP_TEST_CHECK_HIP(cmd)                                            \
@@ -46,10 +48,10 @@ SOFTWARE.
 
 namespace rpptest {
 
-// RAII wrapper around an rpp handle. numThreads = 0 keeps rppCreate's default.
+// RAII wrapper around an rpp handle for the given backend.
 class RppHandle {
    public:
-    RppHandle(RppBackend backend, std::size_t batchSize, Rpp32u numThreads = 0)
+    RppHandle(RppBackend backend, std::size_t batchSize, Rpp32u numThreads = kDefaultThreads)
         : backend_(backend) {
         if (rppCreate(&handle_, batchSize, numThreads, nullptr, backend_) != rppStatusSuccess)
             throw std::runtime_error("rppCreate failed");

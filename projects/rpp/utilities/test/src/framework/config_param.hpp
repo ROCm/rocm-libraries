@@ -104,7 +104,7 @@ struct TestConfig {
     Layout layoutIn, layoutOut;
     Roi roi;
     Size size;
-    Rpp32u numThreads;  // passed to rppCreate; 0 = default
+    Rpp32u numThreads;  // passed to rppCreate; kDefaultThreads = rppCreate's default
 };
 
 // Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48" (or

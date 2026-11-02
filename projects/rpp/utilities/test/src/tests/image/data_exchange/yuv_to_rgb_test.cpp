@@ -77,9 +77,9 @@ std::vector<WithParams<YuvParams>> yuv_configs() {
         if (backend != RPP_HIP_BACKEND) continue;
         for (const YuvParams& op : kYuvParams)
             for (const Size& size : kSizes)
-                configs.push_back(
-                    {TestConfig{backend, DType::U8, Layout::PKD3, Layout::PKD3, Roi::Full, size, 0},
-                     op});
+                configs.push_back({TestConfig{backend, DType::U8, Layout::PKD3, Layout::PKD3,
+                                              Roi::Full, size, kDefaultThreads},
+                                   op});
     }
     return configs;
 }

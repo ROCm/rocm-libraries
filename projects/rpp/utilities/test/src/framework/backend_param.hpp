@@ -47,13 +47,15 @@ inline std::string backend_name(RppBackend backend) {
     return backend == RPP_HIP_BACKEND ? "HIP" : "HOST";
 }
 
-// HOST thread counts tested on top of the default (numThreads = 0, one thread per image): a single
-// thread, and more threads than the default batch of 2. rppCreate caps the count at
-// std::thread::hardware_concurrency(), so a small machine may run the larger count with fewer.
-inline const std::vector<Rpp32u> kHostThreadCounts{1, 4};
+// numThreads value that keeps rppCreate's default: one thread per image on HOST.
+inline constexpr Rpp32u kDefaultThreads = 0;
 
-// A backend plus the numThreads its handle is created with. HIP ignores numThreads, so it only
-// gets the default.
+// HOST thread counts every op is tested with: the default, a single thread, and more threads than
+// the default batch of 2. rppCreate caps the count at std::thread::hardware_concurrency(), so a
+// small machine may run the larger count with fewer.
+inline const std::vector<Rpp32u> kHostThreadCounts{kDefaultThreads, 1, 4};
+
+// A backend plus the numThreads its handle is created with.
 struct BackendVariant {
     RppBackend backend;
     Rpp32u numThreads;
@@ -62,39 +64,19 @@ struct BackendVariant {
 inline std::vector<BackendVariant> backend_variants() {
     std::vector<BackendVariant> variants;
     for (RppBackend backend : available_backends()) {
-        variants.push_back({backend, 0});
         if (backend == RPP_HOST_BACKEND)
             for (Rpp32u n : kHostThreadCounts) variants.push_back({backend, n});
+        else
+            variants.push_back({backend, kDefaultThreads});  // HIP ignores numThreads
     }
     return variants;
 }
 
 // Backend label token: "HOST" for the default thread count, "HOST_T1" for an explicit one.
 inline std::string backend_name(RppBackend backend, Rpp32u numThreads) {
-    return numThreads == 0 ? backend_name(backend)
-                           : backend_name(backend) + "_T" + std::to_string(numThreads);
-}
-
-// Replaces the HOST thread-count variants of a config grid with `counts` (each default HOST config
-// is followed by one copy per count); HIP configs pass through. {} keeps the default count only.
-// Works on any config with backend and numThreads members. Nested calls: the outermost wins.
-template <typename Config>
-std::vector<Config> host_threads(const std::vector<Config>& configs,
-                                 const std::vector<Rpp32u>& counts) {
-    std::vector<Config> out;
-    for (const Config& c : configs) {
-        if (c.backend != RPP_HOST_BACKEND) {
-            out.push_back(c);
-        } else if (c.numThreads == 0) {
-            out.push_back(c);
-            for (Rpp32u n : counts) {
-                Config variant = c;
-                variant.numThreads = n;
-                out.push_back(variant);
-            }
-        }
-    }
-    return out;
+    return numThreads == kDefaultThreads
+               ? backend_name(backend)
+               : backend_name(backend) + "_T" + std::to_string(numThreads);
 }
 
 }  // namespace rpptest

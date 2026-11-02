@@ -79,7 +79,7 @@ struct NdConfig {
     DType dtypeIn, dtypeOut;
     Rpp32u nDim;  // per-sample rank: 2, 3 or 4
     NdShape shape;
-    Rpp32u numThreads;  // passed to rppCreate; 0 = default
+    Rpp32u numThreads;  // passed to rppCreate; kDefaultThreads = rppCreate's default
 };
 
 // Every axis has a distinct extent, so an axis mix-up cannot pass by coincidence.
