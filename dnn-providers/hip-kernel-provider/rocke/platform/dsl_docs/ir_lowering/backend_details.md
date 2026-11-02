@@ -37,31 +37,29 @@ The default `compile_kernel` ISA is `amdgcn-amd-amdhsa--gfx950`, and gfx950 (MI3
 
 ## LLVM Intrinsic Flavor
 
-A small set of AMDGPU intrinsic signatures changed between LLVM 20 (ROCm 7.0 / 7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22; ROCm 7.13+ ships LLVM 23). The DSL picks the right flavor on first lower so the same source compiles on every toolchain. The ladder has three rungs — `llvm20`, `llvm22`, `llvm23` — enumerated once in `LLVM_FLAVORS` (`core/lower_llvm.py`) and mirrored by the C++ engine's flavor table (`cpp/core/lower_llvm/core.cpp`, readable from Python as `rocke_engine.llvm_flavors()`).
+rocKE separates a **compiler lane** from an **emission profile**. A lane records a qualified compiler major; a profile records the structural LLVM IR that rocKE emits: datalayout generation, declaration ABI, call shapes, and admitted target operations. The qualified lanes are `llvm20`, `llvm22`, `llvm23`, and `llvm24`, enumerated by `LLVM_FLAVORS` in `core/llvm_profile.py` and mirrored by the neutral C++ profile registry in `cpp/core/llvm_profile.cpp`. LLVM23 and LLVM24 intentionally share one emission profile because qualification found no structural IR delta between them.
 
-The signature changes at the llvm20 → llvm21+ boundary:
+The profiles capture these differences:
 
-- `llvm.amdgcn.make.buffer.rsrc.p1` → `llvm.amdgcn.make.buffer.rsrc.p8.p1`, `num_records` widened from `i32` to `i64` (LLVM PR #126828).
-- `llvm.amdgcn.mfma.f32.{16x16x32,32x32x16}.{fp8,bf8}.{fp8,bf8}` A/B operands collapsed from `<2 x i32>` to scalar `i64`.
+- LLVM20 uses the plain-`p8` datalayout and legacy buffer-resource/FP8 MFMA declarations.
+- LLVM22 uses indexed `p8`, `make.buffer.rsrc.p8.p1` with an `i64` count, scalar-`i64` FP8/BF8 MFMA operands, and the eleven-argument scaled-MFMA form.
+- LLVM23/24 add `m:e` and address spaces `p10`–`p15`, use the nine-argument scaled-MFMA form, and admit the LLVM23-generation target-op surface.
 
-`llvm23` is a distinct rung but not yet a distinct *shape*: `_INTRINSIC_DECLS_LLVM23_OVERRIDES` is currently a copy of the llvm22 table, and both share the `P8_INDEXED` datalayout, so the two emit identical IR for every wired target. The rung exists so that the first llvm23-only signature change is a one-table edit rather than a new flavor plumbed through both engines, and so a ROCm 7.13 host reports what it actually has.
-
-**The flavor is tied to the comgr-lib vintage that will actually load — the IR must match the library that compiles it.** The mismatch that matters is llvm22-shaped IR fed to a comgr `< 7.2`: comgr verifies top-level `declare`s BEFORE running the auto-upgrade pass, so a mismatched declare fails the verifier (historically a `SIGABRT`) even when LLVM would otherwise auto-upgrade the call site. So the detection keys off *the comgr library that runtime will dlopen*, not just the ambient ROCm version.
+The compiler resolver never infers structural compatibility from a lane name. Emission decisions consult the selected profile rather than exact `llvm23` comparisons. Python and C++ must emit byte-identical IR for the same kernel, target, and lane.
 
 Detection (`core/lower_llvm.py::_detect_llvm_flavor`):
 
-1. `ROCKE_LLVM_FLAVOR` env var (`llvm20`, `llvm22`, or `llvm23`).
-2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (the torch-bundled lib → `torch.version.hip` when rocke ends up driving torch's bundled comgr; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. The version is mapped through `_ROCM_FLAVOR_LADDER`: ROCm `>= 7.13` → `llvm23`, `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the runtime's torch-bundled-lib resolution (`runtime/hip_module.py::_torch_bundled_lib`). Teaching rocke about a newer ROCm is one row in that ladder.
-3. `torch.version.hip` / `/opt/rocm/.info/version` — fallbacks when the comgr-lib path cannot be resolved.
-4. Default: `llvm22`.
+1. A supported `ROCKE_LLVM_FLAVOR` value selects offline emission without loading COMGR.
+2. Otherwise COMGR's loaded compiler maps as follows: LLVM <=20 → `llvm20`, 21–22 → `llvm22`, 23 → `llvm23`, and 24 → `llvm24`.
+3. A compiler newer than the latest qualified lane fails instead of silently inheriting the newest profile. Missing compiler evidence also fails. Offline callers can select an explicit qualified lane.
 
-Resolution is *lazy and import-order-robust*: `_LLVM_FLAVOR` stays `None` at module import; the first call to `lower_kernel_to_llvm(kernel)` runs `_resolve_llvm_flavor()`. The cache is **keyed on the resolved comgr-lib path** (the "basis"), not resolved-once-forever — so a torch-less early call that picks llvm20 no longer locks the process: once torch enters and the loadable comgr becomes the torch-bundled 7.2 lib, the flavor re-resolves to llvm22. This lets the caller import `rocke` and `torch` in either order (or only one of them) and still emit the matching IR.
+Resolution is lazy and compiler evidence is retained with the loaded COMGR handle. Python-driven C++ lowering receives Python's resolved lane explicitly. Standalone native AUTO applies the same mapping and unknown-value failures. A native caller that owns compilation should pass the lane matching that compiler. See [Compiler detection and provenance](../reference/env_flags.md#compiler-detection-and-provenance).
 
-**Compile-time guard.** `runtime/comgr.py::build_hsaco_from_llvm_ir` calls `_assert_ir_flavor_matches_lib` (same module), which reads the IR datalayout `p8` field and compares its **generation** (`LlvmDatalayoutKind`: `p8:128:128:128:48` = `P8_INDEXED`, shared by llvm22/llvm23; `p8:128:128` = `P8_PLAIN` = llvm20) to the generation of the loaded comgr vintage. The comparison is on generation rather than flavor because the `p8` field cannot distinguish llvm22 from llvm23, and codegen only aborts across the generation boundary. On a mismatched pair (LLVM 21+ IR + comgr `< 7.2`) it raises a clean `ComgrError` that names the fix, instead of the bare `SIGABRT`. The guard is a no-op on matched pairs and protects **both** lowering engines (C-lowered `.ll` funnels through the same comgr path). Flavor outcomes are unchanged for the two common cases (torch-first → llvm22, torch-less → llvm20), so byte-identity is preserved.
+**Compile-time guard.** `runtime/comgr.py::build_hsaco_from_llvm_ir` compares the recognized IR `p8` generation with the profile selected from loaded compiler evidence. `p8:128:128:128:48` is `P8_INDEXED` (llvm22/llvm23/llvm24); `p8:128:128` is `P8_PLAIN` (llvm20). This catches a known ABI-generation mismatch but does not replace real-toolchain validity and datalayout-drift checks.
 
-Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22` / `LLVM_FLAVOR_LLVM23`). All three constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` (and to `_INTRINSIC_DECLS_LLVM23_OVERRIDES` if LLVM 23 differs again — it currently just copies the llvm22 table), and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples). Prefer `_is_modern_flavor(self._flavor)` over naming flavors in the branch: `test_no_hand_rolled_flavor_membership_lists` rejects a literal listing two or more flavor constants, because that is the shape that silently left `llvm23` out.
+When adding a lane, first characterize its real compiler output. Add a lane only for qualification; add a distinct profile only for a structural IR difference. Put declaration and call-shape decisions in the profile instead of branching on a lane name. Python/C++ profile tests, the real-toolchain drift guard, emitted-IR validity, and byte identity cover different contracts and remain independently required.
 
-The committed golden (`tests/golden/rocke_representative_ir_sha256.json`) holds one sub-document per flavor and `check_golden` verifies **all** of them from any host, so an llvm23 hash cannot go stale just because CI runs on ROCm 7.2.
+Goldens store one sub-document per distinct emission profile. A lane in `aliases` is still lowered and compared, but reuses the profile-identical baseline instead of duplicating thousands of hashes. Thus LLVM24 is checked against LLVM23's baseline while remaining a separately exercised compiler lane.
 
 ## Wave Size
 
@@ -76,17 +74,9 @@ Verified mappings:
 - pointers: `ptr addrspace(1)` (`global`), `ptr addrspace(3)` (`lds`), `ptr` otherwise.
 - vectors: `<N x elem>`.
 - SmemType: lowers to `ptr addrspace(3)` for value-level usage.
-- scalars: `i1`, `i8`, `i32`, `i64`, `f16`, `bf16`, `f32`. (FP8E4M3 / BF8E5M2 lower through the convert intrinsics rather than as first-class load/store types.)
+- scalars: `i1`, `i8` (also `u8`), `i16`, `i32`, `i64`, `f16`, `bf16`, `f32`, `f64`. (FP8E4M3 / BF8E5M2 lower through the convert intrinsics rather than as first-class load/store types.)
 
-If you add a new dtype, check:
-
-- scalar LLVM type mapping in `_llvm_type`;
-- vector mapping if `<N x T>` is needed;
-- pointer / address-space handling;
-- load and store ops;
-- cast / pack / unpack;
-- MFMA atom support (and `MFMA_F16_ATOMS` catalog or new catalog);
-- manifest dtype parsing and reference verification.
+To add a dtype, follow [Adding a dtype](../development/extending.md#54-adding-a-dtype).
 
 ## Address Spaces
 
@@ -154,7 +144,7 @@ When in doubt, inspect the LLVM text via `art.llvm_text` and the generated ISA v
 - HIP typedefs for vector types;
 - builtin shims for intrinsics clang may not expose directly (e.g. `_llvm_amdgcn_raw_ptr_buffer_load_lds`, `_llvm_amdgcn_ds_read_tr16_b64`);
 - `__shared__` storage for LDS allocations;
-- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/0x00027000)`;
+- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/word3)`, where `word3` is the target ISA backend's `buffer_rsrc_word3` (the same word the LLVM route emits);
 - `__builtin_amdgcn_mfma_*`;
 - C++ `for` and `if` for structured control flow.
 

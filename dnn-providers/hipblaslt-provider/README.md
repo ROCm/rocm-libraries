@@ -16,11 +16,31 @@ cmake --build --preset default
 ### Building as a standalone plugin
 To build the plugin standalone, first install hipDNN and hipBLASLt on the system and then follow these steps:
 
+The [hipDNN developer image](../../projects/hipdnn/dockerfiles/README.md) supplies the third-party libraries. With the compatible hipDNN SDKs and hipBLASLt available, the following image recipe needs no manual dependency download, install, or fetch flag.
+
 1. Navigate to the `dnn-providers/hipblaslt-provider` directory.
 1. Make a build directory using `mkdir build && cd build`.
 1. Configure the build using `cmake -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..`.
 1. Finally, run `ninja` to build the plugin.
 
+Outside the image, this provider resolves third-party libraries like every other hipDNN component; see [Third-Party Libraries](../../projects/hipdnn/docs/Building.md#third-party-libraries) for the installed-package and fetch options. Configure from this provider's build directory:
+
+```bash
+cmake -G Ninja -DCMAKE_CXX_COMPILER=/path/to/amdclang/clang++ \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+```
+
+Beyond the shared third-party set, the prefixes must provide HIP, hipBLASLt, `hipdnn_data_sdk`, `hipdnn_flatbuffers_sdk`, `hipdnn_plugin_sdk`, and their transitive dependencies. The fetch opt-in supplies none of those.
+
 ## Operation support
 
 The list of supported operations is described in [Operation Support](docs/OperationSupport.md) documentation.
+
+## Project policies
+
+This plugin is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)

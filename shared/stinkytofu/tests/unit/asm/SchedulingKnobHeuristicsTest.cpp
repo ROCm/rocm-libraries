@@ -36,13 +36,11 @@ namespace {
 
 constexpr std::array<int, 3> kGfx1250 = {12, 5, 0};
 
-SchedulingFeatures makeFeatures(int wmma, int ds, int firstWmmaLatency = 0,
-                                int sumWmmaLatency = 0) {
+SchedulingFeatures makeFeatures(int wmma, int ds, int sumWmmaLatency = 0) {
     SchedulingFeatures features;
     features.arch = kGfx1250;
     features.stats.wmmaCount = wmma;
     features.stats.dsLoadCount = ds;
-    features.stats.firstWmmaLatencyCycles = firstWmmaLatency;
     features.stats.sumWmmaLatencyCycles = sumWmmaLatency;
     return features;
 }
@@ -58,53 +56,42 @@ TEST(SchedulingKnobHeuristics, DegenerateFallsBackToStaticDefaults) {
             resolveSchedulingKnobs(features, overrides, policy);
         const ResolvedSchedulingKnobs defaults = staticSchedulingKnobDefaults(kGfx1250);
 
-        EXPECT_EQ(resolved.dsReadThrottleLatency, defaults.dsReadThrottleLatency);
-        EXPECT_EQ(resolved.dsReadPerWmma, defaults.dsReadPerWmma);
         EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles,
                   defaults.clusterBarrierRule3SignalLeadCycles);
-        EXPECT_EQ(resolved.dsReadThrottleLatencySource, SchedulingKnobSource::StaticDefault);
-        EXPECT_EQ(resolved.dsReadPerWmmaSource, SchedulingKnobSource::StaticDefault);
         EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCyclesSource,
                   SchedulingKnobSource::StaticDefault);
+        EXPECT_EQ(resolved.reduceClusterBarrierPerLoop, defaults.reduceClusterBarrierPerLoop);
+        EXPECT_FALSE(resolved.reduceClusterBarrierPerLoop);
+        EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::StaticDefault);
     }
 
-    EXPECT_EQ(staticSchedulingKnobDefaults(kGfx1250).dsReadThrottleLatency,
-              hwModelForArch(kGfx1250).lds.readThrottleLatency);
-    EXPECT_EQ(staticSchedulingKnobDefaults(kGfx1250).dsReadPerWmma, kStaticDefaultDsReadPerWmma);
     EXPECT_EQ(staticSchedulingKnobDefaults(kGfx1250).clusterBarrierRule3SignalLeadCycles,
               kStaticDefaultClusterBarrierRule3SignalLeadCycles);
+    EXPECT_FALSE(staticSchedulingKnobDefaults(kGfx1250).reduceClusterBarrierPerLoop);
 }
 
 TEST(SchedulingKnobHeuristics, PolicyUsedWhenMainLoopHasBothCounts) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    // firstWmmaLatency=32, perWmma=ceil(12/4)=3, queueDepth=16
-    // computed = (32/3)*16 = 10*16 = 160 > 72 => 160
-    const SchedulingFeatures features =
-        makeFeatures(/*wmma=*/4, /*ds=*/12, /*firstWmmaLatency=*/32);
+    const SchedulingFeatures features = makeFeatures(/*wmma=*/4, /*ds=*/12);
 
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
     const ResolvedSchedulingKnobs proposed = policy.propose(features, hwModelForArch(kGfx1250));
 
-    EXPECT_EQ(resolved.dsReadThrottleLatencySource, SchedulingKnobSource::Policy);
-    EXPECT_EQ(resolved.dsReadPerWmmaSource, SchedulingKnobSource::Policy);
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCyclesSource, SchedulingKnobSource::Policy);
-    EXPECT_EQ(resolved.dsReadThrottleLatency, proposed.dsReadThrottleLatency);
-    EXPECT_EQ(resolved.dsReadPerWmma, proposed.dsReadPerWmma);
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles,
               proposed.clusterBarrierRule3SignalLeadCycles);
-    // ceil(12/4) = 3
-    EXPECT_EQ(resolved.dsReadPerWmma, 3);
-    EXPECT_EQ(resolved.dsReadThrottleLatency, 160);
     // sumWmmaLatencyCycles default 0 <= 500 => 100
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles, 100);
+    EXPECT_FALSE(resolved.reduceClusterBarrierPerLoop);
+    EXPECT_EQ(resolved.reduceClusterBarrierPerLoop, proposed.reduceClusterBarrierPerLoop);
+    EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::Policy);
 }
 
 TEST(SchedulingKnobHeuristics, Rule3LeadUses200WhenSumWmmaLatencyExceeds500) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    const SchedulingFeatures features =
-        makeFeatures(/*wmma=*/4, /*ds=*/4, /*firstWmmaLatency=*/3, /*sumWmmaLatency=*/501);
+    const SchedulingFeatures features = makeFeatures(/*wmma=*/4, /*ds=*/4, /*sumWmmaLatency=*/501);
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles, 200);
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCyclesSource, SchedulingKnobSource::Policy);
@@ -113,89 +100,109 @@ TEST(SchedulingKnobHeuristics, Rule3LeadUses200WhenSumWmmaLatencyExceeds500) {
 TEST(SchedulingKnobHeuristics, Rule3LeadUses100WhenSumWmmaLatencyAtMost500) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    const SchedulingFeatures features =
-        makeFeatures(/*wmma=*/4, /*ds=*/4, /*firstWmmaLatency=*/3, /*sumWmmaLatency=*/500);
+    const SchedulingFeatures features = makeFeatures(/*wmma=*/4, /*ds=*/4, /*sumWmmaLatency=*/500);
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles, 100);
 }
 
-TEST(SchedulingKnobHeuristics, DsReadPerWmmaCappedAt3) {
+TEST(SchedulingKnobHeuristics, UserOverrideWinsOverPolicy) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    // ceil(20/4)=5 would exceed the cap => 3
-    const SchedulingFeatures features =
-        makeFeatures(/*wmma=*/4, /*ds=*/20, /*firstWmmaLatency=*/32);
+    overrides.clusterBarrierRule3SignalLeadCycles = 40;
+    const SchedulingFeatures features = makeFeatures(/*wmma=*/2, /*ds=*/10, /*sumWmmaLatency=*/900);
+
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
-    EXPECT_EQ(resolved.dsReadPerWmma, 3);
-    EXPECT_EQ(resolved.dsReadPerWmmaSource, SchedulingKnobSource::Policy);
+
+    EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCyclesSource, SchedulingKnobSource::User);
+    EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles, 40);
+    // The other knob stays on the policy path.
+    EXPECT_FALSE(resolved.reduceClusterBarrierPerLoop);
+    EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::Policy);
 }
 
-TEST(SchedulingKnobHeuristics, ThrottleFlooredAtArchReadThrottleLatency) {
+TEST(SchedulingKnobHeuristics, ReduceClusterBarrierPerLoopWhenWmmaBudgetCoversDsLoads) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    // Throttle uses independent ceil(ds/wmma)=1 (not the dsReadPerWmma knob):
-    // firstWmmaLatency=3, queueDepth=16 => (3/1)*16=48 < 72 => floor at 72.
-    // wmma < 128 => dsReadPerWmma prefers the static default (3), not ceil=1.
-    const SchedulingFeatures features = makeFeatures(/*wmma=*/4, /*ds=*/4, /*firstWmmaLatency=*/3);
-    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
-    EXPECT_EQ(resolved.dsReadThrottleLatency, 72);
-    EXPECT_EQ(resolved.dsReadPerWmma, kStaticDefaultDsReadPerWmma);
+
+    // 2501 cycles over 500 ds_loads is 5 cycles each, and the sum is above 2500.
+    const SchedulingFeatures enabled =
+        makeFeatures(/*wmma=*/64, /*ds=*/500, /*sumWmmaLatency=*/2501);
+    const ResolvedSchedulingKnobs on = resolveSchedulingKnobs(enabled, overrides, policy);
+    EXPECT_TRUE(on.reduceClusterBarrierPerLoop);
+    EXPECT_EQ(on.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::Policy);
+
+    // Exactly 5 cycles per ds_load is enough once the sum is above 2500.
+    const SchedulingFeatures exact = makeFeatures(/*wmma=*/64, /*ds=*/501, /*sumWmmaLatency=*/2505);
+    EXPECT_TRUE(resolveSchedulingKnobs(exact, overrides, policy).reduceClusterBarrierPerLoop);
+
+    // The sum threshold is strict.
+    const SchedulingFeatures atSumCap =
+        makeFeatures(/*wmma=*/64, /*ds=*/100, /*sumWmmaLatency=*/2500);
+    EXPECT_FALSE(resolveSchedulingKnobs(atSumCap, overrides, policy).reduceClusterBarrierPerLoop);
+
+    // 2501 / 501 truncates to 4 cycles per ds_load.
+    const SchedulingFeatures tight = makeFeatures(/*wmma=*/64, /*ds=*/501, /*sumWmmaLatency=*/2501);
+    EXPECT_FALSE(resolveSchedulingKnobs(tight, overrides, policy).reduceClusterBarrierPerLoop);
 }
-TEST(SchedulingKnobHeuristics, UserOverrideIndependentPerKnob) {
+
+TEST(SchedulingKnobHeuristics, ReduceClusterBarrierUserOverrideWinsOverPolicy) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    overrides.dsReadThrottleLatency = 40;
-    // Leave per-WMMA and Rule3 unset so they still come from policy.
-    const SchedulingFeatures features = makeFeatures(/*wmma=*/2, /*ds=*/10);
+    overrides.reduceClusterBarrierPerLoop = true;
+    const SchedulingFeatures features = makeFeatures(/*wmma=*/2, /*ds=*/10, /*sumWmmaLatency=*/900);
 
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
-    const ResolvedSchedulingKnobs proposed = policy.propose(features, hwModelForArch(kGfx1250));
 
-    EXPECT_EQ(resolved.dsReadThrottleLatencySource, SchedulingKnobSource::User);
-    EXPECT_EQ(resolved.dsReadThrottleLatency, 40);
-    EXPECT_EQ(resolved.dsReadPerWmmaSource, SchedulingKnobSource::Policy);
-    EXPECT_EQ(resolved.dsReadPerWmma, proposed.dsReadPerWmma);
+    EXPECT_TRUE(resolved.reduceClusterBarrierPerLoop);
+    EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::User);
+    // Lead cycles stay on the policy path.
+    EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles, 200);
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCyclesSource, SchedulingKnobSource::Policy);
-    EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCycles,
-              proposed.clusterBarrierRule3SignalLeadCycles);
+}
+
+TEST(SchedulingKnobHeuristics, ReduceClusterBarrierExplicitOffIsUser) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+    overrides.reduceClusterBarrierPerLoop = false;
+    const SchedulingFeatures features = makeFeatures(/*wmma=*/4, /*ds=*/4);
+
+    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
+
+    EXPECT_FALSE(resolved.reduceClusterBarrierPerLoop);
+    EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::User);
 }
 
 TEST(SchedulingKnobHeuristics, ModuleOptionsSentinelsMapToOverrides) {
     StinkyAsmModule::ModuleOptions opts{};
-    // Struct defaults: throttle / perWmma / Rule3 are -1 (unset).
-    EXPECT_EQ(opts.DsReadThrottleLatency, -1);
-    EXPECT_EQ(opts.DsReadPerWmma, -1);
+    // Struct default: Rule3 is -1 (unset).
     EXPECT_EQ(opts.ClusterBarrierRule3SignalLeadCycles, -1);
+    EXPECT_EQ(opts.ReduceClusterBarrierPerLoop, -1);
 
     SchedulingKnobOverrides empty = schedulingKnobOverridesFromModuleOptions(opts);
-    EXPECT_FALSE(empty.dsReadThrottleLatency.has_value());
-    EXPECT_FALSE(empty.dsReadPerWmma.has_value());
     EXPECT_FALSE(empty.clusterBarrierRule3SignalLeadCycles.has_value());
+    EXPECT_FALSE(empty.reduceClusterBarrierPerLoop.has_value());
 
-    opts.DsReadThrottleLatency = 64;
-    opts.DsReadPerWmma = 0;                        // extreme but valid
     opts.ClusterBarrierRule3SignalLeadCycles = 0;  // co-locate
+    opts.ReduceClusterBarrierPerLoop = 0;
     SchedulingKnobOverrides set = schedulingKnobOverridesFromModuleOptions(opts);
-    ASSERT_TRUE(set.dsReadThrottleLatency.has_value());
-    ASSERT_TRUE(set.dsReadPerWmma.has_value());
     ASSERT_TRUE(set.clusterBarrierRule3SignalLeadCycles.has_value());
-    EXPECT_EQ(*set.dsReadThrottleLatency, 64);
-    EXPECT_EQ(*set.dsReadPerWmma, 0);
     EXPECT_EQ(*set.clusterBarrierRule3SignalLeadCycles, 0);
+    ASSERT_TRUE(set.reduceClusterBarrierPerLoop.has_value());
+    EXPECT_FALSE(*set.reduceClusterBarrierPerLoop);
+
+    opts.ReduceClusterBarrierPerLoop = 1;
+    SchedulingKnobOverrides enabled = schedulingKnobOverridesFromModuleOptions(opts);
+    ASSERT_TRUE(enabled.reduceClusterBarrierPerLoop.has_value());
+    EXPECT_TRUE(*enabled.reduceClusterBarrierPerLoop);
 }
 
 TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsFormat) {
     SchedulingFeatures features;
     features.stats.wmmaCount = 4;
     features.stats.dsLoadCount = 12;
-    features.stats.firstWmmaLatencyCycles = 30;
     features.stats.sumWmmaLatencyCycles = 120;
 
     ResolvedSchedulingKnobs resolved;
-    resolved.dsReadThrottleLatency = 160;
-    resolved.dsReadThrottleLatencySource = SchedulingKnobSource::Policy;
-    resolved.dsReadPerWmma = 3;
-    resolved.dsReadPerWmmaSource = SchedulingKnobSource::Policy;
     resolved.clusterBarrierRule3SignalLeadCycles = 100;
     resolved.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
 
@@ -205,9 +212,9 @@ TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsFormat) {
     EXPECT_NE(line.find("[SchedulingKnobs] module=Cijk_kernel"), std::string::npos);
     EXPECT_NE(line.find("wmma=4"), std::string::npos);
     EXPECT_NE(line.find("dsLoad=12"), std::string::npos);
-    EXPECT_NE(line.find("dsReadThrottleLatency=160(policy)"), std::string::npos);
-    EXPECT_NE(line.find("dsReadPerWmma=3(policy)"), std::string::npos);
+    EXPECT_NE(line.find("sumWmmaLat=120"), std::string::npos);
     EXPECT_NE(line.find("rule3SignalLeadCycles=100(static)"), std::string::npos);
+    EXPECT_NE(line.find("reduceClusterBarrierPerLoop=0(static)"), std::string::npos);
 }
 
 TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsIfDebugHonorsDebugOnly) {

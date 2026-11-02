@@ -134,6 +134,14 @@ namespace TensileLite
         {
             using IO = llvm::yaml::IO;
 
+            static bool hasKey(IO& io, const char* key)
+            {
+                for(auto const& present : io.keys())
+                    if(present == key)
+                        return true;
+                return false;
+            }
+
             template <typename T>
             static void mapRequired(IO& io, const char* key, T& obj)
             {
@@ -333,4 +341,3 @@ namespace llvm
             "fdsa");
     } // namespace yaml
 } // namespace llvm
-

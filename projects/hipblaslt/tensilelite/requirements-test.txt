@@ -1,0 +1,14 @@
+# Python dependencies for running the artifact-based TensileLite and rocisa tests.
+# Keep the version limits equal to tox.ini and pyproject.toml.
+# TODO: generate this from pyproject.toml
+pytest>=5.4.1
+pytest-timeout==2.4.0
+PyYAML
+packaging
+msgpack>=1.0.0
+joblib>=1.4.0
+numpy>=1.26.0
+filelock>=3.0.0
+syrupy
+hip-python; sys_platform != "win32"
+pytest-xdist>=1.32.0

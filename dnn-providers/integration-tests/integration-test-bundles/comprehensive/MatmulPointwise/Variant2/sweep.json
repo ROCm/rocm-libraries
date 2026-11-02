@@ -1,0 +1,837 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "3_16_128_bfp16_ncl_operationswish_fwd_norlo_norhi_6de5d0",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "swish_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": 1.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivBf16.Correctness/11",
+        "operation": "Smoke/IntegrationGpuMatmulActivBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivBf16.Correctness_11"
+      }
+    },
+    {
+      "id": "3_16_128_bfp16_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_d42dc7",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "gelu_approx_tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivBf16.Correctness/14",
+        "operation": "Smoke/IntegrationGpuMatmulActivBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivBf16.Correctness_14"
+      }
+    },
+    {
+      "id": "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0_norhi_ef36ce",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivBf16.Correctness/20",
+        "operation": "Smoke/IntegrationGpuMatmulActivBf16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivBf16.Correctness_20"
+      }
+    },
+    {
+      "id": "3_16_128_fp16_ncl_operationrelu_fwd_rlo0_norhi_725f79",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivFp16.Correctness/0",
+        "operation": "Smoke/IntegrationGpuMatmulActivFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp16.Correctness_0"
+      }
+    },
+    {
+      "id": "3_16_128_fp16_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_a060e6",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "gelu_approx_tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivFp16.Correctness/10",
+        "operation": "Smoke/IntegrationGpuMatmulActivFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp16.Correctness_10"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_ca75ea",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "swish_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": 1.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivFp16.Correctness/23",
+        "operation": "Smoke/IntegrationGpuMatmulActivFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp16.Correctness_23"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_7fd5df",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              512,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              12288,
+              4096,
+              128,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "swish_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": 1.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivFp16.Correctness/27",
+        "operation": "Smoke/IntegrationGpuMatmulActivFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp16.Correctness_27"
+      }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_operationrelu_fwd_rlo0_norhi_852683",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              128,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivFp32.Correctness/0",
+        "operation": "Smoke/IntegrationGpuMatmulActivFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp32.Correctness_0"
+      }
+    },
+    {
+      "id": "3_16_128_fp32_ncl_operationgelu_approx_tanh_fwd_norlo_norhi_254ca1",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              512,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              1,
+              32
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "gelu_approx_tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivFp32.Correctness/14",
+        "operation": "Smoke/IntegrationGpuMatmulActivFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp32.Correctness_14"
+      }
+    },
+    {
+      "id": "2_3_16_128_fp32_nchw_operationswish_fwd_norlo_norhi_03a8fb",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              16,
+              128
+            ],
+            "strides": [
+              6144,
+              2048,
+              128,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              16,
+              32
+            ],
+            "strides": [
+              1536,
+              512,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              32,
+              128
+            ],
+            "strides": [
+              4096,
+              4096,
+              1,
+              32
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "swish_fwd",
+          "relu_lower_clip": null,
+          "relu_upper_clip": null,
+          "swish_beta": 1.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuMatmulActivFp32.Correctness/35",
+        "operation": "Smoke/IntegrationGpuMatmulActivFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMatmulActivFp32.Correctness_35"
+      }
+    }
+  ]
+}

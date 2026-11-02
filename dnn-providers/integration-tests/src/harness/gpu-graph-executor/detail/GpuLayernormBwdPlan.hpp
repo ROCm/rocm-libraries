@@ -134,9 +134,8 @@ public:
         double epsilon = hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON;
         if(_params.epsilonTensor.has_value())
         {
-            epsilon = static_cast<double>(
-                hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<ComputeDataType>(
-                    _params.epsilonTensor.value(), variantPack, "Epsilon"));
+            epsilon = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+                _params.epsilonTensor.value(), variantPack, "Epsilon");
         }
 
         hipdnn_gpu_ref::GpuFpReferenceLayernorm::bprop<DyDataType,
@@ -237,11 +236,8 @@ public:
                               nodeAttributes->inv_variance_tensor_uid().value(),
                               MeanInvVarianceDataTypeEnum);
         }
-        if(nodeAttributes->epsilon_tensor_uid().has_value())
-        {
-            CHECK_TENSOR_TYPE(
-                tensorMap, nodeAttributes->epsilon_tensor_uid().value(), ComputeDataTypeEnum);
-        }
+
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
     }

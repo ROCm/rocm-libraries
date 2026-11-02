@@ -25,6 +25,7 @@
  *   static_if    {pred:<intexpr>,then,else?}     -> compile-time branch
  *   scf_for      {iv,lo,hi,step,iter:[<iterarg>],results:[<reg>],body} -> runtime loop
  *   scf_if       {cond,then}                     -> runtime branch
+ *   scf_if_else  {cond,then,else}                -> runtime if/else (scf.if_else)
  *   ret          {}                              -> rocke_b_ret
  *
  * Parametric (rolled) features:
@@ -44,6 +45,8 @@
  */
 #include "rocke/recipe_vm.h"
 
+#include <limits.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -308,13 +311,50 @@ static void rv_ivar_push(rvm_t* vm, const char* name, long value)
 
 /* ----------------------------------------------------------- intexpr eval */
 
+static bool rv_number_to_long(double n, long* out)
+{
+    /* Check before casting: larger adjacent integer spellings can round to the
+     * same double, while non-finite and out-of-range conversions are undefined.
+     * The upper long bound is exclusive so the first out-of-range power of two
+     * is rejected even where LONG_MAX rounds to it. */
+    if(!isfinite(n) || n < -9007199254740991.0 || n > 9007199254740991.0 || n < (double)LONG_MIN
+       || n >= (double)LONG_MAX + 1.0)
+        return false;
+    long value = (long)n;
+    if(n != (double)value)
+        return false;
+    *out = value;
+    return true;
+}
+
+static bool rv_number_to_int64(double n, int64_t* out)
+{
+    /* Recipe numbers use a double-backed DOM, so values outside the safe-integer
+     * range can silently change when adjacent spellings round to one double. */
+    if(!isfinite(n) || !(n >= -9007199254740991.0 && n <= 9007199254740991.0))
+        return false;
+    int64_t value = (int64_t)n;
+    if(n != (double)value)
+        return false;
+    *out = value;
+    return true;
+}
+
 static long rv_int(rvm_t* vm, const jd_val_t* e)
 {
     if(vm->failed || !e)
         return 0;
     double n;
     if(rocke_jnum(e, &n))
-        return (long)n;
+    {
+        long value;
+        if(!rv_number_to_long(n, &value))
+        {
+            rv_fail(vm, "intexpr number is not an integer");
+            return 0;
+        }
+        return value;
+    }
     if(e->kind == JD_OBJ)
     {
         const jd_val_t* s = rocke_jget(e, "spec");
@@ -349,7 +389,7 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
            the multiplier depends on its odd part, so neither is expressible as
            arithmetic on the axis -- the recipe has to regenerate them.
            Mirrors recipe_expand.py::magic_division_constants, and upstream of
-           both, helpers/transforms.py::calculate_magic_numbers. */
+           both, helpers/magic_division.py::calculate_magic_numbers. */
         const jd_val_t* mm = rocke_jget(e, "magic_multiplier");
         const jd_val_t* ms = rocke_jget(e, "magic_shift");
         if(mm || ms)
@@ -437,19 +477,26 @@ static bool rv_abi_ok(const jd_val_t* node, char* err, size_t err_cap)
     const jd_val_t* abi = rocke_jget(node, "abi");
     if(!abi || abi->kind != JD_OBJ)
         return true;
-    double need;
-    if(!rocke_jnum(rocke_jget(abi, "min_reader"), &need))
+    double need_number;
+    if(!rocke_jnum(rocke_jget(abi, "min_reader"), &need_number))
         return true;
-    if((int)need <= ROCKE_RECIPE_ABI)
+    long need;
+    if(!rv_number_to_long(need_number, &need))
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "artifact min_reader is not an integer");
+        return false;
+    }
+    if(need <= ROCKE_RECIPE_ABI)
         return true;
     if(err && err_cap)
     {
         const char* who = rocke_jstr(rocke_jget(abi, "engine"));
         ROCKE_ERR_SNPRINTF(err,
                            err_cap,
-                           "artifact needs a recipe reader >= %d, this engine is %d "
+                           "artifact needs a recipe reader >= %ld, this engine is %d "
                            "(written by engine %s)",
-                           (int)need,
+                           need,
                            ROCKE_RECIPE_ABI,
                            who ? who : "?");
     }
@@ -505,8 +552,9 @@ static bool rv_point_matches(rvm_t* vm, const jd_val_t* pt)
             continue;
         }
         double d;
-        long have;
-        if(!rocke_jnum(v, &d) || !rv_spec_int(vm, k, &have) || have != (long)d)
+        long want_int, have;
+        if(!rocke_jnum(v, &d) || !rv_number_to_long(d, &want_int) || !rv_spec_int(vm, k, &have)
+           || have != want_int)
             return false;
     }
     return true;
@@ -786,8 +834,10 @@ static const rocke_type_t* rv_type(rvm_t* vm, const jd_val_t* t)
             const jd_val_t* cnt = rocke_jget(t, "count");
             if(!elem || !cnt)
                 return vm->failed ? nullptr : (rv_fail(vm, "bad vector type"), nullptr);
-            int n = (int)rv_int(vm, cnt); /* count may be an intexpr */
-            return vm->failed ? NULL : rocke_vector_type(vm->b, elem, n);
+            long count = rv_int(vm, cnt); /* count may be an intexpr */
+            if(!vm->failed && (count < INT_MIN || count > INT_MAX))
+                rv_fail(vm, "vector count is outside the int range");
+            return vm->failed ? NULL : rocke_vector_type(vm->b, elem, (int)count);
         }
         if(kind && strcmp(kind, "smem") == 0)
         {
@@ -803,7 +853,12 @@ static const rocke_type_t* rv_type(rvm_t* vm, const jd_val_t* t)
             }
             int dims[8];
             for(int i = 0; i < rank; i++)
-                dims[i] = (int)rv_int(vm, shape->arr[i]); /* dims may be intexprs */
+            {
+                long dim = rv_int(vm, shape->arr[i]); /* dims may be intexprs */
+                if(!vm->failed && (dim < INT_MIN || dim > INT_MAX))
+                    rv_fail(vm, "smem shape item %d is outside the int range", i);
+                dims[i] = vm->failed ? 0 : (int)dim;
+            }
             /* exclusive is reconstructed from the op attr in rv_op (the type
              * node, like the canonical type name, omits it). */
             return vm->failed ? NULL : rocke_smem_type(vm->b, elem, dims, rank, 0);
@@ -848,6 +903,43 @@ static void rv_attrs(rvm_t* vm, const jd_val_t* attrs, rocke_attr_map_t* m)
         else
             rv_fail(vm, "attr '%s' bad kind '%s'", key, t);
     }
+}
+
+/* A kernel list attr of bare ints (e.g. cluster_dims, agpr_alloc), encoded by
+ * ir_export as {"t":"l","v":[{"_":{"t":"i","v":N}}, ...]}. Any other shape is
+ * an error: a dropped list would silently change what the kernel compiles to. */
+static void rv_kernel_int_list(rvm_t* vm, rocke_attr_map_t* m, const char* key, const jd_val_t* v)
+{
+    int64_t ints[16];
+    const int cap = (int)(sizeof ints / sizeof ints[0]);
+    if(!v || v->kind != JD_ARR)
+    {
+        rv_fail(vm, "kernel attr '%s': list value must be an array", key);
+        return;
+    }
+    if(v->arr_len > cap)
+    {
+        rv_fail(
+            vm, "kernel attr '%s': list has %d items, at most %d supported", key, v->arr_len, cap);
+        return;
+    }
+    for(int i = 0; i < v->arr_len; i++)
+    {
+        const jd_val_t* item = rocke_jget(v->arr[i], "_");
+        const char* t = rocke_jstr(rocke_jget(item, "t"));
+        double d;
+        if(!t || strcmp(t, "i") != 0 || !rocke_jnum(rocke_jget(item, "v"), &d))
+        {
+            rv_fail(vm, "kernel attr '%s': item %d is not a bare int", key, i);
+            return;
+        }
+        if(!rv_number_to_int64(d, &ints[i]))
+        {
+            rv_fail(vm, "kernel attr '%s': item %d is not an integer", key, i);
+            return;
+        }
+    }
+    rocke_attr_set_int_list(vm->b, m, key, ints, v->arr_len);
 }
 
 /* ---------------------------------------------------------------- execute */
@@ -907,8 +999,14 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                 }
                 else if(strcmp(key, "align") == 0 && rocke_jnum(v, &d))
                 {
-                    opts.align = (int)d;
-                    opts.align_set = true;
+                    long align;
+                    if(!rv_number_to_long(d, &align) || align < INT_MIN || align > INT_MAX)
+                        rv_fail(vm, "param '%s' align is not an integer", name);
+                    else
+                    {
+                        opts.align = (int)align;
+                        opts.align_set = true;
+                    }
                 }
                 else if(strcmp(key, "addr_space") == 0)
                 {
@@ -1090,6 +1188,39 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         {
             rocke_b_region_enter(vm->b, s.then_region);
             rv_exec_list(vm, then);
+            rocke_b_region_leave(vm->b);
+        }
+        return;
+    }
+    if(strcmp(op, "scf_if_else") == 0)
+    {
+        /* Converging runtime if/else: both arms join at one block (barriers in
+         * either arm survive simplifycfg). A distinct op from scf_if so that an
+         * engine predating it refuses the recipe instead of dropping "else". */
+        rocke_value_t* cond = rv_reg_get(vm, rocke_jstr(rocke_jget(instr, "cond")));
+        if(!cond)
+        {
+            rv_fail(vm, "scf_if_else needs cond");
+            return;
+        }
+        rocke_if_else_t s = rocke_b_scf_if_else(vm->b, cond);
+        if(!rocke_ir_builder_ok(vm->b))
+        {
+            rv_fail(vm, "scf_if_else build: %s", rocke_ir_builder_error(vm->b));
+            return;
+        }
+        const jd_val_t* then = rocke_jget(instr, "then");
+        if(then)
+        {
+            rocke_b_region_enter(vm->b, s.then_region);
+            rv_exec_list(vm, then);
+            rocke_b_region_leave(vm->b);
+        }
+        const jd_val_t* els = rocke_jget(instr, "else");
+        if(els && !vm->failed)
+        {
+            rocke_b_region_enter(vm->b, s.else_region);
+            rv_exec_list(vm, els);
             rocke_b_region_leave(vm->b);
         }
         return;
@@ -1341,15 +1472,32 @@ static rocke_status_t rv_run_root(jd_val_t* root,
     if(kattrs && kattrs->kind == JD_OBJ)
     {
         rocke_kernel_def_t* k = rocke_ir_builder_kernel(out_builder);
-        for(int i = 0; i < kattrs->obj_len; i++)
+        for(int i = 0; i < kattrs->obj_len && !vm.failed; i++)
         {
             const char* key = kattrs->obj[i].key;
             const jd_val_t* tv = kattrs->obj[i].val;
             const char* t = rocke_jstr(rocke_jget(tv, "t"));
             const jd_val_t* v = rocke_jget(tv, "v");
             double d;
-            if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
-                rocke_attr_set_int(out_builder, &k->attrs, key, (int64_t)d);
+            if(t && strcmp(t, "l") == 0)
+                rv_kernel_int_list(&vm, &k->attrs, key, v);
+            /* Rejected rather than skipped: a dropped cluster_dims launches unclustered. */
+            else if(v && v->kind == JD_ARR)
+                rv_fail(&vm,
+                        "kernel attr '%s': array value requires tag \"l\", got \"%s\"",
+                        key,
+                        t ? t : "(none)");
+            else if(strcmp(key, "cluster_dims") == 0)
+                rv_fail(
+                    &vm, "kernel attr '%s' requires tag \"l\", got \"%s\"", key, t ? t : "(none)");
+            else if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
+            {
+                int64_t value;
+                if(!rv_number_to_int64(d, &value))
+                    rv_fail(&vm, "kernel attr '%s' value is not an integer", key);
+                else
+                    rocke_attr_set_int(out_builder, &k->attrs, key, value);
+            }
         }
     }
 
@@ -1578,6 +1726,8 @@ struct rocke_launch_plan
     rocke_launch_dims_t grid;
     rocke_launch_dims_t block;
     unsigned lds_bytes;
+    bool has_cluster;
+    rocke_launch_dims_t cluster;
     rocke_arg_desc_t* args;
     int n_args;
     unsigned kernarg_size;
@@ -1704,6 +1854,84 @@ static bool rv_plan_geometry(
     return true;
 }
 
+/* The kernel's cluster_dims attr, read off the built kernel so the launch
+ * shape cannot disagree with the compiled "amdgpu-cluster-dims". The grid (when
+ * the recipe carries one) must be a whole number of clusters on every axis;
+ * hipDrvLaunchKernelEx would reject it, but far from the cause. */
+static bool rv_plan_cluster(const rocke_kernel_def_t* kernel,
+                            rocke_launch_plan_t* plan,
+                            char* err,
+                            size_t cap)
+{
+    const rocke_attr_value_t* v = kernel ? rocke_attr_get(&kernel->attrs, "cluster_dims") : NULL;
+    if(!v)
+        return true;
+    if(v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 3)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err, cap, "cluster_dims must be three integers (x, y, z)");
+        return false;
+    }
+    const int64_t* c = v->u.ilist.ints;
+    for(int i = 0; i < 3; i++)
+    {
+        if(c[i] < 1 || c[i] > 15)
+        {
+            if(err && cap)
+                ROCKE_ERR_SNPRINTF(err,
+                                   cap,
+                                   "cluster_dims (%lld, %lld, %lld): each dimension must be in "
+                                   "1..15",
+                                   (long long)c[0],
+                                   (long long)c[1],
+                                   (long long)c[2]);
+            return false;
+        }
+    }
+    if(c[0] * c[1] * c[2] > 16)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err,
+                               cap,
+                               "cluster_dims (%lld, %lld, %lld): %lld workgroups exceeds the "
+                               "cluster limit of 16",
+                               (long long)c[0],
+                               (long long)c[1],
+                               (long long)c[2],
+                               (long long)(c[0] * c[1] * c[2]));
+        return false;
+    }
+    plan->cluster.x = (unsigned)c[0];
+    plan->cluster.y = (unsigned)c[1];
+    plan->cluster.z = (unsigned)c[2];
+    plan->has_cluster = true;
+    if(plan->has_geometry)
+    {
+        const unsigned g[3] = {plan->grid.x, plan->grid.y, plan->grid.z};
+        const unsigned k[3] = {plan->cluster.x, plan->cluster.y, plan->cluster.z};
+        for(int i = 0; i < 3; i++)
+        {
+            if(g[i] % k[i] != 0)
+            {
+                if(err && cap)
+                    ROCKE_ERR_SNPRINTF(err,
+                                       cap,
+                                       "grid (%u, %u, %u) is not a multiple of cluster "
+                                       "(%u, %u, %u) in %c",
+                                       g[0],
+                                       g[1],
+                                       g[2],
+                                       k[0],
+                                       k[1],
+                                       k[2],
+                                       "xyz"[i]);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 static rocke_status_t rv_plan_on(jd_val_t* root,
                                  const rocke_recipe_spec_int_t* ints,
                                  int n_ints,
@@ -1794,7 +2022,8 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
     vm.n_ints = n_ints;
     vm.strs = strs;
     vm.n_strs = n_strs;
-    if(!rv_plan_geometry(&vm, root, plan, err, err_cap))
+    if(!rv_plan_geometry(&vm, root, plan, err, err_cap)
+       || !rv_plan_cluster(kernel, plan, err, err_cap))
     {
         rocke_ir_builder_free(&b);
         rocke_launch_plan_free(plan);
@@ -1923,6 +2152,15 @@ bool rocke_launch_plan_geometry(const rocke_launch_plan_t* plan,
         *out_block = plan->block;
     if(out_lds_bytes)
         *out_lds_bytes = plan->lds_bytes;
+    return true;
+}
+
+bool rocke_launch_plan_cluster(const rocke_launch_plan_t* plan, rocke_launch_dims_t* out_cluster)
+{
+    if(!plan || !plan->has_cluster)
+        return false;
+    if(out_cluster)
+        *out_cluster = plan->cluster;
     return true;
 }
 

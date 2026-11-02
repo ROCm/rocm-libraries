@@ -81,7 +81,8 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
-                                         t->warp_tile_k);
+                                         t->warp_tile_k,
+                                         nullptr);
 }
 
 /* _storage_dtype(spec): validate homogeneous A/B/C + fp32 acc + RCR layout,
@@ -1370,7 +1371,14 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.dtl = spec->trait.direct_to_lds;
     if(ctx.dtl)
     {
-        ctx.dtl_dwords = 4;
+        /* Capped at the arch's own buffer_load_lds width (is_valid_spec has
+         * already checked tile_k divides it): CDNA4 (gfx950) has the full
+         * dword=4 form, CDNA3 (gfx942) only dword=1. */
+        ctx.dtl_dwords = rocke_archtarget_async_lds_max_dwords(ctx.target);
+        if(ctx.dtl_dwords > 4)
+        {
+            ctx.dtl_dwords = 4;
+        }
         ctx.dtl_halves = ctx.dtl_dwords * 2;
         ctx.dtl_bytes_per_lane = ctx.dtl_dwords * 4;
         if((ctx.block_k % ctx.dtl_halves) != 0)

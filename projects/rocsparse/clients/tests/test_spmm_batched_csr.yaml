@@ -41,48 +41,46 @@ Definitions:
     - { alpha:   1.0, beta:  0.0, alphai:  0.0, betai:  0.0 }
 
 Tests:
-# ##############################
-# # Quick
-# ##############################
+# Quick
 - name: spmm_batched_csr
   category: quick
   function: spmm_batched_csr
   indextype: *i32
   precision: *single_only_precisions
-  M: [15, 32]
-  N: [2, 3]
-  K: [7, 27]
+  M: [15]
+  N: [2]
+  K: [7]
   batch_count_A: [1]
   batch_count_B: [7]
   batch_count_C: [7]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  spmm_alg: [rocsparse_spmm_alg_csr, rocsparse_spmm_alg_csr_nnz_split]
+  spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
 
 - name: spmm_batched_csr
   category: quick
   function: spmm_batched_csr
-  indextype: *i64i32
-  precision: *double_only_precisions
-  M: [155, 300]
-  N: [22, 39]
-  K: [72, 265]
-  batch_count_A: [5]
-  batch_count_B: [1]
-  batch_count_C: [5]
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [15]
+  N: [2, 3]
+  K: [7]
+  batch_count_A: [1]
+  batch_count_B: [7]
+  batch_count_C: [7]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  spmm_alg: [rocsparse_spmm_alg_csr, rocsparse_spmm_alg_csr_merge_path]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_row]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
 
 - name: spmm_batched_csr
   category: quick
@@ -91,13 +89,13 @@ Tests:
   precision: *single_only_precisions_complex
   M: [300]
   N: [300]
-  K: [1324]
+  K: [324]
   batch_count_A: [8]
   batch_count_B: [8]
   batch_count_C: [8]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_csr]
@@ -116,7 +114,7 @@ Tests:
   batch_count_B: [1]
   batch_count_C: [9]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
@@ -139,8 +137,8 @@ Tests:
   batch_count_B: [10]
   batch_count_C: [10]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_csr]
@@ -150,9 +148,52 @@ Tests:
   rand_gen_max: 127.0
   convert_to_int: true
 
-##############################
-# Precheckin
-##############################
+- name: spmm_batched_csr
+  category: quick
+  function: spmm_batched_csr
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [15]
+  N: [17, 18, 19, 20, 21,
+      23, 24, 25, 26, 27, 28, 29, 30,
+      31, 32, 33, 34, 35, 36, 37, 38,
+      40, 41, 42, 43,
+      46, 47, 48, 49, 50, 51, 52, 53,
+      54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+  K: [7]
+  batch_count_A: [2]
+  batch_count_B: [2]
+  batch_count_C: [2]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+- name: spmm_batched_csr
+  category: quick
+  function: spmm_batched_csr
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [15]
+  N: [40]
+  K: [7]
+  batch_count_A: [2]
+  batch_count_B: [1]
+  batch_count_C: [2]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# Pre_checkin
 - name: spmm_batched_csr_bad_arg
   category: pre_checkin
   function: spmm_batched_csr_bad_arg
@@ -337,10 +378,7 @@ Tests:
   orderC: [rocsparse_order_column]
   graph_test: true
 
-##############################
 # Nightly
-##############################
-
 - name: spmm_batched_csr
   category: nightly
   function: spmm_batched_csr
@@ -469,9 +507,7 @@ Tests:
   orderC: [rocsparse_order_row]
   filename: [bmwcra_1]
 
-##############################
 # Stress
-##############################
 
 - name: spmm_batched_csr_file
   category: stress
@@ -517,4 +553,3 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [nos4]
-

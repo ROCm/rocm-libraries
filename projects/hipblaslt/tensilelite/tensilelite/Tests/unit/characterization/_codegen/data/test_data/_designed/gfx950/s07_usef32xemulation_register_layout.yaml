@@ -1,0 +1,90 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S07 candidate: UseF32XEmulation register-layout cluster in KernelWriter.py.
+#
+# Target (KernelWriter.py, initTF32Emu / initTF32EmuAB / adjustNumVForTF32Emu):
+#   9006 : doPackPreSchedulingThisLoop assignment (DirectToLds==1 + numItersPLR)
+#   9028 : if kernel["UseDirect32XEmulationInterleaveTreg"]  (doFullPackCodePrefetch arm)
+#   9035 : numV = numVForIndexTranspose (Interleave==False else)
+#   9040 : sAorB.useTransposeCodeThis = True (UseMFMAF32XEmulation arm)
+#
+# Reachability analysis (Solution.py):
+#   - UseF32XEmulation is only set True when archCaps["HasF32XEmulation"].
+#     gfx1250 has HasF32XEmulation but NO MFMA -> UseMFMAF32XEmulation=False, and
+#     Solution.py (~L2826) force-disables ForceUnrollSubIter for non-MFMA F32X,
+#     which zeroes UsePLRPack -> doFullPackCodePrefetch=False (9028/9035/9040 dead).
+#   - gfx950 has BOTH HasF32XEmulation=1 AND HasMFMA=1 -> UseMFMAF32XEmulation=True,
+#     ForceUnrollSubIter is kept, so UsePLRPack survives and
+#     doFullPackCodePrefetch = UsePLRPack and not CMS = True.  This is the arch.
+#
+#   UsePLRPack survives (Solution.py ~L2832) only when ALL hold (non-CMS branch):
+#     EnableMatrixInstruction, UseF32XEmulation, _ScheduleIterAlg==3,
+#     ForceUnrollSubIter, DirectToLds==1, PGR!=0, PLR!=0, UseCustomMainLoopSchedule==0.
+#   UseDirect32XEmulationInterleaveTreg defaults False (Solution.py L956), so the
+#   9028 test is taken with the else at 9035.  UseMFMAF32XEmulation=True hits 9040.
+#
+# MI shape [16,16,32,1,1,4,6,2,2] is the proven gfx950 XF32 MFMA shape from
+# Tests/common/gemm/gfx950/custom_mainloop_scheduling_tf32.yaml (DepthU=32).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F32 (XF32 emulation) TN GEMM on gfx950 MFMA:
+  #   DataType=S + F32XdlMathOp=X + HPA -> UseF32XEmulation + UseMFMAF32XEmulation
+  #   UsePLRPack + ForceUnrollSubIter + DirectToLds=1 + SIA3 + non-CMS
+  #   -> doFullPackCodePrefetch=True -> initTF32EmuAB full-pack arm (9028/9035/9040)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 6, 2, 2]
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - ExpandPointerSwap: [False]
+        - UsePLRPack: [1]
+        - UseCustomMainLoopSchedule: [0]
+        - LocalReadVectorWidth: [4]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 64]

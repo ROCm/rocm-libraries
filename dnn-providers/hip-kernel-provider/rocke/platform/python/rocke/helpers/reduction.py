@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Callable, List, Literal, Tuple
 
-from ..core.ir import F32, I32, IRBuilder, Value
+from ..core.ir import F32, F64, I32, IRBuilder, Value
 
 
 __all__ = [
@@ -316,15 +316,16 @@ def block_lds_reduce_with_wave_prologue(
     on small-shape reductions in the working ``instances/reduce.py``
     prototype.
 
-    ``lds_buf`` must point to at least ``num_warps`` f32 slots; reuse
-    the kernel's existing ``block_size``-element LDS allocation so
-    the kernel's LDS footprint doesn't change.
+    ``lds_buf`` must point to at least ``num_warps`` slots of ``val``'s
+    type (f32 or f64); reuse the kernel's existing ``block_size``-element
+    LDS allocation so the kernel's LDS footprint doesn't change.
 
     Promoted from ``instances/reduce.py::_block_tile_reduce`` (P20).
     """
-    if val.type.name != "f32":
+    if val.type.name not in ("f32", "f64"):
         raise ValueError(
-            f"block_lds_reduce_with_wave_prologue expects f32 input, got {val.type.name}"
+            "block_lds_reduce_with_wave_prologue expects f32 or f64 input, "
+            f"got {val.type.name}"
         )
 
     warp_partial = _warp_xor_reduce(b, val, combine=combine, wave_size=wave_size)
@@ -336,13 +337,20 @@ def block_lds_reduce_with_wave_prologue(
     c_wave = b.const_i32(wave_size)
     lane = b.mod(tid, c_wave)
     warp = b.div(tid, c_wave)
+    is_f64 = val.type.name == "f64"
     with b.scf_if(b.cmp_eq(lane, b.const_i32(0))):
-        b.smem_store_vN_f32(lds_buf, [warp], warp_partial, 1)
+        if is_f64:
+            b.smem_store_vN(lds_buf, [warp], warp_partial, 1)
+        else:
+            b.smem_store_vN_f32(lds_buf, [warp], warp_partial, 1)
     b.sync()
 
     parts: List[Value] = []
     for w in range(num_warps):
-        v_vec = b.smem_load_vN_f32(lds_buf, b.const_i32(w), n=1)
+        if is_f64:
+            v_vec = b.smem_load_vN(lds_buf, b.const_i32(w), dtype=F64, n=1)
+        else:
+            v_vec = b.smem_load_vN_f32(lds_buf, b.const_i32(w), n=1)
         parts.append(b.vec_extract(v_vec, 0))
     return _tree_reduce_scalars(b, combine, parts)
 

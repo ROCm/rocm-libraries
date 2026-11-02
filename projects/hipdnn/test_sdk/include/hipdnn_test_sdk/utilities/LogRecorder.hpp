@@ -514,9 +514,12 @@ private:
  * Use this recorder in integration tests where you need to register a log recording
  * callback explicitly with the UUT. Logs are isolated to only this recorder.
  *
- * NOTE: There should be only one instance of the IsolatedLogRecorder per unit
- * test as all instances of the IsolatedLogRecorder will share the same log
- * recording buffer internally.
+ * Use only one IsolatedLogRecorder at a time. All instances share one internal
+ * recording buffer. A new instance clears that buffer. A destroyed instance
+ * stops recording and clears that buffer for all other instances.
+ *
+ * To capture more than one scenario in one test, call clearLogs() between them.
+ * The recorder continues to record after a clear.
  *
  * This class provides a static IsolatedLogRecorder::getIsolatedRecordingCallback()
  * method to obtain the callback function for registration with the UUT's APIs.

@@ -31,6 +31,8 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 
 #include <vector>
 
+// integer_exact supports fp8 data. With swizzled scales it currently requires K along
+// stored rows (transposed A or non-transposed B); other orientations throw before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,

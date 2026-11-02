@@ -12,33 +12,37 @@
 
 namespace
 {
-    TEST(ArchRevisionSmoke, Gfx1250Revision0IsTheV0Subtree)
+    TEST(arch_revision_smoke, gfx1250_revision0_is_the_v0_subtree)
     {
-        // The one case that diverges: pre-production v0 loads its own tree.
+        // An A0 part in non-strict mode reports gfx1250 and loads its own tree.
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", 0), "gfx1250v0");
     }
 
-    TEST(ArchRevisionSmoke, Gfx1250V1RevisionKeepsTheBaseName)
+    TEST(arch_revision_smoke, gfx1250_strict_keeps_its_reported_name)
     {
-        // v1 is revision 1; it must map to the plain gfx1250 tree.
-        EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", 1), "gfx1250");
+        // An A0 part in strict mode reports gfx1250-strict (asicRevision is still 0)
+        // and keeps loading library/gfx1250-strict/.
+        EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250-strict", 0), "gfx1250-strict");
     }
 
-    TEST(ArchRevisionSmoke, Gfx1250UnknownOrFutureRevisionDefaultsToV1)
+    TEST(arch_revision_smoke, gfx1250_nonzero_revision_keeps_the_base_name)
     {
-        // -1 is what HIP reports when it is too old to expose the field; any
-        // unseen value must default to the v1 tree rather than invent a
-        // subtree that was never built.
-        EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", -1), "gfx1250");
+        // Assumes B0 reports a non-zero revision; it maps to the plain gfx1250 tree.
+        EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", 1), "gfx1250");
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", 2), "gfx1250");
     }
 
-    TEST(ArchRevisionSmoke, OtherArchesAreUnaffectedByRevision)
+    TEST(arch_revision_smoke, gfx1250_unknown_revision_keeps_the_base_name)
     {
-        // Only gfx1250 has a revision split; every other arch is returned
-        // unchanged regardless of what asicRevision happens to be.
+        // Only a revision known to be A0 selects the A0 tree.
+        EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250", -1), "gfx1250");
+    }
+
+    TEST(arch_revision_smoke, other_arches_are_unaffected_by_revision)
+    {
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx942", 0), "gfx942");
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx950", 0), "gfx950");
         EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250v0", 0), "gfx1250v0");
+        EXPECT_EQ(rocblaslt_revisioned_arch_name("gfx1250-strict", 1), "gfx1250-strict");
     }
 }

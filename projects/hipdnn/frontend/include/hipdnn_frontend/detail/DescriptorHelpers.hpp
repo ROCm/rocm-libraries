@@ -226,6 +226,18 @@ inline Error
                                                    "tensor byte alignment"));
     }
 
+    // Only send the ragged-offset multiplier when non-default. Sending it
+    // unconditionally would break lowering against a pre-1.4.0 backend that doesn't
+    // recognize HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER (same rationale as alignment).
+    if(tensor->get_ragged_offset_multiplier() != DEFAULT_RAGGED_OFFSET_MULTIPLIER)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                                                   HIPDNN_TYPE_INT64,
+                                                   tensor->get_ragged_offset_multiplier(),
+                                                   "tensor ragged offset multiplier"));
+    }
+
     // Lower the ragged-offset aux as its own tensor descriptor and link it, so the
     // backend can resolve the aux's dims/strides/dtype rather than a bare UID.
     // createOrFindTensorDesc dedups a shared or also-an-input aux by UID and

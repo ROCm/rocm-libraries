@@ -28,7 +28,25 @@
         "block_size": 64,
         "dtype": "FLOAT"
       },
-      "priority": 0
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "4e06e981-aaf2-4fe1-836d-09c221009a0c",
+              "kmd_id": "a7745b41-dcd5-4b4f-89ca-a98f608dba38",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "block_size",
+                "dtype"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     },
     {
       "version": "1.0",
@@ -49,7 +67,25 @@
         "block_size": 256,
         "dtype": "FLOAT"
       },
-      "priority": 0
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "4e06e981-aaf2-4fe1-836d-09c221009a0c",
+              "kmd_id": "a7745b41-dcd5-4b4f-89ca-a98f608dba38",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "block_size",
+                "dtype"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     },
     "2eb00697-80a3-4ffe-b4cd-2e5c71d9d834"
   ]

@@ -34,6 +34,41 @@ namespace TensileLite
 {
     namespace Client
     {
+        std::vector<int> resolveHybridAssignmentPolicies(po::variables_map const& args)
+        {
+            std::vector<int> result{0};
+            if(args.count("streamk-hybrid-mode"))
+            {
+                auto raw = args["streamk-hybrid-mode"].as<std::vector<int>>();
+                for(auto value : raw)
+                    if(value < 0 || value > 2)
+                        throw std::invalid_argument("streamk-hybrid-mode must be 0, 1, or 2");
+                if(!raw.empty())
+                    result = std::move(raw);
+            }
+            if(args.count("hybrid-assignment-policy"))
+            {
+                std::vector<int> policy;
+                for(auto const& value : args["hybrid-assignment-policy"].as<std::vector<std::string>>())
+                {
+                    if(value == "Default")
+                        policy.push_back(0);
+                    else if(value == "DynamicWorkQueue")
+                        policy.push_back(1);
+                    else if(value == "Auto")
+                        policy.push_back(2);
+                    else
+                        throw std::invalid_argument("hybrid-assignment-policy must be Default, DynamicWorkQueue, or Auto");
+                }
+                if(args.count("streamk-hybrid-mode")
+                   && policy != result)
+                    throw std::invalid_argument("Conflicting hybrid-assignment-policy and streamk-hybrid-mode");
+                if(!policy.empty())
+                    result = std::move(policy);
+            }
+            return result;
+        }
+
         ClientProblemFactory::ClientProblemFactory(po::variables_map const& args)
             : m_problemSizes(args["problem-size"].as<std::vector<std::vector<size_t>>>())
             , m_stridedBatched(args["strided-batched"].as<bool>())
@@ -45,6 +80,7 @@ namespace TensileLite
             , m_performanceMetric(args["performance-metric"].as<PerformanceMetric>())
             , m_deterministicMode(args["deterministic-mode"].as<bool>())
             , m_cEqualsD(args["c-equal-d"].as<bool>())
+            , m_uniformSummationOrder(args["uniform-summation-order"].as<int>())
             , m_biasTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_gateTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_factorDimArgs(std::vector<int>(1, 0))
@@ -217,12 +253,7 @@ namespace TensileLite
             if(args.count("activation-enum-args"))
                 m_activationEnumArg
                     = args["activation-enum-args"].as<std::vector<ActivationType>>();
-            if(args.count("streamk-hybrid-mode"))
-            {
-                auto raw = args["streamk-hybrid-mode"].as<std::vector<int>>();
-                if(!raw.empty())
-                    m_streamKHybridMode = std::move(raw);
-            }
+            m_streamKHybridMode = resolveHybridAssignmentPolicies(args);
             if(args.count("use-bias"))
                 m_useBias = args["use-bias"].as<int>();
             if(args.count("bias-source"))
@@ -413,6 +444,7 @@ namespace TensileLite
                                     static_cast<ContractionProblemGemm::BATCHMODE>(m_batchMode));
                                 rv.back().setHighPrecisionAccumulate(m_highPrecisionAccumulate);
                                 rv.back().setUseGradient(m_useGradient);
+                                rv.back().setParams().setUniformSummationOrder(m_uniformSummationOrder);
                                 rv.back().setUseBias(m_useBias);
                                 rv.back().setUseGateResidual(m_useGateResidual);
                                 rv.back().setUseE(m_useE);

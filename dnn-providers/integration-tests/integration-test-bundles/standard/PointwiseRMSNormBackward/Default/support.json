@@ -1,0 +1,73 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "1_256_1_1_nhwc_norlo_norslope_rhi6_341ff6",
+          "1_256_1_1_nhwc_rlo0_norslope_norhi_e9f979",
+          "1_256_1_1_nhwc_rlo0p1_norslope_rhi0p5_4a763d",
+          "1_3_14_14_nchw_norlo_norslope_rhi6_87b775",
+          "1_3_14_14_nchw_rlo0_norslope_norhi_84678b",
+          "1_3_14_14_nchw_rlo0p1_norslope_rhi0p5_a6109b",
+          "2_16_8_8_nchw_9f7335",
+          "2_16_8_8_nchw_a1c5ba",
+          "2_16_8_8_nchw_b045bd",
+          "2_16_8_8_nchw_d6fcb9",
+          "2_16_8_8_nchw_ef1b39",
+          "2_16_8_8_nhwc_258769",
+          "2_16_8_8_nhwc_72a4bb",
+          "2_16_8_8_nhwc_cc19f5",
+          "2_16_8_8_nhwc_ec4e04",
+          "2_16_8_8_nhwc_fa1434",
+          "2_1_1_1_nchw_778fd6",
+          "2_1_1_1_nchw_83f7e4",
+          "2_1_1_1_nchw_8432ad",
+          "2_1_1_1_nchw_ad4be2",
+          "2_1_1_1_nchw_e6a37c",
+          "2_3_4_8_8_ncdhw_1a3371",
+          "2_3_4_8_8_ncdhw_2aa5d3",
+          "2_3_4_8_8_ncdhw_3e29dc",
+          "2_3_4_8_8_ncdhw_bd8b94",
+          "2_3_4_8_8_ncdhw_bdae27",
+          "2_3_4_8_8_ndhwc_248c43",
+          "2_3_4_8_8_ndhwc_5bf27f",
+          "2_3_4_8_8_ndhwc_9d090e",
+          "2_3_4_8_8_ndhwc_d43a4e",
+          "2_3_4_8_8_ndhwc_eaa039",
+          "32_3_14_1_nchw_ef67f2",
+          "32_3_14_1_nhwc_601a95",
+          "32_3_1_14_nchw_92154b",
+          "32_3_1_14_nhwc_2b89bb"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

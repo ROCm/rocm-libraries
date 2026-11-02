@@ -36,6 +36,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 namespace stinkytofu {
 // -----------------------------------------------------------------------
@@ -190,6 +191,9 @@ inline void configureModuleInstrumentations(ModulePassManager& mpm,
                                             const StinkyAsmModule* module = nullptr) {
     if (auto inst = makeDebugPrintInstrumentation(opts, label, debugStreams, module))
         mpm.addInstrumentation(std::move(inst));
+    if (auto timer = getActiveTimePasses()) {
+        mpm.addInstrumentation(std::move(timer));
+    }
     if (!opts.DebugPass.empty()) {
         std::istringstream stream(opts.DebugPass);
         std::string name;
@@ -203,10 +207,10 @@ inline void configureModuleInstrumentations(ModulePassManager& mpm,
 }
 
 /// Single entry point for the standard pipeline observers (LLVM
-/// StandardInstrumentations style): debug IR printing plus, when
-/// ModuleOptions.VerifyEach is set, per-pass StinkyTofu ASM IR verification.
-/// Drivers (backend, opt) should call this instead of wiring each observer
-/// individually.
+/// StandardInstrumentations style): debug IR printing, per-pass StinkyTofu ASM IR
+/// verification when ModuleOptions.VerifyEach is set, and per-pass timing while a
+/// TimePassesSession is open. Drivers (backend, opt) should call this instead of
+/// wiring each observer individually.
 inline void configureStandardInstrumentations(
     PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
     const std::shared_ptr<DebugOutputStreams>& debugStreams,
@@ -214,6 +218,9 @@ inline void configureStandardInstrumentations(
     configureDebugOutput(pm, opts, label, debugStreams, module);
     if (opts.VerifyEach) {
         pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
+    }
+    if (auto timer = getActiveTimePasses()) {
+        pm.addInstrumentation(std::move(timer));
     }
 }
 
@@ -268,6 +275,10 @@ inline std::string makeDebugLabel(const std::vector<std::string>& groupNames) {
 /// to call findGroupRange(), inner passes must NOT delete the boundary
 /// instructions that mark group ranges. If a future pass needs to delete
 /// boundaries, use separate single-region adapters instead.
+///
+/// TEXTBLOCK comments are erased during extract. If another group's stored
+/// endpoint is that comment, the endpoint is moved to the neighboring
+/// instruction before the comment is freed.
 ///
 /// Example — whole-kernel adapter followed by a scoped adapter:
 ///
@@ -334,19 +345,23 @@ class ScopeAdaptor : public Pass {
    private:
     /// Move IR from [begin, end) into \p bb.
     /// StinkyInstructions and non-TEXTBLOCK AsmDirectives are preserved;
-    /// TEXTBLOCK directives (comments) are erased.
-    static void moveIRToBlock(IntrusiveListIterator<IRBase> begin,
-                              IntrusiveListIterator<IRBase> end, BasicBlock* bb) {
+    /// TEXTBLOCK directives (comments) are erased. A comment that is another
+    /// group's stored endpoint is retargeted onto a neighbor first so a later
+    /// adaptor does not start on a freed node.
+    void moveIRToBlock(IntrusiveListIterator<IRBase> begin, IntrusiveListIterator<IRBase> end,
+                       BasicBlock* bb) {
         for (auto it = begin; it != end;) {
             IRBase* ir = it.getNodePtr();
             it++;
             if (dyn_cast<StinkyInstruction>(ir)) {
                 bb->appendIR(ir);
             } else if (const auto* directive = dyn_cast<AsmDirective>(ir)) {
-                if (directive->kind == AsmDirectiveKind::TEXTBLOCK)
+                if (directive->kind == AsmDirectiveKind::TEXTBLOCK) {
+                    module.retargetGroupEndpoint(ir, it.getNodePtr(), ir->getPrev());
                     ir->erase();
-                else
+                } else {
                     bb->appendIR(ir);
+                }
             } else {
                 assert(false && "Unexpected non-instruction IR type in scope adaptor");
             }

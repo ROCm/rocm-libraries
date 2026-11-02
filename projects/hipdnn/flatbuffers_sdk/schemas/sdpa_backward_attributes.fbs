@@ -3,8 +3,9 @@
 
 include "sdpa_attributes.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -24,9 +25,11 @@ table SdpaBackwardAttributes {
 
     // Optional input tensor UIDs
     scale_tensor_uid:          long = null (cache_uid);  // Attention scale tensor (Attn_scale)
+    // Not work_data_dependent, as in SdpaAttributes: the bias is applied to every score.
     attn_mask_tensor_uid:      long = null (cache_uid);  // Additive attention bias (Bias)
-    seq_len_q_tensor_uid:      long = null (cache_uid);
-    seq_len_kv_tensor_uid:     long = null (cache_uid);
+    // Per-batch valid lengths decide the score count, as in SdpaAttributes.
+    seq_len_q_tensor_uid:      long = null (cache_uid, work_data_dependent);
+    seq_len_kv_tensor_uid:     long = null (cache_uid, work_data_dependent);
     seed_tensor_uid:           long = null (cache_uid);  // Dropout seed
     offset_tensor_uid:         long = null (cache_uid);  // Dropout offset
     dropout_mask_tensor_uid:   long = null (cache_uid);

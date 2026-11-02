@@ -6,6 +6,10 @@
 # prove its LLVM-IR emission is byte-identical to the Python engine across every
 # kernel family. A green run means the dual-backend contract still holds.
 #
+# When the selected emission profile lacks the LLVM23-generation target-op
+# capability, a second lane re-runs the affected families at llvm23. Profiles
+# that already carry the capability (llvm23 and llvm24) run them directly.
+#
 # Cross-platform (Windows + Linux) replacement for the legacy check_byte_identity.sh.
 # All paths are derived relative to this file so the rocke/platform/ tree stays copy-able.
 #
@@ -23,9 +27,34 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _hostcaps import available_cpus
+
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> rocKE
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
+# The parity family that carries the llvm23-gated gfx1250 ops.
+GFX1250_FAMILY = "gfx1250_lowering"
+# Families whose every config uses an llvm23-gated op (their kernels move data
+# with TDM). Under another flavor both engines reject all of them, which the
+# gate reads as ALL_REJECTED, so they are compared in the llvm23 lane only.
+TARGET_OP_PROFILE_FAMILIES = (
+    "conv_direct_dgrad_wmma",
+    "conv_direct_fwd_wmma",
+    "conv_fwd_small_wmma",
+)
+
+
+def _selected_profile_supports_target_ops() -> bool:
+    """Resolve the selected lane once and query its structural profile."""
+    python_root = ROCKE / "python"
+    if str(python_root) not in sys.path:
+        sys.path.insert(0, str(python_root))
+    from rocke.core.lower_llvm import (
+        _resolve_llvm_flavor,
+        _supports_llvm23_target_ops,
+    )
+
+    return _supports_llvm23_target_ops(_resolve_llvm_flavor())
 
 
 def _cxx() -> str | None:
@@ -78,8 +107,12 @@ def main() -> int:
             str(build_root),
             "--target",
             "rocke_core",
+            # This process's share, not the machine's size. `os.cpu_count()`
+            # reports the host, so on a scheduler-pinned node it asked ninja
+            # for 384 compile jobs against an affinity of 2 -- which is how a
+            # gate that should take a couple of minutes turns into a thrash.
             "-j",
-            str(os.cpu_count() or 1),
+            str(available_cpus()),
         ],
         check=True,
         stdout=subprocess.DEVNULL,
@@ -127,26 +160,33 @@ def main() -> int:
     if args.ref_shim:
         ref_args += ["--shim", args.ref_shim]
 
-    def run_gate(label: str, dashboard: str, extra: list[str]) -> int:
-        print(f"\n== differential gate: {label} ==")
+    def run_gate(
+        label: str,
+        dashboard: str,
+        extra: list[str],
+        *,
+        only: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> int:
+        print(f"\n== differential gate: {label} ==", flush=True)
+        # The full gate is long-running. Inherit the parent's streams and make
+        # the child unbuffered so each completed family is visible instead
+        # of holding the entire dashboard until the process exits.
         proc = subprocess.run(
             [
                 sys.executable,
+                "-u",
                 str(RUN_DIFF),
                 "--archive",
                 str(archive),
                 "--json",
                 dashboard,
-                *only_args,
+                *(only_args if only is None else only),
                 *ref_args,
                 *extra,
             ],
-            capture_output=True,
-            text=True,
+            env=env,
         )
-        print(proc.stdout)
-        if proc.stderr:
-            print(proc.stderr, file=sys.stderr)
         # run_diff owns the pass/fail rule (its GATE_PASS/GATE_FAIL partition,
         # which fails closed on any status it does not recognize). Trust the
         # exit code -- a second rule here could only disagree with it.
@@ -154,11 +194,42 @@ def main() -> int:
 
     # A dashboard per lane, beside the archive it describes: one shared path
     # meant the diagnostic ir run overwrote the gating run's JSON.
+    supports_target_ops = _selected_profile_supports_target_ops()
+    only_subs = [s for s in args.only.split(",") if s]
+    llvm23_families = [
+        f
+        for f in TARGET_OP_PROFILE_FAMILIES
+        if not only_subs or any(s in f for s in only_subs)
+    ]
+    # Under another flavor the default lane leaves the llvm23-only families
+    # out (run_diff passes when that leaves nothing to compare).
     status = run_gate(
         "LLVM-IR (the contract)",
         str(build_root / "dashboard_ll.json"),
-        ["--mode", "ll"],
+        ["--mode", "ll"]
+        + (
+            []
+            if supports_target_ops
+            else ["--exclude", ",".join(TARGET_OP_PROFILE_FAMILIES)]
+        ),
     )
+    # The gfx1250-only ops need the LLVM23-generation target-op profile. Under
+    # an older profile both engines reject those configs, which reads as
+    # BOTH_REJECTED and passes without comparing a byte. Re-run affected
+    # families at llvm23 only when the selected profile lacks that capability.
+    llvm23_only = [s for s in only_subs if s in GFX1250_FAMILY]
+    if not args.only:
+        llvm23_only = [GFX1250_FAMILY]
+    llvm23_only += llvm23_families
+    if not supports_target_ops and llvm23_only:
+        env = dict(os.environ, ROCKE_LLVM_FLAVOR="llvm23")
+        status |= run_gate(
+            "LLVM-IR, gfx1250 families at llvm23",
+            str(build_root / "dashboard_ll_llvm23.json"),
+            ["--mode", "ll"],
+            only=["--only", ",".join(llvm23_only)],
+            env=env,
+        )
     if args.ir:
         # Diagnostic, not gating: its exit code is deliberately discarded, so a
         # GATE FAILURES block under this label does not turn the result RED.

@@ -51,6 +51,15 @@ namespace TensileLite
         {
             // matching enum used in hipGcnArch
             // only including supported types
+            //
+            // Silicon revisions sharing an ISA are deliberately absent: there is
+            // no gfx1250-strict, and toProcessor maps such a device onto the base
+            // entry. The master library file name keeps them apart -- it spells
+            // the architecture the runtime reports, and a device opens only the
+            // master named for itself, so a Processor value is only compared
+            // inside its own revision's library. Adding one would also break
+            // older loaders: the value is serialized by name, and a loader whose
+            // table lacks that name rejects the whole file.
             gfx000 = 0,
             //gfx701  =  1,
             //gfx801  =  2,
@@ -76,6 +85,8 @@ namespace TensileLite
             gfx1151 = 1151,
             gfx1152 = 1152,
             gfx1153 = 1153,
+            gfx1170 = 1170,
+            gfx1171 = 1171,
             gfx1200 = 1200,
             gfx1201 = 1201,
             gfx1250 = 1250
@@ -167,6 +178,14 @@ namespace TensileLite
             {
                 return Processor::gfx1153;
             }
+            else if(archName.find("gfx1170") != std::string::npos)
+            {
+                return Processor::gfx1170;
+            }
+            else if(archName.find("gfx1171") != std::string::npos)
+            {
+                return Processor::gfx1171;
+            }
             else if(archName.find("gfx1200") != std::string::npos)
             {
                 return Processor::gfx1200;
@@ -228,6 +247,10 @@ namespace TensileLite
                 return "gfx1152";
             case AMDGPU::Processor::gfx1153:
                 return "gfx1153";
+            case AMDGPU::Processor::gfx1170:
+                return "gfx1170";
+            case AMDGPU::Processor::gfx1171:
+                return "gfx1171";
             case AMDGPU::Processor::gfx1200:
                 return "gfx1200";
             case AMDGPU::Processor::gfx1201:
@@ -248,11 +271,11 @@ namespace TensileLite
         int         wavefrontSize            = 64;
         int         simdPerCu                = 4;
         int         computeUnitCount         = 0;
-        int         skDynamicGrid            = 6;
-        int         skDynamicWGM             = 0;
-        int         skMaxCUs                 = 0;
-        int         skGridMultiplier         = 1;
-        int         skFixedGrid              = 0;
+        int         persistentDynamicGrid    = 6;
+        int         persistentDynamicWGM     = 0;
+        int         persistentMaxCUs         = 0;
+        int         persistentGridMultiplier = 1;
+        int         persistentFixedGrid      = 0;
         int         skFullTiles              = 1;
         int         skTiles                  = -1;
         int         skSplit                  = -1;
@@ -285,40 +308,48 @@ namespace TensileLite
 
         virtual std::string description() const override;
 
-        const int getSKDynamicGrid() const
+        const int getPersistentDynamicGrid() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_DYNAMIC_GRID");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_DYNAMIC_GRID") ? std::getenv("TENSILE_PERSISTENT_DYNAMIC_GRID") : std::getenv("TENSILE_STREAMK_DYNAMIC_GRID"));
             static const int   value  = (envStr == NULL ? 6 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKDynamicWGM() const
+        const int getPersistentDynamicWGM() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_DYNAMIC_WGM");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_DYNAMIC_WGM") ? std::getenv("TENSILE_PERSISTENT_DYNAMIC_WGM") : std::getenv("TENSILE_STREAMK_DYNAMIC_WGM"));
             static const int   value  = (envStr == NULL ? 0 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKMaxCUs() const
+        const int getPersistentMaxCUs() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_MAX_CUS");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_MAX_CUS") ? std::getenv("TENSILE_PERSISTENT_MAX_CUS") : std::getenv("TENSILE_STREAMK_MAX_CUS"));
             static const int   value  = (envStr == NULL ? 0 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKGridMultiplier() const
+        const int getPersistentGridMultiplier() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_GRID_MULTIPLIER");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_GRID_MULTIPLIER") ? std::getenv("TENSILE_PERSISTENT_GRID_MULTIPLIER") : std::getenv("TENSILE_STREAMK_GRID_MULTIPLIER"));
             static const int   value  = (envStr == NULL ? 1 : std::atoi(envStr));
             return value;
         }
 
-        const int getSKFixedGrid() const
+        const int getPersistentFixedGrid() const
         {
-            static const char* envStr = std::getenv("TENSILE_STREAMK_FIXED_GRID");
+            static const char* envStr = (std::getenv("TENSILE_PERSISTENT_FIXED_GRID") ? std::getenv("TENSILE_PERSISTENT_FIXED_GRID") : std::getenv("TENSILE_STREAMK_FIXED_GRID"));
             static const int   value  = (envStr == NULL ? 0 : std::atoi(envStr));
             return value;
         }
+
+        // Legacy source-level accessors. Shared launch policy uses the
+        // persistent names; old environment spellings are read above only.
+        const int getSKDynamicGrid() const { return getPersistentDynamicGrid(); }
+        const int getSKDynamicWGM() const { return getPersistentDynamicWGM(); }
+        const int getSKMaxCUs() const { return getPersistentMaxCUs(); }
+        const int getSKGridMultiplier() const { return getPersistentGridMultiplier(); }
+        const int getSKFixedGrid() const { return getPersistentFixedGrid(); }
 
         const int getSKFullTiles() const
         {

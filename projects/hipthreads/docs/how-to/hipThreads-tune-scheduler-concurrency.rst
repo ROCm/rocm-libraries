@@ -16,8 +16,7 @@ The total vcore count is calculated by multiplying the number of WGPs on the dev
 
    hardware_concurrency() = multiprocessorCount * vcoresPerWgp
 
-Increasing the number of vcores per WGP raises the number of work items that can run concurrently, which can
-improve throughput.
+Increasing the number of vcores per WGP raises the number of work items that can run concurrently, which might improve throughput.
 
 .. note::
 
@@ -27,15 +26,17 @@ You can change the number of vcores per WGP at compile time with the ``HIPTHREAD
 
 For example, to set the default number of vcores per WGP to 20:
 
-.. code-block:: bash
+.. code:: shell
 
    cmake -B build -DHIPTHREADS_DEFAULT_VCORES_PER_WGP=20
    cmake --build ./build
 
 To set the number of vcores per WGP at runtime without changing the default value:
 
-.. code-block:: bash
+.. code:: shell
 
-   HIPTHREADS_VCORES_PER_WGP=20
+   export HIPTHREADS_VCORES_PER_WGP=20
+
+Prefixing the application command also works: ``HIPTHREADS_VCORES_PER_WGP=20 ./application``.
 
 ``HIPTHREADS_VCORES_PER_WGP`` must be set before launching the application to take effect. ``HIPTHREADS_VCORES_PER_WGP`` always overrides the compile-time value.

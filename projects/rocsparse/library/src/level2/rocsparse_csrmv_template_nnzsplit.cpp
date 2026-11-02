@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_envariables.hpp"
@@ -33,8 +34,6 @@
 
 #include "csrmv_device_nnzsplit.h"
 #include "rocsparse_primitives.hpp"
-
-#include <vector>
 
 #define LAUNCH_CSRMV_ANALYSIS(BLOCKSIZE, NNZ_PER_THREAD) \
     csrmv_analysis_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD>(  \
@@ -267,9 +266,11 @@ namespace rocsparse
     }
 
     // Longest row length (max over row_ptr differences) - the row-skew signal.
-    // Computed once at analysis time (amortised over many SpMV calls) with a
-    // single host copy of row_ptr; the compute phase reads it from the info
-    // struct and never touches row_ptr for tuning.
+    // Computed once at analysis time with csr_max_nnz_per_row. The GPU scalar is
+    // I (row_ptr difference); the info struct is not templated on I/J so the
+    // stored value is int64_t. Scratch the first sizeof(I) of handle->buffer
+    // rather than a one-integer alloc: this helper stream-syncs before return,
+    // and later analysis (exclusive_scan) may reuse the same buffer.
     template <typename I, typename J>
     static rocsparse_status csrmv_nnzsplit_max_row_nnz(rocsparse_handle handle,
                                                        J                m,
@@ -277,30 +278,37 @@ namespace rocsparse
                                                        int64_t*         max_row_nnz)
     {
         *max_row_nnz = 0;
-        if(m <= 0 || csr_row_ptr == nullptr)
+        // Empty matrix only. Public APIs reject m < 0; (m - 1) / 256 + 1 would
+        // still launch a block if we called the kernel with m == 0.
+        if(m == 0)
         {
             return rocsparse_status_success;
         }
 
-        hipStream_t    stream = handle->stream;
-        std::vector<I> hptr(static_cast<size_t>(m) + 1);
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(hptr.data(),
-                                                     csr_row_ptr,
-                                                     sizeof(I) * (static_cast<size_t>(m) + 1),
-                                                     hipMemcpyDeviceToHost,
-                                                     stream));
+        if(handle->buffer_size < sizeof(I))
+        {
+            return rocsparse_status_memory_error;
+        }
+
+        hipStream_t stream    = handle->stream;
+        I*          d_max_nnz = reinterpret_cast<I*>(handle->buffer);
+        I           h_max_nnz = static_cast<I>(0);
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_max_nnz, 0, sizeof(I), stream));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr_max_nnz_per_row<256, I, I>),
+                                           dim3((m - 1) / 256 + 1),
+                                           dim3(256),
+                                           0,
+                                           stream,
+                                           m,
+                                           csr_row_ptr,
+                                           d_max_nnz);
+
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            &h_max_nnz, d_max_nnz, sizeof(I), hipMemcpyDeviceToHost, stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
-        int64_t mx = 0;
-        for(J i = 0; i < m; ++i)
-        {
-            const int64_t len = static_cast<int64_t>(hptr[i + 1] - hptr[i]);
-            if(len > mx)
-            {
-                mx = len;
-            }
-        }
-        *max_row_nnz = mx;
+        *max_row_nnz = static_cast<int64_t>(h_max_nnz);
         return rocsparse_status_success;
     }
 }

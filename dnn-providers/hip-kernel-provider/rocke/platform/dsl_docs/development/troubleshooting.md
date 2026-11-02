@@ -90,10 +90,13 @@ waived here; both are GREEN now and the waiver is gone with them.)
 
 ### `--check-golden` fails after a change I *meant* to make
 If you intentionally changed what a kernel emits, re-bless the golden **from a
-green state** and let your reviewer read the diff:
+green state**, for every LLVM flavor, in the same commit, and let your reviewer
+read the diff (`tests/instances/differential/golden/README.md`):
 ```bash
-run_diff --record-golden
+run_diff.py --mode ll --python-only --record-golden --flavor llvm20,llvm22,llvm23
+run_diff.py --mode ir --canonical --python-only --record-golden
 ```
+`--only <family>` re-blesses just that family and keeps every other one.
 Never re-bless to silence a red gate you don't understand — that discards the one
 signal that protects the contract.
 

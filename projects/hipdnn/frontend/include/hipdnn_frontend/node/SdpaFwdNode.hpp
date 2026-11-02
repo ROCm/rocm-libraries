@@ -165,6 +165,9 @@ public:
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
 
+        // Rule 6c: left_bound follows cuDNN and must be -1 or >= 1
+        HIPDNN_CHECK_ERROR(detail::validateSdpaLeftBound(attributes.left_bound, "SdpaFwdNode"));
+
         // Rule 7: If O has dims already set, validate them
         const auto& oDims = o->get_dim();
         if(!oDims.empty())

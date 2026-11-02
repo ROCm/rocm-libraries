@@ -35,8 +35,6 @@
 #include <roctracer/roctx.h>
 #endif
 
-#include <Tensile/Singleton.hpp>
-
 namespace TensileLite
 {
     using StringSet = std::set<std::string>;
@@ -44,9 +42,11 @@ namespace TensileLite
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug
     {
     public:
+        static Debug& Instance();
+
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
         bool printPredicateEvaluationVerbose() const;
@@ -78,11 +78,11 @@ namespace TensileLite
         // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
         bool printStreamKModeSelection() const;
 
-        // Emits a StreamK "launch summary" of the decisions made in the StreamK
-        // launch-parameter path (mode, reduction, grid/tiles/split, workspace,
-        // partials, DP-only, fallbacks) for each StreamK solve(). Purely
-        // observational. Gated by TENSILE_DB bit 0x200000 = StreamK launch summary
-        // (sits alongside the 0x100000 StreamK-mode-selection bit above).
+        // Emits the canonical persistent launch summary. Actual StreamK
+        // launches also retain their compatibility decision fields. Purely
+        // observational; TENSILE_DB bit 0x200000 retains its existing meaning.
+        bool printPersistentLaunchSummary() const;
+        // Legacy source/ABI accessor for the same diagnostic control.
         bool printStreamKLaunchSummary() const;
 
         // Reports, on stderr, every problem for which solution selection came
@@ -108,8 +108,6 @@ namespace TensileLite
         //    1 -> force the dynamic (SK4) path
         // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
         int streamK5ForceMode() const;
-
-        bool usePreciseSMTarget() const;
 
         int useExperimentalSelection() const;
 
@@ -168,8 +166,6 @@ namespace TensileLite
         }
 
     private:
-        friend LazySingleton<Debug>;
-
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;
@@ -186,10 +182,8 @@ namespace TensileLite
         bool        m_disableStaggerU     = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
-        bool        m_usePreciseSMTarget  = false;
         StringSet   m_excludedFromGetAll;
 
         Debug();
     };
 } // namespace TensileLite
-

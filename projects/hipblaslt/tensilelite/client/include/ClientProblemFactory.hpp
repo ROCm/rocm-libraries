@@ -40,6 +40,8 @@ namespace TensileLite
     namespace Client
     {
 
+        std::vector<int> resolveHybridAssignmentPolicies(po::variables_map const& args);
+
         class ClientProblemFactory
         {
         public:
@@ -74,6 +76,7 @@ namespace TensileLite
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
+            int         m_uniformSummationOrder;
             int         m_useBias;
             int         m_biasSrc;
             std::string m_useScaleAB;

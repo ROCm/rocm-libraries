@@ -10,7 +10,7 @@
 #include "row_loader.h"
 #include "types.h"
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 namespace hipconv::cdna4::direct_wgrad
 {
@@ -25,16 +25,25 @@ constexpr int S_LANE_BYTES     = 16;
 constexpr int DELTA_LANE_BYTES = 16;
 
 // Columns of one load round, a round being one wave's buffer load of the row.
-constexpr int col_granularity(int chans, int lane_bytes)
+//
+// Measured on the source element, which is what the load width buys: tf32's 4-byte elements
+// halve the columns a round covers, and so halve the padding the row rounds up to.
+constexpr int col_granularity(int chans, int lane_bytes, int elem_bytes)
 {
-    return WAVE_SIZE * lane_bytes / (chans * 2);
+    return WAVE_SIZE * lane_bytes / (chans * elem_bytes);
 }
 
 // Columns one item's row holds: live columns padded to the whole round RowLoader requires.
-constexpr int buffer_cols(int live, int chans, int lane_bytes)
+constexpr int buffer_cols(int live, int chans, int lane_bytes, int elem_bytes)
 {
-    const int g = col_granularity(chans, lane_bytes);
+    const int g = col_granularity(chans, lane_bytes, elem_bytes);
     return (live + g - 1) / g * g;
+}
+
+// Planes one row buffer holds: tf32's (big, small) bf16 pair, or the row itself.
+constexpr int row_planes(const Config& cfg)
+{
+    return cfg.is_tf32() ? 2 : 1;
 }
 
 constexpr int s_live_cols(const Config& cfg)
@@ -47,31 +56,45 @@ constexpr int s_live_cols(const Config& cfg)
 // Delta is read at a single column offset, so its live columns are the MFMA's whatever the
 // unfold is.
 template <Config cfg>
-using SRowLayout = RowLayout<buffer_cols(s_live_cols(cfg), cfg.block_c(), S_LANE_BYTES),
-                             cfg.block_c(),
-                             s_live_cols(cfg),
-                             cfg.w_unfold(),
-                             cfg.kw - 1>;
+using SRowLayout =
+    RowLayout<buffer_cols(s_live_cols(cfg), cfg.block_c(), S_LANE_BYTES, cfg.elem_bytes),
+              cfg.block_c(),
+              s_live_cols(cfg),
+              cfg.w_unfold(),
+              cfg.kw - 1,
+              row_planes(cfg)>;
 template <Config cfg>
-using DeltaRowLayout = RowLayout<buffer_cols(MFMA_K, cfg.block_k(), DELTA_LANE_BYTES),
-                                 cfg.block_k(),
-                                 MFMA_K,
-                                 cfg.w_unfold(),
-                                 0>;
+using DeltaRowLayout =
+    RowLayout<buffer_cols(MFMA_K, cfg.block_k(), DELTA_LANE_BYTES, cfg.elem_bytes),
+              cfg.block_k(),
+              MFMA_K,
+              cfg.w_unfold(),
+              0,
+              row_planes(cfg)>;
 
 template <Config cfg, hipconv::DataType DT>
-using SRowLoader =
-    RowLoader<SRowLayout<cfg>, ToType<DT>, cfg.waves_per_item(), cfg.waves_q, S_LANE_BYTES>;
+using SRowLoader = RowLoader<SRowLayout<cfg>,
+                             LdsType<DT>,
+                             cfg.waves_per_item(),
+                             cfg.waves_q,
+                             S_LANE_BYTES,
+                             (cfg.rows_per_tile > 0),
+                             cfg.is_tf32()>;
 template <Config cfg, hipconv::DataType DT>
-using DeltaRowLoader =
-    RowLoader<DeltaRowLayout<cfg>, ToType<DT>, cfg.waves_per_item(), cfg.waves_q, DELTA_LANE_BYTES>;
+using DeltaRowLoader = RowLoader<DeltaRowLayout<cfg>,
+                                 LdsType<DT>,
+                                 cfg.waves_per_item(),
+                                 cfg.waves_q,
+                                 DELTA_LANE_BYTES,
+                                 (cfg.rows_per_tile > 0),
+                                 cfg.is_tf32()>;
 
 template <Config cfg, hipconv::DataType DT>
-using SRing = RowRing<ToType<DT>, cfg.row_buffers()>;
+using SRing = RowRing<LdsType<DT>, cfg.row_buffers()>;
 template <Config cfg, hipconv::DataType DT>
-using DeltaRing = RowRing<ToType<DT>, cfg.row_buffers()>;
+using DeltaRing = RowRing<LdsType<DT>, cfg.row_buffers()>;
 template <Config cfg, hipconv::DataType DT>
-using DeltaScratch = RowRing<ToType<DT>, cfg.scratch_rows()>;
+using DeltaScratch = RowRing<LdsType<DT>, cfg.scratch_rows()>;
 
 template <Config cfg, hipconv::DataType DT>
 constexpr int lds_elems =
@@ -98,6 +121,30 @@ constexpr int loads_per_iteration =
 template <Config cfg, hipconv::DataType DT>
 constexpr int loads_in_flight = (cfg.prefetch_rows - 1) * loads_per_iteration<cfg, DT>;
 
+// A wave's staged rows, one slot per LDS ring slot.
+//
+// Row R stages in slot R % row_buffers, the same index its LDS buffer takes, so the main loop's
+// read_slot and issue_slot select both at once. A row is staged the iteration its loads issue
+// and converted the iteration the drain confirms them, so the slots live exactly as long as the
+// ring's do. The loaders size them, down to one dead slot on the DMA path.
+template <Config cfg, hipconv::DataType DT>
+struct RowStage
+{
+    typename SRowLoader<cfg, DT>::template StageRing<cfg.row_buffers()> s;
+    typename DeltaRowLoader<cfg, DT>::template StageRing<cfg.row_buffers()> delta;
+
+    template <int Slot>
+    __device__ auto& s_slot()
+    {
+        return s.template slot<Slot>();
+    }
+    template <int Slot>
+    __device__ auto& delta_slot()
+    {
+        return delta.template slot<Slot>();
+    }
+};
+
 // Declare the workgroup's LDS and hand `body` the two rings and the prologue scratch.
 //
 // One __shared__ declaration per ring slot, because the row loop reads one slot while DMA is
@@ -106,7 +153,7 @@ constexpr int loads_in_flight = (cfg.prefetch_rows - 1) * loads_per_iteration<cf
 template <Config cfg, hipconv::DataType DT, typename Body>
 __device__ void with_lds_rings(Body&& body)
 {
-    using T                   = ToType<DT>;
+    using T                   = LdsType<DT>;
     constexpr int s_elems     = SRowLoader<cfg, DT>::buffer_elems;
     constexpr int delta_elems = DeltaRowLoader<cfg, DT>::buffer_elems;
 

@@ -11,6 +11,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
+      - '.github/requirements-hipdnn-superbuild-ci.txt'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
@@ -24,8 +25,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Two layers of filtering:
+  #  1. The trigger-level `paths:` keeps this workflow off PRs that touch
+  #     neither hipDNN nor its providers (hipBLASLt-only, MIOpen-only, ...).
+  #  2. Within a PR that does match, this job skips the builds when every
+  #     changed hipDNN/provider file is documentation. A skipped build job
+  #     counts as passing, and the summary job below still reports, so a
+  #     docs-only PR never sits at "Expected - Waiting for status".
+  # Docs cannot be excluded in layer 1: a workflow skipped by `paths:` never
+  # reports a status at all.
+  changes:
+    name: Detect hipDNN changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+    steps:
+      # No checkout: on pull_request, paths-filter reads the changed-file list
+      # from the GitHub REST API (hence `pull-requests: read`), and the filters
+      # are inline.
+
+      # Schedule and manual dispatch always build; only PRs are filtered.
+      # `every` makes a file count only if it matches all patterns: inside the
+      # first (brace) pattern, and none of the exclusions. Docs-only PRs (RFCs,
+      # READMEs, guides) therefore do not run the superbuild; a PR that also
+      # touches any non-doc file still does.
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml}'
+              - '!**/*.md'
+              - '!**/*.rst'
+              - '!projects/hipdnn/docs/**'
+              - '!dnn-providers/**/docs/**'
+
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -165,6 +209,49 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
+      # DVC pinned to an explicit release. The action drops in the self-contained
+      # DVC installer, so no Python interpreter on this persistent self-hosted
+      # runner is mutated, and the lane does not silently move to a new DVC
+      # major. The Linux job below installs it the same way, for the same reasons.
+      - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
+        with:
+          version: '3.62.0'
+
+      # hipdnn_golden_data_tests validates our checked-in golden .bin blobs against
+      # our own CPU/GPU references. The blobs are DVC-managed, so without this step
+      # the binary registers zero tests and the lane passes having verified nothing.
+      # Anonymous S3 reads are enabled on both remotes (.dvc/config), so no
+      # credentials are needed, and each golden-data pointer carries its own
+      # `remote:` key, so a bare pull resolves them all.
+      #
+      # This MUST run before configure: integration-tests/CMakeLists.txt stages the
+      # bundle tree into the build directory with a configure-time file(COPY), so
+      # blobs that arrive later never reach <exe>/../lib/integration-test-bundles.
+      # That placement makes an S3 outage fail the whole lane, build included.
+      # Taken deliberately: the alternative is a green build whose golden-data
+      # suite verified nothing, which is the failure this step exists to close.
+      - name: Fetch golden data
+        run: |
+          set -euo pipefail
+          dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+          # Exiting 0 does not prove a blob landed: absent pointers, or a remote
+          # that resolves to nothing, pull nothing and still succeed. Every bundle
+          # then loads without golden data, which the harness counts as a
+          # legitimately empty lane -- green, having verified nothing. Count what
+          # the pull was supposed to produce.
+          count=$(find dnn-providers/integration-tests/integration-test-bundles -name '*.bin' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
+          echo "Fetched $count golden tensor blob(s)"
+
+      # HIPKERNELPROVIDER_ENABLE_ROCKE=ON with the default production root: pull the
+      # DVC-stored rocKE descriptors (the KDPs). Each pointer names the `ingestor`
+      # remote, so a bare pull resolves it. Configure sets REQUIRE_DVC_DESCRIPTORS=ON,
+      # so a missing file fails it instead of silently dropping the bundle.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
@@ -182,16 +269,21 @@ jobs:
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
+            -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON \
+            -DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1
 
       - name: Build
         run: cmake --build build
@@ -211,7 +303,7 @@ jobs:
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --no-tests=error
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -251,6 +343,8 @@ jobs:
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-linux-scale-rocm
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
@@ -301,10 +395,9 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build ccache lsb-release wget software-properties-common gnupg
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
+          sudo apt-get install -y ninja-build ccache
+          # clang-tidy-20 comes from Ubuntu's noble-updates archive rather than
+          # apt.llvm.org, whose intermittent outages failed this step.
           sudo apt-get install -y clang-tidy-20 clang-tools-20
 
       - name: Install ROCm wheels
@@ -380,6 +473,48 @@ jobs:
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
+      # Same pinned, self-contained DVC as the Windows lane: the action installs
+      # the .deb on Linux, so no Python interpreter is touched and the version does
+      # not drift.
+      #
+      # The other Linux lane in this repo (component-ci-miopen.yml) calls
+      # `dvc pull` with no install step, but it runs inside a container image
+      # that ships DVC. This job runs on a bare azure-linux-scale-rocm runner,
+      # which does not.
+      - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
+        with:
+          version: '3.62.0'
+
+      # Golden-data fetch for hipdnn_golden_data_tests. See the Windows lane above
+      # for why this exists and why it MUST precede configure.
+      #
+      # LOGNAME is set for the same reason the other Linux lanes set it: DVC needs a
+      # resolvable user (see ROCm/rocm-libraries#1617).
+      - name: Fetch golden data
+        run: |
+          set -euo pipefail
+          command -v dvc >/dev/null || { echo "dvc is not on this runner" >&2; exit 1; }
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+          # A pull can exit 0 having fetched nothing; count what it should produce.
+          count=$(find dnn-providers/integration-tests/integration-test-bundles -name '*.bin' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
+          echo "Fetched $count golden tensor blob(s)"
+
+      # test_registry_regeneration.py regenerates the gfx950 attention catalog and
+      # diffs it against the shipped KDP. The rocKE KDPs are DVC-managed (each pointer
+      # names the `ingestor` remote), and this lane packs the example descriptors
+      # rather than the production tree, so nothing else fetches them. Without them
+      # both tests skip, and the tooling suite fails skips inside pytest. Same pull as
+      # the Windows lane, which packs the production tree.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+          # A pull can exit 0 having fetched nothing; count what it should produce.
+          count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors -name '*.kdp.json' -path '*artifacts*' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no rocKE KDPs" >&2; exit 1; }
+          echo "Fetched $count rocKE KDP(s)"
+
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
@@ -401,6 +536,8 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
@@ -409,10 +546,21 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON \
+            -DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1
 
       - name: Build
         run: cmake --build build
+
+      # The touch makes the build run flatc again, also when the checkout gives the committed
+      # header a newer timestamp than the schema.
+      - name: Check the committed ingestor plan header matches its schema
+        run: |
+          set -euo pipefail
+          touch dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan.fbs
+          cmake --build build --target hkp_generate_ingestor_plan_header
+          git diff --exit-code -- dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated.h
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
@@ -425,17 +573,41 @@ jobs:
           printf '%s\n' "${kpacks[@]}"
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        env:
+          # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
+          ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
+        run: ctest --test-dir build --output-on-failure --no-tests=error
+
+      # The full support matrix is too large to commit (only its overview is,
+      # in dnn-providers/integration-tests/), so publish it from every run.
+      # Both renderers read the committed support-claim sidecars, not the
+      # build, so this runs even when the build or tests failed.
+      - name: Render support matrix
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          scripts=dnn-providers/integration-tests/scripts
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX.md
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" --overview-only \
+            --output build/support-matrix/SUPPORT_MATRIX_GRAPH_OVERVIEW.md
+          "$VENV_PYTHON" "$scripts/support_features/feature_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX_OVERVIEW.md
+
+      - name: Upload support matrix
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hipdnn-support-matrix
+          path: build/support-matrix/
+          if-no-files-found: error
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.
       # That spelling is retired: it is now the hipdnn_golden_data_tests binary,
       # registered as an ordinary ctest target, so the "Run tests" step above already
       # covers it -- once per run rather than once per provider, and with no env var.
-      #
-      # Note it validates nothing until the golden .bin blobs are pulled: this
-      # workflow sparse-checks-out .dvc but never runs `dvc pull`, so every bundle
-      # currently registers as "without golden data".
+      # The "Fetch golden data" step above is what gives it anything to validate.
 
       - name: Patch ROCm SDK with superbuild outputs
         run: cmake --install build --prefix "$ROCM_SDK_PATH"
@@ -464,6 +636,7 @@ jobs:
     name: hipDNN Superbuild Summary
     if: always()
     needs:
+      - changes
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
     runs-on: ubuntu-24.04

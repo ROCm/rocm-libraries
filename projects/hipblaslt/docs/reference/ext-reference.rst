@@ -219,6 +219,7 @@ you can call the run API to launch the kernel directly.
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
     gemm.setProblem(1, 1, 1, 1, epilogue, inputs); // m, n, k, batch
     gemm.algoGetHeuristic(gemm, pref, heuristic);
+    gemm.setMaxWorkspaceBytes(1000000);
     gemm.initialize(heuristic[0].algo, d_workspace, stream);
     for(int i = 0; i < 10; i++)
     {
@@ -453,6 +454,7 @@ Here is a simple example that shows how this API works.
     // Step 6: Initialize and run
     if(validIdx.size() > 1)
     {
+        groupedGemm.setMaxWorkspaceBytes(1000000);
         groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
         for(int i = 0; i < 10; i++)
         {
@@ -637,6 +639,7 @@ GEMM
 
     if(validIdx.size() > 1)
     {
+        gemm.setMaxWorkspaceBytes(1000000);
         gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
         for(int i = 0; i < 10; i++)
         {
@@ -712,6 +715,7 @@ Grouped GEMM
 
     if(validIdx.size() > 1)
     {
+        groupedGemm.setMaxWorkspaceBytes(1000000);
         groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
         for(int i = 0; i < 10; i++)
         {
@@ -854,6 +858,7 @@ In this mode, the first element is the "sum of N" in the array of Ns.
     // Step 6: Initialize and run
     if(validIdx.size() > 1)
     {
+        groupedGemm.setMaxWorkspaceBytes(1000000);
         groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace);
         for(int i = 0; i < 10; i++)
         {

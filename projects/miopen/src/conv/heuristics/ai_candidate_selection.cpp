@@ -1489,6 +1489,12 @@ ModelSelectBestCandidate(const std::string& arch,
                          const bool use_split_k,
                          ValidationFunc&& is_valid)
 {
+    if(common::LgbmOnly())
+    {
+        MIOPEN_LOG_I2("Candidate selection bypassed via MIOPEN_DEBUG_LGBM_ONLY for "
+                      << solver << " on " << arch);
+        return CandidateSelectionResult{{}, {}};
+    }
     try
     {
         const auto& model = GetCandidateSelectionModel(arch, solver);

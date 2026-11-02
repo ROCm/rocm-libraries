@@ -16,6 +16,7 @@
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h"
 
 #include <stdio.h> /* snprintf */
+#include <string.h> /* strcmp */
 
 rocke_conv_problem_t rocke_conv_problem_make(int N,
                                              int Hi,
@@ -210,4 +211,64 @@ rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
         *out_len = (size_t)written;
     }
     return ROCKE_OK;
+}
+
+bool rocke_conv_coalesced_load_ok(const char* operand,
+                                  int tile_rows,
+                                  int tile_cols,
+                                  int block_size,
+                                  int load_vec,
+                                  char* reason,
+                                  size_t reason_cap)
+{
+    /* Python: chunks = (tile_rows * tile_cols) // load_vec
+     *         if chunks % block_size: return f"{operand} load: ..." */
+    const int chunks = load_vec > 0 ? (tile_rows * tile_cols) / load_vec : 0;
+    if(block_size > 0 && load_vec > 0 && chunks % block_size == 0)
+        return true;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "%s load: tile %dx%d / %d = %d not divisible by block_size %d",
+                 operand,
+                 tile_rows,
+                 tile_cols,
+                 load_vec,
+                 chunks,
+                 block_size);
+    return false;
+}
+
+/* Python twin: _VECTOR_WIDTH_DTYPE_BYTES in _conv_implicit_gemm_common.py.
+ * Keyed explicitly so a future 1- or 8-byte dtype is a one-line table edit
+ * here and there, instead of a silent fallthrough to the 2-byte default. */
+static int rocke_conv_vector_width_elem_bytes(const char* dtype)
+{
+    if(strcmp(dtype, "fp32") == 0)
+        return 4;
+    return 2;
+}
+
+bool rocke_conv_vector_width_ok(
+    const char* operand, bool has_vec, int vec, const char* dtype, char* reason, size_t reason_cap)
+{
+    /* Python: nbytes = vec * (4 if dtype == "fp32" else 2)
+     *         if nbytes > MAX_VECTOR_BYTES: return f"vector_size_{operand}=..." */
+    const int max_vector_bytes = 16;
+    const char* dt = dtype ? dtype : "fp16";
+    if(!has_vec)
+        return true;
+    const long long nbytes = (long long)vec * rocke_conv_vector_width_elem_bytes(dt);
+    if(nbytes <= max_vector_bytes)
+        return true;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "vector_size_%s=%d x %s is %lld bytes > %d-byte max per-lane access",
+                 operand,
+                 vec,
+                 dt,
+                 nbytes,
+                 max_vector_bytes);
+    return false;
 }

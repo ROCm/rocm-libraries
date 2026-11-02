@@ -38,16 +38,11 @@ namespace TensileLite
     template struct TypedGemm<int8_t, int8_t, int32_t, int32_t>;
     template struct TypedGemm<int8_t, int8_t, int32_t, int32_t, float, float>;
     template struct TypedGemm<int8_t, int8_t, int8_t, int8_t, float, float>;
-#ifdef TENSILE_USE_HALF
     template struct TypedGemm<Half>;
     template struct TypedGemm<Half, Half, Half, Half, float, float>;
     template struct TypedGemm<Half, Half, float, float>;
-#endif
-#ifdef TENSILE_USE_BF16
     template struct TypedGemm<BFloat16, BFloat16, BFloat16, BFloat16, float, float>;
     template struct TypedGemm<BFloat16, BFloat16, float, float>;
-#endif
-#ifdef TENSILE_USE_FP8_BF8
     template struct TypedGemm<Half, Half, Half, Half, float, float, Float8>;
     template struct TypedGemm<Half, Half, Half, Half, float, float, Float8BFloat8>;
     template struct TypedGemm<Half, Half, Half, Half, float, float, BFloat8Float8>;
@@ -76,5 +71,4 @@ namespace TensileLite
     template struct TypedGemm<Float8_fnuz, BFloat8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float>;
     template struct TypedGemm<BFloat8, Float8, BFloat8, BFloat8, float, float>;
     template struct TypedGemm<BFloat8_fnuz, Float8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float>;
-#endif
 } // namespace TensileLite

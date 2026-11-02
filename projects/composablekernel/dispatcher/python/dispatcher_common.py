@@ -17,6 +17,7 @@ Best-of-both:
   - logging module instead of bare print() (shared improvement)
 """
 
+import functools
 import logging
 import shutil
 import sys
@@ -55,6 +56,165 @@ def get_generated_kernels_dir() -> Path:
 def get_codegen_dir() -> Path:
     """Get the codegen scripts directory."""
     return get_dispatcher_root() / "codegen"
+
+
+# ============================================================================
+# HIP runtime loading
+# ============================================================================
+
+# Fallback sonames for installations without a usable library discovery tool.
+#
+# The bare ``libamdhip64.so`` is the *development* symlink: it ships in
+# ``$ROCM_PATH/lib`` but is frequently NOT in the ldconfig cache, so a plain
+# ``CDLL("libamdhip64.so")`` fails on an otherwise healthy ROCm node unless the
+# caller happens to have ``LD_LIBRARY_PATH`` set. Only the versioned soname is
+# registered on runtime-only installations. Discover the registered soname
+# instead of assuming its major version; the list below remains a fallback
+# when the system lookup tools are unavailable.
+_HIP_SONAMES = (
+    "libamdhip64.so",
+    "libamdhip64.so.7",
+    "libamdhip64.so.6",
+    "libamdhip64.so.5",
+)
+
+
+def hip_library_candidates() -> List[str]:
+    """Return the HIP runtime names/paths to try, in order.
+
+    Discover files under ``$ROCM_PATH/{lib,lib64}`` (default ``/opt/rocm``),
+    then consult the system library cache and finally try fallback sonames.
+    Neither path requires the unversioned development symlink or a hardcoded
+    runtime major version.
+    """
+    import ctypes.util
+    import os
+    import re
+
+    candidates: List[str] = []
+    try:
+        installed = ctypes.util.find_library("amdhip64")
+    except OSError:
+        installed = None
+    rocm = Path(os.environ.get("ROCM_PATH", "/opt/rocm")).expanduser()
+    for libdir in (rocm / "lib", rocm / "lib64"):
+        candidates.append(str(libdir / _HIP_SONAMES[0]))
+        # Numeric ordering tries .so.10 before .so.9 and accepts full filenames
+        # such as .so.10.0.26306 when even the major-version symlink is absent.
+        versioned = []
+        try:
+            for path in libdir.glob("libamdhip64.so.*"):
+                match = re.fullmatch(r"libamdhip64\.so\.(\d+(?:\.\d+)*)", path.name)
+                if match and path.is_file():
+                    versioned.append((tuple(map(int, match[1].split("."))), str(path)))
+        except OSError:
+            pass
+        candidates.extend(path for _, path in sorted(versioned, reverse=True))
+    if installed:
+        candidates.append(installed)
+    candidates.extend(_HIP_SONAMES)
+    return list(dict.fromkeys(candidates))
+
+
+def load_hip_runtime():
+    """Load libamdhip64 via ctypes using discovered and fallback candidates.
+
+    Single source of truth so the bridges cannot drift into their own partial
+    lists -- grouped_conv hardcoded the bare ``libamdhip64.so`` (which fails
+    wherever only the versioned soname is registered) and fmha listed only
+    ``.so``/``.so.6`` (which fails on ROCm 7).
+
+    Raises OSError naming every candidate tried, so a failure is diagnosable
+    instead of surfacing later as a bare "no GPU available".
+    """
+    import ctypes
+
+    tried: List[str] = []
+    for name in hip_library_candidates():
+        try:
+            return ctypes.CDLL(name)
+        except OSError:
+            tried.append(name)
+    raise OSError(
+        "Could not load the HIP runtime (libamdhip64). Tried: "
+        + ", ".join(tried)
+        + ". Is ROCm installed, and is $ROCM_PATH/lib on the loader path?"
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _hip_runtime_once():
+    """load_hip_runtime() once per process, or None if it fails.
+
+    Each load re-runs find_library, which can cost seconds per call.
+    """
+    import ctypes
+
+    try:
+        hip = load_hip_runtime()
+    except OSError:
+        return None
+    hip.hipGetErrorName.restype = ctypes.c_char_p
+    hip.hipGetErrorString.restype = ctypes.c_char_p
+    return hip
+
+
+def _hip_error_text(hip, err: int) -> str:
+    """'hipErrorName: description' for a HIP error code."""
+    name = (hip.hipGetErrorName(err) or b"?").decode()
+    return f"{name}: {(hip.hipGetErrorString(err) or b'?').decode()}"
+
+
+def hip_device_problem() -> Optional[str]:
+    """Why HIP sees no GPU, or None if it sees one (or HIP cannot be loaded).
+
+    Without a device every hipMalloc in the ctypes libraries fails and each
+    kernel reports only ``status=-1``; this names the real cause once. If the
+    runtime does not load here the kernel libraries may still find it through
+    their own RUNPATH, so that case is left to them.
+    """
+    import ctypes
+    import os
+
+    hip = _hip_runtime_once()
+    if hip is None:
+        return None
+    count = ctypes.c_int(0)
+    err = hip.hipGetDeviceCount(ctypes.byref(count))
+    if err == 0 and count.value > 0:
+        return None
+    reason = (
+        f"hipGetDeviceCount found {count.value} device(s) "
+        f"({_hip_error_text(hip, err)})"
+    )
+    if not os.path.exists("/dev/kfd"):
+        reason += (
+            "; /dev/kfd does not exist, so this process has no GPU access"
+            " (a container needs --device=/dev/kfd --device=/dev/dri)"
+        )
+    elif not os.access("/dev/kfd", os.R_OK | os.W_OK):
+        reason += (
+            "; /dev/kfd is not readable and writable by this user"
+            " (it needs the render/video group, e.g. docker --group-add)"
+        )
+    for var in ("HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        if var in os.environ:
+            reason += f"; {var}={os.environ[var]!r}"
+    return reason
+
+
+def hip_last_error() -> str:
+    """Name of the HIP error pending on this thread ('' if none), then reset it.
+
+    The ctypes libraries return a bare -1 on any HIP failure; when that failure
+    left a pending HIP error this names it. Best effort: errors the libraries
+    already read themselves are gone. A pending error can survive later
+    successful calls, so call this once before a kernel to drop anything left
+    by earlier ones.
+    """
+    hip = _hip_runtime_once()
+    err = hip.hipGetLastError() if hip is not None else 0
+    return _hip_error_text(hip, err) if err else ""
 
 
 def _detect_gpu_arch_via_amd_smi() -> Optional[str]:
@@ -180,6 +340,41 @@ def ocp_arch_defines(arch: Optional[str]) -> List[str]:
     if not fp8_uses_ocp(arch):
         return []
     return ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+
+
+def validate_configs_match_arch(configs, arch, bridge: str = "") -> None:
+    """Reject configs that were built for a different arch than we are compiling for.
+
+    Every arch-dependent safeguard in these bridges -- the warp_tile_k selectors,
+    the fp4 rule, the i4 rejection -- runs when the CONFIG is constructed, keyed on
+    that config's own gfx_arch. The compile entry points take their own gfx_arch,
+    so a config built for one arch and handed to a build for another slips past all
+    of them: the config's literal tile is emitted verbatim and compiled for the
+    other target.
+
+    Concretely, default_fp4_config(gfx_arch="gfx950") records warp_tile_k=32, and
+    compiling it with gfx_arch="gfx1250" emits a 16x16x32 tile for gfx1250 -- the
+    GPU-confirmed dead-accumulator case the fp4 rule exists to prevent. The same
+    hole bypasses the AQuant/BQuant i4 rejection.
+
+    Configs with no recorded arch are left alone; only a genuine mismatch raises.
+    """
+    target = normalize_arch(arch)
+    mismatched = []
+    for i, cfg in enumerate(configs or []):
+        cfg_arch = normalize_arch(getattr(cfg, "gfx_arch", None))
+        if cfg_arch and target and cfg_arch != target:
+            name = getattr(cfg, "name", None) or f"<config {i}>"
+            mismatched.append(f"  [{i}] {name}: built for {cfg_arch!r}")
+    if mismatched:
+        raise ValueError(
+            f"{bridge or 'bridge'}: refusing to compile for {target!r} using configs "
+            f"built for a different architecture. Their arch-dependent fields "
+            f"(warp_tile_k in particular) were derived for the other target and would "
+            f"be emitted verbatim, bypassing the arch safeguards that ran at "
+            f"construction time. Rebuild them with gfx_arch={target!r}:\n"
+            + "\n".join(mismatched)
+        )
 
 
 def arch_feature_defines(arch: Optional[str]) -> List[str]:

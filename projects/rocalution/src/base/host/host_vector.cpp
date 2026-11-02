@@ -1663,6 +1663,12 @@ namespace rocalution
         {
             int coarse_index = this->vec_[index[i]];
 
+            if(coarse_index == -1)
+            {
+                map[ind++] = -1;
+                continue;
+            }
+
             if(check[coarse_index] == -1)
             {
                 map[ind++]          = k;

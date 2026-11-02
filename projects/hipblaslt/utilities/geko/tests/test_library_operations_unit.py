@@ -106,7 +106,7 @@ def test_merge_rejects_missing_hipblaslt_path(tmp_path: Path) -> None:
 
 def test_merge_invokes_tensile_merge_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     called = {}
 
     def _fake_run(cmd):
@@ -134,7 +134,7 @@ def test_create_rejects_empty_library_dir(tmp_path: Path) -> None:
 
 def test_create_invokes_tensile_create_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     libs = tmp_path / "libs"
     libs.mkdir()
     _write_library_yaml(libs, "x.yaml")
@@ -197,6 +197,8 @@ def test_from_dataframe_happy_path(tmp_path: Path) -> None:
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             }
         ]
     )
@@ -258,6 +260,8 @@ def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             },
             {
                 "lib": "a.yaml",
@@ -272,6 +276,8 @@ def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             },
         ]
     )
@@ -334,6 +340,8 @@ def test_from_full_dataframe_reuses_tuned_solution_for_multiple_sizes(tmp_path: 
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "winner": "tuned",
                 "solutionIdx_reference": 0,
             },
@@ -350,6 +358,8 @@ def test_from_full_dataframe_reuses_tuned_solution_for_multiple_sizes(tmp_path: 
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "winner": "tuned",
                 "solutionIdx_reference": 0,
             },
@@ -393,6 +403,69 @@ def test_extract_solutions_happy_path(tmp_path: Path) -> None:
     libs = operations.extract_solutions(df, mt)
     assert len(libs) == 1
     assert len(libs[0].sizes) == 1
+
+
+def test_extract_solutions_fill_perf_uses_measured_gflops(tmp_path: Path) -> None:
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+    p = _write_library_yaml(lib_dir, "a.yaml")
+
+    mt = _write_match_table(tmp_path, [[str(p), 0]])
+    df = pd.DataFrame(
+        [
+            {
+                "m": 16,
+                "n": 16,
+                "batch_count": 1,
+                "k": 16,
+                "solutionIdx": 0,
+                "compute_type": "f32_r",
+                "hipblaslt-Gflops": 123.4,
+            }
+        ]
+    )
+
+    libs_default = operations.extract_solutions(df, mt)
+    assert libs_default[0].sizes[0][0] == [16, 16, 1, 16]
+    assert libs_default[0].sizes[0][1][1] == 0.0
+
+    libs_filled = operations.extract_solutions(df, mt, fill_perf=True)
+    assert libs_filled[0].sizes[0][0] == [16, 16, 1, 16]
+    assert libs_filled[0].sizes[0][1][1] == 123.4
+
+
+def test_extract_solutions_all_numeric_dataframe(tmp_path: Path) -> None:
+    # All-numeric (int + float) DataFrame, with no string columns. This makes
+    # df.iterrows() upcast each row to a common float64 dtype, so solutionIdx,
+    # m, n, batch_count, and k all arrive as numpy.float64 inside the loop.
+    # extract_solutions must int()-cast them before using them as list/dict
+    # indices (e.g. match_table[solutionIdx]) or storing them as size dims.
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+    p = _write_library_yaml(lib_dir, "a.yaml")
+
+    mt = _write_match_table(tmp_path, [[str(p), 0]])
+    df = pd.DataFrame(
+        [
+            {
+                "m": 16,
+                "n": 16,
+                "batch_count": 1,
+                "k": 16,
+                "solutionIdx": 0,
+                "hipblaslt-Gflops": 123.4,
+            }
+        ]
+    )
+    assert df.dtypes.apply(lambda dt: dt.kind in "if").all()
+
+    libs = operations.extract_solutions(df, mt, fill_perf=True)
+    assert len(libs) == 1
+    size, (sol_idx, perf) = libs[0].sizes[0]
+    assert size == [16, 16, 1, 16]
+    assert all(isinstance(v, int) for v in size)
+    assert sol_idx == 0
+    assert perf == 123.4
 
 
 def test_prune_library_missing_hipblaslt_raises(tmp_path: Path) -> None:
@@ -582,11 +655,11 @@ def test_prune_library_raises_when_merge_returns_multiple(monkeypatch: pytest.Mo
 # ---------------------------------------------------------------------------
 
 def _make_tensile_mocks(calls: dict):
-    """Return (sys.modules patch dict, mock modules) for Tensile imports."""
-    tensile_mod = types.ModuleType("Tensile")
-    library_io_mod = types.ModuleType("Tensile.LibraryIO")
-    custom_yaml_mod = types.ModuleType("Tensile.CustomYamlLoader")
-    merge_lib_mod = types.ModuleType("Tensile.TensileMergeLibrary")
+    """Return (sys.modules patch dict, mock modules) for tensilelite imports."""
+    tensile_mod = types.ModuleType("tensilelite")
+    library_io_mod = types.ModuleType("tensilelite.LibraryIO")
+    custom_yaml_mod = types.ModuleType("tensilelite.CustomYamlLoader")
+    merge_lib_mod = types.ModuleType("tensilelite.TensileMergeLibrary")
 
     def _load_yaml_stream(path, loader):
         calls["load"] = path
@@ -609,10 +682,10 @@ def _make_tensile_mocks(calls: dict):
     tensile_mod.LibraryIO = library_io_mod
 
     patch = {
-        "Tensile": tensile_mod,
-        "Tensile.LibraryIO": library_io_mod,
-        "Tensile.CustomYamlLoader": custom_yaml_mod,
-        "Tensile.TensileMergeLibrary": merge_lib_mod,
+        "tensilelite": tensile_mod,
+        "tensilelite.LibraryIO": library_io_mod,
+        "tensilelite.CustomYamlLoader": custom_yaml_mod,
+        "tensilelite.TensileMergeLibrary": merge_lib_mod,
     }
     return patch
 
@@ -636,7 +709,7 @@ def test_normalize_raises_if_data_not_list(monkeypatch: pytest.MonkeyPatch, tmp_
     calls: dict = {}
     mocks = _make_tensile_mocks(calls)
     # Override load to return a non-list (dict format is unsupported as input)
-    mocks["Tensile.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
+    mocks["tensilelite.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
     for mod_name, mod in mocks.items():
         monkeypatch.setitem(sys.modules, mod_name, mod)
 
@@ -780,6 +853,79 @@ def test_extract_solutions_raises_on_default_solution_mismatch(tmp_path: Path) -
         operations.extract_solutions(df, mt)
 
 
+def test_extract_solutions_falls_back_on_default_solution_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the external-merge fallback when a hipBLASLt path is supplied.
+
+    Args:
+        tmp_path (Path): Temporary test directory.
+        monkeypatch (pytest.MonkeyPatch): Fixture used to replace the external merger.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the fallback is not called or loses an exact-logic row.
+    """
+    lib_dir1 = tmp_path / "libs1"
+    lib_dir2 = tmp_path / "libs2"
+    lib_dir1.mkdir()
+    lib_dir2.mkdir()
+    p1 = _write_library_yaml_with_default(lib_dir1, "a.yaml", {"StaggerU": 0})
+    p2 = _write_library_yaml_with_default(lib_dir2, "a.yaml", {"StaggerU": 1})
+    mt = _write_match_table(tmp_path, [[str(p1), 0], [str(p2), 0]])
+    df = pd.DataFrame(
+        [
+            {"m": 16, "n": 16, "batch_count": 1, "k": 16, "solutionIdx": 0},
+            {"m": 32, "n": 32, "batch_count": 1, "k": 32, "solutionIdx": 1},
+        ]
+    )
+    calls: list[Path] = []
+
+    def _fake_external_merge(
+        hipblaslt_path: str | Path,
+        original: Library,
+        incremental: Library,
+    ) -> Library:
+        """Combine extracted test libraries while recording fallback use.
+
+        Args:
+            hipblaslt_path (str | Path): Supplied hipBLASLt path.
+            original (Library): First extracted library.
+            incremental (Library): Second extracted library.
+
+        Returns:
+            Library: Combined test library.
+
+        Raises:
+            None.
+        """
+        calls.append(Path(hipblaslt_path))
+        operations._reindex_and_append(original, incremental)
+        original.default_solution = incremental.default_solution
+        return original
+
+    monkeypatch.setattr(
+        operations,
+        "_merge_extracted_libraries",
+        _fake_external_merge,
+    )
+
+    hipblaslt_path = tmp_path / "hipblaslt"
+    libs = operations.extract_solutions(
+        df,
+        mt,
+        hipblaslt_path=hipblaslt_path,
+    )
+
+    assert calls == [hipblaslt_path]
+    assert len(libs) == 1
+    assert len(libs[0].solutions) == 2
+    assert len(libs[0].sizes) == 2
+
+
 def test_extract_solutions_ok_with_matching_default_solution(tmp_path: Path) -> None:
     lib_dir1 = tmp_path / "libs1"
     lib_dir2 = tmp_path / "libs2"
@@ -798,6 +944,8 @@ def test_extract_solutions_ok_with_matching_default_solution(tmp_path: Path) -> 
 
     libs = operations.extract_solutions(df, mt)
     assert len(libs) == 1
+    assert [sol["SolutionIndex"] for sol in libs[0].solutions] == [0, 1]
+    assert [size[1][0] for size in libs[0].sizes] == [0, 1]
 
 
 def test_extract_solutions_ok_when_both_default_solution_none(tmp_path: Path) -> None:

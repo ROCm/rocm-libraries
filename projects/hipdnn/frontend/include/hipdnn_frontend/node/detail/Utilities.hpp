@@ -7,6 +7,8 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -467,6 +469,24 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
     }
 
     return {ErrorCode::OK, ""};
+}
+
+// Validates an SDPA left diagonal-band bound. hipDNN follows cuDNN: left_bound = L
+// keeps the L keys ending at the diagonal, diagonal included. 0 keeps no key at or before
+// the diagonal and is rejected: a provider's L - 1 would turn it into -1, which kernels read
+// as unbounded (cuDNN rejects it in the backward pass, and in the forward pass before
+// backend 9.10). -1 is accepted as "unbounded".
+inline Error validateSdpaLeftBound(const std::optional<int64_t>& leftBound,
+                                   const std::string& nodeName)
+{
+    HIPDNN_RETURN_IF_TRUE(leftBound.has_value()
+                              && (leftBound.value() == 0 || leftBound.value() < -1),
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": left_bound must be -1 (unbounded) or >= 1, got "
+                              + std::to_string(leftBound.value_or(0))
+                              + ". left_bound = L keeps the L keys ending at the diagonal, "
+                                "diagonal included");
+    return {};
 }
 
 // Validates scalar parameter tensor is properly configured

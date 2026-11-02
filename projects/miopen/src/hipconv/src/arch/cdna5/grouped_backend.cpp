@@ -2,9 +2,9 @@
 
 #include <array>
 
-using hipconv::Conv2dParams;
 using hipconv::ConvAlgorithm;
 using hipconv::ConvKernelSpan;
+using hipconv::ConvParams;
 
 extern const ConvKernelSpan grouped_multi_g_cdna5_kernels;
 // Unified wgrad kernel covering group channel counts G in {4,8,16,32}
@@ -13,7 +13,7 @@ extern const ConvKernelSpan grouped_multi_g_wgrad_cdna5_kernels;
 namespace
 {
 
-bool is_applicable(const Conv2dParams& par)
+bool is_applicable(const ConvParams& par)
 {
     if(par.groups == 1)
         return false;

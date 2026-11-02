@@ -145,7 +145,8 @@ bool rocke_wmma_gemm_gfx1151_is_valid_spec(const rocke_wmma_gemm_gfx1151_spec_t*
                                      "fp32",
                                      ROCKE_WMMA_M,
                                      ROCKE_WMMA_N,
-                                     ROCKE_WMMA_K)
+                                     ROCKE_WMMA_K,
+                                     nullptr)
        == NULL)
     {
         snprintf(buf,

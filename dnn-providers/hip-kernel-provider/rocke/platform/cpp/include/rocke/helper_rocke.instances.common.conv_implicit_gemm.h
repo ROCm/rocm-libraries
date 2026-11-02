@@ -215,6 +215,28 @@ rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
                                         size_t out_cap,
                                         size_t* out_len);
 
+/* coalesced_load_reason(operand, tile_rows, tile_cols, block_size, load_vec):
+ * whether a CoalescedTileLoader with this exact width can copy the tile (its
+ * chunk count must divide by block_size). Returns true if it can; otherwise
+ * writes the Python reason text into `reason` (if non-NULL) and returns
+ * false. */
+bool rocke_conv_coalesced_load_ok(const char* operand,
+                                  int tile_rows,
+                                  int tile_cols,
+                                  int block_size,
+                                  int load_vec,
+                                  char* reason,
+                                  size_t reason_cap);
+
+/* vector_width_reason((operand, vector_size, dtype), ...), one operand per
+ * call: an explicit width (has_vec) must keep one per-lane access within
+ * 16 bytes (8 x 16-bit or 4 x fp32). An unset width is derived from the
+ * per-dtype default ladder and always fits. Returns true if it fits;
+ * otherwise writes the Python reason text into `reason` (if non-NULL) and
+ * returns false. A NULL dtype is the "fp16" default. */
+bool rocke_conv_vector_width_ok(
+    const char* operand, bool has_vec, int vec, const char* dtype, char* reason, size_t reason_cap);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

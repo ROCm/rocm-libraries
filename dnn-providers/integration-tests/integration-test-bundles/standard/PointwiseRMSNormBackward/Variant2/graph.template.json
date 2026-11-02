@@ -1,0 +1,143 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "unset",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "RMSNormBackwardActivationTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 4,
+        "in_1_tensor_uid": 8,
+        "in_2_tensor_uid": null,
+        "operation": "relu_bwd",
+        "relu_lower_clip": "${case.attributes.relu_lower_clip}",
+        "relu_lower_clip_slope": "${case.attributes.relu_lower_clip_slope}",
+        "relu_upper_clip": "${case.attributes.relu_upper_clip}",
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_0",
+      "outputs": {
+        "out_0_tensor_uid": 0
+      },
+      "type": "PointwiseAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "dy_tensor_uid": 0,
+        "inv_rms_tensor_uid": 5,
+        "scale_tensor_uid": 6,
+        "x_tensor_uid": 7
+      },
+      "name": "RMSNormBackward_1",
+      "outputs": {
+        "dbias_tensor_uid": 1,
+        "dscale_tensor_uid": 2,
+        "dx_tensor_uid": 3
+      },
+      "type": "RMSNormBackwardAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Pointwise_0::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": true
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "RMSNormBackward_1::DBIAS",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "RMSNormBackward_1::DSCALE",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "RMSNormBackward_1::DX",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "dy",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "inv_rms",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 7,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "y",
+      "strides": "${case.strides}",
+      "uid": 8,
+      "virtual": false
+    }
+  ]
+}

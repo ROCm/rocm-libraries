@@ -35,15 +35,12 @@ that gfx942 does not have. gfx950 keeps its own file, byte-identical.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 import os
 from typing import Optional, Tuple
 
 from rocke.core.ir import (
     BF16,
-    CACHE_ALL,
-    CACHE_GLOBAL,
-    CACHE_STREAM,
+    CACHE_POLICY_NAMES,
     F16,
     F32,
     FP8E4M3,
@@ -52,15 +49,16 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
-    NON_TEMPORAL,
     Type,
     Value,
     VectorType,
+    cache_policy_from_name,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -336,9 +334,10 @@ class UnifiedAttention2DTiledSpec:
     # voffset, which overflows for paged caches > 2 GiB (~65 K bf16 / ~131 K
     # fp8 blocks) and silently corrupts loads. When True, the per-block
     # ``physical_block`` offset is folded into a 64-bit buffer *base* (small
-    # within-block voffset) so any cache size is addressable. It costs a
-    # per-call ``make_buffer_rsrc`` so the dispatcher only enables it when the
-    # cache actually exceeds the 2 GiB cap (see _enable_i64_kv_addr).
+    # within-block voffset) so any cache size is addressable. The K/V loaders
+    # build one ``make_buffer_rsrc`` per page of a tile; the dispatcher only
+    # enables it when the cache exceeds the i32 buffer range (see
+    # _enable_i64_kv_addr).
     use_i64_kv_addr: bool = False
     # Experimental schedule: issue the current V async copy immediately after
     # the iter-start K drain/barrier, before QK. This gives V the whole QK plus
@@ -778,11 +777,26 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "8-wave mw32 v1 requires direct-Q + cfvst to stay within LDS"
                 )
-        if self.kv_cache_policy not in ("all", "global", "stream", "nt"):
+        if self.kv_cache_policy not in CACHE_POLICY_NAMES:
             raise ValueError(
-                "kv_cache_policy must be one of 'all', 'global', 'stream', 'nt' "
+                f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
                 f"(got {self.kv_cache_policy!r})"
             )
+        if self.use_k_hbm_direct:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_k_hbm_direct requires transposed-x8 "
+                    "(use_mfma_32x32x8 + use_transposed_qk_32x32); "
+                    "the 16x16 QK loop always reads K_lds"
+                )
+            if self.use_k_sliced_ring:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring"
+                )
+            if self.use_global_load_lds_k:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k"
+                )
         if self.use_global_load_lds_k and self.kv_storage_dtype is not None:
             raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
         if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
@@ -951,11 +965,9 @@ class UnifiedAttention2DTiledSpec:
         # AITER/Triton uses a true while-loop binary search. Our IR currently
         # lowers this as a fixed-trip scf.for, so specialize the trip count to
         # the known problem batch size instead of always paying 32 iterations.
-        # Keep 32 as a conservative fallback for direct unit-test specs that do
-        # not provide `num_seqs`.
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        # Falls back to 32 for direct unit-test specs that do not provide
+        # `num_seqs`.
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -972,6 +984,7 @@ class UnifiedAttention2DTiledSpec:
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
+            "fnuz" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
@@ -1429,12 +1442,7 @@ def build_unified_attention_2d_tiled(
     _CFV_STORE_SPLIT = spec.use_conflict_free_v_store_split
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
-    kv_cache_aux = {
-        "all": CACHE_ALL,
-        "global": CACHE_GLOBAL,
-        "stream": CACHE_STREAM,
-        "nt": NON_TEMPORAL,
-    }[spec.kv_cache_policy]
+    kv_cache_aux = cache_policy_from_name(spec.kv_cache_policy)
 
     # gfx942 32x32x8 wide-fragment path (correctness-first flash foundation).
     # ``use_mfma_32x32`` (K=16) stays rejected in the spec; ``use_mfma_32x32x8``
@@ -2668,6 +2676,61 @@ def build_unified_attention_2d_tiled(
                 ),
             )
 
+    # i64 K/V addressing: load the tile's page ids once and build one buffer
+    # resource per page. A resource per copy would reload its page id and wait
+    # on it, and since vmcnt drains in order, those waits also drain the copies
+    # issued before it. The non-fast K/V loaders below are i32-only otherwise.
+    PAGE_RSRC_I64 = I64_KV_ADDR and not FAST_PAGED_KV_DESC
+    if PAGE_RSRC_I64:
+        # The spec and supports_tiled_2d guarantee both: tile_size is a multiple
+        # of block_size, and a copy (at most 8 warps x 64 lanes x 2 halves) never
+        # exceeds a page (at least 16 x 64 halves), all powers of two. Raised,
+        # not asserted, so python -O cannot emit copies that straddle pages.
+        if T % BS != 0 or (BS * HD) % KV_HALVES_PER_CALL != 0:
+            raise ValueError(
+                f"i64 K/V copies need whole pages per tile and per copy "
+                f"(T={T}, BS={BS}, HD={HD}, halves per copy={KV_HALVES_PER_CALL})"
+            )
+        CALLS_PER_PAGE = (BS * HD) // KV_HALVES_PER_CALL
+
+        def _tile_pages(
+            src: Value, kv_tile_idx: Value
+        ) -> tuple[list[Value], list[Value], Value]:
+            """Base pointers and buffer resources of the tile's pages, and the
+            kv head's byte offset within a page."""
+            first = b.add(seq_base, b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)))
+            ptrs = []
+            for page in range(N_BLOCKS_PER_TILE):
+                idx = b.add(first, b.const_i32(page))
+                physical = b.masked_global_load(
+                    block_tables,
+                    idx,
+                    b.cmp_lt(idx, block_table_max_idx),
+                    b.const_i32(0),
+                    dtype=I32,
+                    align=4,
+                )
+                base = b.mul(
+                    b.zext(b.to_sgpr_u32(physical), I64), b.const_i64(kv_stride_blk_b)
+                )
+                ptrs.append(b.global_ptr_add(src, base))
+            rsrcs = [b.buffer_rsrc(ptr, kv_block_bytes_c) for ptr in ptrs]
+            kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+            return ptrs, rsrcs, kv_head_b
+
+        def _page_voff(call: int, kv_head_b: Value) -> Value:
+            # Byte offset of this lane's halves within the call's page.
+            half = b.add(
+                b.const_i32((call % CALLS_PER_PAGE) * KV_HALVES_PER_CALL),
+                lane_half_base,
+            )
+            token = b.div(half, b.const_i32(HD))
+            dim = b.mod(half, b.const_i32(HD))
+            return b.add(
+                b.add(b.mul(token, b.const_i32(kv_stride_tok_b)), kv_head_b),
+                b.mul(dim, b.const_i32(KV_BYTES)),
+            )
+
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async K loads for one tile into K_lds[buf_idx].
 
@@ -2689,6 +2752,8 @@ def build_unified_attention_2d_tiled(
         K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
+        if PAGE_RSRC_I64:
+            page_ptrs, page_rsrcs, kv_head_b = _tile_pages(key, kv_tile_idx)
         for call in range(kv_calls_per_tile):
             k_rsrc = key_rsrc
             k_ptr = key
@@ -2697,27 +2762,20 @@ def build_unified_attention_2d_tiled(
                 if base_i64 is not None:  # I64_KV_ADDR: per-block 64-bit base
                     k_ptr = b.global_ptr_add(key, base_i64)
                     k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
+            elif PAGE_RSRC_I64:
+                k_ptr = page_ptrs[call // CALLS_PER_PAGE]
+                k_rsrc = page_rsrcs[call // CALLS_PER_PAGE]
+                voff = _page_voff(call, kv_head_b)
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
-                    base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                        b,
-                        "physical_block",
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
-                    k_ptr = b.global_ptr_add(key, base_i64)
-                    k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
-                else:
-                    voff, _ = paged_kv_desc.offset(
-                        b,
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call))
             if USE_GLOBAL_LOAD_LDS_K:
                 b.global_load_lds(
@@ -2829,6 +2887,8 @@ def build_unified_attention_2d_tiled(
         V_wave_base = b.smem_ptr_add(V_lds_addr, v_wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
+        if PAGE_RSRC_I64:
+            _, page_rsrcs, kv_head_b = _tile_pages(value, kv_tile_idx)
         for call in range(kv_calls_per_tile):
             v_rsrc = value_rsrc
             if FAST_PAGED_KV_DESC:
@@ -2837,28 +2897,19 @@ def build_unified_attention_2d_tiled(
                     v_rsrc = b.buffer_rsrc(
                         b.global_ptr_add(value, base_i64), kv_block_bytes_c
                     )
+            elif PAGE_RSRC_I64:
+                v_rsrc = page_rsrcs[call // CALLS_PER_PAGE]
+                voff = _page_voff(call, kv_head_b)
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
-                    base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                        b,
-                        "physical_block",
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
-                    v_rsrc = b.buffer_rsrc(
-                        b.global_ptr_add(value, base_i64), kv_block_bytes_c
-                    )
-                else:
-                    voff, _ = paged_kv_desc.offset(
-                        b,
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             v_dst = b.smem_ptr_add(
                 V_wave_base, b.const_i64(call * V_BYTES_PER_CALL_SWZ)
             )
@@ -6005,6 +6056,14 @@ def build_gfx942_4warp_gqa(
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
+    if spec.use_i64_kv_addr:
+        # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
+        # under a spec that claims i64; dispatch keeps the flag off through
+        # kv_addr_width_for_builder.
+        raise NotImplementedError(
+            "4-warp GQA kernel does not support use_i64_kv_addr: its K/V are i32 "
+            "element offsets, correct up to 2^31 elements of the cache dtype"
+        )
     if spec.dtype not in ("bf16", "fp16"):
         raise NotImplementedError("4-warp GQA kernel supports dtype in {bf16, fp16}")
     dtype = spec.dtype_ir
@@ -6541,3 +6600,57 @@ def build_gfx942_4warp_gqa(
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
     return b.kernel
+
+
+def supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_2d`` (gfx942 variant).
+
+    ``supports_tiled_2d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads every parameter the predicate has off the spec and
+    delegates, making the 2D unified builder validatable at pack time. The flags
+    below size the LDS estimate, so each one is forwarded: a spec is judged by
+    the layout it will be built with, not by the predicate's defaults.
+    ``use_d256_fast`` is derived from the builder, not the spec: see
+    :func:`supports_gfx942_4warp_gqa_spec`.
+    """
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=False)
+
+
+def supports_gfx942_4warp_gqa_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """:func:`supports_tiled_2d_spec` for ``build_gfx942_4warp_gqa``, the
+    ``use_d256_fast=True`` path."""
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=True)
+
+
+def _supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str, use_d256_fast: bool
+) -> Tuple[bool, str]:
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        num_warps=spec.num_warps,
+        block_m_per_warp=spec.block_m_per_warp,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        tile_size=spec.tile_size,
+        arch=arch,
+        use_mfma_32x32x8=spec.use_mfma_32x32x8,
+        use_transposed_qk_32x32=spec.use_transposed_qk_32x32,
+        use_k_single_buffer=spec.use_k_single_buffer,
+        use_conflict_free_v_store=spec.use_conflict_free_v_store,
+        use_k_sliced_ring=spec.use_k_sliced_ring,
+        ring_depth=spec.ring_depth,
+        k_slice_hd=spec.k_slice_hd,
+        use_d256_fast=use_d256_fast,
+    )

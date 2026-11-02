@@ -163,8 +163,8 @@ option(MIOPEN_ENABLE_HIPDNN_WRAPPER
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     message(STATUS
         "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
-        "wrapper over libMIOpen_private.so. The wrapper is an unconditional "
-        "pass-through; runtime forwarding to hipDNN is not implemented yet.")
+        "wrapper over libMIOpen_private.so. Set MIOPEN_HIPDNN_FORWARDING=enabled "
+        "at run time to forward the convolution entry points to hipDNN.")
 endif()
 
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
@@ -178,7 +178,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.6.2)
+rocm_setup_version(VERSION 3.6.3)
 
 include(TargetFlags)
 
@@ -362,12 +362,13 @@ add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPI
 
 # MIOpen's HIP device code is compiled in the same translation units as host code, so a host
 # sanitizer request (e.g. CI's debug '-fsanitize=undefined -fno-sanitize-recover=undefined')
-# also instruments AMDGPU device code. ROCm/TheRock ships a device sanitizer runtime only for
-# ASan (amdgcn asanrtl.bc); there is no device UBSan runtime, so instrumented device objects
-# fail to link with undefined __ubsan_handle_*_abort symbols. When UBSan is requested, disable
-# UBSan on the device side only -- via '-Xarch_device -fno-sanitize=undefined' -- so device code
-# is left uninstrumented while host code stays instrumented. Gated on 'undefined' specifically,
-# so ASan-only builds keep their working device ASan.
+# also instruments AMDGPU device code. MIOpen does not use device UBSan: older toolchains ship no
+# device UBSan runtime (instrumented device objects fail to link with undefined
+# __ubsan_handle_*_abort symbols), and newer ones (LLVM #219973) link a host-side ubsan_offload
+# runtime into --hip-link shared libraries that the executables cannot satisfy. When UBSan is
+# requested, disable UBSan on the device side only -- via '-Xarch_device -fno-sanitize=undefined'
+# -- so device code is left uninstrumented while host code stays instrumented. Gated on
+# 'undefined' specifically, so ASan-only builds keep their working device ASan.
 #
 # Note: -fno-gpu-sanitize is deliberately NOT used. On this toolchain it drops the user -I include
 # directories from the AMDGPU device compilation pass, so device-side '#include <miopen/...>'
@@ -375,8 +376,9 @@ add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPI
 # without that side effect.
 #
 # Detection lives here (before add_subdirectory); the flag is applied narrowly with
-# target_compile_options on the MIOpen library target in src/CMakeLists.txt so it only touches
-# the device-code library and not host tools (addkernels), tests, driver, or fin.
+# target_compile_options and target_link_options on the MIOpen library and CK plugin targets
+# (src/CMakeLists.txt, src/ck_impl/CMakeLists.txt) so it only touches the device-code libraries
+# and not host tools (addkernels), tests, driver, or fin.
 if(HAS_HIP)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" MIOPEN_BUILD_TYPE_UPPER)
     set(MIOPEN_EFFECTIVE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MIOPEN_BUILD_TYPE_UPPER}}")
@@ -849,6 +851,12 @@ enable_cppcheck(
     SUPPRESS
         ConfigurationNotChecked
         constStatement
+        # cppcheck cannot resolve a transitive header for the LGBM picker gtests
+        # in project mode, so it aborts parsing the whole TU with a spurious
+        # syntaxError at the first TEST_F. The files compile fine with the real
+        # toolchain; suppress the parse-abort for just these two.
+        syntaxError:*test/gtest/lgbm_picker.cpp
+        syntaxError:*test/gtest/lgbm_pcfg_picker.cpp
         # There is no ODR violation because of using separate executables,
         # but cppcheck doesn't understand that as it assumes everything
         # will be compiled together in one binary.

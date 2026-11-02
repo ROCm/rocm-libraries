@@ -56,3 +56,13 @@ __device__ __forceinline__ void wait_lgkmcnt_all()
 {
     wait_lgkmcnt<0>();
 }
+
+// Wait on both counters at once: each helper above leaves the other maxed out, so
+// intersecting them yields a single waitcnt constraining both.
+template <int Vm, int Lgkm>
+__device__ inline void wait_mem()
+{
+    static_assert(Vm >= 0 && Vm <= 63, "vmcnt must be in range [0, 63] (6-bit field)");
+    static_assert(Lgkm >= 0 && Lgkm <= 15, "lgkmcnt must be in range [0, 15] (4-bit field)");
+    __builtin_amdgcn_s_waitcnt(vmcnt(Vm) & lgkmcnt(Lgkm));
+}

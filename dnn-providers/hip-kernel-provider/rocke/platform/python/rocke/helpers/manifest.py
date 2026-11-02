@@ -24,8 +24,9 @@ Schema (version `ck.dsl.example.manifest/v1`):
       "cpg": <int>, "kpg": <int>,            // conv only
       "grid_explicit": [gx, gy, gz],         // optional, overrides grid_order
       "grid_order": "MN" | "NM",             // optional
+      "cluster_dims": [cx, cy, cz],          // optional, gfx1250 cluster launch
       "args_signature": [
-        {"name": ..., "type": "ptr<f16,global>" | "i32", "size_bytes": ...},
+        {"name": ..., "type": "ptr<f16,global>" | "ptr<bf16,global>" | "i32", "size_bytes": ...},
         ...
       ],
       "sig_has_bytes": 0 | 1,                // 1 if A_bytes/B_bytes/D_bytes are kernel args
@@ -66,7 +67,6 @@ MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"
 __all__ = [
     "MANIFEST_SCHEMA",
     "attention_args_signature",
-    "conv_args_signature",
     "engine_build_id",
     "engine_version",
     "gemm_args_signature",
@@ -117,12 +117,23 @@ def _provenance_fields() -> Dict[str, str]:
     return {"engine_build_id": bid, "engine_version": ver}
 
 
+def _cluster_fields(artifact: KernelArtifact) -> Dict[str, List[int]]:
+    """``{"cluster_dims": [x, y, z]}`` for a kernel compiled with a gfx1250
+    workgroup-cluster shape, else ``{}`` so other manifests are unchanged.
+    Launchers must pass this shape to the cluster launch path."""
+    kernel = getattr(artifact, "kernel", None)
+    dims = kernel.cluster_dims if kernel is not None else None
+    return {} if dims is None else {"cluster_dims": list(dims)}
+
+
 # ---------------------------------------------------------------------
 # Args signature helpers
 # ---------------------------------------------------------------------
 
 
-def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
+def gemm_args_signature(
+    *, with_bytes: bool = False, dtype: str = "fp16"
+) -> List[Dict[str, Any]]:
     """Standard GEMM kernel args signature: A, B, C ptrs + M, N, K i32s.
 
     `with_bytes=True` adds A_bytes/B_bytes/C_bytes args before the
@@ -130,10 +141,18 @@ def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
     signature; the universal GEMM doesn't need them since it doesn't
     use buffer_rsrc).
     """
+    _dtype_map = {"fp16": "f16", "bf16": "bf16"}
+    if dtype not in _dtype_map:
+        raise ValueError(
+            f"gemm_args_signature: unsupported dtype {dtype!r}; "
+            f"supported: {list(_dtype_map)}"
+        )
+    ir_type = _dtype_map[dtype]
+    ptr_type = f"ptr<{ir_type}, global>"
     sig: List[Dict[str, Any]] = [
-        {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "B", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "C", "type": "ptr<f16, global>", "size_bytes": 8},
+        {"name": "A", "type": ptr_type, "size_bytes": 8},
+        {"name": "B", "type": ptr_type, "size_bytes": 8},
+        {"name": "C", "type": ptr_type, "size_bytes": 8},
     ]
     if with_bytes:
         sig += [
@@ -148,21 +167,6 @@ def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
             {"name": "K", "type": "i32", "size_bytes": 4},
         ]
     return sig
-
-
-def conv_args_signature(dtype: str = "fp16") -> List[Dict[str, Any]]:
-    """Conv kernel args signature: A, B, D ptrs + A_bytes/B_bytes/D_bytes."""
-    _dtype_map = {"fp16": "f16", "bf16": "bf16", "fp32": "f32"}
-    ir_type = _dtype_map.get(dtype, dtype)
-    ptr_type = f"ptr<{ir_type}, global>"
-    return [
-        {"name": "A", "type": ptr_type, "size_bytes": 8},
-        {"name": "B", "type": ptr_type, "size_bytes": 8},
-        {"name": "D", "type": ptr_type, "size_bytes": 8},
-        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "B_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-    ]
 
 
 def attention_args_signature(*, path: str = "2d") -> List[Dict[str, Any]]:
@@ -267,6 +271,7 @@ def make_simple_op_manifest(
         "ir_authored": True,
         "is_binary": bool(is_binary),
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if elems_per_block is not None:
         manifest["elems_per_block"] = int(elems_per_block)
@@ -335,6 +340,7 @@ def make_gemm_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if extra:
         manifest.update(dict(extra))
@@ -352,10 +358,12 @@ def make_conv_manifest(
     groups: int,
     cpg: int,
     kpg: int,
+    args_signature: Sequence[Mapping[str, Any]],
     dtype: str = "fp16",
     grid_explicit: Optional[Sequence[int]] = None,
     grid_order: Optional[str] = None,
     conv_layout: str = "implicit_gemm",
+    direction: str = "fwd",
     warmup_iters: int = 5,
     timed_iters: int = 100,
     atoms: Iterable[str] = (),
@@ -365,12 +373,19 @@ def make_conv_manifest(
     """Build the v1 manifest JSON object for one convolution kernel.
 
     `conv` is `[N, H, W, C, K, R, S, sH, sW, pH, pW, dH, dW]` (13
-    ints). `groups` / `cpg` / `kpg` describe the grouping; for dense
+    ints), or for `conv_layout="implicit_gemm_3d"`
+    `[N, Di, Hi, Wi, C, K, Z, Y, X, sD, sH, sW, pD, pH, pW, dD, dH, dW]`
+    (18 ints). `groups` / `cpg` / `kpg` describe the grouping; for dense
     conv pass `groups=1, cpg=C, kpg=K`.
 
     `dtype` is `"fp16"` (default), `"bf16"`, or `"fp32"`. It sets the
-    manifest `kind` (e.g. `"conv_bf16"`) and the pointer types in the
-    args signature so the runner allocates tensors of the right dtype.
+    manifest `kind` (e.g. `"conv_bf16"`) so the runner allocates tensors of
+    the right dtype.
+
+    `args_signature` is the kernel's launch signature. Conv kernels are AOT --
+    the problem shape travels as kernargs -- so there is no generic default:
+    the ABI belongs to the conv instances (``kernels.common.conv_abi`` in the
+    library), which is where callers get it from.
 
     Pass `grid_explicit=[gx, gy, gz]` to bypass the runner's automatic
     grid derivation (this is what the direct conv kernels use; the
@@ -379,14 +394,18 @@ def make_conv_manifest(
     _valid_dtypes = {"fp16", "bf16", "fp32"}
     if dtype not in _valid_dtypes:
         raise ValueError(f"dtype must be one of {_valid_dtypes}, got {dtype!r}")
-    if len(list(conv)) != 13:
-        raise ValueError(f"conv expects 13 ints (got {len(list(conv))})")
+    n_conv = 18 if conv_layout == "implicit_gemm_3d" else 13
+    if len(list(conv)) != n_conv:
+        raise ValueError(
+            f"{conv_layout} conv expects {n_conv} ints (got {len(list(conv))})"
+        )
 
     manifest: Dict[str, Any] = {
         "schema": MANIFEST_SCHEMA,
         "kind": f"conv_{dtype}",
         "dtype": dtype,
         "conv_layout": conv_layout,
+        "direction": direction,
         "kernel_name": artifact.kernel_name,
         "hsaco": f"{artifact.kernel_name}.hsaco",
         "block_m": int(block_m),
@@ -399,7 +418,7 @@ def make_conv_manifest(
         "groups": int(groups),
         "cpg": int(cpg),
         "kpg": int(kpg),
-        "args_signature": conv_args_signature(dtype),
+        "args_signature": [dict(a) for a in args_signature],
         "sig_has_bytes": 1,
         "timing_ms": dict(artifact.timings),
         "hsaco_bytes": artifact.hsaco_bytes,
@@ -408,6 +427,7 @@ def make_conv_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if grid_explicit is not None:
         manifest["grid_explicit"] = [int(x) for x in grid_explicit]
@@ -449,6 +469,7 @@ def make_attention_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         **_provenance_fields(),
+        **_cluster_fields(artifact),
     }
     if extra:
         manifest.update(dict(extra))

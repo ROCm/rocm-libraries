@@ -1,6 +1,9 @@
 # RFC 0015: Per-Graph Engine Support Claims
 
 - Contributors: Adam Dickin
+- **Status**: In progress
+- **Status notes**: Claim loader, enforcement, write tool, pre-commit verifier, and CI log harvest shipped (#10244, #10554, #10594, #12338, #12675). The committed-data matrix renderer and failure runbook (§11) are not built. The harvest coverage report (§12.4) is not built.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 
@@ -23,8 +26,8 @@
 
 ## 1. Executive Summary
 
-This RFC adds a **per-graph engine-support claim** to the golden reference validation
-framework defined in [RFC 0011](0011_GoldenReferenceValidation.md). Each golden bundle
+This RFC adds a **per-graph engine-support claim** to the bundle test framework
+defined in [RFC 0011](0011_BundleTestFramework.md). Each golden bundle
 gains an optional machine-managed companion — `{Name}.support.json` for a single-graph bundle,
 or a co-located per-case `support.json` for a template-sweep bundle (§5.4) — that records, per
 claimed graph and per `(engine, arch, platform)`, whether the engine is expected to support that
@@ -86,7 +89,7 @@ Three principles govern the design:
 
 ## 2. Problem Statement
 
-The golden reference framework ([RFC 0011](0011_GoldenReferenceValidation.md)) validates
+The bundle test framework ([RFC 0011](0011_BundleTestFramework.md)) validates
 engine outputs against pre-computed data and **skips** a bundle when the engine under test
 reports that it does not support the graph (the engine execution step maps "unsupported" to
 `GTEST_SKIP`). This is correct for bring-up — a graph no engine supports yet should not
@@ -157,9 +160,10 @@ case id (§5.4):
   support.json             # NEW: machine-managed claims, keyed by cases[].id
 ```
 
-The support sidecar is **machine-owned**: written wholesale by `--write-support-claims` (§9),
-never hand-edited, and kept separate from the human-authored `meta.json` (and, for a sweep, from
-`sweep.json`). The runner reads it at test time and compares its recorded verdict against a live
+The support sidecar is **machine-written**: `--write-support-claims` (§9) adds claims and never
+removes one, since retracting a claim is a deliberate, reviewed change. It is kept separate from
+the human-authored `meta.json` (and, for a sweep, from `sweep.json`). The runner reads it at test
+time and compares its recorded verdict against a live
 engine support query for the exact graph — the expanded case, for a sweep.
 
 Claim evaluation is built on RFC 0011's existing machinery:
@@ -242,6 +246,9 @@ The status code separates *resolved* from *unknown*; membership separates *suppo
 *declined* within a resolved query (see §8 for why list-emptiness alone is not the
 discriminator — an empty list and an error status are different things, and a non-empty list
 must still be attributed per engine).
+
+Enforcement reads only the engine under test (`--test-engine`). Claims for other engines are not
+checked in that run (§7.3).
 
 Claim semantics:
 
@@ -411,14 +418,14 @@ verification-modes section when that schema extension lands.
 
 ### 7.1 Per-graph outcomes
 
-Each claimed `(engine, arch, platform)` is evaluated **independently** from the same support
-query, using the per-engine verdict of §5.2 (status code → *resolved* vs *unknown*; membership
-→ *supported* vs *declined*):
+Only the engine under test (`--test-engine`) is evaluated. Its claim for the run's
+`(arch, platform)` is checked against the support query, using the per-engine verdict of §5.2
+(status code → *resolved* vs *unknown*; membership → *supported* vs *declined*):
 
 - **Claim broken.** A `supported` claim whose query *resolved* but whose engine is *declined*
   (its id absent from the ranked list — `GRAPH_NOT_SUPPORTED` when it is the only/last engine)
-  → **FAIL**. The message names the bundle, the `(engine, arch, platform)`, and the support file
-  location, and links to the failure runbook (§11). This is the real-regression case.
+  → **FAIL**. The message names the bundle, the `(engine, arch, platform)`, and the reason.
+  This is the real-regression case.
 - **Errored before assert.** A `supported` claim whose query did **not** resolve (build
   failure, backend error, OOM, device lost), or whose graph build itself crashes → **FAIL**
   ("fix the underlying error first"). Distinct from *declined*: the verdict could not be
@@ -428,19 +435,19 @@ query, using the per-engine verdict of §5.2 (status code → *resolved* vs *unk
   a verdict.
 - **Unclaimed support (informational).** For a **claim-bearing** bundle/sweep (one that carries a
   `support.json`), a graph the engine *supported* on an `(engine, arch, platform)` the file does
-  **not** list → collected and printed in an **end-of-run summary** ("supported but unclaimed;
-  run `--write-support-claims` to record it"), never a FAIL and never a SKIP change. It is the
-  within-run, human-readable twin of the §12 CI harvest, which emits the same observation as
-  structured data for offline claim proposals. A graph with no `support.json` at all is out of
-  scope — surfacing every unclaimed graph would be the rejected default-deny noise (§13.4).
+  **not** list → listed under `unclaimed_support` in the end-of-run `SUPPORT CLAIM SUMMARY`,
+  never a FAIL and never a SKIP change. The §12 CI harvest reads the same list from CI logs and
+  proposes the claims to add. A graph with no `support.json` at all is out of scope — surfacing
+  every unclaimed graph would be the rejected default-deny noise (§13.4).
 
 The split between *declined* and *unknown* is the whole reason §5.2/§8 key on the status code
 for the first step: collapsing an error status into "declined" would force a choice between
 flaky CI (every error → FAIL) and missed regressions (every error → note). A *resolved* query
 (`OK` or `GRAPH_NOT_SUPPORTED`) is the only one that produces a verdict; within it, an engine's
-absence from the ranked list is its *declined* signal. When several engines are loaded, each
-claimed engine gets its own verdict from the one query — one engine's `declined` does not taint
-another's `supported`.
+absence from the ranked list is its *declined* signal. When several engines are loaded, the
+verdict reads only the engine under test's membership, so another engine's `declined` does not
+affect it. Claims for other engines are not checked in this run; each engine's own lane checks
+them.
 
 ### 7.2 Run-level guards
 
@@ -458,40 +465,40 @@ another's `supported`.
 
 ### 7.3 Engine selection, multi-plugin runs, and preconditions
 
-A run selects which engine(s) it drives through two existing harness flags — `--test-article`
-(the plugin shared library to load) and `--test-engine` (an engine within it). Three modes
-result, and they determine both how deep enforcement reaches and whether the run can generate
-claims:
+A run selects which engine(s) it drives through two harness flags — `--test-article` (the
+plugin shared library to load) and `--test-engine` (an engine within it). Three modes result.
+They determine whether the run enforces claims and how it generates them:
 
 | Mode | Flags | Engines exercised | Enforce | Generate |
 |------|-------|-------------------|---------|----------|
-| **A — auto-select** | neither (default plugin config) | hipDNN's heuristic picks the top-ranked engine **per graph** (existing behaviour) | yes | **no** |
-| **B — plugin, all engines** | `--test-article <plugin>` only | **every** engine the plugin exposes, run **sequentially** — one full pass per engine | yes | **yes** |
+| **A — auto-select** | neither (default plugin config) | hipDNN's heuristic picks the top-ranked engine **per graph** | no | **no** |
+| **B — plugin, all engines** | `--test-article <plugin>` only | as mode A; a write run reads ranked-list membership for **every** loaded engine from one support query per graph | no | **yes** |
 | **C — plugin + engine** | `--test-article <plugin>` + `--test-engine <engine>` | exactly that one engine | yes | **yes** |
 
-- **Support (applicability) enforcement is multi-engine in every mode.** The support query spans
-  all loaded engines, so each claimed `(engine, arch, platform)` is attributed by ranked-list
-  membership (§5.2, §8) regardless of mode. There is **no refuse-to-run** on multiple plugins —
-  for the support gate, N plugins are simply N engines, each evaluated independently; one
-  engine's `declined` never taints another's `supported`.
-- **Deep (`buildable`/`full`) checks follow the executed engine.** Building and executing pin a
-  single preferred engine per pass. Mode A runs whichever engine the heuristic auto-selects —
-  which can differ graph to graph — so it cannot attribute a `buildable`/`full` verdict to a
-  fixed engine and therefore **does not generate**. Mode B enumerates the plugin's engines
-  (`hipdnnGetEngineCount_ext` + `getEngineInfo`) and runs the suite once per engine in sequence,
-  pinning each in turn, so every rung is attributable. Mode C pins the one named engine.
-- **Generation needs a pinned engine, which modes B and C provide.** `--write-support-claims`
-  runs in mode B (refresh every engine the plugin returns, sequentially, in one invocation) or
-  mode C (refresh one engine). Each pass writes only its own engine's disjoint keys (§9.2), and
-  because the plugin's engines run **sequentially** the §9.2 "one writer at a time" property
-  holds — a single mode-B run can refresh a whole plugin's engines on the current ASIC. Mode A
-  is run-only.
+- **Enforcement needs `--test-engine` (mode C).** One lane tests one engine. The run checks only
+  the engine under test's claims, by its ranked-list membership (§5.2, §8). Without
+  `--test-engine` the run checks no claims: the default enforcement drops to warning-only, and an
+  explicit `--enforce-support-claims` is an error. There is **no refuse-to-run** on multiple
+  plugins; other loaded engines are not checked, so one engine's `declined` never affects the
+  engine under test's verdict.
+- **Deep (`buildable`/`full`) checks follow the engine under test.** Building and executing pin
+  the engine under test as the preferred engine. Mode A and mode B let the backend pick, which
+  can differ graph to graph, so they cannot attribute a `buildable`/`full` verdict to a fixed
+  engine.
+- **Generation records ranked-list membership.** `--write-support-claims` needs `--test-article`,
+  so it runs in mode B or C. It opens each graph, records which engines are in the ranked list,
+  and skips the test; it does not build plans or execute. Mode C records the named engine; mode B
+  records every loaded engine from the same query, so a single mode-B run refreshes a whole
+  plugin's engines on the current ASIC. Each engine's keys are disjoint (§9.2), and one run
+  writes them all, so the §9.2 "one writer at a time" property holds. Mode A is run-only.
+- **Not yet built:** mode B as one full pass per engine, run in sequence and pinning each engine
+  in turn, so a single invocation enforces claims and checks every rung for all of a plugin's
+  engines (see the §9.4 all-engines helper).
 
-A claim for an engine that is **not loaded** in the current run is *not enforced* (no query
-observed it; the empty-query guard of §7.2 still catches a run that observed *nothing*). The
-claim check is scoped **per-arch**: enforcement proceeds whenever a loaded engine has *any*
-claim for the current `(arch, platform)`; a brand-new arch with no claims yet is the
-not-enforced bring-up case (§3.2), not a refuse-to-run.
+A claim for an engine other than the engine under test, or for an engine that is **not
+loaded**, is *not enforced* in this run (the empty-query guard of §7.2 still catches a run that
+observed *nothing*). The claim check is scoped **per-arch**: a brand-new arch with no claims yet
+for the engine under test is the not-enforced bring-up case (§3.2), not a refuse-to-run.
 
 ### 7.4 Acceptance criteria
 
@@ -501,11 +508,10 @@ not-enforced bring-up case (§3.2), not a refuse-to-run.
       errored-before-assert FAIL.
 - [ ] Unresolved query on an unclaimed `(engine, arch, platform)` → note, not FAIL.
 - [ ] Enforcement with zero observed queries → FAIL (empty-query guard).
-- [ ] New-arch run with no claims for the loaded engine on that arch → not-enforced, not a
+- [ ] New-arch run with no claims for the engine under test on that arch → not-enforced, not a
       refuse-to-run.
-- [ ] A run with **two or more plugins loaded** enforces each engine's claims independently
-      from one query (no refuse-to-run); one engine *declined* while another is *supported*
-      yields a FAIL for the first and a pass for the second.
+- [ ] A run with **two or more plugins loaded** checks only the engine under test's claims (no
+      refuse-to-run); another loaded engine's *declined* does not change its verdict.
 - [ ] A claim for an engine not loaded in the current run is not enforced.
 - [ ] A claim-bearing bundle whose engine *supports* an unlisted `(engine, arch, platform)` is
       listed in the end-of-run unclaimed-support summary, not FAILed.
@@ -560,7 +566,8 @@ Every step of this is an **existing frontend capability** — no spike is requir
    claim for a specific `(engine, arch, platform)` is therefore checked by testing whether that
    engine's id is present in the ranked list — the same membership test the golden harness
    already performs for a single `--test-engine` (`std::find(engineIds, targetEngineId)`).
-   Extending it to N engines is iterating that test per loaded engine; see §7.3.
+   Enforcement runs this test for the engine under test only; a mode-B write run runs it for
+   every loaded engine (§7.3).
 
 ## 9. Write Tool and Contract
 
@@ -573,7 +580,7 @@ Every step of this is an **existing frontend capability** — no spike is requir
     --test-article <plugin-lib> --test-engine MIOPEN_ENGINE \
     --write-support-claims
 
-# Mode B — every engine the plugin exposes, run sequentially
+# Mode B — every loaded engine, from one support query per graph
 ./hipdnn_integration_tests \
     --golden-data-dir dnn-providers/integration-tests/integration-test-bundles \
     --test-article <plugin-lib> \
@@ -589,20 +596,18 @@ cases — is left unchanged (§9.2 details how a sweep's grouped array is preser
 cells change). The graph JSON (`{Name}.json` / `graph.template.json`), `sweep.json`, `.bin`
 files, and `meta.json` are never modified.
 
-Generation requires a **pinned engine**, so it runs in **mode B or C** (§7.3), never mode A: a
-`buildable`/`full` verdict means compiling (and executing) one specific engine's plan, and even
-the `applicability` rung is written per-engine so a run's scope is unambiguous. Mode C pins one
-engine via `--test-engine` (the existing selector drives the harness's per-engine support check,
-`TestConfig::getEngineName` → membership test). Mode B omits `--test-engine`: the run enumerates
-the plugin's engines and writes each one's keys in sequence, refreshing the whole plugin on one
-ASIC in a single invocation. Either way each engine writes disjoint keys, so results merge
-cleanly (§9.2); broad multi-ASIC coverage can instead accumulate from CI observations (§12)
-without a dedicated session.
+Generation requires `--test-article`, so it runs in **mode B or C** (§7.3), never mode A. It
+records ranked-list membership only; it does not build plans or execute. Mode C records the
+engine named by `--test-engine` (`TestConfig::getEngineName` → membership test). Mode B omits
+`--test-engine` and records every loaded engine from the same support query, refreshing the
+whole plugin on one ASIC in a single invocation. Either way each engine writes disjoint keys, so
+results merge cleanly (§9.2); broad multi-ASIC coverage can instead accumulate from CI runs
+(§12) without a dedicated session.
 
 This engineer-driven write is one of two ways claims get refreshed; the other is the CI
-observation harvest (§12), where routine enforcement runs *emit* what they observe and an
-offline consumer proposes claim updates. Both share the same observe-then-write split — only
-the actor and cadence differ.
+harvest (§12), where routine CI runs print the unclaimed support they see and an engineer runs
+a script that adds those claims. Both share the same observe-then-write split — only the actor
+and cadence differ.
 
 ### 9.2 Write contract
 
@@ -613,12 +618,16 @@ the actor and cadence differ.
   the current `(engine, arch, platform)` keys, leaving siblings byte-identical. A sweep's grouped
   array (§5.4) can't be patched in place — a changed cell may move a case between groups — so the
   tool **flattens, overlays, then re-groups canonically**: it expands `support.json` to
-  per-`(engine, case, arch, platform)` cells, overlays only the cells this run observed, leaves the
-  rest as-is, and re-derives the canonical grouped form (§5.4). Both paths re-emit canonical JSON
+  per-`(engine, case, arch, platform)` cells, adds the cells this run observed as supported, keeps
+  the rest, and re-derives the canonical grouped form (§5.4). Both paths re-emit canonical JSON
   (sorted keys, fixed number formatting, stable newline), so an unchanged run is a **zero diff**
   and untouched engines stay byte-identical. Because engines, arches, and platforms are disjoint
   cells, separate per-engine/per-arch regenerations merge cleanly; only one binary runs at a time,
   so no multi-writer coordination is needed.
+- **Add-only.** A write never removes a claim, including one the run observed as declined. A
+  regression and a deliberate withdrawal reach the tool as the same observation, and nothing in
+  the run can tell them apart, so retracting a claim is a deliberate, reviewed change. Until it
+  lands, the enforcing run reports the disagreement as `CLAIM_BROKEN`.
 - **Change churn is bounded and safe.** The zero-diff guarantee is for an *unchanged* run; when a
   support value actually changes, canonical regrouping may merge or split groups, so the diff can
   be larger than the one changed cell. Canonical formatting keeps this granular — one case id per
@@ -671,8 +680,8 @@ add_external_integration_test_target(
     TEST_CONFIG   <config file>)        # → --test-config
 ```
 
-This RFC adds a **second variant for mode B** that registers one ctest running every engine the
-plugin exposes, sequentially:
+Not yet built: a **second variant for mode B** that registers one ctest running every engine
+the plugin exposes, sequentially:
 
 ```cmake
 add_external_integration_test_target_all_engines(   # name provisional
@@ -686,8 +695,7 @@ takes a **config directory** rather than a single `TEST_CONFIG` file, so each en
 can resolve its own config from that directory. Because the engines run sequentially within one
 binary invocation, this variant both enforces and **generates** support claims for all of a
 plugin's engines in a single ctest, honouring the §9.2 one-writer-at-a-time property. The
-existing single-engine helper is unchanged; the two coexist (a provider registers whichever
-fits).
+single-engine helper stays; the two coexist (a provider registers whichever fits).
 
 ### 9.5 Acceptance criteria
 
@@ -696,10 +704,11 @@ fits).
 - [ ] A write run with an empty/absent observation set does not null an existing `supported`
       verdict (empty-write guard).
 - [ ] A claim-bearing bundle with a missing/invalid `enforcement_level` fails pre-commit.
-- [ ] A mode-B run (`--test-article` only) enumerates the plugin's engines and writes a verdict
-      for each; a mode-C run writes only the named engine's keys; a mode-A run writes nothing.
-- [ ] The all-engines CMake helper registers one ctest that exercises every engine the plugin
-      exposes, sequentially.
+- [ ] A mode-B run (`--test-article` only) records every loaded engine's ranked-list membership
+      and writes a verdict for each; a mode-C run writes only the named engine's keys; a mode-A
+      run writes nothing.
+- [ ] Not yet built: the all-engines CMake helper registers one ctest that exercises every
+      engine the plugin exposes, sequentially.
 - [ ] A sweep case's verdict is written into the group covering that `cases[].id` under the
       correct engine, other engines' arrays are left byte-identical, and the emitted grouping is
       canonical (cases sorted, groups ordered by first case id).
@@ -725,19 +734,28 @@ the claim is meant to gate.
 
 ## 11. Support Matrix Generation and Documentation
 
-**Generated from committed data, not a hardware run.** The engine support matrix is generated
-**purely from the data checked into the repo** — each single-graph bundle's `{Name}.json`, or a
-template-sweep case (`graph.template.json` + the `cases[].id` from `sweep.json`), for the row
-identity (operation, layout, dtype, scenario), and its support sidecar (`{Name}.support.json`, or
-the sweep `support.json` group covering the case, §5.4) for the
-per-`(engine, arch, platform)` verdict). This **replaces** generating the matrix from a
-runtime `SupportMatrixCollector` populated during a live test run: because every claimed
-graph already carries its verdict on disk (§4), the committed bundles and their `support.json`
-sidecars are a complete, hardware-free description of claimed support. A contributor can
-regenerate or diff the matrix from a plain checkout with no GPU, no plugin, and no DVC pull
-(only `.json`/`.support.json` are needed, and both live in git — §9.2).
+The harness has one support matrix: the runtime `SupportMatrixCollector`.
+`--generate-support-matrix[=file]` writes it as markdown (default `support_matrix.md`). It
+records C++ graph tests only, not bundles, so it does not show claims. Claim behaviour and the
+`SUPPORT CLAIM SUMMARY` keys are documented in
+`dnn-providers/integration-tests/docs/support-claim-enforcement.md`.
 
-**Renderer.** `dnn-providers/integration-tests/tools/render_support_matrix.py` discovers every
+### 11.1 Matrix from committed claims
+
+Not yet built.
+
+**Generated from committed data, not a hardware run.** A renderer generates an engine support
+matrix **purely from the data checked into the repo** — each single-graph bundle's
+`{Name}.json`, or a template-sweep case (`graph.template.json` + the `cases[].id` from
+`sweep.json`), for the row identity (operation, layout, dtype, scenario), and its support
+sidecar (`{Name}.support.json`, or the sweep `support.json` group covering the case, §5.4) for
+the per-`(engine, arch, platform)` verdict. Because every claimed graph carries its verdict on
+disk (§4), the committed bundles and their `support.json` sidecars are a complete,
+hardware-free description of claimed support. A contributor can regenerate or diff the matrix
+from a plain checkout with no GPU, no plugin, and no DVC pull (only `.json`/`.support.json` are
+needed, and both live in git — §9.2).
+
+**Renderer.** `dnn-providers/integration-tests/scripts/render_support_matrix.py` discovers every
 support sidecar under the golden-data tree — each `{Name}.support.json` and each sweep
 `support.json` — joins each to its graph (`{Name}.json`, or the expanded `cases[].id` from
 `graph.template.json` + `sweep.json`), and emits one combined markdown matrix: engine columns,
@@ -745,10 +763,51 @@ one row per claimed graph keyed by `(operation, layout, dtype, scenario)`, each 
 verdict per `(arch, platform)`.
 The matrix is a **view** of the committed claims, not a second state to maintain.
 
+**One collection, then a projection.** The renderer resolves each sidecar into a flat list of
+claim units once, then renders that list as `dnn-providers/integration-tests/SUPPORT_MATRIX.md`:
+a human document that aggregates cases into `(operation, layout, dtype, scenario)` rows and
+annotates each row with an HTML comment naming the contributing bundle path, its tier, and its
+case count — coordinates back to the claim, not the claim itself. Collection is kept separate
+from rendering, so a richer consumer — a browsable or zoomable view of the matrix — needs only a
+new projection of the same units rather than a scraper of the rendered tables. Enumerating every case id inline in the markdown is available (`--max-case-ids`) but off by
+default: it multiplies the document size to no visual effect, and a large enough markdown file
+stops rendering on GitHub at all.
+
 **Sidecar as source of truth.** The `support.json` sidecars are authoritative; the matrix is
-derived. The matrix is regenerated (and its freshness checked) by a CI lint that fails if the
-committed matrix differs from a re-render of the current sidecars — so the committed doc can
-never silently drift from the claims.
+derived. The full matrix is **generated on demand and not committed** — a contributor who wants
+it runs the renderer against their checkout. This is deliberate: the rendered document is large
+and grows with every bundle and every gfx target added, which makes it both a large diff on every
+sidecar edit and close enough to the size at which GitHub stops rendering markdown to be a
+liability. Not committing it also removes its drift problem outright: there is no full second
+copy to go stale. The one committed projection, the overview below, is checked instead.
+
+The cost is that the full document is not in a pull request diff, and a reader cannot browse
+it on the web without a checkout. A compact overview recovers most of that:
+`support_features/feature_matrix.py` writes
+`dnn-providers/integration-tests/SUPPORT_MATRIX_OVERVIEW.md`, the share of each op's API
+options claimed per GPU family, engine and target, small enough to render on GitHub. The
+overview **is committed**, so a claim change shows in the diff as a changed percentage, and it
+is regenerated in the same commit as the sidecars it reflects — `harvest_support_claims.py
+--write` (§12.3) does so itself. Reviewers who want the per-graph detail regenerate the full
+matrix locally; `render_support_matrix.py --overview-only` gives its per-target graph counts
+alone.
+
+**Freshness.** Three checks keep the sidecars and the overview in step:
+
+- The `render-support-matrix` pre-commit hook renders the full matrix and discards it, failing
+  if any sidecar cannot be resolved: a malformed or orphaned sidecar, or a claim on an unknown
+  case.
+- The `check-support-matrix-overview` pre-commit hook runs `feature_matrix.py --check`,
+  failing if the committed overview differs from a fresh render.
+- Both hooks see only the files pre-commit passes them, and the top-level `exclude` in
+  `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook, so a commit
+  that changes only sidecars triggers neither. The `hipdnn_support_matrix_renderer_python_tests`
+  and `hipdnn_support_features_python_tests` ctests cover that case: they run in
+  `hipdnn-superbuild-ci` on every change under `dnn-providers/` and render the real tree, and
+  the second fails if the committed overview is stale.
+
+Claim *correctness* is enforced separately by `verify-support-claims` (§9.3) and by the
+integration tests themselves (§4).
 
 Two clarifications. (1) The matrix row key `(operation, layout, dtype, scenario)` is
 *coarser* than the actual claim key (the on-disk graph, §4): two bundles — or two sweep cases —
@@ -756,106 +815,126 @@ sharing that 4-tuple but differing in exact shape are distinct claims that would
 one matrix row. This is a presentation simplification, not a contract — the per-bundle
 `{Name}.support.json` and per-case sweep `support.json` entries remain the source of truth; the
 matrix should make the bundle path (and case id, for a sweep) reachable per row so the full
-claim set is recoverable. (2) A runtime `SupportMatrixCollector`
-already exists on the live-compute harness; this renderer reads the committed `support.json`
-sidecars instead, a deliberately separate source of truth — the two must not be conflated
+claim set is recoverable. (2) The runtime `SupportMatrixCollector` and this renderer read
+different sources — live C++ graph tests versus committed sidecars — and must not be conflated
 into divergent matrices.
 
-**Runbook linking.** Every claim-broken / errored-before-assert message ends with a stable
-anchor into a failure-mode runbook (`docs/support-claims-failures.md`), one section per
-outcome state (§7), each answering: what triggered it, what it means, ranked likely causes,
-and step-by-step remediation. Anchor names and verifier output are co-designed; renaming an
-anchor without updating the verifier fails CI lint. Schema and bring-up docs
-(`support-claims-schema.md`, `support-claims-bringup.md`) land in the same PR as the
-implementation; PRs that change schema or verifier behaviour without updating the docs fail
-review.
+### 11.2 Failure runbook
+
+Not yet built.
+
+Every claim-broken / errored-before-assert message ends with a stable anchor into a
+failure-mode runbook (`docs/support-claims-failures.md`), one section per outcome state (§7),
+each answering: what triggered it, what it means, ranked likely causes, and step-by-step
+remediation. Anchor names and verifier output are co-designed; renaming an anchor without
+updating the verifier fails CI lint.
 
 ## 12. CI Support-Observation Harvest
 
 §9's `--write-support-claims` tool refreshes claims by running the suite on one target ASIC.
 But CI is where the broadest matrix of ASICs and platforms actually runs, nightly — and every
-enforcement run already queries support for each claim-bearing bundle (§7). Rather than require
-a separate engineer-driven hardware session per ASIC, this section lets CI **emit the support
-it observes** as structured data, so an offline consumer can harvest newly-supported graphs and
-propose `support.json` updates. Nightly CI thereby becomes a continuous stream of support
-observations across every ASIC it runs.
+run that reads claims already queries support for each claim-bearing bundle (§7). Rather than
+require a separate engineer-driven hardware session per ASIC, each CI run prints the support
+that no claim records, and a script harvests those prints from the CI logs into proposed
+`support.json` updates.
 
-This preserves the §9.2 invariant that **CI never writes claims**: CI only *emits observations*
-(read-only with respect to the contract); turning observations into committed claims is an
-offline, engineer-reviewed step.
+This preserves the §9.2 invariant that **CI never writes claims**: CI only prints what it
+observes (read-only with respect to the contract); turning that output into committed claims is
+an offline, engineer-reviewed step.
 
-> **Provisional.** The concrete near-term intent is simply to **print these observations into
-> the CI logs** so we can collect them after the fact, because we do not yet fully know what
-> artifact storage / data egress the CI environment will allow. The structured-record and
-> JSONL-artifact design below is the direction we want; the exact transport may change once we
-> learn what is actually retrievable from CI. Treat §12 as the target shape, not a frozen
-> contract.
+### 12.1 The `SUPPORT CLAIM SUMMARY` block
 
-### 12.1 Emitting observations
+After its tests, a run prints one block to stdout. It skips the block only when it found no
+graph with a sidecar and recorded no verdict:
 
-An enforcement run (`--enforce-support-claims`) gains a side output,
-`--emit-support-observations=<path>`, that writes one record per observed `(bundle, engine)`
-regardless of verdict. Emission is a pure side effect — it never changes enforcement
-pass/fail. The observed verdict is the per-engine **support** signal (ranked-list membership,
-§5.2) — the applicability-level "engine accepts this graph" fact — and is derived for **every
-loaded engine** from the single query, *independent of the bundle's `enforcement_level`*. So a
-nightly run with several plugins loaded emits a support observation for each loaded engine in
-one pass, even though the deeper `buildable`/`full` pass-fail (surfaced as a CI FAIL, §7.1) is
-attributed only to the engine whose plan was built/executed. Each record carries what the
-offline consumer needs to attribute and apply it:
-
-```jsonl
-{"schema":"support_observation/1","bundle":"quick/ConvFwd/nhwc/fp16/resnet50_layer3","engine":"MIOPEN_ENGINE","arch":"gfx942","platform":"linux","verdict":"supported","enforcement_level":"full","rocm_version":"6.4.0","commit":"<sha>","run_id":"<ci-run>","timestamp":"<iso8601>"}
-{"schema":"support_observation/1","bundle":"quick/BatchnormFwdInference/Inference#small_fp16_nchw","engine":"MIOPEN_ENGINE","arch":"gfx942","platform":"linux","verdict":"declined","enforcement_level":"applicability","rocm_version":"6.4.0","commit":"<sha>","run_id":"<ci-run>","timestamp":"<iso8601>"}
+```text
+==== SUPPORT CLAIM SUMMARY (ENFORCING) ====
+{
+  "support_claim_summary": {
+    ...
+    "mode": "enforcing",
+    "run": { "arch": "gfx942", "engine": "MIOPEN_ENGINE", "platform": "linux" },
+    "schema_version": 1,
+    "unclaimed_support": [
+      {
+        "bundle": "integration-test-bundles/quick/ConvFwd/sweep.json",
+        "cases": ["case_a", "case_b"],
+        "reached": "verified",
+        "required": "verified"
+      }
+    ],
+    ...
+  }
+}
 ```
 
-- `verdict` ∈ `supported | declined | unknown`, using the per-engine mapping of §5.2
-  (status code → resolved/unknown; ranked-list membership → supported/declined).
-- `bundle` is the repo-relative on-disk key a claim attaches to (§4): the bundle path for a
-  single-graph bundle, or `{sweep-path}#{caseId}` for a template-sweep case (the same
-  `sweep.json#caseId` diagnostic key discovery already uses). This lets the consumer locate the
-  exact support sidecar and, for a sweep, the engine group that lists that case id, to update.
-- Provenance (`rocm_version`, `commit`, `run_id`, `timestamp`) lets the consumer break ties
-  (prefer the newest observation) and audit where a claim came from.
+The header and `mode` name the claim mode: `ENFORCING` / `enforcing`, or
+`WARNING ONLY -- NOT ENFORCED` / `warning_only`. Both modes report the same results. The
+document also carries coverage counters, verdict counts, `claim_failures`, and `failed_in_use`
+(see `support-claim-enforcement.md` for every key). An `unclaimed_support` entry never changes
+pass/fail.
 
-**Two transports.** The transport we can rely on first is the **CI log**: each record is
-emitted to stdout behind a stable tag — `[[HIPDNN_SUPPORT_OBS]] {json}`, one per line — so it
-can be scraped from a build log after the fact with no artifact-storage dependency. Where the CI
-job *can* retain artifacts, the same records are additionally written as a **JSONL artifact**
-(`support_observations.jsonl`) for direct upload. Which of these is primary depends on what the
-CI environment supports (see the provisional note above); both are append-only and union-safe.
+An `unclaimed_support` entry follows these rules:
+
+- Only a bundle or sweep that has a `support.json` sidecar can produce an entry.
+- The entry is for the **engine under test** only. One lane tests one engine, so other loaded
+  engines get no entry.
+- The query resolved, the engine is in the ranked list (*supported*, §5.2), and the sidecar
+  does not claim this `(engine, arch, platform)` (or sweep case). An *unknown* result gives no
+  entry.
+- `bundle` starts at the bundle root's folder name. A sweep lists its cases under `cases`.
+  `engine`, `arch`, and `platform` appear only when they differ from `run`.
+- `reached` and `required` give the depth the graph reached and the depth its bundle requires
+  (`not-reached`, `applicable`, `buildable`, `executed`, `verified`).
 
 ### 12.2 Shard- and ASIC-tolerant by construction
 
-Each record is a self-contained per-`(bundle, engine, arch, platform)` fact, so:
+The harvest turns each entry into one cell per case, `(bundle, case, arch, platform, engine)`.
+Each cell is a self-contained fact, so:
 
-- **Sharding.** Each shard emits only the bundles it ran; the consumer unions all shards'
-  records. Unlike enforcement's empty-observation floor (§7.2), harvesting needs no
-  completeness guarantee from a single process — the union across shards/runs is what matters.
-- **Multiple ASICs.** Different ASICs' nightly runs write disjoint `(arch, platform)` keys, so
-  their observations never conflict — the same disjoint-key property as the §9.2 writes.
-- **Multiple engines.** A multi-plugin run emits one record per loaded engine (disjoint
-  `engine` keys), so the harvest gains support data for several engines from a single run — the
-  same disjoint-key property, on the engine axis.
+- **Sharding.** One job log can hold several blocks, one per test process; the script reads
+  every block and unions the cells. Unlike enforcement's empty-observation floor (§7.2),
+  harvesting needs no completeness guarantee from a single process — the union across jobs and
+  runs is what matters.
+- **Multiple ASICs.** Jobs on different ASICs give disjoint `(arch, platform)` keys, so their
+  cells never conflict — the same disjoint-key property as the §9.2 writes.
+- **Multiple engines.** Each lane tests one engine, so each provider's jobs give that engine's
+  cells (disjoint `engine` keys). The default `--jobs` pattern, `Test \w+provider\b`, reads
+  every provider's jobs, so one CI run gives support data for several engines.
 
 ### 12.3 Harvesting into claims (offline, reviewed)
 
-An offline consumer (`tools/harvest_support_observations.py`) ingests observation records from
-one or more CI runs and proposes `support.json` updates:
+`dnn-providers/integration-tests/scripts/harvest_support_claims.py` reads CI job logs and
+prints the claim cells to add:
 
-- **Newly-supported graphs (the stream).** A bundle observed `supported` whose `support.json`
-  does not yet list that `(engine, arch, platform)` → propose adding it. This is the continuous
-  gain stream from nightly CI: as an engine picks up coverage on an ASIC, the next nightly run
-  observes it and the harvest surfaces it.
-- **Monotonic by policy — harvest only adds/upgrades, never silently removes.** A
-  `supported → declined` flip is either a real regression (already a CI **FAIL** under §7.1, so
-  it surfaces loudly, not via silent harvest) or needs human judgement; the harvest never
-  auto-downgrades a committed `supported` verdict. `unknown` observations are ignored (not a
-  verdict, §5.2).
-- **Output is a reviewed change, not an auto-commit.** The consumer emits a proposed
-  `support.json` diff (or opens a gated bot PR). An engineer reviews and merges it, keeping the
-  §9.2 "CI never writes the contract" invariant intact. The surgical canonical-JSON write
-  format (§9.2) makes the proposed diff minimal and reviewable.
+- **Input.** Each positional `RUN` is a job log or a directory of `*.log` job logs. Each
+  `--run ID` fetches a GitHub workflow run with `gh` and reads its jobs whose name matches
+  `--jobs` and that succeeded or failed. With no input, the script fetches the latest completed
+  scheduled run of the develop nightly (`therock-multi-arch-ci-nightly.yml`). A log whose text
+  appears in two runs is refused, so no run counts twice.
+- **Block checks.** The script rejects a whole block when no gtest `ran.` line comes before it,
+  its JSON does not parse, `schema_version` is not 1, `mode` is unknown, the run arch,
+  platform, or engine is invalid, `counters_consistent` is not `true`, or a `harness_defects`
+  count is not 0. A log with a rejected block contributes nothing, and the exit status is 1. A
+  log with no block is listed under `Missing`; its engines are not harvested.
+- **Cell checks.** A cell is kept only when its gtest printed an `OK` line in the same log
+  stream and `reached` is at or above `required`. A cell whose gtest failed, was skipped, or
+  printed no `OK` line is dropped, as is a cell with a missing depth.
+- **Across runs.** A cell is claimed when it is kept in at least `--min-runs` runs (default 1)
+  and dropped in none. One drop in any run vetoes it.
+- **Add only.** The harvest only adds claims; it never removes a claim. A claim that the
+  engine stops meeting is already a CI **FAIL** (§7.1), so it surfaces loudly, not through the
+  harvest. `claim_failures` and `failed_in_use` are listed for a human; they never become
+  claims.
+- **Output is a reviewed change, not an auto-commit.** By default the script prints a table
+  (`--format json` for JSON). With `--arch` and `--platform` it adds the claims for that one
+  arch/platform to the current sidecars and names each sidecar that would change; `--write`
+  (which needs both) writes them. Sidecars must be up to date: the script fetches the tip of
+  develop with git and refuses a sidecar that lacks any claim its develop version has. Nothing
+  is written if a log was rejected or a sidecar was refused. Sidecars are rendered in the
+  canonical form that `verify_support_claims.py` checks (§9.3), so the diff is minimal. An
+  engineer reviews and commits the change, keeping the §9.2 "CI never writes the contract"
+  invariant intact.
 
 ### 12.4 Full vs incremental refresh
 
@@ -865,29 +944,34 @@ A **complete** refresh of an ASIC requires that **every claim-bearing bundle has
 at least once on that ASIC** — completeness is "every bundle observed ≥ 1×," however achieved.
 Two ways to get there:
 
-- **One dedicated full run** — `--write-support-claims` (or `--enforce-support-claims
-  --emit-support-observations`) over the entire suite, unsharded and unfiltered, on that
-  hardware, in a single pass (§9).
-- **Accumulated CI observations** — the union of nightly enforcement runs' emitted
-  observations, once they have collectively covered every tier and shard for that ASIC. No
-  dedicated hardware session is required; the coverage falls out of routine CI over time.
+- **One dedicated full run** — `--write-support-claims` over the entire suite, unsharded and
+  unfiltered, on that hardware, in a single pass (§9).
+- **Accumulated CI runs** — the union of nightly runs' kept cells, once they have collectively
+  covered every tier and shard for that ASIC. No dedicated hardware session is required; the
+  coverage falls out of routine CI over time. Because the harvest only adds claims, this path
+  finds gains only.
 
 So a full refresh still requires full *coverage*, but not necessarily a single full *run*: the
-harvest model lets that coverage accumulate from CI instead of a manual session. The consumer
-reports per-ASIC observation coverage (which bundles have and have not been observed) so an
-engineer knows when an ASIC's picture is complete.
+harvest model lets that coverage accumulate from CI instead of a manual session.
+
+Not yet built: a per-ASIC coverage report (which claim-bearing bundles have and have not been
+observed) so an engineer knows when an ASIC's picture is complete. The script lists only logs
+with no block (`Missing`).
 
 ### 12.5 Acceptance criteria
 
-- [ ] `--emit-support-observations` writes one JSONL record per observed `(bundle, engine)`
-      with verdict + provenance, and does not alter enforcement pass/fail.
-- [ ] The same records are emitted to stdout under the `[[HIPDNN_SUPPORT_OBS]]` tag.
-- [ ] The harvest consumer unions records across shards/runs and proposes only additions or
-      upgrades to `supported`; it never auto-downgrades a committed `supported` verdict and
-      ignores `unknown`.
-- [ ] The harvest output is a reviewable diff / gated PR, never a direct CI commit.
-- [ ] The consumer reports per-ASIC observation coverage (observed vs total claim-bearing
-      bundles).
+- [ ] A run with a claim-bearing graph prints one `SUPPORT CLAIM SUMMARY` block whose
+      `unclaimed_support` lists each unclaimed cell the engine under test supports, with
+      `reached` and `required`; the block does not alter pass/fail.
+- [ ] The harvest script unions cells across jobs and runs, keeps only cells whose gtest passed
+      at the required depth, and only adds claims; it never removes a committed claim and
+      ignores *unknown* results.
+- [ ] One dropped cell in any run vetoes that claim; `--min-runs` sets how many runs must keep
+      it.
+- [ ] The script writes sidecars only with `--write` for one `--arch`/`--platform`, refuses
+      sidecars behind develop, and never commits.
+- [ ] Not yet built: the script reports per-ASIC observation coverage (observed vs total
+      claim-bearing bundles).
 
 ## 13. Alternatives Considered
 
@@ -950,11 +1034,11 @@ run. **Rejected** — the claim attaches to the graph, never to a test name.
 | `graph.fbs` / serialization evolution changes how a graph deserializes, shifting the identity a claim attaches to. | The claim attaches to the deserialized graph object, not raw bytes; FlatBuffers schema changes must stay backwards compatible (same constraint RFC 0011 already carries). |
 | `applicability`/`buildable` FAIL is ambiguous between a builder bug and an engine regression for oversized shapes. | Shape-selection rule in §10 (smallest golden-infeasible shape, overflow handling as a separate labelled test). |
 | The support query cannot distinguish "declined" from "errored". | Two-step verdict (§5.2, §8): the status code separates a *resolved* query (`OK`/`GRAPH_NOT_SUPPORTED`) from an *unknown* error; within a resolved query, ranked-list membership separates *supported* from *declined* per engine. Only a resolved query yields a verdict; all other errors are "unknown". |
-| With multiple plugins loaded, a declined engine is mis-attributed or taints another engine's verdict. | Per-engine attribution by ranked-list membership (§5.2, §7.3, §8): each claimed engine's verdict is read independently from the one query; one engine's `declined` never affects another's. |
+| With multiple plugins loaded, a declined engine is mis-attributed or taints another engine's verdict. | Enforcement checks only the engine under test, by its ranked-list membership (§5.2, §7.3, §8); another engine's `declined` never affects it. |
 | A claim is eroded within a surviving bundle (support.json deleted / verdict downgraded). | Accepted declared-graphs-only tail-risk (§3.2); mitigated by code review and version-control history rather than a dedicated guard. |
 | A no-GPU or plugin-load-failure run silently passes or nulls claims. | Empty-query guard and empty-write guard (§7.2, §9.2). |
-| CI harvest (§12) proposes a wrong/over-broad `supported` upgrade. | Harvest is monotonic (adds/upgrades only), ignores `unknown`, and never auto-commits — every proposed change is an engineer-reviewed diff/PR (§12.3). Provenance fields let the reviewer audit which run/commit/ROCm version produced an observation. |
-| Stale or spoofed observation logs corrupt the harvest. | Observations carry `commit`/`run_id`/`rocm_version`/`timestamp`; the consumer prefers newest and the result is reviewed before merge. Logs are inputs to a proposal, never directly the contract. |
+| CI harvest (§12) proposes a wrong/over-broad claim. | The harvest only adds claims, ignores *unknown* results, keeps a cell only when its gtest passed at the required depth, lets one drop in any run veto a cell, and never commits — an engineer reviews every change (§12.3). |
+| Stale or spoofed CI logs corrupt the harvest. | The script rejects any block that fails its checks, refuses a log that appears in two runs, and refuses sidecars behind develop (§12.3). Logs are input to a reviewed change, never directly the contract. |
 
 ## 15. Open Questions and Future Work
 
@@ -967,30 +1051,27 @@ run. **Rejected** — the claim attaches to the graph, never to a test name.
   bundles for the shapes worth pinning. Whether to systematically convert fixture shapes to
   bundles is future work.
 - **Automated harvest PR bot.** §12.3 keeps harvest engineer-reviewed. A gated bot that opens
-  the proposed `support.json` PR automatically from nightly observation artifacts (still
-  merged by a human) is a natural follow-on once the harvest consumer is proven.
-- **Harvesting the full runtime population.** If runtime-fixture graphs also emit observations
-  (not just bundle-backed ones), the harvest could surface support data for graphs that do not
-  yet have bundles, informing which `applicability` bundles are worth authoring. Depends on the
-  fixture path emitting the same observation records.
+  the proposed `support.json` PR automatically from nightly CI logs (still merged by a human)
+  is a possible next step.
+- **Harvesting the full runtime population.** If runtime-fixture graphs also reported
+  unclaimed support (not just bundle-backed ones), the harvest could surface support data for
+  graphs that do not yet have bundles, informing which `applicability` bundles are worth
+  authoring. Depends on the fixture path printing the same `unclaimed_support` entries.
 - **Per-engine index.** If per-bundle `support.json` write churn is unsustainable at the
   full bundle population, move claims to a per-engine index keyed by bundle identity — still
   no region matching, same verdict semantics.
 - **Sharding.** Enforcement assumes an unsharded run so the empty-observation floor (§7.2) is
   meaningful. A per-shard record + reduce phase is future work, shared with the golden
   framework's own sharding story.
-- **Concurrent deep enforcement across engines.** Multi-engine *support* (applicability)
-  enforcement is in scope from one query (§7.3), and `buildable`/`full` coverage of all of a
-  plugin's engines is in scope **sequentially** via mode B (one pinned pass per engine). What is
-  *not* yet done is running those per-engine passes **concurrently** — each still pins one
-  preferred engine, so a mode-B run is as long as the sum of its engines. Parallelising the
-  per-engine passes (and the cross-plugin case) is future work, bounded by the harness's
-  one-preferred-engine-per-pass model.
+- **Deep enforcement across engines.** Enforcement checks one engine per run (mode C). Running
+  all of a plugin's engines in one invocation — sequential mode-B passes (§7.3, §9.4), then
+  concurrent passes — is future work, bounded by the harness's one-preferred-engine-per-pass
+  model.
 
 ## 16. Glossary
 
 - **Bundle.** A golden data directory as defined by
-  [RFC 0011](0011_GoldenReferenceValidation.md), in one of two forms: a **single-graph bundle**
+  [RFC 0011](0011_BundleTestFramework.md), in one of two forms: a **single-graph bundle**
   (`{Name}.json` + optional `.tensor{uid}.bin` + `meta.json`) or a **template-sweep bundle**
   (`graph.template.json` + `sweep.json` + `golden/{CaseId}/...`). The unit a support claim
   attaches to; for a sweep the claim attaches per `cases[].id`.

@@ -10,7 +10,7 @@ Named scalar types are singletons exported from `core/ir.py`:
 
 ```text
 I1, I8, I32, I64
-F16, BF16, F32
+F16, BF16, F32, F64
 FP8E4M3      # e4m3 fp8 (cvt_fp8_to_f32 / cvt_f32_to_fp8)
 BF8E5M2      # e5m2 fp8 (cvt_bf8_to_f32 / cvt_f32_to_bf8)
 ```
@@ -24,14 +24,23 @@ Composite types:
   - other     -> LLVM `ptr`
 - `SmemType(elem, shape)` — opaque token for an LDS allocation. Lowers to `ptr addrspace(3)`.
 
-Cache-coherence AUX hints (constants in `core/ir.py`) for `async_buffer_load_lds_addr` / `buffer_load_vN_*`:
+Cache-policy bits (the AUX operand; constants in `core/ir.py`) for `async_buffer_load_lds_addr` /
+`buffer_load_vN_*`:
 
 ```text
-CACHE_ALL    = 0   # default, cache at all levels
-CACHE_GLOBAL = 1   # GLC set, skip L2
-CACHE_STREAM = 2   # SLC set, streaming hint (don't evict useful lines)
-NON_TEMPORAL = 3   # GLC + SLC, bypass cache hierarchy
+CACHE_ALL    = 0   # no bits: the default caching
+CACHE_GLOBAL = 1   # GLC (gfx90a) / SC0 (gfx942, gfx950)
+CACHE_STREAM = 2   # SLC (gfx90a) / NT (gfx942, gfx950): streaming data
+NON_TEMPORAL = 3   # GLC + SLC / SC0 + NT
 ```
+
+On gfx942 / gfx950, SC0 selects the coherence scope and NT marks the data as streaming; for loads, NT
+caches the same with or without SC0. Spec fields name a policy with one of `CACHE_POLICY_NAMES`
+(`"all"`, `"global"`, `"stream"`, `"nt"`); `cache_policy_from_name` gives its bits (C:
+`rocke_cache_policy_from_name`).
+These are raw bit values for buffer ops. They are **not** `temporal_hint=TemporalHint.STREAMING`
+on `global_load_vN` / `global_store_vN` (below), whose bits the backend picks per arch: on
+gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPORAL`.
 
 ### `Value`
 
@@ -83,20 +92,23 @@ Kernel attributes consumed by lowering:
 const_i32(value)
 const_i64(value)
 const_f32(value)
+const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
-zero_vec(elem, n)          # f32 / f16 / bf16
+zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / i16 / i32
 ```
 
 ### Arithmetic / compare / cast
 
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
-fadd, fsub, fmul, fdiv, fneg               # f32 arithmetic
-fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16)
+add_nuw                                    # integer add, no unsigned wrap (i32/i64)
+fadd, fsub, fmul, fdiv, fneg               # f64/f32/f16/bf16 arithmetic
+fmax, fmin                                 # llvm.maxnum / llvm.minnum (f64/f32/f16/bf16)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
+cmp_ult                                    # unsigned compare (i32/i64 -> i1)
 land, lor, lnot                            # bitwise + i1 logic
 zext(v, target_int_type)
 sext(v, target_int_type)
@@ -105,6 +117,8 @@ masked_select                              # alias for select
 sitofp_f32(v)                              # i32 -> f32 (LLVM sitofp)
 cast_to_f32(v)                             # f16/bf16 -> f32
 cast_f32_to(v, target)                     # f32 -> f16/bf16
+cvt_f32_to_f64(v)                          # f32 -> f64 (fpext, exact)
+cvt_f64_to_f32(v)                          # f64 -> f32 (fptrunc, round to nearest even)
 trunc_f32_to_f16(v)                        # f32 -> f16 (fptrunc with attrs)
 bitcast(v, target)                         # scalar bitcast of equal size
 vec_bitcast(v, target_vec_type)            # vector bitcast (e.g. <2xi32> <-> <4xf16>)
@@ -120,13 +134,13 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings. `exp2_fast` rejects f64 in the LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only f32: the builder rejects any other operand type. `rcp` is a plain `fdiv` and accepts f64, and `fabs` lowers f64 to `llvm.fabs.f64`.
 
 ```text
 exp2(v)        # llvm.exp2.f32
 sqrt(v)        # llvm.sqrt.f32
 rsqrt(v)       # llvm.amdgcn.rsq.f32 (single hardware reciprocal-sqrt)
-tanh(v)        # llvm.tanh.f32
+tanh(v)        # OCML-style piecewise f32 expansion (polynomial below |v| < 0.625, exp2/rcp otherwise)
 rcp(v)         # 1/v, lowered to hardware reciprocal
 ```
 
@@ -168,12 +182,19 @@ global_load_bf16(ptr, idx, align=2)
 global_load_f32(ptr, idx, align=4)
 global_load_i32(ptr, idx, align=4)
 global_load_i64(ptr, idx, align=8)
+global_load_f64(ptr, idx, align=8)
 global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
 global_load_vN_f16(ptr, idx, n)        # n in {2,4,8}; aligned by default
-global_load_vN(ptr, idx, dtype, n)     # f16 or bf16; n in {2,4,8}
-global_store_vN(...)                   # vector stores
+global_load_vN(ptr, idx, dtype, n, temporal_hint=TemporalHint.DEFAULT)   # 16-bit n in {2,4,6,8,16}; f32/i32 {2,3,4,8}; 8-bit {2,4,8,12,16}
+global_store_vN(ptr, idx, value, n, temporal_hint=TemporalHint.DEFAULT)  # vector stores
+# TemporalHint.STREAMING: semantic intent (data read/written once). Lowered today to LLVM
+# `!nontemporal` (HIP: __builtin_nontemporal_load/store), and only for gfx942/gfx950
+# (`nt` only = CACHE_STREAM, NOT NON_TEMPORAL); every lowerer rejects it (ValueError /
+# ROCKE_ERR_VALUE) on other targets, whose cache bits differ or are unverified.
+# DEFAULT records nothing. C: rocke_b_global_{load,store}_vN_ex(..., const rocke_mem_opts_t*),
+# opts initialized with ROCKE_MEM_OPTS_INIT (records struct_size; see ir.h for the contract).
 global_atomic_add_f32(ptr, idx, value) # used by split-K paths
 ```
 
@@ -186,7 +207,7 @@ smem_ptr_add(lds_addr, byte_off)              # i64 LDS address arithmetic
 smem_load_f16(smem, indices)
 smem_load_vN_f16(smem, *indices, n in {1,2,4,8})
 smem_load_v4_f16(smem, row, col)
-smem_load_vN(smem, *indices, dtype, n)        # f16/bf16
+smem_load_vN(smem, *indices, dtype, n)        # 8/16/32/64-bit dtypes; see the docstring
 smem_store_f16(smem, indices, value)
 smem_store_vN_f16(smem, indices, value, n)    # ds_write_b{16,32,64,128}
 smem_store_vN(smem, indices, value, n)        # n in {1,2,4,8}
@@ -216,6 +237,7 @@ mfma_f32_16x16x32_bf16(a, b, c)    # <8 x bfloat>, <8 x bfloat>, <4 x float>
 mfma_f32_32x32x8_f16(a, b, c)      # <4 x half>, <4 x half>, <16 x float>
 mfma_f32_32x32x16_f16(a, b, c)     # <8 x half>, <8 x half>, <16 x float>  (gfx950 only)
 mfma_f32_4x4x4_f16(a, b, c)        # 16 independent 4x4 matmuls per wave
+mfma_f32_4x4x4_bf16(a, b, c)       # bf16 twin, lowers via *_1k variant with <4 x i16> operands
 ```
 
 The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`. These MFMA atoms target the CDNA (wave64) backends. For RDNA (wave32) targets the builder also exposes WMMA matrix ops (`wmma_f32_16x16x16_f16` / `wmma_f32_16x16x16_bf16`, and the gfx12 variants) backed by `WmmaAtom` in `helpers/atoms.py`; all matrix ops route through the generic `mma()` builder method.

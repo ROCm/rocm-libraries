@@ -62,8 +62,7 @@ void testing_spmm_bell_bad_arg(const Arguments& argus)
     hipDataType          dataType     = HIP_R_32F;
     hipsparseSpMMAlg_t   alg          = HIPSPARSE_SPMM_BLOCKED_ELL_ALG1;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dind_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int32_t) * safe_size), device_free};

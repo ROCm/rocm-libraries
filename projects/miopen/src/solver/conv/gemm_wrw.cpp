@@ -152,7 +152,8 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto b                  = problem.GetBatchSize();
@@ -162,7 +163,7 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     auto spatial_per_batch  = s / b;
     auto channels_per_group = c / g;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         // GemmWrw1x1_stride1 - Batch-based filtering
         // Analysis: 8.4% terrible cases - moderate filtering benefit
@@ -218,6 +219,8 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    if(gemm::IsSmallBatchNhwcBackwardExcluded(context.GetStream().GetDeviceName(), problem))
+        return false;
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
@@ -231,7 +234,7 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
     // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
     const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
                                 !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
-    if(!problem.IsLayoutDefault() && !nhwc_supported)
+    if(!(problem.IsLayoutDefault() || nhwc_supported))
         return false;
 
     const auto wei_spatial =
@@ -269,7 +272,7 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
     // dw = sum_over_batch(dy[i] * transpose(x[i])), i is batch id
     const auto tmp_gemm_desc = [&]() {
         auto tmp          = group_count > 1
-                                ? CreateGemmDescriptorGroupConvBwdWeight(dyDesc, xDesc, dwDesc, group_count)
+                                ? CreateGemmDescriptorGroupConvBwdWeight(problem)
                                 : CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(dyDesc, xDesc, dwDesc);
         tmp.deterministic = problem.GetConv().attribute.deterministic;
         if(problem.IsTensorsCasted())
@@ -496,14 +499,15 @@ bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto b                 = problem.GetBatchSize();
     auto s                 = problem.GetOutHeight() * problem.GetOutWidth();
     auto spatial_per_batch = s / b;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         // GemmWrwUniversal - SPB-only filtering
         // Analysis: 18.4% terrible cases - significant filtering benefit
@@ -531,6 +535,8 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
                                     const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    if(gemm::IsSmallBatchNhwcBackwardExcluded(context.GetStream().GetDeviceName(), problem))
+        return false;
     if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
     {
         if(!problem.AllTensorsDimsFitIntoInt())
@@ -563,12 +569,11 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
-    // Everything below goes through Im2Col, which addresses x as NCHW.
-    if(!problem.IsLayoutDefault())
+    if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
         return false;
 
-    return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&
-           GetWorkspaceSize(context, problem) != 0;
+    return GetWorkspaceSize(context, problem) != 0 &&
+           !GemmWrw1x1_stride1{}.IsApplicable(context, problem);
 #else
     std::ignore = context;
     std::ignore = problem;
@@ -588,9 +593,8 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
 
     // dw = dy * transpose(Im2Col(x))
     const auto tmp_gemm_desc = [&]() {
-        auto tmp          = group_count > 1
-                                ? CreateGemmDescriptorGroupConvBwdWeight(dyDesc, xDesc, dwDesc, group_count)
-                                : CreateGemmDescriptorConvBwdWeight(dyDesc, xDesc, dwDesc);
+        auto tmp          = group_count > 1 ? CreateGemmDescriptorGroupConvBwdWeight(problem)
+                                            : CreateGemmDescriptorConvBwdWeight(problem);
         tmp.deterministic = problem.GetConv().attribute.deterministic;
         if(problem.IsTensorsCasted())
         {
@@ -789,7 +793,9 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                                   conv_strides,
                                   conv_dilations,
                                   workspace,
-                                  dyDesc_.GetType());
+                                  dyDesc_.GetType(),
+                                  problem.IsLayoutNHWC(),
+                                  problem.GetGroupCount());
 
                 miopenStatus_t status;
 

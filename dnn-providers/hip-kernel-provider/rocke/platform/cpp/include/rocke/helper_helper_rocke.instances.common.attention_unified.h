@@ -13,7 +13,7 @@
  *   build_unified_attention_2d               rocke_build_unified_attention_2d_scalar
  *   UnifiedAttention2DSpec.kernel_name       rocke_unified_attention_2d_scalar_kernel_name
  *   (block_id grid of build_..._2d)          rocke_unified_attention_2d_scalar_grid
- *   _attn_signature(include_bt_stride=False) rocke_unified_attention_2d_scalar_signature
+ *   _attn_signature(include_bt_stride=True)  rocke_unified_attention_2d_scalar_signature
  *   build_unified_attention_3d               rocke_build_unified_attention_3d_scalar
  *   UnifiedAttention3DSpec.kernel_name       rocke_unified_attention_3d_scalar_kernel_name
  *   (block_id grid of build_..._3d)          rocke_unified_attention_3d_scalar_grid
@@ -123,7 +123,7 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_scalar(
  * extents = (total_q, num_query_heads, head_size). Writes out[0..2]. */
 void rocke_unified_attention_2d_scalar_grid(const rocke_unified_attention_problem_t* p, int out[3]);
 
-/* _attn_signature(dtype, include_bt_stride=False): the 2D scalar kernel ABI.
+/* _attn_signature(dtype, include_bt_stride=True): the 2D scalar kernel ABI.
  * On ROCKE_OK *out_items / *out_count hold the arena-owned array. */
 rocke_status_t
     rocke_unified_attention_2d_scalar_signature(const rocke_unified_attention_problem_t* p,

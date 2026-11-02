@@ -24,6 +24,8 @@ def _props(target_id: str | None) -> hip_module.HipDevicePropR0600:
     [
         ("gfx90a", "gfx90a"),
         ("gfx11-generic", "gfx11-generic"),
+        ("gfx1101", "gfx11-generic"),
+        ("gfx1101-strict:unknown+", "gfx11-generic"),
         ("gfx1250-strict", "gfx1250"),
         ("gfx942:sramecc+:xnack-", "gfx942"),
         (None, None),
@@ -42,6 +44,8 @@ def test_device_target_id_and_base_arch_are_separate(
     [
         ("gfx1250-strict", "gfx1250", "gfx1250", 0),
         ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-", 1),
+        ("gfx1101", "gfx11-generic", "gfx1101", 0),
+        ("gfx1101-strict:unknown+", "gfx11-generic", "gfx1101:unknown+", 0),
         (None, None, None, 0),
     ],
 )

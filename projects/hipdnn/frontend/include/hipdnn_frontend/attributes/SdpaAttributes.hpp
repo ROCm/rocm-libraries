@@ -7,7 +7,7 @@
  *
  * This file defines the SdpaAttributes class used to configure
  * scaled dot-product attention operations, computing
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V.
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V.
  */
 
 #pragma once
@@ -30,8 +30,11 @@ namespace hipdnn_frontend::graph
  *
  * SdpaAttributes configures a scaled dot-product attention operation:
  * @code
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V
  * @endcode
+ *
+ * `scale` is attn_scale_value or the Attn_scale tensor. When neither is set it is 1.0
+ * (no scaling), as in cuDNN; set 1/sqrt(d_k) explicitly for the conventional scaling.
  *
  * **Tensor Shapes (BHSD ordering):**
  * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
@@ -59,7 +62,7 @@ namespace hipdnn_frontend::graph
  * - ALiBi positional encoding
  * - Paged attention (page_table_k, page_table_v)
  * - FP8 quantization (descale/scale tensors)
- * - Attention scale override (attn_scale_value)
+ * - Attention scale (attn_scale_value or an Attn_scale tensor; 1.0 when neither is set)
  *
  * @code{.cpp}
  * SdpaAttributes attr;
@@ -122,8 +125,15 @@ public:
     std::optional<bool> generate_stats;
     bool alibi_mask = false;
     bool padding_mask = false;
-    bool causal_mask = false; // Deprecated
-    bool causal_mask_bottom_right = false; // Deprecated
+    /**
+     * @brief Deprecated; kept for graphs persisted before the causal setters changed. Do not set
+     * directly: use set_causal_mask*() or the diagonal-band setters. Backends resolve them as if
+     * the matching setter ran before every bound and alignment setter, so left_bound, a
+     * right_bound >= 0 or (for causal_mask) diagonal_alignment refines them. Setting both, or any
+     * bound below -1, is invalid.
+     */
+    bool causal_mask = false;
+    bool causal_mask_bottom_right = false;
 
     // Scalar attributes
     std::optional<float> dropout_probability;
@@ -594,16 +604,43 @@ public:
         padding_mask = value;
         return *this;
     }
+    /**
+     * @brief Request a top-left causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to TOP_LEFT and right_bound to 0. The deprecated causal_mask
+     * member is not modified, and later bound or alignment setters take precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_causal_mask(bool value)
     {
-        causal_mask = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
+    /**
+     * @brief Request a bottom-right causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to BOTTOM_RIGHT and right_bound to 0. The deprecated
+     * causal_mask_bottom_right member is not modified, and later bound or alignment setters take
+     * precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_causal_mask_bottom_right(bool value)
     {
-        causal_mask_bottom_right = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -630,6 +667,22 @@ public:
         attn_scale_value = value;
         return *this;
     }
+    /**
+     * @brief Set the left bound of the diagonal attention band (sliding window).
+     *
+     * Follows cuDNN: a left bound of L keeps the L keys ending at the diagonal, diagonal
+     * included, so query i attends to keys j with j > i + offset - L (offset is 0 for
+     * TOP_LEFT and seq_kv - seq_q for BOTTOM_RIGHT). Must be >= 1, or -1 for unbounded.
+     * A FlashAttention-style window_size_left = W is the same window as a left bound of W + 1.
+     *
+     * Two values differ from cuDNN. -1 means unbounded here, where cuDNN leaves the bound
+     * unset. 0 is rejected in both directions, where cuDNN 9.10 and later accepts it in the
+     * forward pass: a provider whose kernels take FlashAttention's window would pass L - 1,
+     * turning 0 into -1, which those kernels read as unbounded.
+     *
+     * @param value The left bound L.
+     * @return Reference to this for chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_left_bound(int64_t value)
     {
@@ -709,7 +762,14 @@ public:
     {
         return set_generate_stats(!value);
     }
-    // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
+    /**
+     * @brief cuDNN-compatible alias of set_diagonal_band_left_bound().
+     *
+     * A window length of n keeps the n keys ending at the diagonal, as in cuDNN.
+     *
+     * @param value The window length n (>= 1).
+     * @return Reference to this for chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_sliding_window_length(int value)
     {

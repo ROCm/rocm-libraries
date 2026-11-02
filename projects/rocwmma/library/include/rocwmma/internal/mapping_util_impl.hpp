@@ -49,7 +49,7 @@ namespace rocwmma
             return threadIdx.x & (Constants::AMDGCN_WAVE_SIZE - 1u);
         }
 
-        ROCWMMA_DEVICE constexpr inline Coord2d waveCount(Coord2d const& threadCount)
+        ROCWMMA_HOST_DEVICE constexpr inline Coord2d waveCount(Coord2d const& threadCount)
         {
             // waveCount.x = threadCount.x / AMDGCN_WAVE_SIZE
             // waveCount.y = threadCount.y
@@ -106,7 +106,7 @@ namespace rocwmma
         template <uint32_t TBlockX, uint32_t TBlockY>
         template <bool IsConst /* = (TBlockX > 0u && TBlockY > 0u) */,
                   enable_if_t<IsConst>* /* = nullptr */>
-        ROCWMMA_DEVICE constexpr inline auto WaveSpace<TBlockX, TBlockY>::workgroupDim()
+        ROCWMMA_HOST_DEVICE constexpr inline auto WaveSpace<TBlockX, TBlockY>::workgroupDim()
             -> WorkgroupDimT
         {
             return waveCount(make_coord2d(TBlockX, TBlockY));

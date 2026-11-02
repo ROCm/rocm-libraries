@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: test_gfx950_dtl_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_S_B_UserArgs_MT16x16x32_MI16x16x1IL3L58ITdKFj3oMW5tF7GLBtMfz1QvYcBr7H0L4YkbQ=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_S_B_UserArgs_MT16x16x32_MI16x16x1KSEFKouVQljAUFxASBuOfaIncUzefPDfr9e0PXcHpAY=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_S_B_UserArgs_MT16x16x32_MI16x16x1ZO_y6vc59nesP-prC8r71YqBGd8ETOIKBk1ZenUPEno=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_S_B_UserArgs_MT16x16x32_MI16x16x1uGvl0AbLgHwwHbY0IgNn77v0Nmwf_UhR3f_WYdcHKd0=',
+      'err': 0,
+    }),
+  ])
+# ---

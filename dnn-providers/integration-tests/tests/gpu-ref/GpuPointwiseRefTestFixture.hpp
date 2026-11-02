@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuReferencePointwise.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -20,6 +21,7 @@ namespace gpu_pointwise_ref_test
 {
 
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 
@@ -44,8 +46,11 @@ void runGpuVsCpuPointwiseUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMo
     auto outputCpu = Tensor<DataType>(ioDims);
     auto outputGpu = Tensor<DataType>(ioDims);
 
-    inputTensor.fillWithRandomValues(
-        static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+    fillWithRandomValues(
+        inputTensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     CpuReferencePointwiseImpl<DataType, DataType>::pointwiseCompute(
         operation, outputCpu, inputTensor);
@@ -67,10 +72,14 @@ void runGpuVsCpuPointwiseBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseM
     auto outputCpu = Tensor<DataType>(ioDims);
     auto outputGpu = Tensor<DataType>(ioDims);
 
-    input0Tensor.fillWithRandomValues(
-        static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
-    input1Tensor.fillWithRandomValues(
-        static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+    fillWithRandomValues(
+        input0Tensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+    fillWithRandomValues(
+        input1Tensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
 
     CpuReferencePointwiseImpl<DataType, DataType, DataType>::pointwiseCompute(
         operation, outputCpu, input0Tensor, input1Tensor);

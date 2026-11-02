@@ -853,7 +853,7 @@ namespace DGen
             __amd_fp6x32_storage_t out
                 = __amd_cvt_floatx32_to_fp6x32_scale(in, Interp, scaleExp);
             int const outLen = blockSize * 6 / 8;
-#if defined(__gfx950__) || defined(__gfx1250__)
+#if defined(__gfx950__) || defined(__gfx1250__) || defined(__gfx1250_strict__)
             for(int b = 0; b < outLen; ++b)
                 outBytes[b] = 0;
             __amd_floatx32_storage_t decoded

@@ -34,6 +34,14 @@
 
 namespace
 {
+#if HIP_FP8_TYPE_FNUZ
+    // Compile-time regression coverage: this conversion must be callable from
+    // device code on architectures with native FNUZ support, including gfx942.
+    __global__ void hipblaslt_bf8_fnuz_to_half(hipblaslt_bf8_fnuz value, _Float16* output)
+    {
+        *output = static_cast<_Float16>(value);
+    }
+#endif
 
     // ----------------------------------------------------------------------------
     // aux
@@ -208,7 +216,6 @@ namespace
 
     TEST_P(aux_test, conversion)
     {
-        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         RUN_TEST_ON_THREADS_STREAMS(aux_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(aux_test);

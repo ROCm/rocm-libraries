@@ -1,0 +1,53 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_3_1_1_fp32_nchw_88d524",
+          "2_3_4_2_2_bfp16_ncdhw_9e3190",
+          "2_3_4_2_2_bfp16_ndhwc_4966d8",
+          "2_3_4_2_2_fp16_ncdhw_2973c6",
+          "2_3_4_2_2_fp32_ncdhw_98845c",
+          "2_3_4_2_2_fp32_ncdhw_b9950e",
+          "2_3_4_2_2_fp32_ndhwc_5f6768",
+          "2_3_4_2_2_fp32_ndhwc_8649da",
+          "2_3_4_2_2_fp32_ndhwc_8ae281",
+          "2_3_4_4_bfp16_nchw_b04c54",
+          "2_3_4_4_fp16_nhwc_6dc08f",
+          "2_3_4_4_fp32_nchw_07801e",
+          "2_3_4_4_fp32_nchw_b93372",
+          "2_3_4_4_fp32_nhwc_9c60c4",
+          "2_3_4_4_fp32_nhwc_fcfc7a"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

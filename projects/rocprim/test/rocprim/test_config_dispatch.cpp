@@ -73,6 +73,14 @@ TEST(RocprimConfigDispatchTests, StrEqualN)
     ASSERT_FALSE(prefix_equals("prefix", "prefixaaa", 7));
     static_assert(!prefix_equals("hasprefix", "hasp", 4), "");
     ASSERT_FALSE(prefix_equals("hasprefix", "hasp", 4));
+
+    // '-' and '_' equivalence tests
+    static_assert(prefix_equals("a_b", "a-b", 3), "");
+    ASSERT_TRUE(prefix_equals("a_b", "a-b", 3));
+    static_assert(!prefix_equals("a-b", "a_b", 3), "");
+    ASSERT_FALSE(prefix_equals("a-b", "a_b", 3));
+    static_assert(!prefix_equals("a_b", "a--b", 4), "");
+    ASSERT_FALSE(prefix_equals("a_b", "a--b", 4));
 }
 
 TEST(RocprimConfigDispatchTests, GetTargetArch)
@@ -83,6 +91,8 @@ TEST(RocprimConfigDispatchTests, GetTargetArch)
     ASSERT_TRUE(get_target_arch_from_name("gfx_nonexisting", 7) == target_arch::unknown);
     static_assert(get_target_arch_from_name("gfx803", 6) == target_arch::gfx803);
     ASSERT_TRUE(get_target_arch_from_name("gfx803", 6) == target_arch::gfx803);
+    static_assert(get_target_arch_from_name("gfx1250-strict", 14) == target_arch::gfx1250);
+    ASSERT_TRUE(get_target_arch_from_name("gfx1250-strict", 14) == target_arch::gfx1250);
 }
 
 TEST(RocprimConfigDispatchTests, HostMatchesDevice)
@@ -143,6 +153,11 @@ TEST(RocprimConfigDispatchTests, ParseCommonArches)
     ASSERT_EQ(parse_gcn_arch("gfx906:::"), target_arch::gfx906);
     ASSERT_EQ(parse_gcn_arch("gfx908:"), target_arch::gfx908);
     ASSERT_EQ(parse_gcn_arch("gfx90a:sramecc+:xnack-"), target_arch::gfx90a);
+
+    // gfx1250-strict is mapped to gfx1250
+    ASSERT_EQ(parse_gcn_arch("gfx1250"), target_arch::gfx1250);
+    ASSERT_EQ(parse_gcn_arch("gfx1250-strict"), target_arch::gfx1250);
+    ASSERT_EQ(parse_gcn_arch("gfx1250-strict:sramecc+:xnack-"), target_arch::gfx1250);
 }
 
 #ifndef _WIN32

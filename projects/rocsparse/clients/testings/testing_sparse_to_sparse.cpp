@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 #include "auto_testing_bad_arg.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "testing.hpp"
 
 struct spmat
@@ -211,7 +212,7 @@ public:
             h.block_direction,
             h.row_block_dim,
             row_data = to_device(nullptr, h.ptr.size(), sizeof(I), h.ptr),
-            col_data = to_device(nullptr, h.ind.size(), sizeof(I), h.ind),
+            col_data = to_device(nullptr, h.ind.size(), sizeof(J), h.ind),
             val_data = to_device(nullptr, h.val.size(), sizeof(T), h.val),
             get_indextype<I>(),
             get_indextype<J>(),
@@ -252,12 +253,13 @@ public:
     {
         if(this->descr != nullptr)
         {
-            rocsparse_destroy_spmat_descr(this->descr);
+            rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                  rocsparse_destroy_spmat_descr(this->descr));
         }
-        std::ignore = rocsparse_hipFree(this->row_data);
-        std::ignore = rocsparse_hipFree(this->col_data);
-        std::ignore = rocsparse_hipFree(this->ind_data);
-        std::ignore = rocsparse_hipFree(this->val_data);
+        rocsparse_clients_log_hip_error("rocsparse_hipFree", rocsparse_hipFree(this->row_data));
+        rocsparse_clients_log_hip_error("rocsparse_hipFree", rocsparse_hipFree(this->col_data));
+        rocsparse_clients_log_hip_error("rocsparse_hipFree", rocsparse_hipFree(this->ind_data));
+        rocsparse_clients_log_hip_error("rocsparse_hipFree", rocsparse_hipFree(this->val_data));
     }
 
     // Allow spmat to be used anywhere rocsparse_spmat_descr is expected
@@ -804,7 +806,7 @@ void spmat_allocate(
 void spmat_get_rawsize(rocsparse_spmat_descr descr, int64_t* m_, int64_t* n_, int64_t* nnz_)
 {
     rocsparse_format format;
-    rocsparse_spmat_get_format(descr, &format);
+    CHECK_ROCSPARSE_THROW_ERROR(rocsparse_spmat_get_format(descr, &format));
     switch(format)
     {
     case rocsparse_format_bell:
@@ -950,7 +952,7 @@ void spmat_get_types(rocsparse_spmat_descr descr,
                      rocsparse_index_base* base_)
 {
     rocsparse_format format;
-    rocsparse_spmat_get_format(descr, &format);
+    CHECK_ROCSPARSE_THROW_ERROR(rocsparse_spmat_get_format(descr, &format));
     switch(format)
     {
     case rocsparse_format_bell:
@@ -1100,7 +1102,7 @@ void spmat_bsr_get_block_dim(rocsparse_const_spmat_descr descr,
                              int64_t*                    block_dim)
 {
     rocsparse_format format;
-    rocsparse_spmat_get_format(descr, &format);
+    CHECK_ROCSPARSE_THROW_ERROR(rocsparse_spmat_get_format(descr, &format));
     switch(format)
     {
     case rocsparse_format_bsr:
@@ -1246,7 +1248,7 @@ spmat spmat_create_B(spmat& A, const Arguments& arg, rocsparse_format format_B)
     case rocsparse_format_bsr:
     {
         rocsparse_format format_A;
-        rocsparse_spmat_get_format(A, &format_A);
+        CHECK_ROCSPARSE_THROW_ERROR(rocsparse_spmat_get_format(A, &format_A));
 
         if(format_A == rocsparse_format_bsr)
         {
@@ -1301,7 +1303,7 @@ spmat spmat_create_C(spmat& A, spmat& B)
     int64_t          N;
     int64_t          NNZ;
     rocsparse_format format_A;
-    rocsparse_spmat_get_format(A, &format_A);
+    CHECK_ROCSPARSE_THROW_ERROR(rocsparse_spmat_get_format(A, &format_A));
 
     spmat_get_rawsize(B, &M, &N, &NNZ);
 
@@ -1592,7 +1594,7 @@ void testing_sparse_to_sparse_bad_arg(const Arguments& arg)
 void spmat_check(rocsparse_handle handle, spmat& A)
 {
     rocsparse_format format_A;
-    rocsparse_spmat_get_format(A, &format_A);
+    CHECK_ROCSPARSE_THROW_ERROR(rocsparse_spmat_get_format(A, &format_A));
     if(format_A != rocsparse_format_coo_aos && format_A != rocsparse_format_bell)
     {
         size_t                buffer_size;

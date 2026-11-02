@@ -227,6 +227,58 @@ jobs:
           # target is almost entirely parallel per-file analysis.
           ninja -C build -k 0 -j$(nproc) analyze
 
+      # Off has to mean invisible: a harness that leaked into the default build
+      # would otherwise be noticed only once it started failing somewhere else.
+      #
+      # The build above cannot show this. It names no test target, so whether the
+      # harness is registered there depends on what the configure-time GPU probe
+      # makes of this runner, not on the wrapper flag, and a zero count proves
+      # nothing. Two configure-only trees that pin the test target and differ in
+      # the wrapper flag alone can: the harness is registered unless the flag is
+      # off, and the wrapper-on tree checks the count is read correctly.
+      - name: Forwarding parity harness is absent with the wrapper off
+        if: matrix.job_id == 'no-ck-build'
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          parity_count() {
+            cmake -S projects/miopen -B "$1" \
+              -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+              ${{ matrix.cmake_extra_flags }} \
+              -DMIOPEN_TEST_GFX94X=ON \
+              -DMIOPEN_TEST_DISCRETE=OFF \
+              -DMIOPEN_ENABLE_HIPDNN_WRAPPER="$2" > "$1.configure.log" \
+              || { cat "$1.configure.log" >&2; return 1; }
+            # Capture before parsing: piping ctest into sed would make sed's exit
+            # status the function's, so a ctest that failed outright would be read
+            # as a zero count.
+            local listing
+            listing=$(ctest --test-dir "$1" -N -L forwarding_parity) || return 1
+            printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p'
+          }
+          off=$(parity_count parity-off OFF)
+          on=$(parity_count parity-on ON)
+          echo "forwarding_parity tests registered: wrapper off ${off:-<unparsed>}, wrapper on ${on:-<unparsed>}"
+          test -n "$on" && test "$on" -gt 0 || {
+            echo "the wrapper-on tree registered no forwarding_parity tests, so the wrapper-off count proves nothing"
+            exit 1
+          }
+          test "$off" = "0" || {
+            echo "expected no forwarding_parity tests without MIOPEN_ENABLE_HIPDNN_WRAPPER"
+            exit 1
+          }
+          # The packaged test list is written separately from the build tree's and
+          # is what ships, so it gets the same pair of checks.
+          packaged=test/gtest/install_CTestTestfile.cmake
+          if grep -q forwarding_parity "parity-off/$packaged"; then
+            echo "the packaged test list registers the harness without MIOPEN_ENABLE_HIPDNN_WRAPPER"
+            exit 1
+          fi
+          grep -q forwarding_parity "parity-on/$packaged" || {
+            echo "the packaged test list is missing the harness with MIOPEN_ENABLE_HIPDNN_WRAPPER on"
+            exit 1
+          }
+
       # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
       # exported public C API symbol set, and no _impl symbol leakage. This is a
       # symbol-level check -- signatures, struct layout and behaviour are outside

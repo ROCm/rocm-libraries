@@ -135,6 +135,10 @@ public:
         ON_CALL(*this, hasNonDefaultTensorAlignment()).WillByDefault(::testing::Invoke([this]() {
             return this->GraphDescriptor::hasNonDefaultTensorAlignment();
         }));
+        // Same rationale as hasRaggedTensors above, for the ragged-offset-multiplier floor.
+        ON_CALL(*this, hasRaggedOffsetMultiplier()).WillByDefault(::testing::Invoke([this]() {
+            return this->GraphDescriptor::hasRaggedOffsetMultiplier();
+        }));
     }
 
     MOCK_METHOD(void, finalize, (), (override));
@@ -160,6 +164,7 @@ public:
     MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
     MOCK_METHOD(bool, hasRaggedTensors, (), (const, override));
     MOCK_METHOD(bool, hasNonDefaultTensorAlignment, (), (const, override));
+    MOCK_METHOD(bool, hasRaggedOffsetMultiplier, (), (const, override));
     MOCK_METHOD(bool, isRuntimePassByValueEnabled, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()

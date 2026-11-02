@@ -112,6 +112,169 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->kv_storage_dtype = NULL;
         s->use_i64_kv_addr = true;
         break;
+    case 6:
+        /* All-decode grid (seq_idx = block_id_x, no search). Decode-shaped GQA. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        break;
+    case 7:
+        /* All-decode grid at NQK=16 (BLOCK_Q=1) with fp8 KV and sinks. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 1;
+        s->dtype = "bf16";
+        s->num_segments = 32;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_decode_grid = true;
+        break;
+    case 8:
+        /* Multi-page KV tile T=32 over 16-token pages (page-id loader), decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 128;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 32;
+        s->use_decode_grid = true;
+        break;
+    case 9:
+        /* Multi-page T=64 over 16-token pages with 64-bit paged-KV addressing. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 64;
+        s->use_i64_kv_addr = true;
+        break;
+    case 10:
+        /* Decode grid with streaming (NT) K/V copies, as dispatched for decode. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
+    case 11:
+        /* Multi-page T=32 with 64-bit paged-KV addressing and NT K/V copies. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 32;
+        s->use_i64_kv_addr = true;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
+    case 12:
+        /* Single-sequence decode policy: T=64, 64 segments, swizzled K/V LDS. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 64;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 64;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->use_kv_lds_swizzle = true;
+        break;
+    case 13:
+        /* D256 swizzled K/V LDS with 64-bit paged-KV addressing, sinks, softcap. */
+        s->head_size = 256;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = true;
+        s->kv_storage_dtype = NULL;
+        s->use_i64_kv_addr = true;
+        s->use_kv_lds_swizzle = true;
+        break;
+    case 14:
+        /* Batched decode with the wave page-id load (64-page id window). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->use_wave_page_id_load = true;
+        break;
+    case 15:
+        /* 64-token tiles, swizzled K/V LDS, wave page-id load, 64-bit paged-KV
+         * addressing and sinks. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 64;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 64;
+        s->use_i64_kv_addr = true;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->use_kv_lds_swizzle = true;
+        s->use_wave_page_id_load = true;
+        break;
     default:
         return -1;
     }

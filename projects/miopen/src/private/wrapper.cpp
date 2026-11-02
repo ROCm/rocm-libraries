@@ -35,9 +35,16 @@
 #endif
 
 #include <miopen/miopen.h>
+// Without this header's MIOPEN_EXPORT declaration, hidden visibility would leave
+// miopenGetLastForwardedError unexported.
+#include <miopen/hipdnn_forwarding.h>
 
+#include "hipdnn_conv.hpp"
+#include "hipdnn_graph.hpp"
 #include "miopen_impl.h"
 #include "routing.hpp"
+
+#include <string>
 
 #ifdef miopenCreate
 #error "miopen_private_rename.h leaked into the public wrapper"
@@ -47,12 +54,33 @@ namespace {
 // Placeholder hipDNN path, replaced per entry point by an op-specific forwarding
 // function as those land. Until then an op added to the forwarding set without
 // an implementation fails loudly here instead of silently running MIOpen.
-miopenStatus_t forward_to_hipdnn(const char* /*entryPoint*/) { return miopenStatusNotImplemented; }
+miopenStatus_t forward_to_hipdnn(const char* entryPoint)
+{
+    return ::miopen::wrapper::hipdnn::RecordFailure(
+        miopenStatusNotImplemented,
+        std::string(entryPoint) + " is in the forwarding set but has no hipDNN implementation");
+}
 } // namespace
 
 extern "C" const char* miopenGetErrorString(miopenStatus_t error)
 {
-    return miopenGetErrorString_impl(error);
+    const char* const native = miopenGetErrorString_impl(error);
+    // A forwarded failure and the same status raised by MIOpen itself are
+    // otherwise indistinguishable, which makes a hipDNN problem look like an
+    // MIOpen one.
+    if(const char* const forwarded = ::miopen::wrapper::hipdnn::PrefixedErrorString(error, native))
+        return forwarded;
+    return native;
+}
+
+// No dispatch macro: its MIOpen route would clear the state read here.
+extern "C" miopenStatus_t miopenGetLastForwardedError(miopenStatus_t* forwardedStatus)
+{
+    if(forwardedStatus == nullptr)
+        return miopenStatusBadParm;
+    if(!::miopen::wrapper::hipdnn::LastForwardedFailure(forwardedStatus))
+        *forwardedStatus = miopenStatusSuccess;
+    return miopenStatusSuccess;
 }
 
 extern "C" miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size_t* patch)
@@ -76,6 +104,10 @@ extern "C" miopenStatus_t miopenCreateWithStream(miopenHandle_t* handle,
 
 extern "C" miopenStatus_t miopenDestroy(miopenHandle_t handle)
 {
+    // Unconditional, and before the dispatch hook: this handle may have been
+    // forwarded earlier in the process, even if miopenDestroy itself is never on
+    // the hipDNN route.
+    ::miopen::wrapper::hipdnn::ReleaseHandle(handle);
     MIOPEN_WRAPPER_DISPATCH(miopenDestroy);
     return miopenDestroy_impl(handle);
 }
@@ -719,7 +751,20 @@ extern "C" miopenStatus_t miopenConvolutionForward(miopenHandle_t handle,
                                                    void* workSpace,
                                                    size_t workSpaceSize)
 {
-    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionForward);
+    MIOPEN_WRAPPER_FORWARD(miopenConvolutionForward,
+                           ::miopen::wrapper::hipdnn::ConvolutionForward(handle,
+                                                                         alpha,
+                                                                         xDesc,
+                                                                         x,
+                                                                         wDesc,
+                                                                         w,
+                                                                         convDesc,
+                                                                         algo,
+                                                                         beta,
+                                                                         yDesc,
+                                                                         y,
+                                                                         workSpace,
+                                                                         workSpaceSize));
     return miopenConvolutionForward_impl(handle,
                                          alpha,
                                          xDesc,
@@ -808,7 +853,20 @@ miopenConvolutionBackwardData(miopenHandle_t handle,
                               void* workSpace,
                               size_t workSpaceSize)
 {
-    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionBackwardData);
+    MIOPEN_WRAPPER_FORWARD(miopenConvolutionBackwardData,
+                           ::miopen::wrapper::hipdnn::ConvolutionBackwardData(handle,
+                                                                              alpha,
+                                                                              dyDesc,
+                                                                              dy,
+                                                                              wDesc,
+                                                                              w,
+                                                                              convDesc,
+                                                                              algo,
+                                                                              beta,
+                                                                              dxDesc,
+                                                                              dx,
+                                                                              workSpace,
+                                                                              workSpaceSize));
     return miopenConvolutionBackwardData_impl(handle,
                                               alpha,
                                               dyDesc,
@@ -885,7 +943,20 @@ miopenConvolutionBackwardWeights(miopenHandle_t handle,
                                  void* workSpace,
                                  size_t workSpaceSize)
 {
-    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionBackwardWeights);
+    MIOPEN_WRAPPER_FORWARD(miopenConvolutionBackwardWeights,
+                           ::miopen::wrapper::hipdnn::ConvolutionBackwardWeights(handle,
+                                                                                 alpha,
+                                                                                 dyDesc,
+                                                                                 dy,
+                                                                                 xDesc,
+                                                                                 x,
+                                                                                 convDesc,
+                                                                                 algo,
+                                                                                 beta,
+                                                                                 dwDesc,
+                                                                                 dw,
+                                                                                 workSpace,
+                                                                                 workSpaceSize));
     return miopenConvolutionBackwardWeights_impl(handle,
                                                  alpha,
                                                  dyDesc,
@@ -2297,7 +2368,26 @@ miopenConvolutionBiasActivationForward(miopenHandle_t handle,
                                        const miopenTensorDescriptor_t yDesc,
                                        void* y)
 {
-    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionBiasActivationForward);
+    MIOPEN_WRAPPER_FORWARD(
+        miopenConvolutionBiasActivationForward,
+        ::miopen::wrapper::hipdnn::ConvolutionBiasActivationForward(handle,
+                                                                    alpha1,
+                                                                    xDesc,
+                                                                    x,
+                                                                    wDesc,
+                                                                    w,
+                                                                    convDesc,
+                                                                    algo,
+                                                                    workspace,
+                                                                    workspaceSizeInBytes,
+                                                                    alpha2,
+                                                                    zDesc,
+                                                                    z,
+                                                                    biasDesc,
+                                                                    bias,
+                                                                    activationDesc,
+                                                                    yDesc,
+                                                                    y));
     return miopenConvolutionBiasActivationForward_impl(handle,
                                                        alpha1,
                                                        xDesc,
