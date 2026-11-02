@@ -687,7 +687,6 @@ void testing_bdsqr(Arguments& argus)
     argus.validate_consumed();
 }
 
-
 // Regression test for GitHub issue #12188: out-of-bounds memory access in
 // bdsqr_update_endpoints, observed as a SIGSEGV/illegal-address fault when
 // solving a 3x3 upper bidiagonal matrix.
