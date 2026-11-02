@@ -1625,7 +1625,7 @@ def build_nvfp4_gemm_case(dtype, k):
         )
 
         return build_nvfp4_gemm(
-            NvFp4GemmSpec(f"irhash_nvfp4_{dtype}_k{k}", 32, 48, k, dtype),
+            NvFp4GemmSpec(f"irhash_nvfp4_{dtype}", 32, 48, k, dtype),
             arch="gfx1250",
         )
 

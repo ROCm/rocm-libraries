@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import re
 import warnings
 
 import numpy as np
@@ -45,6 +46,39 @@ def test_nvfp4_golden(case, sha):
     kernel = build_nvfp4_gemm(NvFp4GemmSpec("golden", 32, 48, int(k), dtype))
     llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
     assert hashlib.sha256(llvm.encode()).hexdigest() == sha
+
+
+@pytest.mark.parametrize("tensor_scale", [False, True])
+@pytest.mark.parametrize("prefetch", [False, True])
+def test_block_scaled_name_tracks_codegen_not_grid(tensor_scale, prefetch):
+    spec = replace(
+        NvFp4GemmSpec("identity", 32, 48, 128).block_spec(),
+        tensor_scale=tensor_scale,
+        prefetch=prefetch,
+    )
+
+    def normalized_llvm(candidate):
+        kernel = build_block_scaled_gemm(candidate)
+        return lower_kernel_to_llvm(
+            kernel, arch="gfx1250", llvm_flavor="llvm24"
+        ).replace(kernel.name, "normalized")
+
+    baseline = normalized_llvm(spec)
+    larger_grid = replace(spec, M=64)
+    assert spec.kernel_name() == larger_grid.kernel_name()
+    assert baseline == normalized_llvm(larger_grid)
+    assert not re.search(r"M\d+N\d+K\d+", spec.kernel_name())
+    for specialized in (replace(spec, N=64), replace(spec, K=256)):
+        assert spec.kernel_name() != specialized.kernel_name()
+        assert baseline != normalized_llvm(specialized)
+
+
+def test_software_block_scaled_name_excludes_grid_only_dimension():
+    spec = BlockScaledGemmSpec("identity", 32, 48, 128)
+    other = replace(spec, M=64)
+    assert spec.kernel_name() == other.kernel_name()
+    for candidate in (replace(spec, N=64), replace(spec, K=256)):
+        assert spec.kernel_name() != candidate.kernel_name()
 
 
 def test_nvfp4_output_type_has_distinct_name():

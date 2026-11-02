@@ -29,7 +29,12 @@ from ...core.ir import (
 )
 from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_ir_type
 from ...core.storage import BitPacking
-from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+from ...helpers.spec import (
+    SignatureBuilder,
+    ceil_div_grid,
+    kernel_name_join,
+    salted_kernel_name,
+)
 
 _LOWBIT_FORMATS = {
     "fp8e4m3": "fp8",
@@ -136,12 +141,11 @@ class BlockScaledGemmSpec:
         return _WAVE
 
     def kernel_name(self) -> str:
-        return kernel_name_join(
+        base = kernel_name_join(
             self.name,
             "block_scaled",
             f"{_canon_lowbit(self.dtype_a)}_{_canon_lowbit(self.dtype_b)}",
             f"out_{normalize_dtype(self.dtype_c)}",
-            f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
             flags={
@@ -153,9 +157,12 @@ class BlockScaledGemmSpec:
                     if self.resolved_matrix_path() in ("wmma_scale", "wmma_scale16")
                     and dtype != "e8m0"
                 },
-                "pf": self.prefetch,
             },
         )
+        # N specializes addressing and K specializes the unrolled instruction
+        # sequence. M affects only launch geometry, not the generated body.
+        specialized = salted_kernel_name(base, (("N", self.N), ("K", self.K)))
+        return kernel_name_join(specialized, flags={"pf": self.prefetch})
 
     def resolved_matrix_path(self) -> str:
         # "auto" and the legacy "wmma_scaffold" token both resolve to the real
