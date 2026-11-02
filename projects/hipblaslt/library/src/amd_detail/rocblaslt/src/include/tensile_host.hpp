@@ -223,7 +223,8 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
 
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
- * rocblaslt_matmul_heuristic_result                                           *
+ * rocblaslt_matmul_heuristic_result. problemUpdated says gemmData's problem   *
+ * is already what updateTensileProblem makes from prob.                       *
  *******************************************************************************/
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
@@ -231,7 +232,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes);
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool                               problemUpdated = false);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,

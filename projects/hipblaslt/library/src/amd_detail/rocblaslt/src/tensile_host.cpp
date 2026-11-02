@@ -5768,6 +5768,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // Built by whichever of replay and the tuner needs it first.
         std::optional<TensileLite::ProblemOverride> tuningKey;
 
+        // Whether data->problem is already what updateTensileProblem makes of prob.
+        bool problemUpdated = false;
+
         if(!callerSuppliedAlgo && keyed)
         {
             // Cache replay for a call that passed no algo. hipblasLtMatmul
@@ -5783,6 +5786,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // Replay looks the call up by its Tensile problem, which the
                 // launch needs anyway.
                 updateTensileProblem(prob, data->problem);
+                problemUpdated = true;
 
                 // A miss that may go on to tune is counted by the tuner, by
                 // what the call finds once it can tune.
@@ -5801,7 +5805,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // The cache is an optimisation: a lookup that throws leaves the
                 // call on default selection rather than failing it.
                 static_cast<void>(hipGetLastError());
-                algo = nullptr;
+                algo           = nullptr;
+                problemUpdated = false;
             }
         }
         const bool replayed = !callerSuppliedAlgo && algo != nullptr;
@@ -5809,14 +5814,22 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(algo == nullptr)
         {
             int returnAlgoCount = 0;
-            status = getBestSolutions(
-                prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
+            status              = getBestSolutions(prob,
+                                      handle,
+                                      gemmData,
+                                      1,
+                                      &heuristicResult,
+                                      &returnAlgoCount,
+                                      prob.workspaceSize,
+                                      problemUpdated);
             if(returnAlgoCount == 0)
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
         }
-        // Replay has already made data->problem what this would.
-        if(replayed)
+        // Replay has already made data->problem what this would, and default
+        // selection leaves it so, except when it retries an XF32 problem as FP32.
+        if(replayed
+           || (problemUpdated && prob.compute_type != rocblaslt_compute_f32_fast_xf32))
             assert(isUpdatedFrom(prob, data->problem));
         else
             updateTensileProblem(prob, data->problem);
@@ -7497,7 +7510,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes)
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool                               problemUpdated)
 {
     *returnAlgoCount = 0;
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -7531,7 +7545,10 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     }
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    updateTensileProblem(prob, data->problem);
+    if(problemUpdated)
+        assert(isUpdatedFrom(prob, data->problem));
+    else
+        updateTensileProblem(prob, data->problem);
 
     bool enableEpilogue = prob.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
 
