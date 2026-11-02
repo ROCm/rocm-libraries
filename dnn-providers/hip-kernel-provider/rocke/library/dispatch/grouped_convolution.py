@@ -1184,9 +1184,21 @@ def format_instance_list(lst: InstanceList) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: Directions whose default (no-``ranker``) pick is the deterministic
+#: sorted-by-label order :func:`_instance_sort_key` defines, rather than the
+#: list file's on-disk order. Scoped to dgrad only: fwd's default pick is a
+#: hand-tuned family preference (e.g. #14628's windowed depthwise kernel
+#: sorting first in its catalog) that label order does not reproduce, and
+#: re-deriving it needs fresh measurement this change does not make.
+_SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad"})
+
+
 def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]:
-    """The registered instances of ``(arch, direction)``: a set, sorted by
-    :func:`_instance_sort_key` for a deterministic default order.
+    """The registered instances of ``(arch, direction)``.
+
+    For a direction in :data:`_SET_SEMANTICS_DIRECTIONS`, a set sorted by
+    :func:`_instance_sort_key` for a deterministic default order; otherwise
+    the list file's own on-disk order (its unwritten priority table).
 
     Fails at import rather than at a first request: a list that does not
     load, or that declares another arch or direction than it is registered
@@ -1199,7 +1211,9 @@ def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]
             f"{path.name}: declares {lst.arch} {lst.direction}, "
             f"registered as {arch} {direction}"
         )
-    return tuple(sorted(lst.identities, key=_instance_sort_key))
+    if direction in _SET_SEMANTICS_DIRECTIONS:
+        return tuple(sorted(lst.identities, key=_instance_sort_key))
+    return tuple(lst.identities)
 
 
 _CONV_DIM_VOCABULARY = (
