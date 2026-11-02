@@ -509,6 +509,8 @@ namespace
 
                 if(arg.c_equal_d)
                     name << "_C_EQUAL_D";
+                if(arg.timing)
+                    name << "_TIMING";
                 if(arg.placement[0])
                     name << "_PLACE_" << arg.placement;
                 if(arg.integer_exact_pattern[0])

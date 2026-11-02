@@ -52,7 +52,7 @@ dropping files in a folder.
 Two filters decide what a build packs, and both prune exactly as arch pruning does:
 
 - **Family folders.** A descriptor family lives in a top-level child folder of a root
-  (`rocKE/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
+  (`rocKE/` and `FlyDSL/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
   `HkpPackaging.cmake` maps each switchable folder to the option that enables it, and a
   family whose option is OFF is passed as `--exclude-folder <name>`: its files are
   never read, under every root. A new family is one entry in that table. A folder is
