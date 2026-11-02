@@ -16,6 +16,7 @@ Documentation for hipSPARSE is available at
 * Removed the no-op `deps` CMake project and the unused `deps/external-gtest.cmake`.
 
 ### Resolved issues
+* The API documentation now states the memory space of scalar pointer arguments that did not have one: `alpha` and `beta`, `tol` and `boost_val` of `hipsparseXcsrilu02_numericBoost` and `hipsparseXbsrilu02_numericBoost`, and `nnzTotalDevHostPtr` of `hipsparseXcsrgemm2Nnz` can be in host or device memory, while the buffer size outputs and `fractionToColor` and `ncolors` of `hipsparseXcsrcolor` are always host variables, regardless of the pointer mode.
 * Fixed an integer overflow in `hipsparseXcsr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion.
 
 ## hipSPARSE 4.8.0 for ROCm 10.1

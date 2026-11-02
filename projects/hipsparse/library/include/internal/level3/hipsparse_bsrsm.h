@@ -103,6 +103,7 @@ hipsparseStatus_t
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *              \ref hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()" and
 *              \ref hipsparseSbsrsm2_solve "hipsparseXbsrsm2_solve()".
 *
@@ -525,7 +526,7 @@ hipsparseStatus_t hipsparseZbsrsm2_analysis(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb             number of non-zero blocks of the sparse BSR matrix \f$A\f$.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA           descriptor of the sparse BSR matrix \f$A\f$.
 *  @param[in]

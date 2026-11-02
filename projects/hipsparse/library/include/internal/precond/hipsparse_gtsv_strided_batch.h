@@ -56,6 +56,7 @@ extern "C" {
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p batchStride, \p dl,
