@@ -376,7 +376,8 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
                              const std::vector<int64_t>& dxDims,
                              const std::vector<int64_t>& padding,
                              const std::vector<int64_t>& convStride,
-                             const std::vector<int64_t>& dilation)
+                             const std::vector<int64_t>& dilation,
+                             const std::vector<int64_t>& postPaddingOverride = {})
 {
     constexpr int64_t DY_UID = 10;
     constexpr int64_t W_UID = 11;
@@ -386,19 +387,25 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
     auto wStrides = generateStrides(wDims);
     auto dxStrides = generateStrides(dxDims);
 
-    auto graphBuilder = createConvBwdGraph(DY_UID,
-                                           W_UID,
-                                           DX_UID,
-                                           dyDims,
-                                           wDims,
-                                           dxDims,
-                                           dyStrides,
-                                           wStrides,
-                                           dxStrides,
-                                           padding,
-                                           convStride,
-                                           dilation,
-                                           hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
+    // An empty override means symmetric padding.
+    const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
+
+    auto graphBuilder
+        = createConvBwdGraphWithPadding(DY_UID,
+                                        W_UID,
+                                        DX_UID,
+                                        dyDims,
+                                        wDims,
+                                        dxDims,
+                                        dyStrides,
+                                        wStrides,
+                                        dxStrides,
+                                        padding,
+                                        postPadding,
+                                        convStride,
+                                        dilation,
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
 
     auto dyCount = elementCount(dyDims);
     auto wCount = elementCount(wDims);
@@ -471,7 +478,8 @@ void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
                              const std::vector<int64_t>& dwDims,
                              const std::vector<int64_t>& padding,
                              const std::vector<int64_t>& convStride,
-                             const std::vector<int64_t>& dilation)
+                             const std::vector<int64_t>& dilation,
+                             const std::vector<int64_t>& postPaddingOverride = {})
 {
     constexpr int64_t X_UID = 10;
     constexpr int64_t DY_UID = 11;
@@ -481,19 +489,25 @@ void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
     auto dyStrides = generateStrides(dyDims);
     auto dwStrides = generateStrides(dwDims);
 
-    auto graphBuilder = createConvWrwGraph(X_UID,
-                                           DY_UID,
-                                           DW_UID,
-                                           xDims,
-                                           dyDims,
-                                           dwDims,
-                                           xStrides,
-                                           dyStrides,
-                                           dwStrides,
-                                           padding,
-                                           convStride,
-                                           dilation,
-                                           hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
+    // An empty override means symmetric padding.
+    const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
+
+    auto graphBuilder
+        = createConvWrwGraphWithPadding(X_UID,
+                                        DY_UID,
+                                        DW_UID,
+                                        xDims,
+                                        dyDims,
+                                        dwDims,
+                                        xStrides,
+                                        dyStrides,
+                                        dwStrides,
+                                        padding,
+                                        postPadding,
+                                        convStride,
+                                        dilation,
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
 
     auto xCount = elementCount(xDims);
     auto dyCount = elementCount(dyDims);
@@ -952,6 +966,22 @@ TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdStride2Executes)
         {1, 2, 3, 3}, {2, 1, 3, 3}, {1, 1, 8, 8}, {0, 0}, {2, 2}, {1, 1});
 }
 
+TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdDilationExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<float>(
+        {1, 3, 4, 4}, {3, 2, 3, 3}, {1, 2, 6, 6}, {1, 1}, {1, 1}, {2, 2});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvBwdAsymmetricPaddingExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvBwdExecutorVsCpu<float>(
+        {1, 3, 6, 5}, {3, 2, 3, 3}, {1, 2, 6, 6}, {2, 0}, {1, 1}, {1, 1}, {0, 1});
+}
+
 TEST(TestGpuReferenceGraphExecutorFp16, ConvBwdExecutes)
 {
     SKIP_IF_NO_DEVICES();
@@ -990,6 +1020,22 @@ TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwStride2Executes)
 
     runConvWrwExecutorVsCpu<float>(
         {1, 1, 8, 8}, {1, 2, 3, 3}, {2, 1, 3, 3}, {0, 0}, {2, 2}, {1, 1});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwDilationExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<float>(
+        {1, 2, 6, 6}, {1, 3, 4, 4}, {3, 2, 3, 3}, {1, 1}, {1, 1}, {2, 2});
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwAsymmetricPaddingExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runConvWrwExecutorVsCpu<float>(
+        {1, 2, 6, 6}, {1, 3, 6, 5}, {3, 2, 3, 3}, {2, 0}, {1, 1}, {1, 1}, {0, 1});
 }
 
 TEST(TestGpuReferenceGraphExecutorFp16, ConvWrwExecutes)

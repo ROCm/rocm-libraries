@@ -12,24 +12,23 @@
 namespace hipdnn_integration_tests::test_utils
 {
 
-// Creates a minimal graph with a ConvolutionWrw node and separate input/output data types.
-// Uses symmetric padding (prePadding == postPadding == padding).
-// inputDataType applies to x and dy tensors; outputDataType applies to dw tensor.
+// Same as createConvWrwGraph but with separate prePadding and postPadding.
 inline flatbuffers::FlatBufferBuilder
-    createConvWrwGraph(int64_t xUid,
-                       int64_t dyUid,
-                       int64_t dwUid,
-                       const std::vector<int64_t>& xDims,
-                       const std::vector<int64_t>& dyDims,
-                       const std::vector<int64_t>& dwDims,
-                       const std::vector<int64_t>& xStrides,
-                       const std::vector<int64_t>& dyStrides,
-                       const std::vector<int64_t>& dwStrides,
-                       const std::vector<int64_t>& padding,
-                       const std::vector<int64_t>& convStride,
-                       const std::vector<int64_t>& dilation,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType)
+    createConvWrwGraphWithPadding(int64_t xUid,
+                                  int64_t dyUid,
+                                  int64_t dwUid,
+                                  const std::vector<int64_t>& xDims,
+                                  const std::vector<int64_t>& dyDims,
+                                  const std::vector<int64_t>& dwDims,
+                                  const std::vector<int64_t>& xStrides,
+                                  const std::vector<int64_t>& dyStrides,
+                                  const std::vector<int64_t>& dwStrides,
+                                  const std::vector<int64_t>& prePadding,
+                                  const std::vector<int64_t>& postPadding,
+                                  const std::vector<int64_t>& convStride,
+                                  const std::vector<int64_t>& dilation,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -47,8 +46,8 @@ inline flatbuffers::FlatBufferBuilder
                                                              xUid,
                                                              dyUid,
                                                              dwUid,
-                                                             &padding,
-                                                             &padding,
+                                                             &prePadding,
+                                                             &postPadding,
                                                              &convStride,
                                                              &dilation,
                                                              ConvMode::CROSS_CORRELATION);
@@ -70,6 +69,42 @@ inline flatbuffers::FlatBufferBuilder
 
     builder.Finish(graph);
     return builder;
+}
+
+// Creates a minimal graph with a ConvolutionWrw node and separate input/output data types.
+// Uses symmetric padding (prePadding == postPadding == padding).
+// inputDataType applies to x and dy tensors; outputDataType applies to dw tensor.
+inline flatbuffers::FlatBufferBuilder
+    createConvWrwGraph(int64_t xUid,
+                       int64_t dyUid,
+                       int64_t dwUid,
+                       const std::vector<int64_t>& xDims,
+                       const std::vector<int64_t>& dyDims,
+                       const std::vector<int64_t>& dwDims,
+                       const std::vector<int64_t>& xStrides,
+                       const std::vector<int64_t>& dyStrides,
+                       const std::vector<int64_t>& dwStrides,
+                       const std::vector<int64_t>& padding,
+                       const std::vector<int64_t>& convStride,
+                       const std::vector<int64_t>& dilation,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType)
+{
+    return createConvWrwGraphWithPadding(xUid,
+                                         dyUid,
+                                         dwUid,
+                                         xDims,
+                                         dyDims,
+                                         dwDims,
+                                         xStrides,
+                                         dyStrides,
+                                         dwStrides,
+                                         padding,
+                                         padding,
+                                         convStride,
+                                         dilation,
+                                         inputDataType,
+                                         outputDataType);
 }
 
 // Convenience overload: single dataType used for all tensors (x, dy, and dw).

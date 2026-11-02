@@ -73,7 +73,8 @@ void runWrwPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
                                const std::vector<int64_t>& dwDims,
                                const std::vector<int64_t>& padding,
                                const std::vector<int64_t>& stride,
-                               const std::vector<int64_t>& dilation)
+                               const std::vector<int64_t>& dilation,
+                               const std::vector<int64_t>& postPaddingOverride = {})
 {
     constexpr int64_t X_UID = 1;
     constexpr int64_t DY_UID = 2;
@@ -83,21 +84,25 @@ void runWrwPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
     auto dyStrides = generateStrides(dyDims);
     auto dwStrides = generateStrides(dwDims);
 
+    // An empty override means symmetric padding.
+    const auto& postPadding = postPaddingOverride.empty() ? padding : postPaddingOverride;
+
     auto graphBuilder
-        = createConvWrwGraph(X_UID,
-                             DY_UID,
-                             DW_UID,
-                             xDims,
-                             dyDims,
-                             dwDims,
-                             xStrides,
-                             dyStrides,
-                             dwStrides,
-                             padding,
-                             stride,
-                             dilation,
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<XType>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<DwType>());
+        = createConvWrwGraphWithPadding(X_UID,
+                                        DY_UID,
+                                        DW_UID,
+                                        xDims,
+                                        dyDims,
+                                        dwDims,
+                                        xStrides,
+                                        dyStrides,
+                                        dwStrides,
+                                        padding,
+                                        postPadding,
+                                        stride,
+                                        dilation,
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<XType>(),
+                                        hipdnn_test_sdk::utilities::nativeTypeToDataType<DwType>());
 
     auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -109,7 +114,7 @@ void runWrwPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
                                        *tensorMap.at(nodeAttributes->dy_tensor_uid()),
                                        *tensorMap.at(nodeAttributes->dw_tensor_uid()),
                                        padding,
-                                       padding,
+                                       postPadding,
                                        stride,
                                        dilation,
                                        ConvMode::CROSS_CORRELATION);
@@ -502,6 +507,22 @@ TEST(TestGpuConvolutionWrwPlan, ExecutePlanStride2)
 
     runWrwPlanExecuteVsCpuRef<float, float, float, float>(
         {1, 1, 8, 8}, {1, 2, 3, 3}, {2, 1, 3, 3}, {0, 0}, {2, 2}, {1, 1});
+}
+
+TEST(TestGpuConvolutionWrwPlan, ExecutePlanDilation)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runWrwPlanExecuteVsCpuRef<float, float, float, float>(
+        {1, 2, 6, 6}, {1, 3, 4, 4}, {3, 2, 3, 3}, {1, 1}, {1, 1}, {2, 2});
+}
+
+TEST(TestGpuConvolutionWrwPlan, ExecutePlanAsymmetricPadding)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runWrwPlanExecuteVsCpuRef<float, float, float, float>(
+        {1, 2, 6, 6}, {1, 3, 6, 5}, {3, 2, 3, 3}, {2, 0}, {1, 1}, {1, 1}, {0, 1});
 }
 
 // ============================================================================
