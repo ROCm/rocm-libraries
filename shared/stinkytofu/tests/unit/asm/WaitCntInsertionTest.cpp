@@ -413,6 +413,68 @@ TEST_F(WaitCntInsertionTest, WmmaRunGetsOneMergedWait) {
     }
 }
 
+// mergeDsWaitsPerWmmaGroup: every N WMMAs that each have their own dscnt wait share one,
+// before the first; ds_loads between them lower the later counts. A WMMA with no wait
+// ends the group, and a group shorter than N keeps its own waits.
+TEST_F(WaitCntInsertionTest, WmmaGroupGetsOneMergedDsWait) {
+    std::string loads;
+    for (int i = 0; i < 12; ++i)
+        loads += "  v[" + std::to_string(i * 8) + ":" + std::to_string(i * 8 + 3) +
+                 "] = \"st.ds_load_b128\"(v200) { issueCycles = 1, latencyCycles = 56 }\n";
+    auto wmma = [](int src, int acc) {
+        return "  a[" + std::to_string(acc) + ":" + std::to_string(acc + 7) +
+               "] = \"st.v_wmma_f32_16x16x32_bf16\"(v[" + std::to_string(src) + ":" +
+               std::to_string(src + 7) + "], v[100:107], a[" + std::to_string(acc) + ":" +
+               std::to_string(acc + 7) + "]) { issueCycles = 1, latencyCycles = 8 }\n";
+    };
+    const std::string valu =
+        "  v60 = \"st.v_add_f32\"(v61, v62) { issueCycles = 1, latencyCycles = 1 }\n";
+    const std::string dsLoads2 =
+        "  v[120:123] = \"st.ds_load_b128\"(v200) { issueCycles = 1, latencyCycles = 56 }\n"
+        "  v[124:127] = \"st.ds_load_b128\"(v200) { issueCycles = 1, latencyCycles = 56 }\n";
+    // WMMA k reads load k. Two ds_loads issue after the second WMMA.
+    std::string run9 = wmma(0, 0) + valu + wmma(8, 8) + dsLoads2;
+    for (int k = 2; k < 9; ++k) run9 += wmma(k * 8, k * 8);
+    // A WMMA that reads no load needs no wait and ends the group.
+    const std::string noWait =
+        "  a[200:207] = \"st.v_wmma_f32_16x16x32_bf16\"(v[100:107], "
+        "v[100:107], a[200:207]) { issueCycles = 1, latencyCycles = 8 }\n";
+    std::string broken = wmma(0, 0) + wmma(8, 8) + noWait;
+    for (int k = 2; k < 6; ++k) broken += wmma(k * 8, k * 8);
+
+    struct Case {
+        std::string body;
+        int groupSize;
+        std::vector<std::pair<int, int>> waits;  // (WMMA index the wait precedes, dlcnt)
+    };
+    const std::vector<Case> cases = {
+        {run9, 0, {{0, 11}, {1, 10}, {2, 11}, {3, 10}, {4, 9}, {5, 8}, {6, 7}, {7, 6}, {8, 5}}},
+        // W0..W3: min(11, 10, 11 - 2, 10 - 2) = 8. W4..W7: 6. W8 alone keeps its 5.
+        {run9, 4, {{0, 8}, {4, 6}, {8, 5}}},
+        {broken, 4, {{0, 11}, {1, 10}, {3, 6}}},
+    };
+    for (const Case& c : cases) {
+        StinkyIRConverter converter(getArch());
+        auto* func = parseIR("st.func @t() {\n^entry:\n" + loads + c.body + "}\n", converter);
+        ASSERT_NE(func, nullptr);
+        WaitCntInsertionOptions options;
+        options.mergeDsWaitsPerWmmaGroup = c.groupSize;
+        runInsertionPass(*func, options);
+
+        BasicBlock& bb = *func->begin();
+        auto waitcnts = getAllWaitCnts(bb);
+        ASSERT_EQ(waitcnts.size(), c.waits.size()) << "groupSize=" << c.groupSize;
+        for (size_t i = 0; i < c.waits.size(); ++i) {
+            StinkyInstruction* w = findNthInst(bb, GFX::v_wmma_f32_16x16x32_bf16, c.waits[i].first);
+            ASSERT_NE(w, nullptr);
+            EXPECT_EQ(waitcnts[i].position, getInstructionPosition(bb, w) - 1)
+                << "groupSize=" << c.groupSize << " wait " << i;
+            EXPECT_EQ(waitcnts[i].waitData->dlcnt, c.waits[i].second)
+                << "groupSize=" << c.groupSize << " wait " << i;
+        }
+    }
+}
+
 TEST_F(WaitCntInsertionTest, WaitCountIsCappedAtMaxInFlightMinusOne) {
     std::string irString = R"(
 st.func @test_wait_count_cap() {

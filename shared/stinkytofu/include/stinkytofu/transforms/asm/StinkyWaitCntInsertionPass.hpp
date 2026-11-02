@@ -42,6 +42,9 @@ struct WaitCntInsertionOptions {
     /// With mergeWaitsInWmmaRuns, also merge the waits of WMMAs marked WmmaForcedBurstData.
     /// Default true: one wait before the forced burst. False keeps one wait per forced-burst WMMA.
     bool mergeWaitsInForcedWmmaBursts = true;
+    /// Every N WMMAs in a row that each have their own s_wait_dscnt share one
+    /// dscnt wait before the first of them (see WmmaGroupDsWaitMerge). 0 = off.
+    int mergeDsWaitsPerWmmaGroup = 0;
 };
 
 /**

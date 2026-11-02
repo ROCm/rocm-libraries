@@ -158,6 +158,7 @@
     X(QueueStartMinWmmaBurst, int, -1) /* forced burst min WMMAs: 1..depth, -1 = depth */          \
     X(QueueStartCalibratedIssueCycles, int, 0) /* forced burst: cycles per pick; 0 = off */        \
     X(MergeDscnt, bool, true) /* forced burst: one wait before the run; false = one per WMMA */    \
+    X(MergeDscntWmmaGroup, int, 0) /* N WMMAs each with a dscnt: one dscnt before the first */     \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(SpecifiedClusterLoop, int, 0)                                                                \

@@ -230,6 +230,8 @@ const std::vector<PassInfo> availablePasses = {
          WaitCntInsertionOptions options;
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
          options.mergeWaitsInWmmaRuns = hasPassArg(args, "mergeWaitsInWmmaRuns");
+         options.mergeDsWaitsPerWmmaGroup =
+             std::stoi(passArgValue(args, "mergeDscntWmmaGroup", "0"));
          return createStinkyWaitCntInsertionPass(options);
      }},
     // Gfx1250HazardPass accepts:

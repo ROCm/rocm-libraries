@@ -15,7 +15,9 @@
 //      via forward dataflow with per-pred queues.
 //   3. ShallowPredPromotion (and any other WaitPlanOptimizer) may relax
 //      anchor waits by recording predecessor tail drains; WmmaRunWaitMerge
-//      (when enabled) moves the waits of a WMMA run onto its first WMMA.
+//      (when enabled) moves the waits of a WMMA run onto its first WMMA;
+//      WmmaGroupDsWaitMerge (when enabled) gives each group of N WMMAs one
+//      dscnt wait.
 //   4. finalizePlan() replays blocks against the final plan (all counters)
 //      with tail-drain-aware entry state so later anchors stay correct.
 //   5. emitWaits() materialises the plan as s_wait_* IR nodes.
@@ -37,6 +39,7 @@
 #include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlan.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlanOptimizer.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/WmmaGroupDsWaitMerge.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WmmaRunWaitMerge.hpp"
 
 #define DEBUG_TYPE "StinkyWaitCntInsertionPass"
@@ -84,8 +87,10 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
         ShallowPredPromotion shallowPred;
         WmmaRunWaitMerge wmmaRunMerge(options.mergeWaitsInForcedWmmaBursts);
+        WmmaGroupDsWaitMerge wmmaGroupDsMerge(options.mergeDsWaitsPerWmmaGroup);
         std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred};
         if (options.mergeWaitsInWmmaRuns) optimizers.push_back(&wmmaRunMerge);
+        if (options.mergeDsWaitsPerWmmaGroup > 1) optimizers.push_back(&wmmaGroupDsMerge);
         for (auto* opt : optimizers) opt->rewrite(plan, df.getResult(), func);
 
         df.finalizePlan(plan);
