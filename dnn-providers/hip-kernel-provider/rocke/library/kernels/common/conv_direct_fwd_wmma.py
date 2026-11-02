@@ -76,7 +76,7 @@ loop, so they are build-time capabilities, like the tile geometry.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
@@ -178,23 +178,57 @@ class DirectFwdWmmaSpec:
     # lane l + dil of the same 16-lane row) plus a 2-lane LDS read for the
     # column that enters at the right edge, instead of a full LDS read.
     tap_shift: bool = False
+    # Stride-2 filters with no overlap (1x1 s2, 2x2 s2, no padding) as a
+    # strided GEMM: the kernel runs the 1x1 stride-1 tile loop over a view of
+    # X whose rows and columns step by the stride (so no halo element is
+    # unused) and whose reduction runs over the KH * KW * cpg patch. A 2x2
+    # patch is KH runs of KW * cpg contiguous channels, one input row apart:
+    # each channel chunk lies within one run, so a chunk's transfer starts at
+    # its run. The weights are [k][r][s][c], already the patch order.
+    strided_view: bool = False
+    # With strided_view on an input of exactly stride * Ho rows: an image's
+    # view rows continue the previous image's (x's image stride is Ho view
+    # rows, y's Ho output rows), so the batch folds into the rows and a tile
+    # can span images: N * Ho rows of one image.
+    fold_n: bool = False
+
+    @property
+    def vp(self) -> DirectConvProblem:
+        """The problem the tile loop sees: ``problem`` itself, or its
+        strided-GEMM view (1x1, stride 1, over the Ho x Wo output grid)."""
+        p = self.problem
+        if not self.strided_view:
+            return p
+        rows = p.N * p.Ho if self.fold_n else p.Ho
+        return replace(
+            p,
+            N=1 if self.fold_n else p.N,
+            H=rows,
+            W=p.Wo,
+            cpg=p.KH * p.KW * p.cpg,
+            KH=1,
+            KW=1,
+            PAD=0,
+            pad_w=-1,
+            stride=1,
+        )
 
     @property
     def ring_taps(self) -> int:
         """Taps per weight slot."""
-        p = self.problem
+        p = self.vp
         if self.tap_ring:
             return 1
         return p.KW if self.row_ring else p.KH * p.KW
 
     @property
     def phases_w(self) -> int:
-        return self.problem.stride if self.phase_split else 1
+        return self.vp.stride if self.phase_split else 1
 
     @property
     def halo_cols(self) -> int:
         """Columns of one (phase) sub-halo."""
-        p = self.problem
+        p = self.vp
         if self.phase_split:
             return self.tile_w + ((p.KW - 1) * p.dil_w) // p.stride
         return self.halo_w
@@ -202,7 +236,7 @@ class DirectFwdWmmaSpec:
     @property
     def lead_cols(self) -> int:
         """Most leading zero columns a (phase) sub-halo gets at the left edge."""
-        p = self.problem
+        p = self.vp
         return _ceil_div(p.PAD_W, p.stride) if self.phase_split else p.PAD_W
 
     @property
@@ -214,11 +248,11 @@ class DirectFwdWmmaSpec:
 
     @property
     def stride(self) -> int:
-        return self.problem.stride
+        return self.vp.stride
 
     @property
     def cpg_eff(self) -> int:
-        return self.pack_groups * self.problem.cpg
+        return self.pack_groups * self.vp.cpg
 
     @property
     def kpg_eff(self) -> int:
@@ -247,12 +281,12 @@ class DirectFwdWmmaSpec:
 
     @property
     def halo_h(self) -> int:
-        p = self.problem
+        p = self.vp
         return p.stride * (self.tile_h - 1) + (p.KH - 1) * p.dil_h + 1
 
     @property
     def halo_w(self) -> int:
-        p = self.problem
+        p = self.vp
         return p.stride * (self.tile_w - 1) + (p.KW - 1) * p.dil_w + 1
 
     @property
@@ -275,14 +309,14 @@ class DirectFwdWmmaSpec:
 
     @property
     def wei_elems(self) -> int:
-        p = self.problem
+        p = self.vp
         return self.ring_taps * self.block_k * self.x_pitch
 
     @property
     def halo_slack(self) -> int:
         # A left-edge block's last row wraps up to PAD_W columns past the ring
         # (a split halo carries the slack in each phase).
-        return 0 if self.phase_split else self.problem.PAD_W * self.x_pitch
+        return 0 if self.phase_split else self.vp.PAD_W * self.x_pitch
 
     def lds_bytes(self) -> int:
         # Each halo slot carries its own wrap slack (see the module docstring).
@@ -329,11 +363,13 @@ class DirectFwdWmmaSpec:
             f"pg{self.pp_group}" if self.pp_group > 1 else "",
             "tu" if self.tap_reuse else "",
             "tsh" if self.tap_shift else "",
+            "sv" if self.strided_view else "",
+            "fn" if self.fold_n else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
     def grid(self) -> tuple[int, int, int]:
-        p = self.problem
+        p = self.vp
         n_kt = _ceil_div(self.kpg_eff, self.block_k)
         n_ht = _ceil_div(p.Ho, self.tile_h)
         n_wt = _ceil_div(p.Wo, self.tile_w)
@@ -349,7 +385,7 @@ class DirectFwdWmmaSpec:
 
 def fwd_wmma_tile_efficiency(spec: DirectFwdWmmaSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""
-    p = spec.problem
+    p = spec.vp
     tiles = (
         _ceil_div(p.N, spec.tile_n) * spec.tile_n,
         _ceil_div(p.Ho, spec.tile_h) * spec.tile_h,
@@ -369,6 +405,28 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
     )
     if why:
         return why
+    real = p
+    if spec.strided_view:
+        if (
+            p.PAD
+            or p.PAD_W
+            or p.is_dilated
+            or p.KH != p.KW
+            or p.KH not in (1, p.stride)
+        ):
+            return "strided_view serves undilated 1x1 or KxK stride-K, no padding"
+        if p.stride < 2:
+            return "strided_view serves stride > 1"
+        if spec.phase_split or spec.pack_groups > 1 or spec.tap_reuse:
+            return "strided_view is a 1x1 stride-1 loop (no phases, packs or reuse)"
+        if p.KH > 1 and (p.KW * p.cpg) % spec.ck:
+            return (
+                f"a {p.KW * p.cpg}-channel patch run is not whole ck {spec.ck} chunks"
+            )
+        if spec.fold_n and (p.H != p.stride * p.Ho or spec.tile_n != 1):
+            return "fold_n needs H == stride * Ho and one image per tile"
+    elif spec.fold_n:
+        return "fold_n builds on strided_view"
     if p.stride not in (1, 2):
         return f"stride {p.stride} not in (1, 2)"
     if p.dil_h < 1 or p.dil_w < 1:
@@ -488,9 +546,9 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
         return str(e)
     # Global offsets are i32 bytes and the tile index is a flat block id.
     tensor_bytes = (
-        2 * p.N * p.H * p.W * p.total_c,
-        2 * p.total_k * p.KH * p.KW * p.cpg,
-        2 * p.N * p.Ho * p.Wo * p.total_k,
+        2 * real.N * real.H * real.W * real.total_c,
+        2 * real.total_k * real.KH * real.KW * real.cpg,
+        2 * real.N * real.Ho * real.Wo * real.total_k,
     )
     if max(tensor_bytes) > _I32_MAX:
         return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
@@ -560,7 +618,9 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     if why is not None:
         raise ValueError(f"invalid DirectFwdWmmaSpec for {arch}: {why}")
 
-    p = spec.problem
+    rp = spec.problem  # the real problem; p is the one the tile loop runs
+    p = spec.vp
+    SV = spec.strided_view
     KH, KW = p.KH, p.KW
     S = p.stride
     DH, DW = p.dil_h, p.dil_w
@@ -619,6 +679,11 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         c_cpg = b.div(params["p_total_c"], c_groups)
         c_kpg = b.div(params["p_total_k"], c_groups)
         c_cpg0 = c_cpg
+    c_run = c_cpg  # channels of one contiguous patch run (strided_view)
+    if SV:
+        c_run = b.mul(c_cpg, b.const_i32(rp.KW))
+        c_cpg = b.mul(c_cpg, b.const_i32(rp.KH * rp.KW))
+        c_cpg0 = c_cpg
     c_N = params["p_N"]
     c_H, c_W = params["p_Hi"], params["p_Wi"]
     c_Ho, c_Wo = params["p_Ho"], params["p_Wo"]
@@ -627,6 +692,16 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         params["p_A_stride_hi"],
         params["p_A_stride_wi"],
     )
+    xs_h_real = xs_h
+    if SV:
+        # The view's rows and columns are the output grid: input row S * i.
+        c_H, c_W = params["p_Ho"], params["p_Wo"]
+        if spec.fold_n:
+            c_Ho = b.mul(c_N, c_Ho)
+            c_H = c_Ho
+            c_N = c1
+        xs_h = b.mul(xs_h, b.const_i32(rp.stride))
+        xs_w = b.mul(xs_w, b.const_i32(rp.stride))
     ys_n, ys_h, ys_w = (
         params["p_D_stride_n"],
         params["p_D_stride_ho"],
@@ -755,7 +830,12 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                 )
                 with b.scf_if(issue):
                     img_off = b.add(stage_off, b.const_i32(im * IMG + a * PSTR))
-                    img = b.add(b.add(x_base, k0), b.mul(b.const_i32(im), xs_n))
+                    x_k0 = k0
+                    if SV and rp.KH > 1:
+                        # Patch run r of the chunk: one input row further on.
+                        run = b.div(k0, c_run)
+                        x_k0 = b.add(k0, b.mul(run, b.sub(xs_h_real, c_run)))
+                    img = b.add(b.add(x_base, x_k0), b.mul(b.const_i32(im), xs_n))
                     src = b.global_ptr_add(Xp, b.mul(img, c2))
                     dst = b.add(halo_addr, b.mul(b.add(img_off, z_elems), c2))
                     h_ext = x_h_ext

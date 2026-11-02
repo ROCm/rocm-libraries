@@ -1300,6 +1300,8 @@ def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         pp_group=spec.pp_group,
         tap_reuse=spec.tap_reuse,
         tap_shift=spec.tap_shift,
+        strided_view=spec.strided_view,
+        fold_n=spec.fold_n,
     )
 
 

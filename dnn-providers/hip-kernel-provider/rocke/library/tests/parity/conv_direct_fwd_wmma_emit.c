@@ -293,6 +293,45 @@ static int make_cfg(int idx, rocke_direct_fwd_wmma_spec_t* s, const char** arch)
         s->problem = make_problem_rect(3, 1, 2, 0, 17, 17, 1, "bf16");
         s->problem.dil_h = 2;
         return 0;
+    case 37:
+        s->problem = make_problem(1, 0, 2, 1, 64, 96, 1, 1, "bf16");
+        knobs(s, 2, 2, 4, 4, 8, 1, 64, 2);
+        s->strided_view = true;
+        return 0;
+    case 38:
+        s->problem = make_problem(1, 0, 2, 1, 64, 96, 1, 1, "fp16");
+        knobs(s, 2, 1, 4, 4, 8, 1, 64, 3);
+        s->strided_view = true;
+        s->fold_n = true;
+        pf(s);
+        return 0;
+    case 39:
+        s->problem = make_problem(2, 0, 2, 1, 64, 96, 1, 1, "bf16");
+        knobs(s, 1, 2, 4, 4, 32, 1, 64, 2);
+        s->strided_view = true;
+        s->fold_n = true;
+        pf(s);
+        return 0;
+    case 40:
+        s->problem = make_problem(2, 0, 2, 1, 64, 96, 1, 1, "fp16");
+        knobs(s, 2, 1, 4, 4, 8, 1, 64, 3);
+        s->strided_view = true;
+        pf(s);
+        return 0;
+    case 41:
+        s->problem = make_problem(1, 0, 2, 1, 256, 96, 1, 1, "bf16");
+        knobs(s, 2, 1, 1, 1, 8, 1, 128, 3);
+        s->strided_view = true;
+        pf(s);
+        return 0;
+    case 42:
+        s->problem = make_problem(1, 0, 2, 1, 64, 96, 1, 1, "bf16");
+        s->fold_n = true;
+        return 0;
+    case 43:
+        s->problem = make_problem(3, 1, 2, 1, 64, 96, 1, 1, "bf16");
+        s->strided_view = true;
+        return 0;
     default:
         return -1;
     }

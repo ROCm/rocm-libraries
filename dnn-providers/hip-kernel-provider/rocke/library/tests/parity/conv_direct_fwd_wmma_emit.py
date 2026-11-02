@@ -53,6 +53,14 @@
 #  34  fp16, 3x3 PAD 0 stride 2 on 17x17, phase_split
 #  35  rejected by both engines: 7x1 with pack_groups 2
 #  36  rejected by both engines: 3x1 dilated 2x1
+#  strided GEMM (strided_view) over the stride-2 filters without overlap:
+#  37  bf16, 1x1 s2, 2x2 waves, 4x4 tiles, tile_w 8, ck 64
+#  38  fp16, 1x1 s2, fold_n, 3 stages, prefetch + iterative-ilp
+#  39  bf16, 2x2 s2 (two 128-channel patch runs), fold_n, tile_w 32, prefetch
+#  40  fp16, 2x2 s2, 3 stages, prefetch
+#  41  bf16, 1x1 s2, cpg 256, 2x1 waves of 1x1 tiles, ck 128, 3 stages
+#  42  rejected by both engines: fold_n without strided_view
+#  43  rejected by both engines: strided_view on a padded 3x3
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_wmma import (
     DirectFwdWmmaSpec,
@@ -141,6 +149,7 @@ def _k(wk, wp, tk, tp, tw, tn, ck, st, **kw):
 
 
 PF = dict(prefetch=True, sched="iterative-ilp")
+SV = dict(strided_view=True)
 
 
 def _spec(idx: int):
@@ -369,6 +378,40 @@ def _spec(idx: int):
             "gfx1250",
         ),
         36: (S(problem=_pr(3, 1, 2, 0, 17, 17, dil_h=2)), "gfx1250"),
+        37: (
+            S(problem=_p(KH=1, PAD=0, stride=2), **_k(2, 2, 4, 4, 8, 1, 64, 2, **SV)),
+            "gfx1250",
+        ),
+        38: (
+            S(
+                problem=_p(KH=1, PAD=0, stride=2, dtype="fp16"),
+                **_k(2, 1, 4, 4, 8, 1, 64, 3, fold_n=True, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        39: (
+            S(
+                problem=_p(KH=2, PAD=0, stride=2),
+                **_k(1, 2, 4, 4, 32, 1, 64, 2, fold_n=True, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        40: (
+            S(
+                problem=_p(KH=2, PAD=0, stride=2, dtype="fp16"),
+                **_k(2, 1, 4, 4, 8, 1, 64, 3, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        41: (
+            S(
+                problem=_p(KH=1, PAD=0, stride=2, cpg=256),
+                **_k(2, 1, 1, 1, 8, 1, 128, 3, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        42: (S(problem=_p(KH=1, PAD=0, stride=2), fold_n=True), "gfx1250"),
+        43: (S(problem=_p(stride=2), **SV), "gfx1250"),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

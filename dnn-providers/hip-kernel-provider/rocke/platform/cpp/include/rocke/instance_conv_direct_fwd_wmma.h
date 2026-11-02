@@ -69,6 +69,8 @@ extern "C" {
  *      pp_group: int = 1         # steps per ping-pong phase
  *      tap_reuse: bool = False   # reuse B fragments across filter rows
  *      tap_shift: bool = False   # next filter column by v_permlane16
+ *      strided_view: bool = False # 1x1 / KxK stride-K as a strided GEMM
+ *      fold_n: bool = False      # strided_view: the batch folded into rows
  * ===================================================================== */
 typedef struct rocke_direct_fwd_wmma_spec
 {
@@ -95,6 +97,8 @@ typedef struct rocke_direct_fwd_wmma_spec
     int pp_group; /* default 1 */
     bool tap_reuse; /* default false */
     bool tap_shift; /* default false */
+    bool strided_view; /* default false */
+    bool fold_n; /* default false */
 } rocke_direct_fwd_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */

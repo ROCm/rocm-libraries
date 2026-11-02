@@ -92,37 +92,63 @@ long long fww_Wo(const rocke_direct_conv_problem_t* p)
            + 1;
 }
 
+/* spec.vp: the problem the tile loop sees, ``problem`` itself or its
+ * strided-GEMM view (1x1, stride 1, over the Ho x Wo output grid). */
+rocke_direct_conv_problem_t fww_vp(const rocke_direct_fwd_wmma_spec_t* s)
+{
+    rocke_direct_conv_problem_t v = s->problem;
+    if(!s->strided_view)
+        return v;
+    const rocke_direct_conv_problem_t* p = &s->problem;
+    const int Ho = (int)fww_Ho(p), Wo = (int)fww_Wo(p);
+    v.N = s->fold_n ? 1 : p->N;
+    v.H = s->fold_n ? p->N * Ho : Ho;
+    v.W = Wo;
+    v.cpg = p->KH * p->KW * p->cpg;
+    v.KH = 1;
+    v.KW = 1;
+    v.PAD = 0;
+    v.pad_w = -1;
+    v.stride = 1;
+    return v;
+}
+
 /* Spec @property helpers the builder shares. */
 int fww_ring_taps(const rocke_direct_fwd_wmma_spec_t* s)
 {
+    const rocke_direct_conv_problem_t p = fww_vp(s);
     if(s->tap_ring)
         return 1;
-    return s->row_ring ? s->problem.KW : s->problem.KH * s->problem.KW;
+    return s->row_ring ? p.KW : p.KH * p.KW;
 }
 int fww_phases_w(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    return s->phase_split ? s->problem.stride : 1;
+    return s->phase_split ? fww_vp(s).stride : 1;
 }
 int fww_halo_h(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    const rocke_direct_conv_problem_t* p = &s->problem;
+    const rocke_direct_conv_problem_t v = fww_vp(s);
+    const rocke_direct_conv_problem_t* p = &v;
     return p->stride * (rocke_direct_fwd_wmma_tile_h(s) - 1) + (p->KH - 1) * p->dil_h + 1;
 }
 int fww_halo_w(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    const rocke_direct_conv_problem_t* p = &s->problem;
+    const rocke_direct_conv_problem_t v = fww_vp(s);
+    const rocke_direct_conv_problem_t* p = &v;
     return p->stride * (s->tile_w - 1) + (p->KW - 1) * p->dil_w + 1;
 }
 int fww_halo_cols(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    const rocke_direct_conv_problem_t* p = &s->problem;
+    const rocke_direct_conv_problem_t v = fww_vp(s);
+    const rocke_direct_conv_problem_t* p = &v;
     if(s->phase_split)
         return s->tile_w + (int)fww_floordiv((long long)(p->KW - 1) * p->dil_w, p->stride);
     return fww_halo_w(s);
 }
 int fww_lead_cols(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    const rocke_direct_conv_problem_t* p = &s->problem;
+    const rocke_direct_conv_problem_t v = fww_vp(s);
+    const rocke_direct_conv_problem_t* p = &v;
     const int pad_w = rocke_direct_conv_problem_pad_w(p);
     return s->phase_split ? fww_ceil_div(pad_w, p->stride) : pad_w;
 }
@@ -140,7 +166,7 @@ int fww_phase_elems(const rocke_direct_fwd_wmma_spec_t* s)
 }
 int fww_cpg_eff(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    return s->pack_groups * s->problem.cpg;
+    return s->pack_groups * fww_vp(s).cpg;
 }
 int fww_kpg_eff(const rocke_direct_fwd_wmma_spec_t* s)
 {
@@ -167,7 +193,8 @@ int fww_wei_elems(const rocke_direct_fwd_wmma_spec_t* s)
 }
 int fww_halo_slack(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    return s->phase_split ? 0 : rocke_direct_conv_problem_pad_w(&s->problem) * fww_x_pitch(s);
+    const rocke_direct_conv_problem_t v = fww_vp(s);
+    return s->phase_split ? 0 : rocke_direct_conv_problem_pad_w(&v) * fww_x_pitch(s);
 }
 
 } // namespace
@@ -203,6 +230,8 @@ rocke_direct_fwd_wmma_spec_t rocke_direct_fwd_wmma_spec_default(void)
     s.pp_group = 1;
     s.tap_reuse = false;
     s.tap_shift = false;
+    s.strided_view = false;
+    s.fold_n = false;
     return s;
 }
 
@@ -246,7 +275,8 @@ long rocke_direct_fwd_wmma_lds_bytes(const rocke_direct_fwd_wmma_spec_t* spec)
 
 void rocke_direct_fwd_wmma_grid(const rocke_direct_fwd_wmma_spec_t* spec, int grid[3])
 {
-    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const rocke_direct_conv_problem_t v = fww_vp(spec);
+    const rocke_direct_conv_problem_t* p = &v;
     long long n_kt = fww_ceil_div(fww_kpg_eff(spec), rocke_direct_fwd_wmma_block_k(spec));
     long long n_ht = fww_ceil_div((int)fww_Ho(p), rocke_direct_fwd_wmma_tile_h(spec));
     long long n_wt = fww_ceil_div((int)fww_Wo(p), spec->tile_w);
@@ -325,7 +355,9 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
                            spec->pingpong ? "pp" : "",
                            ppg,
                            spec->tap_reuse ? "tu" : "",
-                           spec->tap_shift ? "tsh" : ""};
+                           spec->tap_shift ? "tsh" : "",
+                           spec->strided_view ? "sv" : "",
+                           spec->fold_n ? "fn" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {fww_is_bf16(spec) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_fwd_wmma",
@@ -371,6 +403,22 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     if(!rocke_wmma_fwd_gate(
            p, arch, "direct_fwd_wmma", spec->wave_size, true, &target, reason, reason_cap))
         return false;
+    if(spec->strided_view)
+    {
+        if(p->PAD || rocke_direct_conv_problem_pad_w(p) || p->dil_h != 1 || p->dil_w != 1
+           || p->KH != p->KW || (p->KH != 1 && p->KH != p->stride))
+            FWW_FAIL("strided_view serves undilated 1x1 or KxK stride-K, no padding");
+        if(p->stride < 2)
+            FWW_FAIL("strided_view serves stride > 1");
+        if(spec->phase_split || spec->pack_groups > 1 || spec->tap_reuse)
+            FWW_FAIL("strided_view is a 1x1 stride-1 loop (no phases, packs or reuse)");
+        if(p->KH > 1 && spec->ck != 0 && (p->KW * p->cpg) % spec->ck)
+            FWW_FAIL("a %d-channel patch run is not whole ck %d chunks", p->KW * p->cpg, spec->ck);
+        if(spec->fold_n && (p->H != p->stride * fww_Ho(p) || spec->tile_n != 1))
+            FWW_FAIL("fold_n needs H == stride * Ho and one image per tile");
+    }
+    else if(spec->fold_n)
+        FWW_FAIL("fold_n builds on strided_view");
     if(p->stride != 1 && p->stride != 2)
         FWW_FAIL("stride %d not in (1, 2)", p->stride);
     if(p->dil_h < 1 || p->dil_w < 1)
@@ -528,8 +576,10 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
             mx = bytes[2];
         if(mx > INT32_MAX)
             FWW_FAIL("tensors of %lld B exceed the i32 byte offsets", mx);
-        long long tiles = (long long)fww_ceil_div(p->N, spec->tile_n) * fww_groups_eff(spec)
-                          * fww_ceil_div((int)Ho, TH) * fww_ceil_div((int)Wo, spec->tile_w)
+        const rocke_direct_conv_problem_t v = fww_vp(spec);
+        long long tiles = (long long)fww_ceil_div(v.N, spec->tile_n) * fww_groups_eff(spec)
+                          * fww_ceil_div((int)fww_Ho(&v), TH)
+                          * fww_ceil_div((int)fww_Wo(&v), spec->tile_w)
                           * fww_ceil_div(fww_kpg_eff(spec), rocke_direct_fwd_wmma_block_k(spec));
         if(tiles > INT32_MAX)
             FWW_FAIL("%lld workgroups exceed the i32 block id", tiles);
@@ -570,12 +620,15 @@ struct fww_ctx
     bool PS;
     int NPW, HC, PSTR, NHS, WTAPS, NG, WEI0;
     bool RR, TU, TSH, SB, PP;
+    bool SV; /* strided_view */
+    int RKH; /* the real problem's KH (strided_view patch runs) */
     int TWF;
     int64_t SEL_LO, SEL_HI;
 
     V c0, c1, c2, c8, c16;
     V c_groups, c_cpg, c_kpg, c_cpg0, c_N, c_H, c_W, c_Ho, c_Wo;
-    V xs_n, xs_h, xs_w, ys_n, ys_h, ys_w;
+    V c_run; /* channels of one contiguous patch run (strided_view) */
+    V xs_n, xs_h, xs_w, ys_n, ys_h, ys_w, xs_h_real;
     V tid, wave_id, lane, l16, lhalf, wave_k, wave_p;
     V n_base, k_base, h_tile, w_tile, k_grp, c_grp, w_row, c_CK, n_chunks;
     V lds, halo_addr, wei_addr;
@@ -753,9 +806,18 @@ void issue_halo(fww_ctx& c, V chunk, V stage)
             V issue = rocke_b_land(b, e, l);
             if_then(c, issue, [&]() {
                 V img_off = addk(c, stage_off, (int64_t)im * c.IMG + (int64_t)a * c.PSTR);
+                V x_k0 = k0;
+                if(c.SV && c.RKH > 1)
+                {
+                    /* Patch run r of the chunk: one input row further on. */
+                    V run = divv(c, k0, c.c_run);
+                    V d = sub(c, c.xs_h_real, c.c_run);
+                    V m = mul(c, run, d);
+                    x_k0 = add(c, k0, m);
+                }
                 V img;
                 {
-                    V u = add(c, sh.base, k0);
+                    V u = add(c, sh.base, x_k0);
                     V w = ci(c, im);
                     V z = mul(c, w, c.xs_n);
                     img = add(c, u, z);
@@ -1447,9 +1509,13 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
         rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, msg.c_str());
         return NULL;
     }
-    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const rocke_direct_conv_problem_t* rp = &spec->problem; /* the real problem */
+    const rocke_direct_conv_problem_t vpv = fww_vp(spec); /* the one the tile loop runs */
+    const rocke_direct_conv_problem_t* p = &vpv;
     c.b = b;
     c.spec = spec;
+    c.SV = spec->strided_view;
+    c.RKH = rp->KH;
     c.KH = p->KH;
     c.KW = p->KW;
     c.S = p->stride;
@@ -1533,6 +1599,13 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
         c.c_kpg = divv(c, params->p_total_k, c.c_groups);
         c.c_cpg0 = c.c_cpg;
     }
+    c.c_run = c.c_cpg;
+    if(c.SV)
+    {
+        c.c_run = mulk(c, c.c_cpg, rp->KW);
+        c.c_cpg = mulk(c, c.c_cpg, rp->KH * rp->KW);
+        c.c_cpg0 = c.c_cpg;
+    }
     c.c_N = params->p_N;
     c.c_H = params->p_Hi;
     c.c_W = params->p_Wi;
@@ -1541,6 +1614,21 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     c.xs_n = params->p_A_stride_n;
     c.xs_h = params->p_A_stride_hi;
     c.xs_w = params->p_A_stride_wi;
+    c.xs_h_real = c.xs_h;
+    if(c.SV)
+    {
+        /* The view's rows and columns are the output grid: input row S * i. */
+        c.c_H = params->p_Ho;
+        c.c_W = params->p_Wo;
+        if(spec->fold_n)
+        {
+            c.c_Ho = mul(c, c.c_N, c.c_Ho);
+            c.c_H = c.c_Ho;
+            c.c_N = c.c1;
+        }
+        c.xs_h = mulk(c, c.xs_h, rp->stride);
+        c.xs_w = mulk(c, c.xs_w, rp->stride);
+    }
     c.ys_n = params->p_D_stride_n;
     c.ys_h = params->p_D_stride_ho;
     c.ys_w = params->p_D_stride_wo;

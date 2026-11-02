@@ -704,6 +704,33 @@ FWD_WMMA_1D_KNOBS = (
     (2, 4, 4, 8, 32, 2, "pp"),
     (2, 4, 4, 10, 32, 2, "pp"),
 )
+# Strided GEMM (strided_view) rows of the stride-2 filters without overlap,
+# 1x1 s2 and 2x2 s2: (waves_k, waves_p, tiles_k, tiles_p, tile_w, ck, stages,
+# prefetch, fold_n); prefetch builds with the iterative-ilp scheduler.
+FWD_WMMA_SV_KNOBS = (
+    # 32-channel x 64-pixel blocks with 64-128 channel chunks: the n1 deep
+    # downsamples (c896 -> 2016 at 16x16 / 14x14) launch 252 blocks.
+    (2, 1, 1, 1, 8, 128, 3, True, False),
+    (2, 1, 1, 1, 8, 64, 3, True, False),
+    (1, 2, 4, 4, 32, 64, 2, True, True),
+    (2, 1, 4, 4, 8, 64, 2, True, True),
+    (2, 1, 4, 4, 8, 64, 3, True, False),
+    (2, 1, 4, 4, 8, 64, 3, True, True),
+    (2, 1, 4, 4, 32, 32, 2, True, True),
+    (2, 2, 2, 4, 8, 64, 3, True, True),
+    (2, 2, 2, 4, 16, 64, 3, True, True),
+    (2, 2, 4, 2, 8, 64, 3, True, True),
+    (2, 2, 4, 4, 8, 64, 2, False, False),
+    (2, 2, 4, 4, 8, 64, 2, False, True),
+    (2, 2, 4, 4, 8, 64, 3, True, True),
+    (2, 2, 4, 4, 16, 64, 3, True, True),
+    (2, 2, 4, 8, 8, 64, 2, True, True),
+    (2, 2, 4, 8, 16, 64, 2, True, True),
+    (2, 2, 4, 8, 16, 64, 3, True, True),
+    (2, 2, 8, 4, 8, 64, 2, True, True),
+    (2, 2, 8, 4, 8, 64, 3, True, True),
+    (2, 4, 4, 4, 8, 64, 3, True, True),
+)
 # END FWD_WMMA TABLES
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
@@ -1300,11 +1327,13 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for c in FWD_WMMA_PACKED_CHANNELS
             for s in _STRIDES
         )
-        # Stride 2: 3x3 "same", 3x3 "valid" and the 2x2 patch merge.
+        # Stride 2: 3x3 "same", 3x3 "valid", the 2x2 patch merge and the
+        # 1x1 downsample (the last two also as strided GEMMs).
         + (
             DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
             DirectCaps(KH=3, PAD=0, stride=2, cpg=0, kpg=0),
             DirectCaps(KH=2, PAD=0, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=1, PAD=0, stride=2, cpg=0, kpg=0),
         )
         # Dilated 3x3 (per-axis dilation), stride 1 and 2.
         + tuple(
@@ -1440,6 +1469,25 @@ def _dgrad_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
             knobs.update(prefetch=True, sched="iterative-ilp")
         if pack_groups > 1:
             knobs.update(pack_groups=pack_groups)
+        yield knobs
+
+
+def _fwd_wmma_sv_knobs() -> Iterator[dict]:
+    for wk, wp, tk, tp, tw, ck, st, pf, fn in FWD_WMMA_SV_KNOBS:
+        knobs = dict(
+            waves_k=wk,
+            waves_p=wp,
+            tiles_k=tk,
+            tiles_p=tp,
+            tile_w=tw,
+            ck=ck,
+            stages=st,
+            strided_view=True,
+        )
+        if pf:
+            knobs.update(prefetch=True, sched="iterative-ilp")
+        if fn:
+            knobs.update(fold_n=True)
         yield knobs
 
 
@@ -1810,8 +1858,11 @@ def _knob_grid(
                 ),
                 pack_groups=max(1, 32 // caps.cpg),
             )
+        elif caps is not None and caps.stride > 1 and caps.KH == 1:
+            yield from _fwd_wmma_sv_knobs()
         elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
             yield from _fwd_wmma_knobs(FWD_WMMA_PATCH2_KNOBS)
+            yield from _fwd_wmma_sv_knobs()
         elif caps is not None and caps.stride > 1 and caps.dil_h == caps.dil_w == 1:
             yield from _fwd_wmma_knobs(
                 FWD_WMMA_S2V_KNOBS if caps.PAD == 0 else FWD_WMMA_STRIDED_KNOBS

@@ -224,6 +224,13 @@ class TestFwdWmmaSpec(unittest.TestCase):
             (dict(PAD=16, dil_w=16), dict(tap_reuse=True, tap_shift=True)),
             ({}, dict(phase_split=True)),
             (dict(stride=2), dict(phase_split=True, tile_w=8, tile_n=4)),
+            ({}, dict(strided_view=True)),
+            (dict(KH=1, PAD=0, stride=2), dict(strided_view=True)),
+            (dict(KH=1, PAD=0, stride=2), dict(strided_view=True, phase_split=True)),
+            (dict(KH=2, PAD=0, stride=2, C=48), dict(strided_view=True, ck=64)),
+            (dict(KH=2, PAD=0, stride=2, H=14), dict(strided_view=True, fold_n=True)),
+            (dict(KH=2, PAD=0, stride=2, H=13), dict(strided_view=True, fold_n=True)),
+            ({}, dict(fold_n=True)),
             ({}, dict(wave_epilogue=True, tiles_p=3)),
             ({}, dict(row_ring=True, tap_ring=True)),
             ({}, dict(row_ring=True, split_barrier=True)),
@@ -609,6 +616,55 @@ _CASES = (
     (
         dict(N=2, H=9, W=12, C=64, K=96, groups=2),
         dict(tiles_k=1, tiles_p=2, tile_w=8, wave_epilogue=True),
+    ),
+    # Strided GEMM (strided_view): 1x1 s2 on odd extents with a ragged last
+    # chunk, grouped; the batch folded into the rows (tiles across images);
+    # 2x2 s2 with several chunks per patch run, folded, with prefetch.
+    (
+        dict(N=3, H=13, W=19, C=40, K=48, KH=1, PAD=0, stride=2),
+        dict(tiles_k=1, tiles_p=2, tile_w=8, strided_view=True),
+    ),
+    (
+        dict(N=2, H=14, W=18, C=128, K=64, groups=2, KH=1, PAD=0, stride=2),
+        dict(tiles_k=1, tiles_p=2, tile_w=8, strided_view=True),
+    ),
+    (
+        dict(N=5, H=14, W=22, C=96, K=80, KH=1, PAD=0, stride=2, dtype="fp16"),
+        dict(tiles_k=2, tiles_p=2, tile_w=8, ck=64, strided_view=True, fold_n=True),
+    ),
+    (
+        dict(N=3, H=10, W=18, C=48, K=64, KH=2, PAD=0, stride=2),
+        dict(tiles_k=2, tiles_p=2, tile_w=8, strided_view=True, fold_n=True),
+    ),
+    (
+        dict(N=2, H=12, W=14, C=64, K=96, KH=2, PAD=0, stride=2, dtype="fp16"),
+        dict(
+            tiles_k=1,
+            tiles_p=2,
+            tile_w=16,
+            ck=64,
+            stages=3,
+            prefetch=True,
+            sched="iterative-ilp",
+            strided_view=True,
+        ),
+    ),
+    # n1 deep 1x1 s2 downsample rows: 32-channel x 64-pixel blocks, 128-channel
+    # chunks.
+    (
+        dict(N=1, H=32, W=32, C=256, K=96, KH=1, PAD=0, stride=2),
+        dict(
+            waves_k=2,
+            waves_p=1,
+            tiles_k=1,
+            tiles_p=1,
+            tile_w=8,
+            ck=128,
+            stages=3,
+            prefetch=True,
+            sched="iterative-ilp",
+            strided_view=True,
+        ),
     ),
     # A column padding of its own on a square filter.
     (dict(N=3, H=11, W=19, PAD=1, pad_w=0), dict(tiles_k=1, tiles_p=2, tile_w=8)),

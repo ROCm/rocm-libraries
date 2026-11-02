@@ -1280,6 +1280,13 @@ Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
 - `tap_reuse` reuses B fragments across filter rows (whole output rows per
   wave); `tap_shift` builds the next filter column's fragments with an
   in-wave lane rotation (`v_permlane16`).
+- `strided_view` runs a stride-2 filter without overlap (1x1 s2, 2x2 s2, no
+  padding) as a strided GEMM: the 1x1 stride-1 tile loop over a view of X
+  whose rows and columns step by the stride, reducing over the
+  `KH * KW * cpg` patch (a 2x2 patch is two runs of `2 * cpg` contiguous
+  channels one input row apart; a channel chunk lies within one run).
+  `fold_n` (with `strided_view`, `H == stride * Ho`) folds the batch into the
+  view rows, so a tile can span images of small maps.
 
 Besides square filters it serves rectangular filters with a column padding
 of their own (`pad_w`, in 0..(KW-1)*dil): the halo's column origin, the
