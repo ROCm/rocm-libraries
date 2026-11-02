@@ -3098,9 +3098,10 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
 #endif
 }
 
-// The compiler does not insert s_wait_xcnt for these stores, so the wait is in the same asm to
-// keep the address VGPRs live. No bounds check; the caller waits on DScnt before and on ASYNCcnt
-// after.
+// Keep s_wait_xcnt in the same asm as the stores so the compiler cannot reuse their address
+// operands before the wait. Eight per burst is a batching choice, not a hardware limit: an active
+// D128 wave issues two bursts (16 address operands per asm instead of 32); 4 and 16 were not
+// measured. No bounds check; the caller waits on DScnt before and on ASYNCcnt after.
 CK_TILE_DEVICE void amd_async_global_store_from_lds_b128_x8(const void* global_base,
                                                             const uint32_t (&global_offset)[8],
                                                             const uint32_t (&lds_addr)[8])

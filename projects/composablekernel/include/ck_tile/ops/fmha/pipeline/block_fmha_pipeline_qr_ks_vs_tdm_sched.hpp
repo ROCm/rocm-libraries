@@ -466,7 +466,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         auto q_tile = load_tile(q_lds_read_window);
 
         block_sync_lds<0>();
-        // Fixed TDM prologue: current K/V and the first look-ahead K buffer.
+        // Fixed TDM prologue: current K/V and the first look-ahead K buffer. With
+        // kOverlapQKVPrologue K0 and V0 were already issued above, so only K1 follows.
         if constexpr(!kOverlapQKVPrologue)
         {
             load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
