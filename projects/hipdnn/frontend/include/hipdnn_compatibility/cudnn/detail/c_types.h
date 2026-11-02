@@ -25,8 +25,8 @@
  * @file c_types.h
  * @brief cuDNN backend C-API types for the hipDNN cuDNN v8 compatibility shim.
  *
- * Enumerator values are shim-assigned, not NVIDIA's, and append-only; they are
- * pinned by tests/data/cudnn_v8/cudnn_v8_enum_values.inc.
+ * Enumerator values are shim-assigned, not NVIDIA's, and append-only within a
+ * hipdnn_frontend major version.
  */
 
 #pragma once

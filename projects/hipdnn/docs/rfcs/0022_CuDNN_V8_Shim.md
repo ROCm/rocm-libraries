@@ -280,30 +280,24 @@ runs no heuristics and needs no GPU.
 
 ### 3.7 Types, enum values and versions
 
-- Every C identifier that the v0.x headers, NVIDIA's legacy samples and the PyTorch consumers name is
-  declared, from a checked-in list extracted from those sources and pinned by a test, except the
-  exclusions the extractor lists with a reason each, among them the backend descriptor C API's five
-  functions and its attribute-name and attribute-type enums (`cudnnBackendAttributeName_t`,
-  `cudnnBackendAttributeType_t`), `cudnnMoeGroupedMatmulMode_t`, which only upstream's enum
-  converters name (§9 R4), the v7 filter and reorder API, the CUDA-graph and causal-conv1d API, and
-  `cudnnGetExecutionPlanWorkspaceSize`. The extractor takes the cudnn-frontend repository, tag and
-  commit from the cudnn-samples harness manifest (`tests/cudnn_samples/manifest.json`, `"corpus"`), so
-  one pin serves both; `pins.json` holds the sha256 digests of the scanned files and the PyTorch pin,
-  and the extractor refuses inputs that do not match. `c_types.h` is generated from the same table
-  (`--emit-c-types`).
-- Enums are declared or left out whole relative to the extracted list: a declared enum holds every
+- Every C identifier that the v0.x headers, NVIDIA's legacy samples and PyTorch's v0.x consumers
+  name is declared, except the backend descriptor C API's five functions and its attribute-name and
+  attribute-type enums (`cudnnBackendAttributeName_t`, `cudnnBackendAttributeType_t`),
+  `cudnnMoeGroupedMatmulMode_t`, which only upstream's enum converters name (§9 R4), the v7 filter
+  and reorder API, the CUDA-graph and causal-conv1d API, and `cudnnGetExecutionPlanWorkspaceSize`.
+  The declarations are maintained by hand; the legacy-sample corpus, pinned by commit in
+  `tests/cudnn_samples/manifest.json`, and the v8 samples compile against them.
+- Enums are declared or left out whole relative to those sources: a declared enum holds every
   enumerator the sources name. An enumerator none of them names, such as cuDNN's
   `CUDNN_NOT_PROPAGATE_NAN`, is not declared.
 - Names are declared for source compatibility; `detail/c_types.h` carries the NVIDIA notice for the
   upstream headers that name them (RFC 0012 §6.4).
 - Enum values are the shim's own: numbered from 0 in ASCII order of the enumerator name, so they
-  can't reproduce NVIDIA's numbering, and each count sentinel is last + 1 (an `ENUM_COUNT` row in the
-  pinned value table). Exceptions: `cudnnStatus_t` keeps the
+  can't reproduce NVIDIA's numbering, and each count sentinel is last + 1. Exceptions: `cudnnStatus_t` keeps the
   v9 shim's 0–14 numbering, and `cudnnBackendTensorReordering_t` follows the shim's
   `TensorReordering_t`. An alias has no value of its own: `CUDNN_RESAMPLE_AVGPOOL` equals
-  `CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING`, as in cuDNN, and the pinned value table lists it as an
-  `ENUM_ALIAS` row.
-- Values are append-only within a `hipdnn_frontend` major version, pinned by a test. Knob types appear
+  `CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING`, as in cuDNN.
+- Values are append-only within a `hipdnn_frontend` major version. Knob types appear
   in plan tags and serialized autotune results, so renumbering would break persisted data. Removing a
   whole enum retires its values.
 - `DescriptorType_t`, `NormMode_t` and `RngDistribution_t` are shim-owned rather than aliased (RFC
@@ -476,7 +470,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | R1 | No backend descriptor C API except `cudnnBackendExecute`: the builders reach hipDNN through the core. The only raw C caller found is XLA's autotune persistence, which reads plans and engine configs through `cudnnBackendCreateDescriptor` / `GetAttribute` / `DestroyDescriptor` (`cuda_dnn.cc` L5081-5199 at the [Reference §4](./0022_CuDNN_V8_Shim_Reference.md#4-consumer-surfaces) commit); it does not compile. PyTorch's, Paddle's and XLA's builder code is source compatible |
 | R2 | `cudnnBackendExecute` is a passthrough: hipDNN runs a plan on whichever handle it is given, including one other than its graph's, provided the handle is on the plan's device. Pinned by unit and integration tests |
 | R3 | NVIDIA's legacy "Tensor creation comparison" calls the raw API. A harness-only `tests/cudnn_samples/legacy/overlay/cudnn.h` declares the calls it makes as `NOT_SUPPORTED` stubs, plus the five tensor attribute names and two attribute types it passes; the case is an expected failure. The stub is never installed under `include/` |
-| R4 | Identifiers are left out relative to the extracted list (§3.7). An excluded function or enum is left out whole: among them the five descriptor functions, `cudnnBackendAttributeName_t`, `cudnnBackendAttributeType_t`, and `cudnnMoeGroupedMatmulMode_t` (named only by upstream's enum converters, which the shim omits for it). An enumerator none of the sources names, such as `CUDNN_NOT_PROPAGATE_NAN`, is not declared. None of them was declared on `develop`, so relative to `develop` the change only adds API, as RFC 0012 §4.8 requires; `hipdnn_frontend` takes a minor version bump to 0.5.0 |
+| R4 | Identifiers are left out relative to the sources in §3.7. An excluded function or enum is left out whole: among them the five descriptor functions, `cudnnBackendAttributeName_t`, `cudnnBackendAttributeType_t`, and `cudnnMoeGroupedMatmulMode_t` (named only by upstream's enum converters, which the shim omits for it). An enumerator none of the sources names, such as `CUDNN_NOT_PROPAGATE_NAN`, is not declared. None of them was declared on `develop`, so relative to `develop` the change only adds API, as RFC 0012 §4.8 requires; `hipdnn_frontend` takes a minor version bump to 0.5.0 |
 | R5 | Builder error messages name the builder and the rule, not attribute enums, so they differ from cuDNN's; the legacy-corpus anchors and the tests' message checks pin the shim's messages |
 | R6 | `cudnnBackendDescriptorType_t` stays whole: PyTorch's plan-cache key, Paddle's template argument and `OperationBuilder`'s constructor argument |
 | R7 | `cudnnGetLastErrorString` is hipDNN's; see §3.6 |

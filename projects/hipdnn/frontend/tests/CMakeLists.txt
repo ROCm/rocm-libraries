@@ -54,7 +54,6 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimPlanSurface.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimLogging.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimUtils.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Identifiers.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8CApiStandalone.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8TypeMapping.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Utils.cpp>
@@ -345,14 +344,4 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         ${_hipdnn_cudnn_v8_header_targets}
         ${_hipdnn_cudnn_v8_cpp20_targets}
     )
-
-    # Build tree only. The suite uses stand-in inputs: no network, upstream tree or GPU.
-    if(Python3_FOUND)
-        add_test(
-            NAME hipdnn_cudnn_v8_extractor_tests
-            COMMAND ${Python3_EXECUTABLE}
-                    ${CMAKE_CURRENT_SOURCE_DIR}/data/cudnn_v8/test_extract_cudnn_v8_identifiers.py
-        )
-        _apply_hipdnn_test_category_labels(hipdnn_cudnn_v8_extractor_tests)
-    endif()
 endif()

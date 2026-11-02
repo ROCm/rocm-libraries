@@ -345,15 +345,13 @@ by the v9 shim's existing switch
 ### 1.5 Declared C surface
 
 The shim declares the C identifiers that upstream's v0.x headers, NVIDIA's legacy samples and the
-PyTorch consumers name (RFC §3.7), as extracted by
-`projects/hipdnn/frontend/tests/data/cudnn_v8/extract_cudnn_v8_identifiers.py` into
-`cudnn_v8_identifiers.inc` and pinned by `TestCudnnShimV8Identifiers.cpp`. Types and enums are in
-`detail/c_types.h`, which ends with a generated `detail::LAST_ENUMERATOR<E>` range bound per enum;
+PyTorch consumers name (RFC §3.7). Types and enums are in
+`detail/c_types.h`, which ends with a `detail::LAST_ENUMERATOR<E>` range bound per enum;
 functions in `cudnn.h` and `cudnn_graph.h`.
 
 | Kind | Declared | Not declared (RFC §9 R4) |
 |---|---|---|
-| Functions | `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`, `cudnnGetStream`, `cudnnGetErrorString`, `cudnnGetVersion`, `cudnnGetCudartVersion`, `cudnnBackendExecute`, `cudnnGetLastErrorString` | `cudnnBackendCreateDescriptor`, `cudnnBackendDestroyDescriptor`, `cudnnBackendSetAttribute`, `cudnnBackendGetAttribute`, `cudnnBackendFinalize`; the extractor also excludes the v7 filter and reorder API, the CUDA-graph and causal-conv1d functions and `cudnnGetExecutionPlanWorkspaceSize` |
+| Functions | `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`, `cudnnGetStream`, `cudnnGetErrorString`, `cudnnGetVersion`, `cudnnGetCudartVersion`, `cudnnBackendExecute`, `cudnnGetLastErrorString` | `cudnnBackendCreateDescriptor`, `cudnnBackendDestroyDescriptor`, `cudnnBackendSetAttribute`, `cudnnBackendGetAttribute`, `cudnnBackendFinalize`; also not declared: the v7 filter and reorder API, the CUDA-graph and causal-conv1d functions and `cudnnGetExecutionPlanWorkspaceSize` |
 | C++ helper (namespace `cudnn_frontend`, not C) | `cudnnReorderFilterAndBiasInt8x32` (`cudnn_frontend_Reorder_Tensor.h`): upstream's argument checks (`BAD_PARAM`), then `NOT_SUPPORTED` | — |
 | Handle and descriptor types | `cudnnHandle_t` = `hipdnnHandle_t`, `cudnnBackendDescriptor_t` = `hipdnnBackendDescriptor_t`, `cudnnFraction_t` | — |
 | Enums | `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`, `cudnnBackendHeurMode_t`, `cudnnBackendKnobType_t`, `cudnnBackendNormFwdPhase_t`, `cudnnBackendNormMode_t`, `cudnnBackendNumericalNote_t`, `cudnnBackendReshapeMode_t`, `cudnnBackendTensorReordering_t`, `cudnnBnFinalizeStatsMode_t`, `cudnnConvolutionMode_t`, `cudnnDataType_t`, `cudnnGenStatsMode_t`, `cudnnNanPropagation_t`, `cudnnPaddingMode_t`, `cudnnPointwiseMode_t`, `cudnnReduceTensorOp_t`, `cudnnResampleMode_t`, `cudnnRngDistribution_t`, `cudnnTensorFormat_t`; `cudnnStatus_t` from the v9 shim | `cudnnBackendAttributeName_t` (`CUDNN_ATTR_*`), `cudnnBackendAttributeType_t` (`CUDNN_TYPE_*`), `cudnnMoeGroupedMatmulMode_t` (named only by enum converters, removed with it) |
