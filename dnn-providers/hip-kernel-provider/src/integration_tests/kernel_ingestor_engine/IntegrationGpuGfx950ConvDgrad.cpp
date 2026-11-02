@@ -535,7 +535,10 @@ const DgradCatalog& shippedCatalog()
         const std::string prefix = std::string(DESCRIPTOR_PREFIX) + "_";
         const std::string suffix = ".kdp.json";
         std::vector<std::filesystem::path> shards;
-        for(const auto& file : std::filesystem::directory_iterator(catalog.directory, error))
+        // Recursive: the kdp.json shards live under the bundle's artifacts/ (DVC-pulled),
+        // not directly beside the kmd.json.
+        for(const auto& file :
+            std::filesystem::recursive_directory_iterator(catalog.directory, error))
         {
             const auto name = file.path().filename().string();
             if(name.size() > prefix.size() + suffix.size() && name.rfind(prefix, 0) == 0
