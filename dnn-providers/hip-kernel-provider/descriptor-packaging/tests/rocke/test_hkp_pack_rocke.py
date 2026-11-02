@@ -32,14 +32,24 @@ def _copy_fixture(tmp_path, fixture):
     return dst
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches=(ARCH,)):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches=(ARCH,),
+    hip_path=None,
+    device_lib_path=None,
+):
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
 
@@ -558,9 +568,23 @@ def test_rocke_compile_variant_real(tmp_path, rocke_available, rocke_ukd):
 
 
 def test_rocke_compiles_and_packs(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
     ukd = shipped["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
@@ -604,14 +628,28 @@ def test_rocke_compiles_and_packs(
 
 
 def test_rocke_symbol_capture_differs_from_builder(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
     from kernels.gfx950.attention_dense import (
         AttentionDenseSpec,
         build_attention_dense,
     )
 
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
     symbol = ukd["kernel_source"]["symbol"]
     expected = build_attention_dense(
@@ -622,12 +660,26 @@ def test_rocke_symbol_capture_differs_from_builder(
 
 
 def test_rocke_arch_scoping(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     """A gfx950-scoped rocke UKD under a gfx942+gfx950 KDP packs only for gfx950;
     targeting gfx942 excludes the UKD before compile, so the gfx950-only builder
     is never invoked and no gfx942 shard is produced."""
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", ARCH])
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     # gfx950 shard has the packed rocke UKD.
     assert (tmp_path / "out" / ARCH / "attention.kdp.json").exists()
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
@@ -773,7 +825,7 @@ def test_rocke_toc_key_collision_is_detected(tmp_path, monkeypatch, rocm_kpack_d
             source_root=root,
             arches=[ARCH],
             out_root=tmp_path / "out",
-            hipcc="hipcc-not-invoked",
+            hip_compiler="compiler-not-invoked",
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
         )
@@ -950,7 +1002,7 @@ def test_generic_target_records_compile_target_per_shard(
     }
     for shard, (generic, ids) in expected.items():
         inter = pipeline.compile_intermediate(
-            flat, root, shard, "hipcc-not-invoked", tmp_path / "inter" / shard
+            flat, root, shard, "compiler-not-invoked", tmp_path / "inter" / shard
         )
         records = [u for k in inter.kdps for u in k.ukds]
         assert {u.id for u in records} == ids
@@ -985,7 +1037,7 @@ def test_generic_target_provenance_names_the_compile_target(
         source_root=root,
         arches=["gfx1151", "gfx1201"],
         out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
+        hip_compiler="compiler-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )

@@ -63,7 +63,14 @@ def desk_check_fixture(fixtures_dir):
 
 
 @pytest.fixture(scope="module")
-def packed_desk_check(tmp_path_factory, desk_check_fixture, hipcc, rocm_kpack_dir):
+def packed_desk_check(
+    tmp_path_factory,
+    desk_check_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+):
     """Real pack of the desk_check fixture (two genuinely distinct
     attention_dense variants: head_size 64 and 128, both batch=1)."""
     tmp_path = tmp_path_factory.mktemp("desk_check_pack")
@@ -71,14 +78,24 @@ def packed_desk_check(tmp_path_factory, desk_check_fixture, hipcc, rocm_kpack_di
         source_root=desk_check_fixture,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
     return read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
 
 
-def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
+def _pack_mutated(
+    tmp_path,
+    desk_check_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    mutate,
+):
     """Copy the desk_check fixture, apply `mutate` to its KDP doc, pack it
     for real, and return the shipped KDP doc."""
     src = tmp_path / "src"
@@ -91,7 +108,9 @@ def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
         source_root=src,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -161,7 +180,13 @@ class TestInvariant2DuplicateMatcherTuples:
         )
 
     def test_real_pack_of_two_identical_matcher_tuples_is_detected(
-        self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
+        self,
+        tmp_path,
+        desk_check_fixture,
+        hip_compiler,
+        hip_path,
+        device_lib_path,
+        rocm_kpack_dir,
     ):
         """Negative case, packed for real: two kernels whose spec differs only in a
         field outside the matcher tuple (seqlen_q) collapse to one
@@ -177,7 +202,13 @@ class TestInvariant2DuplicateMatcherTuples:
             doc["kernelDescriptors"].append(dup)
 
         shipped = _pack_mutated(
-            tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
+            tmp_path,
+            desk_check_fixture,
+            hip_compiler,
+            hip_path,
+            device_lib_path,
+            rocm_kpack_dir,
+            mutate,
         )
         dupes = duplicate_matcher_tuples(
             _kernels(shipped), _MATCHER_FIELDS, GENERIC_TARGETS
@@ -194,7 +225,13 @@ class TestInvariant3TocKeyUniqueness:
         assert distinct == total == 2
 
     def test_real_pack_of_a_genuine_duplicate_spec_collides_on_one_toc_key(
-        self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
+        self,
+        tmp_path,
+        desk_check_fixture,
+        hip_compiler,
+        hip_path,
+        device_lib_path,
+        rocm_kpack_dir,
     ):
         """Negative case, packed for real: two UKDs with byte-identical
         (source, builder, spec) collapse onto ONE toc_key."""
@@ -206,7 +243,13 @@ class TestInvariant3TocKeyUniqueness:
             doc["kernelDescriptors"] = [doc["kernelDescriptors"][0], twin]
 
         shipped = _pack_mutated(
-            tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
+            tmp_path,
+            desk_check_fixture,
+            hip_compiler,
+            hip_path,
+            device_lib_path,
+            rocm_kpack_dir,
+            mutate,
         )
         distinct, total = toc_key_uniqueness(_kernels(shipped))
         assert total == 2
@@ -228,7 +271,13 @@ class TestInvariant4SymbolNonUniquenessTolerated:
         assert distinct == total == 2
 
     def test_real_pack_where_symbol_is_shared_but_toc_key_disambiguates(
-        self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
+        self,
+        tmp_path,
+        desk_check_fixture,
+        hip_compiler,
+        hip_path,
+        device_lib_path,
+        rocm_kpack_dir,
     ):
         """Packed for real: attention_dense's kernel_name() omits `batch`, so two
         variants differing only in batch share one symbol while remaining two
@@ -244,7 +293,13 @@ class TestInvariant4SymbolNonUniquenessTolerated:
             doc["kernelDescriptors"] = [doc["kernelDescriptors"][1], other_batch]
 
         shipped = _pack_mutated(
-            tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
+            tmp_path,
+            desk_check_fixture,
+            hip_compiler,
+            hip_path,
+            device_lib_path,
+            rocm_kpack_dir,
+            mutate,
         )
         kernels = _kernels(shipped)
         distinct_sym, total = symbol_distinctness(kernels)
@@ -297,7 +352,7 @@ class TestCliEndToEnd:
 
 
 # Real-bundle regressions against every git-tracked rocKE bundle the repository
-# carries -- no pack, no hipcc, no GPU.
+# carries -- no pack, no HIP compiler, no GPU.
 @pytest.mark.quick
 @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
 def test_real_rocke_example_dtype_vocabularies_are_not_drift(rocke_root):

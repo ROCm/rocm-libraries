@@ -62,11 +62,21 @@ def rocm_kpack_dir():
 
 
 @pytest.fixture(scope="session")
-def hipcc():
-    value = os.environ.get("HKP_HIPCC")
+def hip_compiler():
+    value = os.environ.get("HKP_HIP_COMPILER") or os.environ.get("HKP_HIPCC")
     if not value:
-        pytest.fail("HKP_HIPCC must name the hipcc driver")
+        pytest.fail("HKP_HIP_COMPILER must name the HIP compiler")
     return value
+
+
+@pytest.fixture(scope="session")
+def hip_path():
+    return os.environ.get("HKP_HIP_PATH") or None
+
+
+@pytest.fixture(scope="session")
+def device_lib_path():
+    return os.environ.get("HKP_DEVICE_LIB_PATH") or None
 
 
 @pytest.fixture(scope="session")
@@ -101,9 +111,11 @@ def pack_root(
     src,
     work,
     rocm_kpack_dir,
-    hipcc,
+    hip_compiler,
     comgr_lib,
     *,
+    hip_path=None,
+    device_lib_path=None,
     rocke=False,
     filters=((), ()),
     arch=ARCH,
@@ -130,8 +142,8 @@ def pack_root(
         str(out),
         "--arches",
         arch,
-        "--hipcc",
-        hipcc,
+        "--hip-compiler",
+        hip_compiler,
         "--generic-targets-json",
         str(GENERIC_TARGETS_JSON),
         "--inter-root",
@@ -141,6 +153,10 @@ def pack_root(
         "--source-label",
         "probe_assert_test",
     ]
+    if hip_path:
+        cmd += ["--hip-path", hip_path]
+    if device_lib_path:
+        cmd += ["--hip-device-lib-path", device_lib_path]
     if rocke:
         wheel_stamp = work / "rocke-wheel.stamp"
         wheel_stamp.write_text(hashlib.sha256(b"probe-test-wheel").hexdigest() + "\n")
@@ -179,10 +195,21 @@ def write_packed(path, doc):
 
 
 @pytest.fixture(scope="module")
-def packed_root(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
+def packed_root(
+    tmp_path_factory, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     """The rocke fixture packed once for ARCH, with the rocKE toolchain."""
     work = tmp_path_factory.mktemp("probe_pack")
-    return pack_root(ROCKE_FIXTURE, work, rocm_kpack_dir, hipcc, comgr_lib, rocke=True)
+    return pack_root(
+        ROCKE_FIXTURE,
+        work,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+        rocke=True,
+    )
 
 
 def run_assert(out_root, expect_path, rocm_kpack_dir, expect_comgr=None, arch=ARCH):
@@ -246,10 +273,12 @@ def derive_and_pack(
     src,
     work,
     rocm_kpack_dir,
-    hipcc,
+    hip_compiler,
     comgr_lib,
     ukds=(),
     *,
+    hip_path=None,
+    device_lib_path=None,
     rocke=False,
     filters=((), ()),
     arch=ARCH,
@@ -262,8 +291,10 @@ def derive_and_pack(
         work / "probe" / "root",
         work,
         rocm_kpack_dir,
-        hipcc,
+        hip_compiler,
         comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocke=rocke,
         filters=filters,
         arch=arch,

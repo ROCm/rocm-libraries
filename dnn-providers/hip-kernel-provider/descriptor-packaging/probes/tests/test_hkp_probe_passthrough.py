@@ -14,8 +14,10 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     EMPTY_ARCH_FIXTURE,
     comgr_lib,
     derive_and_pack,
+    device_lib_path,
+    hip_compiler,
+    hip_path,
     hip_source,
-    hipcc,
     read_packed,
     rocm_kpack_dir,
     run_assert,
@@ -72,19 +74,39 @@ def _fails(result, assertion_id):
 
 
 @pytest.fixture(scope="module")
-def emb_packed(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
+def emb_packed(
+    tmp_path_factory, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     work = tmp_path_factory.mktemp("emb_probe")
     _embedded_source(work / "src" / "emb")
-    return derive_and_pack(work / "src", work, rocm_kpack_dir, hipcc, comgr_lib)
+    return derive_and_pack(
+        work / "src",
+        work,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
 
 
 @pytest.fixture(scope="module")
-def mixed_packed(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
+def mixed_packed(
+    tmp_path_factory, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     work = tmp_path_factory.mktemp("emb_hip_probe")
     src = work / "src"
     _embedded_source(src / "emb")
     hip_source(src / "hip")
-    return derive_and_pack(src, work, rocm_kpack_dir, hipcc, comgr_lib)
+    return derive_and_pack(
+        src,
+        work,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
 
 
 @pytest.fixture
@@ -222,7 +244,7 @@ def test_expected_passthrough_but_shipped_ukd_missing_fails_count(emb):
 
 
 def test_two_listed_passthrough_ukds_in_one_kdp_pack_and_pass(
-    tmp_path, rocm_kpack_dir, hipcc, comgr_lib
+    tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
 ):
     # UKDS may keep several pass-through UKDs of one KDP; default mode keeps one.
     src = _embedded_source(tmp_path / "src" / "emb")
@@ -235,7 +257,14 @@ def test_two_listed_passthrough_ukds_in_one_kdp_pack_and_pass(
     (src / "solo.kdp.json").write_text(json.dumps(kdp, indent=2))
     listed = [first["name"], "second"]
     out, expect = derive_and_pack(
-        tmp_path / "src", tmp_path, rocm_kpack_dir, hipcc, comgr_lib, ukds=listed
+        tmp_path / "src",
+        tmp_path,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        ukds=listed,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     entries = json.loads(expect.read_text())
     assert sorted(e["name"] for e in entries) == sorted(listed)
