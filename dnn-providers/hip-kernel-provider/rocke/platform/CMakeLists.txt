@@ -664,6 +664,32 @@ if(ROCKE_INSTALL_TESTS)
              "  LABELS \"ckc\\;python\\;quick\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
+
+      # The tiling package's tests live inside the package (rocke/tests/helpers/tiling), so
+      # rocke_pytest above, which collects the installed tests/ tree, never sees them. Run
+      # them from the installed package, the way the arch-domain gate reads its package data.
+      # Two kinds of test skip here and pass: the GPU tests, without a usable GPU, and every test
+      # that loads platform/tools/, which the installed tree does not hold. The second kind runs
+      # only from a source checkout: the backend coverage re-measurement, the compile of every
+      # issued MMA instruction and the gfx950 fp8 x fp4 hardware run (traits/README.md, Backend
+      # coverage). Like rocke_pytest, the entry gets the compiler tool locations but not the
+      # compiler requirement policy.
+      #
+      # No directory above the installed package holds a rocke pytest configuration, so
+      # without -c pytest would take one from any pytest.ini or pyproject.toml above the
+      # install (a CI workspace has one whose python_files matches only *_test.py, and
+      # collected nothing). -c names the installed tests/pytest.ini, the configuration
+      # rocke_pytest runs under.
+      set(_ROCKE_TILING_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
+             "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
+             "add_test(rocke_tiling_pytest python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TILING_TESTS}\" -v -rs --timeout=120)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;quick\"\n"
+             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  TIMEOUT 1800)\n")
     endif()
 
     # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
