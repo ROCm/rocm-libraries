@@ -19255,7 +19255,16 @@ class KernelWriterAssembly(KernelWriter):
         # baseline build).  The coalesce is always COMPILE-TIME allocated for eligible kernels; the
         # coalesce-vs-plain choice on the plain store is a RUNTIME size gate (subtileCoalesceSizeOkSgpr,
         # computed in _emitSubtileGuards, consumed in GlobalWriteBatch), not a second store build.
+        # Match the firing conditions in GlobalWriteBatch.plsinStorePermlane16Active exactly, so the
+        # cvt-VGPR reservation (and the _emitSubtileGuards size predicate) only lands when the coalesce
+        # can actually fire: gfx950, MXF4->bf16 TN subtile, MI16, MT256x256 (MIWT8).  Without these the
+        # reservation would waste 2 VGPRs + a few SALU on non-gfx950 / non-MXF4 MIWT8 subtile kernels
+        # (e.g. gfx1250) where the coalesce never fires.  MT320x256 (MIWT10) is already excluded by the
+        # miwt[0]==8 check, so plsinStorePermlane16Active's weaveGroups special case is moot here.
         isSubtileCoalesce = bool(kernel.get("UseSubtileImpl")
+                             and isMxf4SubtilePath(kernel)
+                             and tuple(kernel.get("ISA", ())) == (9, 5, 0)
+                             and kernel.get("MatrixInstM") == 16
                              and len(miwt) >= 2 and miwt[0] == COALESCE_MIWT_PROVEN
                              and coalesceFits
                              and not _COALESCE_MEASURE_OFF)
