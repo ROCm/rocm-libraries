@@ -5,8 +5,9 @@
 
 An instance is packaged from a rocKE dgrad ``KernelIdentity``; these tests hold the
 adapter (``builders/common/convolution_backward_data.py``) to the sweeps it comes from,
-over the shipped catalog (``instances_dgrad.txt`` and the weight-transform helpers its
-MFMA rows pull in):
+over the shipped catalog (the dispatcher's registered gfx950 dgrad instances --
+``dispatch/grouped_convolution_instances/gfx950_dgrad.json`` -- and the weight-transform
+helpers its MFMA rows pull in):
 
 * the packaged IR is the sweep kernel's, byte for byte up to the symbol, for one
   instance of every pipeline and implicit-GEMM form;
@@ -61,7 +62,10 @@ from builders.common.convolution_backward_data import (
     supports_gfx950_conv_dgrad_aot,
     supports_gfx950_conv_dgrad_aot_problem,
 )
-from dispatch.grouped_convolution import ConvGroupedRequest
+from dispatch.grouped_convolution import (
+    ConvGroupedRequest,
+    registered_conv_grouped_instances,
+)
 from kernels.conv import direct_aot_jobs
 from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
 from kernels.conv.direct_variants import make_direct_spec
@@ -70,7 +74,6 @@ from kernels.conv.kernel_identity import (
     dgrad_sub_gemms,
     identity_supports_problem,
 )
-from rocke.assets import platform_root
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
 _ARCH = "gfx950"
@@ -170,8 +173,12 @@ def _with_helpers(identities):
 @pytest.fixture(scope="module")
 def catalog():
     """``[(identity, spec)]`` of the shipped catalog, helpers included."""
-    labels = (platform_root().parent / "instances_dgrad.txt").read_text().split()
-    identities = _with_helpers([KernelIdentity.from_label(label) for label in labels])
+    identities = _with_helpers(
+        [
+            spec.identity
+            for spec in registered_conv_grouped_instances("gfx950", direction="dgrad")
+        ]
+    )
     return [(ident, _spec(ident)) for ident in identities]
 
 
@@ -193,7 +200,7 @@ def _form(identity: KernelIdentity) -> tuple:
 
 
 def test_the_catalog_converts_and_reproduces_its_identities(catalog):
-    # instances_dgrad.txt was pruned from 640 to 406 labels (users/barkocot/
+    # gfx950_dgrad.json was pruned from 454 to 406 instances (users/barkocot/
     # gfx950-dgrad-aot-catalog-prune-150): 414 with weight-transform helpers.
     assert len(catalog) > 400
     algorithms = set()
@@ -601,6 +608,7 @@ def test_dx_is_zero_filled_exactly_where_the_records_leave_it_unwritten(
         and not s.tap_outer_k
         and s.filter_h == 0
         and s.tile_m <= 64
+        and s.dtype == problem.dtype
     )
     plan, why = gfx950_conv_dgrad_aot_plan(spec, problem)
     assert plan is not None, why
