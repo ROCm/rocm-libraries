@@ -1,0 +1,1016 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "hipblaslt-jit-code-object.hpp"
+#include "rocblaslt_arch_revision.hpp"
+#include "rocblaslt_secure_env.hpp"
+
+#include <amd_comgr/amd_comgr.h>
+#include <hip/hip_runtime_api.h>
+
+#include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <new>
+#include <set>
+#include <system_error>
+#include <utility>
+#ifndef _WIN32
+#include <dlfcn.h>
+#include <sys/stat.h>
+#endif
+
+namespace hipblaslt_jit::code_object
+{
+    namespace
+    {
+        struct Relocatable
+        {
+            std::string       name;
+            std::vector<uint8_t> bytes;
+        };
+
+        struct RelocatableResult
+        {
+            Status                   status = Status::InternalError;
+            std::string              log;
+            std::vector<Relocatable> objects;
+            bool                     ok() const noexcept
+            {
+                return status == Status::Success;
+            }
+        };
+
+        struct Failure
+        {
+            Status      status;
+            std::string message;
+        };
+
+        [[noreturn]] void fail(Status status, std::string message)
+        {
+            throw Failure{status, std::move(message)};
+        }
+
+        std::string statusString(amd_comgr_status_t status)
+        {
+            const char* text = nullptr;
+            if(amd_comgr_status_string(status, &text) == AMD_COMGR_STATUS_SUCCESS && text)
+                return text;
+            return "comgr status " + std::to_string(static_cast<int>(status));
+        }
+
+        void check(amd_comgr_status_t status,
+                   const char*        what,
+                   Status             onError = Status::ComgrError)
+        {
+            if(status != AMD_COMGR_STATUS_SUCCESS)
+                fail(status == AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT ? Status::InvalidArgument
+                                                                       : onError,
+                     std::string(what) + ": " + statusString(status));
+        }
+
+        template <typename H, amd_comgr_status_t (*Destroy)(H)>
+        class Handle
+        {
+        public:
+            Handle() = default;
+            ~Handle()
+            {
+                reset();
+            }
+            Handle(const Handle&)            = delete;
+            Handle& operator=(const Handle&) = delete;
+            Handle(Handle&& other) noexcept
+                : value(std::exchange(other.value, H{}))
+            {
+            }
+            Handle& operator=(Handle&& other) noexcept
+            {
+                if(this != &other)
+                {
+                    reset();
+                    value = std::exchange(other.value, H{});
+                }
+                return *this;
+            }
+            H* out() noexcept
+            {
+                reset();
+                return &value;
+            }
+            H get() const noexcept
+            {
+                return value;
+            }
+
+        private:
+            void reset() noexcept
+            {
+                if(value.handle != 0)
+                    Destroy(value);
+                value = H{};
+            }
+            H value{};
+        };
+
+        using Data       = Handle<amd_comgr_data_t, amd_comgr_release_data>;
+        using DataSet    = Handle<amd_comgr_data_set_t, amd_comgr_destroy_data_set>;
+        using ActionInfo = Handle<amd_comgr_action_info_t, amd_comgr_destroy_action_info>;
+        using Metadata   = Handle<amd_comgr_metadata_node_t, amd_comgr_destroy_metadata>;
+
+        DataSet makeSet()
+        {
+            DataSet set;
+            check(amd_comgr_create_data_set(set.out()), "amd_comgr_create_data_set");
+            return set;
+        }
+
+        void add(DataSet&              set,
+                 amd_comgr_data_kind_t kind,
+                 const std::string&    name,
+                 const void*           bytes,
+                 size_t                size)
+        {
+            Data data;
+            check(amd_comgr_create_data(kind, data.out()), "amd_comgr_create_data");
+            check(amd_comgr_set_data(data.get(), size, static_cast<const char*>(bytes)),
+                  "amd_comgr_set_data");
+            check(amd_comgr_set_data_name(data.get(), name.c_str()), "amd_comgr_set_data_name");
+            check(amd_comgr_data_set_add(set.get(), data.get()), "amd_comgr_data_set_add");
+        }
+
+        std::vector<uint8_t> bytesOf(amd_comgr_data_t data)
+        {
+            size_t size = 0;
+            check(amd_comgr_get_data(data, &size, nullptr), "amd_comgr_get_data");
+            std::vector<uint8_t> bytes(size);
+            if(size)
+                check(amd_comgr_get_data(data, &size, reinterpret_cast<char*>(bytes.data())),
+                      "amd_comgr_get_data");
+            bytes.resize(size);
+            return bytes;
+        }
+
+        std::string nameOf(amd_comgr_data_t data)
+        {
+            size_t size = 0;
+            check(amd_comgr_get_data_name(data, &size, nullptr), "amd_comgr_get_data_name");
+            std::string name(size, '\0');
+            if(size)
+                check(amd_comgr_get_data_name(data, &size, name.data()),
+                      "amd_comgr_get_data_name");
+            while(!name.empty() && name.back() == '\0')
+                name.pop_back();
+            return name;
+        }
+
+        std::vector<std::pair<std::string, std::vector<uint8_t>>>
+            collect(const DataSet& set, amd_comgr_data_kind_t kind)
+        {
+            size_t count = 0;
+            check(amd_comgr_action_data_count(set.get(), kind, &count),
+                  "amd_comgr_action_data_count");
+            std::vector<std::pair<std::string, std::vector<uint8_t>>> items;
+            for(size_t i = 0; i < count; ++i)
+            {
+                Data data;
+                check(amd_comgr_action_data_get_data(set.get(), kind, i, data.out()),
+                      "amd_comgr_action_data_get_data");
+                items.emplace_back(nameOf(data.get()), bytesOf(data.get()));
+            }
+            return items;
+        }
+
+        ActionInfo makeAction(const std::string&              isaName,
+                              const std::vector<std::string>& options,
+                              bool                            hip = false)
+        {
+            ActionInfo info;
+            check(amd_comgr_create_action_info(info.out()), "amd_comgr_create_action_info");
+            check(amd_comgr_action_info_set_isa_name(info.get(), isaName.c_str()),
+                  ("unsupported ISA name '" + isaName + "'").c_str());
+            check(amd_comgr_action_info_set_logging(info.get(), true),
+                  "amd_comgr_action_info_set_logging");
+            if(hip)
+            {
+                check(amd_comgr_action_info_set_language(info.get(), AMD_COMGR_LANGUAGE_HIP),
+                      "amd_comgr_action_info_set_language");
+                check(amd_comgr_action_info_set_device_lib_linking(info.get(), true),
+                      "amd_comgr_action_info_set_device_lib_linking");
+            }
+            std::vector<const char*> argv;
+            argv.reserve(options.size());
+            for(const auto& option : options)
+                argv.push_back(option.c_str());
+            check(amd_comgr_action_info_set_option_list(info.get(), argv.data(), argv.size()),
+                  "amd_comgr_action_info_set_option_list");
+            return info;
+        }
+
+        std::string join(const std::vector<std::string>& options)
+        {
+            std::string text;
+            for(const auto& option : options)
+                text += (text.empty() ? "" : " ") + option;
+            return text;
+        }
+
+        // Runs one comgr action, appending its log/diagnostics whether or not it succeeds.
+        DataSet run(amd_comgr_action_kind_t         kind,
+                    const char*                     stage,
+                    const ActionInfo&               info,
+                    const DataSet&                  input,
+                    const std::vector<std::string>& options,
+                    std::string&                    log)
+        {
+            DataSet    output = makeSet();
+            const auto status = amd_comgr_do_action(kind, info.get(), input.get(), output.get());
+            std::string text;
+            for(auto dataKind : {AMD_COMGR_DATA_KIND_LOG, AMD_COMGR_DATA_KIND_DIAGNOSTIC})
+            {
+                size_t count = 0;
+                if(amd_comgr_action_data_count(output.get(), dataKind, &count)
+                   != AMD_COMGR_STATUS_SUCCESS)
+                    continue;
+                for(const auto& item : collect(output, dataKind))
+                    text.append(item.second.begin(), item.second.end());
+            }
+            while(!text.empty() && (text.back() == '\n' || text.back() == '\0'))
+                text.pop_back();
+            if(status != AMD_COMGR_STATUS_SUCCESS || !text.empty())
+            {
+                log += std::string("[") + stage + "] options: " + join(options) + "\n";
+                if(!text.empty())
+                    log += text + "\n";
+            }
+            if(status != AMD_COMGR_STATUS_SUCCESS)
+                fail(Status::ComgrError,
+                     std::string(stage) + " failed: " + statusString(status)
+                         + (text.empty() ? " (comgr produced no log)" : ""));
+            return output;
+        }
+
+        void validateTarget(const Target& target)
+        {
+            if(target.processor == Processor::gfx000 || target.processorName().empty())
+                fail(Status::InvalidArgument,
+                     "unknown target processor " + std::to_string(static_cast<int>(target.processor)));
+        }
+
+        void validateOptions(const Options& options)
+        {
+            if(options.codeObjectVersion < 4 || options.codeObjectVersion > 6)
+                fail(Status::InvalidArgument,
+                     "code object version must be 4, 5 or 6, got "
+                         + std::to_string(options.codeObjectVersion));
+            if(options.wavefrontSize != 0 && options.wavefrontSize != 32
+               && options.wavefrontSize != 64)
+                fail(Status::InvalidArgument, "wavefront size must be 0, 32 or 64");
+            std::set<std::string> names;
+            for(const auto& include : options.includes)
+            {
+                if(include.name.empty() || include.name.front() == '/'
+                   || include.name.find("..") != std::string::npos)
+                    fail(Status::InvalidArgument,
+                         "include name must be a relative path without '..': '" + include.name
+                             + "'");
+                if(!names.insert(include.name).second)
+                    fail(Status::InvalidArgument, "duplicate include name '" + include.name + "'");
+            }
+        }
+
+        // comgr materializes data objects as files named after the data; use
+        // index-prefixed, file-system-safe names and keep the caller's names separately.
+        std::string dataName(size_t index, const std::string& name, const char* extension)
+        {
+            std::string safe;
+            for(char c : name)
+                safe += (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')
+                            ? c
+                            : '_';
+            if(safe.size() > 96)
+                safe.resize(96);
+            return std::to_string(index) + "-" + safe + extension;
+        }
+
+        template <typename Source>
+        void validateSources(const std::vector<Source>& sources)
+        {
+            if(sources.empty())
+                fail(Status::InvalidArgument, "no sources supplied");
+            std::set<std::string> names;
+            for(const auto& source : sources)
+            {
+                if(source.name.empty())
+                    fail(Status::InvalidArgument, "source name must not be empty");
+                if(!names.insert(source.name).second)
+                    fail(Status::InvalidArgument, "duplicate source name '" + source.name + "'");
+            }
+        }
+
+        // A -cuid unique within one link. Source names are already unique.
+        std::string contentId(const std::string& name)
+        {
+            std::string id;
+            for(unsigned char c : name)
+                id += (std::isalnum(c) || c == '_') ? static_cast<char>(c) : '_';
+            return id.empty() ? std::string("unit") : id;
+        }
+
+        // wavefrontSize, or the processor default when it is 0.
+        std::string waveOption(const Target& target, int wavefrontSize)
+        {
+            if(wavefrontSize == 0)
+                wavefrontSize = target.processor < Processor::gfx1010 ? 64 : 32;
+            return wavefrontSize == 64 ? "-mwavefrontsize64" : "-mno-wavefrontsize64";
+        }
+
+        void addIncludes(DataSet& set, const Options& options)
+        {
+            for(const auto& include : options.includes)
+                add(set,
+                    AMD_COMGR_DATA_KIND_INCLUDE,
+                    include.name,
+                    reinterpret_cast<const char*>(include.bytes.data()),
+                    include.bytes.size());
+        }
+
+        std::vector<Relocatable> relocatablesFrom(const DataSet&                  output,
+                                                  const std::vector<std::string>& names)
+        {
+            auto items = collect(output, AMD_COMGR_DATA_KIND_RELOCATABLE);
+            if(items.size() != names.size())
+                fail(Status::NoOutput,
+                     "expected " + std::to_string(names.size()) + " relocatable objects, comgr produced "
+                         + std::to_string(items.size()));
+            std::vector<Relocatable> objects;
+            for(size_t i = 0; i < items.size(); ++i)
+            {
+                if(items[i].second.empty())
+                    fail(Status::NoOutput, "empty relocatable for '" + names[i] + "'");
+                objects.push_back({names[i], std::move(items[i].second)});
+            }
+            return objects;
+        }
+
+        // Replaces the target ID after "amdgcn-amd-amdhsa--" in the target directive
+        // and metadata, up to the closing quote or the end of the token.
+        std::string retarget(std::string text, const std::string& targetId)
+        {
+            const std::string triple = "amdgcn-amd-amdhsa--";
+            for(const char* anchor : {".amdgcn_target", "amdhsa.target:"})
+            {
+                for(size_t at = text.find(anchor); at != std::string::npos;
+                    at        = text.find(anchor, at + 1))
+                {
+                    const auto lineEnd = text.find('\n', at);
+                    const auto start   = text.find(triple + "gfx", at);
+                    if(start == std::string::npos || start > lineEnd)
+                        continue;
+                    const auto begin = start + triple.size();
+                    auto       end   = begin;
+                    while(end < text.size() && text[end] != '"' && text[end] != '\''
+                          && !std::isspace(static_cast<unsigned char>(text[end])))
+                        ++end;
+                    text.replace(begin, end - begin, targetId);
+                }
+            }
+            return text;
+        }
+
+        RelocatableResult assembleImpl(const std::vector<hipblaslt_jit::Artifact>& sources,
+                                       const Target&                      target,
+                                       const Options&                     options,
+                                       std::string&                       log)
+        {
+            validateTarget(target);
+            validateOptions(options);
+            validateSources(sources);
+
+            std::vector<std::string> flags
+                = {"-mcode-object-version=" + std::to_string(options.codeObjectVersion),
+                   waveOption(target, options.wavefrontSize),
+                   "-Wno-unused-command-line-argument"};
+            for(const auto& dir : options.includeDirectories)
+                flags.push_back("-I" + dir);
+            flags.insert(flags.end(), options.assemblerFlags.begin(), options.assemblerFlags.end());
+
+            auto                     input = makeSet();
+            std::vector<std::string> names;
+            for(size_t i = 0; i < sources.size(); ++i)
+            {
+                const std::string source(sources[i].bytes.begin(), sources[i].bytes.end());
+                const auto& text = options.retargetAssembly ? retarget(source, target.targetId())
+                                                            : source;
+                add(input,
+                    AMD_COMGR_DATA_KIND_SOURCE,
+                    dataName(i, sources[i].name, ".s"),
+                    text.data(),
+                    text.size());
+                names.push_back(sources[i].name);
+            }
+            addIncludes(input, options);
+
+            const auto info   = makeAction(target.isaName(), flags);
+            const auto output = run(AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
+                                    "assemble",
+                                    info,
+                                    input,
+                                    flags,
+                                    log);
+            return {Status::Success, {}, relocatablesFrom(output, names)};
+        }
+
+        RelocatableResult compileHipImpl(const std::vector<hipblaslt_jit::Artifact>& sources,
+                                         const Target&                 target,
+                                         const Options&                options,
+                                         std::string&                  log)
+        {
+            validateTarget(target);
+            validateOptions(options);
+            validateSources(sources);
+
+            const auto               version = std::to_string(options.codeObjectVersion);
+            std::vector<std::string> compile
+                = {"-O3", "-std=c++17", "-mcode-object-version=" + version, waveOption(target, 0)};
+            if(!options.rocmPath.empty())
+                compile.push_back("--rocm-path=" + options.rocmPath);
+            if(options.includeHipRuntimeWrapper)
+                compile.insert(compile.end(), {"-include", "__clang_hip_runtime_wrapper.h"});
+            for(const auto& dir : options.includeDirectories)
+                compile.push_back("-I" + dir);
+
+            std::vector<std::string> codegen = {"-O3",
+                                                "-Xclang",
+                                                "-disable-llvm-optzns",
+                                                "-mcode-object-version=" + version,
+                                                waveOption(target, 0)};
+            codegen.insert(codegen.end(), options.codegenFlags.begin(), options.codegenFlags.end());
+
+            const auto        codegenInfo = makeAction(target.isaName(), codegen);
+            RelocatableResult result{Status::Success, {}, {}};
+            // One action per source: COMPILE_SOURCE_TO_RELOCATABLE accepts a single
+            // source, and every translation unit needs its own -cuid or the
+            // __hip_cuid_<id> symbols collide when the objects are linked together.
+            for(size_t i = 0; i < sources.size(); ++i)
+            {
+                auto options_i = compile;
+                options_i.push_back("-cuid=" + contentId(sources[i].name));
+                options_i.insert(
+                    options_i.end(), options.compilerFlags.begin(), options.compilerFlags.end());
+                const auto info  = makeAction(target.isaName(), options_i, true);
+                auto       input = makeSet();
+                const std::string source(sources[i].bytes.begin(), sources[i].bytes.end());
+                add(input,
+                    AMD_COMGR_DATA_KIND_SOURCE,
+                    dataName(i, sources[i].name, ".hip"),
+                    source.data(),
+                    source.size());
+                addIncludes(input, options);
+                if(options.hipPipeline == HipPipeline::SourceToRelocatable)
+                {
+                    const auto output = run(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE,
+                                            "compile HIP to relocatable",
+                                            info,
+                                            input,
+                                            options_i,
+                                            log);
+                    result.objects.push_back(
+                        std::move(relocatablesFrom(output, {sources[i].name}).front()));
+                    continue;
+                }
+                const auto bitcode = run(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC,
+                                         "compile HIP to bitcode",
+                                         info,
+                                         input,
+                                         options_i,
+                                         log);
+                const auto output  = run(AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
+                                        "codegen bitcode to relocatable",
+                                        codegenInfo,
+                                        bitcode,
+                                        codegen,
+                                        log);
+                result.objects.push_back(
+                    std::move(relocatablesFrom(output, {sources[i].name}).front()));
+            }
+            return result;
+        }
+
+        Result linkImpl(const std::vector<Relocatable>& objects,
+                        const Target&                   target,
+                        const Options&                  options,
+                        std::string&                    log)
+        {
+            validateTarget(target);
+            validateOptions(options);
+            if(objects.empty())
+                fail(Status::InvalidArgument, "no relocatable objects to link");
+
+            auto input = makeSet();
+            for(size_t i = 0; i < objects.size(); ++i)
+            {
+                if(objects[i].bytes.empty())
+                    fail(Status::InvalidArgument,
+                         "relocatable '" + objects[i].name + "' is empty");
+                add(input,
+                    AMD_COMGR_DATA_KIND_RELOCATABLE,
+                    dataName(i, objects[i].name, ".o"),
+                    objects[i].bytes.data(),
+                    objects[i].bytes.size());
+            }
+            const auto info   = makeAction(target.isaName(), options.linkerFlags);
+            const auto output = run(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
+                                    "link",
+                                    info,
+                                    input,
+                                    options.linkerFlags,
+                                    log);
+            auto executables = collect(output, AMD_COMGR_DATA_KIND_EXECUTABLE);
+            if(executables.size() != 1 || executables.front().second.empty())
+                fail(Status::NoOutput,
+                     "link produced " + std::to_string(executables.size())
+                         + " executables; expected one non-empty executable");
+            hipblaslt_jit::Artifact executable;
+            executable.kind  = hipblaslt_jit::Artifact::Kind::Executable;
+            executable.bytes = std::move(executables.front().second);
+            return {Status::Success, {}, std::move(executable)};
+        }
+
+        template <typename R, typename F>
+        R guarded(F&& body) noexcept
+        {
+            std::string log;
+            try
+            {
+                R result   = body(log);
+                result.log = std::move(log) + result.log;
+                return result;
+            }
+            catch(Failure& failure)
+            {
+                R result;
+                result.status = failure.status;
+                try
+                {
+                    result.log = std::move(log) + "error: " + failure.message + "\n";
+                }
+                catch(...)
+                {
+                }
+                return result;
+            }
+            catch(const std::bad_alloc&)
+            {
+                R result;
+                result.status = Status::InternalError;
+                return result;
+            }
+            catch(const std::exception& error)
+            {
+                R result;
+                result.status = Status::InternalError;
+                try
+                {
+                    result.log = std::move(log) + "internal error: " + error.what() + "\n";
+                }
+                catch(...)
+                {
+                }
+                return result;
+            }
+            catch(...)
+            {
+                R result;
+                result.status = Status::InternalError;
+                return result;
+            }
+        }
+
+        std::string metadataString(amd_comgr_metadata_node_t node, const char* key)
+        {
+            amd_comgr_metadata_kind_t kind;
+            check(amd_comgr_get_metadata_kind(node, &kind), "amd_comgr_get_metadata_kind",
+                  Status::MetadataError);
+            if(kind != AMD_COMGR_METADATA_KIND_STRING)
+                fail(Status::MetadataError, std::string("metadata '") + key + "' is not a scalar");
+            size_t size = 0;
+            check(amd_comgr_get_metadata_string(node, &size, nullptr),
+                  "amd_comgr_get_metadata_string", Status::MetadataError);
+            std::string value(size, '\0');
+            check(amd_comgr_get_metadata_string(node, &size, value.data()),
+                  "amd_comgr_get_metadata_string", Status::MetadataError);
+            while(!value.empty() && value.back() == '\0')
+                value.pop_back();
+            return value;
+        }
+
+        bool lookup(amd_comgr_metadata_node_t map, const char* key, Metadata& value)
+        {
+            return amd_comgr_metadata_lookup(map, key, value.out()) == AMD_COMGR_STATUS_SUCCESS;
+        }
+
+        std::string stringField(amd_comgr_metadata_node_t map, const char* key, bool required)
+        {
+            Metadata value;
+            if(!lookup(map, key, value))
+            {
+                if(required)
+                    fail(Status::MetadataError, std::string("missing metadata key '") + key + "'");
+                return {};
+            }
+            return metadataString(value.get(), key);
+        }
+
+        template <typename F>
+        void forEach(amd_comgr_metadata_node_t list, const char* key, F&& visit)
+        {
+            size_t count = 0;
+            check(amd_comgr_get_metadata_list_size(list, &count),
+                  (std::string("metadata '") + key + "' is not a list").c_str(),
+                  Status::MetadataError);
+            for(size_t i = 0; i < count; ++i)
+            {
+                Metadata element;
+                check(amd_comgr_index_list_metadata(list, i, element.out()),
+                      "amd_comgr_index_list_metadata", Status::MetadataError);
+                visit(element.get());
+            }
+        }
+
+        std::uint16_t le16(const unsigned char* p)
+        {
+            return static_cast<std::uint16_t>(p[0] | (p[1] << 8));
+        }
+
+        // A little-endian field of the size of T at offset, which must lie in the object.
+        template <typename T>
+        T field(const std::vector<uint8_t>& elf, std::uint64_t offset)
+        {
+            if(offset > elf.size() || elf.size() - offset < sizeof(T))
+                fail(Status::MetadataError, "the code object is truncated");
+            T value = 0;
+            for(size_t i = 0; i < sizeof(T); ++i)
+                value |= static_cast<T>(static_cast<T>(elf[offset + i]) << (8 * i));
+            return value;
+        }
+
+        int elfCodeObjectVersion(const unsigned char* elf, size_t size)
+        {
+            static const char bundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+            if(size >= 4 && std::memcmp(elf, "CCOB", 4) == 0)
+                fail(Status::MetadataError,
+                     "input is a compressed offload bundle; extract the code object first");
+            if(size >= sizeof(bundleMagic) - 1
+               && std::memcmp(elf, bundleMagic, sizeof(bundleMagic) - 1) == 0)
+                fail(Status::MetadataError,
+                     "input is a clang offload bundle; extract the code object first");
+            if(size < 64 || std::memcmp(elf, "\x7f" "ELF", 4) != 0)
+                fail(Status::MetadataError, "input is not an ELF file");
+            if(elf[4] != 2 || elf[5] != 1)
+                fail(Status::MetadataError, "input is not a little-endian ELF64 file");
+            constexpr std::uint16_t amdgpuMachine = 224; // EM_AMDGPU
+            if(le16(elf + 18) != amdgpuMachine)
+                fail(Status::MetadataError, "input is not an AMDGPU ELF file");
+            constexpr unsigned char amdhsaAbi = 64; // ELFOSABI_AMDGPU_HSA
+            if(elf[7] != amdhsaAbi)
+                fail(Status::MetadataError, "input is not an AMDHSA code object");
+            return elf[8] + 2;
+        }
+
+        ObjectCheck readMetadataImpl(const void* bytes, size_t size, std::string&)
+        {
+            if(!bytes)
+                fail(Status::InvalidArgument, "null code object");
+            ObjectCheck result;
+            result.codeObjectVersion
+                = elfCodeObjectVersion(static_cast<const unsigned char*>(bytes), size);
+            const bool relocatable = le16(static_cast<const unsigned char*>(bytes) + 16) == 1;
+
+            Data data;
+            check(amd_comgr_create_data(relocatable ? AMD_COMGR_DATA_KIND_RELOCATABLE
+                                                    : AMD_COMGR_DATA_KIND_EXECUTABLE,
+                                        data.out()),
+                  "amd_comgr_create_data");
+            check(amd_comgr_set_data(data.get(), size, static_cast<const char*>(bytes)),
+                  "amd_comgr_set_data");
+            check(amd_comgr_set_data_name(data.get(), "code-object"), "amd_comgr_set_data_name");
+
+            size_t isaSize = 0;
+            check(amd_comgr_get_data_isa_name(data.get(), &isaSize, nullptr),
+                  "amd_comgr_get_data_isa_name", Status::MetadataError);
+            result.isaName.assign(isaSize, '\0');
+            check(amd_comgr_get_data_isa_name(data.get(), &isaSize, result.isaName.data()),
+                  "amd_comgr_get_data_isa_name", Status::MetadataError);
+            while(!result.isaName.empty() && result.isaName.back() == '\0')
+                result.isaName.pop_back();
+
+            Metadata root;
+            check(amd_comgr_get_data_metadata(data.get(), root.out()),
+                  "amd_comgr_get_data_metadata", Status::MetadataError);
+
+            Metadata kernels;
+            if(!lookup(root.get(), "amdhsa.kernels", kernels))
+                fail(Status::MetadataError, "missing metadata key 'amdhsa.kernels'");
+            forEach(kernels.get(), "amdhsa.kernels", [&](amd_comgr_metadata_node_t node) {
+                result.kernelNames.push_back(stringField(node, ".name", true));
+            });
+            result.status = Status::Success;
+            return result;
+        }
+
+        MetadataNote metadataNoteImpl(const std::vector<uint8_t>& elf, std::string&)
+        {
+            elfCodeObjectVersion(elf.data(), elf.size());
+            constexpr std::uint32_t noteSection = 7; // SHT_NOTE
+            constexpr std::uint32_t amdgpuNote  = 32; // NT_AMDGPU_METADATA
+            const auto              headers     = field<std::uint64_t>(elf, 0x28);
+            const auto              headerSize  = field<std::uint16_t>(elf, 0x3a);
+            const auto              count       = field<std::uint16_t>(elf, 0x3c);
+            const auto              padded = [](std::uint64_t size) { return (size + 3) & ~3ull; };
+            for(std::uint16_t i = 0; i < count; ++i)
+            {
+                const auto header = headers + std::uint64_t{i} * headerSize;
+                if(field<std::uint32_t>(elf, header + 4) != noteSection)
+                    continue;
+                auto       at  = field<std::uint64_t>(elf, header + 0x18);
+                const auto end = at + field<std::uint64_t>(elf, header + 0x20);
+                if(end < at || end > elf.size())
+                    fail(Status::MetadataError, "a note section lies outside the code object");
+                while(end - at >= 12)
+                {
+                    const auto nameSize = field<std::uint32_t>(elf, at);
+                    const auto descSize = field<std::uint32_t>(elf, at + 4);
+                    const auto type     = field<std::uint32_t>(elf, at + 8);
+                    const auto name     = at + 12;
+                    const auto desc     = name + padded(nameSize);
+                    if(desc > end || end - desc < descSize)
+                        fail(Status::MetadataError, "a note lies outside its section");
+                    if(type == amdgpuNote && nameSize == 7
+                       && std::memcmp(elf.data() + name, "AMDGPU", 7) == 0)
+                    {
+                        MetadataNote result;
+                        result.bytes.assign(elf.begin() + desc, elf.begin() + desc + descSize);
+                        result.status = Status::Success;
+                        return result;
+                    }
+                    at = desc + padded(descSize);
+                }
+            }
+            fail(Status::MetadataError, "the code object has no AMDGPU metadata note");
+        }
+
+#ifndef _WIN32
+        std::filesystem::path libraryOf(const void* symbol)
+        {
+            Dl_info info{};
+            if(dladdr(symbol, &info) == 0 || !info.dli_fname || !*info.dli_fname)
+                return {};
+            std::error_code error;
+            auto            path = std::filesystem::canonical(info.dli_fname, error);
+            return error ? std::filesystem::path(info.dli_fname) : path;
+        }
+#endif
+
+        std::vector<Relocatable> objectsOf(const hipblaslt_jit::SourceCodeBundle& bundle,
+                                           const Target&                          target,
+                                           const Options&                         options,
+                                           std::string&                           log)
+        {
+            if(bundle.mainKernel.name.empty() || bundle.mainKernel.bytes.empty())
+                fail(Status::InvalidArgument, "no sources supplied");
+            if(bundle.mainKernel.kind != hipblaslt_jit::Artifact::Kind::Assembly
+               && bundle.mainKernel.kind != hipblaslt_jit::Artifact::Kind::Hip)
+                fail(Status::InvalidArgument, "the main kernel is not assembly or HIP source");
+            Options               merged = options;
+            std::set<std::string> includeNames;
+            for(const auto& include : merged.includes)
+                includeNames.insert(include.name);
+            for(const auto& include : bundle.includes)
+            {
+                if(include.name.empty())
+                    fail(Status::InvalidArgument, "include name must not be empty");
+                if(includeNames.insert(include.name).second)
+                    merged.includes.push_back(include);
+            }
+            std::vector<hipblaslt_jit::Artifact> assembly, hip;
+            merged.compilerFlags.insert(
+                merged.compilerFlags.end(), bundle.hipFlags.begin(), bundle.hipFlags.end());
+            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::Hip)
+                hip.push_back(bundle.mainKernel);
+            else
+                assembly.push_back(bundle.mainKernel);
+            std::vector<Relocatable> objects;
+            if(!assembly.empty())
+            {
+                auto assembled = assembleImpl(assembly, target, merged, log);
+                for(auto& object : assembled.objects)
+                    objects.push_back(std::move(object));
+            }
+            if(!hip.empty())
+            {
+                auto compiled = compileHipImpl(hip, target, merged, log);
+                for(auto& object : compiled.objects)
+                    objects.push_back(std::move(object));
+            }
+            return objects;
+        }
+    }
+
+    const char* toString(Status status) noexcept
+    {
+        switch(status)
+        {
+        case Status::Success:
+            return "success";
+        case Status::InvalidArgument:
+            return "invalid argument";
+        case Status::ComgrError:
+            return "comgr error";
+        case Status::NoOutput:
+            return "no output";
+        case Status::MetadataError:
+            return "metadata error";
+        case Status::InternalError:
+            return "internal error";
+        }
+        return "unknown";
+    }
+
+    Result build(const hipblaslt_jit::SourceCodeBundle& bundle,
+                 const Target&                           target,
+                 const Options&                          options) noexcept
+    {
+        return guarded<Result>([&](std::string& log) {
+            auto objects = objectsOf(bundle, target, options, log);
+            return linkImpl(objects, target, options, log);
+        });
+    }
+
+    Result compileRelocatable(const hipblaslt_jit::SourceCodeBundle& bundle,
+                              const Target&                          target,
+                              const Options&                         options) noexcept
+    {
+        return guarded<Result>([&](std::string& log) {
+            auto objects = objectsOf(bundle, target, options, log);
+            if(objects.size() != 1 || objects.front().bytes.empty())
+                fail(Status::NoOutput, "compilation did not produce one relocatable");
+            hipblaslt_jit::Artifact object;
+            object.name  = objects.front().name.empty() ? bundle.mainKernel.name
+                                                        : objects.front().name;
+            object.kind  = hipblaslt_jit::Artifact::Kind::Relocatable;
+            object.bytes = std::move(objects.front().bytes);
+            return Result{Status::Success, {}, std::move(object)};
+        });
+    }
+
+    Result linkRelocatables(const std::vector<hipblaslt_jit::Artifact>& objects,
+                            const Target&                               target,
+                            const Options&                              options) noexcept
+    {
+        return guarded<Result>([&](std::string& log) {
+            std::vector<Relocatable> relocatables;
+            relocatables.reserve(objects.size());
+            for(const auto& object : objects)
+            {
+                if(object.kind != hipblaslt_jit::Artifact::Kind::Relocatable)
+                    fail(Status::InvalidArgument, "'" + object.name + "' is not a relocatable");
+                relocatables.push_back({object.name, object.bytes});
+            }
+            return linkImpl(relocatables, target, options, log);
+        });
+    }
+
+    ObjectCheck inspect(const void* elf, std::size_t size) noexcept
+    {
+        return guarded<ObjectCheck>(
+            [&](std::string& log) { return readMetadataImpl(elf, size, log); });
+    }
+
+    ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept
+    {
+        return inspect(elf.data(), elf.size());
+    }
+
+    MetadataNote metadataNote(const std::vector<uint8_t>& elf) noexcept
+    {
+        return guarded<MetadataNote>(
+            [&](std::string& log) { return metadataNoteImpl(elf, log); });
+    }
+
+    std::string comgrVersion() noexcept
+    {
+        try
+        {
+            size_t major = 0, minor = 0;
+            amd_comgr_get_version(&major, &minor);
+            return std::to_string(major) + "." + std::to_string(minor);
+        }
+        catch(...)
+        {
+            return {};
+        }
+    }
+
+    std::string comgrIdentity() noexcept
+    {
+        try
+        {
+            auto identity = comgrVersion();
+#ifndef _WIN32
+            const auto  path = libraryOf(reinterpret_cast<const void*>(&amd_comgr_get_version));
+            struct stat info{};
+            if(!path.empty() && ::stat(path.c_str(), &info) == 0)
+                identity += ":" + path.string() + ":" + std::to_string(info.st_size) + ":"
+                            + std::to_string(static_cast<long long>(info.st_mtim.tv_sec)
+                                                 * 1000000000LL
+                                             + info.st_mtim.tv_nsec);
+#endif
+            return identity;
+        }
+        catch(...)
+        {
+            return {};
+        }
+    }
+
+    std::string rocmPath() noexcept
+    {
+        try
+        {
+            if(const char* hip = rocblaslt_secure_getenv("HIP_PATH"); hip && *hip)
+                return hip;
+#ifndef _WIN32
+            const auto runtime = libraryOf(reinterpret_cast<const void*>(&hipModuleLoadData));
+            if(runtime.has_parent_path() && runtime.parent_path().has_parent_path())
+                return runtime.parent_path().parent_path().string();
+#endif
+            return {};
+        }
+        catch(...)
+        {
+            return {};
+        }
+    }
+}
+
+namespace hipblaslt_jit
+{
+    std::optional<Target> Target::fromTargetId(const std::string& targetId)
+    {
+        std::vector<std::string> parts;
+        for(size_t begin = 0;;)
+        {
+            const auto end = targetId.find(':', begin);
+            parts.push_back(targetId.substr(begin, end - begin));
+            if(end == std::string::npos)
+                break;
+            begin = end + 1;
+        }
+        Target target;
+        target.processor = TensileLite::AMDGPU::toProcessor(parts.front());
+        if(target.processor == Processor::gfx000 || target.processorName() != parts.front())
+            return std::nullopt;
+        for(size_t i = 1; i < parts.size(); ++i)
+        {
+            const auto& part    = parts[i];
+            const auto  name    = part.substr(0, part.empty() ? 0 : part.size() - 1);
+            auto*       feature = name == "sramecc" ? &target.sramecc
+                                  : name == "xnack" ? &target.xnack
+                                                    : nullptr;
+            if(!feature || *feature != TargetFeature::Any
+               || (part.back() != '+' && part.back() != '-'))
+                return std::nullopt;
+            *feature = part.back() == '+' ? TargetFeature::On : TargetFeature::Off;
+        }
+        return target;
+    }
+
+    std::string Target::processorName() const
+    {
+        return TensileLite::AMDGPU::toString(processor);
+    }
+
+    std::string Target::targetId() const
+    {
+        const auto feature = [](const char* name, TargetFeature setting) {
+            if(setting == TargetFeature::Any)
+                return std::string();
+            return std::string(":") + name + (setting == TargetFeature::On ? "+" : "-");
+        };
+        return processorName() + feature("sramecc", sramecc) + feature("xnack", xnack);
+    }
+
+    std::string Target::isaName() const
+    {
+        return "amdgcn-amd-amdhsa--" + targetId();
+    }
+
+    std::string Target::libraryArch() const
+    {
+        return rocblaslt_revisioned_arch_name(processorName(), asicRevision);
+    }
+}
