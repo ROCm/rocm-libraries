@@ -115,11 +115,10 @@ namespace
         EXPECT_EQ(rocsparse_spsort_buffer_size(handle, descr, src, dst, stage, &size, nullptr),
                   st_ok);
         EXPECT_NE(size, std::numeric_limits<size_t>::max());
+        // DevBuf allocates at least one byte, so the pointer is non-null even when the
+        // library reports a buffer size of zero. That pointer must be accepted.
         DevBuf<char> buffer(size);
-        // The size of the scratch space is an implementation detail; a zero size comes
-        // with a null buffer.
-        return rocsparse_spsort(
-            handle, descr, src, dst, stage, size, size ? buffer.get() : nullptr, nullptr);
+        return rocsparse_spsort(handle, descr, src, dst, stage, size, buffer.get(), nullptr);
     }
 
     // Sets an input of a spsort descriptor.
@@ -345,6 +344,28 @@ namespace
         run_sort_grid<int64_t, int64_t, rocsparse_double_complex>(handle, false);
     }
 
+    // A new descriptor uses rocsparse_spsort_alg_default. CSR analysis needs no temporary
+    // storage and accepts a non-null buffer when the reported size is zero.
+    TEST_F(ConvSort, SpsortDefaultAlgorithmAndZeroBuffer)
+    {
+        DevBuf<int32_t> d_ptr(std::vector<int32_t>{0, 2, 4}),
+            d_ind(std::vector<int32_t>{1, 0, 1, 0});
+        DevBuf<float> d_val(std::vector<float>{1, 2, 3, 4});
+        Spmat         mat;
+        ASSERT_EQ(
+            rocsparse_create_csr_descr(&mat, 2, 2, 4, d_ptr, d_ind, d_val, i32, i32, base0, f32),
+            st_ok);
+
+        SpsortDescr descr(handle);
+        size_t      size = std::numeric_limits<size_t>::max();
+        EXPECT_EQ(
+            rocsparse_spsort_buffer_size(handle, descr, mat, mat, stg_ana, &size, nullptr), st_ok);
+        EXPECT_EQ(size, size_t(0));
+        DevBuf<char> buffer(1);
+        EXPECT_EQ(rocsparse_spsort(handle, descr, mat, mat, stg_ana, 0, buffer.get(), nullptr),
+                  st_ok);
+    }
+
     TEST_F(ConvSort, SpsortDescrInputs)
     {
         rocsparse_spsort_descr tmp = nullptr;
@@ -447,8 +468,12 @@ namespace
         EXPECT_REJECTED(bsz(descr, src, dst, bad_stage, &size));
         EXPECT_EQ(bsz(descr, src, dst, stg_cmp, nullptr), st_ptr);
 
-        // The algorithm has not been set.
-        EXPECT_REJECTED(bsz(descr, src, dst, stg_cmp, &size));
+        // The algorithm defaults to rocsparse_spsort_alg_default.
+        EXPECT_EQ(bsz(descr, src, dst, stg_cmp, &size), st_ok);
+        // A value outside the enum is stored and rejected when the descriptor is used.
+        const auto bad_alg = static_cast<rocsparse_spsort_alg>(-1);
+        ASSERT_EQ(set_input(handle, descr, rocsparse_spsort_input_alg, bad_alg), st_ok);
+        EXPECT_EQ(bsz(descr, src, dst, stg_cmp, &size), st_val);
         ASSERT_EQ(set_input(handle, descr, rocsparse_spsort_input_alg, alg_def), st_ok);
         EXPECT_EQ(bsz(descr, src, dst, stg_cmp, &size), st_ok);
 
