@@ -2468,7 +2468,7 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
 }
 
 // An automatic refill line (cover < 0) is one WMMA short of a full queue: the same schedule as
-// asking for (depth - 1) x the WMMA latency by hand.
+// asking for (depth - 1) x the next WMMA's latency by hand.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_AutomaticCoverIsOneWmmaShortOfFull) {
     constexpr int kDepth = 4;
     std::string shapes[2];

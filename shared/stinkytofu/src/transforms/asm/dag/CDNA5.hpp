@@ -471,16 +471,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
         return f.wmmaQueueCoverCycles != 0 ? std::max(1, f.wmmaQueueDepth) : 1;
     }
-    // Cycles of queued WMMA work needed before a non-WMMA pick may issue (0 = off). Automatic
-    // (the option below 0): one WMMA short of a full queue.
-    int wmmaQueueCover() const {
-        if (wmmaQueueDepth() <= 1) return 0;
+    bool wmmaQueueOn() const {
+        return wmmaQueueDepth() > 1;
+    }
+    // The refill line: cycles of queued WMMA work needed before a non-WMMA pick may issue.
+    // Automatic (the option below 0): one WMMA short of a full queue, sized by the next WMMA's
+    // latency, so a region that mixes WMMA latencies gets the line of the WMMA it refills for.
+    int wmmaQueueCover(int wmmaLatency) const {
+        if (!wmmaQueueOn()) return 0;
         const int cover = getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles;
         if (cover >= 0) return cover;
-        return (wmmaQueueDepth() - 1) * std::max(1, wmmaIssueConfig.latency);
+        return (wmmaQueueDepth() - 1) * std::max(1, wmmaLatency);
     }
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
-    // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
+    // queued cover drops below the refill line (wmmaQueueCover) with room in the queue, and
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
     // WMMAs, Dynamic once the queued cover reaches the refill target. wmmaLatency is the next
     // WMMA's latency (sizes the auto target).
@@ -491,7 +495,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         int left = 0;
     };
     WmmaRefillState wmmaRefillState(int wmmaLatency) const {
-        if (wmmaQueueCover() <= 0) return {wmmaRefilling_, wmmaRefillLeft_};
+        if (!wmmaQueueOn()) return {wmmaRefilling_, wmmaRefillLeft_};
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
         const bool room = outstandingWmmas() < wmmaQueueDepth();
         WmmaRefillState st{wmmaRefilling_, wmmaRefillLeft_};
@@ -504,7 +508,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
                                   : queuedCoverCycles() < target;
             if (!room || !more) st.active = false;
         }
-        if (!st.active && room && queuedCoverCycles() < wmmaQueueCover()) {
+        if (!st.active && room && queuedCoverCycles() < wmmaQueueCover(wmmaLatency)) {
             st.active = true;
             st.left = std::max(1, f.wmmaBatchSize);
         }
@@ -512,7 +516,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     // Whether a refill is under way, as the pick sees it.
     bool wmmaRefillActive(int wmmaLatency) {
-        if (wmmaQueueCover() <= 0) return false;
+        if (!wmmaQueueOn()) return false;
         const WmmaRefillState st = wmmaRefillState(wmmaLatency);
         wmmaRefilling_ = st.active;
         wmmaRefillLeft_ = st.left;
@@ -1100,7 +1104,7 @@ void CDNA5ReadyQueue::resetActiveWindow() {
 // the WAR gate (pointer-free; the nodes die with the region). Queue model only.
 void CDNA5ReadyQueue::carryQueuedWar() {
     std::vector<CarriedWar> next;
-    if (wmmaQueueCover() > 0) {
+    if (wmmaQueueOn()) {
         for (CarriedWar& c : carriedWar_) {
             if (c.remaining > clock_) next.push_back({std::move(c.srcs), c.remaining - clock_});
         }
@@ -1168,7 +1172,7 @@ int CDNA5ReadyQueue::preFirstWmmaStallShadow() const {
 void CDNA5ReadyQueue::advanceTime(int cycles, TimeKind kind) {
     if (kind == TimeKind::ValuIssue) {
         cycles = computeValuAdvanceCycles(cycles);  // skips the slots a VALU cannot use
-    } else if (kind == TimeKind::Issue && wmmaQueueCover() > 0) {
+    } else if (kind == TimeKind::Issue && wmmaQueueOn()) {
         int at = coIssueCyclePos_;
         for (int c = 0; c < cycles; ++c) {
             while (isBlockedCycle(at)) ++at;
@@ -2657,7 +2661,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         if (bestLatency > 0 && heldMemOpPending())
             if (DAGNode* n = pickFallback()) return n;
         // The queued WMMA can only start once its sources arrive: that stall elapses.
-        if (wmmaQueueCover() > 0 && bestLatency > 0) advanceTime(bestLatency, TimeKind::Elapsed);
+        if (wmmaQueueOn() && bestLatency > 0) advanceTime(bestLatency, TimeKind::Elapsed);
         DAGNode* node = pickOneFromWMMA(bestWMMA);
         return rememberPick(node);
     }
