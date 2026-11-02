@@ -50,6 +50,8 @@
 #include "rocblaslt.h"
 #include <hip/hip_runtime_api.h>
 
+#include <limits>
+
 /* =========================================================================
  * Environment variable parsing infrastructure
  * ========================================================================= */
@@ -109,6 +111,62 @@ bool fixedPointEmulationPerformanceCheck(const _rocblaslt_handle*      h,
  * Shared for both FP32 and FP64.  Env var cached on first call.           */
 bool fixedPointEmulationIsEager();
 
+/* Device support for fixed-point emulation.
+ * A device is supported when its PCI device ID has a chip row (performance-
+ * model values measured on that card) or its gfx target has an architecture
+ * row (arithmetic-intensity thresholds).                                    */
+enum FixedPointEmulationDeviceMatch
+{
+    FIXED_POINT_EMULATION_DEVICE_NONE = 0, /* not supported: never emulated  */
+    FIXED_POINT_EMULATION_DEVICE_CHIP = 1, /* PCI device ID row              */
+    FIXED_POINT_EMULATION_DEVICE_ARCH = 2, /* gfx target (architecture) row  */
+};
+
+/* Architecture-row threshold that never emulates.                          */
+inline constexpr double FIXED_POINT_EMULATION_NEVER = std::numeric_limits<double>::infinity();
+
+struct FixedPointEmulationDeviceSupport
+{
+    FixedPointEmulationDeviceMatch match;
+    /* Architecture-row thresholds, used for a device without a chip row
+     * unless the strategy is eager: emulate exactly when the arithmetic
+     * intensity 2*m*n*k / (bytes per element * (m*k + k*n + m*n)), in
+     * flop/byte, is at least the value.  0 = always,
+     * FIXED_POINT_EMULATION_NEVER = never.                                  */
+    double fp64_min_ai;
+    double fp32_min_ai;
+};
+
+/* Pure lookup, for tests: gcn_arch_name may carry target features
+ * ("gfx1100:sramecc-:xnack-") or be nullptr.                               */
+FixedPointEmulationDeviceSupport fixedPointEmulationLookupDevice(uint32_t    pci_device_id,
+                                                                 const char* gcn_arch_name);
+
+/* Lookup for a HIP device index, cached per device.                        */
+FixedPointEmulationDeviceSupport fixedPointEmulationDeviceSupport(int device);
+
+enum FixedPointEmulationPolicy
+{
+    FIXED_POINT_EMULATION_POLICY_NATIVE  = 0, /* run the native GEMM        */
+    FIXED_POINT_EMULATION_POLICY_EMULATE = 1, /* emulate                    */
+    FIXED_POINT_EMULATION_POLICY_MODEL   = 2, /* ask the performance model  */
+};
+
+/* Emulate-or-native policy for a supported device, before the performance
+ * model.  Pure function, for tests.
+ *   eager:          emulate.
+ *   chip row:       performance model.
+ *   architecture:   emulate exactly when the arithmetic intensity is at
+ *                   least the row's threshold for type_a.
+ * An unsupported device or a type other than HIP_R_64F / HIP_R_32F runs
+ * natively.                                                                 */
+FixedPointEmulationPolicy fixedPointEmulationPolicy(const FixedPointEmulationDeviceSupport& support,
+                                                    bool                                    eager,
+                                                    hipDataType                             type_a,
+                                                    int64_t                                 m,
+                                                    int64_t                                 n,
+                                                    int64_t                                 k);
+
 /* Returns the special-values support mask from
  * HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK (default: 0x3).
  *   bit 0 = Inf detection enabled
@@ -149,7 +207,7 @@ struct FixedPointEmulationSettings
     rocblaslt_status                         status;      /* invalid_value on bad env            */
     bool                                     apply;       /* true -> use emulation; false -> native path */
     uint32_t                                 sv_support;  /* resolved special-values bitmask (bit 0 = Inf, bit 1 = NaN) */
-    hipblasEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env; never DEFAULT) */
+    hipblasEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env and the device policy; never DEFAULT) */
     void*                                    workspace;   /* caller workspace ptr; nullptr until filled before GEMM dispatch */
     size_t                                   workspace_bytes; /* caller workspace size; ~size_t{0} = no budget constraint */
     /* ADP target precision in mantissa bits.
