@@ -1,0 +1,8 @@
+# Vendored mosaic headers are a build artifact, copied from <repo>/include
+# by setup.py. Source of truth is the repo-root include/ directory.
+pymosaic/_include/
+
+# Build / packaging outputs
+build/
+dist/
+*.egg-info/
