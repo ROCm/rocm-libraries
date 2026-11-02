@@ -436,7 +436,6 @@ public:
     // each thread has sorted keys
     // merge sort keys in shared memory
     //
-    _CCCL_PRAGMA_UNROLL_FULL()
     for (int target_merged_threads_number = 2;
          target_merged_threads_number <= NUM_THREADS;
          target_merged_threads_number *= 2)

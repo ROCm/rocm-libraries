@@ -50,7 +50,7 @@ AccumType ThreadReduce(const InputType& input, ReductionOp reduction_op)
 
     AccumType     retval = input[0];
     constexpr int length = ::hipcub::detail::static_size_v<InputType>();
-    HIPCUB_PRAGMA_UNROLL_FULL()
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 1; i < length; ++i)
     {
         retval = reduction_op(retval, input[i]);
@@ -75,7 +75,7 @@ AccumType ThreadReduce(const InputType& input, ReductionOp reduction_op, PrefixT
 
     constexpr int length = ::hipcub::detail::static_size_v<InputType>();
     AccumType     retval = static_cast<AccumType>(prefix);
-    HIPCUB_PRAGMA_UNROLL_FULL()
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < length; ++i)
     {
         retval = reduction_op(retval, input[i]);
