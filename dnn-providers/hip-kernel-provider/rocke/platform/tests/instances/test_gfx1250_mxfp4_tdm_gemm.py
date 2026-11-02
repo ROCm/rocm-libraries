@@ -216,6 +216,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
     def test_step6_dependencies_are_rejected(self):
         problem = {"M": 1024, "N": 1024, "K": 2048, **YAML_TILE}
         chain = variant_flags("step6_8_mxfp4_gemm")
+        read_ahead = variant_flags("trial_read_ahead_on6_9_mxfp4_gemm")
         cases = (
             (
                 {"M": 128, "N": 96, "K": 256, "tile_n": 96, "vector_epilogue": True},
@@ -306,8 +307,63 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 "prefetch_gl2 needs tile_k / 2 to be a multiple of 256 B",
             ),
             (
-                {**problem, **chain, "tile_refill_mid": True},
-                "tile_refill_mid requires local_read_prefetch, init_c_wmma and scale_tdm",
+                {**problem, "local_read_prefetch": True, "tile_refill_mid": True},
+                "tile_refill_mid requires local_read_prefetch and scale_tdm",
+            ),
+            (
+                {**problem, **chain, "init_c_wmma": True, "tile_read_ahead": True},
+                "tile_read_ahead requires tile_refill_mid",
+            ),
+            (
+                {**problem, **read_ahead, "cluster_signal_wmmas": 6},
+                (
+                    "cluster_signal_wmmas requires tile_read_ahead, tdm_multicast "
+                    "and source_order"
+                ),
+            ),
+            (
+                {**problem, **read_ahead, "source_order": True, "cluster_signal_wmmas": 17},
+                "cluster_signal_wmmas must be in 0..16",
+            ),
+            (
+                {**problem, **read_ahead, "gl2_prefetch_early": True},
+                "gl2_prefetch_early requires prefetch_gl2 and tile_read_ahead",
+            ),
+            (
+                {**problem, **read_ahead, "cluster_signal_wave0": True},
+                "cluster_signal_wave0 requires cluster_signal_wmmas",
+            ),
+            (
+                {**problem, "tdm_desc_hoist": True},
+                "tdm_desc_hoist requires wave_parity_tdm",
+            ),
+            (
+                {**problem, "wmma_n_outer": True},
+                "wmma_n_outer requires local_read_prefetch",
+            ),
+            (
+                {**problem, **chain, "coarse_ds_wait": True},
+                "coarse_ds_wait requires tile_read_ahead",
+            ),
+            (
+                {**problem, "cluster_aid_remap": True},
+                "cluster_aid_remap requires cluster_dim",
+            ),
+            (
+                {**problem, "epilogue_nan_clamp": True},
+                "epilogue_nan_clamp requires vector_epilogue",
+            ),
+            (
+                {**problem, "tile_n": 128, "vector_epilogue": True, "epilogue_pk8_cvt": True},
+                "epilogue_pk8_cvt requires vector_epilogue and wave_repeat_n % 8 == 0",
+            ),
+            (
+                {**problem, "epilogue_inst_prefetch": 6},
+                "epilogue_inst_prefetch requires vector_epilogue",
+            ),
+            (
+                {**problem, "vector_epilogue": True, "epilogue_inst_prefetch": 0},
+                "epilogue_inst_prefetch must be at least 1",
             ),
         )
         for kwargs, message in cases:
@@ -324,11 +380,11 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertEqual(names[0], BASE_VARIANT)
         self.assertEqual(
             [variant_step(name) for name in names],
-            [f"6.{i}" for i in range(1, 10)],
+            [f"6.{i}" for i in range(1, 14)],
         )
         self.assertEqual(
             [name for name in names[1:]],
-            [f"step6_{i}_mxfp4_gemm" for i in range(2, 10)],
+            [f"step6_{i}_mxfp4_gemm" for i in range(2, 14)],
         )
         self.assertEqual(MXFP4_GEMM_VARIANTS[0][1], {})
         for name in names:
@@ -356,10 +412,21 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             default_llvm,
         )
 
-    def test_expert_scheduling_is_a_comgr_option(self):
+    def test_scheduling_flags_are_comgr_options(self):
+        esm = ["-O3", "-mllvm", "-amdgpu-expert-scheduling-mode"]
+        no_misched = [
+            "-mllvm",
+            "-enable-misched=false",
+            "-mllvm",
+            "-enable-post-misched=false",
+        ]
         expected = {
             "step6_8_mxfp4_gemm": ["-O3"],
-            "step6_9_mxfp4_gemm": ["-O3", "-mllvm", "-amdgpu-expert-scheduling-mode"],
+            "step6_9_mxfp4_gemm": esm,
+            "trial_srco_on6_9_mxfp4_gemm": esm + no_misched,
+            "step6_12_mxfp4_gemm": esm,
+            "trial_pka_on6_12_mxfp4_gemm": esm
+            + ["-mllvm", "-amdgpu-kernarg-preload-count=11"],
         }
         for name, options in expected.items():
             with self.subTest(variant=name):
@@ -516,6 +583,174 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertEqual(_count(sched, refill_mid), 6)
         self.assertEqual(_count(cluster_asm, refill_mid), 4)
         self.assertEqual(_count(branches, refill_mid), _count(branches, init_c))
+        # Trial read-ahead: tile k+1 is waited for at tile k's refill
+        # (tensorcnt 0 there, 2 only in the prologue), and its first K-step
+        # is read there, so the first tile's head is the one extra read set
+        # and the refill fences are the only scheduling barriers.
+        read_ahead = by_step["T6"]
+        on6_9 = by_step["T5"]
+        self.assertEqual(_count(wmma, read_ahead), 32 * k_steps * 2)
+        self.assertEqual(_count(tdm, read_ahead), 8)
+        self.assertEqual(_count(wait_tensor.format(0), read_ahead), 3)
+        self.assertEqual(_count(wait_tensor.format(2), read_ahead), 1)
+        self.assertEqual(_count(sched, read_ahead), 4)
+        per_step = _count(lds_b128, on6_9) // (k_steps * 2)
+        self.assertEqual(
+            _count(lds_b128, read_ahead), _count(lds_b128, on6_9) + per_step
+        )
+        self.assertEqual(_count(branches, read_ahead), _count(branches, on6_9))
+        # source_order is a compile option only.
+        kernel = {
+            step: variant_spec(names[step], *_SMOKE, **YAML_TILE).kernel_name()
+            for step in ("T6", "T7")
+        }
+        self.assertEqual(
+            by_step["T7"].replace(kernel["T7"], kernel["T6"]), read_ahead
+        )
+        # Split cluster barrier (prologue tile and loop body): the signal and
+        # the wait replace the refill's full cluster barrier; only the
+        # prologue's and the drain's remain. Tile k+1 is published by a
+        # workgroup barrier instead.
+        signal_asm = re.escape(
+            'asm sideeffect "s_barrier_signal_isfirst -1\\0As_barrier_wait -1'
+            '\\0As_cbranch_scc0 1\\0As_barrier_signal -3", "~{scc},~{memory}"'
+        )
+        wait_asm = re.escape('asm sideeffect "s_barrier_wait -3", "~{memory}"')
+        wg_barrier = r"call void @llvm\.amdgcn\.s\.barrier\(\)"
+        for step in ("T9", "T10"):
+            with self.subTest(step=step):
+                split = by_step[step]
+                self.assertEqual(_count(signal_asm, split), 2)
+                self.assertEqual(_count(wait_asm, split), 2)
+                self.assertEqual(_count(cluster_asm, split), 2)
+                self.assertEqual(
+                    _count(wg_barrier, split), _count(wg_barrier, read_ahead) + 2
+                )
+                self.assertEqual(_count(wmma, split), _count(wmma, read_ahead))
+                self.assertEqual(_count(lds_b128, split), _count(lds_b128, read_ahead))
+        # No peel: the loop starts at tile 0, so only one copy of the tile
+        # and no C = 0 WMMAs.
+        for step in ("T13", "T14"):
+            with self.subTest(step=step):
+                self.assertEqual(_count(wmma, by_step[step]), 32 * k_steps)
+                self.assertEqual(_count(zero_c, by_step[step]), 0)
+        # Early GL2 prefetch: the same prefetches, each tile's issued after
+        # its first 16 WMMAs instead of at the refill.
+        late, early = by_step["T11"], by_step["T12"]
+        self.assertEqual(_count(prefetch, early), _count(prefetch, late))
+        self.assertGreater(_count(prefetch, early), 0)
+        for text, wmmas_before in ((late, 96), (early, 16)):
+            body = text.split("for.body", 1)[1]
+            first = re.search(prefetch, body).start()
+            self.assertEqual(_count(wmma, body[:first]), wmmas_before)
+        # Descriptor hoist: the loop body builds no descriptor, so it has no
+        # readfirstlane; the TDM issues are unchanged.
+        readfirstlane = r"@llvm\.amdgcn\.readfirstlane"
+        for step, base in (("T15", "T12"), ("6.10", "6.9")):
+            with self.subTest(step=step):
+                body = by_step[step].split("for.body", 1)[1]
+                self.assertEqual(_count(readfirstlane, body), 0)
+                self.assertGreater(
+                    _count(readfirstlane, by_step[base].split("for.body", 1)[1]), 0
+                )
+                self.assertEqual(_count(tdm, by_step[step]), _count(tdm, by_step[base]))
+        # WMMA order: B fragment outer, so the first two WMMAs share it.
+        b_operand = r"wmma\.scale\.f32\.32x16x128\.f4[^\n]*?<8 x i32> (%\w+)"
+        for step, shared in (("T12", False), ("T16", True), ("6.10", False), ("6.11", True)):
+            with self.subTest(step=step):
+                first, second = re.findall(b_operand, by_step[step])[:2]
+                self.assertEqual(first == second, shared)
+                self.assertEqual(_count(wmma, by_step[step]), _count(wmma, early))
+        # Coarse LDS wait: one per 16-WMMA block, in the peeled tile and the
+        # loop body.
+        ds_wait = re.escape('asm sideeffect "s_wait_dscnt 35", "~{memory}"')
+        self.assertEqual(_count(ds_wait, early), 0)
+        self.assertEqual(_count(ds_wait, by_step["T17"]), 2 * k_steps * 2)
+        # Wave-0 cluster signal: replaces the draining signal; the late wait
+        # adds the LDS wait and a workgroup barrier.
+        wave0_asm = re.escape(
+            'asm sideeffect "s_cmp_eq_u32 $0, 0\\0As_cbranch_scc0 1'
+            '\\0As_barrier_signal -3", "s,~{scc},~{memory}"'
+        )
+        wave0 = by_step["T18"]
+        self.assertEqual(_count(wave0_asm, wave0), 2)
+        self.assertEqual(_count(signal_asm, wave0), 0)
+        self.assertEqual(_count(ds_wait, wave0), 2)
+        self.assertEqual(_count(wg_barrier, wave0), _count(wg_barrier, early) + 2)
+        # Kernel setup: the arbitration-stall write and the AID query are one
+        # inline asm each; kernarg preload is a compile option only.
+        arb_asm = re.escape(
+            'asm sideeffect "s_setreg_imm32_b32 hwreg(HW_REG_WAVE_SCHED_MODE, 2, 1), 1"'
+        )
+        aid_asm = re.escape(
+            'asm sideeffect "s_sendmsg_rtn_b32 $0, sendmsg(MSG_RTN_GET_SE_AID_ID)'
+            '\\0As_wait_kmcnt 0", "=s"'
+        )
+        # The smoke grid is one cluster, so the remap keeps the hardware
+        # order there; 2048x4096 is eight 4x4 clusters.
+        eight_clusters = {
+            step: _lower_kernel_to_llvm_python(
+                build_mxfp4_tdm_gemm(
+                    variant_spec(names[step], 2048, 4096, 2048, **YAML_TILE),
+                    arch="gfx1250",
+                ),
+                arch="gfx1250",
+                llvm_flavor="llvm23",
+            )
+            for step in ("6.12", "T22", "T23", "T24")
+        }
+        for step, arb, aid in (
+            ("6.11", 0, 0),
+            ("T21", 1, 0),
+            ("6.12", 0, 0),
+            ("T22", 0, 0),
+        ):
+            with self.subTest(step=step):
+                self.assertEqual(_count(arb_asm, by_step[step]), arb)
+                self.assertEqual(_count(aid_asm, by_step[step]), aid)
+        for step, arb in (("6.12", 0), ("T22", 0), ("T23", 1), ("T24", 0)):
+            with self.subTest(step=step, shape="eight clusters"):
+                self.assertEqual(_count(arb_asm, eight_clusters[step]), arb)
+                self.assertEqual(_count(aid_asm, eight_clusters[step]), 1)
+        kernel = {
+            step: variant_spec(names[step], *_SMOKE, **YAML_TILE).kernel_name()
+            for step in ("6.11", "6.12", "T22")
+        }
+        for step in ("6.12", "T22"):
+            with self.subTest(step=step, same_ir_as="6.11"):
+                self.assertEqual(
+                    by_step[step].replace(kernel[step], kernel["6.11"]),
+                    by_step["6.11"],
+                )
+        # Epilogue, per beta path: 64 vector stores of 8 values. The NaN clamp
+        # is one maximum and one minimum per value with no NaN select; the
+        # 8-wide convert is one call per store; the instruction prefetch
+        # comes before every sixth store.
+        values = 64 * 8 * 2
+        maximum = r"call float @llvm\.maximum\.f32\("
+        minimum = r"call float @llvm\.minimum\.f32\("
+        uno = r"fcmp uno float"
+        pk8 = r"call <2 x i32> @llvm\.amdgcn\.cvt\.scalef32\.pk8\.fp8\.f32\("
+        pk2 = r"call i32 @llvm\.amdgcn\.cvt\.pk\.fp8\.f32\("
+        inst_prefetch = re.escape(
+            'asm sideeffect "s_wait_xcnt 0\\0As_prefetch_inst_pc_rel 0, null, 31"'
+        )
+        for step, clamp, wide, prefetches in (
+            ("6.12", False, False, 0),
+            ("T25", True, False, 0),
+            ("T26", False, True, 0),
+            ("6.13", True, True, 0),
+            ("T27", True, True, 2 * 11),
+            ("T28", False, False, 2 * 11),
+        ):
+            with self.subTest(step=step):
+                text = by_step[step]
+                self.assertEqual(_count(maximum, text), values if clamp else 0)
+                self.assertEqual(_count(minimum, text), values if clamp else 0)
+                self.assertEqual(_count(uno, text), 0 if clamp else values)
+                self.assertEqual(_count(pk8, text), 2 * 64 if wide else 0)
+                self.assertEqual(_count(pk2, text), 0 if wide else values // 2)
+                self.assertEqual(_count(inst_prefetch, text), prefetches)
 
     def test_tdm_pad_fields_encoding(self):
         self.assertEqual(tdm_pad_fields(1024, 16), {"pad_interval": 7, "pad_amount": 3})

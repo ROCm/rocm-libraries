@@ -1503,6 +1503,24 @@ class IRBuilder:
     def fmin(self, a: Value, b: Value) -> Value:
         return self._op("arith.fmin", [a, b], [a.type], result_name_hint="fmin").result
 
+    def fmaximum(self, a: Value, b: Value) -> Value:
+        """f32 maximum that propagates NaN (``llvm.maximum``); a
+        ``fminimum(fmaximum(v, lo), hi)`` clamp is one
+        ``v_maximumminimum_f32`` on gfx1250."""
+        if a.type.name != "f32":
+            raise ValueError(f"fmaximum expects f32, got {a.type.name}")
+        return self._op(
+            "arith.fmaximum", [a, b], [a.type], result_name_hint="fmaximum"
+        ).result
+
+    def fminimum(self, a: Value, b: Value) -> Value:
+        """f32 minimum that propagates NaN (``llvm.minimum``)."""
+        if a.type.name != "f32":
+            raise ValueError(f"fminimum expects f32, got {a.type.name}")
+        return self._op(
+            "arith.fminimum", [a, b], [a.type], result_name_hint="fminimum"
+        ).result
+
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
 
@@ -1942,6 +1960,25 @@ class IRBuilder:
             [v],
             [VectorType(FP8E4M3, 4)],
             result_name_hint="q8x4",
+        ).result
+
+    def cvt_pk8_fp8_f32x8(self, v: Value) -> Value:
+        """Convert <8 x f32> to <8 x fp8e4m3> with one gfx1250
+        ``v_cvt_scalef32_pk8_fp8_f32`` (scale 1.0); out-of-range values as
+        in :meth:`cvt_f32_to_fp8` (no saturation)."""
+        if (
+            not isinstance(v.type, VectorType)
+            or v.type.elem.name != "f32"
+            or v.type.count != 8
+        ):
+            raise ValueError(
+                f"cvt_pk8_fp8_f32x8 expects vec<f32x8> input, got {v.type.name}"
+            )
+        return self._op(
+            "arith.cvt_pk8_fp8_f32x8",
+            [v],
+            [VectorType(FP8E4M3, 8)],
+            result_name_hint="q8x8",
         ).result
 
     def cvt_f32_to_bf8(self, v: Value) -> Value:
@@ -6108,6 +6145,8 @@ PURE_OP_NAMES = {
     "arith.assume_range",
     "arith.fmax",
     "arith.fmin",
+    "arith.fmaximum",
+    "arith.fminimum",
     "arith.select",
     "arith.and",
     "arith.or",
@@ -6191,6 +6230,7 @@ PURE_OP_NAMES = {
     "arith.cvt_pk_f32_fp8x4",
     "arith.cvt_pk_f32_bf8x4",
     "arith.cvt_pk_fp8_f32x4",
+    "arith.cvt_pk8_fp8_f32x8",
     "arith.cvt_pk_bf8_f32x4",
     "arith.cvt_scalef32_pk_f32_fp8",
     "arith.cvt_scalef32_pk_f32_bf8",

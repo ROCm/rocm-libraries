@@ -45,6 +45,14 @@ MXFP4_GEMM_VARIANTS, VARIANT_STEPS = _chain(
         {"cluster_dim": (4, 4, 1), "tdm_multicast": True},
     ),
     ("6.9", "step6_9_mxfp4_gemm", {"expert_scheduling": True}),
+    ("6.10", "step6_10_mxfp4_gemm", {"tdm_desc_hoist": True}),
+    ("6.11", "step6_11_mxfp4_gemm", {"wmma_n_outer": True}),
+    ("6.12", "step6_12_mxfp4_gemm", {"cluster_aid_remap": True}),
+    (
+        "6.13",
+        "step6_13_mxfp4_gemm",
+        {"epilogue_nan_clamp": True, "epilogue_pk8_cvt": True},
+    ),
 )
 
 # Trials build on 6.8 and stay off the chain. The YAML's
@@ -55,9 +63,18 @@ MXFP4_GEMM_VARIANTS, VARIANT_STEPS = _chain(
 # slower than the step before it on the YAML shape, so they are trials now.
 # trial_ck_lds_pad replaces 6.6 instead: it is 6.5 with CK Tile's comp_tdm
 # padding (16 B after every 256 B LDS row on A and B, no B iterate mode,
-# unpadded scales), so it compares against 6.6 directly.
+# unpadded scales), so it compares against 6.6 directly. The on6_9 trials
+# build on 6.9 instead.
 _CHAIN_END = dict(MXFP4_GEMM_VARIANTS)["step6_8_mxfp4_gemm"]
 _STEP6_5 = dict(MXFP4_GEMM_VARIANTS)["step6_5_mxfp4_gemm"]
+_STEP6_9 = dict(MXFP4_GEMM_VARIANTS)["step6_9_mxfp4_gemm"]
+_READ_AHEAD_SRCO = {
+    **_STEP6_9,
+    "init_c_wmma": True,
+    "tile_refill_mid": True,
+    "tile_read_ahead": True,
+    "source_order": True,
+}
 MXFP4_GEMM_TRIAL_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("trial_prefetch_gl2_mxfp4_gemm", {**_CHAIN_END, "prefetch_gl2": True}),
     ("trial_init_c_wmma_mxfp4_gemm", {**_CHAIN_END, "init_c_wmma": True}),
@@ -66,6 +83,96 @@ MXFP4_GEMM_TRIAL_VARIANTS: list[tuple[str, dict[str, Any]]] = [
         {**_CHAIN_END, "init_c_wmma": True, "tile_refill_mid": True},
     ),
     ("trial_ck_lds_pad_mxfp4_gemm", {**_STEP6_5, "lds_pad_ck": True}),
+    (
+        "trial_tile_refill_mid_on6_9_mxfp4_gemm",
+        {**_STEP6_9, "init_c_wmma": True, "tile_refill_mid": True},
+    ),
+    (
+        "trial_read_ahead_on6_9_mxfp4_gemm",
+        {
+            **_STEP6_9,
+            "init_c_wmma": True,
+            "tile_refill_mid": True,
+            "tile_read_ahead": True,
+        },
+    ),
+    ("trial_read_ahead_srco_on6_9_mxfp4_gemm", _READ_AHEAD_SRCO),
+    ("trial_srco_on6_9_mxfp4_gemm", {**_STEP6_9, "source_order": True}),
+    *(
+        (
+            f"trial_csig{wmmas}_on6_9_mxfp4_gemm",
+            {**_READ_AHEAD_SRCO, "cluster_signal_wmmas": wmmas},
+        )
+        for wmmas in (6, 0)
+    ),
+    (
+        "trial_pgl2_csig6_on6_9_mxfp4_gemm",
+        {**_READ_AHEAD_SRCO, "cluster_signal_wmmas": 6, "prefetch_gl2": True},
+    ),
+    (
+        "trial_pgl2e_csig6_on6_9_mxfp4_gemm",
+        {
+            **_READ_AHEAD_SRCO,
+            "cluster_signal_wmmas": 6,
+            "prefetch_gl2": True,
+            "gl2_prefetch_early": True,
+        },
+    ),
+    # T5 and T7 without the peeled first tile: the loop starts at tile 0.
+    (
+        "trial_refill_mid_nopeel_on6_9_mxfp4_gemm",
+        {**_STEP6_9, "tile_refill_mid": True},
+    ),
+    (
+        "trial_read_ahead_srco_nopeel_on6_9_mxfp4_gemm",
+        {key: value for key, value in _READ_AHEAD_SRCO.items() if key != "init_c_wmma"},
+    ),
+]
+
+# The winner's main-loop features, one at a time on T12 and together.
+# tdm_desc_hoist and wmma_n_outer, the ones that also speed up 6.9, are
+# chain steps 6.10 and 6.11.
+_T12 = dict(MXFP4_GEMM_TRIAL_VARIANTS)["trial_pgl2e_csig6_on6_9_mxfp4_gemm"]
+_LOOP_SAFE = {"tdm_desc_hoist": True, "wmma_n_outer": True, "coarse_ds_wait": True}
+MXFP4_GEMM_TRIAL_VARIANTS += [
+    ("trial_dhst_on_t12_mxfp4_gemm", {**_T12, "tdm_desc_hoist": True}),
+    ("trial_nout_on_t12_mxfp4_gemm", {**_T12, "wmma_n_outer": True}),
+    ("trial_cdsw_on_t12_mxfp4_gemm", {**_T12, "coarse_ds_wait": True}),
+    ("trial_csw0_on_t12_mxfp4_gemm", {**_T12, "cluster_signal_wave0": True}),
+    ("trial_loop_safe_on_t12_mxfp4_gemm", {**_T12, **_LOOP_SAFE}),
+    (
+        "trial_loop_all_on_t12_mxfp4_gemm",
+        {**_T12, **_LOOP_SAFE, "cluster_signal_wave0": True},
+    ),
+]
+
+# The winner's kernel setup on 6.11, one at a time and together.
+# cluster_aid_remap, the one that sped 6.11 up in every run, is chain step
+# 6.12; kernarg_preload is tried on 6.12 instead.
+_STEP6_11 = dict(MXFP4_GEMM_VARIANTS)["step6_11_mxfp4_gemm"]
+_STEP6_12 = dict(MXFP4_GEMM_VARIANTS)["step6_12_mxfp4_gemm"]
+_SETUP = {"wmma_arb_stall_off": True, "kernarg_preload": True, "cluster_aid_remap": True}
+MXFP4_GEMM_TRIAL_VARIANTS += [
+    ("trial_noarb_on6_11_mxfp4_gemm", {**_STEP6_11, "wmma_arb_stall_off": True}),
+    ("trial_pka_on6_12_mxfp4_gemm", {**_STEP6_12, "kernarg_preload": True}),
+    ("trial_setup_on6_11_mxfp4_gemm", {**_STEP6_11, **_SETUP}),
+    (
+        "trial_caid_on6_10_mxfp4_gemm",
+        {**dict(MXFP4_GEMM_VARIANTS)["step6_10_mxfp4_gemm"], "cluster_aid_remap": True},
+    ),
+]
+
+# The winner's epilogue on 6.12: its FP8 store sequence, piece by piece, and
+# its SW instruction prefetch. The two pieces together are chain step 6.13.
+# Six vector stores stay under the 4 KiB a prefetch covers on both beta
+# paths of 6.12.
+_STEP6_13 = dict(MXFP4_GEMM_VARIANTS)["step6_13_mxfp4_gemm"]
+_EPI_PREFETCH = {"epilogue_inst_prefetch": 6}
+MXFP4_GEMM_TRIAL_VARIANTS += [
+    ("trial_nclp_on6_12_mxfp4_gemm", {**_STEP6_12, "epilogue_nan_clamp": True}),
+    ("trial_pk8_on6_12_mxfp4_gemm", {**_STEP6_12, "epilogue_pk8_cvt": True}),
+    ("trial_ipf_on6_13_mxfp4_gemm", {**_STEP6_13, **_EPI_PREFETCH}),
+    ("trial_ipf_on6_12_mxfp4_gemm", {**_STEP6_12, **_EPI_PREFETCH}),
 ]
 
 MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []
@@ -79,7 +186,7 @@ def variant_names(*, trials: bool = False) -> list[str]:
 
 
 def variant_step(name: str) -> str:
-    """The plan step label (``"6.1"`` .. ``"6.10"``, or ``"T*"``) of ``name``."""
+    """The plan step label (``"6.1"`` .. ``"6.13"``, or ``"T*"``) of ``name``."""
     if name in VARIANT_STEPS:
         return VARIANT_STEPS[name]
     for index, (trial, _) in enumerate(MXFP4_GEMM_TRIAL_VARIANTS, start=1):

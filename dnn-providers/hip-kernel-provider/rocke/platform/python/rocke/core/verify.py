@@ -90,6 +90,8 @@ _BINARY_SAME_TYPE = {
     "arith.fdiv",
     "arith.fmax",
     "arith.fmin",
+    "arith.fmaximum",
+    "arith.fminimum",
     "arith.and",
     "arith.or",
     "arith.smax",

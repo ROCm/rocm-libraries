@@ -53,7 +53,23 @@ typedef struct rocke_mxfp4_tdm_gemm_spec
     bool tdm_multicast;
     bool prefetch_gl2;
     bool tile_refill_mid;
+    bool tile_read_ahead;
+    bool cluster_signal_wmmas_set;
+    int cluster_signal_wmmas;
+    bool gl2_prefetch_early;
+    bool cluster_signal_wave0;
+    bool tdm_desc_hoist;
+    bool wmma_n_outer;
+    bool coarse_ds_wait;
+    bool wmma_arb_stall_off;
+    bool kernarg_preload;
+    bool cluster_aid_remap;
+    bool epilogue_nan_clamp;
+    bool epilogue_pk8_cvt;
+    bool epilogue_inst_prefetch_set;
+    int epilogue_inst_prefetch;
     bool expert_scheduling;
+    bool source_order;
 } rocke_mxfp4_tdm_gemm_spec_t;
 
 rocke_mxfp4_tdm_gemm_spec_t rocke_mxfp4_tdm_gemm_spec_default(void);

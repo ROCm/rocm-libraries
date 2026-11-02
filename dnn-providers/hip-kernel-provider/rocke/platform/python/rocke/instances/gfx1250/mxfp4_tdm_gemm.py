@@ -12,12 +12,17 @@ from ...core.ir import (
     FP8E4M3,
     I8,
     I32,
+    I64,
     IRBuilder,
     KernelDef,
     PtrType,
     Value,
 )
-from ...helpers.compile import EXPERT_SCHEDULING_ATTR
+from ...helpers.compile import (
+    EXPERT_SCHEDULING_ATTR,
+    KERNARG_PRELOAD_COUNT_ATTR,
+    SOURCE_ORDER_ATTR,
+)
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
 _ATOM_M = 32
@@ -56,6 +61,30 @@ _CLUSTER_BARRIER_ASM = (
     "s_cbranch_scc0 1\n"
     "s_barrier_signal -3\n"
     "s_barrier_wait -3"
+)
+# _CLUSTER_BARRIER_ASM split in two, so work can run between the signal
+# and the wait.
+_CLUSTER_SIGNAL_ASM = (
+    "s_barrier_signal_isfirst -1\n"
+    "s_barrier_wait -1\n"
+    "s_cbranch_scc0 1\n"
+    "s_barrier_signal -3"
+)
+_CLUSTER_WAIT_ASM = "s_barrier_wait -3"
+# The next 32 instruction cache lines (128 B each) from this PC. Address
+# translations drain first so the prefetch is not caught in an XNACK replay.
+_INST_PREFETCH_ASM = "s_wait_xcnt 0\ns_prefetch_inst_pc_rel 0, null, 31"
+_ARB_STALL_OFF_ASM = "s_setreg_imm32_b32 hwreg(HW_REG_WAVE_SCHED_MODE, 2, 1), 1"
+# $0 = this wave's SE/AID id word; bits 18:16 are the XCC.
+_AID_ID_ASM = "s_sendmsg_rtn_b32 $0, sendmsg(MSG_RTN_GET_SE_AID_ID)\ns_wait_kmcnt 0"
+# ClusterAIDMapping assumes cluster c is dispatched to XCC c % 8, four XCCs
+# per AID.
+_CLUSTERS_PER_AID_GROUP = 8
+_XCCS_PER_AID = 4
+# The winner's early cluster signal: wave 0 alone, no LDS drain. $0 is the
+# wave index.
+_CLUSTER_SIGNAL_WAVE0_ASM = (
+    "s_cmp_eq_u32 $0, 0\n" "s_cbranch_scc0 1\n" "s_barrier_signal -3"
 )
 
 
@@ -100,8 +129,49 @@ class MxFp4TdmGemmSpec:
     tdm_multicast: bool = False
     prefetch_gl2: bool = False
     tile_refill_mid: bool = False
+    # PrefetchLocalRead across tiles: tile k+1's first K-step is read during
+    # tile k's last K-step, after the refill.
+    tile_read_ahead: bool = False
+    # Split cluster barrier: signal this many WMMAs after the tile's last LDS
+    # read, wait before the refill TDM half a K-step after the last K-step
+    # starts.
+    cluster_signal_wmmas: int | None = None
+    # GL2 prefetch after the first K-step's first half, as the winner's
+    # loop, instead of at the refill.
+    gl2_prefetch_early: bool = False
+    # The winner's early cluster signal: wave 0 alone, with no LDS drain; a
+    # workgroup barrier before the refill TDM publishes every wave's reads.
+    cluster_signal_wave0: bool = False
+    # TDM descriptors built once; each tile patches only the LDS address,
+    # global address and remaining-size words, as the winner's SGPR D#s.
+    tdm_desc_hoist: bool = False
+    # The winner's WMMA order: B fragment outer, A fragment inner.
+    wmma_n_outer: bool = False
+    # The winner's LDS wait: one s_wait_dscnt per WMMA block that leaves a
+    # K-step of reads in flight.
+    coarse_ds_wait: bool = False
+    # Kernel setup as the winner's: WMMA arbitration stall off
+    # (SCHED_MODE bit 2), every kernel argument preloaded into SGPRs, and
+    # clusters renumbered so each AID's GL2 serves one contiguous half of
+    # the grid (ClusterAIDMapping).
+    wmma_arb_stall_off: bool = False
+    kernarg_preload: bool = False
+    cluster_aid_remap: bool = False
+    # The winner's FP8 store: a NaN-propagating clamp (v_maximumminimum)
+    # instead of med3 plus a NaN select, and eight values per convert
+    # (v_cvt_scalef32_pk8_fp8_f32) instead of two.
+    epilogue_nan_clamp: bool = False
+    epilogue_pk8_cvt: bool = False
+    # s_prefetch_inst_pc_rel (the next 4 KiB) before every this many vector
+    # stores, as the winner's SW instruction prefetch past the 32640 B the
+    # dispatcher fetches.
+    epilogue_inst_prefetch: int | None = None
     # ESM2, as the winner's EnableESM2: LLVM's -amdgpu-expert-scheduling-mode.
     expert_scheduling: bool = False
+    # StinkyTofu OptLevel 0: no machine scheduling, instructions stay in the
+    # emitted order. LLVM's schedulers move WMMAs across barriers even past a
+    # sched_barrier.
+    source_order: bool = False
 
     @property
     def wave_repeat_m(self) -> int:
@@ -142,7 +212,7 @@ class MxFp4TdmGemmSpec:
     @property
     def uses_step6(self) -> bool:
         return any(getattr(self, name) for name in _STEP6_BOOL_FLAGS) or (
-            self.cluster_dim is not None
+            self.cluster_dim is not None or self.epilogue_inst_prefetch is not None
         )
 
     @property
@@ -155,6 +225,8 @@ class MxFp4TdmGemmSpec:
 
     def kernel_name(self) -> str:
         cluster_on = self.cluster_dim is not None
+        signal = self.cluster_signal_wmmas
+        inst_prefetch = self.epilogue_inst_prefetch
         return kernel_name_join(
             self.name,
             "mxfp4_tdm",
@@ -176,7 +248,21 @@ class MxFp4TdmGemmSpec:
                 "mcast": self.tdm_multicast,
                 "pgl2": self.prefetch_gl2,
                 "rmid": self.tile_refill_mid,
+                "rahd": self.tile_read_ahead,
+                f"csig{signal}": signal is not None,
+                "pgl2e": self.gl2_prefetch_early,
+                "csw0": self.cluster_signal_wave0,
+                "dhst": self.tdm_desc_hoist,
+                "nout": self.wmma_n_outer,
+                "cdsw": self.coarse_ds_wait,
+                "noarb": self.wmma_arb_stall_off,
+                "pka": self.kernarg_preload,
+                "caid": self.cluster_aid_remap,
+                "nclp": self.epilogue_nan_clamp,
+                "pk8": self.epilogue_pk8_cvt,
+                f"ipf{inst_prefetch}": inst_prefetch is not None,
                 "esm": self.expert_scheduling,
+                "srco": self.source_order,
             },
         )
 
@@ -193,7 +279,19 @@ _STEP6_BOOL_FLAGS = (
     "tdm_multicast",
     "prefetch_gl2",
     "tile_refill_mid",
+    "tile_read_ahead",
+    "gl2_prefetch_early",
+    "cluster_signal_wave0",
+    "tdm_desc_hoist",
+    "wmma_n_outer",
+    "coarse_ds_wait",
+    "wmma_arb_stall_off",
+    "kernarg_preload",
+    "cluster_aid_remap",
+    "epilogue_nan_clamp",
+    "epilogue_pk8_cvt",
     "expert_scheduling",
+    "source_order",
 )
 
 
@@ -517,10 +615,42 @@ def _step6_reason(spec: MxFp4TdmGemmSpec) -> str | None:
             return "prefetch_gl2 requires cluster_dim for the cooperative split"
         if (spec.tile_k // 2) % _GL2_LINE_BYTES:
             return "prefetch_gl2 needs tile_k / 2 to be a multiple of 256 B"
-    if spec.tile_refill_mid and not (
-        spec.local_read_prefetch and spec.init_c_wmma and spec.scale_tdm
-    ):
-        return "tile_refill_mid requires local_read_prefetch, init_c_wmma and scale_tdm"
+    if spec.tile_refill_mid and not (spec.local_read_prefetch and spec.scale_tdm):
+        return "tile_refill_mid requires local_read_prefetch and scale_tdm"
+    if spec.tile_read_ahead and not spec.tile_refill_mid:
+        return "tile_read_ahead requires tile_refill_mid"
+    if spec.cluster_signal_wmmas is not None:
+        if not (spec.tile_read_ahead and spec.tdm_multicast and spec.source_order):
+            return (
+                "cluster_signal_wmmas requires tile_read_ahead, tdm_multicast "
+                "and source_order"
+            )
+        if spec.k_steps < 2:
+            return "cluster_signal_wmmas needs at least two K-steps per tile"
+        per_half = spec.wave_repeat_m * (spec.wave_repeat_n // 2)
+        if not 0 <= spec.cluster_signal_wmmas <= per_half:
+            return f"cluster_signal_wmmas must be in 0..{per_half}"
+    if spec.gl2_prefetch_early and not (spec.prefetch_gl2 and spec.tile_read_ahead):
+        return "gl2_prefetch_early requires prefetch_gl2 and tile_read_ahead"
+    if spec.cluster_signal_wave0 and spec.cluster_signal_wmmas is None:
+        return "cluster_signal_wave0 requires cluster_signal_wmmas"
+    if spec.tdm_desc_hoist and not spec.wave_parity_tdm:
+        return "tdm_desc_hoist requires wave_parity_tdm"
+    if spec.wmma_n_outer and not spec.local_read_prefetch:
+        return "wmma_n_outer requires local_read_prefetch"
+    if spec.coarse_ds_wait and not spec.tile_read_ahead:
+        return "coarse_ds_wait requires tile_read_ahead"
+    if spec.cluster_aid_remap and spec.cluster_dim is None:
+        return "cluster_aid_remap requires cluster_dim"
+    if spec.epilogue_nan_clamp and not spec.vector_epilogue:
+        return "epilogue_nan_clamp requires vector_epilogue"
+    if spec.epilogue_pk8_cvt and not (spec.vector_epilogue and spec.wave_repeat_n % 8 == 0):
+        return "epilogue_pk8_cvt requires vector_epilogue and wave_repeat_n % 8 == 0"
+    if spec.epilogue_inst_prefetch is not None:
+        if not spec.vector_epilogue:
+            return "epilogue_inst_prefetch requires vector_epilogue"
+        if spec.epilogue_inst_prefetch < 1:
+            return "epilogue_inst_prefetch must be at least 1"
     return None
 
 
@@ -596,6 +726,45 @@ def mxfp4_tdm_gemm_signature(spec: MxFp4TdmGemmSpec) -> list[dict]:
 
 def mxfp4_tdm_gemm_grid(spec: MxFp4TdmGemmSpec) -> tuple[int, int, int]:
     return ceil_div_grid((spec.N, spec.tile_n), (spec.M, spec.tile_m))
+
+
+def aid_remapped_blocks(b: IRBuilder, ops, spec: MxFp4TdmGemmSpec, block_x, block_y):
+    """The winner's ClusterAIDMapping: renumber clusters so the clusters on
+    one AID's XCCs cover one contiguous half of the grid. Workgroups keep
+    their place in the cluster, so the multicast masks are unchanged. Like
+    the winner, grids that are not whole clusters in groups of eight keep
+    the hardware order."""
+    gx, gy, _ = mxfp4_tdm_gemm_grid(spec)
+    cx, cy, _ = spec.cluster_dim
+    clusters_x, clusters_y = gx // cx, gy // cy
+    if gx % cx or gy % cy or clusters_x * clusters_y % _CLUSTERS_PER_AID_GROUP:
+        return block_x, block_y
+    cluster = ops.add(
+        ops.div(block_x, cx), ops.mul(ops.div(block_y, cy), clusters_x)
+    )
+    aid_word = b.inline_asm(_AID_ID_ASM, "=s", result_type=I32)
+    xcc = ops.mod(ops.div(aid_word, 1 << 16), _CLUSTERS_PER_AID_GROUP)
+    slot = ops.add(
+        ops.add(
+            ops.mul(ops.div(xcc, _XCCS_PER_AID), clusters_x * clusters_y // 2),
+            ops.mul(ops.div(cluster, _CLUSTERS_PER_AID_GROUP), _XCCS_PER_AID),
+        ),
+        ops.mod(xcc, _XCCS_PER_AID),
+    )
+    # Each AID gets half the cluster rows (grid y) when those halves are
+    # whole and, if the column halves are too, when every AID then reads the
+    # smaller operand (rocKE B) in full; otherwise half the cluster columns.
+    split_rows = clusters_y % 2 == 0 and (
+        clusters_x % 2 == 1 or gx * spec.tile_n <= gy * spec.tile_m
+    )
+    if split_rows:
+        new_x, new_y = ops.mod(slot, clusters_x), ops.div(slot, clusters_x)
+    else:
+        new_x, new_y = ops.div(slot, clusters_y), ops.mod(slot, clusters_y)
+    return (
+        ops.add(ops.mul(new_x, cx), ops.mod(block_x, cx)),
+        ops.add(ops.mul(new_y, cy), ops.mod(block_y, cy)),
+    )
 
 
 def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> KernelDef:
@@ -850,6 +1019,8 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     if spec.expert_scheduling:
         b.kernel.attrs[EXPERT_SCHEDULING_ATTR] = True
+    if spec.source_order:
+        b.kernel.attrs[SOURCE_ORDER_ATTR] = True
     if spec.cluster_dim is not None:
         b.set_cluster_dims(*spec.cluster_dim)
     ops = _IrOps(b)
@@ -865,6 +1036,10 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
     K = b.param("K", I32)
     alpha = b.param("alpha", F32)
     beta = b.param("beta", F32)
+    if spec.kernarg_preload:
+        b.kernel.attrs[KERNARG_PRELOAD_COUNT_ATTR] = len(b.kernel.params)
+    if spec.wmma_arb_stall_off:
+        b.inline_asm(_ARB_STALL_OFF_ASM, "")
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
@@ -881,8 +1056,11 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
     wave_n = ops.mod(wave, spec.warp_n)
     wave_m = ops.div(wave, spec.warp_n)
 
-    block_m = ops.mul(b.block_id_y(), spec.tile_m)
-    block_n = ops.mul(b.block_id_x(), spec.tile_n)
+    block_x, block_y = b.block_id_x(), b.block_id_y()
+    if spec.cluster_aid_remap:
+        block_x, block_y = aid_remapped_blocks(b, ops, spec, block_x, block_y)
+    block_m = ops.mul(block_y, spec.tile_m)
+    block_n = ops.mul(block_x, spec.tile_n)
 
     def m_row(rm, m_local):
         """Tile row of rocKE A for M-repeat ``rm`` and WMMA M position ``m_local``.
@@ -1026,7 +1204,98 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
             **extra,
         )
 
+    hoisted = None
+    if spec.tdm_desc_hoist:
+        # The winner keeps its D#s in SGPRs and advances only the address
+        # and size words per tile: build both descriptors once (tile 0,
+        # buffer 0) and patch those words below.
+        even0 = b.cmp_eq(ops.mod(wave, 2), c0)
+        component0 = ops.div(wave, 2)
+
+        def selected(b_desc, a_desc):
+            return [b.select(even0, x, y) for x, y in zip(b_desc, a_desc)]
+
+        hoisted = {
+            "data": selected(
+                data_descriptor("b", c0, component0, c0, b.sub(packed_k, c0)),
+                data_descriptor("a", c0, component0, c0, b.sub(packed_k, c0)),
+            )
+        }
+        if spec.scale_tdm:
+            hoisted["scale"] = selected(
+                scale_descriptor("b", c0, component0, c0),
+                scale_descriptor("a", c0, component0, c0),
+            )
+            hoisted["scale_stride"] = b.select(
+                even0, ops.v(ops.mul(N, 4)), ops.v(ops.mul(M, 4))
+            )
+
+    def patched(desc, parity, byte_offset, words):
+        """``desc`` with its LDS address moved to buffer ``parity``, its
+        global address advanced by ``byte_offset`` and the group-1 words in
+        ``words`` (index -> value) replaced."""
+        d0, d1, *rest = desc
+        lds = b.add(b.vec_extract(d0, 1), ops.v(buffer_base(parity)))
+        lo, hi = b.vec_extract(d0, 2), b.vec_extract(d0, 3)
+        address = b.lor(
+            b.shl(b.zext(b.land(hi, b.const_i32(0x1FFFFFF)), I64), b.const_i64(32)),
+            b.zext(lo, I64),
+        )
+        address = b.add(address, b.zext(ops.v(byte_offset), I64))
+        new_hi = b.lor(
+            b.land(b.trunc(b.lshr(address, b.const_i64(32)), I32), b.const_i32(0x1FFFFFF)),
+            b.land(hi, b.const_i32(-0x2000000)),
+        )
+        d0 = b.vec_pack(
+            [b.vec_extract(d0, 0), lds, b.trunc(address, I32), new_hi], I32
+        )
+        d1 = b.vec_pack(
+            [words.get(i, b.vec_extract(d1, i)) for i in range(8)], I32
+        )
+        return (d0, d1, *rest)
+
+    def issue_hoisted(k0, parity) -> None:
+        k_byte = ops.div(k0, 2)
+        remaining_k = b.sub(packed_k, ops.v(k_byte))
+        c16 = b.const_i32(16)
+        data = hoisted["data"]
+        w2 = b.vec_extract(data[1], 2)
+        b.tensor_load_to_lds(
+            *patched(
+                data,
+                parity,
+                k_byte,
+                {
+                    1: b.shl(remaining_k, c16),
+                    2: b.lor(
+                        b.land(w2, b.const_i32(-0x10000)), b.lshr(remaining_k, c16)
+                    ),
+                },
+            )
+        )
+        if spec.scale_tdm:
+            k_step = ops.v(ops.div(k0, _ATOM_K))
+            scale = hoisted["scale"]
+            steps_left = b.sub(ops.v(ops.div(K, _ATOM_K)), k_step)
+            s2, s3 = b.vec_extract(scale[1], 2), b.vec_extract(scale[1], 3)
+            b.tensor_load_to_lds(
+                *patched(
+                    scale,
+                    parity,
+                    b.mul(k_step, hoisted["scale_stride"]),
+                    {
+                        2: b.lor(b.land(s2, b.const_i32(0xFFFF)), b.shl(steps_left, c16)),
+                        3: b.lor(
+                            b.land(s3, b.const_i32(-0x10000)), b.lshr(steps_left, c16)
+                        ),
+                    },
+                )
+            )
+
     def issue_tdm(k0, parity) -> None:
+        if hoisted is not None:
+            issue_hoisted(k0, parity)
+            return
         k_byte = ops.div(k0, 2)
         remaining_k = b.sub(packed_k, k_byte)
         if spec.wave_parity_tdm:
@@ -1205,11 +1474,55 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
             b_scales.append(b.bitcast(b.vec_pack(values, I8), I32))
         return a_scales, b_scales
 
-    def compute_tile(k0, parity, accumulators, *, seed_zero=False, refill=None):
+    # PrefetchLocalRead=1 + HalfPLR: everything for K-step s+1 is read
+    # during K-step s. A and the scales get a second full register set;
+    # B is read in halves so only three half-sets are live: the next
+    # step's first half is read before this step's WMMAs, its second
+    # half after this step's first half has been consumed.
+    half = rn_count // 2
+    # 16-byte LDS reads per K-step (see the loaders above). With read-ahead,
+    # exactly this many reads are newer than any WMMA block's operands.
+    reads_per_step = 1 + rn_count // 4 + 4 * rm_count + 2 * rn_count
+
+    def load_head(buffer, k0, step):
+        a_scales, b_scales = load_scales(buffer, k0, step)
+        a_frags = [load_a_fragment(buffer, rm, step) for rm in range(rm_count)]
+        return a_frags, a_scales, b_scales
+
+    def load_b_half(buffer, step, which):
+        return [
+            load_b_fragment(buffer, rn, step)
+            for rn in range(which * half, (which + 1) * half)
+        ]
+
+    def flatten_head(head):
+        a_frags, a_scales, b_scales, b_halves = head
+        return [*a_frags, *a_scales, *b_scales, *b_halves[0], *b_halves[1]]
+
+    def unflatten_head(values):
+        values = list(values)
+        cuts = [rm_count, rm_count, rn_count, half, half]
+        parts = []
+        for count in cuts:
+            parts.append(values[:count])
+            values = values[count:]
+        return parts[0], parts[1], parts[2], [parts[3], parts[4]]
+
+    def compute_tile(
+        k0, parity, accumulators, *, seed_zero=False, refill=None, head=None,
+        next_parity=None, signal=None, late_refill=None, prefetch=None,
+    ):
         """One DepthU tile. ``seed_zero`` gives the first K-step's WMMAs C = 0.
 
         ``refill`` runs before the last K-step's WMMAs, after the tile's last
-        LDS read (local_read_prefetch only)."""
+        LDS read (local_read_prefetch only). ``head`` is K-step 0's reads
+        ``(a_frags, a_scales, b_scales, b_halves)``, issued by the previous
+        tile. With ``next_parity`` the next tile's K-step 0 is read from that
+        buffer during the last K-step, after ``refill``, and returned as
+        ``(accumulators, head)``. ``signal`` runs ``cluster_signal_wmmas``
+        WMMAs after the tile's last LDS read, and ``late_refill`` before the
+        second half of the last K-step's WMMAs. ``prefetch`` runs after the
+        first K-step's first half."""
         buffer = buffer_base(parity)
         out = list(accumulators)
         zero = b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) if seed_zero else None
@@ -1231,52 +1544,66 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
                         mma(rm, rn, a_frag, b_frag, a_scales[rm], b_scales[rn], step == 0)
             return out
 
-        # PrefetchLocalRead=1 + HalfPLR: everything for K-step s+1 is read
-        # during K-step s. A and the scales get a second full register set;
-        # B is read in halves so only three half-sets are live: the next
-        # step's first half is read before this step's WMMAs, its second
-        # half after this step's first half has been consumed.
-        half = rn_count // 2
-
-        def load_head(step):
-            a_scales, b_scales = load_scales(buffer, k0, step)
-            a_frags = [load_a_fragment(buffer, rm, step) for rm in range(rm_count)]
-            return a_frags, a_scales, b_scales
-
-        def load_b_half(step, which):
-            return [load_b_fragment(buffer, rn, step) for rn in range(which * half, (which + 1) * half)]
-
-        head = load_head(0)
-        b_halves = [load_b_half(0, 0), load_b_half(0, 1)]
-        if refill is not None:
-            # Otherwise LLVM mixes K-step 1's reads into K-step 0's and the
-            # first WMMA waits for twice as many reads.
-            b.sched_barrier(_SCHED_ALU_ONLY)
+        if head is None:
+            head = load_head(buffer, k0, 0)
+            b_halves = [load_b_half(buffer, 0, 0), load_b_half(buffer, 0, 1)]
+            if refill is not None:
+                # Otherwise LLVM mixes K-step 1's reads into K-step 0's and the
+                # first WMMA waits for twice as many reads.
+                b.sched_barrier(_SCHED_ALU_ONLY)
+        else:
+            *head, b_halves = head
+        next_buffer = None if next_parity is None else buffer_base(next_parity)
         for step in range(steps):
             a_frags, a_scales, b_scales = head
             last = step + 1 == steps
             if not last:
-                head = load_head(step + 1)
-                next_first = load_b_half(step + 1, 0)
+                head = load_head(buffer, k0, step + 1)
+                next_first = load_b_half(buffer, step + 1, 0)
+            elif next_buffer is not None:
+                if refill is not None:
+                    refill()
+                head = load_head(next_buffer, k0, 0)
+                next_first = load_b_half(next_buffer, 0, 0)
             elif refill is not None:
                 refill()
             for which in (0, 1):
                 if which == 1 and not last:
-                    next_second = load_b_half(step + 1, 1)
-                for rm in range(rm_count):
-                    for j in range(half):
-                        rn = which * half + j
-                        mma(
-                            rm,
-                            rn,
-                            a_frags[rm],
-                            b_halves[which][j],
-                            a_scales[rm],
-                            b_scales[rn],
-                            step == 0,
-                        )
+                    next_second = load_b_half(buffer, step + 1, 1)
+                elif which == 1 and next_buffer is not None:
+                    next_second = load_b_half(next_buffer, 0, 1)
+                if which == 1 and last and late_refill is not None:
+                    late_refill()
+                if which == 1 and step == 0 and prefetch is not None:
+                    prefetch()
+                signal_here = signal is not None and which == 1 and step + 2 == steps
+                if spec.coarse_ds_wait:
+                    b.inline_asm(f"s_wait_dscnt {reads_per_step}", "~{memory}")
+                if spec.wmma_n_outer:
+                    order = [(rm, j) for j in range(half) for rm in range(rm_count)]
+                else:
+                    order = [(rm, j) for rm in range(rm_count) for j in range(half)]
+                issued = 0
+                for rm, j in order:
+                    rn = which * half + j
+                    if signal_here and issued == spec.cluster_signal_wmmas:
+                        signal()
+                    issued += 1
+                    mma(
+                        rm,
+                        rn,
+                        a_frags[rm],
+                        b_halves[which][j],
+                        a_scales[rm],
+                        b_scales[rn],
+                        step == 0,
+                    )
+                if signal_here and issued == spec.cluster_signal_wmmas:
+                    signal()
             if not last:
                 b_halves = [next_first, next_second]
+        if next_buffer is not None:
+            return out, (*head, [next_first, next_second])
         return out
 
     def cluster_sync() -> None:
@@ -1315,11 +1642,18 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
             b.inline_asm("", "~{memory}")
             b.sched_barrier(_SCHED_ALU_ONLY)
 
+        read_ahead = spec.tile_read_ahead
+
         def refill(k0, parity):
             def run() -> None:
-                prefetch_gl2(ops.v(ops.add(k0, prefetch_ahead * spec.tile_k)))
+                if not spec.gl2_prefetch_early:
+                    prefetch_gl2(ops.v(ops.add(k0, prefetch_ahead * spec.tile_k)))
                 fence()
                 b.s_waitcnt(lgkmcnt=0)
+                if read_ahead:
+                    # Tile k+1 is read next, from this point: it is the only
+                    # TDM load in flight, and the barrier below publishes it.
+                    b.s_wait_tensorcnt(0)
                 if spec.tdm_multicast:
                     cluster_sync()
                 else:
@@ -1328,6 +1662,53 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
                 fence()
 
             return run
+
+        split = spec.cluster_signal_wmmas is not None
+
+        def split_refill(k0, parity):
+            """The refill with the cluster barrier split: the signal follows
+            the tile's last LDS read, tile k+1 is published by a workgroup
+            barrier at the last K-step, and the cluster wait and tile k+2's
+            TDM come half a K-step later."""
+
+            def signal() -> None:
+                fence()
+                if spec.cluster_signal_wave0:
+                    b.inline_asm(_CLUSTER_SIGNAL_WAVE0_ASM, "s,~{scc},~{memory}", [wave])
+                else:
+                    b.s_waitcnt(lgkmcnt=0)
+                    b.inline_asm(_CLUSTER_SIGNAL_ASM, "~{scc},~{memory}")
+                fence()
+
+            def run() -> None:
+                if not spec.gl2_prefetch_early:
+                    prefetch_gl2(ops.v(ops.add(k0, prefetch_ahead * spec.tile_k)))
+                fence()
+                b.s_wait_tensorcnt(0)
+                b.s_barrier_bare()
+                fence()
+
+            def late() -> None:
+                fence()
+                b.inline_asm(_CLUSTER_WAIT_ASM, "~{memory}")
+                if spec.cluster_signal_wave0:
+                    # No wave drained its reads of this buffer before the
+                    # signal; the workgroup barrier publishes them here.
+                    b.inline_asm(f"s_wait_dscnt {reads_per_step}", "~{memory}")
+                    b.s_barrier_bare()
+                issue_tdm(clamp_k(ops.v(ops.add(k0, two_tiles))), parity)
+                fence()
+
+            return {"refill": run, "signal": signal, "late_refill": late}
+
+        def phases(k0, parity):
+            out = split_refill(k0, parity) if split else {"refill": refill(k0, parity)}
+            if spec.gl2_prefetch_early:
+                # The winner's spot: 16 WMMAs into the tile, same distance.
+                out["prefetch"] = lambda: prefetch_gl2(
+                    ops.v(ops.add(k0, prefetch_ahead * spec.tile_k))
+                )
+            return out
 
         def wait_next_tile() -> None:
             b.s_wait_tensorcnt(loads_per_tile)
@@ -1340,31 +1721,77 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
         issue_tdm(tile_k_v, c1)
         for tile in range(2, prefetch_ahead):
             prefetch_gl2(ops.v(tile * spec.tile_k))
-        wait_next_tile()
+        peel = spec.init_c_wmma
+        if peel or read_ahead:
+            wait_next_tile()
         undef = [b.undef_vec(F32, _ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
-        accumulators = compute_tile(
-            c0, c0, undef, seed_zero=True, refill=refill(c0, c0)
-        )
+        first_head = None
+        if read_ahead:
+            first_head = (
+                *load_head(buffer_base(c0), c0, 0),
+                [load_b_half(buffer_base(c0), 0, w) for w in (0, 1)],
+            )
+        if not peel:
+            # The loop starts at tile 0 and clears the accumulators once.
+            accumulators = [
+                b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) for _ in range(n_acc)
+            ]
+            head_values = flatten_head(first_head) if read_ahead else []
+            start, start_parity = c0, c0
+        elif not read_ahead:
+            accumulators = compute_tile(
+                c0, c0, undef, seed_zero=True, refill=refill(c0, c0)
+            )
+            head_values = []
+            start, start_parity = tile_k_v, c1
+        else:
+            accumulators, head = compute_tile(
+                c0,
+                c0,
+                undef,
+                seed_zero=True,
+                **phases(c0, c0),
+                head=first_head,
+                next_parity=c1,
+            )
+            head_values = flatten_head(head)
+            start, start_parity = tile_k_v, c1
         loop = b.scf_for_iter(
-            tile_k_v,
+            start,
             K,
             tile_k_v,
-            [("parity", c1)]
-            + [(f"acc{i}", value) for i, value in enumerate(accumulators)],
+            [("parity", start_parity)]
+            + [(f"acc{i}", value) for i, value in enumerate(accumulators)]
+            + [(f"head{i}", value) for i, value in enumerate(head_values)],
             iv_name="k0",
             elide_trailing_barrier=False,
         )
         with loop as (k0, carried):
             parity = carried[0]
-            wait_next_tile()
-            updated = compute_tile(k0, parity, carried[1:], refill=refill(k0, parity))
-            b.scf_yield(b.sub(c1, parity), *updated)
+            next_parity = b.sub(c1, parity)
+            acc = carried[1 : 1 + n_acc]
+            if not read_ahead:
+                wait_next_tile()
+                updated = compute_tile(k0, parity, acc, refill=refill(k0, parity))
+                b.scf_yield(next_parity, *updated)
+            else:
+                # The last tile reads ahead from a buffer holding the clamped
+                # reload: valid LDS, never consumed.
+                updated, head = compute_tile(
+                    k0,
+                    parity,
+                    acc,
+                    **phases(k0, parity),
+                    head=unflatten_head(carried[1 + n_acc :]),
+                    next_parity=next_parity,
+                )
+                b.scf_yield(next_parity, *updated, *flatten_head(head))
         # No workgroup may exit while a TDM load into its LDS is in flight:
         # with multicast, peers' loads write here too.
         b.s_wait_tensorcnt(0)
         if spec.tdm_multicast:
             cluster_sync()
-        return loop.results[1:]
+        return loop.results[1 : 1 + n_acc]
 
     n_acc = rm_count * rn_count
     two_tiles = 2 * spec.tile_k
@@ -1415,13 +1842,31 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
         # hipBLASLt's FP8 store: +-inf -> NaN (x * 0 + x), finite values
         # clamped to +-448, NaN kept.
         value = b.fma(value, b.const_f32(0.0), value)
+        if spec.epilogue_nan_clamp:
+            return b.fminimum(
+                b.fmaximum(value, b.const_f32(-_FP8_MAX)), b.const_f32(_FP8_MAX)
+            )
         clamped = b.clamp_f32(value, b.const_f32(-_FP8_MAX), b.const_f32(_FP8_MAX))
         return b.select(b.fcmp("uno", value, value), value, clamped)
+
+    def pack_fp8(values):
+        if spec.epilogue_pk8_cvt:
+            width, convert = 8, b.cvt_pk8_fp8_f32x8
+        else:
+            width, convert = 4, b.cvt_pk_fp8_f32x4
+        packed = None
+        for chunk in range(len(values) // width):
+            part = convert(b.vec_pack(values[chunk * width : (chunk + 1) * width], F32))
+            packed = part if packed is None else b.vec_concat(packed, part)
+        return packed
 
     def store_vector(read_c: bool) -> None:
         col = ops.add(block_n, n_row(0, lane_col))
         for rm in range(rm_count):
             for slot in range(_ACCUMULATORS_PER_ATOM):
+                store = rm * _ACCUMULATORS_PER_ATOM + slot
+                if spec.epilogue_inst_prefetch and store % spec.epilogue_inst_prefetch == 0:
+                    b.inline_asm(_INST_PREFETCH_ASM, "")
                 m_local = ops.add((slot // 8) * 16 + slot % 8, ops.mul(lane_half, 8))
                 row = ops.add(block_m, m_row(rm, m_local))
                 index = ops.v(ops.add(ops.mul(row, N), col))
@@ -1439,13 +1884,7 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
                         for i, value in enumerate(values)
                     ]
                 values = [saturate(value) for value in values]
-                packed = None
-                for chunk in range(rn_count // 4):
-                    quad = b.cvt_pk_fp8_f32x4(
-                        b.vec_pack(values[chunk * 4 : chunk * 4 + 4], F32)
-                    )
-                    packed = quad if packed is None else b.vec_concat(packed, quad)
-                b.global_store_vN(D, index, packed, rn_count, align=rn_count)
+                b.global_store_vN(D, index, pack_fp8(values), rn_count, align=rn_count)
 
     if spec.vector_epilogue:
         # GW_B0 / GW_B1: the beta = 0 path never reads C.

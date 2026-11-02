@@ -120,6 +120,10 @@ repo.
 | 6.7 | `step6_7_mxfp4_gemm` | `lds_segment_interleave` | `LDSSegmentInterleave=1` |
 | 6.8 | `step6_8_mxfp4_gemm` | `cluster_dim=(4,4,1)`, `tdm_multicast` | `ClusterDim=4x4`, `TDMMulticast` |
 | 6.9 | `step6_9_mxfp4_gemm` | `expert_scheduling` | `EnableESM2` |
+| 6.10 | `step6_10_mxfp4_gemm` | `tdm_desc_hoist` | SGPR TDM descriptors (`OptLevel: 0` loop) |
+| 6.11 | `step6_11_mxfp4_gemm` | `wmma_n_outer` | WMMA order (`OptLevel: 0` loop) |
+| 6.12 | `step6_12_mxfp4_gemm` | `cluster_aid_remap` | `ClusterAIDMapping=-2` |
+| 6.13 | `step6_13_mxfp4_gemm` | `epilogue_nan_clamp`, `epilogue_pk8_cvt` | FP8 store sequence |
 
 The chain keeps only steps that are faster than the step before them, or
 that a later faster step needs: 6.4 is slower on its own, but `scale_tdm`,
@@ -139,6 +143,36 @@ padding, so it builds on 6.5 and compares against 6.6:
 | Trial | Variant | Adds to 6.5 | Source |
 | --- | --- | --- | --- |
 | T4 | `trial_ck_lds_pad_mxfp4_gemm` | `lds_pad_ck` | CK Tile `GetLdsPaddingConfig` |
+
+T5 to T8 build on 6.9. They follow the winner compiled at StinkyTofu
+`OptLevel: 0`, which runs no scheduler:
+
+| Trial | Variant | Adds to 6.9 | Source |
+| --- | --- | --- | --- |
+| T5 | `trial_tile_refill_mid_on6_9_mxfp4_gemm` | `init_c_wmma`, `tile_refill_mid` | T3 on 6.9 |
+| T6 | `trial_read_ahead_on6_9_mxfp4_gemm` | T5, `tile_read_ahead` | `PrefetchLocalRead` across tiles |
+| T7 | `trial_read_ahead_srco_on6_9_mxfp4_gemm` | T6, `source_order` | StinkyTofu `OptLevel: 0` |
+| T8 | `trial_srco_on6_9_mxfp4_gemm` | `source_order` | StinkyTofu `OptLevel: 0` |
+| T9 | `trial_csig6_on6_9_mxfp4_gemm` | T7, `cluster_signal_wmmas=6` | split cluster barrier, `OptLevel: 0` loop |
+| T10 | `trial_csig0_on6_9_mxfp4_gemm` | T7, `cluster_signal_wmmas=0` | split cluster barrier |
+| T11 | `trial_pgl2_csig6_on6_9_mxfp4_gemm` | T9, `prefetch_gl2` | `PrefetchGL2=2` |
+| T12 | `trial_pgl2e_csig6_on6_9_mxfp4_gemm` | T11, `gl2_prefetch_early` | `PrefetchGL2=2`, `OptLevel: 0` loop |
+| T13 | `trial_refill_mid_nopeel_on6_9_mxfp4_gemm` | T5 without `init_c_wmma` | control |
+| T14 | `trial_read_ahead_srco_nopeel_on6_9_mxfp4_gemm` | T7 without `init_c_wmma` | control |
+| T15 | `trial_dhst_on_t12_mxfp4_gemm` | T12, `tdm_desc_hoist` | SGPR TDM descriptors |
+| T16 | `trial_nout_on_t12_mxfp4_gemm` | T12, `wmma_n_outer` | WMMA order |
+| T17 | `trial_cdsw_on_t12_mxfp4_gemm` | T12, `coarse_ds_wait` | `s_wait_dscnt` per WMMA block |
+| T18 | `trial_csw0_on_t12_mxfp4_gemm` | T12, `cluster_signal_wave0` | wave-0 cluster signal |
+| T19 | `trial_loop_safe_on_t12_mxfp4_gemm` | T15 + T16 + T17 | `OptLevel: 0` loop |
+| T20 | `trial_loop_all_on_t12_mxfp4_gemm` | T19, `cluster_signal_wave0` | `OptLevel: 0` loop |
+| T21 | `trial_noarb_on6_11_mxfp4_gemm` | 6.11, `wmma_arb_stall_off` | `DisableXdlArbStall` |
+| T22 | `trial_pka_on6_12_mxfp4_gemm` | 6.12, `kernarg_preload` | `PreloadKernArgs` |
+| T23 | `trial_setup_on6_11_mxfp4_gemm` | 6.11, T21, T22 | winner's kernel setup |
+| T24 | `trial_caid_on6_10_mxfp4_gemm` | 6.10, `cluster_aid_remap` | `ClusterAIDMapping=-2` |
+| T25 | `trial_nclp_on6_12_mxfp4_gemm` | 6.12, `epilogue_nan_clamp` | FP8 store clamp |
+| T26 | `trial_pk8_on6_12_mxfp4_gemm` | 6.12, `epilogue_pk8_cvt` | FP8 store convert |
+| T27 | `trial_ipf_on6_13_mxfp4_gemm` | 6.13, `epilogue_inst_prefetch=6` | winner's epilogue |
+| T28 | `trial_ipf_on6_12_mxfp4_gemm` | 6.12, `epilogue_inst_prefetch=6` | SW instruction prefetch |
 
 Design of each step:
 
@@ -190,6 +224,15 @@ Design of each step:
   hardware stops tracking ALU dependencies, and LLVM inserts the
   `s_wait_alu` waits itself (346 in the YAML-shape kernel, none in 6.8).
   The LLVM IR is 6.8's; only the compile option differs.
+- **6.10 descriptor hoist.** Like the winner's SGPR descriptors, both
+  wave-parity TDM descriptors (data and scales) are built and selected once
+  before the loop. Each tile then patches only the LDS buffer address, the
+  64-bit global address and the remaining-size words. The loop has no
+  `v_readfirstlane`, and its per-tile instruction count drops to the
+  winner's.
+- **6.11 WMMA order.** Within each half of a K-step the B fragment is the
+  outer index and the A fragments the inner one, so consecutive WMMAs share
+  their 8-register operand, as in the winner.
 - **T1 GL2 prefetch.** The cluster's 16 workgroups split the GL2 prefetch
   of tile `k + 2`'s A, B and swizzled-scale lines, one 256 B line per thread,
   with `th:TH_LOAD_NT scope:SCOPE_SE` as in the winner. The A and B lines
@@ -239,9 +282,77 @@ Design of each step:
   and every 8th B row, so 16 lanes of a `ds_load_b128` start at only 4
   (A) or 2 (B) distinct 16 B bank slots. The 6.6 pads give 16 distinct
   slots.
+- **T6 tile read-ahead.** The sync of T3 moves to the start of the last
+  K-step: the tile waits for its own LDS reads and for tile `k + 1`
+  (`s_wait_tensorcnt 0`, the only TDM load in flight), barriers, and issues
+  tile `k + 2`. It then reads tile `k + 1`'s first K-step from the other
+  buffer during its last K-step, HalfPLR-style, and the loop carries those
+  fragments to the next tile. The tile boundary has no wait or barrier, and
+  only the prologue waits with `s_wait_tensorcnt 2`. The last tile reads
+  ahead from the buffer holding the clamped reload: valid LDS that is never
+  used.
+- **T7 / T8 source order.** `-mllvm -enable-misched=false -mllvm
+  -enable-post-misched=false`: no machine scheduling, as StinkyTofu at
+  `OptLevel: 0`. LLVM's schedulers move WMMAs across the refill's barrier
+  despite the `sched_barrier`s. In T6 the waits and the barrier land at
+  WMMA 40 and the TDM at WMMA 96. In T7 all of them stay at WMMA 96,
+  between the 96th and 97th WMMA, with no spills. The LLVM IR is T6's
+  (T8: 6.9's).
+- **T9 / T10 split cluster barrier.** The cluster barrier is split into its
+  signal and its wait, as in the winner's `OptLevel: 0` loop. Each tile
+  waits for its LDS reads and signals `cluster_signal_wmmas` WMMAs after its
+  last read, which is issued with the second half of K-step `steps-2`. At
+  the last K-step, `s_wait_tensorcnt 0` and a workgroup barrier publish
+  tile `k + 1`, whose reads start there. Half a K-step later the cluster
+  wait is followed by tile `k + 2`'s TDM. In T9 the signal is at WMMA 86,
+  the workgroup barrier at 96, and the wait and TDM at 112, the winner's
+  positions. No LDS read is issued between the signal and the workgroup
+  barrier. This needs `source_order`, which keeps the WMMAs between the
+  phases.
+- **T11 / T12 GL2 prefetch placement.** With `PrefetchGL2=2` the winner
+  prefetches tile `k + 4` (PGR + PrefetchGL2, TensileLite's `skipPGR`) once
+  per tile, after its 16th WMMA. T11 issues the same distance at the
+  refill (WMMA 96). T12 moves it after the first K-step's first half (WMMA
+  16), so every loop event of T12 sits at the winner's WMMA position.
+- **T15 to T20 main-loop features on T12.** T15 and T16 add the 6.10 and
+  6.11 features. `coarse_ds_wait` issues one `s_wait_dscnt` per 16-WMMA block that leaves a
+  K-step of reads in flight. It is inline asm, so LLVM keeps its own finer
+  waits, which are already satisfied when they run. `cluster_signal_wave0`
+  is the winner's wave-0 cluster signal without an LDS drain. A workgroup
+  barrier after the cluster wait then publishes every wave's reads before
+  the TDM. This relies on that barrier, as the winner does.
+- **6.12 cluster AID remap.** `cluster_aid_remap` reads the XCC with
+  `MSG_RTN_GET_SE_AID_ID` and renumbers clusters as the winner does:
+  `l = aid*Nc/2 + (c//8)*4 + xcc%4`, then the AID's half of the cluster
+  rows (or columns). Like the winner it assumes cluster `c` runs on XCC
+  `c % 8`, and grids that are not whole clusters in groups of eight keep
+  the hardware order (so the one-cluster smoke IR is 6.11's).
+- **T21 to T23 kernel setup.** `wmma_arb_stall_off` sets `SCHED_MODE` bit 2
+  at entry, after the ESM write of bits 0 to 1, as the winner's "Disable
+  WMMA arb stall". `kernarg_preload` preloads all 11 kernel arguments
+  (17 SGPRs) with `-amdgpu-kernarg-preload-count`, so the prologue has no
+  `s_load` before the first TDM; a compile option only.
+- **6.13 and T25 to T28 epilogue.** The winner's beta = 0 store path
+  (`GW_B0_FD0_VW8_GSU1`) stores 8 FP8 per lane with `buffer_store_b64`, the
+  width of rocKE's `global_store_b64`; its `buffer_store_b128` stores belong
+  to the GSU workspace path. What differs is the FP8 store sequence and the
+  instruction prefetch. `epilogue_nan_clamp` clamps with
+  `llvm.minimum(llvm.maximum(v, -448), 448)`, one NaN-propagating
+  `v_maximumminimum_f32` per value, instead of `v_med3` plus an unordered
+  compare and a select. `epilogue_pk8_cvt` converts eight values with one
+  `v_cvt_scalef32_pk8_fp8_f32` (scale 1.0) instead of four
+  `v_cvt_pk_fp8_f32`. 6.13 takes both; T25 and T26 try each alone on
+  6.12. `epilogue_inst_prefetch` issues the winner's
+  `s_wait_xcnt 0; s_prefetch_inst_pc_rel 0, null, 31` (the next 4 KiB)
+  before every N-th vector store. The dispatcher fetches only the first
+  32640 B (`INST_PREF_SIZE` 255), and LLVM lays out the beta = 0 path after
+  the beta != 0 one, so on 6.12 it sits entirely past that window. The
+  winner places its prefetches every 4 KiB of layout; IR has no byte
+  offsets, so the trial spaces them by store count, and six stores stay
+  under 4 KiB on the timed beta = 0 path of T27 and T28.
 
 Host resources at M=4096, N=4096, K=65536 (no VGPR/SGPR spills and no scratch
-for any step):
+for any step except T6, which spills 2 VGPRs):
 
 | Step | VGPR | LDS |
 | --- | --- | --- |
@@ -254,10 +365,38 @@ for any step):
 | 6.7 | 815 | 282624 |
 | 6.8 | 819 | 282624 |
 | 6.9 | 819 | 282624 |
+| 6.10 | 838 | 282624 |
+| 6.11 | 854 | 282624 |
+| 6.12 | 854 | 282624 |
+| 6.13 | 854 | 282624 |
 | T1 | 826 | 282624 |
 | T2 | 1008 | 282624 |
 | T3 | 942 | 282624 |
 | T4 | 819 | 294912 |
+| T5 | 942 | 282624 |
+| T6 | 1024 | 282624 |
+| T7 | 860 | 282624 |
+| T8 | 811 | 282624 |
+| T9 | 860 | 282624 |
+| T10 | 860 | 282624 |
+| T11 | 868 | 282624 |
+| T12 | 876 | 282624 |
+| T13 | 776 | 282624 |
+| T14 | 858 | 282624 |
+| T15 | 860 | 282624 |
+| T16 | 876 | 282624 |
+| T17 | 876 | 282624 |
+| T18 | 876 | 282624 |
+| T19 | 860 | 282624 |
+| T20 | 860 | 282624 |
+| T21 | 854 | 282624 |
+| T22 | 854 | 282624 |
+| T23 | 854 | 282624 |
+| T24 | 838 | 282624 |
+| T25 | 854 | 282624 |
+| T26 | 854 | 282624 |
+| T27 | 854 | 282624 |
+| T28 | 854 | 282624 |
 
 Host tests pin one LLVM-IR fact per step and check the LDS layout model.
 `MxFp4LdsLayout` is the single address model used by the builder. The test
@@ -267,8 +406,6 @@ writes stay inside the buffer.
 
 Known differences from the winner, kept on purpose:
 
-- The FP8 pack uses two `cvt_pk_fp8_f32x4` calls instead of one 8-wide pack.
-- NaN is kept with a select instead of `v_maximumminimum`.
 - Both scale prefetches use `global_prefetch`, as noted under T1.
 
 StinkyTofu / SIA4 schedule fidelity (instruction interleave and

@@ -891,6 +891,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "amdgcn.cvt.pk.bf8.f32": (
         "declare i32 @llvm.amdgcn.cvt.pk.bf8.f32(float, float, i32, i1)"
     ),
+    "amdgcn.cvt.scalef32.pk8.fp8.f32": (
+        "declare <2 x i32> @llvm.amdgcn.cvt.scalef32.pk8.fp8.f32(<8 x float>, float)"
+    ),
+    "maximum.f32": "declare float @llvm.maximum.f32(float, float)",
+    "minimum.f32": "declare float @llvm.minimum.f32(float, float)",
     # Dequant direction (packed: i32 holding 4 fp8/bf8 bytes -> <2 x float>
     # with a 1-bit word selector picking bytes 0,1 or 2,3). Two calls
     # cover the full 4-byte input — twice the throughput of the
@@ -2804,6 +2809,22 @@ class _Lowerer:
             f"{llvm_ty} {self._operand(a)}, {llvm_ty} {self._operand(b)})"
         )
 
+    def _op_arith_fmaximum(self, op: Op) -> None:
+        a, b = op.operands
+        self._need("maximum.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.maximum.f32("
+            f"float {self._operand(a)}, float {self._operand(b)})"
+        )
+
+    def _op_arith_fminimum(self, op: Op) -> None:
+        a, b = op.operands
+        self._need("minimum.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.minimum.f32("
+            f"float {self._operand(a)}, float {self._operand(b)})"
+        )
+
     def _op_arith_select(self, op: Op) -> None:
         cond, lhs, rhs = op.operands
         self._current().emit(
@@ -3149,6 +3170,20 @@ class _Lowerer:
             f"float {elems[2]}, float {elems[3]}, i32 {lo}, i1 true)"
         )
         self._current().emit(f"  {op.result.name} = bitcast i32 {packed} to <4 x i8>")
+
+    def _op_arith_cvt_pk8_fp8_f32x8(self, op: Op) -> None:
+        """Lower <8 x f32> -> <8 x fp8e4m3> via one
+        ``llvm.amdgcn.cvt.scalef32.pk8.fp8.f32`` (scale 1.0)."""
+        (v,) = op.operands
+        self._need("amdgcn.cvt.scalef32.pk8.fp8.f32")
+        packed = f"{op.result.name}p"
+        self._current().emit(
+            f"  {packed} = call <2 x i32> @llvm.amdgcn.cvt.scalef32.pk8.fp8.f32("
+            f"<8 x float> {self._operand(v)}, float 1.000000e+00)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = bitcast <2 x i32> {packed} to <8 x i8>"
+        )
 
     def _op_arith_cvt_f32_to_bf8(self, op: Op) -> None:
         """Lower f32->bf8e5m2 quantisation via ``llvm.amdgcn.cvt.pk.bf8.f32``.

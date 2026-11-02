@@ -99,6 +99,13 @@ COMGR_FRESH_PROCESS_ATTR = "comgr_fresh_process"
 # Kernel attribute for ``-amdgpu-expert-scheduling-mode`` (compile policy only,
 # like the attribute above).
 EXPERT_SCHEDULING_ATTR = "amdgpu_expert_scheduling_mode"
+# Kernel attribute that turns off LLVM's pre- and post-RA machine schedulers,
+# so instructions keep the order the kernel emits them in (compile policy only,
+# like the attributes above).
+SOURCE_ORDER_ATTR = "source_order_schedule"
+# Kernel attribute: how many leading kernel arguments LLVM preloads into SGPRs
+# (``-amdgpu-kernarg-preload-count``; compile policy only).
+KERNARG_PRELOAD_COUNT_ATTR = "amdgpu_kernarg_preload_count"
 
 
 @dataclass
@@ -508,6 +515,13 @@ def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
     if kernel.attrs.get(EXPERT_SCHEDULING_ATTR):
         options.extend(["-mllvm", "-amdgpu-expert-scheduling-mode"])
+    if kernel.attrs.get(SOURCE_ORDER_ATTR):
+        options.extend(
+            ["-mllvm", "-enable-misched=false", "-mllvm", "-enable-post-misched=false"]
+        )
+    preload = int(kernel.attrs.get(KERNARG_PRELOAD_COUNT_ATTR, 0))
+    if preload > 0:
+        options.extend(["-mllvm", f"-amdgpu-kernarg-preload-count={preload}"])
     return options
 
 
