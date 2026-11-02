@@ -1011,7 +1011,7 @@ TEST_P(MaxLogits, DataTypeConfig)
                                                    &selected_kernel,
                                                    true); // store_max_logits
         CHECK_RESULT(result);
-        EXPECT_NE(selected_kernel.find("_max_logits"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_maxl"), std::string::npos) << selected_kernel;
     }
     else
     {

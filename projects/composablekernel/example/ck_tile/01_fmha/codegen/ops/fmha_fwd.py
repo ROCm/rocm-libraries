@@ -595,7 +595,7 @@ class FmhaFwdPipeline:
         else:
             n += "_nsink"
         if self.F_max_logits == "t":
-            n += "_max_logits"
+            n += "_maxl"
 
         return n
 
