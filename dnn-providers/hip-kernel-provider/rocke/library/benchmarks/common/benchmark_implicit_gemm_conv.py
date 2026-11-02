@@ -1390,7 +1390,8 @@ def main() -> int:
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
             "also for --run-from-cache: "
             "auto = two-stage only when C/groups is odd (where the packed atomic "
-            "cannot be built); "
+            "cannot be built), except under --run-from-cache, where the cached "
+            "two-stage kernels always compete with the packed-atomic ones; "
             "always = time the two-stage kernels alongside the packed-atomic ones "
             "(nothing is dropped), so both split-K reductions compete; "
             "never = skip two-stage entirely (default: auto)"
@@ -4783,26 +4784,19 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
                     continue
-            if direction == "wgrad" and args.two_stage != "always":
-                # Same rule as the JIT sweep's --two-stage: by default the
-                # two-stage (scratch + reduce) kernels only run when C/groups
-                # is odd -- the case the packed-atomic epilogue cannot cover;
-                # "never" drops them outright; "always" keeps them alongside
-                # the packed-atomic ones, so both reductions compete.
-                odd = (problem.C // max(1, problem.groups)) % 2 != 0
-                if args.two_stage == "never" or not odd:
-                    candidates = [c for c in candidates if not c[0].two_stage]
+            if direction == "wgrad" and args.two_stage == "never":
+                # By default both split-K reductions compete: the cached
+                # two-stage (scratch + reduce) kernels are timed next to the
+                # packed-atomic ones whatever C/groups is -- the JIT sweep
+                # builds them for odd C/groups only, but here they are already
+                # compiled, and deep f32-workspace splits beat the atomic ones
+                # on many even shapes. "never" drops them outright.
+                candidates = [c for c in candidates if not c[0].two_stage]
                 if not candidates:
                     print(
                         f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
-                        f"no compatible kernel ("
-                        + (
-                            "two-stage disabled by --two-stage never"
-                            if args.two_stage == "never"
-                            else "two-stage kernels only run for odd C/groups; "
-                            "see --two-stage"
-                        )
-                        + ")",
+                        "no compatible kernel (two-stage disabled by "
+                        "--two-stage never)",
                         flush=True,
                     )
                     continue

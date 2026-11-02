@@ -393,23 +393,32 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
 
 static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
 {
+    /* Mirror of Python _op_memref_global_atomic_add_pk_f16: a generic
+     * atomicrmw fadd <2 x half> with the AMDGPU memory-model metadata, as for
+     * bf16 (backend selects global_atomic_pk_add_f16). The legacy
+     * llvm.amdgcn.global.atomic.fadd.v2f16 intrinsic is auto-upgraded to a
+     * system-scope seq_cst atomicrmw that fences every atomic with an L2
+     * writeback and invalidate. GEP index stays i32. */
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
-    const char* gep;
-    rocke_ll_need(L, "global.atomic.fadd.v2f16");
-    gep = rocke_ll_fresh(L, "gep");
+    const char* gep = rocke_ll_fresh(L, "gep");
+    const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
                    gep,
                    rocke_ll_operand(L, ptr),
                    rocke_ll_operand(L, idx));
+    L->needs_fp_atomic_md = true;
     rocke_ll_emitf(L,
-                   "  %s = call <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-                   "ptr addrspace(1) %s, <2 x half> %s)",
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x half> %s %s"
+                   ", !amdgpu.no.fine.grained.memory !1"
+                   ", !amdgpu.no.remote.memory !1"
+                   ", !amdgpu.ignore.denormal.mode !1",
                    ll_res(op),
                    gep,
-                   rocke_ll_operand(L, val));
+                   rocke_ll_operand(L, val),
+                   ordering);
 }
 
 /* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING

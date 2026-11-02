@@ -3572,23 +3572,34 @@ class _Lowerer:
         )
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
-        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
+        """Lower the packed-fp16 atomic add via a generic ``atomicrmw fadd``
+        on a ``<2 x half>``.
 
-        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
-        GEPs into the fp16 buffer at ``idx`` and calls
-        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16``: the backend selects
+        the native ``global_atomic_pk_add_f16`` (gfx940+) under the same
+        device-local memory-model metadata. The legacy
+        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic is auto-upgraded to
+        a system-scope ``seq_cst`` atomicrmw, which brackets every atomic with
+        an L2 writeback (``buffer_wbl2``) and invalidate (``buffer_inv``) that
+        the bf16 atomic the same epilogues emit does not pay.
+        GEPs into the fp16 buffer at ``idx`` (i32).
         """
         ptr, idx, val = op.operands
-        self._need("global.atomic.fadd.v2f16")
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
+        ordering = op.attrs.get("ordering", "monotonic")
+        self._needs_fp_atomic_md = True
+        md = (
+            ", !amdgpu.no.fine.grained.memory !1"
+            ", !amdgpu.no.remote.memory !1"
+            ", !amdgpu.ignore.denormal.mode !1"
+        )
         self._current().emit(
-            f"  {op.result.name} = call <2 x half> "
-            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
+            f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
+            f"<2 x half> {self._operand(val)} {ordering}{md}"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:

@@ -3447,7 +3447,12 @@ static rocke_value_t* wgrad_declare_ptr(rocke_ir_builder_t* b,
  * iteration arguments. Each iteration issues every buffer load from the
  * carried offsets, derives the next tile's offsets while those loads are in
  * flight, then writes LDS. The (row, col) slot decode is loop-invariant and is
- * emitted once ahead of the loop. */
+ * emitted once ahead of the loop.
+ *
+ * pipeline="compv3" also prefetches the data (CK's compv3: one LDS buffer,
+ * the next tile in registers): a prologue stages tile k_lo into LDS, and each
+ * iteration issues tile k+1's loads before tile k's MFMAs and writes them to
+ * LDS only after those MFMAs. */
 
 /* Iteration arguments of that loop: the accumulators plus one byte offset per
  * staged A and B vector. Python has no fixed cap, so this one must cover every
@@ -3495,6 +3500,30 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
     if(!rocke_ir_builder_ok(b))
         return;
 
+    const bool compv3 = ctx->spec->pipeline != NULL && strcmp(ctx->spec->pipeline, "compv3") == 0;
+    if(compv3)
+    {
+        /* Prologue: stage tile k_lo into LDS and publish it; the loop starts
+         * from the offsets of tile k_lo + block_k. */
+        rocke_ctl_staged_t a_st;
+        rocke_ctl_staged_t b_st;
+        rocke_coalesced_tile_loader_issue_slots(
+            b, &ctx->a_sync_loader, ctx->a_rsrc, &a_slots, offs0, &a_st);
+        rocke_coalesced_tile_loader_issue_slots(
+            b, &ctx->b_sync_loader, ctx->b_rsrc, &b_slots, offs0 + n_a, &b_st);
+        rocke_value_t* k_one = rocke_b_add(b, k_lo, ctx->c_block_k);
+        ctx->k_off_capture = k_one;
+        rocke_coalesced_tile_loader_slot_offsets(
+            b, &ctx->a_sync_loader, &a_slots, a_fn, ctx, offs0);
+        rocke_coalesced_tile_loader_slot_offsets(
+            b, &ctx->b_sync_loader, &b_slots, b_fn, ctx, offs0 + n_a);
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_st);
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_st);
+        rocke_b_sync(b);
+        if(!rocke_ir_builder_ok(b))
+            return;
+    }
+
     rocke_iter_arg_t iter_args[WGRAD_PFA_MAX_ITER_ARGS];
     char off_names[WGRAD_PFA_MAX_ITER_ARGS][24];
     for(int i = 0; i < num_accs; ++i)
@@ -3534,8 +3563,10 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
         rocke_coalesced_tile_loader_issue_slots(
             b, &ctx->b_sync_loader, ctx->b_rsrc, &b_slots, iter_vars + num_accs + n_a, &b_staged);
 
-        /* _tile_offsets(k0 + block_k) */
-        rocke_value_t* k_next = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        /* _tile_offsets(k0 + block_k), or k0 + 2*block_k under compv3: the
+         * loads just issued are already tile k0 + block_k's. */
+        rocke_value_t* k_step = compv3 ? rocke_b_const_i32(b, 2 * ctx->block_k) : ctx->c_block_k;
+        rocke_value_t* k_next = rocke_b_add(b, for_op.iv, k_step);
         rocke_value_t* yields[WGRAD_PFA_MAX_ITER_ARGS];
         ctx->k_off_capture = k_next;
         rocke_coalesced_tile_loader_slot_offsets(
@@ -3543,11 +3574,23 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
         rocke_coalesced_tile_loader_slot_offsets(
             b, &ctx->b_sync_loader, &b_slots, b_fn, ctx, yields + num_accs + n_a);
 
-        rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_staged);
-        rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_staged);
-        rocke_b_sync(b);
-        rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iter_vars, num_accs, yields);
-        rocke_b_sync(b);
+        if(compv3)
+        {
+            /* MFMAs out of LDS while the loads fly, then overwrite LDS. */
+            rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iter_vars, num_accs, yields);
+            rocke_b_sync(b);
+            rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_staged);
+            rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_staged);
+            rocke_b_sync(b);
+        }
+        else
+        {
+            rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_staged);
+            rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_staged);
+            rocke_b_sync(b);
+            rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iter_vars, num_accs, yields);
+            rocke_b_sync(b);
+        }
         rocke_b_scf_yield(b, yields, num_accs + n_off);
     }
     rocke_b_region_leave(b);

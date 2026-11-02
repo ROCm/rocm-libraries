@@ -541,7 +541,8 @@ class WgradConvSpec:
     # outweigh the hidden latency on large, MFMA-bound tiles -- see
     # ``default_prefetch_addr`` for the selection policy. Applies to the single-buffer synchronous K loop shared by the
     # mem/compv3/compv4/basic pipelines; async_dma and unroll_k have their own
-    # loops and reject it.
+    # loops and reject it. Under pipeline="compv3" the loop also prefetches
+    # the next tile's data into registers across the MFMAs (see the K loop).
     #
     # Default False: strictly additive, so every existing config emits
     # byte-identical IR and keeps its kernel name.
@@ -2019,7 +2020,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
     # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
     # scheduling hints -- so charging it for a second A/B tile rejected specs for
-    # LDS the kernel never allocates.
+    # LDS the kernel never allocates. (compv3 with prefetch_addr stages the next
+    # tile in registers, not in a second LDS tile.)
     _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -3287,6 +3289,13 @@ def build_implicit_gemm_conv_wgrad(
         # (row, col) slot decode is loop-invariant and emitted once up front.
         # The last iteration computes offsets for a tile past _k_upper that no
         # load ever consumes.
+        #
+        # pipeline="compv3" goes one step further (CK's compv3: one LDS
+        # buffer, the next tile prefetched into registers): the loads of tile
+        # k+1 are issued before tile k's MFMAs and only written to LDS after
+        # them, so the global latency overlaps the math instead of preceding
+        # it. Its last iteration loads a tile past _k_upper into LDS that no
+        # MFMA reads -- a buffer load, so past the tensor it reads zero.
         _a_fn, _b_fn = _split_desc_fns()
         _a_slots = a_sync_loader.plan_slots(b, tid=tid)
         _b_slots = b_sync_loader.plan_slots(b, tid=tid)
@@ -3300,24 +3309,55 @@ def build_implicit_gemm_conv_wgrad(
         _offs0 = _tile_offsets(k_lo)
         _n_acc = len(accs)
         _n_a = len(_a_slots)
-        _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs0)]
-        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            _cur = list(iter_vars[_n_acc:])
-            _a_staged = a_sync_loader.issue_slots(
-                b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+        if spec.pipeline == "compv3":
+            # Prologue: stage tile k_lo into LDS and publish it.
+            _st_a = a_sync_loader.issue_slots(
+                b, rsrc=dy_rsrc, slots=_a_slots, offsets=_offs0[:_n_a]
             )
-            _b_staged = b_sync_loader.issue_slots(
-                b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+            _st_b = b_sync_loader.issue_slots(
+                b, rsrc=x_rsrc, slots=_b_slots, offsets=_offs0[_n_a:]
             )
-            _next = _tile_offsets(b.add(k0, c_block_k))
-            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
-            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+            _offs1 = _tile_offsets(b.add(k_lo, c_block_k))
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_st_a)
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_st_b)
             b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
-            b.sync()
-            b.scf_yield(*new_accs, *_next)
-        final_accs = list(for_op.results)[:_n_acc]
+            _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs1)]
+            for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                _cur = list(iter_vars[_n_acc:])
+                _a_staged = a_sync_loader.issue_slots(
+                    b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+                )
+                _b_staged = b_sync_loader.issue_slots(
+                    b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+                )
+                _next = _tile_offsets(b.add(k0, b.const_i32(2 * block_k)))
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
+                b.sync()
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+                b.sync()
+                b.scf_yield(*new_accs, *_next)
+            final_accs = list(for_op.results)[:_n_acc]
+        else:
+            _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs0)]
+            for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                _cur = list(iter_vars[_n_acc:])
+                _a_staged = a_sync_loader.issue_slots(
+                    b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+                )
+                _b_staged = b_sync_loader.issue_slots(
+                    b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+                )
+                _next = _tile_offsets(b.add(k0, c_block_k))
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
+                b.sync()
+                b.scf_yield(*new_accs, *_next)
+            final_accs = list(for_op.results)[:_n_acc]
     elif not spec.async_dma:
         # mem/compv3/compv4/basic: scf_for_iter with dynamic _k_upper (= p_wg_K or k_hi)
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
