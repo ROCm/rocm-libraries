@@ -1120,8 +1120,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 if(i_total_loops == num_sink_loop - 1)
                 {
                     advance_v(aligned_physical_seqlen_k_start - sink_seq_end);
-                    move_tile_window(bias_dram_window,
-                                     {0, aligned_physical_seqlen_k_start - sink_seq_end});
+                    // Bias is indexed logically, so its landing column drops
+                    // kv_l2p_offset. That puts it on the same column the
+                    // non-sink branch computes for bias_n_offset.
+                    move_tile_window(
+                        bias_dram_window,
+                        {0, aligned_physical_seqlen_k_start - sink_seq_end - kv_l2p_offset});
                 }
             }
 
