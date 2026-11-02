@@ -18,8 +18,20 @@ import pathlib
 import unittest
 from unittest import mock
 
-from rocke.core.arch import ArchTarget, known_arches, normalize_dtype, validate_arch
-from rocke.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
+from rocke.core.arch import (
+    ArchTarget,
+    known_arches,
+    listed_arch_for,
+    normalize_dtype,
+    validate_arch,
+)
+from rocke.core.isa import (
+    BACKEND_REGISTRY,
+    Gfx9MfmaBackend,
+    Gfx11RdnaBackend,
+    Gfx950Backend,
+    backend_for,
+)
 
 _ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
 
@@ -256,8 +268,27 @@ class TestISABackend(unittest.TestCase):
         self.assertIsInstance(backend_for("gfx950"), Gfx950Backend)
 
     def test_unknown_backend_raises(self):
-        with self.assertRaises(KeyError):
+        with self.assertRaises(KeyError) as ctx:
             backend_for("gfx999")
+        # The C++ engine's rocke_backend_for reports the same text
+        # (tests/core/isa_backend_targets.cpp).
+        self.assertEqual(
+            ctx.exception.args[0],
+            f"no ISA backend registered for 'gfx999'; known: {list(known_arches())}",
+        )
+
+    def test_every_known_target_gets_a_backend_under_its_own_name(self):
+        """A target whose row takes its facts from a generic target has no
+        registry row: it gets its generic's backend class, built on its own
+        ArchTarget, so lowering keeps the target's name."""
+        self.assertNotIn("gfx1100", BACKEND_REGISTRY)
+        self.assertIsInstance(backend_for("gfx1100"), Gfx11RdnaBackend)
+        for arch in known_arches():
+            with self.subTest(arch=arch):
+                backend = backend_for(arch)
+                self.assertEqual(backend.arch.gfx, arch)
+                entry = listed_arch_for(arch, BACKEND_REGISTRY)
+                self.assertIs(type(backend), BACKEND_REGISTRY[entry])
 
     def test_preamble_and_waitcnt_shared_for_cdna(self):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM22

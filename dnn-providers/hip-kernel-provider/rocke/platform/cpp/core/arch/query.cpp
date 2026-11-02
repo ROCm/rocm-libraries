@@ -700,6 +700,47 @@ const char* const* rocke_known_arches(int* count)
     return rocke_ati_known_arches;
 }
 
+/* Copy `text` into out at `pos`, as much as fits in out_cap with its NUL, and
+ * return strlen(text): the amount pos advances whether or not it fitted. */
+static size_t append_at(char* out, size_t out_cap, size_t pos, const char* text)
+{
+    const size_t length = strlen(text);
+    size_t copied;
+
+    if(out != NULL && pos < out_cap)
+    {
+        copied = length < out_cap - pos - 1 ? length : out_cap - pos - 1;
+        memcpy(out + pos, text, copied);
+        out[pos + copied] = '\0';
+    }
+    return length;
+}
+
+/* Python repr(list) over rocke_known_arches(): "['gfx908', 'gfx90a']". */
+size_t rocke_known_arch_list_repr(char* out, size_t out_cap, bool (*keep)(const char* gfx))
+{
+    int count = 0;
+    const char* const* arches = rocke_known_arches(&count);
+    size_t pos = 0;
+    bool first = true;
+    int i;
+
+    pos += append_at(out, out_cap, pos, "[");
+    for(i = 0; i < count; ++i)
+    {
+        if(keep != NULL && !keep(arches[i]))
+        {
+            continue;
+        }
+        pos += append_at(out, out_cap, pos, first ? "'" : ", '");
+        pos += append_at(out, out_cap, pos, arches[i]);
+        pos += append_at(out, out_cap, pos, "'");
+        first = false;
+    }
+    pos += append_at(out, out_cap, pos, "]");
+    return pos;
+}
+
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
  *
  *   Python _build_target: raise KeyError(
@@ -710,49 +751,29 @@ const char* const* rocke_known_arches(int* count)
  * the whole message. sorted(specs) renders as ['gfx...', 'gfx...']. */
 void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
 {
-    int count = 0;
-    const char* const* arches;
-    int i;
-    size_t pos = 0;
     int wrote;
+    size_t pos;
 
     if(out == NULL || out_cap == 0)
     {
         return;
     }
 
-    arches = rocke_known_arches(&count);
-
-    wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
+    wrote = snprintf(out, out_cap, "\"unknown gfx target '%s'; known: ", gfx);
     if(wrote < 0)
     {
         out[0] = '\0';
         return;
     }
-    pos += (size_t)wrote;
-    if(pos >= out_cap)
+    pos = (size_t)wrote;
+    if(pos < out_cap)
     {
-        out[out_cap - 1] = '\0';
-        return;
+        pos += rocke_known_arch_list_repr(out + pos, out_cap - pos, NULL);
     }
-
-    for(i = 0; i < count; ++i)
+    if(pos < out_cap)
     {
-        wrote = snprintf(out + pos, out_cap - pos, "%s'%s'", (i == 0) ? "" : ", ", arches[i]);
-        if(wrote < 0)
-        {
-            out[out_cap - 1] = '\0';
-            return;
-        }
-        pos += (size_t)wrote;
-        if(pos >= out_cap)
-        {
-            out[out_cap - 1] = '\0';
-            return;
-        }
+        snprintf(out + pos, out_cap - pos, ". Add a row to arch_specs.json.\"");
     }
-
-    snprintf(out + pos, out_cap - pos, "]. Add a row to arch_specs.json.\"");
 }
 
 /* Return the final gfx component without discarding profile or feature suffixes. */
@@ -874,6 +895,11 @@ static const char* rocke_row_facts_of(const char* gfx, size_t len)
             return row->facts_of;
     }
     return NULL;
+}
+
+const char* rocke_arch_facts_of(const char* gfx)
+{
+    return gfx != NULL ? rocke_row_facts_of(gfx, strlen(gfx)) : NULL;
 }
 
 static void rocke_set_message(char* message, size_t message_cap, const char* fmt, ...)

@@ -93,14 +93,16 @@ typedef struct rocke_isa_backend
 /* ------------------------------------------------------------- registry */
 
 /* Resolve a gfx string to its ISA backend (Python backend_for + BACKEND_REGISTRY).
- * On an unknown gfx, returns a backend with .valid == false and leaves *err (if
- * non-NULL) pointing at a static "no ISA backend registered for ..." message;
- * callers should check .valid. Known gfx: gfx908, gfx90a, gfx942, gfx950,
- * gfx11-generic and gfx1100 .. gfx1154, gfx12-generic, gfx1200 and gfx1201,
- * gfx1250. */
+ * A target whose arch_specs.json row takes its facts from a generic target gets
+ * the generic's backend under its own .gfx. On an unknown gfx, returns a backend
+ * with .valid == false and leaves *err (if non-NULL) pointing at Python's
+ * "no ISA backend registered for '<gfx>'; known: [...]" message, held in a
+ * per-thread buffer that stays valid until the thread's next miss; callers should
+ * check .valid. */
 rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err);
 
-/* True if `gfx` has a registered backend. */
+/* True if rocke_backend_for(gfx) would succeed: `gfx` has a row of its own, or
+ * its arch_specs.json row points at a generic target that has one. */
 bool rocke_backend_is_known(const char* gfx);
 
 /* ------------------------------------------------------- module preamble */

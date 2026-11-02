@@ -50,7 +50,7 @@ flowchart TD
     subgraph L2["2 · ISA backend — code, per gfx family"]
         direction LR
         B1["core/isa/backend.py<br/>BACKEND_REGISTRY['gfxNNNN'] = Gfx…Backend<br/>reuse a class; subclass only if codegen diverges"]
-        B2["cpp/core/isa/backend.cpp REGISTRY row<br/>+ cpp/core/lower_llvm/core.cpp rocke_ll_backend_for"]
+        B2["cpp/core/isa/backend.cpp REGISTRY row<br/>+ cpp/core/lower_llvm/core.cpp LL_BACKENDS"]
         B1 -.->|"both C++ rows required"| B2
     end
 
@@ -209,15 +209,21 @@ subclass only when the target's codegen actually diverges. Adding a gfx is
 explicitly *not* "edit `_Lowerer`".
 
 The C++ side needs **two** rows: the `REGISTRY` table in
-[`cpp/core/isa/backend.cpp`](../../cpp/core/isa/backend.cpp) and the resolver
-`rocke_ll_backend_for` in
+[`cpp/core/isa/backend.cpp`](../../cpp/core/isa/backend.cpp) and the
+`LL_BACKENDS` table `rocke_ll_backend_for` reads in
 [`cpp/core/lower_llvm/core.cpp`](../../cpp/core/lower_llvm/core.cpp).
+
+Only a target whose row holds facts of its own gets backend rows. A member that
+points at its generic (`facts_of`) gets none in any of the three registries: each
+resolves it through its generic's row under the member's own name (Python
+through `listed_arch_for`, C++ through `rocke_arch_facts_of`), so its arch-domain
+cells and messages stay its own.
 
 A backend row may legitimately land **before** the arch metadata (a forward
 declaration; none is registered today). `backend_for()` resolves the
 `ArchTarget` first, so that case reports "forward-declared but has no
 arch_specs.json metadata yet" instead of leaking a raw `KeyError`, and
-`wired_arches()` returns only the rows that can actually build a backend.
+`wired_arches()` returns only the targets that can actually build a backend.
 
 ## 3 · Kernels
 

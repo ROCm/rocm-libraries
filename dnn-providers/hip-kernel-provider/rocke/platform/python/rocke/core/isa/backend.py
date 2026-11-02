@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Tuple, Union
 
-from ..arch import ArchTarget
+from ..arch import ArchTarget, known_arches, listed_arch_for
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import I32, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
@@ -633,47 +633,53 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         )
 
 
-# gfx -> backend class. Adding a CDNA gfx is one row here plus, when its codegen
-# actually diverges, a new subclass.
+# gfx -> backend class, one row per target whose ``arch_specs.json`` row holds
+# facts of its own. A target whose row takes its facts from a generic target
+# (``facts_of``) has no row here: :func:`backend_for` builds its generic's class
+# on the target's own :class:`ArchTarget`, so it keeps its own name. Adding a
+# CDNA gfx is one row here plus, when its codegen actually diverges, a new
+# subclass.
 #
 # A row may be added before its ``core/arch/data/arch_specs.json`` row exists (a
 # forward-declaration). ``backend_for`` resolves the :class:`ArchTarget` first,
 # so such a row reports a clean "metadata not yet present" error from this layer
 # rather than a raw arch-layer ``KeyError``. ``wired_arches()`` returns only the
-# rows that have arch metadata and can actually build a backend today.
+# targets that have arch metadata and can actually build a backend today.
 BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx908": Gfx9MfmaBackend,
     "gfx90a": Gfx9MfmaBackend,
     "gfx942": Gfx9MfmaBackend,
     "gfx950": Gfx950Backend,
-    "gfx1100": Gfx11RdnaBackend,
-    "gfx1101": Gfx11RdnaBackend,
-    "gfx1102": Gfx11RdnaBackend,
-    "gfx1103": Gfx11RdnaBackend,
-    "gfx1150": Gfx11RdnaBackend,
-    "gfx1151": Gfx11RdnaBackend,
-    "gfx1152": Gfx11RdnaBackend,
-    "gfx1153": Gfx11RdnaBackend,
-    "gfx1154": Gfx11RdnaBackend,
-    "gfx1200": Gfx12RdnaBackend,
-    "gfx1201": Gfx12RdnaBackend,
     "gfx1250": Gfx1250Backend,
     "gfx11-generic": Gfx11RdnaBackend,
     "gfx12-generic": Gfx12RdnaBackend,
 }
 
 
+def _backend_class(gfx: str) -> Callable[[ArchTarget], ISABackend] | None:
+    """The backend class for ``gfx``: its own row, else the row of the generic
+    target its ``arch_specs.json`` row points at; ``None`` when neither exists."""
+    entry = listed_arch_for(gfx, BACKEND_REGISTRY)
+    return None if entry is None else BACKEND_REGISTRY[entry]
+
+
 def wired_arches() -> Tuple[str, ...]:
-    """gfx targets that have BOTH a backend row and arch metadata today.
+    """Known gfx targets :func:`backend_for` can build a backend for today.
 
-    A backend row may be a forward-declaration (registered before its
-    ``arch_specs.json`` row lands); those are excluded here because
-    :func:`backend_for` cannot construct them yet.
+    That is every target with arch metadata whose own row, or whose generic
+    target's row, is registered. A backend row may be a forward-declaration
+    (registered before its ``arch_specs.json`` row lands); those are excluded
+    because :func:`backend_for` cannot construct them yet.
     """
-    from ..arch import known_arches
+    return tuple(gfx for gfx in known_arches() if _backend_class(gfx) is not None)
 
-    known = set(known_arches())
-    return tuple(sorted(g for g in BACKEND_REGISTRY if g in known))
+
+def _no_backend(gfx: str) -> KeyError:
+    """The error for a target with no backend; the C++ engine's
+    ``rocke_backend_for`` reports the same text."""
+    return KeyError(
+        f"no ISA backend registered for {gfx!r}; known: {list(wired_arches())}"
+    )
 
 
 def backend_for(arch: Union[str, ArchTarget]) -> ISABackend:
@@ -681,12 +687,8 @@ def backend_for(arch: Union[str, ArchTarget]) -> ISABackend:
     if isinstance(arch, ArchTarget):
         target = arch
     else:
-        cls = BACKEND_REGISTRY.get(arch)
-        if cls is None:
-            raise KeyError(
-                f"no ISA backend registered for {arch!r}; "
-                f"known: {sorted(BACKEND_REGISTRY)}"
-            )
+        if _backend_class(arch) is None:
+            raise _no_backend(arch)
         try:
             target = ArchTarget.from_gfx(arch)
         except KeyError as exc:
@@ -699,10 +701,7 @@ def backend_for(arch: Union[str, ArchTarget]) -> ISABackend:
                 f"arch_specs.json metadata yet; buildable now: "
                 f"{list(wired_arches())}"
             ) from exc
-    cls = BACKEND_REGISTRY.get(target.gfx)
+    cls = _backend_class(target.gfx)
     if cls is None:
-        raise KeyError(
-            f"no ISA backend registered for {target.gfx!r}; "
-            f"known: {sorted(BACKEND_REGISTRY)}"
-        )
+        raise _no_backend(target.gfx)
     return cls(target)

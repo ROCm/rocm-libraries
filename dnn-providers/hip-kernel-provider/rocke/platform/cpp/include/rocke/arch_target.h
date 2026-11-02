@@ -24,6 +24,7 @@
  *   class ArchTarget (frozen)         rocke_arch_target_t + rocke_arch_* () getters
  *   ArchTarget.from_gfx(gfx)          rocke_arch_target_from_gfx()
  *   known_arches()                    rocke_known_arches()
+ *   _load_pointers().get(gfx)         rocke_arch_facts_of()
  *   arch_from_isa(isa)                rocke_arch_from_isa()
  *   target_id_from_isa(isa)           rocke_target_id_from_isa()
  *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
@@ -455,6 +456,20 @@ bool rocke_arch_has_dpp_row_xmask(const rocke_arch_target_t* t);
  * storage; do not free. If `count` is non-NULL it receives the element count
  * (excluding the terminating NULL). */
 const char* const* rocke_known_arches(int* count);
+
+/* The generic target whose facts the arch_specs.json row of `gfx` takes
+ * ("facts_of"), or NULL when that row holds facts of its own or `gfx` has no row.
+ * Static storage. A table keyed by target resolves a name it has no entry for
+ * through this generic, as Python's listed_arch_for(gfx, table) does, so a
+ * generic's members need no entries of their own. */
+const char* rocke_arch_facts_of(const char* gfx);
+
+/* Python repr() of the list of known arches `keep` accepts, in
+ * rocke_known_arches order: "['gfx908', 'gfx90a']". A NULL `keep` keeps every
+ * known arch. Writes as much as fits in out_cap bytes, NUL-terminated (NULL out
+ * or zero out_cap writes nothing), and returns the length of the whole text, as
+ * snprintf does, so a result >= out_cap means the text was cut. */
+size_t rocke_known_arch_list_repr(char* out, size_t out_cap, bool (*keep)(const char* gfx));
 
 /* Write str(KeyError) of ArchTarget.from_gfx's miss for `gfx` into out:
  *   "unknown gfx target '<gfx>'; known: ['gfx...', ...]. Add a row to arch_specs.json."

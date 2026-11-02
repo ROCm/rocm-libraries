@@ -409,6 +409,23 @@ if(BUILD_TESTING)
                  rocke_flavor_datalayout_ssot)
   endif()
 
+  # Holds both C++ backend registries to one row per target with facts of its own.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/isa_backend_targets.cpp")
+    add_executable(rocke_isa_backend_targets core/isa_backend_targets.cpp)
+    target_link_libraries(rocke_isa_backend_targets PRIVATE rocke_core)
+    add_test(NAME rocke_isa_backend_targets
+             COMMAND rocke_isa_backend_targets)
+    set_tests_properties(rocke_isa_backend_targets
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_isa_backend_targets)
+    set_target_properties(rocke_isa_backend_targets
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_isa_backend_targets
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_isa_backend_targets)
+  endif()
+
   # Holds the intrinsic declaration chain (per declaration ABI generation) to its rule.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/flavor_decl_chain.cpp")
     add_executable(rocke_flavor_decl_chain core/flavor_decl_chain.cpp)

@@ -35,6 +35,7 @@
 
 #include <exception>
 #include <new>
+#include <vector>
 
 /* The lowerer's private symbols live in namespace ckc; public entry points stay
  * at global scope under their extern "C" header declarations. */
@@ -90,17 +91,6 @@ static const rocke_isa_backend_t LL_BACKEND_GFX950
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1100 = {.gfx = "gfx1100", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1101 = {.gfx = "gfx1101", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1102 = {.gfx = "gfx1102", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1103 = {.gfx = "gfx1103", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1150 = {.gfx = "gfx1150", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {.gfx = "gfx1151", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1152 = {.gfx = "gfx1152", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1153 = {.gfx = "gfx1153", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1154 = {.gfx = "gfx1154", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1200 = {.gfx = "gfx1200", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {.gfx = "gfx1201", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX12_GENERIC
@@ -134,9 +124,68 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1250
 #undef LL_BACKEND_CDNA_DEFAULTS
 #undef LL_BACKEND_RDNA_DEFAULTS
 
+/* One backend per target whose arch_specs.json row holds facts of its own
+ * (Python BACKEND_REGISTRY). */
+static const rocke_isa_backend_t* const LL_BACKENDS[] = {
+    &LL_BACKEND_GFX908,
+    &LL_BACKEND_GFX90A,
+    &LL_BACKEND_GFX942,
+    &LL_BACKEND_GFX950,
+    &LL_BACKEND_GFX1250,
+    &LL_BACKEND_GFX11_GENERIC,
+    &LL_BACKEND_GFX12_GENERIC,
+};
+
+static const rocke_isa_backend_t* ll_registered_backend(const char* gfx)
+{
+    for(const rocke_isa_backend_t* backend : LL_BACKENDS)
+    {
+        if(strcmp(backend->gfx, gfx) == 0)
+        {
+            return backend;
+        }
+    }
+    return NULL;
+}
+
+/* A target whose row takes its facts from a generic target lowers through the
+ * generic's backend under its own name (Python: backend_for builds the generic's
+ * class on the target's own ArchTarget), so its arch-domain cells and messages
+ * stay its own. These backends are derived from the arch registry once, on first
+ * use; a function-local static is initialised exactly once even when lowerers
+ * start on several threads. */
+static const rocke_isa_backend_t* ll_member_backend(const char* gfx)
+{
+    static const std::vector<rocke_isa_backend_t> member_backends = [] {
+        std::vector<rocke_isa_backend_t> backends;
+        int count = 0;
+        const char* const* arches = rocke_known_arches(&count);
+        for(int i = 0; i < count; ++i)
+        {
+            const char* generic = rocke_arch_facts_of(arches[i]);
+            const rocke_isa_backend_t* shared
+                = generic != NULL ? ll_registered_backend(generic) : NULL;
+            if(shared != NULL)
+            {
+                rocke_isa_backend_t backend = *shared;
+                backend.gfx = arches[i]; /* static storage */
+                backends.push_back(backend);
+            }
+        }
+        return backends;
+    }();
+    for(const rocke_isa_backend_t& backend : member_backends)
+    {
+        if(strcmp(backend.gfx, gfx) == 0)
+        {
+            return &backend;
+        }
+    }
+    return NULL;
+}
+
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
-    const rocke_isa_backend_t* base = NULL;
     /* No default. A NULL arch used to resolve to gfx950 silently, so a caller
      * that forgot the target lowered for one arch and compiled for another.
      * Mirrors the Python lowerer, which raises on `arch=None`. */
@@ -148,89 +197,14 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
         }
         return NULL;
     }
-    if(strcmp(arch, "gfx950") == 0)
+    const rocke_isa_backend_t* base = ll_registered_backend(arch);
+    if(base == NULL)
     {
-        base = &LL_BACKEND_GFX950;
-    }
-    else if(strcmp(arch, "gfx942") == 0)
-    {
-        base = &LL_BACKEND_GFX942;
-    }
-    else if(strcmp(arch, "gfx908") == 0)
-    {
-        base = &LL_BACKEND_GFX908;
-    }
-    else if(strcmp(arch, "gfx90a") == 0)
-    {
-        base = &LL_BACKEND_GFX90A;
-    }
-    else if(strcmp(arch, "gfx1100") == 0)
-    {
-        base = &LL_BACKEND_GFX1100;
-    }
-    else if(strcmp(arch, "gfx1101") == 0)
-    {
-        base = &LL_BACKEND_GFX1101;
-    }
-    else if(strcmp(arch, "gfx1102") == 0)
-    {
-        base = &LL_BACKEND_GFX1102;
-    }
-    else if(strcmp(arch, "gfx1103") == 0)
-    {
-        base = &LL_BACKEND_GFX1103;
-    }
-    else if(strcmp(arch, "gfx1150") == 0)
-    {
-        base = &LL_BACKEND_GFX1150;
-    }
-    else if(strcmp(arch, "gfx1151") == 0)
-    {
-        base = &LL_BACKEND_GFX1151;
-    }
-    else if(strcmp(arch, "gfx1152") == 0)
-    {
-        base = &LL_BACKEND_GFX1152;
-    }
-    else if(strcmp(arch, "gfx1153") == 0)
-    {
-        base = &LL_BACKEND_GFX1153;
-    }
-    else if(strcmp(arch, "gfx1154") == 0)
-    {
-        base = &LL_BACKEND_GFX1154;
-    }
-    else if(strcmp(arch, "gfx1200") == 0)
-    {
-        base = &LL_BACKEND_GFX1200;
-    }
-    else if(strcmp(arch, "gfx1201") == 0)
-    {
-        base = &LL_BACKEND_GFX1201;
-    }
-    else if(strcmp(arch, "gfx11-generic") == 0)
-    {
-        base = &LL_BACKEND_GFX11_GENERIC;
-    }
-    else if(strcmp(arch, "gfx12-generic") == 0)
-    {
-        base = &LL_BACKEND_GFX12_GENERIC;
-    }
-    else if(strcmp(arch, "gfx1250") == 0)
-    {
-        base = &LL_BACKEND_GFX1250;
-    }
-    else
-    {
-        if(st)
-        {
-            *st = ROCKE_ERR_KEY;
-        }
-        return NULL;
+        base = ll_member_backend(arch);
     }
     if(st)
     {
-        *st = ROCKE_OK;
+        *st = base != NULL ? ROCKE_OK : ROCKE_ERR_KEY;
     }
     return base;
 }
