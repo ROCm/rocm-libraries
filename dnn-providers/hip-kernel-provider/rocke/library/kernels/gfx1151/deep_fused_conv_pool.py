@@ -1483,7 +1483,7 @@ def _wmma_gemm_from_lds_int(
     # One ds_read_b128 per fragment (16 i8 = 128 bits).
     n_ds = mfmas_m + mfmas_n
 
-    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec(I32, op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         a_rows = []
@@ -1564,7 +1564,7 @@ def _wmma_gemm_conv1_i4_from_lds(
             )
         return out
 
-    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec(I32, op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     # Per-step hint is suppressed when fusing; the combined group is emitted once
     # after the loop instead.
     per_step = None if sched_fuse else policy
@@ -1617,7 +1617,7 @@ def _wmma_gemm_conv1_i4_packed_from_lds(
     warp_n_off = grid.warp_n_off(b)
     n_ds = mfmas_m + mfmas_n
 
-    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec(I32, op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         a_rows = []
@@ -1747,7 +1747,7 @@ def _wmma_gemm_conv1_i4_from_regs(
             )
         return out
 
-    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec(I32, op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     per_step = None if sched_fuse else policy
 
     b_all = [load_b(kk) for kk in range(k_atoms)] if prefetch_k else None
@@ -1800,7 +1800,7 @@ def _wmma_gemm_conv1_i8_from_regs(
             )
         return out
 
-    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec(I32, op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     per_step = None if sched_fuse else policy
 
     b_all = [load_b(kk) for kk in range(k_atoms)] if prefetch_k else None
@@ -1980,7 +1980,7 @@ def _wmma_gemm_from_lds(
     ds_per_frag = (op.a_frag_len + 7) // 8
     n_ds = ds_per_frag * (mfmas_m + mfmas_n)
 
-    accs = [b.zero_vec_f32(op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec_f32(op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         a_rows = []
@@ -2174,7 +2174,7 @@ def _wmma_gemm_conv0_direct(
     # B frags via 8-wide chunks. Used for the L2 group-hint counts.
     n_ds = op.a_frag_len * mfmas_m + ((op.b_frag_len + 7) // 8) * mfmas_n
 
-    accs = [b.zero_vec_f32(op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec_f32(op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         k_base = b.add(k_tile_base, a_k)
@@ -2237,7 +2237,7 @@ def _wmma_gemm_conv0_direct_int(
     # A: four 4-byte LDS loads then bitcast; B: one 16-byte LDS load.
     n_ds = _K_PER_I32 * mfmas_m + mfmas_n
 
-    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec(I32, op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         k_base = b.add(k_tile_base, a_k)

@@ -815,7 +815,6 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
         op_id = "mfma_f32_16x16x4_f32"
         a = self._mma_operand(op, op_id, "a", F32)
         b = self._mma_operand(op, op_id, "b", F32)
@@ -826,7 +825,6 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
         op_id = "mfma_f32_32x32x2_f32"
         a = self._mma_operand(op, op_id, "a", F32)
         b = self._mma_operand(op, op_id, "b", F32)
@@ -953,11 +951,9 @@ class _Lowerer:
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are passed as i32x8 (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
-        self._require_wmma_arch(f"wmma_gfx1250_f32_16x16x64_{ab}")
-        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8)
-        a, b, c = op.operands
         op_id = f"wmma_gfx1250_f32_16x16x64_{ab}"
         self._require_wmma_arch(op_id)
+        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8)
         a = self._mma_operand(op, op_id, "a", VectorType(I32, 8))
         b = self._mma_operand(op, op_id, "b", VectorType(I32, 8))
         self._emit(
@@ -1023,11 +1019,9 @@ class _Lowerer:
     # ``llvm.amdgcn.wmma.i32.16x16x16.iu8(i1 1, A, i1 1, B, C, i1 0)``.
 
     def _op_tile_wmma_i32_16x16x16_iu8(self, op: Op) -> None:
-        self._require_wmma_arch("wmma_i32_16x16x16_iu8")
-        validate_unscaled_wmma(op, I32, source_elem=I32, source_count=4)
-        a, b, c = op.operands
         op_id = "wmma_i32_16x16x16_iu8"
         self._require_wmma_arch(op_id)
+        validate_unscaled_wmma(op, I32, source_elem=I32, source_count=4)
         a = self._mma_operand(op, op_id, "a", VectorType(I32, 4))
         b = self._mma_operand(op, op_id, "b", VectorType(I32, 4))
         self._emit(
@@ -1043,11 +1037,9 @@ class _Lowerer:
     # trailing bool is the (off) clamp. Mirrors the LLVM emission
     # ``llvm.amdgcn.wmma.i32.16x16x16.iu4(i1 1, A, i1 1, B, C, i1 0)``.
     def _op_tile_wmma_i32_16x16x16_iu4(self, op: Op) -> None:
-        self._require_wmma_arch("wmma_i32_16x16x16_iu4")
-        validate_unscaled_wmma(op, I32, source_elem=I32, source_count=2)
-        a, b, c = op.operands
         op_id = "wmma_i32_16x16x16_iu4"
         self._require_wmma_arch(op_id)
+        validate_unscaled_wmma(op, I32, source_elem=I32, source_count=2)
         a = self._mma_operand(op, op_id, "a", VectorType(I32, 2))
         b = self._mma_operand(op, op_id, "b", VectorType(I32, 2))
         self._emit(

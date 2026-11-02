@@ -929,8 +929,8 @@ def _wmma_b_16x16_iu4(builder, lane, slot):
 # ``<8 x half>`` per lane (not <16 x half>), and the K dimension is split across
 # the two lane-halves (lanes 0-15 carry K 0..7, lanes 16-31 carry K 8..15). The
 # accumulator is column-distributed (CDNA/MFMA-style): lanes index columns,
-# registers index rows. These maps are the *hypothesis* verified empirically by
-# examples/gfx1201/wmma_probe.py before matmul_nbits is trusted on gfx1201.
+# registers index rows. The WMMA attention numeric suite exercises these maps on
+# gfx1200/gfx1201 hardware; examples/gfx1201/wmma_probe.py probes single atoms.
 def _wmma_gfx12_row_col_16x16(builder, lane, slot):
     """RDNA4 WMMA 16x16x16 src2/dst row-column map:
     slot ``i`` -> ``(row (lane // 16) * 8 + i, col lane % 16)``. Returns

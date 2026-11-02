@@ -38,7 +38,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import lse_store
+from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -1488,7 +1488,9 @@ def build_unified_attention_reduce_tiled(
         # Every lane holds the same butterfly-reduced overall_max/expsum, so one
         # lane writes. overall_max is in log2 units (segm_max carries
         # scale*log2e); lse_store converts to natural log and writes -inf for a
-        # row with no mass (every segment empty), whose O is already 0.
+        # row with no mass (every segment empty, sum 0), whose O is already 0.
+        # A NaN sum (NaN query row) keeps NaN, as O does: the same !(l == 0)
+        # test the tiled 2D epilogues use, never l > 0.
         with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
             lse_index = b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head)
             lse_store(
@@ -1497,7 +1499,7 @@ def build_unified_attention_reduce_tiled(
                 lse_index,
                 overall_max,
                 overall_expsum,
-                row_has_mass=b.fcmp("ogt", overall_expsum, zero_f),
+                row_has_mass=lse_row_has_mass(b, overall_expsum),
             )
 
     return b.kernel

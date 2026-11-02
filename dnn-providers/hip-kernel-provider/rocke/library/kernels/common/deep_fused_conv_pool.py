@@ -885,7 +885,7 @@ def _emit_conv1_1x1(
     needs_mask = k_chunks * conv1_tile_k != K0
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
-    accs = [b.zero_vec_f32(op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [b.zero_vec_f32(op.srcs[2].frag_len) for _ in range(mfmas_m * mfmas_n)]
 
     for k_chunk in range(k_chunks):
         chunk_base = k_chunk * conv1_tile_k

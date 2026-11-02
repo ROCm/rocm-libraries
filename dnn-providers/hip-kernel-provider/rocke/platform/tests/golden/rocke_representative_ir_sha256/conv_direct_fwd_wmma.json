@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {},
@@ -54,6 +52,51 @@
       }
     },
     "llvm23": {
+      "cases": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_default": {
+          "arch": "gfx1250",
+          "bytes": 276580,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f3x3_p1_wk2_wp4_tk4_tp4_tw16_ck32_st2_bf16",
+          "sha256": "63960367623fc11ee97632d5e9b256ea75cb6af502d55ce1e743b2b32d47c024",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/bf16_pp_pg3": {
+          "arch": "gfx1250",
+          "bytes": 356843,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f3x3_p1_wk2_wp4_tk4_tp6_tw16_ck32_st2_siterative-ilp_pp_pg3_bf16",
+          "sha256": "c2df5fcf9c24846e5a39945209e55a9b02b2035df81d81678b1b504e35ecc627",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/bf16_s2_ps_pg4": {
+          "arch": "gfx1250",
+          "bytes": 140643,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f3x3_p1_wk2_wp4_tk1_tp2_tw32_tn2_ck32_st2_str2_pg4c8k8_ps_bf16",
+          "sha256": "cfbea7e2800c3a5dbba63335bd143f48a2902bcd990e9a01a67e0dbd820d82ff",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/bf16_tu_tsh_dil": {
+          "arch": "gfx1250",
+          "bytes": 178508,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f3x3_p2_wk1_wp4_tk2_tp4_tw16_ck32_st2_dil1x2_tu_tsh_bf16",
+          "sha256": "dccd98b256c9685003a9943c3af2af9053a961468baf5724b24ddbf6ebd171e3",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/fp16_tn2_sb_we_pf": {
+          "arch": "gfx1250",
+          "bytes": 353906,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f3x3_p1_wk1_wp4_tk4_tp6_tw16_tn2_ck32_st2_pf_siterative-ilp_sb_we",
+          "sha256": "3003f336777b211444c9d857af449c9afed62159b5bfe7f1b9922059a06be537",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "conv_direct_fwd_wmma/gfx1250/bf16_default": {
           "arch": "gfx1250",

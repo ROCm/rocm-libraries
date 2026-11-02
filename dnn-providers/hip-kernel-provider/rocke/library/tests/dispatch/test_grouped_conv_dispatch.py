@@ -70,11 +70,28 @@ def _req(**kw) -> gc.ConvGroupedRequest:
 
 
 # Shapes that reach every registered forward family: dense (implicit GEMM and
-# direct_nongrouped), grouped cpg=16 and cpg=4 (direct_grouped), depthwise
-# 3x3 / 7x7 / 11x11 / stride 2 (the depthwise variants), the dilated
-# non-grouped instances, odd channels (scalar-vector implicit GEMM) and bf16.
+# direct_nongrouped), grouped cpg=16 and cpg=4 (direct_grouped), cpg=8 (the
+# grouped LDS-halo kernel), depthwise 3x3 / 7x7 / 11x11 / stride 2 (the
+# depthwise variants), the dilated non-grouped instances, a small deep map
+# (split-C), a width-folded patch stem, odd channels (scalar-vector implicit
+# GEMM) and bf16.
 _SHAPES = {
     "dense3x3": dict(),
+    "small_map_deep_c": dict(N=16, Hi=7, Wi=7, C=512, K=512),
+    "grouped_cpg8": dict(C=256, K=256, G=32, Hi=56, Wi=56),
+    "patch16_stem_folds_bf16": dict(
+        C=3,
+        K=768,
+        Hi=224,
+        Wi=224,
+        Y=16,
+        X=16,
+        pad_h=0,
+        pad_w=0,
+        stride_h=16,
+        stride_w=16,
+        dtype="bf16",
+    ),
     "dense1x1_bf16": dict(Y=1, X=1, pad_h=0, pad_w=0, C=256, K=128, dtype="bf16"),
     "dense_stride2": dict(stride_h=2, stride_w=2, K=128),
     "grouped_cpg16": dict(C=1024, K=1024, G=64, dtype="bf16"),
@@ -377,8 +394,9 @@ def _direct_problem(req):
 
 
 class _HelperCache:
-    """Stands in for a kernel cache holding every MFMA dgrad helper; records
-    which helper identities ``plan_for`` looks up."""
+    """Stands in for a kernel cache holding every helper kernel (the MFMA dgrad
+    weight transforms, the split-C reduction); records which helper
+    identities ``plan_for`` looks up."""
 
     def __init__(self):
         self.looked_up: list[KernelIdentity] = []
@@ -526,14 +544,20 @@ def _cache_side_plan(spec, req, ptrs, sizes):
             step.buffers,
             dks.launch_values(step, ptrs, sizes),
         )
-        for identity, step in zip((*helpers, ident), plan.steps, strict=True)
+        # The split-C reduction runs after the conv pass; every other helper
+        # (the MFMA dgrad weight transforms) before it.
+        for identity, step in zip(
+            (ident, *helpers) if gc._split_c(ident) > 1 else (*helpers, ident),
+            plan.steps,
+            strict=True,
+        )
     ]
     return steps, dict(plan.workspaces), ()
 
 
 _PTRS = {
     name: 0x1000 * (i + 1)
-    for i, name in enumerate(("x", "w", "y", "dy", "dx", "ws_t", "ws_coa"))
+    for i, name in enumerate(("x", "w", "y", "dy", "dx", "ws_t", "ws_coa", "ws_split"))
 }
 _PTRS["sub_gemms"] = _UploadRecorder.PTR
 _SIZES = {name: 100 + i for i, name in enumerate(_PTRS)}
@@ -561,8 +585,9 @@ def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
         assert got == want, name
         assert dict(plan.workspaces) == workspaces, name
         assert plan.sub_gemm_table == table, name
-        # The dispatch result describes the instance's own kernel: the last step.
-        own = plan.steps[-1]
+        # The dispatch result describes the instance's own kernel: the last
+        # step, but for a split-C instance, whose reduction runs after it.
+        own = plan.steps[0 if gc._split_c(result.spec.identity) > 1 else -1]
         assert own.identity == result.spec.identity, name
         assert (result.grid, result.block) == (own.grid, own.block), name
         assert result.signature == own.signature, name
@@ -615,13 +640,22 @@ def test_launch_plan_of_the_runtime_channel_mfma_dgrad():
 
 
 @pytest.mark.parametrize(
-    "shape", [s for s in _DGRAD_SHAPES if s.endswith(("_folds", "_folds_bf16"))]
+    "direction,shape",
+    [
+        (d, s)
+        for d, shapes in (("fwd", _SHAPES), ("dgrad", _DGRAD_SHAPES))
+        for s in shapes
+        if s.endswith(("_folds", "_folds_bf16"))
+    ],
 )
-def test_the_folding_shapes_fold(shape):
+def test_the_folding_shapes_fold(direction, shape):
     from kernels.common.conv_implicit_gemm_dgrad import fold_width
 
-    p = _implicit_problem(_case_req(_ARCH, "dgrad", shape))
+    req = _case_req(_ARCH, direction, shape)
+    p = _implicit_problem(req)
     assert fold_width(p) != p
+    # Admission, grid and kernargs all read the folded problem.
+    assert gc._gemm_problem(req) == fold_width(p)
 
 
 # The patch-embedding dgrad (DgradConvSpec.patch) runs one record over the
@@ -694,12 +728,17 @@ def test_default_pick_is_the_first_admitted_instance_in_list_order():
 )
 def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
     """A depthwise-shaped request must not fall back to a generic IGEMM tile
-    just because it happens to sort earlier in the list -- direct_depthwise_tiled
+    just because it happens to sort earlier in the list -- the direct depthwise
     candidates are admitted only for genuinely depthwise shapes (cpg=kpg=1), so
     they are listed ahead of implicit_gemm so they win whenever both are admitted.
+    The windowed MFMA forward (direct_depthwise_win: stride 1, "same" padding,
+    channels a multiple of 8) leads; the tiled kernel takes the rest.
     """
-    req = _req(**_SHAPES[shape])
-    assert gc.dispatch_conv_grouped(req).spec.algorithm == "direct_depthwise_tiled"
+    kw = _SHAPES[shape]
+    req = _req(**kw)
+    windowed = kw.get("stride_h", 1) == 1 and kw.get("Y", 3) <= 9 and kw["C"] % 8 == 0
+    want = "direct_depthwise_win" if windowed else "direct_depthwise_tiled"
+    assert gc.dispatch_conv_grouped(req).spec.algorithm == want
 
 
 def test_spec_id_pins_one_instance():
