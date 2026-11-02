@@ -371,7 +371,6 @@ namespace rocsparse
     template <typename TARGET, typename SOURCE, class FILTER = void>
     struct copy_farray_mix_safe_kernel_t
     {
-        static constexpr bool implemented = false;
     };
 
     template <typename TARGET, typename SOURCE>
@@ -383,8 +382,6 @@ namespace rocsparse
                           (std::is_same<TARGET, rocsparse_double_complex>{}
                            && std::is_same<SOURCE, rocsparse_float_complex>{}))>>
     {
-        static constexpr bool implemented = true;
-
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
             static void run(const size_t             nitems_,
@@ -416,8 +413,6 @@ namespace rocsparse
     template <>
     struct copy_farray_mix_safe_kernel_t<rocsparse_float_complex, float>
     {
-        static constexpr bool implemented = true;
-
         using SOURCE = float;
         using TARGET = rocsparse_float_complex;
 
@@ -453,8 +448,6 @@ namespace rocsparse
     template <>
     struct copy_farray_mix_safe_kernel_t<rocsparse_float_complex, double>
     {
-        static constexpr bool implemented = true;
-
         using SOURCE = double;
         using TARGET = rocsparse_float_complex;
 
@@ -509,8 +502,6 @@ namespace rocsparse
     template <>
     struct copy_farray_mix_safe_kernel_t<rocsparse_float_complex, rocsparse_double_complex>
     {
-        static constexpr bool implemented = true;
-
         using SOURCE = rocsparse_double_complex;
         using TARGET = rocsparse_float_complex;
 
@@ -568,8 +559,6 @@ namespace rocsparse
     template <>
     struct copy_farray_mix_safe_kernel_t<rocsparse_double_complex, rocsparse_float_complex>
     {
-        static constexpr bool implemented = true;
-
         using SOURCE = rocsparse_float_complex;
         using TARGET = rocsparse_double_complex;
 
@@ -603,8 +592,6 @@ namespace rocsparse
     template <>
     struct copy_farray_mix_safe_kernel_t<float, double>
     {
-        static constexpr bool implemented = true;
-
         using TARGET = float;
         using SOURCE = double;
         template <uint32_t BLOCKSIZE>
@@ -650,6 +637,19 @@ namespace rocsparse
         }
     };
 
+    template <typename KERNEL, uint32_t BLOCKSIZE, class FILTER = void>
+    struct has_run_kernel_t : std::false_type
+    {
+    };
+
+    template <typename KERNEL, uint32_t BLOCKSIZE>
+    struct has_run_kernel_t<KERNEL,
+                            BLOCKSIZE,
+                            std::void_t<decltype(&KERNEL::template run<BLOCKSIZE>)>>
+        : std::true_type
+    {
+    };
+
     template <typename TARGET, typename SOURCE>
     static rocsparse_status convert_data_array_compute_core(rocsparse_handle handle_,
                                                             size_t           nitems_,
@@ -665,7 +665,9 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        if constexpr(!rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>::implemented)
+        using kernel_t = rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>;
+        static constexpr uint32_t BLOCKSIZE = 1024;
+        if constexpr(!rocsparse::has_run_kernel_t<kernel_t, BLOCKSIZE>::value)
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
                 rocsparse_status_not_implemented,
@@ -673,15 +675,14 @@ namespace rocsparse
         }
         else
         {
-            const SOURCE*             source_   = (const SOURCE*)source__;
-            const TARGET*             target_   = (const TARGET*)target__;
-            static constexpr uint32_t BLOCKSIZE = 1024;
-            floating_data_t<SOURCE>*  derr      = (floating_data_t<SOURCE>*)handle_->buffer;
-            floating_data_t<SOURCE>   herr;
+            const SOURCE*            source_ = (const SOURCE*)source__;
+            const TARGET*            target_ = (const TARGET*)target__;
+            floating_data_t<SOURCE>* derr    = (floating_data_t<SOURCE>*)handle_->buffer;
+            floating_data_t<SOURCE>  herr;
             RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                 derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>::template run<BLOCKSIZE>),
+                (kernel_t::template run<BLOCKSIZE>),
                 dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
                 dim3(BLOCKSIZE),
                 0,
