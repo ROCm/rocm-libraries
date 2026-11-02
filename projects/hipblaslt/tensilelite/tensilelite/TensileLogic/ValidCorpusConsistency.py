@@ -10,8 +10,11 @@ validators.
 
 These checks are different in kind from the other ``Valid*.py`` validators:
 they are cheap (header-only YAML reads -- no per-solution parsing) but need
-visibility across more than one file to do their job. Both checks below are
-scoped the same way the caller's own per-solution validation already is: to
+visibility across more than one file to do their job. They are also where a
+cross-file fact about the shipped corpus belongs, rather than a unit test that
+reads the corpus: a unit test only sees the corpus in lanes that happen to have
+it, and only runs when tensilelite changes, not when the logic does. The checks
+below are scoped the same way the caller's own per-solution validation already is: to
 the files ``TensileLogic`` selected for the requested ``--architecture``
 (the full corpus when ``--architecture all`` is given). There's no separate
 "whole corpus" mode here -- if a gfx942-only build doesn't touch gfx1250
@@ -25,6 +28,7 @@ needs a documented, temporary exception, extend the known-bugs schema (see
 checks.
 """
 
+import copy
 import sys
 
 from collections import defaultdict
@@ -35,6 +39,7 @@ from ..CustomYamlLoader import (
     load_logic_cu_count,
     load_logic_device_names,
     load_logic_gfx_arch,
+    load_logic_problem_type,
     load_logic_schedule_name,
 )
 
@@ -208,6 +213,72 @@ def find_sibling_device_names_violations(
     return violations
 
 
+_RANGE_DIRNAME = "Range"
+_EQUALITY_DIRNAME = "Equality"
+
+
+def _placeholder_identity(yaml_path: Path) -> Dict[str, object]:
+    """The header fields and effective ``ProblemType`` that name a logic file's
+    placeholder library. ``ProblemType`` is compared after TensileLite fills in
+    its defaults, so a file that writes a default out explicitly and one that
+    omits it compare equal."""
+    from ..SolutionStructs.Problem import ProblemType
+
+    identity: Dict[str, object] = {
+        "ScheduleName": load_logic_schedule_name(yaml_path),
+        "ArchitectureName": load_logic_gfx_arch(yaml_path),
+        "CUCount": load_logic_cu_count(yaml_path),
+        "DeviceNames": read_device_names(yaml_path),
+    }
+    raw = load_logic_problem_type(yaml_path) or {}
+    for key, value in ProblemType(copy.deepcopy(raw), False).state.items():
+        identity[f"ProblemType.{key}"] = value
+    return identity
+
+
+def find_range_sibling_violations(
+    files: Sequence[Path], logic_root: Path
+) -> List[str]:
+    """A ``Range`` logic file with a same-basename ``Equality`` sibling in its
+    logic tree must declare the same ``ScheduleName``, ``ArchitectureName``,
+    ``CUCount``, ``DeviceNames`` and effective ``ProblemType``. Those decide the
+    placeholder library a file loads into, and the Range rows are meant to sit
+    in the Equality file's placeholder beside its rows (the gfx950 skinny TN
+    custom kernels rely on this). A Range file that drifts from its sibling
+    gets a placeholder of its own instead.
+
+    Only Range files are held to this. Same-basename Equality, GridBased and
+    Origami siblings do diverge in the shipped corpus today, so a general
+    sibling rule would fail builds over files nothing here is about.
+
+    As with ``find_sibling_device_names_violations``, only pairs where both
+    files are in ``files`` are compared."""
+    logic_root = _resolve_corpus_root(logic_root)
+    selected = set(files)
+    violations: List[str] = []
+    for range_path in files:
+        if range_path.parent.name != _RANGE_DIRNAME:
+            continue
+        sibling = range_path.parent.parent / _EQUALITY_DIRNAME / range_path.name
+        if sibling not in selected:
+            continue
+        ours = _placeholder_identity(range_path)
+        theirs = _placeholder_identity(sibling)
+        differing = sorted(
+            key for key in ours.keys() | theirs.keys() if ours.get(key) != theirs.get(key)
+        )
+        if differing:
+            detail = ", ".join(
+                f"{key}: {ours.get(key)!r} != {theirs.get(key)!r}" for key in differing
+            )
+            violations.append(
+                f"Range logic diverges from its Equality sibling: "
+                f"{range_path.relative_to(logic_root)} vs "
+                f"{sibling.relative_to(logic_root)}: {detail}"
+            )
+    return violations
+
+
 def check_corpus_invariants(
     logic_root: Path,
     files: Optional[Sequence[Path]] = None,
@@ -226,7 +297,7 @@ def check_corpus_invariants(
     ``gfx950``) is intentionally *not* included here: it guards a future
     source-policy change, not the artifact a given build selects, so it's a
     hermetic pytest assertion over the architecture registry (see
-    ``Tests/unit/test_valid_corpus_consistency.py`` and
+    ``Tests/unit/test_PlaceholderMerge.py`` and
     ``find_chip_id_arch_lock_violations``), not a per-build gate."""
     logic_root = Path(logic_root)
     if not logic_root.is_dir():
@@ -235,7 +306,9 @@ def check_corpus_invariants(
     if files is None:
         files = sorted(resolved_root.rglob("*.yaml"))
 
-    return list(find_sibling_device_names_violations(files, resolved_root))
+    return find_sibling_device_names_violations(
+        files, resolved_root
+    ) + find_range_sibling_violations(files, resolved_root)
 
 
 def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
@@ -246,14 +319,14 @@ def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
     silently stopping being one) needs a deliberate re-audit of both, not a
     registry edit that just happens to flip this predicate.
 
-    This is a source-policy check over the set of architectures the corpus
-    currently contains, not a property of any one build's artifact, so it is
-    exercised only as a pytest assertion (hermetically, and against the real
-    corpus in ``test_PlaceholderMerge.py``) rather than wired into
-    ``check_corpus_invariants()`` / ``TensileLogic --check-all`` -- every
-    from-source build re-checking the whole architecture registry on every
-    invocation would add no additional safety over running it once in CI's
-    unit-test job."""
+    This is a source-policy check over the architectures the given files
+    declare, not a property of any one build's artifact, so it is exercised only
+    as a pytest assertion rather than wired into ``check_corpus_invariants()`` /
+    ``TensileLogic --check-all`` -- every from-source build re-checking the
+    whole architecture registry on every invocation would add no additional
+    safety over running it once in CI's unit-test job. The registry-wide form
+    of the lock, which needs no corpus, is
+    ``test_PlaceholderMerge.py::test_supports_chip_id_predicate_only_gfx950``."""
     from ..Common.Architectures import supportsChipIdPredicate
 
     violations: List[str] = []

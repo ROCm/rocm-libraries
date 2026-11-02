@@ -518,7 +518,7 @@ suites:
     product: tensilelite
     kind: static_check
     mode: default
-    oracle: "Rules on chip IDs, matrix instructions, work-group shapes, XCC mapping, custom kernels"
+    oracle: "Rules on chip IDs, matrix instructions, work-group shapes, XCC mapping, custom kernels, and cross-file corpus invariants"
     source: projects/hipblaslt/tensilelite/tensilelite/TensileLogic/
     current:
       - system: build
@@ -823,26 +823,27 @@ suites:
     product: tensilelite
     kind: host_unit
     mode: default
-    oracle: "Whole-corpus consistency: chip-ID arch lock and sibling DeviceNames"
-    source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py
+    oracle: "Unit tests that still read the logic corpus (@needs_logic_corpus): the skinny TN Range wiring"
+    source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py
     current:
       - system: math_ci
         lane: "preliminary (unit stage)"
         cadence: presubmit
         gates: true
         required_check: Math CI Summary
-        notes: "Only when the PR touches tensilelite/; the corpus is not on disk in TheRock, so the checks skip there."
+        notes: "Only when the PR touches tensilelite/; skips in TheRock, where the corpus is not on disk. Every run prints a needs_logic_corpus ran/skipped count."
         evidence: ["doc:tensilelite/TESTING.md#logic-corpus-consistency-regression-tests", "external:math-ci"]
-        action: retire
+        action: keep
     target:
       - {system: build, cadence: every_build, notes: "inside TensileLogic --check-all"}
     disposition: merge_into
     into: tensilelogic-check-all
     rationale: >-
-      Sibling-DeviceNames already runs in the build gate. Moving the chip-ID arch-lock check there
-      too would make it run everywhere the corpus exists, which is every kernel-generating build,
-      instead of in a pytest copy that can never run in TheRock.
-    tickets: ["#7481"]
+      The cross-file checks (sibling DeviceNames, Range files matching their Equality sibling's
+      placeholder) already run in the build gate, and the chip-ID arch lock walks the architecture
+      registry instead of the corpus. What is left reads one feature's own Range files; a generic
+      Range-file check in the gate would retire it.
+    tickets: ["#7481", "#14887"]
     workstreams: [fill_the_holes]
 
   - id: tensilelite-mutation

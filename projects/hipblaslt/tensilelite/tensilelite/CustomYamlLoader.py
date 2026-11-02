@@ -188,6 +188,16 @@ def load_logic_cu_count(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML
     except RuntimeError:
         return load_yaml_dict_item(yaml_path, loader_type, 'CUCount')
 
+def load_logic_problem_type(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
+    """Return the raw ``ProblemType`` mapping from either dialect (list index 4
+    in the positional form, the ``ProblemType`` key in the mapping form), or
+    ``None`` if the file has none. Defaults the file omits are not filled in."""
+    try:
+        PROBLEM_TYPE_IDX = 4
+        return load_yaml_sequence_item(yaml_path, loader_type, PROBLEM_TYPE_IDX)
+    except RuntimeError:
+        return load_yaml_dict_item(yaml_path, loader_type, 'ProblemType')
+
 def load_logic_device_names(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
     """Return the header's raw ``DeviceNames`` sequence (a list of
     ``"Device ...."`` strings), or ``None`` if the header has no such field.
