@@ -88,7 +88,8 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
                                 tdmMemberIsLive, tdmHintDeciders
-from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
+from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText, \
+                                tdmKDimField, tdmKDimStepIsAddrInc
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -462,9 +463,12 @@ class KernelWriterAssembly(KernelWriter):
     fragmentation and occupancy limit included, so the counterfactual differs from
     it by exactly a known constant.
 
-    Only beta-with-no-edge is checked. beta reads C, so it needs the most
-    registers per element of the paths this problem can take, and the emitted size
-    predicates rule the edge variants out.
+    Only the beta, non-edge path is checked. beta reads C and so needs the most
+    registers per element of the non-edge paths. The edge path is reachable and
+    left unpriced deliberately: checking it would reject these kernels, and
+    pricing it in the model would cost every problem resident k-tiles to pay for
+    the ones that take it, so it is allowed its extra batch instead. See
+    rapMaxResidentKTiles.
     """
     if not (beta and not edge):
       return
@@ -490,6 +494,52 @@ class KernelWriterAssembly(KernelWriter):
          self.rapResidentKTiles(kernel) * kernel["DepthU"]))
     self.states.overflowedResources = 9
 
+  def tailFoldingMxsKSplitOffsetExceedsOneGroup(self, kernel, tc) -> bool:
+    """Can a K-split scale wave's offset outrun the last k-tile's K groups?"""
+    numComp, _ = tdmWaveComponents(kernel, tc)
+    numMxKGroups = kernel["DepthU"] // kernel["MatrixInstK"]
+    if numMxKGroups < numComp:
+      return False
+    return (numComp - 1) * (numMxKGroups // numComp) > 1
+
+  def tailFoldingShrinkTdmKDim(self, kernel, tPA, tPB) -> Module:
+    """Shrink a descriptor set's K dim by the k-tile its address just advanced.
+
+    TDM clamps the partial last k-tile at K only if the K dim, measured from the
+    moving base, shrinks in step: one subtract on the low-half dword (K < 2^16),
+    by the per-wave address increment when members step K differently. A scale
+    wave whose K offset can outrun the last k-tile clamps at zero.
+    """
+    tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
+    module = Module("Tail folding: shrink TDM K dim (%s/%s)" % (tcA, tcB))
+    fields = [tdmKDimField(kernel, tc) for tc in (tcA, tcB)]
+    assert None not in fields and fields[0][0] == fields[1][0], \
+      "%s/%s do not keep K in one field: %s" % (tcA, tcB, fields)
+    assert self.rapResidentKTiles(kernel) * kernel["DepthU"] < (1 << 16), \
+      "the TDM K dim's high half is not zero"
+    dword = fields[0][0]
+    group1 = "tdm%sGroup1+%u" % (self._tdmPairedParityOrder(kernel, tPA, tPB)[0]["tensorChar"], dword)
+    if fields[0][1] == fields[1][1]:
+      step = fields[0][1]
+      module.add(SSubU32(dst=sgpr(group1), src0=sgpr(group1), src1=hex(step << 16),
+                         comment="RAP: K dim -= %u, the k-tile the address just advanced" % step))
+    else:
+      assert tdmKDimStepIsAddrInc(kernel, tcA) and tdmKDimStepIsAddrInc(kernel, tcB), \
+        "%s/%s step K differently and not by bytes" % (tcA, tcB)
+      with self.allocTmpSgpr(1, tag="tailFoldingShrinkTdmKDimStep") as tmpSgprRes:
+        module.add(SLShiftLeftB32(dst=sgpr(tmpSgprRes.idx), shiftHex=hex(16), src=sgpr("tdm%s%sIncs" % (tcA, tcB)),
+                                  comment="RAP: this wave's K step is its address increment"))
+        module.add(SSubU32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
+                           comment="RAP: K dim -= the k-tile the address just advanced"))
+    if any(tc.startswith("MXS") and self.tailFoldingMxsKSplitOffsetExceedsOneGroup(kernel, tc)
+           for tc in (tcA, tcB)):
+      with self.allocTmpSgpr(1, tag="tailFoldingShrinkTdmKDim") as tmpSgprRes:
+        module.add(SCSelectB32(dst=sgpr(tmpSgprRes.idx), src0=hex(0x0000FFFF), src1=-1,
+                               comment="RAP: a borrow means this wave's K ran out"))
+        module.add(SAndB32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
+                           comment="RAP: clamp the K dim at zero"))
+    return module
+
   def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
     """Stop this wave's next tensor_load_to_lds if it is the one carrying A.
 
@@ -513,11 +563,18 @@ class KernelWriterAssembly(KernelWriter):
                              comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
       return module
     # This load feeds the next tile, not this one. Silencing A is only right while
-    # that tile goes on reusing the resident registers; when it changes batch the
-    # entry guard sends it to the fill copy, which computes from what this prefetch
-    # left behind. Fetch A for it. WorkGroup2 already names the next tile here --
-    # prefetchAcrossPersistentSetupNextTile has run and the current tile's identity
-    # is checkpointed -- so the batch is a compare away rather than another divide.
+    # that tile goes on reusing the resident registers; when it needs a different
+    # A the entry guard sends it to the fill copy, which computes from what this
+    # prefetch left behind. Fetch A for it. WorkGroup* already names the next tile
+    # here -- prefetchAcrossPersistentSetupNextTile has run and the current tile's
+    # identity is checkpointed -- so each half of the identity is a compare away
+    # rather than another divide.
+    #
+    # Both halves, not just the batch: the entry guard refills on either, and a
+    # prefetch that stayed silent for the other would hand the fill copy a tile
+    # whose A was never fetched. WorkGroup0 is past DefaultWGM here, and the M-tile
+    # the guard peeks goes through the same remap, so the two agree on when A is
+    # refilled; they disagreed once already, over the batch.
     with self.allocTmpSgpr(1, tag="rapPapKeepA") as keepRes:
       keep = keepRes.idx
       module.add(SCSelectB32(dst=sgpr(keep), src0=-1, src1=0,
@@ -526,8 +583,12 @@ class KernelWriterAssembly(KernelWriter):
                            comment="RAP: does the next tile stay in the resident batch?"))
       module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
                              comment="RAP: next tile changes batch -> it needs A prefetched"))
+      module.add(SCmpEQU32(src0=sgpr("WorkGroup0"), src1=sgpr("RAPResidentMTile"),
+                           comment="RAP: does the next tile stay on the resident M-tile?"))
+      module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
+                             comment="RAP: next tile changes M-tile -> it needs A prefetched"))
       module.add(SCmpEQU32(src0=sgpr(keep), src1=0,
-                           comment="RAP: neither reason to keep the descriptor"))
+                           comment="RAP: no reason to keep the descriptor"))
     module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=0, src1=sgpr(groupSgprName),
                            comment="RAP: NULL descriptor, this load moves nothing"))
     return module
@@ -23102,6 +23163,20 @@ class KernelWriterAssembly(KernelWriter):
             # tileM < numComp: do not M-split and do not zero extra comps.
             # A 0-wide TDM to the same LDS dest can clobber Comp0's scale byte.
             # All comps issue the same small tile (tile0 keeps the full footprint).
+          elif numComp > 1 and kernel.get("_TailFolding", False):
+            # K-splitting: this wave's K groups start compId * DepthU / numComp
+            # into each k-tile, so under tail folding the K dim has to start that
+            # much shorter for the partial last k-tile to clamp where the tail
+            # loop would.
+            if compShift == 1:
+              mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
+              mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+            else:
+              self._emitTdmCompId(mod, kernel, tc, tmpSgprWaveOffset, waveIdxSgpr)
+            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), kernel["DepthU"] // numComp, "RAP: this wave's K offset"))
+            mod.add(SSubU32(sgpr(tmpSgprWaveOffset), sgpr(dim1), sgpr(tmpSgprWaveOffset), "RAP: K left from this wave's base"))
+            mod.add(SCMovB32(sgpr(tmpSgprWaveOffset), 0, "RAP: no K left for this wave"))
+            dim1 = tmpSgprWaveOffset
           if mxTile > 1:
             # remain M/N in scale-row units: ceil(remain / MXBlockFree)
             mod.add(SAddU32(sgpr(dim0), sgpr(dim0), mxTile - 1, f"ceil(remain / MXBlockFree({mxTile}))"))
@@ -23930,6 +24005,7 @@ class KernelWriterAssembly(KernelWriter):
     # Separate descriptors advance independently, each by its own GlobalReadIncs,
     # so the wrap is per tensor because the pointer it wraps is per tensor.
     if tdmSharedScaleSetActive(kernel):
+      assert not kernel.get("_TailFolding", False), "a shared scale set has no single K dim step"
       # Only the A/B call advances the shared scale set.
       if tcA != "A":
         return mod
@@ -23986,6 +24062,9 @@ class KernelWriterAssembly(KernelWriter):
                 src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
+
+    if kernel.get("_TailFolding", False):
+      mod.add(self.tailFoldingShrinkTdmKDim(kernel, tPA, tPB))
 
     if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)):
       # Recompute the split increments transiently (see _tdmSplitMultiWaveInc). The

@@ -56,7 +56,8 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason, \
-                                       tdmWavePartition, tdmWaveSeparated
+                                       tdmWavePartition, tdmWaveSeparated, \
+                                       tdmKDimTrackable
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3896,8 +3897,9 @@ class Solution(collections.abc.Mapping):
     # and sets it for sparse, and the fp4/fp6/MX overrides above set it again. The
     # runtime predicate admits any K that is a multiple of the final ASEM, so a
     # NoTailLoop derived from an earlier value drops the K remainder.
-    # ReuseAcrossPersistent keeps NoTailLoop: its own predicate requires
-    # K % DepthU == 0 (Contractions.py).
+    # NoTailLoop says only that no tail loop is emitted; whether K can leave a
+    # remainder is ASEM % DepthU != 0. ReuseAcrossPersistent never emits one: a
+    # remainder is tail-folded into the main loop instead (_TailFolding, below).
     state["NoTailLoop"] = False
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 or state.get("ReuseAcrossPersistent", 0):
       state["NoTailLoop"] = True
@@ -4106,6 +4108,18 @@ class Solution(collections.abc.Mapping):
     state["AssertFree0ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeA"], state["AssertFree0ElementMultiple"])
     state["AssertFree1ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeB"], state["AssertFree1ElementMultiple"])
 
+    # Tail folding: the main loop runs a partial last k-tile, which TDM clamps at
+    # K. Only RAP folds, so only RAP solutions carry _TailFolding (readers default
+    # it to False). Set after the fp4/fp6/MX ASEM overrides above, which can leave
+    # a remainder depthUIteration never saw.
+    if state["Valid"] and state["ReuseAcrossPersistent"]:
+      state["_TailFolding"] = state["AssertSummationElementMultiple"] % state["DepthU"] != 0
+      # The clamp is one K-dim subtract per descriptor set, so every member must
+      # keep K in the same field.
+      if state["_TailFolding"] and not tdmKDimTrackable(state):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent with AssertSummationElementMultiple % DepthU != 0 requires TDM descriptor sets that keep K in one field (TDMFuse = 0, K-contiguous A and B that step K alike or by bytes, no sparse, no TDM iterate mode)")
+        return
+
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
     #  On gfx1250, i8, f8, it seem working for 1LDSBuffer=0 "BUT EPS=0", haven't checked for other archs/types, so we still reject by 1LDSBuffer only
@@ -4162,7 +4176,13 @@ class Solution(collections.abc.Mapping):
 
     # optSingleColVgpr shares one address vgpr across the batch, so the store needs
     # no per-element address register. Mirrors AsmStoreState's beta, non-edge,
-    # non-atomic branch -- the only store path the RAP size predicates allow.
+    # non-atomic branch.
+    #
+    # Non-edge even though an edge store is reachable: the edge path loses
+    # optSingleColVgpr and so costs one more register per element, and pricing it
+    # here would lower the resident k-tile count for every problem to pay for the
+    # ones that take it. That count is what K's ceiling is made of, so the edge
+    # path is left to cost a store batch instead. See rapCheckStoreNeutrality.
     optSingleColVgpr = (state["BufferStore"] and not packedC0 and not packedC1
                         and not problemType["UseInitialStridesCD"])
     vgprsPerAddr = 0 if optSingleColVgpr else (1 if state["BufferStore"] else 2)
@@ -7809,10 +7829,6 @@ class Solution(collections.abc.Mapping):
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
         return
-      # NoTailLoop is derived later, once ASEM is final (assignDerivedParameters).
-      if state["AssertSummationElementMultiple"] % state["DepthU"] != 0:
-        reject(state, printRejectionReason, "ReuseAcrossPersistent requires NoTailLoop (AssertSummationElementMultiple % DepthU == 0)")
-        return
       if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with DirectToVgpr on A")
         return
@@ -7821,6 +7837,22 @@ class Solution(collections.abc.Mapping):
         return
       if state.get("UseSubtileImpl", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not implemented for the subtile path")
+        return
+      # The entry guard repeats DefaultWGM's remap to learn which M-tile a tile
+      # reads, and the phased tile walk derives its period from that remap.
+      # SpaceFillingCurveWalk is DefaultWGM's sibling,
+      # selected at codegen by len(SpaceFillingAlgo), and redefines the field: with
+      # SFC the WGM kernarg carries packed per-level grid dims rather than a WGM
+      # value. Rejecting the compile-time list is enough, because which algorithm
+      # gets emitted is baked into the assembly; only the WGM *value* arrives from
+      # a runtime field.
+      if len(state["SpaceFillingAlgo"]):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with SpaceFillingAlgo")
+        return
+      # The resident path is implemented for 1D scaling tiles only. With a 2D
+      # tile (MXBlockFree > 1) the reuse copy computes from the wrong scales.
+      if state["ProblemType"]["MXBlockFreeA"] > 1 or state["ProblemType"]["MXBlockFreeB"] > 1:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with 2D MX scales (MXBlockFree > 1)")
         return
       # The A-side local-read pack buffers are sized from numVgprBufferPackA,
       # which RAP does not grow, so the resident buffer sets would alias each

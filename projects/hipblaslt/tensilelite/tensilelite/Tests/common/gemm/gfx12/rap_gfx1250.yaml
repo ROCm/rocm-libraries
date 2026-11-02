@@ -31,12 +31,13 @@ GlobalParameters:
 # can fail on it. DataInitTypeA does not help -- SerialIdx is mapped away too.
 #
 # A rejected size looks like a pass. Sizes are a union across the MacroTiles in a
-# group, so each tile rejects the ones that miss its RAP predicates (M == MT0,
-# N % MT1 == 0, K a whole number of resident k-tiles). Those come back as
+# group, so each tile rejects the ones that miss its RAP predicate (K beyond its
+# resident block) or its ASEM multiple. Those come back as
 # DID_NOT_SATISFY_ASSERTS, which leaves clientExit at 0 -- and so does a build
 # that silently produced no kernel. Check the per-size verdicts, not the exit
-# code. A full run is 252 rows: 202 PASSED, 50 rejected, 0 FAILED, about 33
-# minutes. No size is dead: every one of them runs on some tile.
+# code. A full run is 548 rows: 526 PASSED, 22 rejected, 0 FAILED. The 22
+# rejections are the K-ceiling misses in groups 1-6; group 7 should pass every
+# row. No size is dead: every one of them runs on some tile.
 
 BenchmarkProblems:
 
@@ -176,6 +177,30 @@ BenchmarkProblems:
           # Few enough tiles that a workgroup gets one: exercises the fill copy
           # alone, with the reuse copy never entered.
           - Exact: [64, 2048, 1, 512]
+          # More than one M-tile, which is what the entry guard's M-tile half is
+          # for. 3 is deliberate: the CU count is even, so NumWorkGroups0 of 2
+          # divides the walk stride and the M-tile never turns over, whereas 3
+          # does not divide it and every tile takes the guard. Removing that half
+          # of the guard fails this size and passes the 2 below it.
+          - Exact: [192, 4096, 1, 512]    # nWG0=3, 48 tiles
+          - Exact: [128, 6144, 1, 512]    # nWG0=2, 48 tiles
+          # RAP adds no N predicate, so the store's edge path is reachable. Even
+          # N only: these kernels derive GlobalReadVectorWidthB 2 and so assert
+          # Free1ElementMultiple 2, which is ordinary edge machinery and nothing
+          # to do with RAP -- an odd N is refused here and taken by group 3,
+          # whose kernels derive 1.
+          - Exact: [64, 12416, 1, 512]    # last N-tile half full
+          - Exact: [64, 128, 1, 512]      # a single half-full N-tile
+          # All three at once: several M-tiles, an N edge, and a batch boundary.
+          - Exact: [192, 4098, 2, 512]
+          # A partial M-tile, which leaves most of the resident A block holding
+          # another M-tile's rows for the whole persistent walk. 130 is chosen to
+          # make that as bad as it gets: the last tile holds 2 rows of 64, so 97%
+          # of the block is stale, and NumWorkGroups0 3 means the guard refills
+          # from a different M-tile every tile.
+          - Exact: [130, 4096, 1, 512]    # 2 of 64 rows valid in the last M-tile
+          - Exact: [190, 4096, 1, 512]    # 62 of 64, the other end of the range
+          - Exact: [130, 4098, 2, 512]    # partial M-tile, N edge and a batch
         - ActivationArgs:
           - [Enum: none]
 
@@ -241,6 +266,17 @@ BenchmarkProblems:
           - Exact: [64, 12288, 1, 2304]   # ceiling for 64x256
           - Exact: [128, 12288, 4, 256]
           - Exact: [128, 12288, 2, 1024]  # ceiling for 128x128
+          # The M-tile and N-edge relaxations against the one data type whose A
+          # really does differ per batch, so both halves of the entry guard are
+          # under load at once. MT 128x128 takes the M=192 row as an M edge.
+          - Exact: [192, 4096, 2, 512]    # nWG0=3 at 64x256, batch 2
+          # Odd N, which these kernels can take because they derive
+          # GlobalReadVectorWidthB 1 and so assert Free1ElementMultiple 1. The
+          # narrowest N edge that exists, on top of several M-tiles.
+          - Exact: [128, 6145, 2, 512]
+          # Both dims odd and both partial, against the one data type whose A
+          # really differs per batch. The narrowest edge on each side at once.
+          - Exact: [129, 6145, 2, 512]
         - ActivationArgs:
           - [Enum: none]
 
@@ -305,5 +341,214 @@ BenchmarkProblems:
           - Exact: [64, 12288, 4, 256]    # K floor
           - Exact: [64, 12288, 4, 512]
           - Exact: [64, 12288, 4, 768]    # K ceiling
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 5. A=F8 B=F4 (MX) -- K % DepthU != 0.
+  #    ASEM 32 leaves a partial last k-tile, which RAP runs through the resident
+  #    loop: each TDM descriptor's K dim shrinks with its address, so the clamp
+  #    stops that k-tile at K. A and B step K by 256 and 128 bytes, so each wave
+  #    shrinks by its own address increment. kTiles: 64x256 -> 8, 64x512 -> 3.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256
+          - [16, 16, 128, 1,  1,  2, 16,  2, 2] # MT 64x512
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,1]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 12288, 4, 32]     # the whole K is one partial k-tile
+          - Exact: [64, 12288, 4, 288]    # the second prologue load is the partial one
+          - Exact: [64, 12288, 2, 512]    # a whole number of k-tiles on a tracking kernel
+          - Exact: [64, 12288, 2, 736]    # the partial k-tile is 64x512's last
+          - Exact: [64, 12288, 1, 2016]   # the partial k-tile is 64x256's last
+          - Exact: [192, 4096, 1, 416]    # nWG0=3, the guard refills A every tile
+          - Exact: [130, 4098, 2, 288]    # M edge, N edge and a batch
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 6. A=F8 B=F8 -- K % DepthU != 0, with the batch coverage MX lacks.
+  #    A partial k-tile past the first is where the K dim shrink matters:
+  #    without it that k-tile reads the next row's real data instead of zeros.
+  #    MX hides much of that behind the zero-padded scales of the blocks past
+  #    K, so this group is the discriminating one. kTiles: 64x256 -> 9,
+  #    128x128 -> 4.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 9
+          - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128, kTiles 4
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [1,2]
+        - ReuseAcrossPersistent: [0,1]
+        - PrefetchAcrossPersistent: [0,1]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 12288, 4, 160]    # the whole K is one partial k-tile
+          - Exact: [64, 12288, 2, 480]    # the second prologue load is the partial one
+          - Exact: [128, 12288, 2, 992]   # the partial k-tile is 128x128's last
+          - Exact: [64, 12288, 1, 2272]   # the partial k-tile is 64x256's last
+          - Exact: [192, 4096, 2, 416]    # several M-tiles and a batch
+          - Exact: [129, 6145, 2, 288]    # both dims odd and partial, and a batch
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 7. A=F8 B=F8 -- WorkGroupMapping other than 1.
+  #    Groups 1-6 pin WGM at 1, so the remap is the identity and the phase
+  #    walk's period is NumWorkGroups0. This group is what checks that the
+  #    guard, the fill and the walk agree once DefaultWGM actually moves the
+  #    M-tile. F8/F8 rather than MX so a stale A across a batch is visible.
+  #    WGM 8 blocks N-tiles: P = min(8, nWG1) * nWG0. WGM -4 blocks M-tiles:
+  #    a period exists only when the block height divides nWG0, else the walk
+  #    keeps the plain stride and the guard still has to use the remap.
+  #    ASEM 32 so one size also runs a partial last k-tile through the same
+  #    walk. MT 64x256, kTiles 9. 8 kernels x 4 sizes = 32 rows.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 9
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,1]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        # 8: N-tile blocks, phases in M' order. -4: M-tile blocks.
+        - WorkGroupMapping: [8, -4]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # nWG0=3, nWG1=16, batch 2. WGM 8 => P=24. WGM -4 => block height 3
+          # divides nWG0, P=9, and the phases are not in M' order.
+          - Exact: [192, 4096, 2, 512]
+          # nWG0=5. WGM -4's block height 4 does not divide 5, so that kernel
+          # keeps the plain stride while the guard still remaps.
+          - Exact: [320, 4096, 1, 512]
+          # One M-tile: the walk is the plain stride for either WGM.
+          - Exact: [64, 8192, 1, 512]
+          # Same grid as the first size, with a partial last k-tile.
+          - Exact: [192, 4096, 2, 416]
         - ActivationArgs:
           - [Enum: none]
