@@ -445,6 +445,7 @@ TYPED_TEST(TestGpuDeviceInputFillKinds, SpecialPositionsDependOnTheSeed)
         const auto filled = deviceFill<TypeParam>(recipe, seed, layout);
         EXPECT_TRUE(filled.accepted);
         std::vector<bool> nan;
+        nan.reserve(filled.elements.size());
         for(const auto v : filled.elements)
         {
             nan.push_back(std::isnan(asFloat(v)));
