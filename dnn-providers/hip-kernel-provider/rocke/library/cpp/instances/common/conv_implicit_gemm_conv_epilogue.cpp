@@ -435,6 +435,29 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
  * LDS-staged cshuffle store via CShuffleEpilogue.from_grid; the conv-specific
  * bit is the same D-descriptor addr_fn used by the direct path.
  * ===================================================================== */
+/* _det_store_slab's ws_addr: D's packed [M, K] layout (a group's channel
+ * slab at group * kpg), one slab per slot; always valid. */
+typedef struct
+{
+    rocke_value_t* slab;
+    rocke_value_t* p_K;
+    rocke_value_t* k_out_group_base;
+} conv_ws_addr_ctx_t;
+
+static rocke_value_t* conv_ws_addr(rocke_ir_builder_t* b,
+                                   rocke_value_t* m_val,
+                                   rocke_value_t* n_val,
+                                   rocke_value_t** out_valid,
+                                   void* user)
+{
+    conv_ws_addr_ctx_t* w = (conv_ws_addr_ctx_t*)user;
+    if(w->k_out_group_base != NULL)
+        n_val = rocke_b_add(b, w->k_out_group_base, n_val);
+    rocke_value_t* mk = rocke_b_mul(b, m_val, w->p_K);
+    *out_valid = NULL;
+    return rocke_b_add(b, w->slab, rocke_b_add(b, mk, n_val));
+}
+
 /* Python _atomic() of the wave64 atomic split-K forward: the plain cshuffle
  * atomic store into D, or (split_det 1/2) the deterministic owner fold. */
 static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
@@ -456,6 +479,36 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
         /* Each K slice adds its partial tile into the zeroed D. */
         rocke_cshuffle_epilogue_atomic_store_ex(
             b, epi, accs, num_accs, D, row_pitch, bound_m, bound_n, col_offset);
+        return;
+    }
+    if(spec->split_det == 3)
+    {
+        /* _det_store_slab: every contribution stores its f32 partial tile,
+         * row-major through the cshuffle LDS staging, into its own [M, K]
+         * slab of sk_partials (slot = slice); a separate fold kernel sums the
+         * slabs in slot order into D. */
+        rocke_value_t* mk = rocke_b_mul(b, ctx->p_M, ctx->p_K);
+        rocke_value_t* slab = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ctx->fwd_slice_id, mk));
+        rocke_value_t* ws_rsrc
+            = rocke_b_buffer_rsrc(b, ctx->fwd_p_sk_partials, rocke_b_const_i32(b, 0x7FFFFFF0));
+        /* Row slabs of <= 32 KB of f32 where the warp's M atoms allow. */
+        const int mfm = ctx->mfmas_m;
+        int mch = spec->cshuffle_m_chunks > 1 ? spec->cshuffle_m_chunks : 1;
+        while((ctx->block_m * ctx->block_n * 4) / mch > 32 * 1024 && mfm % (mch * 2) == 0)
+            mch *= 2;
+        rocke_cshuffle_epilogue_t e32 = rocke_cshuffle_epilogue_from_grid(epi->atom, &epi->grid, 4);
+        e32.out_dtype = "fp32";
+        e32.no_alias = spec->cshuffle_no_alias;
+        e32.war_barriers = 1;
+        if(mch > 1)
+            e32.m_chunks = mch;
+        e32.lds_barriers = spec->epi_lds_barriers;
+        conv_ws_addr_ctx_t wctx;
+        wctx.slab = slab;
+        wctx.p_K = ctx->p_K;
+        wctx.k_out_group_base = col_offset;
+        rocke_cshuffle_epilogue_store(
+            b, &e32, accs, num_accs, conv_ws_addr, (void*)&wctx, ws_rsrc, bound_m, bound_n);
         return;
     }
     /* _det_store (modes 1 / 2): the owner (last slice) folds the other

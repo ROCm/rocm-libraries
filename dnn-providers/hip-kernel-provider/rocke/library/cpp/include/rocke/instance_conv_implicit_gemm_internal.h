@@ -373,6 +373,7 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* fwd_is_full; /* split_tail: tile runs unsplit         */
     rocke_value_t* fwd_p_sk_flags; /* split_det counters                */
     rocke_value_t* fwd_p_sk_partials; /* split_det f32 partial slots    */
+    rocke_value_t* fwd_skx_slice; /* split_xcd_remap: the remapped slice  */
     rocke_value_t* fwd_p_ws;
     rocke_value_t* fwd_p_ws_bytes;
     rocke_value_t* fwd_p_ks;

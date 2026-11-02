@@ -1004,6 +1004,22 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->cshuffle_m_chunks = idx == 100 ? 4 : 2;
         spec->epi_lds_barriers = idx == 99;
         return 0;
+    case 104:
+    case 105:
+    case 106:
+    case 107:
+        if(make_cfg_3d(idx == 104 ? 85 : idx == 106 ? 84 : 83, spec, arch) != 0)
+            return -1;
+        if(idx == 104 || idx == 106)
+        {
+            spec->xcd_remap = 0;
+            spec->split_xcd_remap = 6;
+        }
+        spec->split_atomic_pairs = idx == 104;
+        spec->split_det = idx == 106 ? 0 : 3;
+        spec->cshuffle_m_chunks = idx == 105 ? 2 : 1;
+        spec->split_tail = idx == 107;
+        return 0;
     case 102:
         if(make_cfg_3d_base(55, spec, arch) != 0)
             return -1;

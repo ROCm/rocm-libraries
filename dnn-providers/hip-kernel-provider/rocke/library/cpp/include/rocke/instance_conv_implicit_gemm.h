@@ -301,6 +301,9 @@ typedef struct rocke_implicit_gemm_conv_spec
      * partials through agent-coherent (SC1) buffer accesses. Appends sk_flags
      * and sk_partials. 3 (per-slice slabs + a separate fold) is Python-only. */
     int split_det; /* default 0 */
+    /* split_xcd_remap: the whole split launch of one group, slice-major,
+     * remapped XCD-contiguously (replaces xcd_remap / chiplet_swizzle). */
+    int split_xcd_remap; /* default 0 */
 
     /* cshuffle_m_chunks: stage the cshuffle C tile in that many row slabs
      * (bf16 wave64 MFMA cshuffle). Default 1 (0 reads as 1). */

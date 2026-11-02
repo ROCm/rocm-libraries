@@ -577,6 +577,28 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->grid.block_m_off = ctx->block_m_off_v;
         ctx->grid.block_n_off = ctx->block_n_off_v;
     }
+    else if(spec->split_xcd_remap && spec->split_k > 1)
+    {
+        /* The whole launch of one group, slice-major (hardware order: x, y,
+         * then z = group * ks_count + slice), remapped XCD-contiguously. */
+        rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+        rocke_value_t* bz = rocke_b_block_id_z(b);
+        rocke_value_t* zs = rocke_b_mod(b, bz, ctx->fwd_p_ks_count);
+        rocke_value_t* zm = rocke_b_mul(b, zs, ctx->p_num_pid_m);
+        rocke_value_t* zy = rocke_b_add(b, zm, rocke_b_block_id_y(b));
+        rocke_value_t* zn = rocke_b_mul(b, zy, ctx->p_num_pid_n);
+        rocke_value_t* hw = rocke_b_add(b, zn, rocke_b_block_id_x(b));
+        rocke_value_t* nw = rocke_b_mul(b, tiles, ctx->fwd_p_ks_count);
+        rocke_value_t* lg = rocke_chiplet_transform_chunked_runtime(b, hw, nw, spec->split_xcd_remap, NULL);
+        ctx->fwd_skx_slice = rocke_b_div(b, lg, tiles);
+        rocke_value_t* tile = rocke_b_sub(b, lg, rocke_b_mul(b, ctx->fwd_skx_slice, tiles));
+        rocke_value_t* mt = rocke_b_div(b, tile, ctx->p_num_pid_n);
+        ctx->block_m_off_v = rocke_b_mul(b, mt, rocke_b_const_i32(b, ctx->block_m));
+        rocke_value_t* nt = rocke_b_mod(b, tile, ctx->p_num_pid_n);
+        ctx->block_n_off_v = rocke_b_mul(b, nt, rocke_b_const_i32(b, ctx->block_n));
+        ctx->grid.block_m_off = ctx->block_m_off_v;
+        ctx->grid.block_n_off = ctx->block_n_off_v;
+    }
     else if(spec->xcd_remap)
     {
         /* XCD-contiguous tile order (ImplicitGemmConvSpec.xcd_remap), with the
@@ -666,7 +688,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         /* gridDim.z = groups * ks_count: group = z / ks_count, slice = z % ks_count. */
         rocke_value_t* z = rocke_b_block_id_z(b);
-        rocke_value_t* slice = rocke_b_mod(b, z, ctx->fwd_p_ks_count);
+        rocke_value_t* slice = spec->split_xcd_remap ? ctx->fwd_skx_slice
+                                                     : rocke_b_mod(b, z, ctx->fwd_p_ks_count);
+        (void)z;
         ctx->fwd_slice_id = slice;
         ctx->kloop_k_lo = rocke_b_mul(b, slice, ctx->fwd_p_ks);
         ctx->kloop_k_hi = rocke_b_add(b, ctx->kloop_k_lo, ctx->fwd_p_ks);

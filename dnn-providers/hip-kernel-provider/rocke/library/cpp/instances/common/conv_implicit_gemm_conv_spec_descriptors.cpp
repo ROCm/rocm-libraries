@@ -480,7 +480,9 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     }
     /* (xws, saa: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_atomic_pairs, "sapl");
-    /* (sapf, esf, skx, fsk, sfs, szf, xsub, ppfd: Python-only knobs, off.) */
+    /* (sapf, esf: Python-only knobs, off.) */
+    ROCKE_FLAG(s->split_xcd_remap > 0, "skx%d", s->split_xcd_remap);
+    /* (fsk, sfs, szf, xsub, ppfd: Python-only knobs, off.) */
     ROCKE_FLAG(s->fb_skip_empty, "fbse");
     /* (ppeg: Python-only, off.) */
     ROCKE_FLAG(s->epi_lds_barriers, "elb");
@@ -1099,10 +1101,10 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                         "split_atomic selects the wave64 MFMA atomic split-K for a 2-D "
                         "problem: it needs split_k > 1, wave_size 64 and no split_k_cluster "
                         "(a 3-D split is always atomic)");
-    const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_det;
+    const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_det || s->split_xcd_remap;
     if(s->split_k == 1)
     {
-        if(s->split_det)
+        if(s->split_det || s->split_xcd_remap)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "split_xcd_remap / split_streamk / split_flag_store need the split-K "
@@ -1131,10 +1133,16 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
                             "split store");
-        if(s->split_det == 3)
+        if(s->split_det == 3 && s->split_tail)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
-                            "split_det 3 (slab store + fold) is not ported to the C engine");
+                            "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
+                            "split store");
+        if(s->split_xcd_remap && (s->split_tail || s->xcd_remap || s->chiplet_swizzle))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_xcd_remap replaces xcd_remap / chiplet_swizzle and keeps no "
+                            "split tail");
         if(s->split_atomic_pairs && strcmp(d, "bf16") != 0)
             ROCKE_SPEC_FAIL(reason, reason_cap, "split_atomic_pairs is the bf16 atomic store only");
         if(s->split_tail && s->chiplet_swizzle)
