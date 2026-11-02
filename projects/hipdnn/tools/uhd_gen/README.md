@@ -1174,7 +1174,10 @@ Measured on a 500-tree, 127-leaf model with 54 features:
 
 A `float32` leaf is within 2^-24 of its `float64` value, so a row's score moves by at most
 2^-24 × Σ over trees of that tree's largest |leaf|, far below the accuracy of a measured
-throughput. Thresholds are never rounded: a split compares against the value LightGBM chose.
+throughput. A leaf outside `float32`'s normal range (magnitude above 3.4e38, or nonzero
+below 1.2e-38) is refused when the model is written, with the advice to use
+`--leaf-precision float64`, rather than stored as `inf` or `0`. Thresholds are never
+rounded: a split compares against the value LightGBM chose.
 
 ## Generated FlatBuffers bindings
 

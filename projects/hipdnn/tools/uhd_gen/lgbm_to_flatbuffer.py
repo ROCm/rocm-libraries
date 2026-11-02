@@ -352,8 +352,31 @@ def _build_split_leaf_tree(
             tree.splitDefaultLeft = default_left
         if not all(decision_lte):
             tree.splitDecisionLte = decision_lte
+    if leaf_precision == "float32":
+        _require_float32(leaves)
     tree.leavesType, tree.leaves = _reals(_LEAF_TYPES[leaf_precision], leaves)
     return tree
+
+
+_FLOAT32 = np.finfo(np.float32)
+
+
+def _require_float32(leaves: list[float]) -> None:
+    """Refuse leaves a float32 cannot hold within its 2**-24 relative error: one beyond its
+    range would become inf, refused only when the model is loaded, and one below its smallest
+    normal value would lose precision or become 0 without a word."""
+    for value in leaves:
+        magnitude = abs(value)
+        if (
+            not np.isfinite(value)
+            or magnitude > _FLOAT32.max
+            or 0 < magnitude < _FLOAT32.tiny
+        ):
+            raise ValueError(
+                f"leaf value {value!r} is outside float32's normal range "
+                f"({_FLOAT32.tiny:g} to {_FLOAT32.max:g} in magnitude); "
+                'write this model with leaf_precision="float64"'
+            )
 
 
 def _flatten_tree(node: dict[str, Any], nodes: list[dict[str, Any]]) -> int:

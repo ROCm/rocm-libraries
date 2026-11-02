@@ -4,6 +4,7 @@
 verifier refuses, reason for reason, as TreeDataAdapter refuses it."""
 from __future__ import annotations
 
+import math
 import struct
 
 import pytest
@@ -296,6 +297,31 @@ def test_a_non_finite_threshold_or_leaf_is_refused(tmp_path):
     model.trees[0].leaves.values = np.asarray([1.0, np.nan, 3.0], dtype=np.float32)
     with pytest.raises(ValueError, match="leaf prediction is not finite"):
         verify_tree_artifact(write_model(model, tmp_path / "b.bin"), None)
+
+
+@pytest.mark.parametrize(
+    "leaf", [1e39, -1e39, 1e-39, -1e-39, float("inf"), float("nan")]
+)
+def test_a_leaf_float32_cannot_hold_is_refused_when_written(leaf):
+    """Beyond float32's range a leaf would be written as inf and refused only at load; below
+    its smallest normal value it would silently lose precision or become 0."""
+    dump = _dump(_split(0, 0.5, _leaf(1.0), _leaf(leaf)))
+    with pytest.raises(ValueError, match='leaf_precision="float64"'):
+        build_gbdt_model(dump, "sha256:x")
+    if math.isfinite(leaf):
+        exact = _model(build_gbdt_model(dump, "sha256:x", leaf_precision="float64"))
+        assert float(exact.trees[0].leaves.values[1]) == leaf
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    [0.0, float(np.finfo(np.float32).max), float(np.finfo(np.float32).tiny), -1.5],
+)
+def test_a_leaf_at_float32s_limits_is_written(leaf):
+    dump = _dump(_split(0, 0.5, _leaf(1.0), _leaf(leaf)))
+    tree = _model(build_gbdt_model(dump, "sha256:x")).trees[0]
+    assert tree.leavesType == RealArray.Float32Array
+    assert float(tree.leaves.values[1]) == leaf
 
 
 def test_repeated_split_leaf_trees_cannot_claim_more_nodes_than_the_buffer_holds():
