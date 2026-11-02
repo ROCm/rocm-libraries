@@ -55,6 +55,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
 * Fixed `init_rocalution()` reporting the HIP backend as available when creating the rocBLAS or rocSPARSE handle failed on a device selected with `set_device_rocalution()`, which caused `info_rocalution()` to crash. rocALUTION now falls back to the host backend in this case.
+* Fixed a crash or out-of-bounds access in the SA-AMG, UA-AMG and Ruge-Stueben AMG setup with MPI when a process sets only the local part of a `GlobalMatrix` with `SetLocalDataPtrCSR()` or `SetLocalDataPtrCOO()` and its neighbors reference its columns. Such a matrix now has an empty ghost part with one row per local row.
 
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
