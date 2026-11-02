@@ -1411,14 +1411,8 @@ namespace hipblaslt_jit
             return result;
         auto problemCopy = problem;
         problemCopy.setWorkspaceSize(query.workspace);
-        const auto key          = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
-        const auto attemptKey   = generationAttemptKey(query, key, problemCopy, numSolutions);
-        bool       alreadyGenerated = false;
-        if(!attemptKey.empty())
-        {
-            std::lock_guard<std::mutex> guard(m_attemptMutex);
-            alreadyGenerated = m_attempted.count(attemptKey) != 0;
-        }
+        const auto key        = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
+        const auto attemptKey = generationAttemptKey(query, key, problemCopy, numSolutions);
         std::vector<int32_t> indices;
         query.failure = lookup(key,
                                query.target.device,
@@ -1428,13 +1422,40 @@ namespace hipblaslt_jit
                                query.exclude,
                                indices);
         const bool miss = indices.size() < static_cast<size_t>(numSolutions);
-        if(generate && query.allowGeneration && miss && !alreadyGenerated && !attemptKey.empty()
-           && query.generate && query.failure.ok())
+        std::shared_ptr<GenerationAttempt> attempt;
+        bool                               owner = false;
+        if(generate && query.allowGeneration && miss && !attemptKey.empty() && query.generate
+           && query.failure.ok())
         {
+            std::lock_guard<std::mutex> guard(m_attemptMutex);
+            auto [it, inserted] = m_attempts.try_emplace(attemptKey);
+            if(inserted)
             {
-                std::lock_guard<std::mutex> guard(m_attemptMutex);
-                m_attempted.insert(attemptKey);
+                it->second        = std::make_shared<GenerationAttempt>();
+                it->second->owner = std::this_thread::get_id();
+                attempt           = it->second;
+                owner             = true;
             }
+            else if(it->second && it->second->owner != std::this_thread::get_id())
+            {
+                attempt = it->second;
+            }
+        }
+        if(owner)
+        {
+            struct Finish
+            {
+                GenerationAttempt& attempt;
+                ~Finish()
+                {
+                    {
+                        std::lock_guard<std::mutex> guard(attempt.mutex);
+                        attempt.done = true;
+                    }
+                    attempt.ready.notify_all();
+                }
+            } finish{*attempt};
+
             auto exclude = query.exclude;
             for(auto index : indices)
             {
@@ -1453,6 +1474,21 @@ namespace hipblaslt_jit
                     indices.push_back(index);
             if(!indices.empty())
                 query.failure = {};
+        }
+        else if(attempt)
+        {
+            {
+                std::unique_lock<std::mutex> lock(attempt->mutex);
+                attempt->ready.wait(lock, [&] { return attempt->done; });
+            }
+            indices.clear();
+            query.failure = lookup(key,
+                                   query.target.device,
+                                   problemCopy,
+                                   hardware,
+                                   static_cast<size_t>(numSolutions),
+                                   query.exclude,
+                                   indices);
         }
         if(indices.size() > static_cast<size_t>(numSolutions))
             indices.resize(static_cast<size_t>(numSolutions));

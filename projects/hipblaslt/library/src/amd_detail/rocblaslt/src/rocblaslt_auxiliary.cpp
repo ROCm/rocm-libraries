@@ -1188,6 +1188,59 @@ namespace
         return status;
     }
 }
+
+rocblaslt_status selectDefaultContractionAlgo(rocblaslt_handle                   handle,
+                                              RocblasltContractionProblem const& prob,
+                                              std::shared_ptr<void>              gemmData,
+                                              rocblaslt_matmul_heuristic_result& result)
+{
+    auto providerRows = [&](TensileLite::ProviderRows rows, int room) {
+        ProviderSelection selection;
+        if(room > 0)
+        {
+            selection.results.resize(room);
+            int                            count = 0;
+            TensileLite::ProviderRowsScope scope(rows);
+            selection.status = getBestSolutions(
+                prob, handle, gemmData, room, selection.results.data(), &count, prob.workspaceSize);
+            if(count < 0)
+                count = 0;
+            if(count > room)
+                count = room;
+            selection.results.resize(count);
+        }
+        return selection;
+    };
+    const auto ranked
+        = rankJitHeuristic(handle, &prob, prob.workspaceSize, 1, nullptr, 0, providerRows);
+    if(ranked.handled)
+    {
+        if(ranked.results.empty())
+            return rocblaslt_status_not_implemented;
+        result = ranked.results.front();
+        return rocblaslt_status_success;
+    }
+
+    int        count = 0;
+    const auto status
+        = getBestSolutions(prob, handle, gemmData, 1, &result, &count, prob.workspaceSize);
+    if(count == 0)
+        return rocblaslt_status_not_implemented;
+    return status;
+}
+#else
+rocblaslt_status selectDefaultContractionAlgo(rocblaslt_handle                   handle,
+                                              RocblasltContractionProblem const& prob,
+                                              std::shared_ptr<void>              gemmData,
+                                              rocblaslt_matmul_heuristic_result& result)
+{
+    int        count = 0;
+    const auto status
+        = getBestSolutions(prob, handle, gemmData, 1, &result, &count, prob.workspaceSize);
+    if(count == 0)
+        return rocblaslt_status_not_implemented;
+    return status;
+}
 #endif
 
 #ifdef __cplusplus

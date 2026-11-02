@@ -7,6 +7,7 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/SolutionLibrary.hpp>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -15,6 +16,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace TensileLite::hip
@@ -282,12 +284,21 @@ namespace hipblaslt_jit
         bool                                              m_checked = false;
         std::map<std::string, std::unique_ptr<Directory>> m_directories;
         std::map<int, std::vector<Directory*>>            m_routes;
+        // One generation of a problem. The first caller owns it; others wait
+        // until that attempt finishes and then read what it published.
+        struct GenerationAttempt
+        {
+            std::mutex              mutex;
+            std::condition_variable ready;
+            bool                    done = false;
+            std::thread::id         owner{};
+        };
         // Problems this library already tried to generate. The key is the cache
         // directory, workspace, requested count, problem type and sizes, so a
         // different K, datatype or count is still generated. Another root has
-        // its own set.
-        std::mutex            m_attemptMutex;
-        std::set<std::string> m_attempted;
+        // its own map.
+        std::mutex                                                m_attemptMutex;
+        std::map<std::string, std::shared_ptr<GenerationAttempt>> m_attempts;
     };
 
 }

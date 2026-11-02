@@ -5982,11 +5982,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(algo == nullptr)
         {
-            int returnAlgoCount = 0;
-            status = getBestSolutions(
-                prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
-            if(returnAlgoCount == 0)
-                return rocblaslt_status_not_implemented;
+            status = selectDefaultContractionAlgo(handle, prob, gemmData, heuristicResult);
+            if(status != rocblaslt_status_success)
+                return status;
             algo = &heuristicResult.algo;
         }
         updateTensileProblem(prob, data->problem);
@@ -6334,6 +6332,21 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             launchIndex = servedIndex >= 0 ? servedIndex : tunedIndex;
         if(launchIndex >= 0)
             solutionIndex = &launchIndex;
+
+#ifdef HIPBLASLT_ENABLE_JIT
+        // algo was null when the prebuilt library was bound. Selection, replay
+        // or the tuner may since have chosen a JIT index, which that library
+        // cannot resolve.
+        if(hipblaslt_jit::isJitIndex(*solutionIndex))
+        {
+            rocblaslt_matmul_algo resolved = *algo;
+            std::memcpy(resolved.data, solutionIndex, sizeof(*solutionIndex));
+            adapter = get_library_and_adapter(
+                &library, &deviceProp, &hardware, handle->device, &resolved);
+            if(!adapter || !library)
+                return rocblaslt_status_invalid_pointer;
+        }
+#endif
 
         data->algoIndex    = *solutionIndex;
         data->selectedAlgo = *algo;

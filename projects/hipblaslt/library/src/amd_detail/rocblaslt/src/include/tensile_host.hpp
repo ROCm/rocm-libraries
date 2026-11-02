@@ -254,6 +254,14 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int*                               returnAlgoCount,
                                   size_t                             maxWorkSpaceBytes);
 
+// One solution for a matmul that passed no algorithm. A JIT build uses the same
+// ranking as a one-result heuristic query, including a JIT index when that
+// ranking selects one. rocblaslt_status_not_implemented when nothing applies.
+rocblaslt_status selectDefaultContractionAlgo(rocblaslt_handle                   handle,
+                                              RocblasltContractionProblem const& prob,
+                                              std::shared_ptr<void>              gemmData,
+                                              rocblaslt_matmul_heuristic_result& result);
+
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,

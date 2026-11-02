@@ -11,10 +11,13 @@
 #include <hipblaslt/hipblaslt-version.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Compiles this device's committed assembly, publishes the code object into
@@ -374,6 +377,74 @@ TEST_CASE("a stored helper relocatable is reused and linked", "[jit-cpu]")
         INFO(("The executable does not define both the main kernel and the helper"));
         REQUIRE((defined.ok() && names.size() == 2
                  && std::find(names.begin(), names.end(), helperKernel) != names.end()));
+    }
+}
+
+TEST_CASE("concurrent lookups generate one problem once", "[jit-gpu]")
+{
+    int device = 0;
+    {
+        INFO(("Cannot select the current HIP device"));
+        REQUIRE((hipGetDevice(&device) == hipSuccess));
+    }
+    hipDeviceProp_t properties{};
+    {
+        INFO(("Cannot query the current HIP device"));
+        REQUIRE((hipGetDeviceProperties(&properties, device) == hipSuccess));
+    }
+    hj::DeviceTarget target{hipblaslt_jit_test::deviceTarget(properties)};
+    target.device        = device;
+    target.properties    = properties;
+    target.wavefrontSize = properties.warpSize;
+    target.cuCount       = properties.multiProcessorCount;
+    target.hardware      = TensileLite::hip::GetDevice(properties, device);
+    REQUIRE((target.hardware != nullptr));
+
+    const auto root = fs::u8path(HIPBLASLT_JIT_LAUNCH_SCRATCH) / "generate-once";
+    fs::remove_all(root);
+    hj::BackendInfo backend;
+    backend.id               = "generate-once";
+    backend.version          = 1;
+    const auto     problem   = hipblaslt_jit_test::fp16Gemm(false, 128);
+    constexpr auto workspace = hipblaslt_jit_test::workspaceLimit;
+    hj::JitLibrary library(root);
+
+    auto calls = std::make_shared<std::atomic<int>>(0);
+    auto generate
+        = [calls](size_t, const std::vector<std::string>&, std::vector<int32_t>&, hj::Status&) {
+              std::this_thread::sleep_for(std::chrono::milliseconds(200));
+              calls->fetch_add(1);
+          };
+
+    std::string errors[2];
+    auto        worker = [&](std::string& error) {
+        try
+        {
+            library.beginQuery(true, target, backend, workspace, {}, generate);
+            const auto found  = library.findTopSolutions(problem, *target.hardware, 1);
+            const auto status = library.queryStatus();
+            library.endQuery();
+            if(!status.ok())
+                error = status.message.empty() ? "lookup failed" : status.message;
+            else if(!found.empty())
+                error = "a lookup with no publisher returned a solution";
+        }
+        catch(const std::exception& failure)
+        {
+            error = failure.what();
+        }
+    };
+    std::thread first(worker, std::ref(errors[0]));
+    std::thread second(worker, std::ref(errors[1]));
+    first.join();
+    second.join();
+    {
+        INFO((errors[0].empty() ? errors[1] : errors[0]));
+        REQUIRE((errors[0].empty() && errors[1].empty()));
+    }
+    {
+        INFO(("The problem was generated " + std::to_string(calls->load()) + " times"));
+        REQUIRE((calls->load() == 1));
     }
 }
 
