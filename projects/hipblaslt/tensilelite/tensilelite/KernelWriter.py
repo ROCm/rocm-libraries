@@ -9015,7 +9015,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # read offset, which must span the far segment. [1,4] puts the jump in the address reg instead.
           wavesPerCompB = kernel["MIWaveGroup"][1] // numComp
           compColsB = kernel["MacroTile1"] // numComp
-          segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB
+          segILWaveSpansCompB = kernel["MatrixInstN"] * kernel["VectorWidthB"] >= compColsB
           if wavesPerCompB == 1 and not segILWaveSpansCompB:
             segOffsets = kernel["LDSSegInterleaveOffsets"]
             readStride = segOffsets.get("readStrideBytesB", segOffsets["writeStrideBytes"])

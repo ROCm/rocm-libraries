@@ -953,7 +953,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 (tc == "B" and not _segOff.get("bBaseline", False)))
         if segILActive:
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
-            segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
+            segILWaveSpansComp = matrixInstT * vectorWidth >= _compCols
             # portSplitA (VWA==WaveTileA/2): the A0->A1 segment jump is carried on the wave stride, so force it on.
             if tc == "A" and _segOff.get("portSplitA", False):
                 segILWaveSpansComp = True

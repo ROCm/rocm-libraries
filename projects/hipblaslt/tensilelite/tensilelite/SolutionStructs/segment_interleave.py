@@ -156,7 +156,7 @@ def _coarse(state, tc):
     W = _wactive(state, tc)
     mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
     vw = state["VectorWidthA"] if tc == "A" else state["VectorWidthB"]
-    mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
+    mi_threads = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
     return W > 0 and mi_threads * vw >= mt // W
 
 def _port_split(state, tc):
@@ -176,7 +176,7 @@ def _b_readable(state):
     # component (coarse), or its per-vIdx column span (vIdxColsB) divides compColsB evenly so no
     # single ds_load straddles the component boundary. WaveTileB=7 -> 112 % 32 != 0 -> False.
     numComp = state["NumWaves"] // 2
-    mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
+    mi_threads = state["MatrixInstN"]
     if mi_threads * state["VectorWidthB"] >= state["MacroTile1"] // numComp:
         return True
     compColsB = state["MacroTile1"] // numComp
