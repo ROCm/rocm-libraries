@@ -75,6 +75,11 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
     case 5:
         s->use_grouped_kv2_softmax = true;
         break;
+    case 6:
+        /* LSE output through the wrapper (trailing lse_ptr, "_lse" in the
+         * wrapper's kernel name). */
+        s->emit_lse = true;
+        break;
     default:
         return -1;
     }

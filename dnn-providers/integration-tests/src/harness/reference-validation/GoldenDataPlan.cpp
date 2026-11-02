@@ -107,7 +107,8 @@ const char* toString(LaneVerdict verdict)
 
 LaneVerdict judgeLane(const IntegrationTestBundle& bundle,
                       const std::string& bundleId,
-                      ReferenceExecutorType reference)
+                      ReferenceExecutorType reference,
+                      const std::vector<KnownReferenceGap>& gaps)
 {
     if(!bundle.hasGoldenOutputs)
     {
@@ -142,7 +143,7 @@ LaneVerdict judgeLane(const IntegrationTestBundle& bundle,
     }
     // Checked last, so a gap entry only changes the outcome for a bundle this
     // reference would otherwise validate.
-    if(findKnownReferenceGap(reference, bundleId) != nullptr)
+    if(findKnownReferenceGap(gaps, reference, bundleId) != nullptr)
     {
         return LaneVerdict::KNOWN_GAP;
     }
@@ -153,6 +154,7 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
                                         const GoldenDataSession& session)
 {
     const auto lanes = selectedLanes(session);
+    const auto& gaps = session.gaps != nullptr ? *session.gaps : knownReferenceGaps();
     const bool crossCheck = session.cpuSelected && session.gpuSelected;
 
     GoldenDataPlan plan;
@@ -186,7 +188,7 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
                   + BundleReferenceValidationHarness::referenceLabel(reference);
             auto& tally = plan.lanes[lane];
 
-            const auto verdict = judgeLane(*bundle.bundle, bundleId, reference);
+            const auto verdict = judgeLane(*bundle.bundle, bundleId, reference, gaps);
             verdictByReference.at(reference == ReferenceExecutorType::CPU ? 0 : 1) = verdict;
 
             switch(verdict)
@@ -279,13 +281,14 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
                 tally.knownGaps++;
                 accounted = true;
                 // judgeLane() just found this entry, so the lookup cannot come back empty.
-                laneTests[lane].push_back(PlannedTest{PlannedKind::EXPECT_DECLINE,
-                                                      index,
-                                                      reference,
-                                                      suiteName,
-                                                      bundle.testName,
-                                                      {},
-                                                      *findKnownReferenceGap(reference, bundleId)});
+                laneTests[lane].push_back(
+                    PlannedTest{PlannedKind::EXPECT_DECLINE,
+                                index,
+                                reference,
+                                suiteName,
+                                bundle.testName,
+                                {},
+                                *findKnownReferenceGap(gaps, reference, bundleId)});
                 break;
             case LaneVerdict::VALIDATE:
                 tally.validated++;

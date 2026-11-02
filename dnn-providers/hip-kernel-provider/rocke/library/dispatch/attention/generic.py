@@ -15,8 +15,10 @@ import dataclasses
 from typing import Tuple
 
 from kernels.common.attention_unified import (
+    select_auto_path,
     supports_native_unified_attention,
     supports_native_unified_attention_3d_tiled,
+    supports_native_unified_attention_tiled,
 )
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import (
@@ -63,9 +65,9 @@ _UNIFIED_CAPABILITY = Capability(
     # the scalar kernel elsewhere (tiled gates reject it off gfx950).
     supports_features=ATTENTION_FEATURES,
 )
-# Only the split-KV (3D) path writes the optional LSE output; its support check
-# (the 3D gate below) still refuses it on arches/features that cannot.
-_UNIFIED_3D_CAPABILITY = dataclasses.replace(
+# Both unified paths write the optional LSE output; each path's own gate (in
+# ``support`` below) still refuses it on arches/features that cannot.
+_UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
 
@@ -83,17 +85,34 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=req.arch)
+        # The scalar gate is the coverage check; it refuses LSE (the scalar
+        # kernel writes none), so ask it about the LSE-off problem and let the
+        # path's own gate rule on LSE below.
+        coverage = (
+            dataclasses.replace(problem, emit_lse=False)
+            if problem.emit_lse
+            else problem
+        )
+        ok, why = supports_native_unified_attention(coverage, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path(req.arch) != path:
+        # Split-KV also takes the LSE requests that ``select_path(arch)`` sends
+        # to tiled 2D but whose tiled 2D gate declines, as auto does
+        # (``select_auto_path``); the tiled 2D candidate keeps its gate's reason.
+        if problem.select_path(req.arch) != path and not (
+            path == "3d" and select_auto_path(problem, req.arch) == "3d"
+        ):
             return False, (
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
         if problem.emit_lse:
-            # The scalar coverage check above knows nothing about LSE; the
-            # split-KV gate owns which arches and features can write it.
-            ok, why = supports_native_unified_attention_3d_tiled(problem, arch=req.arch)
+            # The path's own gate owns which arches and features can write LSE.
+            gate = (
+                supports_native_unified_attention_3d_tiled
+                if path == "3d"
+                else supports_native_unified_attention_tiled
+            )
+            ok, why = gate(problem, arch=req.arch)
             if not ok:
                 return False, why
         return True, "ok"
@@ -126,7 +145,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
-        capability=_UNIFIED_3D_CAPABILITY if path == "3d" else _UNIFIED_CAPABILITY,
+        capability=_UNIFIED_LSE_CAPABILITY,
         _supports=support,
         select_spec=select,
         signature=lambda _spec: (),

@@ -80,6 +80,11 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 
+/* The LLVM24 overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES): the LLVM23
+ * set with addrspace(15) named-barrier pointers. */
+extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[];
+extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
+
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
 

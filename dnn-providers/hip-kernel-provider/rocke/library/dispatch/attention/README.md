@@ -305,21 +305,37 @@ Selection pins a spec the same way for dense and unified:
   another variant is rejected before the search.
 - `tuning_id="auto"` selects the candidate's base spec.
 - `emit_lse=True` asks for the optional FP32 LSE output (natural-log softmax
-  normalizer). It is the `lse` request feature. The dense candidates, the RDNA
-  WMMA candidates, `attention_unified_3d` and the split-KV tuning candidates
-  (`*_u3d_*`) declare it; the unified 2D, d256 decode and strided decode
-  candidates do not. The split-KV support check then refuses LSE on
-  arches other than gfx942/gfx950 and with sinks. So an LSE request that cannot
-  be served is refused instead of reaching a kernel without the output. To
-  launch unified LSE through `bind_torch`, pin a split-KV tuning spec
-  (`algorithm="unified_tuning"`,
-  `spec_id="<arch>_u3d_..."`): like any unpinned unified request, the
-  `attention_unified_3d` result routes but cannot be bound. It is a dense output
-  field (`DENSE_OUTPUT_FIELDS`) and a unified semantic field (`_SEMANTIC_FIELDS`),
-  so sweeps never vary it, and with it off every spec hash and tuning id is the
-  one stored before the field existed. The caller passes the buffer to
-  `bind_torch` as `tensors["lse"]`; the runner validates its shape, dtype,
-  device, and overlap. The unified layout is `[total_q, Hq, 1]`.
+  normalizer). It is the `lse` request feature. These declare it:
+  - the dense candidates;
+  - the RDNA WMMA candidates;
+  - `attention_unified_2d` and `attention_unified_3d`;
+  - every unified tuning candidate (`*_u2d_*`, `*_u3d_*`) except the gfx942
+    4-warp GQA one (`gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm`).
+
+  The d256 decode, strided decode and route-only `attention_gfx942_dense_pipe`
+  / `attention_gfx950_d256` candidates do not. Each path's own support check
+  (split-KV or tiled 2D) refuses LSE on arches other than gfx942/gfx950 and with
+  sinks. The scalar fallback writes no LSE, so it refuses it. When the tiled 2D
+  check declines an LSE request that `select_path()` sends to tiled 2D (gfx942
+  D256 prefill at block size 32 exceeds its LDS budget),
+  `attention_unified_3d` serves it with split-KV, as the runner's `auto` backend
+  does (`select_auto_path`). An LSE request that cannot be served is refused
+  instead of reaching a kernel without the output.
+
+  To launch unified LSE through `bind_torch`, pin a tuning spec
+  (`algorithm="unified_tuning"`, `spec_id="<arch>_u2d_..."` or `"<arch>_u3d_..."`).
+  Like any unpinned unified request, the `attention_unified_2d` / `_3d` result
+  routes but cannot be bound.
+
+  `emit_lse` is a dense output field (`DENSE_OUTPUT_FIELDS`) and a unified
+  semantic field (`_SEMANTIC_FIELDS`), so sweeps never vary it. It is kept out
+  of the config defaults fingerprint, so a pin's `tuning_id` is the same with
+  LSE on or off. With it off, every spec hash and tuning id is the one stored
+  before the field existed.
+
+  The caller passes the buffer to `bind_torch` as `tensors["lse"]`; the runner
+  validates its shape, dtype, device and overlap. The unified layout is
+  `[total_q, Hq, 1]`.
 
 A candidate resolves a request once: `support` and `select_spec` share a
 per-candidate cache, so a pin is not resolved twice.

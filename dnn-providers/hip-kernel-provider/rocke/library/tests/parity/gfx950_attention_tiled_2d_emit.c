@@ -1102,6 +1102,27 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_qblock_reverse = true;
         break;
 
+    /* --- idx64-67: emit_lse, one per epilogue store site, each an existing
+     *     config plus emit_lse (lockstep with the Python _CONFIGS[64..67]).
+     *     64: transposed32 scalar-state (55); 65: coalesced mfma32 (32);
+     *     66: striped16 GQA-16 (3); 67: striped16 + ALiBi (5 + use_alibi). */
+    case 64:
+        make_spec(55, s);
+        s->emit_lse = true;
+        break;
+    case 65:
+        make_spec(32, s);
+        s->emit_lse = true;
+        break;
+    case 66:
+        make_spec(3, s);
+        s->emit_lse = true;
+        break;
+    case 67:
+        make_spec(5, s);
+        s->use_alibi = true;
+        s->emit_lse = true;
+        break;
     default:
         return -1;
     }

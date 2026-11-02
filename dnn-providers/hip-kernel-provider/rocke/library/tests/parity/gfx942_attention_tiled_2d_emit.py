@@ -9,6 +9,8 @@
 # build_unified_attention_2d_tiled(spec, arch="gfx942") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx942") to stdout so it can be
 # byte-compared with the C emitter gfx942_attention_tiled_2d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS in
+# platform/cpp/bindings/attention_tiled_parity_configs.py; update it in step.
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,
@@ -211,6 +213,86 @@ _CONFIGS = {
         use_transposed_qk_32x32=True,
         use_k_single_buffer=True,
         kv_cache_policy="all",
+    ),
+    # cfg13-cfg17: emit_lse=True, one per LSE store site. cfg13 is cfg5 + LSE
+    # (transposed-x8, 16 state slots, slot 0 stored). cfg14 is the transposed
+    # one-slot state with NQK=6 (VALID_ROWS < BLOCK_M). cfg15 is the
+    # non-transposed x8 Acc_lds epilogue (16 slots, lane_col32 == 0). cfg16 and
+    # cfg17 are the striped16 epilogue (NQK=6 guard; two atoms per warp + the
+    # q-major grid).
+    13: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=False,
+        emit_lse=True,
+    ),
+    14: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=12,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_k_single_buffer=False,
+        emit_lse=True,
+    ),
+    15: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=12,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        emit_lse=True,
+    ),
+    16: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=12,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        emit_lse=True,
+    ),
+    17: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        block_m_per_warp=32,
+        use_q_major_grid=True,
+        emit_lse=True,
     ),
 }
 
