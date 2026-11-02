@@ -22,6 +22,8 @@ from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS, _knob_grid
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_aot_jobs import _knob_grid
 from kernels.conv.direct_variants import (
+    DIRECT_DGRAD_PATCH_WMMA,
+    DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
@@ -36,7 +38,11 @@ from rocke.runtime.packing import compile_packer
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
 _WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
-_WAVE32_ONLY = {DIRECT_DGRAD_WMMA} | _WAVE32_ONLY_FWD
+_WAVE32_ONLY = {
+    DIRECT_DGRAD_WMMA,
+    DIRECT_DGRAD_PATCH_WMMA,
+    DIRECT_DGRAD_SMALLC_WMMA,
+} | _WAVE32_ONLY_FWD
 
 
 @pytest.fixture(scope="module")
@@ -1740,8 +1746,11 @@ def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_job
     """The MFMA variants are wave64 and drop out; the depthwise ones are built
     at wave_size 32, which the identity records and the spec carries. The
     wave32-only WMMA forward kernels are built too."""
+    fwd_parametric = {
+        v for v in DIRECT_WAVE_PARAMETRIC if dks.DIRECT_CAPABILITIES[v][0] == "fwd"
+    }
     assert {j.identity.algorithm for j in wave32_jobs} == (
-        DIRECT_WAVE_PARAMETRIC | _WAVE32_ONLY_FWD
+        fwd_parametric | _WAVE32_ONLY_FWD
     )
     for job in wave32_jobs:
         assert job.identity.wave_size == 32

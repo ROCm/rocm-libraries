@@ -163,7 +163,7 @@ void testing_trtri(const Arguments& arg)
     gpu_time_used = cpu_time_used = 0.0;
     double rocblas_error_out, rocblas_error_in;
 
-    if(!ROCBLAS_REALLOC_ON_DEMAND)
+    if(arg.size_query)
     {
         // Compute size
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));

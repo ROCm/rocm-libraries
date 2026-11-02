@@ -258,7 +258,7 @@ cd dnn-providers/hip-kernel-provider/rocke/platform
 PYTHONPATH=python python tests/test_rocke.py
 PYTHONPATH=python python -m pytest tests/instances/test_rocke_multiarch.py -k TestGfx950ByteIdentical
 PYTHONPATH=python:tests/instances python -m rocke_ir_parity_harness \
-  --compare tests/golden/rocke_representative_ir_sha256.json
+  --check tests/golden/rocke_representative_ir_sha256/
 ```
 
 ## Onboard A New Operator Family

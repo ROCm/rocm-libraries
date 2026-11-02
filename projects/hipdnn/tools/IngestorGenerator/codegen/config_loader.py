@@ -287,14 +287,17 @@ def load_config(path: Path) -> IngestorConfig:
                     "kernel_source missing required key 'kind' and the pack declares "
                     "no kernel_defaults.kind."
                 )
-            # A launch is a rocke source: any other kind has no entry to carry
-            # one, so name the key rather than let the closed key set reject it.
-            if "launches" in ks_raw and ks_raw["kind"] != KERNEL_SOURCE_KIND_ROCKE:
+            # An embedded_source has no entry a launch could override, so name
+            # the key rather than let the closed key set reject it.
+            kind = ks_raw["kind"]
+            if "launches" in ks_raw and not (
+                isinstance(kind, str) and kind in _KNOWN_LAUNCH_OVERRIDE
+            ):
                 raise ConfigError(
                     f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}': "
-                    f"'launches' is only valid on a '{KERNEL_SOURCE_KIND_ROCKE}' "
-                    f"kernel_source (or kernel_defaults), but the kind is "
-                    f"{ks_raw['kind']!r}."
+                    f"'launches' is only valid on a kernel_source (or "
+                    f"kernel_defaults) of kind {sorted(_KNOWN_LAUNCH_OVERRIDE)}, but "
+                    f"the kind is {kind!r}."
                 )
             # The one gate every kernel reaches, hand-authored or expanded.
             # An expanded kernel's `kernel_source` is generated, so it names
@@ -1206,8 +1209,9 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
 #: The fields a kind owns but may omit -- ``KernelSource.as_document`` writes them
 #: for that kind, and nothing requires them.
 _OPTIONAL_KERNEL_SOURCE_FIELDS: dict = {
-    KERNEL_SOURCE_KIND_HIP: ("build",),
+    KERNEL_SOURCE_KIND_HIP: ("build", "launches"),
     KERNEL_SOURCE_KIND_ROCKE: ("target", "launches"),
+    KERNEL_SOURCE_KIND_HSACO: ("launches",),
 }
 #: A ``kernel_source``'s closed key set, per kind. Only the AUTHORED kinds appear:
 #: the others are rejected by `_check_kernel_source_kind_implemented` with a reason.
@@ -1215,32 +1219,40 @@ _KNOWN_KERNEL_SOURCE_BY_KIND: dict = {
     kind: frozenset({"kind", *required, *_OPTIONAL_KERNEL_SOURCE_FIELDS.get(kind, ())})
     for kind, required in _REQUIRED_KERNEL_SOURCE_FIELDS.items()
 }
-#: The keys a launch's override mapping may state: the ``rocke`` source keys
-#: minus ``kind`` (a launch is a ``rocke`` source by construction) and
-#: ``launches`` (no nesting), plus the authored-only ``role``.
-_KNOWN_LAUNCH_OVERRIDE = _KNOWN_KERNEL_SOURCE_BY_KIND[KERNEL_SOURCE_KIND_ROCKE] - {
-    "kind",
-    "launches",
-} | {"role"}
+#: The keys a launch's override mapping may state, per kind: the kind's source
+#: keys minus ``kind`` (a launch inherits its base source's kind, so an override
+#: cannot mix kinds) and ``launches`` (no nesting), plus the authored-only
+#: ``role`` for ``rocke``, which has no meaning for a prebuilt or hip source.
+_KNOWN_LAUNCH_OVERRIDE: dict = {
+    kind: _KNOWN_KERNEL_SOURCE_BY_KIND[kind] - {"kind", "launches"}
+    | ({"role"} if kind == KERNEL_SOURCE_KIND_ROCKE else set())
+    for kind in (
+        KERNEL_SOURCE_KIND_HIP,
+        KERNEL_SOURCE_KIND_ROCKE,
+        KERNEL_SOURCE_KIND_HSACO,
+    )
+}
 
 
 def _build_launches(raw, base: KernelSource, kmd_field_names: set, where: str) -> dict:
-    """The launches a ``rocke`` ``kernel_source`` declares, each the base source
-    with the launch's overrides merged on, keyed by launch name.
+    """The launches a ``rocke``, ``hip`` or ``hsaco`` ``kernel_source`` declares,
+    each the base source with the launch's overrides merged on, keyed by launch
+    name. A launch has its base source's kind.
 
     An override replaces the base key it names, ``spec`` included: a launch
     built by a different builder must not inherit the base builder's spec
-    fields, which ``hkp_pack`` would hydrate into the wrong dataclass.
+    fields, which ``hkp_pack`` would hydrate into the wrong dataclass. The
+    same holds for a ``hip`` launch's ``build``.
 
-    A launch with no ``spec`` override takes the kernel's own spec, which for a
-    kernel expanded from ``variants`` or ``axes`` is that variant's. A launch
-    WITH a ``spec`` override carries that mapping unchanged on every kernel the
-    config expands: expansion varies only the kernel's own spec and never
-    writes into an override, so an override is static, never varied per
-    variant. Because the matcher-visible metadata is stated once per kernel, an
-    override may state a kmd field only at the value the kernel's own spec
-    holds; for an expanded set that rules out stating a varied one, which
-    differs on every other variant.
+    For ``rocke``, a launch with no ``spec`` override takes the kernel's own
+    spec, which for a kernel expanded from ``variants`` or ``axes`` is that
+    variant's. A launch WITH a ``spec`` override carries that mapping unchanged
+    on every kernel the config expands: expansion varies only the kernel's own
+    spec and never writes into an override, so an override is static, never
+    varied per variant. Because the matcher-visible metadata is stated once per
+    kernel, an override may state a kmd field only at the value the kernel's
+    own spec holds; for an expanded set that rules out stating a varied one,
+    which differs on every other variant.
     """
     if not isinstance(raw, dict):
         raise ConfigError(
@@ -1264,28 +1276,46 @@ def _build_launches(raw, base: KernelSource, kmd_field_names: set, where: str) -
                 f"refuses unless it is one."
             )
         _require_mapping(override, launch_where)
-        unknown = sorted(set(override) - _KNOWN_LAUNCH_OVERRIDE)
+        known = _KNOWN_LAUNCH_OVERRIDE[base.kind]
+        unknown = sorted(set(override) - known)
         if unknown:
-            raise ConfigError(
-                f"{launch_where} declares {unknown}, which a launch override does "
-                f"not read. Known keys: {sorted(_KNOWN_LAUNCH_OVERRIDE)}. A launch "
-                f"is always a '{KERNEL_SOURCE_KIND_ROCKE}' source and does not nest."
+            hint = (
+                " A 'role' names one of a rocke builder module's kernels; a "
+                f"'{base.kind}' launch has none."
+                if "role" in unknown and base.kind != KERNEL_SOURCE_KIND_ROCKE
+                else ""
             )
-        for key in ("source", "builder", "target", "role"):
+            raise ConfigError(
+                f"{launch_where} declares {unknown}, which a launch override of a "
+                f"'{base.kind}' source does not read. Known keys: {sorted(known)}. "
+                f"A launch is always a '{base.kind}' source and does not nest.{hint}"
+            )
+        for key in ("source", "builder", "target", "role", "entry", "file", "symbol"):
             if key in override and not isinstance(override[key], str):
                 raise ConfigError(
                     f"{launch_where}.{key} must be a string, got {override[key]!r}."
                 )
-        if "spec" in override:
-            _require_mapping(override["spec"], f"{launch_where}.spec")
+        for key in ("spec", "build"):
+            if key in override:
+                _require_mapping(override[key], f"{launch_where}.{key}")
+        if base.kind != KERNEL_SOURCE_KIND_ROCKE:
+            launches[name] = KernelSource(
+                kind=base.kind,
+                source=override.get("source", base.source),
+                entry=override.get("entry", base.entry),
+                build=dict(override["build"] if "build" in override else base.build),
+                file=override.get("file", base.file),
+                symbol=override.get("symbol", base.symbol),
+            )
+            continue
         target = override.get("target", base.target)
-        if target and target not in ROCKE_TARGETS:
+        if "target" in override and target not in ROCKE_TARGETS:
             raise ConfigError(
                 f"{launch_where}.target is {target!r}, which hkp_pack does not "
                 f"compile for. Known targets: {list(ROCKE_TARGETS)}."
             )
         role = override.get("role", "")
-        if role and not LAUNCH_NAME_PATTERN.fullmatch(role):
+        if "role" in override and not LAUNCH_NAME_PATTERN.fullmatch(role):
             raise ConfigError(
                 f"{launch_where}.role is {role!r}, which is not a lowercase "
                 f"identifier ({LAUNCH_NAME_PATTERN.pattern}), the rule a "

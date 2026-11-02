@@ -106,7 +106,8 @@ struct PassFeatureConfig {
         /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
         /// filler, tensor_load) may issue; below it, and with room in the queue, the next
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
-        /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
+        /// to make (a promoted barrier) are not held. < 0 = automatic: one WMMA short of a full
+        /// queue, (wmmaQueueDepth - 1) x the next WMMA's latency. 0 = off; ignored at depth 1.
         int wmmaQueueCoverCycles = 0;
         /// How many WMMAs one refill issues once the queue drops below the refill line
         /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
@@ -121,12 +122,6 @@ struct PassFeatureConfig {
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.
         bool dsSpread = true;
-        /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
-        /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
-        /// refilled to this cover ahead of other work, and ds_loads the barrier waits on are
-        /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
-        /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
-        int wmmaBarrierCoverCycles = -1;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
@@ -142,11 +137,11 @@ struct PassFeatureConfig {
         /// WMMA windows by the region's matrix latency. 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
-        /// Max cycle-distance between two adjacent barrier groups for
-        /// StinkyMergeBarrierPass to merge them into a single multi-token
-        /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
-        /// Internal tuning knob only — deliberately not surfaced as a module
-        /// option, so TensileLite cannot set it.
+        /// Unused by StinkyMergeBarrierPass. Adjacent groups merge only when no
+        /// matrix instruction is issued between them. Kept so existing callers
+        /// and --merge-barrier-threshold= still parse. Internal knob only —
+        /// deliberately not surfaced as a module option, so TensileLite cannot
+        /// set it.
         int mergeBarrierThreshold = 0;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
