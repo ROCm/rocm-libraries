@@ -12,7 +12,6 @@ keyword: a code object built for one arch must not be launched on another.
 from __future__ import annotations
 
 import ctypes
-import struct
 
 import numpy as np
 
@@ -24,6 +23,7 @@ from rocke.instances.common.gemm_universal import (
     build_universal_gemm,
 )
 from rocke.numeric.bf16 import f32_to_bf16
+from rocke.runtime.packing import pack_args
 
 __all__ = [
     "launch_universal_gemm",
@@ -40,6 +40,10 @@ _HOST_DTYPE = {
     "fp16": np.float16,
     "bf16": np.uint16,
 }
+
+# The parameter a batched kernel that skips inactive tiles reads its sorted
+# token ids from.
+_SORTED_IDS = "SortedTokenIds"
 
 
 def lower_universal_gemm(spec: UniversalGemmSpec, engine: str, *, arch: str) -> str:
@@ -58,18 +62,12 @@ def lower_universal_gemm(spec: UniversalGemmSpec, engine: str, *, arch: str) -> 
 def universal_gemm_nan_output(
     spec: UniversalGemmSpec, shape: tuple[int, ...]
 ) -> np.ndarray:
-    """A ``shape`` C buffer of NaN in ``spec``'s storage dtype, so a tile the
-    kernel never writes stays visible: ``float16`` NaN for fp16, the bf16 NaN
-    encoding (``0x7FC0``) in ``uint16`` for bf16.
+    """A ``shape`` C buffer of NaN in ``spec``'s C storage dtype.
 
-    Raises ``ValueError`` for a split-K spec, whose C is an fp32 workspace the
-    caller must zero and cast, and for a dtype with no host array type here.
+    NaN keeps a tile the kernel never writes visible: ``float16`` NaN for fp16,
+    the bf16 NaN encoding (``0x7FC0``) in ``uint16`` for bf16. Raises
+    ``ValueError`` for a C dtype with no host array type here.
     """
-    if spec.trait.split_k > 1:
-        raise ValueError(
-            f"split-K GEMM (split_k={spec.trait.split_k}) accumulates into a zeroed "
-            "fp32 workspace; launch_universal_gemm runs only non-split-K kernels"
-        )
     dtype = dtype_info(spec.data.dtype_c).name
     if dtype not in _HOST_DTYPE:
         raise ValueError(
@@ -83,54 +81,63 @@ def universal_gemm_nan_output(
 
 def universal_gemm_arguments(
     spec: UniversalGemmSpec,
-    pointers: tuple[int, ...],
+    *,
+    arch: str,
+    a: int,
+    b: int,
+    c: int,
     m: int,
     n: int,
     k: int,
+    sorted_ids: int | None = None,
 ) -> bytes:
-    """The kernel-argument bytes of ``spec``'s kernel, in the order it declares them.
+    """The kernel-argument bytes of ``spec``'s kernel on ``arch``.
 
-    ``pointers`` are the device addresses of A, B and C, then of the sorted
-    token ids when the kernel skips inactive tiles. Every kernel takes A, B, C,
-    M, N and K; a batched one adds the per-batch element strides of A, B and C
-    (``M*K``, ``N*K``, ``M*N``); a batched one that skips inactive tiles adds
-    the sorted token ids and the slot size (``M``).
+    The parameters, their order and their types are the ones the builder
+    declares; ``a``, ``b``, ``c`` and ``sorted_ids`` are device addresses. The
+    values supplied are A, B, C, M, N and K, the per-batch element strides of
+    A, B and C (``M*K``, ``N*K``, ``M*N``), the sorted token ids and the slot
+    size (``M``), so each kernel gets the ones it declares.
 
-    Raises ``ValueError`` when the sorted token ids are passed to a kernel that
-    does not take them, or missing for one that does.
+    Raises ``ValueError`` when ``sorted_ids`` is passed to a kernel that does
+    not read sorted token ids, and when the kernel declares a parameter not
+    supplied here: the sorted token ids left out, or a split-K kernel's fp32
+    workspace.
     """
-    _require_sorted_ids_iff_taken(spec, len(pointers) == 4)
-    layout, values = "3Q3i", [*pointers[:3], m, n, k]
-    if spec.batched:
-        layout += "3i"
-        values += [m * k, n * k, m * n]
-    if _skips_inactive_tiles(spec):
-        layout += "Qi"
-        values += [pointers[3], m]
-    return struct.pack(layout, *values)
-
-
-def _skips_inactive_tiles(spec: UniversalGemmSpec) -> bool:
-    """Whether ``spec``'s kernel reads sorted token ids (the builder declares
-    them for a batched kernel that skips inactive tiles)."""
-    return spec.batched and spec.trait.active_tile_skip
-
-
-def _require_sorted_ids_iff_taken(
-    spec: UniversalGemmSpec, has_sorted_ids: bool
-) -> None:
-    """Refuse sorted token ids for a kernel that does not read them, and their
-    absence for one that does."""
-    if has_sorted_ids and not _skips_inactive_tiles(spec):
+    kernel = build_universal_gemm(spec, arch=arch)
+    declared = [param.name for param in kernel.params]
+    supplied = {
+        "A": a,
+        "B": b,
+        "C": c,
+        "M": m,
+        "N": n,
+        "K": k,
+        "stride_a": m * k,
+        "stride_b": n * k,
+        "stride_c": m * n,
+        "slot_size": m,
+    }
+    reads_sorted_ids = _SORTED_IDS in declared
+    if sorted_ids is not None and not reads_sorted_ids:
         raise ValueError(
-            f"{spec.kernel_name()} does not read sorted token ids; pass sorted_ids "
-            "only for a batched kernel with active_tile_skip"
+            f"{kernel.name} does not read sorted token ids; pass sorted_ids only "
+            "for a batched kernel with active_tile_skip"
         )
-    if _skips_inactive_tiles(spec) and not has_sorted_ids:
+    if reads_sorted_ids and sorted_ids is None:
         raise ValueError(
-            f"{spec.kernel_name()} skips inactive tiles and reads sorted token ids; "
-            "pass sorted_ids"
+            f"{kernel.name} skips inactive tiles and reads sorted token ids; pass "
+            "sorted_ids"
         )
+    supplied[_SORTED_IDS] = sorted_ids
+    missing = [name for name in declared if name not in supplied]
+    if missing:
+        raise ValueError(
+            f"{kernel.name} takes {', '.join(missing)}, which launch_universal_gemm "
+            "does not supply"
+        )
+    signature = [{"name": p.name, "type": p.type.name} for p in kernel.params]
+    return pack_args(signature, supplied)
 
 
 def launch_universal_gemm(
@@ -152,12 +159,12 @@ def launch_universal_gemm(
     that skips inactive tiles reads, and is required exactly for such a kernel.
     ``c`` is C's initial contents; it defaults to
     :func:`universal_gemm_nan_output`. The arguments are
-    :func:`universal_gemm_arguments`.
+    :func:`universal_gemm_arguments`, which refuses a kernel this launcher
+    cannot feed.
     """
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir
     from rocke.runtime.hip_module import Runtime
 
-    _require_sorted_ids_iff_taken(spec, sorted_ids is not None)
     *batch, m, k = a.shape
     n = bt.shape[-2]
     batches = batch[0] if batch else 1
@@ -183,7 +190,17 @@ def launch_universal_gemm(
             )
         tile = spec.tile
         grid = (-(-n // tile.tile_n), -(-m // tile.tile_m), batches)
-        args = universal_gemm_arguments(spec, tuple(ptrs), m, n, k)
+        args = universal_gemm_arguments(
+            spec,
+            arch=arch,
+            a=ptrs[0],
+            b=ptrs[1],
+            c=ptrs[2],
+            m=m,
+            n=n,
+            k=k,
+            sorted_ids=ptrs[3] if sorted_ids is not None else None,
+        )
         runtime.launch_blocking(
             module.get_function(spec.kernel_name()), grid, (spec.block_size, 1, 1), args
         )
