@@ -1978,10 +1978,8 @@ class SplitKVQrTdmTiles(unittest.TestCase):
         ]
 
     def test_every_qr_tdm_tile_keeps_bn0_64(self):
-        # kProgressiveDsLoadK is gated on kN0 == 64 because the reload's own
-        # static_asserts need NIterPerWarp == 4, and it is worth 4-5x. Hand the
-        # pipeline any other tile and the gate turns itself off silently, so
-        # assert it on the side that can actually change: codegen.
+        # kProgressiveDsLoadK is gated on kN0 == 64 and turns itself off
+        # silently on any other tile, so pin it here in codegen.
         tdm = self._tdm_kernels()
         self.assertTrue(tdm, "no qr_tdm split-kv kernels were generated")
         for kernel in tdm:
@@ -1994,12 +1992,9 @@ class SplitKVQrTdmTiles(unittest.TestCase):
         )
 
     def test_qr_tdm_owns_logits_soft_cap(self):
-        # qr_tdm applies the soft cap itself now, so the entries that dispatch
-        # on an exact head dim have to be its own. The companion check below is
-        # what keeps this one honest: a universal claim over an empty set is
-        # vacuously true, and an empty set is exactly what a reverted qr_tdm
-        # change produces -- soft cap would slide back onto the padded fallback
-        # with every test still green.
+        # The soft cap entries that dispatch on an exact head dim must be
+        # qr_tdm's. The head-dim check at the end keeps the set non-empty, so
+        # the loop cannot pass vacuously.
         kernels = get_fwd_splitkv_blobs(
             targets=["gfx1250"],
             kernel_filter="",

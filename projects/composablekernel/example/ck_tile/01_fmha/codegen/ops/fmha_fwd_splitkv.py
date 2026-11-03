@@ -919,19 +919,14 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
 
     @staticmethod
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
-        # Self-contained, like fmha_fwd.py's gfx125 factory: qr_tdm first, then
-        # the qr entries still reachable behind it. Dispatch returns on the
-        # first hit, so emission order is what hands qr_tdm the shapes it covers.
+        # Dispatch returns on the first hit, so emission order is dispatch order.
         Pipeline = FmhaFwdSplitKVPipeline
         pipelines = []
         if dtype in ["fp16", "bf16"]:
             squant = "f"
-            # qr_tdm covers every trait the pipeline implements, logits soft cap
-            # included. The sequence padding variants follow the gfx9 qr order:
-            # the unpadded ones come first, since spad == t / skpad == t
-            # predicates always hold. Head dims are padded together, like
-            # fmha_fwd.py. Soft cap and bias never meet -- the pipeline
-            # static_asserts that, and get_fwd_splitkv_blobs drops the pairing.
+            # Entries with an unpadded seqlen go first: spad/skpad == t predicates
+            # always hold, so the fully padded (t, t) entries must come last.
+            # Soft cap with bias is dropped in get_fwd_splitkv_blobs.
             for logits, mask, bias, pagedkv, sink in itertools.product(
                 ["t", "f"],
                 get_mask_map(mask_impl).keys(),
@@ -944,10 +939,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-            # No qr entry for fp16/bf16. qr_tdm's head-dim predicate is
-            # hdim % 8 == 0 even on its padded rung, so dropping qr narrows
-            # gfx125 split-kv to head dims that are a multiple of 8 -- a
-            # hdim like 100 returns -1 here while prefill still serves it.
+            # No qr fallback: every entry needs hdim % 8 == 0, so other head
+            # dims are unsupported here (the prefill api still serves them).
         elif dtype in ["fp8", "bf8"]:
             squant = "t" if dtype == "fp8" else "f"
             for logits, mask, bias in itertools.product(

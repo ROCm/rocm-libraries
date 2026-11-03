@@ -192,9 +192,8 @@ int override_num_splits_if_necessary(int batch,
         // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
         const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
 
-        // Both tweaks below are measured on gfx1250 only. They also assume the
-        // bn0 64 that every gfx125 split-kv tile uses, while gfx9/gfx12 also
-        // emit bn0 128. Leave other targets on the original behaviour.
+        // Both tweaks below are tuned for gfx125 only; the split cap also assumes
+        // its bn0 64 split-kv tile (gfx9/gfx12 also emit bn0 128).
         const bool is_gfx125 = std::string{props.gcnArchName}.compare(0, 6, "gfx125") == 0;
 
         int max_splits      = 128;

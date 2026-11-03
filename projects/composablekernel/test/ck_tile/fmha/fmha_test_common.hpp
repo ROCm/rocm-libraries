@@ -63,13 +63,9 @@ struct Model
     using Geometry = ck_tile::FmhaTdmSchedGeometryFor<Problem>;
 };
 
-// Split-kv counterpart of Model. The shape matches the prefill pipeline the
-// split-kv qr_tdm copy was derived from -- they share its policy -- only the
-// problem type and traits differ. The flags below pin one point of the trait
-// space, the one these static checks describe; codegen emits more.
-//
-// BlockM selects which tile is being described; the split-kv qr_tdm copy runs
-// the 64-wide one.
+// Split-kv counterpart of Model: same shape and policy as the prefill qr_tdm,
+// with the split-kv problem type. The flags pin one point of the trait space;
+// BlockM selects the tile (split-kv qr_tdm runs the 64-wide one).
 template <int HeadDim,
           bool Mask         = false,
           typename Data     = ck_tile::bf16_t,

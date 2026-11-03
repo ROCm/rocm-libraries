@@ -87,10 +87,8 @@ struct FmhaFwdSplitKVKernel
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
-    // The TDM split-kv pipeline (qr_tdm) consumes native row-major V and needs
-    // affine DRAM views: software padding would let the DMA engine pull in real
-    // neighbouring memory. Everything else about it is self-contained --
-    // in particular it carves up the LDS arena itself.
+    // Set by qr_tdm: native row-major V, unpadded K/V DRAM views (make_k_dram /
+    // make_v_dram) and a per-split K/V height cap (tdm_split_seqlen_k).
     static constexpr bool kUsesUntransposedVKernelPath =
         detail::splitkv_uses_untransposed_v_kernel_path_v<FmhaPipeline>;
     static constexpr bool kUsesTdmAffineDramPath =
@@ -824,17 +822,11 @@ struct FmhaFwdSplitKVKernel
             }
         }();
 
-        // Upper bound of the key range this split may touch. The TDM schedule
-        // prefetches a fixed number of tiles ahead with no "how many are left"
-        // test. Without split-kv that overshoot runs past the end of the cache
-        // and the TDM box clamp turns it into a zero-byte transfer; with
-        // num_splits > 1 it would instead land on real memory owned by the next
-        // split. Capping the view restores the clamp. A coarse bound (no mask
-        // intersection) is enough, it is always >= the range the pipeline walks.
-        // This does not replace the -inf erase inside the pipeline: the clamp
-        // zero-fills, and exp(0) == 1 would pollute softmax.
-        // Paged-kv is excluded: there the descriptor spans one page, not
-        // seqlen_k, so capping it at a split bound would be meaningless.
+        // A split end is not kN0 aligned, so the last K/V tile's TDM box reaches
+        // into the next split; capping the height here makes the clamp zero-fill
+        // it. The bound is coarse but always >= the range the pipeline walks, and
+        // the pipeline still needs its -inf erase (exp(0) == 1). Not for paged-kv,
+        // whose descriptor spans one page.
         const index_t tdm_split_seqlen_k = [&, i_split_ = i_split]() {
             if constexpr(kUsesTdmAffineDramPath && !kIsPagedKV)
             {
@@ -856,10 +848,8 @@ struct FmhaFwdSplitKVKernel
                 number<FmhaPipeline::kAlignmentK>{},
                 number<1>{});
 
-            // TDM box-major DMA cannot honor a software-padded view: the pad
-            // would let the engine pull real neighbouring memory in. Return the
-            // affine naive view so get_lengths()[hdim] stays at the true head
-            // dim and the TDM box clamp zero-fills the OOB tail instead.
+            // TDM pipelines take the unpadded view; the TDM box clamp already
+            // zero-fills the OOB head-dim tail, so a software pad adds nothing.
             if constexpr(kUsesTdmAffineDramPath)
             {
                 return k_dram_naive;
@@ -894,8 +884,7 @@ struct FmhaFwdSplitKVKernel
                     number<1>{});
 
                 // Pipelines with native row-major V consume (seqlen, hdim_v)
-                // windows directly. They also need the affine view, for the
-                // same reason make_k_dram does.
+                // windows directly, unpadded like K in make_k_dram.
                 if constexpr(kUsesUntransposedVKernelPath)
                 {
                     return v_dram_naive;

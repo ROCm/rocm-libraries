@@ -25,11 +25,8 @@ template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmDefaul
 //      navigators, variant hooks, num_splits / i_split, one LDS arena pointer),
 //   2. the tile range is this split's slice of the key sequence,
 //   3. the sink logit is folded in exactly once, by the first split with work.
-//
-// The double-V path (run_double_kv_lds_buffer) is deliberately not carried
-// over: split-kv problems hardwire Problem::kUseDoubleKVLdsBuffer to false, so
-// the shared policy's LdsArenaLayout already resolves to the single-V layout
-// (kV1Offset == kV0Offset, with its own kSOffset region).
+// The double-V path is not carried over: split-kv problems hardwire
+// kUseDoubleKVLdsBuffer to false, which selects the single-V arena layout.
 struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 {
     static constexpr bool kUsesLdsArena = true;
@@ -104,49 +101,24 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // like. Everywhere else this follows the problem, as qr_ks_vs does.
     static constexpr bool kHasUnevenSplits = kIsPagedKV || Problem::kHasUnevenSplits;
 
-    // Tell FmhaFwdSplitKVKernel which K/V DRAM views this pipeline wants.
-    //
-    // Both flags must be declared here. BlockFmhaPipelineQRKSVSTdm gets away
-    // with declaring neither because fmha_fwd_kernel.hpp falls back to matching
-    // the pipeline name against "qr_tdm"; fmha_fwd_splitkv_kernel.hpp's
-    // detectors have no such fallback and default to false, which selects the
-    // transposed (hdim_v, seqlen) V view. This pipeline steps V by {kN0, 0} --
-    // a seqlen stride on dim 0 -- so it needs the untransposed view, or the
-    // stride lands on the head-dim axis instead (symptom: O comes out low,
-    // worsening with every KV tile). The same choice sets the V navigator's
-    // VirtualDim to 0.
-    //
-    // The affine flag is the same requirement make_k_dram documents: this path
-    // loads K and V with bare load_tile_tdm (not the prefill's
-    // LoadTdmFullTileOrPadded), and
-    // a software-padded view lets the box-major DMA pull in real neighbouring
-    // memory instead of clamping.
+    // FmhaFwdSplitKVKernel has no name-based fallback (unlike fmha_fwd_kernel.hpp),
+    // so both must be declared: V is stepped by {kN0, 0}, which needs the
+    // untransposed (seqlen, hdim_v) view, and the affine flag selects the
+    // unpadded K view and the per-split K/V height cap (tdm_split_seqlen_k).
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
 
-    // Progressive K reload, overridden locally instead of read from the problem.
-    // BlockFmhaFwdSplitKVPipelineProblem hardwires kProgressiveDsLoadK to false,
-    // which is what lets the shared qr_tdm policy compile against that problem;
-    // this pipeline wants the feature on, as every prefill qr_tdm instance has
-    // it. The policy's only read of the flag
-    // (block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp:273) is already
-    // short-circuited by kUseDoubleKVLdsBuffer == false, so this stays local.
-    //
-    // Gated on kN0 == 64: the reload's static_asserts below require
-    // Gemm0::NIterPerWarp == 4, i.e. kN0 / Gemm0WarpTile::N == 64 / 16. Every
-    // prefill qr_tdm tile is bn0 64 so this is always on there; a narrower KV
-    // tile has to fall back to the plain traversal.
+    // Overridden locally: the problem declares it false, but the shared policy
+    // reads that only behind kUseDoubleKVLdsBuffer (also false), so the mismatch
+    // is harmless. Gated on kN0 == 64 for the reload's static_asserts.
     static constexpr bool kProgressiveDsLoadK = (kN0 == 64);
 
     static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
 
     static constexpr bool kDeferSink = kHwGemm1Scale && kHasSink;
-    // MergeSink folds the sink in after the main loop with no i_split test, so
-    // every split carrying work would add exp(sink) again. The non-deferred
-    // path derives ownership in init_ml instead. Unreachable today -- split-kv
-    // emits no fp8 V with a 128 gemm1 warp tile -- and blocked here so the
-    // first instance that would be silently wrong fails to compile instead.
+    // MergeSink has no i_split test, so every split with work would add
+    // exp(sink) again. Fail to compile rather than be silently wrong.
     static_assert(!kDeferSink,
                   "qr_tdm split-kv does not implement the deferred sink path");
 
@@ -588,12 +560,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // check early exit if no work to do
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK || kHasUnevenSplits)
         {
-            // Sink loops are deliberately not counted here, matching qr_ks_vs.
-            // A split with no ordinary KV work contributes exactly the sink, and
-            // the closed form below publishes it; running the main loop over the
-            // sink tiles instead leaves m/l degenerate whenever the query rows
-            // are masked out entirely (SplitKvSinkDroppedSink with a sink
-            // prefix), which reports the final LSE as -inf.
+            // Sink loops are deliberately not counted, matching qr_ks_vs: a split with
+            // no ordinary KV work exits through the closed form below, which decides
+            // sink ownership. Looping over sink tiles instead gives -inf LSE when the
+            // rows are fully masked (SplitKvSinkDroppedSink).
             const index_t logical_num_total_loop =
                 integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0);
             if(logical_num_total_loop <= 0)
@@ -712,16 +682,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         const index_t physical_seqlen_k_start = logical_seqlen_k_start + kv_l2p_offset;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end + kv_l2p_offset;
 
-        // Paged-kv needs the first tile to sit entirely inside one page, so the
-        // walk starts on a kN0 boundary. A split boundary is not kN0 aligned, so
-        // that start can precede this split's range -- the head of the first
-        // tile then belongs to the previous split and is erased from s_acc in
-        // the main loop. Without paging there is nothing to align to.
-        //
-        // This only holds if page_block_size % kN0 == 0, otherwise a tile
-        // straddles two pages and the page turn below reads the wrong rows.
-        // Nothing enforces it: page_block_size is a runtime kargs field, so it
-        // is the caller's contract. Results are silently wrong if it is broken.
+        // Paged-kv needs each tile inside one page, so the walk starts on a kN0
+        // boundary (assumes page_block_size % kN0 == 0, a caller contract). That can
+        // precede physical_seqlen_k_start; the main loop erases the head from s_acc.
         const index_t aligned_physical_seqlen_k_start =
             kIsPagedKV ? kN0 * integer_divide_floor(physical_seqlen_k_start, kN0)
                        : physical_seqlen_k_start;
@@ -856,11 +819,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 return smem_ptrk1;
         };
 
-        // Every DRAM advance on K and V goes through the navigator: it both
-        // steps the window and, when paged, swaps the page pointer underneath
-        // it. The table lookup is pulled into a scalar first, the same shape as
-        // block_fmha_fwd_splitkv_pipeline_qr_ks_vs. For a trivial navigator all
-        // of this folds down to a plain move_tile_window.
+        // Every K/V DRAM advance goes through the navigator, which also swaps
+        // the page pointer when paged; for a trivial navigator this folds to a
+        // plain move_tile_window.
         auto advance_k = [&](index_t step) {
             const auto next_id = amd_wave_read_first_lane(
                 k_page_block_navigator.prefetch_table_id(i_page_block_k, k_dram_window, {step, 0}));
@@ -1079,12 +1040,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
             if constexpr(kHasUnevenSplits)
             {
-                // The tail of the last tile reaches past this split's end,
-                // because a split bound is not kN0 aligned. Under paged-kv the
-                // first tile additionally starts before the split, since the
-                // walk was aligned down to a page-friendly boundary -- that head
-                // belongs to the previous split. Sink tiles are exempt from the
-                // head check: they legitimately start at column 0.
+                // The walk's ends are not kN0 aligned: erase the last tile's tail and,
+                // under paged-kv, the first tile's head (see aligned_physical_seqlen_k_start).
+                // Sink tiles are exempt from the head check: they start at column 0.
                 const bool is_last_tile  = (i_total_loops == (num_total_loop - 1));
                 const bool is_sink_tile  = (num_sink_loop > i_total_loops);
                 const bool check_head    = kIsPagedKV && !is_sink_tile &&
@@ -1399,14 +1357,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         return o_acc;
     }
 
-    // Split-kv entry point. Signature matches
-    // BlockFmhaFwdSplitKVPipelineQRKSVS::operator() so that FmhaFwdSplitKVKernel
-    // can call this pipeline through its existing call site, with no TDM-specific
-    // branch on the kernel side.
-    //
-    // No LDS carving here: the single-V path takes one arena pointer and slices
-    // it itself through Policy::LdsArenaLayout. Everything else is forwarded;
-    // the variant hooks reach the logits soft cap site in run_.
+    // Split-kv entry point, same signature as
+    // BlockFmhaFwdSplitKVPipelineQRKSVS::operator() so the kernel needs no
+    // TDM-specific call site. run_single_v_double_k_lds_buffer slices the LDS
+    // arena itself.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowLengths,
               typename KPageBlockNavigator,
@@ -1439,7 +1393,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     {
         static_assert(!kQuantized, "qr_tdm split-kv does not implement quantization");
 
-        // The navigators are forwarded as-is: run_ builds its own K/V windows
+        // The navigators are forwarded as-is: the callee builds its K/V windows
         // through them, so a page turn and a plain window step are the same call.
         return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                                 k_dram_block_window_lengths,
