@@ -162,6 +162,9 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* batch_off_a;
     rocke_value_t* batch_off_b;
     rocke_value_t* batch_off_c;
+    /* TDM fills: the batch offsets, in i64 for batched TDM, else batch_off_a/b. */
+    rocke_value_t* tdm_batch_a;
+    rocke_value_t* tdm_batch_b;
 
     /* ---- per-CTA tile origins (SGPR-pinned SSA) -- */
     rocke_value_t* block_m_off; /* row tile base (chiplet-swizzle aware)     */

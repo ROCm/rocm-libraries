@@ -137,6 +137,9 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
                 lower_universal_gemm(
                     _spec(**kw), arch=ARCH, backend="both", want_ir=True
                 )
+        with self.subTest("batched"):  # the i64 batch offset of the TDM fills
+            spec = replace(_spec(), batched=True)
+            lower_universal_gemm(spec, arch=ARCH, backend="both", want_ir=True)
         with self.subTest("fp16 C"):  # the C-dtype tag in the kernel name
             spec = _spec()
             spec = replace(spec, data=replace(spec.data, dtype_c="fp16"))
@@ -214,8 +217,8 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("'mem' pipeline", why)
 
-    def test_both_engines_scope_the_gfx1250_rules(self):
-        """The summed cshuffle budget on CDNA and no lds_swizzle reject on RDNA
+    def test_both_engines_agree_on_target_scope(self):
+        """The summed cshuffle budget on CDNA and the lds_swizzle reject on RDNA
         WMMA: both engines agree, verdict and reason."""
         import rocke_engine
 

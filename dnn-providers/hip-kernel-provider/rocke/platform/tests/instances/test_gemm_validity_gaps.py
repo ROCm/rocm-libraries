@@ -412,9 +412,9 @@ CDNA_CSHUFFLE = ((256, 256, 64), (2, 2), (32, 32, 16), "compv3", 64)
 RDNA_WMMA = ((64, 64, 32), (2, 2), (16, 16, 16), "mem", 32)
 
 
-class TestGfx1250OnlyRules(unittest.TestCase):
-    """The aliased cshuffle budget and the WMMA lds_swizzle reject are gfx1250
-    rules; the other targets validate as before them."""
+class TestTargetScope(unittest.TestCase):
+    """The aliased cshuffle budget is a gfx1250 rule; the WMMA lds_swizzle
+    reject covers every WMMA target (gfx1151 returns wrong outputs with it)."""
 
     def test_cdna_keeps_the_summed_cshuffle_budget(self):
         from rocke.instances.common.gemm_universal import is_valid_spec
@@ -425,11 +425,36 @@ class TestGfx1250OnlyRules(unittest.TestCase):
         self.assertFalse(ok, "max(AB, C) admitted a CDNA cshuffle spec")
         self.assertIn("LDS budget", why)
 
-    def test_rdna_wmma_does_not_reject_lds_swizzle(self):
+    def test_rdna_wmma_rejects_lds_swizzle(self):
         from rocke.instances.common.gemm_universal import is_valid_spec
 
-        _, why = is_valid_spec(_bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151")
-        self.assertNotIn("lds_swizzle", why or "")
+        self.assertTrue(is_valid_spec(_bf16_spec(RDNA_WMMA), "gfx1151")[0])
+        ok, why = is_valid_spec(_bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("lds_swizzle", why)
+
+
+class TestAbLoadElemBytesBounds(unittest.TestCase):
+    """Python-only, so it runs without the C++ binding."""
+
+    def test_out_of_range_widths_and_tdm_are_rejected(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        base = _fp8_spec()  # TDM
+        no_tdm = replace(base, trait=replace(base.trait, tdm=False))
+        for label, spec0, width in (
+            ("0", no_tdm, 0),
+            ("-1", no_tdm, -1),
+            ("32", no_tdm, 32),
+            ("2 with tdm", base, 2),
+        ):
+            with self.subTest(label):
+                spec = replace(
+                    spec0, trait=replace(spec0.trait, ab_load_elem_bytes=width)
+                )
+                ok, why = is_valid_spec(spec, arch=ARCH)
+                self.assertFalse(ok, label)
+                self.assertIn("ab_load_elem_bytes", why)
 
 
 if __name__ == "__main__":

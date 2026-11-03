@@ -245,16 +245,9 @@ Reading the output:
 - **Feed share** is `memory_probe tdm`'s time per K-step over the GEMM's
   (its time per launch divided by K / 256).
 
-Two symptoms mean the numbers should not be trusted, whatever the ratios say:
-the GEMM arms far below an earlier session while the WMMA ceiling looks
-normal, or the TDM feed's time per K-step well above its usual value. Both
-GEMM and feed probe run exactly one round of workgroups, so a few slow
-compute units set their time while the probe's large grid hides them.
-`clock_probe` checks for it directly: the slowest workgroup needing more than
-10% more shader cycles than the rest for the same work is that state. Its
-start and end columns compare realtime across workgroups, which is only
-meaningful when their counter bases agree; the probe checks that against the
-event-timed launch and says when they do not.
+If the GEMM arms or the TDM feed are far off an earlier session while the WMMA
+ceiling looks normal, check the device before trusting any ratio: case study
+§17 (point 5) explains why and what `clock_probe` reports.
 
 Correctness lanes that need no timing:
 

@@ -34,6 +34,16 @@ def _sweep():
     return fp8_gemm_sweep
 
 
+class TestExactCheck(unittest.TestCase):
+    def test_nan_counts_as_incorrect(self):
+        import numpy as np
+
+        ref = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        out = np.array([1.0, np.nan, 3.0, 5.0], dtype=np.float32)
+        self.assertEqual(_sweep().count_incorrect(np, out, ref), 2)
+        self.assertEqual(_sweep().count_incorrect(np, ref.copy(), ref), 0)
+
+
 def _base_traits():
     """A minimal valid ``traits`` block: one pinned key, one swept."""
     return {

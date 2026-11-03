@@ -161,6 +161,16 @@ class TestTdmTileOriginIsI64(unittest.TestCase):
         self.assertTrue(geps, "no TDM fill address")
         self.assertEqual(set(geps), {"i64"})
 
+    def test_a_batched_fill_offset_is_i64_from_the_start(self):
+        """batch * stride must be formed in i64 too, not widened after an i32
+        multiply has already wrapped."""
+        from dataclasses import replace
+
+        ll = _lower(replace(_ring_spec(2), batched=True))
+        for stride in ("%stride_a", "%stride_b"):
+            with self.subTest(stride):
+                self.assertRegex(ll, rf"= zext i32 {stride} to i64")
+
 
 class TestTdmKLoopIgnoresTheUnrollExperiment(unittest.TestCase):
     def test_unroll_env_does_not_replace_the_tdm_loop(self):

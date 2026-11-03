@@ -770,15 +770,14 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         # incorrect. Under TDM it emits nothing instead, the mover owning the
         # LDS write -- silently inert rather than silently wrong. It is bit-exact
         # on the CDNA MFMA path, hence family scope rather than a global gate.
-        # Rejected on gfx1250 only, where this was found; gfx1151 / gfx1201
-        # keep their earlier behaviour until they have gate configs of their own.
+        # Every WMMA target is affected: gfx1151 returns wrong outputs with it too.
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
             (spec.trait.direct_to_lds, "direct_to_lds"),
             (spec.trait.dtl_prefetch, "dtl_prefetch"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
-            (spec.trait.lds_swizzle and arch == "gfx1250", "lds_swizzle"),
+            (spec.trait.lds_swizzle, "lds_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
@@ -1459,10 +1458,23 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         batch_off_a = b.to_sgpr_u32(b.mul(batch_idx, stride_a))
         batch_off_b = b.to_sgpr_u32(b.mul(batch_idx, stride_b))
         batch_off_c = b.to_sgpr_u32(b.mul(batch_idx, stride_c))
+        if spec.trait.tdm:
+            # The TDM fills address in i64 (see ``_issue``); an i32 batch offset
+            # would wrap first once a batch passes 2^31 elements. Every term is
+            # non-negative, so each widens with zext. Elsewhere the TDM fills
+            # take the i32 offsets, which ``_issue`` widens.
+            from ...core.ir import I64 as _I64b
+
+            _batch64 = b.zext(batch_idx, _I64b)
+            tdm_batch_a = b.mul(_batch64, b.zext(stride_a, _I64b))
+            tdm_batch_b = b.mul(_batch64, b.zext(stride_b, _I64b))
+        else:
+            tdm_batch_a, tdm_batch_b = batch_off_a, batch_off_b
     else:
         batch_off_a = c0
         batch_off_b = c0
         batch_off_c = c0
+        tdm_batch_a, tdm_batch_b = batch_off_a, batch_off_b
 
     # Tile-index assignment. By default ``block_id_x`` maps to the
     # N-tile and ``block_id_y`` to the M-tile (the host launcher uses
@@ -1759,7 +1771,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 # (e.g. M = K = 131072) wraps an i32 one, and the GEP would
                 # sign-extend it to an address before the tensor. Every term is
                 # non-negative, so each widens with zext.
-                batch64 = b.zext(batch_off, _I64)
+                batch64 = (
+                    batch_off if batch_off.type is _I64 else b.zext(batch_off, _I64)
+                )
                 row64 = b.mul(b.zext(row_off, _I64), b.zext(K, _I64))
                 origin = b.add(batch64, b.add(row64, b.zext(k_off, _I64)))
                 groups = b.tdm_descriptor_2d(
@@ -1802,12 +1816,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     _b_wave = b.add(a_wave, b.const_i32(1))
                     b_wave = lambda: _b_wave
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, a_wave)):
-                    _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
+                    _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a)
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, b_wave())):
-                    _issue(Bp, block_n_off, block_n, N, b_lds, batch_off_b)
+                    _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b)
             else:
-                _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
-                _issue(Bp, block_n_off, block_n, N, b_lds, batch_off_b)
+                _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a)
+                _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b)
             return
         if spec.trait.direct_to_lds:
             # For each pass, every lane copies one chunk of HALVES halves

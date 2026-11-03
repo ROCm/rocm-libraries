@@ -908,10 +908,9 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
          * the WMMA one, so where it emits at all it writes one address and
          * reads another: fast, plausible, numerically wrong. Under TDM it emits
          * nothing instead. It is bit-exact on the CDNA MFMA path, hence family
-         * scope rather than a global gate. Rejected on gfx1250 only, where this
-         * was found; gfx1151 / gfx1201 keep their earlier behaviour until they
-         * have gate configs of their own. */
-        if(spec->trait.lds_swizzle && is_gfx1250)
+         * scope rather than a global gate. Every WMMA target is affected:
+         * gfx1151 returns wrong outputs with it too. */
+        if(spec->trait.lds_swizzle)
         {
             CK_GEMM_REJECT("WMMA path does not support lds_swizzle on %s", arch);
         }

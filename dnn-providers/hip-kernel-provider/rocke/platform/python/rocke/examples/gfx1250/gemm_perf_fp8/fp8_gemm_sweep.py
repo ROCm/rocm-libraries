@@ -657,6 +657,15 @@ def warn_if_sweep_is_inert(
     return warnings
 
 
+def count_incorrect(np: Any, actual: Any, reference: Any) -> int:
+    """Outputs that differ from the exact reference, NaN included.
+
+    Not ``abs(actual - reference) > 0``: that is False for NaN, so a NaN output
+    would count as correct.
+    """
+    return int(np.count_nonzero(~(actual == reference)))
+
+
 def warn_if_sweep_changes_validity(config: Dict[str, Any]) -> List[str]:
     """Flag swept traits that change which *geometries* are admissible.
 
@@ -1090,9 +1099,7 @@ def verify_record(
         )
         actual = _f32_from_bf16(np, problem.c_host)
         error = np.abs(actual - problem.reference)
-        # Not ``error > 0.0``: that is False for NaN, so a NaN output would count
-        # as correct.
-        incorrect = int(np.count_nonzero(~(actual == problem.reference)))
+        incorrect = count_incorrect(np, actual, problem.reference)
         result.update(
             {
                 "verified": incorrect == 0,

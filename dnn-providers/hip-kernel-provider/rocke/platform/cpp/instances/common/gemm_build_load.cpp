@@ -130,7 +130,9 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
      * M = K = 131072) wraps an i32 one, and the GEP would sign-extend it to an
      * address before the tensor. Every term is non-negative, so each widens
      * with zext. One value per statement, in the Python engine's order. */
-    rocke_value_t* batch64 = rocke_b_zext(b, batch_off, rocke_i64());
+    rocke_value_t* batch64 = rocke_type_eq(batch_off->type, rocke_i64())
+                                 ? batch_off
+                                 : rocke_b_zext(b, batch_off, rocke_i64());
     rocke_value_t* row_off64 = rocke_b_zext(b, row_off, rocke_i64());
     rocke_value_t* k64 = rocke_b_zext(b, ctx->K, rocke_i64());
     rocke_value_t* row64 = rocke_b_mul(b, row_off64, k64);
@@ -261,7 +263,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                  ctx->block_m,
                                  ctx->M,
                                  a_lds,
-                                 ctx->batch_off_a,
+                                 ctx->tdm_batch_a,
                                  k_off,
                                  k_remaining,
                                  zero,
@@ -277,7 +279,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                  ctx->block_n,
                                  ctx->N,
                                  b_lds,
-                                 ctx->batch_off_b,
+                                 ctx->tdm_batch_b,
                                  k_off,
                                  k_remaining,
                                  zero,
@@ -292,7 +294,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                  ctx->block_m,
                                  ctx->M,
                                  a_lds,
-                                 ctx->batch_off_a,
+                                 ctx->tdm_batch_a,
                                  k_off,
                                  k_remaining,
                                  zero,
@@ -303,7 +305,7 @@ void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
                                  ctx->block_n,
                                  ctx->N,
                                  b_lds,
-                                 ctx->batch_off_b,
+                                 ctx->tdm_batch_b,
                                  k_off,
                                  k_remaining,
                                  zero,
