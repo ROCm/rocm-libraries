@@ -176,7 +176,7 @@ class ConvGeometry:
             sW=problem.stride,
             pD=0,
             pH=problem.PAD,
-            pW=problem.PAD,
+            pW=getattr(problem, "PAD_W", problem.PAD),
             dD=1,
             dH=problem.dil_h,
             dW=problem.dil_w,
