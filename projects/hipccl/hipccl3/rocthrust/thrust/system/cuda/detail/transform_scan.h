@@ -63,7 +63,7 @@ OutputIt _CCCL_HOST_DEVICE transform_inclusive_scan(
   using value_type  = ::cuda::std::remove_cvref_t<result_type>;
 
   using size_type              = thrust::detail::it_difference_t<InputIt>;
-  size_type num_items          = static_cast<size_type>(_THRUST_STD::distance(first, last));
+  size_type num_items          = static_cast<size_type>(::cuda::std::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, value_type, value_type>;
 
   return cuda_cub::inclusive_scan_n(policy, transformed_iterator_t(first, transform_op), num_items, result, scan_op);
@@ -84,7 +84,7 @@ OutputIt _CCCL_HOST_DEVICE transform_inclusive_scan(
   using value_type  = ::cuda::std::remove_cvref_t<result_type>;
 
   using size_type              = thrust::detail::it_difference_t<InputIt>;
-  size_type num_items          = static_cast<size_type>(_THRUST_STD::distance(first, last));
+  size_type num_items          = static_cast<size_type>(::cuda::std::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, value_type, value_type>;
 
   return cuda_cub::inclusive_scan_n(
@@ -105,7 +105,7 @@ OutputIt _CCCL_HOST_DEVICE transform_exclusive_scan(
   using result_type = ::cuda::std::remove_cvref_t<InitialValueType>;
 
   using size_type              = thrust::detail::it_difference_t<InputIt>;
-  size_type num_items          = static_cast<size_type>(_THRUST_STD::distance(first, last));
+  size_type num_items          = static_cast<size_type>(::cuda::std::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, result_type, result_type>;
 
   return cuda_cub::exclusive_scan_n(
@@ -114,4 +114,4 @@ OutputIt _CCCL_HOST_DEVICE transform_exclusive_scan(
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

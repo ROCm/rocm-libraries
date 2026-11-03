@@ -76,4 +76,4 @@ void _CCCL_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Size
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

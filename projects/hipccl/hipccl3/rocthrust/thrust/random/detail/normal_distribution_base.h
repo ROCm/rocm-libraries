@@ -153,9 +153,10 @@ struct normal_distribution_base
 {
 #if THRUST_CUDA_COMPILATION() && !THRUST_CUDA_COMPILER(NVHPC)
   using type = normal_distribution_nvcc<RealType>;
-#else
+#else // ^^^ THRUST_CUDA_COMPILATION() && !THRUST_CUDA_COMPILER(NVHPC) ^^^ /
+      // vvv !THRUST_CUDA_COMPILATION() || THRUST_CUDA_COMPILER(NVHPC) vvv
   using type = normal_distribution_portable<RealType>;
-#endif
+#endif // ^^^ !THRUST_CUDA_COMPILATION() || THRUST_CUDA_COMPILER(NVHPC) ^^^
 };
 } // namespace random::detail
 THRUST_NAMESPACE_END

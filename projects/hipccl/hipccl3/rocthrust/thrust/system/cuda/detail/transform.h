@@ -425,4 +425,4 @@ _CCCL_API _CCCL_FORCEINLINE OutputIt transform_if_n(
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

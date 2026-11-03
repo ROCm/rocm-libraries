@@ -84,4 +84,4 @@ ResultIt _CCCL_HOST_DEVICE gather_if(
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
 
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

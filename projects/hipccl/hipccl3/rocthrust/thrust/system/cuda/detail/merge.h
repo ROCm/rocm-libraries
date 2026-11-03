@@ -42,8 +42,8 @@ merge(execution_policy<Derived>& policy,
 {
   THRUST_CDP_DISPATCH(
     (using size_type         = thrust::detail::it_difference_t<KeysIt1>;
-     const auto num_keys1    = static_cast<size_type>(_THRUST_STD::distance(keys1_begin, keys1_end));
-     const auto num_keys2    = static_cast<size_type>(_THRUST_STD::distance(keys2_begin, keys2_end));
+     const auto num_keys1    = static_cast<size_type>(::cuda::std::distance(keys1_begin, keys1_end));
+     const auto num_keys2    = static_cast<size_type>(::cuda::std::distance(keys2_begin, keys2_end));
      const auto num_keys_out = num_keys1 + num_keys2;
      if (num_keys_out == 0) { return result_begin; }
 
@@ -130,8 +130,8 @@ template <class Derived,
   THRUST_CDP_DISPATCH(
     (using size_type = thrust::detail::it_difference_t<KeysIt1>;
 
-     const auto num_keys1    = static_cast<size_type>(_THRUST_STD::distance(keys1_begin, keys1_end));
-     const auto num_keys2    = static_cast<size_type>(_THRUST_STD::distance(keys2_begin, keys2_end));
+     const auto num_keys1    = static_cast<size_type>(::cuda::std::distance(keys1_begin, keys1_end));
+     const auto num_keys2    = static_cast<size_type>(::cuda::std::distance(keys2_begin, keys2_end));
      const auto num_keys_out = num_keys1 + num_keys2;
      if (num_keys_out == 0) { return {keys_out_begin, items_out_begin}; }
 
@@ -202,4 +202,4 @@ template <class Derived,
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

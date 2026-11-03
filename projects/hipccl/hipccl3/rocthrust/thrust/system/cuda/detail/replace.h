@@ -118,4 +118,4 @@ OutputIt _CCCL_HOST_DEVICE replace_copy(
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()
