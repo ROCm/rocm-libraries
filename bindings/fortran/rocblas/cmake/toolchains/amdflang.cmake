@@ -24,7 +24,7 @@
 
 # AMD ROCm toolchain (amdflang). The recommended default: amdflang is the LLVM-based Fortran compiler shipped with ROCm.
 #
-# Usage, from projects/rocblas/fortran:
+# Usage, from bindings/fortran/rocblas:
 #   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
 #
 # No format or line-length flag: the generated source fits within the 132
