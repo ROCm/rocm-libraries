@@ -49,6 +49,7 @@ enum class Pattern
     Const300,        // every element is 300
     Const12,         // every element is 12
     Const1,          // every element is 1
+    SignedHalves100, // +100 in the first half of the reduced elements, -100 in the second
     SignedHalves300, // +300 in the first half of the reduced elements, -300 in the second
     CancelPrecision, // +/-(20 + (j % 7) / 64): exact in FP32, but not in FP16 once summed
     MulUnderOver,    // 0.97 in the first half, 1 / 0.97 in the second: blocks under/overflow
@@ -60,6 +61,7 @@ struct Shape
     std::string name;
     std::vector<std::size_t> lengths;
     std::vector<int> reduceDims;
+    std::vector<std::size_t> inStrides = {}; // empty: the input is packed
 };
 
 struct MultiBlockCase
@@ -161,6 +163,7 @@ double PatternValue(Pattern p, std::size_t j, std::size_t k)
     case Pattern::Const300: return 300.0;
     case Pattern::Const12: return 12.0;
     case Pattern::Const1: return 1.0;
+    case Pattern::SignedHalves100: return firstHalf ? 100.0 : -100.0;
     case Pattern::SignedHalves300: return firstHalf ? 300.0 : -300.0;
     case Pattern::CancelPrecision:
         return (firstHalf ? 1.0 : -1.0) * (20.0 + static_cast<double>(j % 7) / 64.0);
@@ -311,7 +314,37 @@ void RunCase(const MultiBlockCase& c)
     for(const double v : ref.values)
         ASSERT_LE(std::abs(v), MaxFinite(c.inType)) << "bad test data, result out of range";
 
-    const miopen::TensorDescriptor inDesc{c.inType, c.shape.lengths};
+    // A strided input is laid out in a larger buffer; the elements the tensor does not address
+    // hold a value that would change the result if they were read.
+    std::vector<T> deviceInput;
+    if(c.shape.inStrides.empty())
+    {
+        deviceInput = input;
+    }
+    else
+    {
+        const auto& lens   = c.shape.lengths;
+        const auto& strd   = c.shape.inStrides;
+        std::size_t extent = 1;
+        for(std::size_t i = 0; i < lens.size(); i++)
+            extent += (lens[i] - 1) * strd[i];
+        deviceInput.assign(extent, FromDouble<T>(7.0));
+        for(std::size_t lin = 0; lin < inTotal; lin++)
+        {
+            std::size_t rest = lin, offset = 0;
+            for(std::size_t i = lens.size(); i > 0; i--)
+            {
+                offset += (rest % lens[i - 1]) * strd[i - 1];
+                rest /= lens[i - 1];
+            }
+            deviceInput[offset] = input[lin];
+        }
+    }
+
+    const miopen::TensorDescriptor inDesc =
+        c.shape.inStrides.empty()
+            ? miopen::TensorDescriptor{c.inType, c.shape.lengths}
+            : miopen::TensorDescriptor{c.inType, c.shape.lengths, c.shape.inStrides};
     const miopen::TensorDescriptor outDesc{c.inType, outLengths};
     const miopen::ReduceTensorDescriptor reduceDesc{
         c.op, c.compType, MIOPEN_NOT_PROPAGATE_NAN, c.indices, MIOPEN_32BIT_INDICES};
@@ -325,7 +358,7 @@ void RunCase(const MultiBlockCase& c)
     wspace.Write(std::vector<std::uint8_t>(wsBytes + canaryBytes, canaryByte));
     Workspace idxSpace{idxBytes};
 
-    auto input_dev  = handle.Write(input);
+    auto input_dev  = handle.Write(deviceInput);
     auto output_dev = handle.Write(output);
 
     reduceDesc.ReduceTensor(handle,
@@ -497,6 +530,37 @@ std::vector<MultiBlockCase> SameCompTypeStandard()
     };
 }
 
+// The reduction the RNN code runs for the gradient of the bias (see rnn_util.hpp): the sum over
+// all the rows of the workspace (batch size times sequence length of them) of the bias columns
+// of the rows, accumulated into the weights (beta = 1), FP32 compute. The rows are longer than
+// the bias, so the input is strided.
+std::vector<MultiBlockCase> RnnBiasGradientStandard()
+{
+    // 1 x rows x biasCount, rows are rowStride apart
+    constexpr std::size_t rows = 2200, biasCount = 64, rowStride = 96;
+    const Shape shape{"RnnBias", {1, rows, biasCount}, {0, 1}, {rows * rowStride, rowStride, 1}};
+
+    auto c       = MakeCase("AddSigned100Accumulate",
+                      miopenHalf,
+                      miopenFloat,
+                      MIOPEN_REDUCE_TENSOR_ADD,
+                      shape,
+                      Pattern::SignedHalves100);
+    c.beta       = 1.0f;
+    c.outputInit = 5.0f;
+
+    // a constant gradient: the average fits FP16, the sum of a block does not
+    auto avg       = MakeCase("AvgAccumulate",
+                        miopenHalf,
+                        miopenFloat,
+                        MIOPEN_REDUCE_TENSOR_AVG,
+                        shape,
+                        Pattern::Const300);
+    avg.beta       = 1.0f;
+    avg.outputInit = 5.0f;
+    return {c, avg};
+}
+
 std::vector<MultiBlockCase> Fp32Standard()
 {
     return {
@@ -624,7 +688,9 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ReduceMultiBlock_FP16,
                          ::testing::ValuesIn([] {
-                             auto cases      = Fp16CompFp32Standard();
+                             auto cases     = Fp16CompFp32Standard();
+                             const auto rnn = RnnBiasGradientStandard();
+                             cases.insert(cases.end(), rnn.begin(), rnn.end());
                              const auto same = SameCompTypeStandard();
                              cases.insert(cases.end(), same.begin(), same.end());
                              return cases;
