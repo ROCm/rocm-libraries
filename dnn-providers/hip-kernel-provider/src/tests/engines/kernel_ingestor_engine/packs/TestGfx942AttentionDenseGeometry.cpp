@@ -228,8 +228,9 @@ TEST(TestGfx942AttentionDenseTile, RefusesNamedNeighboursOfTheLegalSet)
 }
 
 // =============================================================================
-// The sliding-window zero-trip guard. Every verdict is supports_attention_dense's for a
-// causal bf16 D128 spec at that tile and shape.
+// The sliding-window zero-trip guard. Every verdict is that guard's in
+// supports_attention_dense for a causal bf16 D128 spec at that tile and shape; the
+// Python's later row rule is not part of it.
 // =============================================================================
 
 TEST(TestGfx942AttentionDenseWindow, NoWindowAlwaysReachesKeys)

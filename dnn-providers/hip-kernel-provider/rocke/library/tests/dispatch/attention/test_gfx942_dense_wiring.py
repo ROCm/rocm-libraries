@@ -883,6 +883,32 @@ class TestGfx942Sinks(unittest.TestCase):
                     self.assertTrue(ok, why)
                     self.assertEqual(dispatch_attention(req).candidate.name, _NAME)
 
+    def test_window_leaving_rows_keyless_admitted_only_with_sinks_or_lse(self):
+        """512/256 at 256/64 with a 128-key window passes the block-level zero-trip
+        guard (the last block's window starts at key tile 2 of 4), yet rows from 383
+        see no key and would average V. Both dense candidates refuse it unless sinks
+        or the LSE path handle those rows."""
+        shape = dict(seqlen_q=512, seqlen_k=256, sliding_window=128)
+        knobs = (("block_m", 256),)
+        by_name = {c.name: c for c in attention_candidates()}
+        with _Gfx942Arch():
+            for name, spec_id in (
+                (_NAME, _SPEC_ID),
+                ("attention_gfx942_dense_qbminor", "gfx942_dense_qbminor"),
+            ):
+                candidate = by_name[name]
+                with self.subTest(candidate=name):
+                    ok, why = candidate.admits(
+                        _req(**shape, spec_id=spec_id, tuning_knobs=knobs)
+                    )
+                    self.assertFalse(ok)
+                    self.assertIn("see no key", why)
+                    for exempt in (dict(use_sinks=True), dict(emit_lse=True)):
+                        ok, why = candidate.admits(
+                            _req(**shape, spec_id=spec_id, tuning_knobs=knobs, **exempt)
+                        )
+                        self.assertTrue(ok, f"{exempt}: {why}")
+
     def test_auto_sinks_request_does_not_select_dense(self):
         """Opt-in still holds for sink requests."""
         with _Gfx942Arch():

@@ -44,9 +44,11 @@ These helpers (:func:`add_dense_tuning_args`, :func:`dense_request`,
 from here rather than keeping a second, drifting resolver.
 
 NOTE: ``--sw`` (sliding window) now builds a supported spec (KV-loop prune + window
-mask); only the degenerate shape whose last query block's window starts past
-``seqlen_kv`` is rejected (zero-trip KV loop -> NaN), and only without sinks: with
-sinks those rows output 0, softmax over the sink alone. ``--use-sinks`` adds random
+mask). Two degenerate shapes are rejected: the last query block's window starting
+past ``seqlen_kv`` (zero-trip KV loop -> NaN), unless sinks are on; and
+``seqlen_q - seqlen_kv >= W``, whose last rows see no key and would average V, unless
+sinks or ``emit_lse`` are on. With sinks those rows output 0, softmax over the sink
+alone; the LSE path zeroes them. ``--use-sinks`` adds random
 per-head sink logits and checks against a manual sink reference; it combines with
 ``--sw``. ``--persistent`` is NOT a
 deferred mode either: the persistent grid ships and dispatch turns it on

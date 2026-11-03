@@ -53,10 +53,11 @@
  * applicability rules live only in that Python; this file is where they become
  * enforceable.
  *
- * Unlike the gfx950 twin, the gfx942 body reads both head counts at runtime as well as
- * batch and the sequence lengths (`Gfx942AttentionDenseSpec.runtime_param_fields`), so a
- * candidate is never compared against the graph's head counts, and it serves a causal
- * sliding window baked per candidate.
+ * The body reads both head counts at runtime as well as batch and the sequence lengths
+ * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Unlike the gfx950 twin, whose
+ * catalog lists each head configuration and whose kernelMatches compares them, a
+ * candidate here is never compared against the graph's head counts. It also serves a
+ * causal sliding window baked per candidate.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -362,7 +363,8 @@ struct AttentionDenseMask
  * A top-left window with seqlen_q - seqlen_kv >= W leaves the last query rows no key: row
  * q sees (q - W, q] and q - W + 1 >= seqlen_kv. The kernel has no empty-row path (every
  * score of such a row is the mask value, so it averages V over the tiles it visits), so
- * those windows are declined.
+ * those windows are declined. This restates supports_attention_dense's row rule; its sink
+ * and LSE exemptions do not arise here, since this pack declines both.
  */
 std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& attributes,
                                           const AttentionDenseProblem& problem)

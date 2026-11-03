@@ -221,8 +221,9 @@ launch_surface:
       block_m / GFX942_ROWS_PER_WAVE(32) * GFX942_WAVE_LANES(64) threads.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
 
-  # The tile rules, the window translation and the sliding-window zero-trip guard are
-  # restated by hand from the rocKE Python. The LDS budget is not restated.
+  # The tile rules, the window translation, the sliding-window zero-trip guard and the
+  # empty-row rule are restated by hand from the rocKE Python. The LDS budget is not
+  # restated.
   - name: matcher
     python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
@@ -234,7 +235,8 @@ launch_surface:
       Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
       query block no key tile. Head counts, batch and sequence lengths are runtime
       kernel arguments and are never compared. graph_match maps a causal band of
-      left_bound L to sliding_window L and declines every non-causal band.
+      left_bound L to sliding_window L, declines every non-causal band, and declines
+      a window that leaves query rows no key (seqlen_q - seqlen_kv >= W).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   - name: kernargs

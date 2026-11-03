@@ -1394,6 +1394,27 @@ def supports_attention_dense(
                 f"count {_n_ktiles} -> zero-trip KV loop -> NaN (well-defined "
                 f"with use_sinks)"
             )
+    # The same window, row by row: row q keeps keys (q - W, q], so once
+    # seqlen_q - seqlen_kv >= W the last rows keep none even where their block
+    # visits tiles. Every score of such a row is the mask value, so the softmax
+    # averages V instead of yielding nothing. Sinks seed the softmax (the row is 0,
+    # softmax([sink]) over no values) and the LSE path zeroes key-less rows
+    # (row_has_key), so both are exempt. The zero-trip guard above still applies with
+    # emit_lse (it exempts sinks only); on tile-divisible shapes every shape it rejects
+    # is also one of these. The hipDNN gfx942 dense pack restates this rule
+    # (Gfx942AttentionDenseNative.cpp maskFor).
+    if (
+        spec.sliding_window
+        and spec.causal
+        and not spec.use_sinks
+        and not spec.emit_lse
+        and spec.seqlen_q - spec.seqlen_kv >= spec.sliding_window
+    ):
+        return False, (
+            f"sliding_window={spec.sliding_window} over seqlen_q={spec.seqlen_q}, "
+            f"seqlen_kv={spec.seqlen_kv}: rows from {spec.seqlen_kv + spec.sliding_window - 1} "
+            f"see no key and would average V (well-defined with use_sinks or emit_lse)"
+        )
     return True, ""
 
 
