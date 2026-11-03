@@ -1178,22 +1178,54 @@ typedef struct rocke_dw_win_plan
 #endif
 
 #ifdef __cplusplus
-#include <functional>
+#include <string>
 #include <vector>
 
 /* A one-trip (or zero-trip) scf.for_iter guarding `body` on the block-uniform
  * `ok`, carrying `accs` (updated in place to the loop results). The iter args
- * are named `<prefix>_y<y>_<i>`, the induction variable `<prefix>_y<y>`. */
-void rocke_dw_win_guarded(
-    rocke_ir_builder_t* b,
-    rocke_value_t* ok,
-    rocke_value_t* c0,
-    rocke_value_t* c1,
-    std::vector<rocke_value_t*>& accs,
-    const char* prefix,
-    int y,
-    bool elide_trailing_barrier,
-    const std::function<std::vector<rocke_value_t*>(const std::vector<rocke_value_t*>&)>& body);
+ * are named `<prefix>_y<y>_<i>`, the induction variable `<prefix>_y<y>`.
+ * `body` maps the carried values to the yielded ones; it is a template
+ * parameter so each caller's lambda is called directly. */
+template <typename Body>
+inline void rocke_dw_win_guarded(rocke_ir_builder_t* b,
+                                 rocke_value_t* ok,
+                                 rocke_value_t* c0,
+                                 rocke_value_t* c1,
+                                 std::vector<rocke_value_t*>& accs,
+                                 const char* prefix,
+                                 int y,
+                                 bool elide_trailing_barrier,
+                                 Body body)
+{
+    rocke_value_t* trip = rocke_b_select(b, ok, c1, c0);
+    std::vector<std::string> names(accs.size());
+    std::vector<rocke_iter_arg_t> iargs(accs.size());
+    for(size_t i = 0; i < accs.size(); ++i)
+    {
+        names[i] = std::string(prefix) + "_y" + std::to_string(y) + "_" + std::to_string(i);
+        iargs[i].name = names[i].c_str();
+        iargs[i].init = accs[i];
+    }
+    const std::string iv = std::string(prefix) + "_y" + std::to_string(y);
+    rocke_for_t loop = rocke_b_scf_for_iter(b,
+                                            c0,
+                                            trip,
+                                            c1,
+                                            iargs.data(),
+                                            (int)iargs.size(),
+                                            iv.c_str(),
+                                            /*unroll=*/false,
+                                            elide_trailing_barrier);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    rocke_b_region_enter(b, loop.body);
+    std::vector<rocke_value_t*> carried(loop.iter_vars, loop.iter_vars + loop.num_iter_vars);
+    std::vector<rocke_value_t*> out = body(carried);
+    rocke_b_scf_yield(b, out.data(), (int)out.size());
+    rocke_b_region_leave(b);
+    for(size_t i = 0; i < accs.size(); ++i)
+        accs[i] = loop.op->results[i];
+}
 #endif
 
 #endif /* ROCKE_INSTANCE_CONV_DIRECT_GROUPED_INTERNAL_H */

@@ -26,7 +26,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <functional>
 #include <string>
 #include <vector>
 
@@ -431,46 +430,6 @@ V* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, V* val)
 V* rocke_dconv_trunc_f32_elem(rocke_ir_builder_t* b, bool bf16, V* val)
 {
     return bf16 ? rocke_b_trunc_f32_to_bf16(b, val) : rocke_b_trunc_f32_to_f16(b, val);
-}
-
-void rocke_dw_win_guarded(rocke_ir_builder_t* b,
-                          V* ok,
-                          V* c0,
-                          V* c1,
-                          std::vector<V*>& accs,
-                          const char* prefix,
-                          int y,
-                          bool elide_trailing_barrier,
-                          const std::function<std::vector<V*>(const std::vector<V*>&)>& body)
-{
-    V* trip = rocke_b_select(b, ok, c1, c0);
-    std::vector<std::string> names(accs.size());
-    std::vector<rocke_iter_arg_t> iargs(accs.size());
-    for(size_t i = 0; i < accs.size(); ++i)
-    {
-        names[i] = std::string(prefix) + "_y" + std::to_string(y) + "_" + std::to_string(i);
-        iargs[i].name = names[i].c_str();
-        iargs[i].init = accs[i];
-    }
-    const std::string iv = std::string(prefix) + "_y" + std::to_string(y);
-    rocke_for_t loop = rocke_b_scf_for_iter(b,
-                                            c0,
-                                            trip,
-                                            c1,
-                                            iargs.data(),
-                                            (int)iargs.size(),
-                                            iv.c_str(),
-                                            /*unroll=*/false,
-                                            elide_trailing_barrier);
-    if(!rocke_ir_builder_ok(b))
-        return;
-    rocke_b_region_enter(b, loop.body);
-    std::vector<V*> carried(loop.iter_vars, loop.iter_vars + loop.num_iter_vars);
-    std::vector<V*> out = body(carried);
-    rocke_b_scf_yield(b, out.data(), (int)out.size());
-    rocke_b_region_leave(b);
-    for(size_t i = 0; i < accs.size(); ++i)
-        accs[i] = loop.op->results[i];
 }
 
 /* ===================================================================== *
