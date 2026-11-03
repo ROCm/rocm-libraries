@@ -78,7 +78,7 @@ size_t count_accepted(const origami::problem_t& problem,
   return std::count_if(configs.begin(), configs.end(), [&](const origami::config_t& config) {
     return origami::gemm::check_lds_capacity(
                hardware, config.mt, problem.a_dtype, problem.b_dtype) &&
-           !origami::gemm::fast_reject(problem, hardware, config);
+           origami::gemm::compute_total_latency(problem, hardware, config) != kRejected;
   });
 }
 
@@ -282,6 +282,83 @@ TEST_CASE("Leveled: whenever nothing is pruned the ranking matches the single pa
       REQUIRE(unpruned_m1_n1 > 0);
       REQUIRE(unpruned_whole > 0);
       REQUIRE(unpruned > 2 * shapes.size());
+    }
+  }
+}
+
+TEST_CASE("Leveled: level 0 and the full level reproduce the single-pass latencies",
+          "[origami][leveled]") {
+  // The cascade rejects configs at level 0 without a context and scores the survivors from
+  // their context, two pieces split out of the single-pass latency. On lists small enough
+  // that nothing is pruned, the ranking must match the single pass exactly: the same
+  // rejected configs (each short-circuit rule, with and without non-temporal variants) and
+  // the same latency for every accepted one. No problem is GEMV or split-K-prone, so the
+  // cascade runs on each list.
+  const std::vector<origami::problem_t> problems = {
+      // Small batched problem: one-tile short-circuit.
+      make_problem(128, 128, 512, origami::transpose_t::T, origami::transpose_t::N, 4),
+      // Wide N with M covered by the tile: non-temporal B rule.
+      make_problem(64, 8192, 2048, origami::transpose_t::N, origami::transpose_t::N),
+      // Wide M with N covered by the tile: non-temporal A rule.
+      make_problem(8192, 64, 2048, origami::transpose_t::T, origami::transpose_t::T),
+      // M < 3: Dot2 rule.
+      make_problem(2, 4096, 2048),
+      // K not a multiple of the cache line.
+      make_problem(4096, 4096, 2052),
+      make_problem(4096, 4096, 2048),
+  };
+
+  // MT x MI x non-temporal hint variants. Non-temporal availability is memoized per
+  // macro tile, the same way callers prepare a config list.
+  std::vector<origami::config_t> configs;
+  for (size_t mt_m : {16, 64, 128, 256})
+    for (size_t mt_n : {16, 64, 128, 256})
+      for (size_t mt_k : {64, 128})
+        for (int nt_a : {0, 4})
+          for (int nt_b : {0, 4}) {
+            configs.push_back(make_config(mt_m, mt_n, mt_k, 16, 16, 16, false, 1, 1, nt_a, nt_b));
+            configs.push_back(make_config(mt_m, mt_n, mt_k, 1, 1, 64, false, 1, 1, nt_a, nt_b));
+          }
+  // Only some tiles have a non-temporal variant, so both availability paths are covered.
+  configs.erase(std::remove_if(configs.begin(),
+                               configs.end(),
+                               [](const origami::config_t& c) {
+                                 return c.mt.m == 128 &&
+                                        (c.cache_hints_a == 4 || c.cache_hints_b == 4);
+                               }),
+                configs.end());
+  origami::memoize_non_temporal_availability(configs);
+  // An invalid config, which both paths reject before any model runs.
+  configs.push_back(make_config(128, 128, 64));
+  configs.back().mt.m = 0;
+  for (size_t i = 0; i < configs.size(); ++i) configs[i].index = i;
+
+  constexpr size_t kWindow = 40;
+  static_assert(kWindow <= kMinKeep, "windows must never be pruned");
+
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware   = make_hardware(gpu_arch);
+      size_t rejected = 0;
+      size_t accepted = 0;
+      for (const auto& problem : problems) {
+        for (size_t begin = 0; begin < configs.size(); begin += kWindow) {
+          const std::vector<origami::config_t> window(
+              configs.begin() + begin, configs.begin() + std::min(begin + kWindow, configs.size()));
+          INFO("problem " << problem.size.m << "x" << problem.size.n << "x" << problem.size.k
+                          << " window " << begin);
+          require_same_ranking(rank(problem, hardware, window, true),
+                               rank(problem, hardware, window, false));
+        }
+        for (const auto& config : configs) {
+          if (origami::gemm::compute_total_latency(problem, hardware, config) == kRejected)
+            ++rejected;
+          else
+            ++accepted;
+        }
+      }
+      REQUIRE(rejected > 0);
+      REQUIRE(accepted > 0);
     }
   }
 }

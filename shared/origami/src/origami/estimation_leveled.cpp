@@ -6,6 +6,7 @@
 // the full analytical latency.
 
 #include "estimation_leveled.hpp"
+#include "gemm_internal.hpp"
 
 #include <algorithm>
 #include <cstdint>

@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "gemm_internal.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
