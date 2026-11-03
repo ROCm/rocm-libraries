@@ -9,9 +9,11 @@ tests are CPU-only and check that both engines agree.
 """
 
 import os
+import re
 
 import numpy as np
 import pytest
+from rocke.assets import dsl_docs_dir, platform_root
 from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.backend import universal_gemm_spec_to_dict
 from rocke.instances.common.gemm_universal import (
@@ -255,6 +257,39 @@ def test_f64_gemm_targets_are_the_documented_ones():
     admits fp64 GEMM on, and the one of them that refuses direct_to_lds."""
     assert _F64_GEMM_ARCHS == ("gfx90a", "gfx942", "gfx950")
     assert _F64_GEMM_ARCHS_WITHOUT_DMA == ("gfx90a",)
+
+
+_F64 = re.compile(r"\bfp?64\b")
+_UNIVERSAL_GEMM = re.compile(r"universal[ _]gemm|gemm_universal", re.IGNORECASE)
+_GFX_TARGET = re.compile(r"\bgfx[0-9a-f]+\b")
+
+
+def _doc_sentences(text):
+    """Split markdown into sentences, keeping list items and table rows apart."""
+    blocks = re.split(r"\n\s*\n|\n(?=\s*(?:[-*] |\|))", text)
+    for block in blocks:
+        yield from re.split(r"(?<=[.;])\s+|(?<=\.\*\*)\s+", " ".join(block.split()))
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        dsl_docs_dir() / "reference" / "dtype_support.md",
+        platform_root() / "python" / "rocke" / "instances" / "SUPPORT_MATRIX.md",
+    ],
+    ids=lambda path: path.name,
+)
+def test_f64_gemm_doc_sentences_name_every_admitted_target(doc):
+    """A sentence that places fp64 universal GEMM on named targets names all of
+    them, so no summary line describes it as narrower than the validator."""
+    narrower = []
+    for sentence in _doc_sentences(doc.read_text(encoding="utf-8")):
+        if not (_F64.search(sentence) and _UNIVERSAL_GEMM.search(sentence)):
+            continue
+        named = set(_GFX_TARGET.findall(sentence))
+        if named and not named.issuperset(_F64_GEMM_ARCHS):
+            narrower.append(sentence)
+    assert not narrower, f"{doc.name} names only some fp64 GEMM targets in: {narrower}"
 
 
 @pytest.mark.parametrize("arch", _F64_GEMM_ARCHS_WITHOUT_DMA)

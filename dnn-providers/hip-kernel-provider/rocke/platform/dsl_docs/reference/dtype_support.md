@@ -28,8 +28,8 @@ logical dtype and native gfx942 atoms added after the original basis snapshot.
 Other scores and source line numbers retain their stated historical basis.
 
 **FP64 coverage update.** The f64 entries in §1, §2.5, §4B, §4C, and §5 reflect the
-IR type, arithmetic, memory, elementwise/reduce2d, CDNA f64 MFMA atom, and gfx942
-universal GEMM support added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
+IR type, arithmetic, memory, elementwise/reduce2d, CDNA f64 MFMA atom, and universal
+GEMM support on gfx90a, gfx942 and gfx950 added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
 
 ---
 
@@ -393,8 +393,8 @@ mode. The missing selector and precision contract are described in §2.5.
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
-- **`f64` — IR, memory, elementwise/reduce2d, the CDNA f64 MFMA atoms, and gfx942
-  universal GEMM.** The IR type,
+- **`f64` — IR, memory, elementwise/reduce2d, the CDNA f64 MFMA atoms, and
+  universal GEMM on gfx90a, gfx942 and gfx950.** The IR type,
   `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
   `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
   memory up to 2-element vectors, and HIP lowering are present. Elementwise
