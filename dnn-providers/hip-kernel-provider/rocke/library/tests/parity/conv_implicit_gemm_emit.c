@@ -1125,6 +1125,13 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->defer_mfma = idx == 125 ? 2 : 0;
         spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
         return 0;
+    case 144:
+    case 145:
+        /* 84 / 87 + pp_end_guard */
+        if(make_cfg_3d(idx == 144 ? 84 : 87, spec, arch) != 0)
+            return -1;
+        spec->pp_end_guard = true;
+        return 0;
     case 142:
     case 143:
         if(make_cfg_3d_base(55, spec, arch) != 0)

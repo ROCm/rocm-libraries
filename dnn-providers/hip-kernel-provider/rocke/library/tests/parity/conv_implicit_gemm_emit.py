@@ -1024,6 +1024,7 @@ _GFX942_3D_OFFSET = 32
 #  133-134: 55 + split_k 2 with split_atomic_agent (+ split_atomic_pairs)
 #  135-141: 55 + split_atomic_fast, epi_store_fast, split_flag_store / split_zero_first
 #  142-143: 55 + split_tail_compact (+ split_zero_first)
+#  144-145: 84 / 87 + pp_end_guard
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1436,6 +1437,10 @@ def _gfx942_3d_spec(idx: int):
             110: dict(_p84, xcd_remap=0, split_streamk=True),
             111: dict(xcd_remap=0, split_hybrid=4, split_det=1),
             112: dict(_p84, xcd_remap=0, split_streamk=True, split_det=2),
+            # 144-145: pp_end_guard (the uniform-tap prefetch masked past the
+            # loop's end) on 84 and on the rpf_pingpong 1 loop (87).
+            144: dict(_p84, pp_end_guard=True),
+            145: dict(rpf_pingpong=1, pp_end_guard=True),
         }
     )
     if idx in _pp:

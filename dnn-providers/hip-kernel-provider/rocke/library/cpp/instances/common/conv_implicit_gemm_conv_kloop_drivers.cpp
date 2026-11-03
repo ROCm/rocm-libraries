@@ -896,6 +896,12 @@ static void conv_kl_fetch(rocke_conv_build_ctx_t* ctx,
     }
     /* uk_fetch: uk_cap[0] = tile_uniforms(st); fetch(a_uk, b_uk) */
     conv_uk_tile_uniforms(u, state);
+    if(ctx->fetch_hi != NULL)
+    {
+        /* pp_end_guard: no reads for a tile at or past the loop's end. */
+        rocke_value_t* in_range = rocke_b_cmp_lt(b, k, ctx->fetch_hi);
+        u->t_ok = rocke_b_land(b, u->t_ok, in_range);
+    }
     if(fa)
         rocke_coalesced_tile_loader_load_global(
             b, &ctx->a_sync_loader, ctx->tid, conv_uk_a_desc, u, ctx->a_rsrc, NULL, &st->a);
@@ -955,7 +961,7 @@ static void conv_rpf_store(rocke_conv_build_ctx_t* ctx,
 /* Python run_pingpong(lo, hi, it1, n_acc, fetch_tile, advance, tag): the
  * rpf_pingpong loop, entered with tile `lo` in the LDS buffer, published.
  * The C port carries pp 1-5, pp_pre_mfma, pp_b_double, vmem_interleave,
- * rpf_setprio and pp_split_fetch 1-4 / 10 (no pp_fetch_deep / pp_end_guard /
+ * rpf_setprio and pp_split_fetch 1-4 / 10 (no pp_fetch_deep /
  * x-halo / a_direct, which its validator rejects). */
 typedef struct
 {
@@ -1297,6 +1303,8 @@ static void conv_run_pingpong(rocke_conv_build_ctx_t* ctx,
     p->late = spec->rpf_pingpong == 4 || spec->rpf_pingpong == 5;
     p->in_comp = spec->rpf_pingpong == 5;
 
+    if(spec->pp_end_guard)
+        ctx->fetch_hi = hi;
     /* The high half runs one barrier ahead. */
     rocke_b_sync_half_block(b, hi_half);
     /* Retire every scalar load before the loop. */

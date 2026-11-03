@@ -295,6 +295,9 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* pp_split_fetch (rpf_pingpong 5): where each operand's global reads go.
      * The C port carries 1-4 and 10; 5-9 are Python-only (rejected here). */
     int pp_split_fetch; /* default 0 */
+    /* pp_end_guard: the plain rpf_pingpong loop's uniform-tap fetches read
+     * nothing for a tile at or past the loop's end (t_ok &= k < hi). */
+    bool pp_end_guard; /* default false */
 
     /* Knobs of the wave64 MFMA atomic split-K forward (split_k > 1). */
     /* split_tail: the first full_tiles tiles (launch order) run the whole

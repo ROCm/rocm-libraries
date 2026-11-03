@@ -681,6 +681,8 @@ typedef struct rocke_conv_build_ctx
     /* _fetch_part (pp_split_fetch): skip an operand's global reads. */
     bool fetch_skip_a;
     bool fetch_skip_b;
+    /* _fetch_part["hi"] (pp_end_guard): the uniform-tap fetch's end bound. */
+    rocke_value_t* fetch_hi;
 } rocke_conv_build_ctx_t;
 
 /* One kk step's MFMA operands (Python load_frags' (a_rows, b_cols)). */

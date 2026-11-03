@@ -493,7 +493,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->split_zero_first, "szf");
     /* (xsub, ppfd: Python-only knobs, off.) */
     ROCKE_FLAG(s->fb_skip_empty, "fbse");
-    /* (ppeg: Python-only, off.) */
+    ROCKE_FLAG(s->pp_end_guard, "ppeg");
     ROCKE_FLAG(s->epi_lds_barriers, "elb");
     ROCKE_FLAG(s->split_hybrid > 0, "shy%d", s->split_hybrid);
     ROCKE_FLAG(s->sched_strategy > 0, "mss%d", s->sched_strategy);
@@ -1433,6 +1433,10 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         ROCKE_SPEC_FAIL(reason, reason_cap, "epi_lds_barriers shapes the cshuffle epilogue");
     if(s->pp_pre_mfma && !s->rpf_pingpong)
         ROCKE_SPEC_FAIL(reason, reason_cap, "pp_pre_mfma shapes the rpf_pingpong loop");
+    if(s->pp_end_guard && !(s->rpf_pingpong && !s->uk_xhalo))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "pp_end_guard masks the plain rpf_pingpong loop's prefetch past its end");
     if(s->pp_split_fetch
        && !(s->pp_split_fetch >= 1 && s->pp_split_fetch <= 10 && s->rpf_pingpong == 5))
         ROCKE_SPEC_FAIL(
