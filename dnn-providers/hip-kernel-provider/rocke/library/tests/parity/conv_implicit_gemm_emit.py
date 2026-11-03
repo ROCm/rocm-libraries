@@ -1387,6 +1387,15 @@ def _gfx942_3d_spec(idx: int):
     # with lane-contiguous pairs.
     knobs[133] = (55, dict(split_k=2, split_atomic_agent=True))
     knobs[134] = (55, dict(split_k=2, split_atomic_agent=True, split_atomic_pairs=True))
+    # 135: split_atomic_fast (the in-bounds tile's unchecked pair walk).
+    knobs[135] = (55, dict(split_k=2, split_atomic_pairs=True, split_atomic_fast=True))
+    # 136-137: epi_store_fast (the packed in-bounds tile's constant-step
+    # store), plain and on the split-K binary (predicate only).
+    knobs[136] = (55, dict(epi_store_fast=True))
+    knobs[137] = (
+        55,
+        dict(reg_prefetch=1, epi_store_fast=True, split_k=2, split_atomic_pairs=True),
+    )
     # 131-132: the plain uk_xhalo loop with xh_stride_m (the A store's _xa
     # map, each tap's fragments shifted from the previous tap's).
     knobs[131] = (55, dict(_xp, xh_stride_m=True, defer_mfma=2, vmem_interleave=2))

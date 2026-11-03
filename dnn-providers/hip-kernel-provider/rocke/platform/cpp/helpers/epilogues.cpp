@@ -724,6 +724,10 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* 
     epi.m_chunks = 1;
     epi.lds_barriers = false;
     epi.atomic_row_batch = false;
+    epi.atomic_fast_full = false;
+    epi.fast_ok = NULL;
+    epi.fast_row_pitch = NULL;
+    epi.fast_col_base = NULL;
     epi.atomic_syncscope = NULL;
     epi.atomic_row_map = NULL;
     epi.atomic_row_map_user = NULL;
@@ -775,6 +779,10 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid_op(const rocke_mmaop
     epi.m_chunks = 1;
     epi.lds_barriers = false;
     epi.atomic_row_batch = false;
+    epi.atomic_fast_full = false;
+    epi.fast_ok = NULL;
+    epi.fast_row_pitch = NULL;
+    epi.fast_col_base = NULL;
     epi.atomic_syncscope = NULL;
     epi.atomic_row_map = NULL;
     epi.atomic_row_map_user = NULL;
@@ -985,6 +993,44 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
         return;
     }
     vecs_per_thread = (grid->tile_m * grid->tile_n / sv) / threads;
+    const int vpr_ = grid->tile_n / sv;
+    const bool fast_ = epi->fast_ok != NULL && _bf16_out && sv > 1 && threads % vpr_ == 0;
+    if(fast_)
+    {
+        /* fast_ok: the in-bounds packed tile at a constant row step. */
+        rocke_value_t* c_tnv = rocke_b_const_i32(b, vpr_);
+        rocke_value_t* c_eb2 = rocke_b_const_i32(b, 2);
+        rocke_if_else_t fie = rocke_b_scf_if_else(b, epi->fast_ok);
+        rocke_b_region_enter(b, fie.then_region);
+        {
+            const int rpe = threads / vpr_;
+            rocke_value_t* r0 = rocke_b_div(b, grid->tid, c_tnv);
+            rocke_value_t* cm0 = rocke_b_mod(b, grid->tid, c_tnv);
+            rocke_value_t* col0 = rocke_b_mul(b, cm0, rocke_b_const_i32(b, sv));
+            rocke_value_t* mr = rocke_b_add(b, grid->block_m_off, r0);
+            rocke_value_t* mp = rocke_b_mul(b, mr, epi->fast_row_pitch);
+            rocke_value_t* nc = rocke_b_add(b, grid->block_n_off, col0);
+            rocke_value_t* base = rocke_b_add(b, mp, nc);
+            if(epi->fast_col_base != NULL)
+                base = rocke_b_add(b, base, epi->fast_col_base);
+            rocke_value_t* base_b = rocke_b_mul(b, base, c_eb2);
+            rocke_value_t* step_b
+                = rocke_b_mul(b, epi->fast_row_pitch, rocke_b_const_i32(b, 2 * rpe));
+            for(int e2 = 0; e2 < vecs_per_thread; ++e2)
+            {
+                rocke_value_t* row = e2 ? rocke_b_add(b, r0, rocke_b_const_i32(b, e2 * rpe)) : r0;
+                rocke_value_t* off_b
+                    = e2 ? rocke_b_add(b, base_b, rocke_b_mul(b, step_b, rocke_b_const_i32(b, e2)))
+                         : base_b;
+                rocke_value_t* li[2] = {row, col0};
+                rocke_value_t* vbf = rocke_b_smem_load_vN(b, c_smem, li, 2, rocke_bf16(), sv);
+                rocke_b_buffer_store_vN_bf16(
+                    b, d_rsrc, off_b, rocke_b_const_i32(b, 0), vbf, sv / 2);
+            }
+        }
+        rocke_b_region_leave(b);
+        rocke_b_region_enter(b, fie.else_region);
+    }
     c_threads = rocke_b_const_i32(b, threads);
     c_tile_n_div_vec = rocke_b_const_i32(b, grid->tile_n / sv);
     c_elem_bytes = rocke_b_const_i32(b, _fp32_out ? 4 : 2);
@@ -1073,6 +1119,8 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
             }
         }
     }
+    if(fast_)
+        rocke_b_region_leave(b);
 }
 
 void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
@@ -1345,13 +1393,58 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
         /* _atomic_pairs binds c_threads / c_ppr, then _atomic_pairs_checked
          * binds its own pair. */
         (void)rocke_b_const_i32(b, thr);
-        (void)rocke_b_const_i32(b, ppr);
+        rocke_value_t* c_ppr0 = rocke_b_const_i32(b, ppr);
+        rocke_if_else_t ff_ie;
+        const bool fast_full = epi->atomic_fast_full && thr % ppr == 0 && bounds_m != NULL
+                               && bounds_n != NULL && epi->atomic_row_map == NULL;
+        if(fast_full)
+        {
+            /* atomic_fast_full: a wholly in-bounds tile walks its pairs at a
+             * constant row step without checks; the edge tiles check. */
+            rocke_value_t* me
+                = rocke_b_add(b, grid->block_m_off, rocke_b_const_i32(b, grid->tile_m));
+            rocke_value_t* f1 = rocke_b_cmp_le(b, me, bounds_m);
+            rocke_value_t* ne
+                = rocke_b_add(b, grid->block_n_off, rocke_b_const_i32(b, grid->tile_n));
+            rocke_value_t* f2 = rocke_b_cmp_le(b, ne, bounds_n);
+            rocke_value_t* full = rocke_b_land(b, f1, f2);
+            ff_ie = rocke_b_scf_if_else(b, full);
+            rocke_b_region_enter(b, ff_ie.then_region);
+            {
+                const int rpe = thr / ppr;
+                rocke_value_t* r0 = rocke_b_div(b, grid->tid, c_ppr0);
+                rocke_value_t* cm0 = rocke_b_mod(b, grid->tid, c_ppr0);
+                rocke_value_t* col0 = rocke_b_mul(b, cm0, rocke_b_const_i32(b, 2));
+                rocke_value_t* mr = rocke_b_add(b, grid->block_m_off, r0);
+                rocke_value_t* mw = rocke_b_mul(b, mr, wg_N);
+                rocke_value_t* nc = rocke_b_add(b, grid->block_n_off, col0);
+                rocke_value_t* base = rocke_b_add(b, mw, nc);
+                if(col_offset != NULL)
+                    base = rocke_b_add(b, base, col_offset);
+                rocke_value_t* step = rocke_b_mul(b, wg_N, rocke_b_const_i32(b, rpe));
+                for(int e = 0; e < total / thr; ++e)
+                {
+                    rocke_value_t* row = e ? rocke_b_add(b, r0, rocke_b_const_i32(b, e * rpe)) : r0;
+                    rocke_value_t* off
+                        = e ? rocke_b_add(b, base, rocke_b_mul(b, step, rocke_b_const_i32(b, e)))
+                            : base;
+                    rocke_value_t* idx[2] = {row, col0};
+                    rocke_value_t* vec = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), 2);
+                    rocke_b_global_atomic_add_pk_bf16_ex(
+                        b, dw_ptr, off, vec, NULL, epi->atomic_syncscope, NULL);
+                }
+            }
+            rocke_b_region_leave(b);
+            rocke_b_region_enter(b, ff_ie.else_region);
+        }
         rocke_value_t* c_thr = rocke_b_const_i32(b, thr);
         rocke_value_t* c_ppr = rocke_b_const_i32(b, ppr);
         if(epi->atomic_row_batch)
         {
             epi_atomic_pairs_batched(
                 b, epi, c_smem, dw_ptr, wg_N, col_offset, bounds_m, bounds_n, total / thr, NULL);
+            if(fast_full)
+                rocke_b_region_leave(b);
             return;
         }
         if(epi->atomic_row_map != NULL)
@@ -1392,6 +1485,8 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
             if(ok != NULL)
                 rocke_b_region_leave(b);
         }
+        if(fast_full)
+            rocke_b_region_leave(b);
         return;
     }
     threads = rocke_warp_grid_block_size(grid);

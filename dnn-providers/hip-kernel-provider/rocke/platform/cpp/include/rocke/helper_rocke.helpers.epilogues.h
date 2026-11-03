@@ -193,6 +193,17 @@ typedef struct rocke_cshuffle_epilogue
      * wave-uniform, one iteration per lane at most) the rows' map done once
      * and read back with v_readlane (Python atomic_row_batch). Default false. */
     bool atomic_row_batch;
+    /* atomic_pair_lanes: a workgroup whose tile is wholly in bounds skips the
+     * per-pair checks and walks its pairs at a constant row step (Python
+     * atomic_fast_full). Default false. */
+    bool atomic_fast_full;
+    /* store(): when fast_ok (an i1 the caller computes: tile in bounds and D
+     * rows fast_row_pitch elements apart, offset = m * pitch + n +
+     * fast_col_base) holds, the bf16 wide stores walk the tile at a constant
+     * row step (Python fast_ok / fast_row_pitch / fast_col_base). NULL off. */
+    rocke_value_t* fast_ok;
+    rocke_value_t* fast_row_pitch;
+    rocke_value_t* fast_col_base;
     /* atomic_store's packed bf16 atomics: LLVM sync scope (NULL = system,
      * the default; "agent" = device scope). Python atomic_syncscope. */
     const char* atomic_syncscope;

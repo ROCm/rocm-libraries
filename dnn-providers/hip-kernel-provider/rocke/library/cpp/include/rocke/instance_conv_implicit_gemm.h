@@ -307,6 +307,12 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* split_atomic_pairs: the bf16 atomic store as lane-contiguous pairs (one
      * 4-byte LDS read per pair). */
     bool split_atomic_pairs; /* default false */
+    /* split_atomic_fast (with split_atomic_pairs, unchunked): a wholly
+     * in-bounds tile walks its pairs at a constant row step (tag sapf). */
+    bool split_atomic_fast; /* default false */
+    /* epi_store_fast: the unchunked bf16 cshuffle store walks a packed,
+     * in-bounds tile at a constant row step (tag esf). */
+    bool epi_store_fast; /* default false */
     /* split_det (1, 2): deterministic split: every non-owner slice stores its
      * f32 partial tile into its slot of sk_partials and counts in; the owner
      * (last slice) folds them in slot order and stores D once. 2 moves the

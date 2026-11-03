@@ -485,7 +485,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->xh_wait_smem, "xws");
     ROCKE_FLAG(s->split_atomic_agent, "saa");
     ROCKE_FLAG(s->split_atomic_pairs, "sapl");
-    /* (sapf, esf: Python-only knobs, off.) */
+    ROCKE_FLAG(s->split_atomic_fast, "sapf");
+    ROCKE_FLAG(s->epi_store_fast, "esf");
     ROCKE_FLAG(s->split_xcd_remap > 0, "skx%d", s->split_xcd_remap);
     ROCKE_FLAG(s->split_streamk, "fsk");
     /* (sfs, szf, xsub, ppfd: Python-only knobs, off.) */
@@ -1149,7 +1150,8 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                        size_t reason_cap)
 {
     const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_atomic_agent
-                       || s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid;
+                       || s->split_atomic_fast || s->split_det || s->split_xcd_remap
+                       || s->split_streamk || s->split_hybrid;
     if(s->split_k == 1)
     {
         if(s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid)
@@ -1157,7 +1159,7 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "split_xcd_remap / split_streamk / split_flag_store need the split-K "
                             "binary");
-        if(s->split_atomic_pairs || s->split_atomic_agent)
+        if(s->split_atomic_pairs || s->split_atomic_agent || s->split_atomic_fast)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "split_atomic_agent/split_atomic_pairs need the split-K binary "
@@ -1167,6 +1169,14 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                 reason, reason_cap, "split_tail needs the split-K binary (split_k > 1)");
         return true;
     }
+    if(s->epi_store_fast
+       && (s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0 || s->cshuffle_m_chunks > 1
+           || s->dtype_d == NULL || strcmp(s->dtype_d, "bf16") != 0 || s->wave_size != 64))
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "epi_store_fast: the unchunked bf16 wave64 cshuffle store only");
+    if(s->split_atomic_fast && (!s->split_atomic_pairs || s->cshuffle_m_chunks > 1))
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "split_atomic_fast is the unchunked split_atomic_pairs store");
     if(s->split_k == -1 || !rocke_conv_fwd_split_k_atomic(s)
        || (s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0))
     {

@@ -785,6 +785,35 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     if(spec->cshuffle_m_chunks > 1)
         epi.m_chunks = spec->cshuffle_m_chunks;
     epi.lds_barriers = spec->epi_lds_barriers;
+    if(spec->epi_store_fast && !rocke_conv_problem_is_pointwise(p) && sctx != NULL)
+    {
+        /* epi_store_fast: packed N[D]HWK and the tile in bounds -> the wide
+         * stores at offset m * K + k_out, a constant row step. */
+        rocke_conv_build_ctx_t* c = sctx;
+        rocke_value_t* e1 = rocke_b_cmp_eq(b, c->p_D_stride_wo, c->p_K);
+        rocke_value_t* wk = rocke_b_mul(b, c->p_Wo, c->p_K);
+        rocke_value_t* e2 = rocke_b_cmp_eq(b, c->p_D_stride_ho, wk);
+        rocke_value_t* pk = rocke_b_land(b, e1, e2);
+        if(p->is_3d)
+        {
+            rocke_value_t* hh = rocke_b_mul(b, c->p_Ho, c->p_D_stride_ho);
+            pk = rocke_b_land(b, pk, rocke_b_cmp_eq(b, c->p_D_stride_do, hh));
+            rocke_value_t* dd = rocke_b_mul(b, c->p_Do, c->p_D_stride_do);
+            pk = rocke_b_land(b, pk, rocke_b_cmp_eq(b, c->p_D_stride_n, dd));
+        }
+        else
+        {
+            rocke_value_t* hh = rocke_b_mul(b, c->p_Ho, c->p_D_stride_ho);
+            pk = rocke_b_land(b, pk, rocke_b_cmp_eq(b, c->p_D_stride_n, hh));
+        }
+        rocke_value_t* me = rocke_b_add(b, c->block_m_off_v, rocke_b_const_i32(b, c->block_m));
+        pk = rocke_b_land(b, pk, rocke_b_cmp_le(b, me, bound_m));
+        rocke_value_t* ne = rocke_b_add(b, c->block_n_off_v, rocke_b_const_i32(b, c->block_n));
+        pk = rocke_b_land(b, pk, rocke_b_cmp_le(b, ne, bound_n));
+        epi.fast_ok = pk;
+        epi.fast_row_pitch = c->p_K;
+        epi.fast_col_base = k_out_group_base;
+    }
 
     /* AOT: the D descriptor, the grouped k_out base and the store bounds all
      * come from the build context. Python builds them before the K-loop (so
@@ -795,6 +824,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
         epi.atomic_pair_lanes = spec->split_atomic_pairs;
         if(spec->split_atomic_agent)
             epi.atomic_syncscope = "agent";
+        if(spec->split_atomic_fast)
+            epi.atomic_fast_full = true;
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
         dctx.k_out_group_base = k_out_group_base;
