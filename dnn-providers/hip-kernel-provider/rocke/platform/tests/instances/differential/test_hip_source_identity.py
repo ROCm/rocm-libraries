@@ -7,7 +7,7 @@ the Python and C++ engines. The HIP-source route has a lowerer in each engine as
 well -- ``rocke.core.lower_hip.lower_kernel_to_hip`` and
 ``rocke_engine.lower_serialized_ir_hip`` -- and this test holds it to the same
 rule: for every kernel the parity emitters build, both lowerers return the same
-text, or both refuse the kernel.
+text, or both refuse the kernel with the same error type and message.
 
 The input is the Python-built kernel, serialized. Whether the two engines'
 builders produce the same IR is the differential gate's ``ir`` mode; here one
@@ -24,7 +24,6 @@ Needs the ``rocke_engine`` extension; skipped without it.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -32,15 +31,17 @@ from pathlib import Path
 
 import pytest
 
-rocke_engine = pytest.importorskip("rocke_engine")
+pytest.importorskip("rocke_engine")
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import run_diff  # noqa: E402 -- the differential harness is not a package
 
-from rocke.core.ir_serialize import parse  # noqa: E402
-from rocke.core.lower_hip import lower_kernel_to_hip  # noqa: E402
+from rocke.tests.engines import (  # noqa: E402
+    HipRefusal,
+    hip_outcomes_of_both_engines,
+)
 
 # Emitters that build no kernel, so they have no target-ir output.
 NO_KERNEL_FAMILIES = {
@@ -54,25 +55,11 @@ EMITTER_TIMEOUT_S = 900
 FAMILIES = run_diff.find_families(python_only=True)
 
 
-def _emitter_env(src_dir: Path) -> dict[str, str]:
-    """The environment the gate gives a Python emitter: the rocke package, the
-    library, and the parity directories (for ``_emit_common``) on the path."""
-    env = dict(os.environ)
-    roots = [
-        str(run_diff.PYROOT),
-        str(run_diff.LIB_ROOT),
-        str(src_dir),
-        str(run_diff.PARITY),
-    ]
-    if env.get("PYTHONPATH"):
-        roots.append(env["PYTHONPATH"])
-    env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(roots))
-    return env
-
-
-def _target_ir_outputs(name: str, src_dir: Path) -> list[tuple[int, str, str]]:
+def _target_ir_outputs(
+    name: str, src_dir: Path
+) -> list[tuple[int, str, run_diff.Emission]]:
     """Run one family's emitter in the target-ir mode over its configs; return
-    ``(config index, stdout, stderr)`` for every config it ran."""
+    ``(config index, stdout, emission)`` for every config it ran."""
     emitter = src_dir / f"{name}_emit.py"
     with tempfile.TemporaryDirectory(prefix=f"hip_identity_{name}_") as out_dir:
         proc = subprocess.run(
@@ -85,7 +72,7 @@ def _target_ir_outputs(name: str, src_dir: Path) -> list[tuple[int, str, str]]:
                 "target-ir",
                 *map(str, range(run_diff.config_limit(name))),
             ],
-            env=_emitter_env(src_dir),
+            env=run_diff.python_emitter_env(src_dir),
             check=False,  # the assert below reports the worker's stderr
             capture_output=True,
             text=True,
@@ -99,7 +86,7 @@ def _target_ir_outputs(name: str, src_dir: Path) -> list[tuple[int, str, str]]:
             record = json.loads(line)
             out = Path(out_dir) / f"{record['idx']}.out"
             text = out.read_text(encoding="utf-8") if out.exists() else ""
-            runs.append((record["idx"], text, record["stderr"]))
+            runs.append((record["idx"], text, run_diff.emission_from_record(record)))
         return runs
 
 
@@ -118,30 +105,39 @@ def _kernels(text: str) -> list[tuple[str, str]]:
     return [(arch, "".join(lines)) for arch, lines in blocks]
 
 
-def _lower_both(ir: str, arch: str) -> tuple[str | None, str | None, str, str]:
-    """Each engine's HIP source for one serialized kernel, or its refusal."""
-    py = cpp = None
-    py_error = cpp_error = ""
-    try:
-        py = lower_kernel_to_hip(parse(ir), arch=arch)
-    except Exception as exc:  # noqa: BLE001 -- a refusal is a result
-        py_error = f"{type(exc).__name__}: {exc}"
-    try:
-        cpp = rocke_engine.lower_serialized_ir_hip(ir, arch)
-    except Exception as exc:  # noqa: BLE001 -- a refusal is a result
-        cpp_error = str(exc)
-    return py, cpp, py_error, cpp_error
-
-
-def _first_difference(py: str, cpp: str) -> str:
-    py_lines, cpp_lines = py.splitlines(), cpp.splitlines()
-    for number, (python_line, cpp_line) in enumerate(zip(py_lines, cpp_lines), start=1):
-        if python_line != cpp_line:
+def _first_difference(python_outcome: str, native_outcome: str) -> str:
+    python_lines, native_lines = (
+        python_outcome.splitlines(),
+        native_outcome.splitlines(),
+    )
+    for number, (python_line, native_line) in enumerate(
+        zip(python_lines, native_lines), start=1
+    ):
+        if python_line != native_line:
             return (
                 f"line {number}: Python {python_line.strip()!r}, "
-                f"C++ {cpp_line.strip()!r}"
+                f"C++ {native_line.strip()!r}"
             )
-    return f"Python has {len(py_lines)} lines, C++ {len(cpp_lines)}"
+    return f"Python has {len(python_lines)} lines, C++ {len(native_lines)}"
+
+
+def _disagreement(
+    python_outcome: str | HipRefusal, native_outcome: str | HipRefusal
+) -> str | None:
+    """How the two engines' outcomes for one kernel differ, or None if they agree."""
+    if python_outcome == native_outcome:
+        return None
+    python_refuses = isinstance(python_outcome, HipRefusal)
+    native_refuses = isinstance(native_outcome, HipRefusal)
+    if python_refuses and native_refuses:
+        return (
+            f"both refuse, differently: Python {python_outcome}, C++ {native_outcome}"
+        )
+    if python_refuses:
+        return f"only Python refuses: {python_outcome}"
+    if native_refuses:
+        return f"only C++ refuses: {native_outcome}"
+    return _first_difference(python_outcome, native_outcome)
 
 
 @pytest.mark.parametrize(
@@ -150,13 +146,15 @@ def _first_difference(py: str, cpp: str) -> str:
 def test_both_engines_emit_the_same_hip_source(name: str, src_dir: Path) -> None:
     runs = _target_ir_outputs(name, src_dir)
     if name in NO_KERNEL_FAMILIES:
-        assert runs and all("unknown mode" in err for _, _, err in runs), (
+        assert runs and all(
+            run_diff.mode_unsupported(emission) for _, _, emission in runs
+        ), (
             f"{name} is listed as building no kernel "
             f"({NO_KERNEL_FAMILIES[name]}) but accepted the target-ir mode"
         )
         return
     assert not any(
-        "unknown mode" in err for _, _, err in runs
+        run_diff.mode_unsupported(emission) for _, _, emission in runs
     ), f"{name}_emit.py does not accept the target-ir mode"
 
     compared = 0
@@ -164,15 +162,11 @@ def test_both_engines_emit_the_same_hip_source(name: str, src_dir: Path) -> None
     for index, text, _ in runs:
         for block, (arch, ir) in enumerate(_kernels(text)):
             where = f"{name} config {index} kernel {block} ({arch})"
-            py, cpp, py_error, cpp_error = _lower_both(ir, arch)
+            python_outcome, native_outcome = hip_outcomes_of_both_engines(ir, arch)
             compared += 1
-            if py is not None and cpp is not None:
-                if py != cpp:
-                    disagreements.append(f"{where}: {_first_difference(py, cpp)}")
-            elif py is not None:
-                disagreements.append(f"{where}: only C++ refuses: {cpp_error}")
-            elif cpp is not None:
-                disagreements.append(f"{where}: only Python refuses: {py_error}")
+            difference = _disagreement(python_outcome, native_outcome)
+            if difference is not None:
+                disagreements.append(f"{where}: {difference}")
     assert compared, f"{name}: the emitter built no kernel in any config"
     assert not disagreements, (
         f"{len(disagreements)} of {compared} {name} kernels lower to different "

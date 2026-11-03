@@ -37,7 +37,7 @@ def test_scaled_mfma_batch_reenters_and_terminates(monkeypatch, flavor):
             "0",
             "ll",
         ],
-        env=run_diff._python_emitter_env(run_diff.PARITY),
+        env=run_diff.python_emitter_env(run_diff.PARITY),
         capture_output=True,
         check=True,
         timeout=run_diff.TIMEOUT,
