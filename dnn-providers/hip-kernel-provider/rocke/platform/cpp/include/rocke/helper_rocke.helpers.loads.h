@@ -136,6 +136,12 @@ typedef struct rocke_coalesced_tile_loader
     /* Python kp_line (row_kpack > 1): line-major lane decode of the packed
      * units (0 = column-group fastest). */
     int kp_line;
+    /* load_global only: emit everything but the buffer reads (a recording
+     * pass, Python's suppressed buffer_load_vN; staged v = NULL), and
+     * vec_range = [vec_lo, vec_hi) (vec_hi 0 = every vector). */
+    bool no_loads;
+    int vec_lo;
+    int vec_hi;
 } rocke_coalesced_tile_loader_t;
 
 /* lds_col_xor_params(tile_cols, chunk=8): the conflict-free XOR swizzle of an

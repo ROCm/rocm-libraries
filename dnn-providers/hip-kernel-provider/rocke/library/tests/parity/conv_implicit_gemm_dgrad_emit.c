@@ -260,10 +260,78 @@ static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
     return 0;
 }
 
+/* 77-80: the x-halo record kernel family; mirrors _GFX942_3D_XH in the
+ * Python emitter (the table is there). */
+static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    make_cfg_3d(57, spec, arch);
+    if(idx == 80)
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 0, 1, 1);
+    else
+        spec->problem = rocke_conv_problem_make_3d(
+            1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, 1, 1, 0, 1, 1, 1);
+    spec->problem.groups = 2;
+    spec->tile_m = 256;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 4;
+    spec->warp_n = 1;
+    spec->tapk_xhalo = true;
+    spec->b_kpack = 2;
+    spec->xhalo_exact = true;
+    spec->xh_a_k4 = true;
+    spec->xh_b_wide = true;
+    spec->xh_b_kpad = 4;
+    spec->lds_xor = true;
+    spec->has_waves_per_eu = true;
+    spec->waves_per_eu = 2;
+    if(idx == 77 || idx == 80)
+    {
+        spec->tapk_prefetch = 3;
+        spec->tapk_ilv = 4;
+        spec->tapk_lds_ahead = 1;
+        spec->tapk_lds_barrier = true;
+        spec->xh_order = 6;
+        spec->xh_defer = 4;
+        spec->xh_fast_a = 1;
+        spec->xh_epi = 1;
+        spec->tapk_setprio = 1;
+        spec->xcd_remap = 6;
+        spec->m_band = 11;
+        spec->xh_stride_m = true;
+        spec->xh_epi_lin = true;
+        spec->epi_lds_barriers = true;
+        spec->xh_tap_rsrc = true;
+        spec->tapk_ztrim = idx == 77 ? 2 : 0;
+        spec->cshuffle_m_chunks = 2;
+    }
+    if(idx == 78)
+    {
+        spec->tapk_prefetch = 3;
+        spec->xh_order = 1;
+        spec->tapk_setprio = 1;
+        spec->tapk_lds_barrier = true;
+        spec->tapk_ilv = 4;
+    }
+    if(idx == 79)
+    {
+        spec->tapk_prefetch = 1;
+        spec->tapk_ztrim = 1;
+        spec->xh_fast_a = 1;
+        spec->xh_tap_rsrc = true;
+        spec->xh_epi = 1;
+        spec->tapk_lds_ahead = 1;
+        spec->xh_defer = 2;
+    }
+    return 0;
+}
+
 /* The gfx942 3-D configs by their own number (from 57); mirrors
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx >= 77 && idx <= 80)
+        return make_cfg_3d_xh(idx, spec, arch);
     if(idx >= 71 && idx <= 76)
         return make_cfg_3d_pp(idx, spec, arch);
     if(idx >= 57 && idx <= 70)

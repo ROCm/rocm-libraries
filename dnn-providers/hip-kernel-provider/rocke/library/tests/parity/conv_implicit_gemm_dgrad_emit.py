@@ -1460,6 +1460,44 @@ _GFX942_3D_PP = {
 }
 
 
+# 77-80: the x-halo (tapk_xhalo) record kernel family on the W-extended
+# pW = 0 view of the grouped 3-D problem; keep in lockstep with
+# make_cfg_3d_xh() in conv_implicit_gemm_dgrad_emit.c.
+_XH_COMMON = dict(
+    tile_m=256, tile_n=64, tile_k=32, warp_m=4, warp_n=1, warp_tile_m=16, warp_tile_n=16,
+    warp_tile_k=16, vector_size_a=8, vector_size_b=8, vector_size_c=8, lds_k_pad=0,
+    pipeline="mem", epilogue="cshuffle", tap_outer_k=True, tapk_xhalo=True, b_kpack=2,
+    xhalo_exact=True, xh_a_k4=True, xh_b_wide=True, xh_b_kpad=4, lds_xor=True, waves_per_eu=2,
+)
+_XH_FULL = dict(
+    tapk_prefetch=3, tapk_ilv=4, tapk_lds_ahead=1, tapk_lds_barrier=True, xh_order=6,
+    xh_defer=4, xh_fast_a=1, xh_epi=1, tapk_setprio=1, xcd_remap=6, m_band=11,
+    xh_stride_m=True, xh_epi_lin=True, epi_lds_barriers=True, xh_tap_rsrc=True,
+    tapk_ztrim=2, cshuffle_m_chunks=2,
+)
+_GFX942_3D_XH = {
+    77: dict(_XH_FULL),
+    78: dict(tapk_prefetch=3, xh_order=1, tapk_setprio=1, tapk_lds_barrier=True, tapk_ilv=4),
+    79: dict(tapk_prefetch=1, tapk_ztrim=1, xh_fast_a=1, xh_tap_rsrc=True, xh_epi=1,
+             tapk_lds_ahead=1, xh_defer=2),
+    80: dict(_XH_FULL, tapk_ztrim=0),
+}
+
+
+def _gfx942_3d_xh_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    if idx == 80:
+        p = ConvProblem(N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=0, groups=2)
+    else:
+        p = ConvProblem(
+            N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
+            sD=1, sH=1, sW=1, pD=1, pH=1, pW=0, dD=1, dH=1, dW=1, groups=2,
+        )
+    data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+    return DgradConvSpec(problem=p, data=data, **_XH_COMMON, **_GFX942_3D_XH[idx]), "gfx942"
+
+
 def _gfx942_3d_pp_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1508,6 +1546,8 @@ def _gfx942_3d_any(idx: int):
         return _gfx942_3d_spec(idx)
     if idx in _GFX942_3D_PP:
         return _gfx942_3d_pp_spec(idx)
+    if idx in _GFX942_3D_XH:
+        return _gfx942_3d_xh_spec(idx)
     raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
 
 

@@ -100,6 +100,9 @@ rocke_status_t rocke_coalesced_tile_loader_from_tile(int tile_rows,
         out->elem_dtype = NULL; /* elem_dtype default F16 */
         out->row_kpack = 1;
         out->kp_line = 0;
+        out->no_loads = false;
+        out->vec_lo = 0;
+        out->vec_hi = 0;
     }
     return ROCKE_OK;
 }
@@ -735,7 +738,10 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
         return;
     }
 
-    for(e = 0; e < vecs_per_thread; ++e)
+    const int e_lo = self->vec_lo;
+    const int e_hi = self->vec_hi ? self->vec_hi : vecs_per_thread;
+    int n_st = 0;
+    for(e = e_lo; e < e_hi; ++e)
     {
         rocke_value_t* vec_idx;
         rocke_value_t* row;
@@ -755,18 +761,22 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
             rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
             rocke_value_t* safe
                 = (valid != NULL) ? rocke_b_select(b, valid, off_bytes, c_oob) : off_bytes;
-            v = ctl_buffer_read(b, self, rsrc, safe, c0);
+            if(self->no_loads)
+                v = NULL;
+            else
+                v = ctl_buffer_read(b, self, rsrc, safe, c0);
         }
         else
         {
             v = ctl_global_read(b, self, ptr, off_elems);
         }
 
-        staged->vecs[e].row = row;
-        staged->vecs[e].col = col;
-        staged->vecs[e].v = v;
+        staged->vecs[n_st].row = row;
+        staged->vecs[n_st].col = col;
+        staged->vecs[n_st].v = v;
+        n_st++;
     }
-    staged->count = vecs_per_thread;
+    staged->count = n_st;
 }
 
 void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
