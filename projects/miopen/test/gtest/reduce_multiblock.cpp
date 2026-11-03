@@ -608,7 +608,8 @@ struct WorkspaceSizeCase
     miopenDataType_t compType;
     std::vector<std::size_t> lengths;
     std::vector<std::size_t> outLengths;
-    std::size_t partials; // number of partial results, 0 if the reduction has one pass
+    std::size_t partials;  // number of partial results, 0 if the reduction has one pass
+    bool rejected = false; // the size query throws miopenStatusBadParm
 
     friend std::ostream& operator<<(std::ostream& os, const WorkspaceSizeCase& c)
     {
@@ -637,6 +638,15 @@ std::vector<WorkspaceSizeCase> GetWorkspaceSizeCases()
         {"Int8CompFp32_2x2048", miopenInt8, miopenFloat, {2, 2048}, {2, 1}, 4},
         {"Fp16CompFp32_1x8192", miopenHalf, miopenFloat, {1, 8192}, {1, 1}, 32},
         {"Fp16CompFp32_2x1024_SinglePass", miopenHalf, miopenFloat, {2, 1024}, {2, 1}, 0},
+        // the compute type is narrower than the input type: the partials are smaller than before
+        {"Fp32CompFp16_2x2048", miopenFloat, miopenHalf, {2, 2048}, {2, 1}, 4},
+        {"Fp64CompFp32_2x2048", miopenDouble, miopenFloat, {2, 2048}, {2, 1}, 4},
+        // a compute type without a size matters only if there are partial results
+        {"Fp16CompInt64_2x1024_SinglePass", miopenHalf, miopenInt64, {2, 1024}, {2, 1}, 0},
+        {"Fp16CompInt64_2x2048_Rejected", miopenHalf, miopenInt64, {2, 2048}, {2, 1}, 4, true},
+        // an input type without a size is rejected, with or without partial results
+        {"Int64CompFp32_2x1024_Rejected", miopenInt64, miopenFloat, {2, 1024}, {2, 1}, 0, true},
+        {"Int64CompFp32_2x2048_Rejected", miopenInt64, miopenFloat, {2, 2048}, {2, 1}, 4, true},
     };
 }
 
@@ -670,6 +680,20 @@ TEST_P(GPU_ReduceMultiBlockWorkspace_FP16, PartialsAreStoredInComputeType)
                                                     MIOPEN_NOT_PROPAGATE_NAN,
                                                     MIOPEN_REDUCE_TENSOR_NO_INDICES,
                                                     MIOPEN_32BIT_INDICES};
+
+    if(c.rejected)
+    {
+        try
+        {
+            std::ignore = reduceDesc.GetWorkspaceSize(handle, inDesc, outDesc);
+            ADD_FAILURE() << "no exception thrown";
+        }
+        catch(const miopen::Exception& e)
+        {
+            EXPECT_EQ(e.status, miopenStatusBadParm);
+        }
+        return;
+    }
 
     // one page for the tensor descriptors of the kernels, then the partial results
     constexpr std::size_t descriptorPage = 4096;

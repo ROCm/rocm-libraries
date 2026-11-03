@@ -10,9 +10,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   reduces more than 1024 input elements and the compute type is wider than the input type (for
   example FP16 `AVG` with FP32 compute returned inf). The multi-block reduction stored the partial
   result of each block in the input type; it now stores it in the compute type.
-  `miopenGetReductionWorkspaceSize` therefore returns a larger size for such reductions (the
-  partial results take the size of the compute type), so the workspace has to be allocated with
-  the size it returns.
+  `miopenGetReductionWorkspaceSize` therefore returns a different size for reductions with
+  partial results: larger when the compute type is wider than the input type, smaller when it is
+  narrower. The workspace has to be allocated with the size it returns. For such reductions
+  `miopenGetReductionWorkspaceSize` also returns `miopenStatusBadParm` for a compute type that
+  `miopenReduceTensor` does not support (`miopenInt64`), where it used to fail only in
+  `miopenReduceTensor`.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
