@@ -5548,6 +5548,20 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             int returnAlgoCount = 0;
             status = getBestSolutions(
                 prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
+            // As in hipblasLtMatmulAlgoGetHeuristic: when the size-matched
+            // libraries have no solution for this problem (for example, a
+            // library with only exact-size entries), use a size-independent one.
+            if(returnAlgoCount == 0)
+            {
+                RocblasltContractionProblem probe = prob;
+                topUpWithSizeIndependentSolutions(handle,
+                                                  probe,
+                                                  gemmData,
+                                                  &heuristicResult,
+                                                  &returnAlgoCount,
+                                                  1,
+                                                  prob.workspaceSize);
+            }
             if(returnAlgoCount == 0)
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
