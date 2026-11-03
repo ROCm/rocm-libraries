@@ -498,12 +498,12 @@ class CkVariantBench:
             # A cache past the i32 buffer range needs i64 whatever the variant asks.
             use_i64_kv_addr=flags["use_i64_kv_addr"] or _enable_i64_kv_addr(problem),
         )
-        # kernel_name() does not encode the KV addressing width, so key on it too.
+        # The name carries i64 addressing; the signature keys the per-shape
+        # launch values the cached spec feeds.
         key = (
             shape.signature,
             variant,
             spec.kernel_name(),
-            spec.use_i64_kv_addr,
             self.compile_backend,
         )
         if key not in self._launchers:
