@@ -24,7 +24,15 @@ if(NOT WIN32)
   find_package(amd_smi REQUIRED)
 endif()
 
-set(ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS "1" CACHE STRING
+include(ProcessorCount)
+ProcessorCount(CORE_COUNT)
+math(EXPR _segmented_pairs_offload_jobs "${CORE_COUNT} / 4")
+if(_segmented_pairs_offload_jobs LESS 1)
+  set(_segmented_pairs_offload_jobs 1)
+elseif(_segmented_pairs_offload_jobs GREATER 4)
+  set(_segmented_pairs_offload_jobs 4)
+endif()
+set(ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS "${_segmented_pairs_offload_jobs}" CACHE STRING
     "Device compiler workers for the segmented radix sort pairs benchmark")
 if(NOT ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS MATCHES "^[1-9][0-9]*$")
   message(FATAL_ERROR "ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS must be a positive integer")
