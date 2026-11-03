@@ -17,7 +17,9 @@ if(BUILD_TESTING)
   if(Python3_Interpreter_FOUND AND HIPKERNELPROVIDER_ENABLE_TESTS)
     add_test(NAME rocke_compiler_discovery_source
       COMMAND ${_ROCKE_TEST_LAUNCH} "${Python3_EXECUTABLE}" -m pytest
-              "${CMAKE_CURRENT_SOURCE_DIR}/test_compiler_detection_native.py" -q)
+              "${CMAKE_CURRENT_SOURCE_DIR}/test_compiler_detection_native.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_compiler_session.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_loaded_compilers_windows.py" -q)
     set_tests_properties(rocke_compiler_discovery_source PROPERTIES
       LABELS "ckc;python;host;quick;standard;comprehensive;full"
       TIMEOUT 600

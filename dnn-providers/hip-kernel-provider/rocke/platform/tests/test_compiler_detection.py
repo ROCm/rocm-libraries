@@ -11,13 +11,12 @@ from unittest.mock import Mock, patch
 import pytest
 from rocke.core import lower_llvm
 from rocke.core.ir import IRBuilder
-from rocke.runtime import comgr
+from rocke.runtime import comgr, _session
 
 
 @pytest.fixture(autouse=True)
 def fresh_query(monkeypatch):
-    monkeypatch.setattr(comgr, "_llvm_version_lib", None)
-    monkeypatch.setattr(comgr, "_compiler_info", None)
+    monkeypatch.setattr(_session, "session", _session.RuntimeSession())
     monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
 
 
@@ -144,7 +143,6 @@ def test_unknown_explicit_flavor_fails_without_querying(monkeypatch, value):
 
 def test_auto_lowering_recovers_then_retains_success(monkeypatch):
     monkeypatch.setenv("ROCKE_BACKEND", "python")
-    monkeypatch.setattr(comgr, "_lib", None)
     monkeypatch.setattr(comgr, "_library_for_symbol", lambda fn: None)
     library = compiler_library((23, 0, 0))
     failure = comgr.ComgrError("missing compiler dependency")
@@ -167,7 +165,6 @@ def test_auto_lowering_recovers_then_retains_success(monkeypatch):
 
 
 def test_unqueryable_success_is_retained_without_retry(monkeypatch):
-    monkeypatch.setattr(comgr, "_lib", None)
     monkeypatch.setattr(comgr, "_library_for_symbol", lambda fn: None)
     load = Mock(return_value=SimpleNamespace(_name="unknown.so"))
     monkeypatch.setattr(comgr, "_load_lib", load)
@@ -188,7 +185,6 @@ def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
     monkeypatch.setenv("ROCKE_BACKEND", "python")
     load = Mock(side_effect=AssertionError("explicit lowering loaded COMGR"))
     monkeypatch.setattr(comgr, "_load_lib", load)
-    monkeypatch.setattr(comgr, "_lib", None)
     builder = IRBuilder("explicit_flavor")
     builder.const_i32(1)
     kwargs = {"llvm_flavor": "llvm23"} if source == "api" else {}
@@ -256,8 +252,7 @@ def test_unqualified_future_compiler_is_rejected_before_ir_shape_checks(
 
 
 def test_unloadable_selected_compiler_does_not_query_a_fallback(monkeypatch):
-    monkeypatch.setattr(comgr, "_lib", None)
-    monkeypatch.setattr(comgr, "_mapped_lib_paths", lambda stem: [])
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_compilers", lambda: [])
     monkeypatch.setattr(comgr, "_candidate_lib_paths", lambda *args: ["selected.so"])
     monkeypatch.setattr(comgr, "_add_dll_dir", lambda path: None)
     with patch.object(ctypes, "CDLL", side_effect=OSError("cannot load")) as load:

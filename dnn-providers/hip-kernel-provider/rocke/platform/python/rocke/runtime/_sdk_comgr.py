@@ -4,7 +4,7 @@
 """Locate COMGR owned by the installed SDK distribution without importing it.
 
 Distribution RECORD entries identify both ordinary and nonce-suffixed payloads.
-Native discovery mirrors these ownership and filename rules in compiler_version.cpp.
+The compiler/runtime owner consumes these paths; native IR lowering receives its flavor.
 """
 
 from __future__ import annotations
@@ -22,9 +22,14 @@ def _distribution():
         return None
 
 
-def _payloads(distribution, windows: bool) -> list[str]:
+def _payloads(distribution, windows: bool, *, hip: bool = False) -> list[str]:
     directory = "bin" if windows else "lib"
-    filename = r"amd_comgr\d*\.dll" if windows else r"libamd_comgr\.so(?:\.\d+)*"
+    if hip:
+        filename = (
+            r"amdhip64(?:_?\d+)?\.dll" if windows else r"libamdhip64\.so(?:\.\d+)*"
+        )
+    else:
+        filename = r"amd_comgr\d*\.dll" if windows else r"libamd_comgr\.so(?:\.\d+)*"
     paths = []
     for entry in distribution.files or ():
         parts = PurePosixPath(str(entry)).parts
@@ -48,6 +53,16 @@ def candidates(*, windows: bool = False) -> list[str]:
     if distribution is None:
         return []
     return _payloads(distribution, windows)[:1]
+
+
+def hip_candidates(*, windows: bool = False) -> list[str]:
+    """HIP owned by the same SDK distribution, without initializing that SDK."""
+    distribution = _distribution()
+    return (
+        _payloads(distribution, windows, hip=True)[:1]
+        if distribution is not None
+        else []
+    )
 
 
 def release_for_path(path: str) -> tuple[int, int] | None:

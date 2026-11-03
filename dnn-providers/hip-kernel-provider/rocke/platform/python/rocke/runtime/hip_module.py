@@ -20,13 +20,15 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
 from ._ctypes_bind import _LazyFn
 from ._hip_device_properties import HipDevicePropR0600
-from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
+from . import _session
+from .runtime_coexistence import _add_dll_dir, _candidate_lib_paths
 
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
 HIP_LAUNCH_PARAM_BUFFER_SIZE = ctypes.c_void_p(2)
@@ -88,30 +90,47 @@ class _HipLaunchConfig(ctypes.Structure):
 
 
 def _load_lib() -> ctypes.CDLL:
-    err = None
-    for p in _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"]):
+    from pathlib import Path
+    from ._compiler_query import ComgrError
+
+    values = _session.session.environment
+    paths = _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"], values)
+    explicit = (values if values is not None else os.environ).get("ROCKE_HIP_LIB")
+    selected = explicit or next(
+        (p for p in paths if os.path.isfile(p)), paths[-1] if paths else None
+    )
+    if not selected:
+        raise HipError(
+            "no HIP runtime candidate; provision the SDK runtime or ROCKE_HIP_LIB"
+        )
+    if os.path.dirname(selected):
+        selected = str(Path(selected).absolute())
+    owner = _session.session
+    compiler = owner.compiler
+    requested = (
+        getattr(compiler, "_rocke_actual_path", getattr(compiler, "_name", None))
+        if compiler is not None
+        else (values if values is not None else os.environ).get("ROCKE_COMGR_LIB")
+    )
+    if requested:
         try:
-            _add_dll_dir(p)
-            return ctypes.CDLL(p)
-        except OSError as e:
-            err = e
-    name = "amdhip64.dll" if _IS_WINDOWS else "libamdhip64.so"
-    raise HipError(f"cannot load {name} ({err!r})")
-
-
-# Holds the resolved ``libamdhip64`` handle. Stays ``None`` until the
-# first HIP call actually goes through the runtime; this lets the user
-# import rocke before importing torch (or vice versa) and still end
-# up sharing torch's bundled HIP runtime instead of double-loading the
-# system one.
-_hip: Optional[ctypes.CDLL] = None
+            _session.check_pair(selected, requested)
+        except ComgrError as error:
+            raise HipError(str(error)) from error
+    directory = _add_dll_dir(selected)
+    try:
+        library = ctypes.CDLL(selected)
+        if directory is not None:
+            owner.dll_directories.append(directory)
+        return library
+    except OSError as error:
+        if directory is not None:
+            directory.close()
+        raise HipError(f"cannot load HIP {selected!r}: {error}") from error
 
 
 def _resolve_hip() -> ctypes.CDLL:
-    global _hip
-    if _hip is None:
-        _hip = _load_lib()
-    return _hip
+    return _session.session.resolve("hip", _load_lib)
 
 
 def _b(name: str, *argtypes, restype=ctypes.c_int) -> _LazyFn:

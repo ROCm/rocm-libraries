@@ -24,132 +24,6 @@ _IS_WINDOWS = sys.platform == "win32"
 _PROC_MAPS = "/proc/self/maps"
 
 
-def _mapped_elf_lib_paths(stem: str) -> List[str]:
-    """Loader names survive unlink/NFS renaming of an already mapped library."""
-    import ctypes
-
-    class Info(ctypes.Structure):
-        _fields_ = [("address", ctypes.c_void_p), ("name", ctypes.c_char_p)]
-
-    library = ctypes.CDLL(None)
-    iterate = getattr(library, "dl_iterate_phdr", None)
-    if iterate is None:
-        return []
-    callback_type = ctypes.CFUNCTYPE(
-        ctypes.c_int, ctypes.POINTER(Info), ctypes.c_size_t, ctypes.c_void_p
-    )
-    paths: List[str] = []
-    pattern = re.compile(rf"lib{re.escape(stem)}\.so(?:\.\d+)*")
-    mappings = []
-    try:
-        with open(_PROC_MAPS) as fh:
-            for line in fh:
-                fields = line.rstrip("\n").split(maxsplit=5)
-                if len(fields) == 6:
-                    start, end = fields[0].split("-", 1)
-                    mappings.append((int(start, 16), int(end, 16), fields[5]))
-    except FileNotFoundError:
-        pass
-
-    @callback_type
-    def collect(info, size, data):
-        if size >= ctypes.sizeof(Info) and info.contents.name:
-            path = os.fsdecode(info.contents.name)
-            if pattern.fullmatch(os.path.basename(path)):
-                # The original loader name may refer to a replacement inode
-                # after an SDK uninstall/reinstall. Match its actual mapping,
-                # including NFS's .nfs name or the Linux deleted-file marker.
-                actual = next(
-                    (
-                        name
-                        for start, end, name in mappings
-                        if start <= info.contents.address < end
-                    ),
-                    path + " (identity unavailable)",
-                )
-                if actual not in paths:
-                    paths.append(actual)
-        return 0
-
-    iterate.argtypes = [callback_type, ctypes.c_void_p]
-    iterate.restype = ctypes.c_int
-    iterate(collect, None)
-    return paths
-
-
-def _mapped_lib_paths(stem: str) -> List[str]:
-    """Every mapped library with this filename, independent of torch ownership."""
-    if _IS_WINDOWS:
-        # Platform mocks on POSIX have no Windows loader to inspect.
-        if os.name != "nt":
-            return []
-        import ctypes
-        from ctypes import wintypes
-
-        psapi = ctypes.WinDLL("psapi", use_last_error=True)
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.GetCurrentProcess.restype = wintypes.HANDLE
-        psapi.EnumProcessModules.argtypes = [
-            wintypes.HANDLE,
-            ctypes.POINTER(wintypes.HMODULE),
-            wintypes.DWORD,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        psapi.GetModuleFileNameExW.argtypes = [
-            wintypes.HANDLE,
-            wintypes.HMODULE,
-            wintypes.LPWSTR,
-            wintypes.DWORD,
-        ]
-        process = kernel.GetCurrentProcess()
-        count = 256
-        while True:
-            modules = (wintypes.HMODULE * count)()
-            needed = wintypes.DWORD()
-            if not psapi.EnumProcessModules(
-                process, modules, ctypes.sizeof(modules), ctypes.byref(needed)
-            ):
-                raise OSError(
-                    ctypes.get_last_error(), "cannot inspect mapped runtime libraries"
-                )
-            if needed.value <= ctypes.sizeof(modules):
-                break
-            count = needed.value // ctypes.sizeof(wintypes.HMODULE)
-        names = []
-        for module in modules[: needed.value // ctypes.sizeof(wintypes.HMODULE)]:
-            path = ctypes.create_unicode_buffer(32768)
-            size = psapi.GetModuleFileNameExW(process, module, path, len(path))
-            if not size or size >= len(path):
-                raise OSError(
-                    ctypes.get_last_error(), "cannot identify a mapped runtime library"
-                )
-            # Driver COMGR names differ from the SDK's digit-stamped payloads.
-            suffix = r"(?:_?\d+)?" if stem == "amd_comgr" else r"\d*"
-            if re.fullmatch(
-                rf"{re.escape(stem)}{suffix}\.dll",
-                os.path.basename(path.value),
-                re.IGNORECASE,
-            ):
-                names.append(path.value)
-        return names
-    name_re = re.compile(rf"lib{re.escape(stem)}\.so(?:\.\d+)*")
-    paths = list(_mapped_elf_lib_paths(stem))
-    try:
-        with open(_PROC_MAPS) as fh:
-            for line in fh:
-                fields = line.rstrip("\n").split(maxsplit=5)
-                if len(fields) < 6:
-                    continue
-                path = fields[5]
-                filename = os.path.basename(path.removesuffix(" (deleted)"))
-                if name_re.fullmatch(filename) and path not in paths:
-                    paths.append(path)
-    except FileNotFoundError:
-        # Keep loader evidence on POSIX systems without procfs.
-        return paths
-    return paths
-
-
 def _mapped_lib(stem: str, *, require_unique: bool = False) -> Optional[str]:
     """Find a mapped library without guessing between distinct runtime copies.
 
@@ -196,19 +70,10 @@ def _mapped_lib(stem: str, *, require_unique: bool = False) -> Optional[str]:
 
 
 def _rocm_sdk_core_dirs() -> List[str]:
-    """Package dirs of the ``rocm-sdk-core`` wheel's ``_rocm_sdk_core``, or [].
-
-    Located with ``importlib.util.find_spec``, which does not import the package.
-    """
-    try:
-        import importlib.util
-
-        spec = importlib.util.find_spec("_rocm_sdk_core")
-    except Exception:
-        return []
-    if spec is None or not spec.submodule_search_locations:
-        return []
-    return list(spec.submodule_search_locations)
+    """Owned SDK payload roots, including suffixes; never import payload packages."""
+    from ._sdk_comgr import candidates, hip_candidates
+    paths = candidates(windows=_IS_WINDOWS) + hip_candidates(windows=_IS_WINDOWS)
+    return sorted({os.path.dirname(os.path.dirname(path)) for path in paths})
 
 
 def _rocm_sdk_core_lib(stem: str) -> Optional[str]:
@@ -219,16 +84,14 @@ def _rocm_sdk_core_lib(stem: str) -> Optional[str]:
     sit in ``_rocm_sdk_core/lib`` with only a SONAME (``libamdhip64.so.7``,
     ``libamd_comgr.so.3``), and ``import torch`` preloads them through
     ``rocm_sdk.initialize_process``. Returns the shortest matching name (the
-    bare ``.so`` if present, else the SONAME) or None. POSIX only; Windows uses
-    :func:`_rocm_sdk_dll`.
+    bare ``.so`` if present, else the SONAME) or None. POSIX only; owned
+    Windows runtime paths are selected directly from distribution metadata.
     """
     if _IS_WINDOWS:
         return None
-    for loc in _rocm_sdk_core_dirs():
-        matches = glob.glob(os.path.join(loc, "lib", f"lib{stem}.so*"))
-        if matches:
-            return min(matches, key=lambda p: (len(p), p))
-    return None
+    from ._sdk_comgr import candidates, hip_candidates
+    paths = hip_candidates() if stem == "amdhip64" else candidates()
+    return paths[0] if paths else None
 
 
 def _torch_bundled_lib(stem: str) -> Optional[str]:
@@ -283,27 +146,6 @@ def _torch_bundled_lib(stem: str) -> Optional[str]:
     return _rocm_sdk_core_lib(stem)
 
 
-def _rocm_sdk_dll(stem: str) -> Optional[str]:
-    """Locate a ROCm runtime DLL shipped by the ``rocm-sdk-core`` wheel.
-
-    ROCm-for-Windows torch nightlies (AMD's gfx1151 index / TheRock) put
-    the HIP runtime and comgr in ``_rocm_sdk_core/bin`` with a version
-    suffix (e.g. ``amdhip64_7.dll``, ``amd_comgr0702.dll``) rather than in
-    ``torch/lib``. Returns the first match for ``<stem>*.dll`` or None.
-    """
-    if not _IS_WINDOWS:
-        return None
-    for loc in _rocm_sdk_core_dirs():
-        bindir = os.path.join(loc, "bin")
-        direct = os.path.join(bindir, f"{stem}.dll")
-        if os.path.exists(direct):
-            return direct
-        matches = sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll")))
-        if matches:
-            return matches[0]
-    return None
-
-
 def _version_key(path: str) -> Any:
     """Sort key that orders ROCm install dirs newest-first.
 
@@ -317,7 +159,7 @@ def _version_key(path: str) -> Any:
     return (len(nums) > 0, nums)
 
 
-def _rocm_root_libdirs() -> List[str]:
+def _rocm_root_libdirs(environment=None) -> List[str]:
     """Existing ``<rocm>/lib`` directories discovered WITHOUT importing torch.
 
     This is the crux of removing rocke's accidental torch dependency. The ROCm
@@ -354,8 +196,9 @@ def _rocm_root_libdirs() -> List[str]:
             roots.append(d)
 
     # Tier 1: explicit env roots win over any globbed install.
+    values = os.environ if environment is None else environment
     for env in ("ROCM_PATH", "ROCM_HOME"):
-        root = os.environ.get(env)
+        root = values.get(env)
         if root:
             _add(os.path.join(root, "lib"))
 
@@ -368,30 +211,35 @@ def _rocm_root_libdirs() -> List[str]:
     return roots
 
 
-def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[str]:
-    """COMGR: explicit override or SDK only. HIP: existing runtime policy."""
+def _candidate_lib_paths(
+    stem: str, env_var: str, sonames: List[str], environment=None
+) -> List[str]:
+    """Select from the owner's captured inputs, without importing frameworks."""
+    values = os.environ if environment is None else environment
     if stem == "amd_comgr":
         from ._sdk_comgr import candidates
 
-        override = os.environ.get(env_var)
+        override = values.get(env_var)
         return [override] if override else candidates(windows=_IS_WINDOWS)
     paths: List[str] = []
-    override = os.environ.get(env_var)
+    override = values.get(env_var)
     if override:
-        paths.append(override)
+        return [override]
     bundled = _torch_bundled_lib(stem)
     if bundled is not None:
         paths.append(bundled)
-    sdk = _rocm_sdk_dll(stem)
-    if sdk is not None and sdk not in paths:
-        paths.append(sdk)
+    from ._sdk_comgr import hip_candidates
+
+    for sdk in hip_candidates(windows=_IS_WINDOWS):
+        if sdk not in paths:
+            paths.append(sdk)
     if _IS_WINDOWS:
         # ROCm-for-Windows / HIP SDK install: ``%HIP_PATH%\bin`` /
         # ``%ROCM_PATH%\bin`` / ``%ROCM_HOME%\bin`` then the bare DLL name
         # (resolved via the default DLL search path). The comgr DLL carries a
         # version suffix, so glob it.
         for root_env in ("HIP_PATH", "ROCM_PATH", "ROCM_HOME"):
-            root = os.environ.get(root_env)
+            root = values.get(root_env)
             if not root:
                 continue
             bindir = os.path.join(root, "bin")
@@ -401,7 +249,10 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
         return paths
     # POSIX: each discovered ROCm ``<root>/lib`` contributes the bare .so plus
     # SONAME-suffixed variants, newest install first.
-    for libdir in _rocm_root_libdirs():
+    roots = (
+        _rocm_root_libdirs() if environment is None else _rocm_root_libdirs(environment)
+    )
+    for libdir in roots:
         paths.append(os.path.join(libdir, f"lib{stem}.so"))
         for soname in sonames:
             paths.append(os.path.join(libdir, f"lib{stem}.so.{soname}"))
@@ -419,6 +270,6 @@ def _add_dll_dir(path: str) -> None:
     d = os.path.dirname(path)
     if d and os.path.isdir(d):
         try:
-            os.add_dll_directory(d)
+            return os.add_dll_directory(d)
         except (OSError, AttributeError):
             pass

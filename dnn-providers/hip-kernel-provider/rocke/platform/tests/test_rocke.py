@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import unittest
+from rocke.runtime import _session
 from unittest.mock import patch, Mock
 
 import pytest
@@ -2049,7 +2050,9 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         candidate = "/selected/libamd_comgr.so"
         with (
             patch.object(comgr_mod, "_candidate_lib_paths", return_value=[candidate]),
-            patch.object(comgr_mod, "_mapped_lib_paths", return_value=[]),
+            patch.object(
+                comgr_mod._loaded_libraries, "loaded_compilers", return_value=[]
+            ),
             patch.object(comgr_mod, "_add_dll_dir"),
             patch.object(
                 comgr_mod.ctypes,
@@ -2150,7 +2153,7 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
 
 # Probe run in a child process: print the datalayout the Python resolver picks
 # for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
-# child because both engines retain the first successfully loaded COMGR.
+# child because the Python compilation owner retains its first loaded COMGR.
 _FLAVOR_AUTO_PROBE = """
 import sys
 from rocke.core.ir import IRBuilder
@@ -2404,7 +2407,7 @@ class TestTorchPackageComgrVersion(unittest.TestCase):
 
         with (
             mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": lib}),
-            mock.patch.object(comgr, "_lib", None),
+            mock.patch.object(_session, "session", _session.RuntimeSession()),
         ):
             return comgr.resolved_lib_rocm_version()
 
@@ -7959,7 +7962,9 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         stack.enter_context(mock.patch.object(sys, "path", [site] + sys.path))
         stack.enter_context(mock.patch.object(rc, "_IS_WINDOWS", False))
         stack.enter_context(
-            mock.patch.object(rc, "_mapped_elf_lib_paths", return_value=[])
+            mock.patch.object(
+                comgr_mod._loaded_libraries, "loaded_compilers", return_value=[]
+            )
         )
         stack.enter_context(
             mock.patch.object(rc, "_PROC_MAPS", maps or os.path.join(tmp, "no-maps"))
@@ -7968,7 +7973,9 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             stack.enter_context(
                 mock.patch.object(rc, "_rocm_root_libdirs", return_value=root_libdirs)
             )
-        stack.enter_context(mock.patch.object(comgr_mod, "_lib", None))
+        stack.enter_context(
+            mock.patch.object(_session, "session", _session.RuntimeSession())
+        )
         stack.enter_context(mock.patch.dict(os.environ))
         for name in ("_rocm_sdk_core",) + tuple(absent):
             sys.modules.pop(name, None)
@@ -8015,18 +8022,17 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 # The explicit override still outranks it.
                 os.environ["ROCKE_HIP_LIB"] = "/custom/libamdhip64.so"
                 paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
-                self.assertEqual(paths[:2], ["/custom/libamdhip64.so", hip])
+                self.assertEqual(paths, ["/custom/libamdhip64.so"])
 
-    def test_rocm_sdk_core_libs_need_therock_torch(self):
+    def test_sdk_hip_is_independent_of_inactive_torch(self):
         import contextlib
         import os
         import tempfile
 
         from rocke.runtime import runtime_coexistence as rc
 
-        # A CUDA, CPU or older ROCm torch in a venv that also has rocm-sdk-core
-        # installed: torch loaded no ROCm libs and rocm_sdk is not imported.
-        # Binding to the wheel's HIP there picks a runtime nothing else uses.
+        # Inactive CPU/CUDA torch has no HIP owner. The SDK runtime remains
+        # available for torch-free rocKE use without initializing rocm_sdk.
         with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
             site, core_lib, torch_stub = self._fake_torch_site(tmp)
             self._enter_fake_process(
@@ -8035,7 +8041,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             self.assertIsNone(rc._torch_bundled_lib("amdhip64"))
             self.assertIsNone(rc._torch_bundled_lib("amd_comgr"))
             paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
-            self.assertNotIn(os.path.join(core_lib, "libamdhip64.so.7"), paths)
+            self.assertEqual(paths[0], os.path.join(core_lib, "libamdhip64.so.7"))
 
     def test_torch_lib_prefers_the_copy_already_mapped(self):
         import os
@@ -8119,75 +8125,46 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             self.assertEqual(rc._mapped_lib("amdhip64"), foreign)
 
     def test_comgr_override_rejects_distinct_mapped_files_and_keeps_aliases(self):
-        import contextlib
         import os
         import tempfile
         from unittest import mock
-
+        from types import SimpleNamespace
         from rocke.runtime import comgr as comgr_mod
-        from rocke.runtime import runtime_coexistence as rc
+        from rocke.runtime._loaded_libraries import LoadedCompiler
+        from rocke.runtime._compiler_query import file_signature
 
-        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
-            site, core_lib, torch_stub = self._fake_torch_site(tmp)
-            wheel = os.path.join(core_lib, "libamd_comgr.so.3")
-            with open(wheel, "wb") as fh:
-                fh.write(b"\x7fELF")
-            host = os.path.join(tmp, "libamd_comgr.so.3")
-            with open(host, "wb") as fh:
-                fh.write(b"\x7fELF")
-            maps = os.path.join(tmp, "maps")
-            with open(maps, "w") as fh:
-                for address in ("7f00-7f01", "7f01-7f02"):
-                    fh.write(f"{address} r-xp 00000000 08:01 11 {wheel}\n")
-            self._enter_fake_process(stack, tmp, site, {"torch": torch_stub}, maps=maps)
-            stack.enter_context(mock.patch.object(comgr_mod, "_IS_WINDOWS", False))
-
-            os.environ["ROCKE_COMGR_LIB"] = host
-            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
-                with self.assertRaises(comgr_mod.ComgrError) as error:
-                    comgr_mod._load_lib()
-                load.assert_not_called()
-            self.assertIn(repr(host), str(error.exception))
-            self.assertIn(repr(wheel), str(error.exception))
-            self.assertIn("separate process", str(error.exception))
-
-            same_file = os.path.join(core_lib, "..", "lib", "libamd_comgr.so.3")
-            os.environ["ROCKE_COMGR_LIB"] = same_file
-            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
-                self.assertIs(comgr_mod._load_lib(), load.return_value)
-                load.assert_called_once_with(same_file)
-
-            # Explicit overrides never fall back to a different candidate.
-            missing = os.path.join(tmp, "missing", "libamd_comgr.so.3")
-            os.environ["ROCKE_COMGR_LIB"] = missing
-            self.assertEqual(
-                rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]),
-                [missing],
+        with tempfile.TemporaryDirectory() as tmp:
+            selected, foreign = os.path.join(tmp, "selected.so"), os.path.join(
+                tmp, "compiler.so"
             )
-            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
-                with self.assertRaises(comgr_mod.ComgrError):
+            for path in (selected, foreign):
+                open(path, "wb").close()
+            handle = SimpleNamespace(_name=foreign)
+            mapped = LoadedCompiler(handle, foreign, file_signature(foreign))
+            with (
+                mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": selected}),
+                mock.patch.object(
+                    comgr_mod._loaded_libraries,
+                    "loaded_compilers",
+                    return_value=[mapped],
+                ),
+                mock.patch.object(comgr_mod._loaded_libraries, "release"),
+                mock.patch.object(comgr_mod.ctypes, "CDLL") as load,
+            ):
+                with self.assertRaisesRegex(comgr_mod.ComgrError, "exact-file"):
                     comgr_mod._load_lib()
                 load.assert_not_called()
-
-            # Any distinct mapped copy is a conflict, even if the selected
-            # file itself is also mapped. No address-order preference applies.
-            with open(maps, "a") as fh:
-                fh.write(f"7f02-7f03 r-xp 00000000 08:01 12 {host}\n")
-            os.environ["ROCKE_COMGR_LIB"] = host
-            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
-                with self.assertRaises(comgr_mod.ComgrError):
-                    comgr_mod._load_lib()
+            with (
+                mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": foreign}),
+                mock.patch.object(
+                    comgr_mod._loaded_libraries,
+                    "loaded_compilers",
+                    return_value=[mapped],
+                ),
+                mock.patch.object(comgr_mod.ctypes, "CDLL") as load,
+            ):
+                self.assertIs(comgr_mod._load_lib(), handle)
                 load.assert_not_called()
-
-            # Without a mapped library, the override's original loader error
-            # remains actionable and still has no SDK fallback.
-            with mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")):
-                with mock.patch.object(
-                    comgr_mod.ctypes, "CDLL", side_effect=OSError("invalid ELF")
-                ) as load:
-                    with self.assertRaisesRegex(comgr_mod.ComgrError, "invalid ELF"):
-                        comgr_mod._load_lib()
-                    load.assert_called_once_with(host)
 
     def test_sdk_comgr_selection_ignores_mapped_state_and_system_release(self):
         import contextlib
@@ -8330,7 +8307,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 mock.patch.object(rc, "_IS_WINDOWS", False),
                 mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")),
                 mock.patch.object(rc, "_rocm_root_libdirs", return_value=[]),
-                mock.patch.object(comgr_mod, "_lib", None),
+                mock.patch.object(_session, "session", _session.RuntimeSession()),
                 mock.patch.dict(os.environ),
             ):
                 sys.modules.pop("_rocm_sdk_core", None)

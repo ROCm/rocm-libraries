@@ -18,8 +18,9 @@ listing every kernel -- reaches the backend. Linking relocatables instead
 would leave one metadata note per object, and the HIP runtime reads only one.
 
 The resulting HSACO bytes are returned to Python and can be handed
-straight to `hipModuleLoadData` (see `hip_module.py`). No subprocesses,
-no `<hip/hip_runtime.h>` parsing, no clang spawn.
+straight to `hipModuleLoadData` (see `hip_module.py`). Compilation stays in-process;
+only exceptional cold compatibility admission can use an isolated version probe.
+No `<hip/hip_runtime.h>` parsing or external compilation driver is needed.
 
 The library is supplied by ``rocm-sdk-core`` (the ``rocke[sdk-core]`` extra),
 or a nonempty ``ROCKE_COMGR_LIB`` explicit override.
@@ -32,18 +33,25 @@ import ctypes
 import os
 import re
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
+from . import _loaded_libraries, _session
+from ._compiler_probe import probe_version
+from ._compiler_query import (
+    ComgrError,
+    CompilerInfo,
+    _Handle,
+    _library_for_symbol,
+    _probe_llvm_version,
+    query_info,
+)
 from ._ctypes_bind import _LazyFn
 from ._sdk_comgr import release_for_path
 from .runtime_coexistence import (
-    _IS_WINDOWS,
     _add_dll_dir,
     _candidate_lib_paths,
-    _mapped_lib_paths,
 )
 
 # Status codes.
@@ -66,72 +74,105 @@ AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = 0x4
 AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = 0x7
 
 
-class ComgrError(RuntimeError):
-    pass
-
-
 class ComgrProcessDied(ComgrError):
     """The process compiling one module (``fresh_process=True``) died before
     it reported a result or an error: a toolchain crash, not a compile error."""
 
 
-def _load_lib() -> ctypes.CDLL:
-    # Selection never adopts a foreign mapped compiler. Check every mapped copy
-    # before dlopen: two distinct COMGRs can register LLVM options and abort.
-    paths = _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
-    if paths:
-        selected = paths[0]
-        for mapped in _mapped_lib_paths("amd_comgr"):
-            try:
-                same_file = os.path.samefile(selected, mapped)
-            except OSError:
-                same_file = False
-            if not same_file:
-                raise ComgrError(
-                    f"Selected COMGR {selected!r} differs from mapped COMGR "
-                    f"{mapped!r} or its file identity cannot be established; "
-                    "opening a second COMGR can abort LLVM. Use the same SDK "
-                    "file, an explicit ROCKE_COMGR_LIB pointing at the mapped "
-                    "file, or compile in a separate process."
-                )
-    failures: List[Tuple[str, OSError]] = []
-    for p in paths:
-        try:
-            _add_dll_dir(p)
-            return ctypes.CDLL(p)
-        except OSError as e:
-            failures.append((p, e))
-    name = "amd_comgr.dll" if _IS_WINDOWS else "libamd_comgr.so"
-    remedy = (
-        "Install 'rocke[sdk-core]' from an AMD ROCm wheel index, or set "
-        "ROCKE_COMGR_LIB to an explicit COMGR library from your ROCm install. "
-        "See the COMGR installation documentation for supported SDK releases."
+def _load_lib(explicit_path: str | None = None) -> ctypes.CDLL:
+    values = _session.session.environment
+    paths = (
+        [explicit_path]
+        if explicit_path is not None
+        else _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"], values)
     )
-    if not failures:
+    if not paths:
         raise ComgrError(
-            f"cannot load {name}: no candidate path was produced. {remedy}"
+            "cannot load COMGR: no candidate path was produced. Install 'rocke[sdk-core]' or set ROCKE_COMGR_LIB"
         )
-    tried = "\n".join(f"  {path}: {exc}" for path, exc in failures)
-    raise ComgrError(
-        f"cannot load {name}; {len(failures)} candidate(s) failed:\n{tried}\n{remedy}"
+    selected = paths[0]
+    explicit = explicit_path is not None or bool(
+        (values if values is not None else os.environ).get("ROCKE_COMGR_LIB")
     )
+    mapped = _loaded_libraries.loaded_compilers()
+    retained = None
+    try:
+        if len(mapped) > 1:
+            raise ComgrError(
+                f"multiple mapped COMGR providers are ambiguous: {[item.path for item in mapped]!r}"
+            )
+        if mapped:
+            item = mapped[0]
+            try:
+                same = os.path.samefile(selected, item.path)
+            except OSError:
+                same = False
+            info = None
+            if not same:
+                if explicit:
+                    raise ComgrError(
+                        f"Selected COMGR {selected!r} differs from mapped COMGR {item.path!r}; exact-file override cannot be honored without a second COMGR"
+                    )
+                info = query_info(
+                    item.library,
+                    selected,
+                    origin=_library_for_symbol,
+                    preprocess=_probe_llvm_version,
+                )
+                if info.llvm_version is None:
+                    raise ComgrError(
+                        f"mapped COMGR {item.path!r} has no compiler version evidence; refusing a second COMGR"
+                    )
+                expected = probe_version(selected)
+                if info.llvm_version != expected.llvm_version:
+                    raise ComgrError(
+                        f"compiler version mismatch: requested {selected!r} LLVM {expected.llvm_version}, mapped {item.path!r} LLVM {info.llvm_version}"
+                    )
+                from dataclasses import replace
 
+                info = replace(info, comgr_path=item.path)
+            item.library._rocke_admission = (selected, info)
+            item.library._rocke_actual_path = item.path
+            item.library._rocke_signature = item.signature
+            retained = item
+            return item.library
+        hip = _session.session.hip
+        if hip is not None:
+            _session.check_pair(getattr(hip, "_name", None), selected)
+        directory = _add_dll_dir(selected)
+        try:
+            library = ctypes.CDLL(selected)
+        except OSError as error:
+            if directory is not None:
+                directory.close()
+            raise ComgrError(
+                f"cannot load COMGR; 1 candidate(s) failed:\n  {selected}: {error}. Install 'rocke[sdk-core]' or repair ROCKE_COMGR_LIB"
+            ) from error
+        from pathlib import Path
 
-# Lazy: import order does not matter until the first query or compilation.
-# Nonempty explicit override, otherwise the SDK-owned COMGR file.
-_lib: Optional[ctypes.CDLL] = None
-_lib_lock = threading.RLock()
-_llvm_version_lib: ctypes.CDLL | None = None
-_compiler_info: CompilerInfo | None = None
+        if directory is not None:
+            _session.session.dll_directories.append(directory)
+        library._rocke_admission = (selected, None)
+        library._rocke_actual_path = str(Path(selected).absolute())
+        return library
+    finally:
+        for item in mapped:
+            if item is not retained:
+                _loaded_libraries.release(item)
 
 
 def _resolve_lib() -> ctypes.CDLL:
-    """Retain a successful load; failed loads may recover on a later call."""
-    global _lib
-    with _lib_lock:
-        if _lib is None:
-            _lib = _load_lib()
-        return _lib
+    """The warm path returns the process owner's retained compiler immediately."""
+    return _session.session.resolve("compiler", _load_lib)
+
+
+def initialize_compiler(path: str) -> ctypes.CDLL:
+    """Explicit initialization/reinitialization must honor the exact physical file."""
+    owner = _session.session
+    owner.check_compiler_request(path)
+    library = owner.resolve("compiler", lambda: _load_lib(path))
+    owner.check_compiler_request(path)
+    return library
 
 
 def resolved_lib_path() -> Optional[str]:
@@ -140,8 +181,9 @@ def resolved_lib_path() -> Optional[str]:
     Once loaded, return the retained handle's path. Otherwise return the sole
     selected candidate, including an unloadable explicit override.
     """
-    if _lib is not None:
-        return getattr(_lib, "_name", None)
+    if _session.session.compiler is not None:
+        library = _session.session.compiler
+        return getattr(library, "_rocke_actual_path", getattr(library, "_name", None))
     try:
         cands = _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
     except Exception:
@@ -300,76 +342,6 @@ def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
     return resolved_lib_rocm_version()
 
 
-@dataclass(frozen=True)
-class CompilerInfo:
-    """Compiler evidence and its origin, tied to one loaded COMGR handle.
-
-    Paths come from the dynamic loader, not filesystem version metadata.
-    requested_comgr preserves the loader input when an actual module path
-    cannot be obtained. A missing version or path is explicitly unknown.
-    """
-
-    llvm_version: tuple[int, int, int] | None
-    source: str
-    requested_comgr: str | None
-    comgr_path: str | None
-    query_library_path: str | None
-
-    def describe(self) -> str:
-        """Explain which loaded compiler supplied a compatibility decision."""
-        version = (
-            ".".join(map(str, self.llvm_version)) if self.llvm_version else "unknown"
-        )
-        return (
-            f"LLVM {version} via {self.source}; "
-            f"COMGR={self.comgr_path or self.requested_comgr!r}; "
-            f"query library={self.query_library_path!r}"
-        )
-
-
-def _library_for_symbol(fn) -> str | None:
-    """Ask the loader which mapped library owns a function address."""
-    try:
-        address = ctypes.cast(fn, ctypes.c_void_p)
-        if _IS_WINDOWS:
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            module = ctypes.c_void_p()
-            get_module = kernel32.GetModuleHandleExW
-            get_module.argtypes = [
-                ctypes.c_uint,
-                ctypes.c_void_p,
-                ctypes.POINTER(ctypes.c_void_p),
-            ]
-            get_module.restype = ctypes.c_int
-            # FROM_ADDRESS | UNCHANGED_REFCOUNT: inspect an existing module.
-            if not get_module(0x6, address, ctypes.byref(module)):
-                return None
-            get_name = kernel32.GetModuleFileNameW
-            get_name.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint]
-            get_name.restype = ctypes.c_uint
-            buf = ctypes.create_unicode_buffer(32768)
-            size = get_name(module, buf, len(buf))
-            return buf.value if 0 < size < len(buf) else None
-
-        class DlInfo(ctypes.Structure):
-            _fields_ = [
-                ("filename", ctypes.c_char_p),
-                ("base", ctypes.c_void_p),
-                ("symbol", ctypes.c_char_p),
-                ("address", ctypes.c_void_p),
-            ]
-
-        lookup = ctypes.CDLL(None).dladdr
-        lookup.argtypes = [ctypes.c_void_p, ctypes.POINTER(DlInfo)]
-        lookup.restype = ctypes.c_int
-        info = DlInfo()
-        if lookup(address, ctypes.byref(info)) and info.filename:
-            return os.fsdecode(info.filename)
-    except (AttributeError, OSError, TypeError, ctypes.ArgumentError):
-        pass
-    return None
-
-
 def loaded_compiler_info() -> CompilerInfo | None:
     """Load COMGR and query its compiler, retaining version and provenance.
 
@@ -394,49 +366,23 @@ def _compiler_info_error(reason: str) -> ComgrError:
 
 
 def _loaded_compiler_info(*, required: bool) -> CompilerInfo | None:
-    """Share loaded-handle evidence, preserving load errors for required callers."""
-    global _llvm_version_lib, _compiler_info
-    with _lib_lock:
-        try:
-            lib = _resolve_lib()
-        except (ComgrError, OSError) as exc:
-            if required:
-                raise _compiler_info_error(f"COMGR could not be loaded: {exc}") from exc
-            return None
-        if _llvm_version_lib is lib:
-            return _compiler_info
-        version = None
-        source = "unavailable"
-        query_path = None
-        try:
-            query = lib.LLVMGetVersion
-        except AttributeError:
-            query = None
-        if query is not None:
-            query.argtypes = [ctypes.POINTER(ctypes.c_uint)] * 3
-            query.restype = None
-            values = [ctypes.c_uint() for _ in range(3)]
-            query(*(ctypes.byref(v) for v in values))
-            if values[0].value:
-                version = tuple(v.value for v in values)
-                source = "LLVMGetVersion"
-                query_path = _library_for_symbol(query)
-        if version is None:
-            try:
-                version = _probe_llvm_version(lib)
-                if version:
-                    source = "COMGR preprocessing"
-                    query_path = _library_for_symbol(lib.amd_comgr_do_action)
-            except (AttributeError, ComgrError, OSError, ValueError):
-                pass
-        try:
-            comgr_path = _library_for_symbol(lib.amd_comgr_get_version)
-        except AttributeError:
-            comgr_path = None
-        info = CompilerInfo(
-            version, source, getattr(lib, "_name", None), comgr_path, query_path
+    try:
+        lib = _resolve_lib()
+    except (ComgrError, OSError) as exc:
+        if required:
+            raise _compiler_info_error(f"COMGR could not be loaded: {exc}") from exc
+        return None
+    owner = _session.session
+    with owner.lock:
+        if owner.queried_compiler is lib:
+            return owner.compiler_info
+        info = query_info(
+            lib,
+            owner.requested_compiler,
+            origin=_library_for_symbol,
+            preprocess=_probe_llvm_version,
         )
-        _llvm_version_lib, _compiler_info = lib, info
+        owner.queried_compiler, owner.compiler_info = lib, info
         return info
 
 
@@ -483,8 +429,6 @@ def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
 
 
 # Opaque handles are returned as a struct containing a single uint64_t.
-class _Handle(ctypes.Structure):
-    _fields_ = [("handle", ctypes.c_uint64)]
 
 
 # Type aliases.
@@ -709,78 +653,6 @@ def _build_in_fresh_process(
         bc=meta["bc"], relocatable=meta["relocatable"], executable=meta["executable"]
     )
     return hsaco, timings
-
-
-def _probe_llvm_version(lib: ctypes.CDLL) -> tuple[int, int, int] | None:
-    """Preprocess a version marker through COMGR when LLVM symbols are hidden."""
-
-    def bind(name, *args):
-        fn = getattr(lib, "amd_comgr_" + name)
-        fn.argtypes, fn.restype = list(args), ctypes.c_int
-        return fn
-
-    hp = ctypes.POINTER(_Handle)
-    create_set = bind("create_data_set", hp)
-    destroy_set = bind("destroy_data_set", _Handle)
-    create_data = bind("create_data", ctypes.c_int, hp)
-    release_data = bind("release_data", _Handle)
-    set_data = bind("set_data", _Handle, ctypes.c_size_t, ctypes.c_char_p)
-    set_name = bind("set_data_name", _Handle, ctypes.c_char_p)
-    add_data = bind("data_set_add", _Handle, _Handle)
-    create_info = bind("create_action_info", hp)
-    destroy_info = bind("destroy_action_info", _Handle)
-    get_isa = bind("get_isa_name", ctypes.c_size_t, ctypes.POINTER(ctypes.c_char_p))
-    set_isa = bind("action_info_set_isa_name", _Handle, ctypes.c_char_p)
-    set_language = bind("action_info_set_language", _Handle, ctypes.c_int)
-    action = bind("do_action", ctypes.c_int, _Handle, _Handle, _Handle)
-    get_output = bind(
-        "action_data_get_data", _Handle, ctypes.c_int, ctypes.c_size_t, hp
-    )
-    get_data = bind(
-        "get_data", _Handle, ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p
-    )
-    handles = []
-
-    def check(status):
-        if status != AMD_COMGR_STATUS_SUCCESS:
-            raise ComgrError(f"COMGR compiler-version probe failed: status={status}")
-
-    def acquire(create, destroy, *args):
-        handle = _Handle()
-        check(create(*args, ctypes.byref(handle)))
-        handles.append((destroy, handle))
-        return handle
-
-    try:
-        inputs = acquire(create_set, destroy_set)
-        outputs = acquire(create_set, destroy_set)
-        source = acquire(create_data, release_data, AMD_COMGR_DATA_KIND_SOURCE)
-        info = acquire(create_info, destroy_info)
-        payload = (
-            b"ROCKE_LLVM_VERSION __clang_major__ __clang_minor__ __clang_patchlevel__\n"
-        )
-        check(set_data(source, len(payload), payload))
-        check(set_name(source, b"rocke_compiler_version.cl"))
-        check(add_data(inputs, source))
-        isa = ctypes.c_char_p()
-        check(get_isa(0, ctypes.byref(isa)))
-        check(set_isa(info, isa.value))
-        check(set_language(info, 1))  # AMD_COMGR_LANGUAGE_OPENCL_1_2
-        check(action(0, info, inputs, outputs))  # SOURCE_TO_PREPROCESSOR
-        output = acquire(
-            get_output, release_data, outputs, AMD_COMGR_DATA_KIND_SOURCE, 0
-        )
-        size = ctypes.c_size_t()
-        check(get_data(output, ctypes.byref(size), None))
-        data = ctypes.create_string_buffer(size.value)
-        check(get_data(output, ctypes.byref(size), data))
-        match = re.search(rb"(?m)^ROCKE_LLVM_VERSION (\d+) (\d+) (\d+)\s*$", data.value)
-        if match and int(match[1]) > 0:
-            return tuple(int(match[i]) for i in (1, 2, 3))
-        return None
-    finally:
-        for destroy, handle in reversed(handles):
-            destroy(handle)
 
 
 def build_hsaco_from_llvm_ir(
