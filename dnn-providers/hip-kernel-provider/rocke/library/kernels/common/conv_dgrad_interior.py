@@ -227,16 +227,22 @@ def written_mask_np(p, keep_w: bool):
 
 @dataclass(frozen=True)
 class DgradHaloZeroSpec:
-    """One workgroup per dX row ``(n, d, h)``: a shell row (d or h in the
-    halo) is zeroed whole, an interior row only its ``hw`` pixels at each
-    end. 16-byte stores; the row and pixel extents are kernargs in 16-byte
-    units (``C * elem_bytes`` must be a multiple of 16)."""
+    """The shell as three flat sections of 16-byte units, one unit per
+    thread (``C * elem_bytes`` a multiple of 16; a pixel is ``pu`` units, a
+    row ``ru``, a plane ``Hi * ru``):
 
-    block: int = 64
+    1. the ``hd`` first and last planes of every image (2 runs of hd planes);
+    2. the ``hh`` first and last rows of every interior plane;
+    3. the ``hw`` first and last pixels of every interior row.
+
+    Each section starts on a workgroup boundary (its block range is a
+    kernarg), so the section branch is uniform."""
+
+    block: int = 256
     name: str = "conv_dgrad_halo_zero"
 
     def kernel_name(self) -> str:
-        return kernel_name_join(self.name, f"b{self.block}")
+        return kernel_name_join(self.name, f"b{self.block}", "v2")
 
 
 def build_dgrad_halo_zero(spec: DgradHaloZeroSpec) -> KernelDef:
@@ -244,74 +250,113 @@ def build_dgrad_halo_zero(spec: DgradHaloZeroSpec) -> KernelDef:
     b.kernel.attrs["max_workgroup_size"] = spec.block
     dx_ptr = b.param("dx", PtrType(I32, "global"), noalias=True, writeonly=True, align=16)
     dx_bytes = b.param("dx_bytes", I32)
-    c_Di = b.param("Di", I32)
-    c_Hi = b.param("Hi", I32)
-    row_u = b.param("row_units", I32)  # Wi * C * eb / 16
-    edge_u = b.param("edge_units", I32)  # hw * C * eb / 16 (one end)
-    c_hd = b.param("hd", I32)
-    c_hh = b.param("hh", I32)
-    c0 = b.const_i32(0)
+    names = ("Di", "Do", "Hi", "Ho", "ru", "hd", "hh", "e", "L1", "L2", "L3", "n1", "n2", "u1", "u2", "u3")
+    k = {n: b.param(n, I32) for n in names}
+    c0, c1 = b.const_i32(0), b.const_i32(1)
+    blk = b.block_id_x()
     tid = b.thread_id_x()
-    rid = b.block_id_x()
-    nd = b.div(rid, c_Hi)
-    h = b.sub(rid, b.mul(nd, c_Hi))
-    d = b.sub(nd, b.mul(b.div(nd, c_Di), c_Di))
-    shell = b.lor(
-        b.lor(b.cmp_lt(d, c_hd), b.cmp_ge(d, b.sub(c_Di, c_hd))),
-        b.lor(b.cmp_lt(h, c_hh), b.cmp_ge(h, b.sub(c_Hi, c_hh))),
-    )
-    two_e = b.add(edge_u, edge_u)
-    n_units = b.select(shell, row_u, two_e)
-    # Units of the right edge start at row_u - 2*edge (the left edge's i < edge
-    # maps to itself): unit(i) = i + (i >= edge ? row_u - 2*edge : 0).
-    right_shift = b.select(shell, c0, b.sub(row_u, two_e))
-    base = b.mul(rid, row_u)
+    cb = b.const_i32(spec.block)
+    plane = b.mul(k["Hi"], k["ru"])
+
+    def sec1(t):
+        # (n, side, offset) over L1 = 2 * hd * plane units per image
+        n = b.div(t, k["L1"])
+        r = b.sub(t, b.mul(n, k["L1"]))
+        half = b.mul(k["hd"], plane)
+        side = b.div(r, half)
+        o = b.sub(r, b.mul(side, half))
+        last = b.mul(b.sub(k["Di"], k["hd"]), plane)
+        return b.add(b.add(b.mul(b.mul(n, k["Di"]), plane), b.mul(side, last)), o)
+
+    def sec2(t):
+        g = b.div(t, k["L2"])
+        r = b.sub(t, b.mul(g, k["L2"]))
+        half = b.mul(k["hh"], k["ru"])
+        side = b.div(r, half)
+        o = b.sub(r, b.mul(side, half))
+        n = b.div(g, k["Do"])
+        d = b.sub(g, b.mul(n, k["Do"]))
+        base = b.mul(b.add(b.mul(n, k["Di"]), b.add(d, k["hd"])), plane)
+        last = b.mul(b.sub(k["Hi"], k["hh"]), k["ru"])
+        return b.add(b.add(base, b.mul(side, last)), o)
+
+    def sec3(t):
+        g = b.div(t, k["L3"])
+        r = b.sub(t, b.mul(g, k["L3"]))
+        side = b.div(r, k["e"])
+        o = b.sub(r, b.mul(side, k["e"]))
+        nd = b.div(g, k["Ho"])
+        h = b.sub(g, b.mul(nd, k["Ho"]))
+        n = b.div(nd, k["Do"])
+        d = b.sub(nd, b.mul(n, k["Do"]))
+        row = b.add(
+            b.mul(b.add(b.mul(n, k["Di"]), b.add(d, k["hd"])), k["Hi"]), b.add(h, k["hh"])
+        )
+        return b.add(b.add(b.mul(row, k["ru"]), b.mul(side, b.sub(k["ru"], k["e"]))), o)
+
+    in2 = b.cmp_ge(blk, k["n1"])
+    in3 = b.cmp_ge(blk, k["n2"])
+    sec_blk = b.select(in3, b.sub(blk, k["n2"]), b.select(in2, b.sub(blk, k["n1"]), blk))
+    t = b.add(b.mul(sec_blk, cb), tid)
+    cnt = b.select(in3, k["u3"], b.select(in2, k["u2"], k["u1"]))
+    # Each section's decode under its own uniform branch (their divisors may
+    # be 0 placeholders for an empty section, which is never entered).
     dx = make_buffer_resource(b, dx_ptr, num_bytes=dx_bytes)
     zero = b.zero_vec(I32, 4)
-    c_blk = b.const_i32(spec.block)
     oob = b.const_i32(0x7FFFFFF0)
-    trips = b.div(b.add(n_units, b.const_i32(spec.block - 1)), c_blk)
-    loop = b.scf_for(c0, trips, b.const_i32(1), iv_name="zt")
-    with loop as j:
-        i = b.add(b.mul(j, c_blk), tid)
-        u = b.add(i, b.select(b.cmp_ge(i, edge_u), right_shift, c0))
-        off = b.mul(b.add(base, u), b.const_i32(16))
-        off = b.select(b.cmp_lt(i, n_units), off, oob)
+    c16 = b.const_i32(16)
+    ok = b.cmp_lt(t, cnt)
+
+    def store(unit):
+        off = b.select(ok, b.mul(unit, c16), oob)
         b.buffer_store_vN(dx.rsrc, off, c0, zero)
+
+    with b.scf_if_else(in3) as (then3, else3):
+        with then3:
+            store(sec3(t))
+        with else3:
+            with b.scf_if_else(in2) as (then2, else2):
+                with then2:
+                    store(sec2(t))
+                with else2:
+                    store(sec1(t))
+    del c1
     return b.kernel
 
 
 def dgrad_halo_zero_signature(spec: DgradHaloZeroSpec) -> list:
-    return (
-        SignatureBuilder()
-        .ptr("dx", "i32")
-        .scalar("dx_bytes", "i32")
-        .scalar("Di", "i32")
-        .scalar("Hi", "i32")
-        .scalar("row_units", "i32")
-        .scalar("edge_units", "i32")
-        .scalar("hd", "i32")
-        .scalar("hh", "i32")
-        .build()
-    )
+    sb = SignatureBuilder().ptr("dx", "i32").scalar("dx_bytes", "i32")
+    for n in ("Di", "Do", "Hi", "Ho", "ru", "hd", "hh", "e", "L1", "L2", "L3", "n1", "n2", "u1", "u2", "u3"):
+        sb = sb.scalar(n, "i32")
+    return sb.build()
 
 
-def halo_zero_launch(p, elem_bytes: int, dx_ptr: int, dx_bytes: int, spec: DgradHaloZeroSpec):
-    """``(values, grid, block)`` of the shell zero-fill of the full dX at ``dx_ptr``."""
+def halo_zero_units(p, elem_bytes: int) -> Dict[str, int]:
+    """Section sizes (16-byte units) of the shell of ``p``'s dX (see DgradHaloZeroSpec)."""
     hd, hh, hw = halo_widths(p)
     pix = int(p.C) * elem_bytes
     if pix % 16:
         raise ValueError("dx_interior zero-fill needs C * elem_bytes % 16 == 0")
-    D = int(p.Di) if p.is_3d else 1
-    rows = int(p.N) * D * int(p.Hi)
-    values = {
-        "dx": dx_ptr,
-        "dx_bytes": dx_bytes,
-        "Di": D,
-        "Hi": int(p.Hi),
-        "row_units": int(p.Wi) * pix // 16,
-        "edge_units": hw * pix // 16,
-        "hd": hd,
-        "hh": hh,
-    }
-    return values, (rows, 1, 1), (spec.block, 1, 1)
+    pu = pix // 16
+    N = int(p.N)
+    Di = int(p.Di) if p.is_3d else 1
+    Do = int(p.Do) if p.is_3d else 1
+    Hi, Ho, ru = int(p.Hi), int(p.Ho), int(p.Wi) * pu
+    e = hw * pu
+    L1, L2, L3 = 2 * hd * Hi * ru, 2 * hh * ru, 2 * e
+    return dict(Di=Di, Do=Do, Hi=Hi, Ho=Ho, ru=ru, hd=hd, hh=hh, e=e, L1=L1, L2=L2, L3=L3,
+                u1=N * L1, u2=N * Do * L2, u3=N * Do * Ho * L3)
+
+
+def halo_zero_launch(p, elem_bytes: int, dx_ptr: int, dx_bytes: int, spec: DgradHaloZeroSpec):
+    """``(values, grid, block)`` of the shell zero-fill of the full dX at ``dx_ptr``."""
+    u = halo_zero_units(p, elem_bytes)
+    B = spec.block
+    b1, b2, b3 = (-(-u[k] // B) for k in ("u1", "u2", "u3"))
+    values = {"dx": dx_ptr, "dx_bytes": dx_bytes}
+    for k in ("Di", "Do", "Hi", "Ho", "ru", "hd", "hh", "e"):
+        values[k] = u[k]
+    for k in ("L1", "L2", "L3"):
+        values[k] = max(1, u[k])  # (an empty section is never entered)
+    values.update(n1=b1, n2=b1 + b2, u1=u["u1"], u2=u["u2"], u3=u["u3"])
+    return values, (max(1, b1 + b2 + b3), 1, 1), (B, 1, 1)

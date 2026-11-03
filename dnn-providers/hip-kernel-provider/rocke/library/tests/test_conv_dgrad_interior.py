@@ -14,6 +14,7 @@ from kernels.common.conv_dgrad_interior import (
     DgradHaloZeroSpec,
     build_dgrad_halo_zero,
     halo_zero_launch,
+    halo_zero_units,
     interior_mask_np,
     interior_view_dx,
     interior_view_problem,
@@ -113,10 +114,34 @@ class ZeroFill(unittest.TestCase):
         k = build_dgrad_halo_zero(DgradHaloZeroSpec())
         self.assertTrue(k is not None)
         v, grid, block = halo_zero_launch(_halo(C=8), 2, 0, 1 << 20, DgradHaloZeroSpec())
-        self.assertEqual(grid, (6 * 5, 1, 1))
-        self.assertEqual(v["row_units"], 7 * 8 * 2 // 16)
-        self.assertEqual(v["edge_units"], 1)
+        self.assertEqual(block, (256, 1, 1))
+        self.assertEqual(v["u1"] + v["u2"] + v["u3"], int((~interior_mask_np(_halo(C=8))).sum()))
 
+    def test_sections_cover_the_shell(self):
+        """The kernel's per-thread decode (emulated) hits every shell unit once."""
+        for p in (_halo(N=2, C=16), _halo(D=18, H=10, W=10, C=64)):
+            u = halo_zero_units(p, 2)
+            pu, plane = p.C * 2 // 16, u["Hi"] * u["ru"]
+            got = []
+            for t in range(u["u1"]):
+                n, r = divmod(t, u["L1"])
+                side, o = divmod(r, u["hd"] * plane)
+                got.append(n * u["Di"] * plane + side * (u["Di"] - u["hd"]) * plane + o)
+            for t in range(u["u2"]):
+                g, r = divmod(t, u["L2"])
+                side, o = divmod(r, u["hh"] * u["ru"])
+                n, d = divmod(g, u["Do"])
+                got.append((n * u["Di"] + d + u["hd"]) * plane + side * (u["Hi"] - u["hh"]) * u["ru"] + o)
+            for t in range(u["u3"]):
+                g, r = divmod(t, u["L3"])
+                side, o = divmod(r, u["e"])
+                nd, h = divmod(g, u["Ho"])
+                n, d = divmod(nd, u["Do"])
+                row = (n * u["Di"] + d + u["hd"]) * u["Hi"] + h + u["hh"]
+                got.append(row * u["ru"] + side * (u["ru"] - u["e"]) + o)
+            shell = np.flatnonzero(~interior_mask_np(p).reshape(-1))
+            want = sorted(int(v) * pu + j for v in shell for j in range(pu))
+            self.assertEqual(sorted(got), want)
 
 
 class PpBoxInterior(unittest.TestCase):
