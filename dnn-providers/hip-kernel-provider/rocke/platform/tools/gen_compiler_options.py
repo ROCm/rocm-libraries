@@ -113,25 +113,22 @@ def main() -> int:
     major = info.llvm_version[0]
     verified_on = "LLVM " + ".".join(map(str, info.llvm_version))
 
-    answers = table.measured_answers()
-    names = list(answers) + [o for o in args.option if o not in answers]
-    drift = []
+    committed = table.measured_answers()
+    names = list(committed) + [o for o in args.option if o not in committed]
+    # A separate copy takes the new column, so ``committed`` stays what the
+    # file says for --check to compare against.
+    answers = {option: dict(column) for option, column in committed.items()}
+    measured = {}
     for name in names:
         accepted, evidence = measure(name)
         print(f"{name}: {'accepted' if accepted else 'not accepted'} on {verified_on}")
-        committed = answers.get(name, {}).get(major)
-        if committed is None:
-            drift.append(f"{name} on LLVM {major}: no committed answer")
-        elif committed.accepted != accepted:
-            drift.append(
-                f"{name} on LLVM {major}: committed accepted={committed.accepted}, "
-                f"measured accepted={accepted}"
-            )
+        measured[name] = accepted
         answers.setdefault(name, {})[major] = table.Answer(
             accepted=accepted, evidence=evidence, verified_on=verified_on
         )
 
     if args.check:
+        drift = table.column_drift(committed, measured, llvm_major=major)
         if drift:
             print(
                 "compiler option table differs from this compiler; run this tool "

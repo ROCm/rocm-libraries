@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -45,6 +46,7 @@ __all__ = [
     "Answer",
     "CompilerOptionNotAccepted",
     "backend_options",
+    "column_drift",
     "format_table",
     "lookup",
     "measured_answers",
@@ -115,53 +117,71 @@ def _parse_answer(cell: object, *, where: str) -> Answer:
     A wrong type here is a bad value in the file, not a bad argument, so it is
     a ``ValueError`` like every other table error (hence the ``noqa``).
     """
-    if not isinstance(cell, dict) or set(cell) != set(Answer._fields):
+    if not isinstance(cell, dict):
+        raise ValueError(  # noqa: TRY004
+            f"{where} is {cell!r}, expected an object with the keys "
+            f"{', '.join(Answer._fields)}"
+        )
+    missing = [key for key in Answer._fields if key not in cell]
+    unexpected = [key for key in cell if key not in Answer._fields]
+    if missing or unexpected:
         raise ValueError(
-            f"compiler option table: {where} must be an object with exactly the "
-            f"keys {', '.join(Answer._fields)}, got {cell!r}"
+            f"{where} has missing keys {missing} and unexpected keys {unexpected}; "
+            f"expected exactly {', '.join(Answer._fields)}"
         )
     answer = Answer(**cell)
     if not isinstance(answer.accepted, bool):
         raise ValueError(  # noqa: TRY004
-            f"compiler option table: {where} accepted={answer.accepted!r}, "
-            "expected true or false"
+            f"{where} accepted={answer.accepted!r}, expected true or false"
         )
     if not isinstance(answer.evidence, str) or not isinstance(answer.verified_on, str):
         raise ValueError(  # noqa: TRY004
-            f"compiler option table: {where} evidence={answer.evidence!r} and "
+            f"{where} evidence={answer.evidence!r} and "
             f"verified_on={answer.verified_on!r}, expected strings"
         )
     return answer
 
 
-def parse_table(text: str) -> dict[str, dict[int, Answer]]:
+def parse_table(
+    text: str, *, source: str | os.PathLike[str] = TABLE_PATH
+) -> dict[str, dict[int, Answer]]:
     """Read a ``compiler_options.json`` document: option -> LLVM major -> answer.
 
-    Raises ``ValueError`` naming the offending entry when the document is not
-    a :data:`SCHEMA` table or an entry has the wrong shape or type.
+    ``source`` names where ``text`` came from (by default the committed
+    table). Raises ``ValueError`` naming ``source`` and the offending entry
+    when the document is not a :data:`SCHEMA` table or an entry has the wrong
+    shape or type.
     """
     doc = json.loads(text)
     schema = doc.get("schema") if isinstance(doc, dict) else None
     if schema != SCHEMA:
         raise ValueError(
-            f"compiler option table: schema={schema!r}, expected {SCHEMA!r}; "
+            f"{source}: schema={schema!r}, expected {SCHEMA!r}; "
             f"regenerate it with {_MEASURE_TOOL}"
         )
     options = doc.get("options")
     if not isinstance(options, dict):
         raise ValueError(  # noqa: TRY004
-            f"compiler option table: options={options!r}, expected an object "
+            f"{source}: options={options!r}, expected an object "
             "mapping each option to its measured LLVM majors"
         )
     answers: dict[str, dict[int, Answer]] = {}
     for option, column in options.items():
-        if not isinstance(column, dict) or not all(major.isdigit() for major in column):
+        if not isinstance(column, dict):
+            raise ValueError(  # noqa: TRY004
+                f"{source}: {option!r} is {column!r}, expected an object keyed "
+                "by LLVM major version"
+            )
+        not_majors = [key for key in column if not key.isdigit()]
+        if not_majors:
             raise ValueError(
-                f"compiler option table: {option!r} has {column!r}, expected an "
-                "object keyed by LLVM major version"
+                f"{source}: {option!r} has the keys {not_majors}, expected LLVM "
+                'major versions such as "20"'
             )
         answers[option] = {
-            int(major): _parse_answer(cell, where=f"{option!r} on LLVM {major}")
+            int(major): _parse_answer(
+                cell, where=f"{source}: {option!r} on LLVM {major}"
+            )
             for major, cell in column.items()
         }
     return answers
@@ -180,6 +200,34 @@ def format_table(answers: Mapping[str, Mapping[int, Answer]]) -> str:
         },
     }
     return json.dumps(doc, indent=2) + "\n"
+
+
+def column_drift(
+    committed: Mapping[str, Mapping[int, Answer]],
+    measured: Mapping[str, bool],
+    *,
+    llvm_major: int,
+) -> list[str]:
+    """How the ``llvm_major`` column of ``committed`` differs from ``measured``.
+
+    ``measured`` maps each option to whether the loaded compiler (LLVM
+    ``llvm_major``) accepted it. Returns one line per measured option whose
+    committed answer for that major is missing or says the opposite, in
+    ``measured`` order; an empty list means the column reproduces.
+    ``tools/gen_compiler_options.py --check`` fails exactly when it is
+    non-empty.
+    """
+    drift = []
+    for option, accepted in measured.items():
+        answer = committed.get(option, {}).get(llvm_major)
+        if answer is None:
+            drift.append(f"{option} on LLVM {llvm_major}: no committed answer")
+        elif answer.accepted != accepted:
+            drift.append(
+                f"{option} on LLVM {llvm_major}: committed accepted={answer.accepted}, "
+                f"measured accepted={accepted}"
+            )
+    return drift
 
 
 @functools.cache
