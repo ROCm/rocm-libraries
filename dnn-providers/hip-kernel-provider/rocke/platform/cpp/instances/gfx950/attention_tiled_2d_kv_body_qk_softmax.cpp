@@ -339,12 +339,18 @@ void rocke_gfx950_attn2d_permute_p_c_to_a16(rocke_gfx950_attn2d_build_ctx_t* ctx
                                             int* out_n)
 {
     rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* lane_col_mod4 = (ctx->lane_col_mod4_v != NULL)
-                                       ? ctx->lane_col_mod4_v
-                                       : rocke_b_mod(b, fh_lane_col(ctx), rocke_b_const_i32(b, 4));
-    rocke_value_t* lane_col_div4 = (ctx->lane_col_div4_v != NULL)
-                                       ? ctx->lane_col_div4_v
-                                       : rocke_b_div(b, fh_lane_col(ctx), rocke_b_const_i32(b, 4));
+    rocke_value_t* lane_col_mod4 = ctx->lane_col_mod4_v;
+    if(lane_col_mod4 == NULL)
+    {
+        rocke_value_t* lane_col = fh_lane_col(ctx);
+        lane_col_mod4 = rocke_b_mod(b, lane_col, rocke_b_const_i32(b, 4));
+    }
+    rocke_value_t* lane_col_div4 = ctx->lane_col_div4_v;
+    if(lane_col_div4 == NULL)
+    {
+        rocke_value_t* lane_col = fh_lane_col(ctx);
+        lane_col_div4 = rocke_b_div(b, lane_col, rocke_b_const_i32(b, 4));
+    }
     rocke_value_t* lane_rg = fh_lane_rg(ctx);
 
     rocke_value_t* vals[4];
@@ -684,7 +690,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 = rocke_b_sub(b, max_seq_prefix_len, rocke_b_const_i32(b, 1));
             rocke_value_t* valid_tail = rocke_b_select(
                 b, rocke_b_cmp_lt(b, mlim_causal_lim, prefix_tail), mlim_causal_lim, prefix_tail);
-            st_row_half_base = rocke_b_mul(b, fh_lane_half32(ctx), rocke_b_const_i32(b, 4));
+            rocke_value_t* lane_half32 = fh_lane_half32(ctx);
+            st_row_half_base = rocke_b_mul(b, lane_half32, rocke_b_const_i32(b, 4));
             rocke_value_t* neg_big = rocke_b_const_i32(b, -(1 << 30));
             rocke_value_t* valid_tail_eff = rocke_b_select(b, mlim_row_ok, valid_tail, neg_big);
             for(int reg = 0; reg < 16; ++reg)

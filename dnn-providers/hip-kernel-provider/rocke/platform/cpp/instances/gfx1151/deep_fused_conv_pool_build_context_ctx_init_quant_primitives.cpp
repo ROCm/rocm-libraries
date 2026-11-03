@@ -244,14 +244,16 @@ rocke_value_t*
     rocke_gfx1151_dfcp_clamp_i32_vec(rocke_ir_builder_t* b, rocke_value_t* x, int lo, int hi)
 {
     int n;
+    rocke_value_t* mx;
+    rocke_value_t* hi_v;
     if(b == NULL)
     {
         return NULL;
     }
     n = rocke_gfx1151_dfcp_vec_count(x);
-    return rocke_b_vector_smin(b,
-                               rocke_b_vector_smax(b, x, rocke_gfx1151_dfcp_splat_i32(b, lo, n)),
-                               rocke_gfx1151_dfcp_splat_i32(b, hi, n));
+    mx = rocke_b_vector_smax(b, x, rocke_gfx1151_dfcp_splat_i32(b, lo, n));
+    hi_v = rocke_gfx1151_dfcp_splat_i32(b, hi, n);
+    return rocke_b_vector_smin(b, mx, hi_v);
 }
 
 /* def _relu_i32_vec(b, x):
@@ -286,6 +288,9 @@ rocke_value_t*
     rocke_value_t* floor_q;
     rocke_value_t* bias;
     rocke_value_t* q;
+    rocke_value_t* round_c;
+    rocke_value_t* odd;
+    rocke_value_t* sum;
     if(b == NULL)
     {
         return NULL;
@@ -298,12 +303,11 @@ rocke_value_t*
     sign = rocke_b_vector_cmp(b, "lt", x, rocke_b_zero_vec(b, rocke_i32(), n));
     ax = rocke_b_vector_select(b, sign, rocke_gfx1151_dfcp_neg_i32_vec(b, x), x);
     floor_q = rocke_b_vector_lshr(b, ax, rocke_gfx1151_dfcp_splat_i32(b, shift, n));
-    bias
-        = rocke_b_vector_add(b,
-                             rocke_gfx1151_dfcp_splat_i32(b, (1 << (shift - 1)) - 1, n),
-                             rocke_b_vector_and(b, floor_q, rocke_gfx1151_dfcp_splat_i32(b, 1, n)));
-    q = rocke_b_vector_lshr(
-        b, rocke_b_vector_add(b, ax, bias), rocke_gfx1151_dfcp_splat_i32(b, shift, n));
+    round_c = rocke_gfx1151_dfcp_splat_i32(b, (1 << (shift - 1)) - 1, n);
+    odd = rocke_b_vector_and(b, floor_q, rocke_gfx1151_dfcp_splat_i32(b, 1, n));
+    bias = rocke_b_vector_add(b, round_c, odd);
+    sum = rocke_b_vector_add(b, ax, bias);
+    q = rocke_b_vector_lshr(b, sum, rocke_gfx1151_dfcp_splat_i32(b, shift, n));
     return rocke_b_vector_select(b, sign, rocke_gfx1151_dfcp_neg_i32_vec(b, q), q);
 }
 

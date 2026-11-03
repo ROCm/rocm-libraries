@@ -17,9 +17,10 @@
 # locals in the Python twin's order and make the call with plain values.
 #
 # An argument "emits" when it calls a rocke_b_* builder function other than the
-# type and info helpers in NON_OP. This is a lexical scan, not a C++ parser:
-# comments, string literals and preprocessor lines are ignored, and an emitting
-# call hidden behind a macro or a non-rocke_b_* wrapper is not seen.
+# type and info helpers in NON_OP, or one of the wrappers in EMITTING_WRAPPERS.
+# This is a lexical scan, not a C++ parser: comments, string literals and
+# preprocessor lines are ignored, and an emitting call hidden behind a macro or
+# an unlisted wrapper is not seen.
 #
 # With no arguments it scans cpp/ and fails on any site not in KNOWN_SITES, and
 # on any KNOWN_SITES entry that no longer occurs. With file arguments (the
@@ -46,6 +47,28 @@ NON_OP = frozenset(
         "rocke_b_io_ir_type",
         "rocke_b_mfma_atom_for_dtype",
         "rocke_b_quant_ir_type",
+    }
+)
+
+# Helpers that are not rocke_b_* but emit ops: the cached lane-index values
+# (they emit on first use, so whether a call emits depends on the spec) and the
+# gfx1151 vector splat. Add a wrapper here when a call passes it beside another
+# emitting argument.
+EMITTING_WRAPPERS = frozenset(
+    {
+        "fh_lane_col",
+        "fh_lane_col32",
+        "fh_lane_half32",
+        "fh_lane_rg",
+        "lane_col32_of",
+        "lane_col_of",
+        "lane_half32_of",
+        "lane_rg_of",
+        "rocke__lane_half_base",
+        "rocke_a2d_lane_col",
+        "rocke_a2d_lane_rg",
+        "rocke_g950a2d_lane_rg",
+        "rocke_gfx1151_dfcp_splat_i32",
     }
 )
 
@@ -131,7 +154,8 @@ def _arguments(src: str, open_paren: int) -> list[str]:
 
 def _emits(arg: str) -> bool:
     return any(
-        name.startswith("rocke_b_") and name not in NON_OP
+        (name.startswith("rocke_b_") and name not in NON_OP)
+        or name in EMITTING_WRAPPERS
         for name in _CALL.findall(arg)
     )
 

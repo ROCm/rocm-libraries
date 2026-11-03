@@ -9,6 +9,7 @@ Source-tree only (it reads cpp/ and tools/); excluded from the installed tree.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -56,6 +57,15 @@ def _callees(src: str) -> list[str]:
         ("x = rocke_b_zext(b, rocke_b_io_ir_type(b, d), rocke_b_get_param(b, n));", []),
         # Any callee counts, not just builder ops.
         ("helper(ctx, rocke_b_mul(b, p, q), rocke_b_const_i32(b, 1));", ["helper"]),
+        # A listed wrapper emits; an unlisted helper that returns a type does not.
+        (
+            "x = rocke_b_mul(b, fh_lane_rg(ctx), rocke_b_const_i32(b, 4));",
+            ["rocke_b_mul"],
+        ),
+        (
+            "x = rocke_b_bitcast(b, rocke_b_mul(b, p, q), rocke_vector_type(b, t, 4));",
+            [],
+        ),
         # Nested sites are each reported.
         (
             (
@@ -119,3 +129,12 @@ def test_file_mode_ignores_paths_outside_cpp(tmp_path):
         "v = rocke_b_add(b, rocke_b_mul(b, p, q), rocke_b_const_i32(b, 1));\n"
     )
     assert ceo.main([str(outside)]) == 0
+
+
+@pytest.mark.parametrize("name", sorted(ceo.EMITTING_WRAPPERS))
+def test_every_listed_wrapper_is_defined(name):
+    pattern = re.compile(rf"rocke_value_t\*\s*{re.escape(name)}\(")
+    assert any(
+        pattern.search(path.read_text(encoding="utf-8", errors="replace"))
+        for path in ceo.CPP_ROOT.rglob("*.cpp")
+    ), f"{name} is listed in EMITTING_WRAPPERS but no longer defined under cpp/"

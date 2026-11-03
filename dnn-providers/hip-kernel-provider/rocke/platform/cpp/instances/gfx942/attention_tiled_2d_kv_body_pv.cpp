@@ -482,7 +482,8 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
              * _apply_transposed_pv_regs reuses them. Cache so the per-n apply
              * calls below reuse the same SSA values. */
             ctx->pv_v_buf_v = rocke_b_const_i32(B, 0);
-            ctx->pv_use_hi_v = rocke_b_cmp_eq(B, lane_half32_of(ctx), rocke_b_const_i32(B, 1));
+            rocke_value_t* lane_half32 = lane_half32_of(ctx);
+            ctx->pv_use_hi_v = rocke_b_cmp_eq(B, lane_half32, rocke_b_const_i32(B, 1));
             for(int n = 0; n < ACC_N_TILES; ++n)
             {
                 rocke_value_t* old_acc = rocke_gfx942_attn2d_acc_get(ctx, n, 0);
@@ -641,8 +642,8 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
             rocke_value_t* vn_n = rocke_b_const_i32(B, n);
             rocke_value_t* vn_16 = rocke_b_const_i32(B, 16);
             rocke_value_t* v_n_col = rocke_b_add(B, rocke_b_mul(B, vn_n, vn_16), lane_col);
-            rocke_value_t* v_k_chunk_base
-                = rocke_b_mul(B, lane_rg_of(ctx), rocke_b_const_i32(B, 4));
+            rocke_value_t* v_lane_rg = lane_rg_of(ctx);
+            rocke_value_t* v_k_chunk_base = rocke_b_mul(B, v_lane_rg, rocke_b_const_i32(B, 4));
             rocke_value_t* v_buf = rocke_b_const_i32(B, 0);
 
             /* K=16 narrow atom (gfx942): build <4 x dtype> B operand from 4
@@ -655,8 +656,9 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
                  * bind it to a temp so C arg-eval order does not allocate the
                  * mul's const ahead of it and shift the mul's %value. */
                 rocke_value_t* p_off_base = rocke_b_const_i32(B, k * 16);
+                rocke_value_t* p_lane_rg = lane_rg_of(ctx);
                 rocke_value_t* p_off = rocke_b_add(
-                    B, p_off_base, rocke_b_mul(B, lane_rg_of(ctx), rocke_b_const_i32(B, 4)));
+                    B, p_off_base, rocke_b_mul(B, p_lane_rg, rocke_b_const_i32(B, 4)));
                 rocke_value_t* B_v = rocke_gfx942_attn2d_strided_v_b_operand(
                     ctx, k, v_n_col, v_k_chunk_base, v_buf);
                 for(int atom = 0; atom < M_ATOMS; ++atom)

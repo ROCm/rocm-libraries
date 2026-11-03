@@ -493,9 +493,11 @@ rocke_value_t* rocke_gfx942_attn2d_fast_paged_kv_voff(rocke_gfx942_attn2d_build_
     {
         physical = (call < fast_calls_per_block) ? block0 : block1;
         int call_in_block = call % fast_calls_per_block;
-        half_in_block = rocke_b_add(b,
-                                    rocke_b_const_i32(b, call_in_block * kv_halves_per_call),
-                                    rocke__lane_half_base(ctx));
+        /* lane_half_base is a preloop value in Python (emitted before this
+         * const); fetch it first so an uncached call keeps that order. */
+        rocke_value_t* lane_half_base = rocke__lane_half_base(ctx);
+        half_in_block = rocke_b_add(
+            b, rocke_b_const_i32(b, call_in_block * kv_halves_per_call), lane_half_base);
     }
     rocke_value_t* token = rocke_b_lshr(b, half_in_block, rocke_b_const_i32(b, 6));
     rocke_value_t* dim = rocke_b_land(b, half_in_block, rocke_b_const_i32(b, 63));
