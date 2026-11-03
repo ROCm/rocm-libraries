@@ -7,7 +7,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -3626,12 +3625,6 @@ inline flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleFwdGr
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto toFlatbuffers = [](const auto& value) {
-        using T = typename std::decay_t<decltype(value)>::value_type;
-        return value.has_value() ? ::flatbuffers::Optional<T>(value.value())
-                                 : ::flatbuffers::Optional<T>(::flatbuffers::nullopt);
-    };
-
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
     std::vector<int64_t> emittedUids;
@@ -3654,7 +3647,7 @@ inline flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleFwdGr
             data_objects::TensorValue::NONE,
             0,
             tensor.isRuntimePassByValue,
-            toFlatbuffers(tensor.raggedOffsetTensorUid)));
+            tensor.raggedOffsetTensorUid));
     };
 
     addTensor(spec.x, "x");
@@ -3685,7 +3678,7 @@ inline flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleFwdGr
                                                               optionalVector(spec.window),
                                                               spec.mode,
                                                               spec.paddingMode,
-                                                              toFlatbuffers(spec.generateIndex));
+                                                              spec.generateIndex);
 
         const auto name = "resample_fwd_" + std::to_string(i);
         nodes.push_back(
