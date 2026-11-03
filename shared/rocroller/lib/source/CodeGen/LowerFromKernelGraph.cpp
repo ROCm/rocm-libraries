@@ -482,6 +482,18 @@ namespace rocRoller
                         "REMOVEME: Wait before branching into Bottom of TailLoop!"));
                 }
                 // -------------------------------------------------------------------------------
+                // Every path into the KLoop labels must have the same waitcnt state, but LDS
+                // ops issued by the prefetch prologue or the previous iteration can still be in
+                // flight on only some of those paths.
+                bool syncLDSQueue = op.loopName == rocRoller::KLOOP
+                                    && m_context->kernelOptions()->syncLDSQueueAtKLoopBoundaries;
+                if(syncLDSQueue)
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::SyncQueue(m_context->targetArchitecture(),
+                                             GPUWaitQueueType::DSQueue,
+                                             "Sync LDS queue before KLoop entry"));
+                }
                 co_yield m_context->brancher()->branchIfZero(
                     botLabel,
                     conditionResult,
@@ -509,6 +521,13 @@ namespace rocRoller
                                               + " if true)");
 
                 co_yield Expression::generate(conditionResult, expr, m_context);
+                if(syncLDSQueue)
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::SyncQueue(m_context->targetArchitecture(),
+                                             GPUWaitQueueType::DSQueue,
+                                             "Sync LDS queue before KLoop back-edge"));
+                }
                 co_yield m_context->brancher()->branchIfNonZero(
                     topLabel,
                     conditionResult,
