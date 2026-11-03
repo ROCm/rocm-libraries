@@ -189,6 +189,11 @@ foreach(test_src ${hipRAND_TEST_SRCS})
     endif()
 endforeach()
 
+# Fortran Wrapper Tests
+if(BUILD_FORTRAN_WRAPPER)
+    add_subdirectory(fortran)
+endif()
+
 # Checks for simple linkage problems
 add_subdirectory(linkage)
 
@@ -202,7 +207,7 @@ add_subdirectory(c_compile)
 # to scan it for the test names already written via add_test() above
 # and emit explicit set_tests_properties(... LABELS ...) lines (the
 # only form ctest's script interpreter exposes through --print-labels
-# / -L). Must run AFTER add_subdirectory(linkage)/add_subdirectory(c_compile)
+# / -L). Must run AFTER add_subdirectory(fortran)/add_subdirectory(linkage)
 # so all add_test() lines have been appended to INSTALL_TEST_FILE.
 if(COMMAND apply_ctest_category_labels)
     apply_ctest_category_labels(

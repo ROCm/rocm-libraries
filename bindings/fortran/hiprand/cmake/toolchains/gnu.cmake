@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Classic Intel toolchain (ifort). Deprecated by Intel in favour of ifx; kept for sites still pinned to it.
-# Usage, from projects/hiprand/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-classic.cmake
+# GNU toolchain (gfortran).
+# Usage, from bindings/fortran/hiprand:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/gnu.cmake
 
-set(CMAKE_Fortran_COMPILER ifort CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER gfortran CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       gcc CACHE FILEPATH "C compiler")

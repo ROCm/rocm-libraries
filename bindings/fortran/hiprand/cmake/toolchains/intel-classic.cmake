@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Intel oneAPI toolchain (ifx, the LLVM-based compiler).
-# Usage, from projects/hiprand/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
+# Classic Intel toolchain (ifort). Deprecated by Intel in favour of ifx; kept for sites still pinned to it.
+# Usage, from bindings/fortran/hiprand:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-classic.cmake
 
-set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
+set(CMAKE_Fortran_COMPILER ifort CACHE FILEPATH "Fortran compiler")
 set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")

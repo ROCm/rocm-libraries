@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
-# Usage, from projects/hiprand/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
+# Intel oneAPI toolchain (ifx, the LLVM-based compiler).
+# Usage, from bindings/fortran/hiprand:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
 
-set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")
