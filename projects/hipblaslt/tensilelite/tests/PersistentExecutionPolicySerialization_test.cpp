@@ -339,7 +339,14 @@ namespace
 #endif
         }
 
-        std::shared_ptr<ContractionSolution> readSolution()
+        enum class LibraryInput
+        {
+            File,
+            Data,
+            Preload
+        };
+
+        std::shared_ptr<ContractionSolution> readSolution(LibraryInput input = LibraryInput::File)
         {
             auto predicate
                 = object(ObjectMap{{"type", object(Predicates::True<Hardware>::Type())}});
@@ -366,7 +373,21 @@ namespace
             file.write(reinterpret_cast<const char*>(bytes.data()),
                        static_cast<std::streamsize>(bytes.size()));
             file.close();
-            auto loaded = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(path.string());
+            std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>> loaded;
+            switch(input)
+            {
+            case LibraryInput::File:
+                loaded
+                    = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(path.string());
+                break;
+            case LibraryInput::Data:
+                loaded = LoadLibraryData<ContractionProblemGemm, ContractionSolution>(bytes);
+                break;
+            case LibraryInput::Preload:
+                loaded = LoadLibraryFilePreload<ContractionProblemGemm, ContractionSolution>(
+                    path.string(), {});
+                break;
+            }
             auto master = std::dynamic_pointer_cast<MasterContractionLibrary>(loaded);
             if(!master)
                 throw std::runtime_error("Persistent policy library failed to deserialize");
@@ -435,6 +456,19 @@ namespace
           public ::testing::WithParamInterface<PolicyCase>
     {
     };
+
+    TEST_F(PersistentExecutionPolicySerializationTest, PublicLoadersPreservePersistentPolicy)
+    {
+        canonical(policies.back());
+        for(auto input : {LibraryInput::File, LibraryInput::Data, LibraryInput::Preload})
+        {
+            SCOPED_TRACE(static_cast<int>(input));
+            auto solution = readSolution(input);
+            ASSERT_NE(solution, nullptr);
+            expectPolicy(solution->sizeMapping, policies.back());
+            EXPECT_EQ(solution->kernelName, "prebuilt_kernel_SK3_DP1");
+        }
+    }
 
     TEST_P(PersistentExecutionPolicyRoundTripTest, CanonicalSelectorsRoundTrip)
     {
