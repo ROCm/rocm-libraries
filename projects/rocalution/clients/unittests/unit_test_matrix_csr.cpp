@@ -1094,8 +1094,6 @@ TYPED_TEST(matrix_csr, connectivity_order_sorts_the_rows_by_their_non_zeros)
     std::vector<int> p = values_of(*perm);
     ASSERT_TRUE(is_permutation(p));
 
-    KNOWN_BUG("it returns perm[new] = old instead of the perm[old] = new that Permute takes");
-
     Csr<T> sorted = permuted(ref, p);
     for(int i = 1; i < sorted.n; ++i)
     {

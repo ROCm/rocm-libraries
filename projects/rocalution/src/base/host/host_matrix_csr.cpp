@@ -4188,7 +4188,7 @@ namespace rocalution
 
         for(int i = 0; i < this->nrow_; ++i, ++it)
         {
-            cast_perm->vec_[i] = it->second;
+            cast_perm->vec_[it->second] = i;
         }
 
         return true;
@@ -10310,22 +10310,13 @@ namespace rocalution
             break;
         }
 
-        // The orderings map each node to its position, except the connectivity ordering,
-        // which gives the node at each position
+        // The orderings map each node to its position
         std::vector<int> node(this->nrow_, -1);
         for(int n = 0; n < this->nrow_; ++n)
         {
-            if(ordering == 1)
-            {
-                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
-                node[n] = perm.vec_[n];
-            }
-            else
-            {
-                const int k = ordering == 0 ? n : perm.vec_[n];
-                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
-                node[k] = n;
-            }
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+            node[k] = n;
         }
 
         // Main algorithm
@@ -10537,22 +10528,13 @@ namespace rocalution
             break;
         }
 
-        // The orderings map each node to its position, except the connectivity ordering,
-        // which gives the node at each position
+        // The orderings map each node to its position
         std::vector<int> node(this->nrow_, -1);
         for(int n = 0; n < this->nrow_; ++n)
         {
-            if(ordering == 1)
-            {
-                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
-                node[n] = perm.vec_[n];
-            }
-            else
-            {
-                const int k = ordering == 0 ? n : perm.vec_[n];
-                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
-                node[k] = n;
-            }
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+            node[k] = n;
         }
 
         // Main algorithm
@@ -10762,22 +10744,13 @@ namespace rocalution
             break;
         }
 
-        // The orderings map each node to its position, except the connectivity ordering,
-        // which gives the node at each position
+        // The orderings map each node to its position
         std::vector<int> node(this->nrow_, -1);
         for(int n = 0; n < this->nrow_; ++n)
         {
-            if(ordering == 1)
-            {
-                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
-                node[n] = perm.vec_[n];
-            }
-            else
-            {
-                const int k = ordering == 0 ? n : perm.vec_[n];
-                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
-                node[k] = n;
-            }
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+            node[k] = n;
         }
 
         // While U != empty
@@ -10986,22 +10959,13 @@ namespace rocalution
             break;
         }
 
-        // The orderings map each node to its position, except the connectivity ordering,
-        // which gives the node at each position
+        // The orderings map each node to its position
         std::vector<int> node(this->nrow_, -1);
         for(int n = 0; n < this->nrow_; ++n)
         {
-            if(ordering == 1)
-            {
-                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
-                node[n] = perm.vec_[n];
-            }
-            else
-            {
-                const int k = ordering == 0 ? n : perm.vec_[n];
-                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
-                node[k] = n;
-            }
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+            node[k] = n;
         }
 
         // While U != empty
