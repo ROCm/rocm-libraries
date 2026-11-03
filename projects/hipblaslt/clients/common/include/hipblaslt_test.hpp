@@ -42,6 +42,7 @@
 #endif
 
 #include "argument_model.hpp"
+#include "client_reporting.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "test_cleanup.hpp"
 #include <algorithm>
