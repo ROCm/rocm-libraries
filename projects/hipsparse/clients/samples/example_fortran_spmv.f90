@@ -138,7 +138,7 @@ program example_fortran_spmv
 
     integer :: Mb, Nb, bsr_dim
     integer, target :: nnzb
-    integer(c_int) :: version
+    integer :: version
 
     integer i
     integer tbegin(8)

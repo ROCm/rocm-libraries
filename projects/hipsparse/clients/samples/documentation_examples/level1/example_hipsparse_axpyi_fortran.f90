@@ -114,7 +114,7 @@ program example_fortran_axpyi
 
     type(c_ptr) :: handle
 
-    integer(c_int) :: version
+    integer :: version
 
 !   Input data
 

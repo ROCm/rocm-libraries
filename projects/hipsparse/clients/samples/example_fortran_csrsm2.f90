@@ -131,7 +131,7 @@ program example_fortran_csrsm
     type(c_ptr) :: descr
     type(c_ptr) :: info
 
-    integer(c_int) :: version
+    integer :: version
 
 !   Input data
 
@@ -210,7 +210,7 @@ program example_fortran_csrsm
                                                         ldb, &
                                                         info, &
                                                         HIPSPARSE_SOLVE_POLICY_USE_LEVEL, &
-                                                        buffer_size))
+                                                        c_loc(buffer_size)))
 
 !   Allocate temporary buffer
     write(*,fmt='(A,I0,A)') 'Allocating ', buffer_size / 1024, 'kB temporary storage buffer'
