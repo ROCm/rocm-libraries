@@ -312,6 +312,10 @@ public:
         {
             return status;
         }
+        if(stream != m_stream)
+        {
+            m_enqueued_lambda = 0; // force a re-enqueue on the new stream
+        }
         m_stream = stream;
         return ROCRAND_STATUS_SUCCESS;
     }

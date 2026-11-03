@@ -73,13 +73,20 @@ inline rocrand_status is_stream_blocking(hipStream_t stream, bool& is_blocking)
 
 inline rocrand_status is_stream_capturing(hipStream_t stream, bool& is_capturing)
 {
-    hipStreamCaptureStatus capture_status;
-    const hipError_t       error = hipStreamIsCapturing(stream, &capture_status);
-    if(error != hipSuccess)
+    if (!stream)
     {
-        return ROCRAND_STATUS_INTERNAL_ERROR;
+        is_capturing = false;
     }
-    is_capturing = capture_status != hipStreamCaptureStatusNone;
+    else
+    {
+        hipStreamCaptureStatus capture_status;
+        const hipError_t       error = hipStreamIsCapturing(stream, &capture_status);
+        if(error != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+        is_capturing = capture_status != hipStreamCaptureStatusNone;
+    }
     return ROCRAND_STATUS_SUCCESS;
 }
 
