@@ -25,13 +25,13 @@
 # SUCH DAMAGE.
 # ##########################################################################
 
-# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
+# GNU toolchain (gfortran).
 #
-# Usage, from projects/rocsolver/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
+# Usage, from bindings/fortran/rocsolver:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/gnu.cmake
 #
 # The module says `use rocblas`: a rocblas.mod built by this same compiler must be
 # reachable through CMAKE_PREFIX_PATH. librocsolver is needed only at link time.
 
-set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER gfortran CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       gcc CACHE FILEPATH "C compiler")

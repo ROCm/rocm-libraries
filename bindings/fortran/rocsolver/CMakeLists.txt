@@ -272,8 +272,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocsolver-fortran-config.cmak
 
 # Read from this tree, not rocsolver_VERSION, which standalone is the INSTALLED rocSOLVER's.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _rocsolver_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocsolver/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocsolver/CMakeLists.txt" _rocsolver_root)
   string(REGEX MATCH "set\\([ \t]*VERSION_STRING[ \t]+\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
          _m "${_rocsolver_root}")
   if(CMAKE_MATCH_1)

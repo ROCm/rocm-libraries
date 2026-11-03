@@ -25,13 +25,13 @@
 # SUCH DAMAGE.
 # ##########################################################################
 
-# Intel oneAPI toolchain (ifx, the LLVM-based compiler).
+# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
 #
-# Usage, from projects/rocsolver/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
+# Usage, from bindings/fortran/rocsolver:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
 #
 # The module says `use rocblas`: a rocblas.mod built by this same compiler must be
 # reachable through CMAKE_PREFIX_PATH. librocsolver is needed only at link time.
 
-set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")

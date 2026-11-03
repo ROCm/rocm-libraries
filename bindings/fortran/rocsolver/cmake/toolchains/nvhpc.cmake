@@ -25,13 +25,13 @@
 # SUCH DAMAGE.
 # ##########################################################################
 
-# AMD ROCm toolchain (amdflang). The recommended default: amdflang is the LLVM-based Fortran compiler shipped with ROCm.
+# NVIDIA HPC SDK toolchain (nvfortran).
 #
-# Usage, from projects/rocsolver/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
+# Usage, from bindings/fortran/rocsolver:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/nvhpc.cmake
 #
 # The module says `use rocblas`: a rocblas.mod built by this same compiler must be
 # reachable through CMAKE_PREFIX_PATH. librocsolver is needed only at link time.
 
-set(CMAKE_Fortran_COMPILER amdflang CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       amdclang CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER nvfortran CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       nvc CACHE FILEPATH "C compiler")
