@@ -168,23 +168,27 @@ class Case:
         problem, dtype, forw = B.parse_miopen_cmd(pin["cmd"])
         direction = {1: "fwd", 2: "dgrad", 4: "wgrad"}[int(forw)]
         self.direction, self.problem, self.dtype = direction, problem, dtype
-        name = strip_launch_suffix(self.label)
-        ident = KernelIdentity.from_label(name)
-        m = SPLIT_RE.search(self.label)
-        split_k = None
-        if m:
-            split_k = int(m.group(1))
-            if m.group(2) is not None:
-                split_k = B.TailSplit(split_k, int(m.group(2)))
-        entry = cache.get(ident)
-        if entry is None:
-            raise SystemExit(f"{key}: {name} is not in the cache")
-        blob, meta = entry
-        launcher = KernelLauncher(
-            hsaco=blob,
-            kernel_name=meta["kernel_name"],
-            signature=B._signature_for_identity(ident, dtype),
-        )
+        # A production route (``--routes``): pad copy / Winograd launches around
+        # (or instead of) a pinned kernel, bound by conv_route_exec.RouteBinding.
+        route_plan = pin.get("route_plan")
+        if route_plan is None:
+            name = strip_launch_suffix(self.label)
+            ident = KernelIdentity.from_label(name)
+            m = SPLIT_RE.search(self.label)
+            split_k = None
+            if m:
+                split_k = int(m.group(1))
+                if m.group(2) is not None:
+                    split_k = B.TailSplit(split_k, int(m.group(2)))
+            entry = cache.get(ident)
+            if entry is None:
+                raise SystemExit(f"{key}: {name} is not in the cache")
+            blob, meta = entry
+            launcher = KernelLauncher(
+                hsaco=blob,
+                kernel_name=meta["kernel_name"],
+                signature=B._signature_for_identity(ident, dtype),
+            )
         p = problem
         nhwc = (p.N, p.Di, p.Hi, p.Wi, p.C)
         nhwk = (p.N, p.Do, p.Ho, p.Wo, p.K)
@@ -209,8 +213,6 @@ class Case:
                 rt.memcpy_h2d(ptr, host_bits.ctypes.data_as(__import__("ctypes").POINTER(__import__("ctypes").c_uint8)).contents if False else _u8(host_bits, n * 2), n * 2)
             rt.memset(ptrs[2], 0, sizes[2])
             self.ptr_sets.append(ptrs)
-        run_problem = B._launch_problem(direction, problem)
-        chunks = B._batch_chunks(direction, run_problem, dtype)
         self.live_extras = []
         self.runs = []
         cfg_cls = LaunchConfig
@@ -224,6 +226,21 @@ class Case:
                 return LaunchConfig(**kw)
 
         self.stream = stream
+        if route_plan is not None:
+            from benchmarks.common.conv_route_exec import RouteBinding
+
+            # One set of route workspaces per case (scratch, reused call after call).
+            self.route_ws = share_from.route_ws if share_from is not None and hasattr(share_from, "route_ws") else {}
+            self.route_bindings = [
+                RouteBinding(route_plan, cache, rt, arch, ptrs, self.sizes, stage2_kernels=stage2_kernels,
+                             cfg_cls=cfg_cls, workspaces=self.route_ws, live_extras=self.live_extras, B=B)
+                for ptrs in self.ptr_sets
+            ]
+            self.runs = [rb.run for rb in self.route_bindings]
+            self.flops = float(problem.flops)
+            return
+        run_problem = B._launch_problem(direction, problem)
+        chunks = B._batch_chunks(direction, run_problem, dtype)
         for ptrs in self.ptr_sets:
             if stream:
                 import rocke.runtime.launcher as _L
@@ -286,6 +303,55 @@ def load_pins_cases(path: str, arch: str) -> dict:
     return out
 
 
+def load_route_cases(path: str, arch: str, pins_path: str | None = None) -> dict:
+    """``{case: {cmd, kernel, calls, route_plan}}`` of one mode of a route table
+    (``PATH#MODE@FORM``: its ``<case>_<FORM>`` cases under their plain names;
+    ``dispatch/conv_routes.py``), every case resolved by
+    :func:`dispatch.conv_routes.dispatch_conv_route`. ``direct`` routes replay as
+    pins (no ``route_plan``); the others carry the plan. ``pins_path``
+    (``PIN_TABLE#MODE``) serves rows that name no kernel."""
+    from dispatch.conv_pins import load_conv_pins
+    from dispatch.conv_routes import ROUTE_DIRECT, dispatch_conv_route, load_conv_routes, request_for_route
+
+    file, _, mode = path.partition("#")
+    mode, _, form = mode.partition("@")
+    routes = load_conv_routes(file, mode or None)
+    pins = None
+    if pins_path:
+        pf, _, pm = pins_path.partition("#")
+        pins = load_conv_pins(pf, pm or None)
+    out = {}
+    for case, r in routes.by_case().items():
+        base, _, suffix = case.rpartition("_")
+        if form:
+            if suffix != form:
+                continue
+            case = base
+        elif not re.fullmatch(r"s\d+", suffix):
+            continue
+        plan = dispatch_conv_route(request_for_route(r, arch), routes, pins)
+        row = {"cmd": r.cmd, "calls": r.calls, "route": plan.route}
+        if r.ms is not None:
+            row["ms"] = r.ms
+        if plan.route == ROUTE_DIRECT:
+            row["kernel"] = plan.kernel_label
+        else:
+            row["kernel"] = f"route:{plan.route} " + (plan.kernel_label or plan.launches[1])
+            row["route_plan"] = plan
+        out[case] = row
+    n = sum(1 for v in out.values() if "route_plan" in v)
+    print(f"[replay] {path}: {len(out)} cases resolved by dispatch_conv_route ({routes.mode}; {n} non-direct)",
+          flush=True)
+    return out
+
+
+def _with_pick(row: dict, pick: dict) -> dict:
+    """``row`` (a case's cmd / calls) running ``pick``'s kernel or route instead."""
+    out = {k: v for k, v in row.items() if k not in ("kernel", "route_plan", "route")}
+    out.update({k: pick[k] for k in ("kernel", "route_plan", "route") if k in pick})
+    return out
+
+
 def _u8(host_bits, nbytes):
     import ctypes
 
@@ -294,7 +360,12 @@ def _u8(host_bits, nbytes):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pins", required=True, help="pins file, or PIN_TABLE#MODE (resolved through dispatch)")
+    ap.add_argument("--pins", default=None, help="pins file, or PIN_TABLE#MODE (resolved through dispatch)")
+    ap.add_argument("--routes", default=None, metavar="ROUTE_TABLE#MODE[@FORM]",
+                    help="replay the production routes of a route table (dispatch/conv_routes.py) instead of "
+                         "--pins; with --pins too, rows without a kernel take the pin table's")
+    ap.add_argument("--routes-variant", action="append", default=[], metavar="NAME:ROUTE_TABLE#MODE[@FORM]",
+                    help="a variant that runs a route table's routes (buffers shared with the base)")
     ap.add_argument("--cache", required=True)
     ap.add_argument("--arch", default="gfx942")
     ap.add_argument("--mode", action="append", choices=["staged", "parts", "b2b", "step", "ab", "stepsel", "energy"])
@@ -367,7 +438,12 @@ def main(argv=None) -> int:
 
         rc = _hm._resolve_hip().hipSetDeviceFlags(ctypes.c_uint(args.sched))
         print(f"[replay] hipSetDeviceFlags({args.sched}) -> {rc}", flush=True)
-    pins = load_pins_cases(args.pins, args.arch)
+    if not args.pins and not args.routes:
+        raise SystemExit("--pins or --routes is required")
+    if args.routes:
+        pins = load_route_cases(args.routes, args.arch, args.pins)
+    else:
+        pins = load_pins_cases(args.pins, args.arch)
     keys = args.cases.split(",") if args.cases else list(pins)
     need = set(keys)
     if "step" in modes:
@@ -415,8 +491,17 @@ def main(argv=None) -> int:
         name, _, path = spec.partition(":")
         vp = load_pins_cases(path, args.arch)
         variants[name] = {
-            k: Case(k, dict(pins[k], kernel=vp[k]["kernel"]) if k in vp else pins[k], cache, args.arch, B, rt,
+            k: Case(k, _with_pick(pins[k], vp[k]) if k in vp else pins[k], cache, args.arch, B, rt,
                     host_bits, stage2, args, share_from=cases[k])
+            for k in sorted(need)
+        }
+    for spec in args.routes_variant:
+        name, _, path = spec.partition(":")
+        vp = load_route_cases(path, args.arch)
+        variants[name] = {
+            k: Case(k, _with_pick(pins[k], vp[k]) if k in vp else pins[k], cache, args.arch, B, rt, host_bits,
+                    stage2, args,
+                    share_from=cases[k])
             for k in sorted(need)
         }
     if args.tied_variant:

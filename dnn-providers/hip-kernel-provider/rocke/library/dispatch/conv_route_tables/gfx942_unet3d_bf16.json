@@ -1,0 +1,761 @@
+{
+ "arch": "gfx942",
+ "llvm_flavor": "llvm22",
+ "comment": "3-D UNet convolutions (bf16, NDHWC, 3x3x3 filter, stride 1; 10 shapes x fwd/dgrad/wgrad) in the padded (production) forms: padding (1,1,1) (cases <dir>_s<N>_pad1) and (0,1,1) with the depth halo in the input (cases <dir>_s<N>_pad011). Per case the route selected by interleaved same-session judging: direct (pinned kernel on the padded problem), padcopy_halo (pad copy + pinned halo-form kernel) or winograd (3-D yx Winograd drop-in). Every route is deterministic (f32 reductions).",
+ "modes": {
+  "deterministic": {
+   "deterministic": true,
+   "cases": {
+    "dgrad_s10_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 18 -H 8 -W 8 -k 1024 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t128x256x64-w2x4-a16x16x16-v8x8x8-mem-cshuffle-grp-s1x1-d1x1-sk4-xcd6-lxor-tapk-tpf1-bkp4-bpp4-pps7-pbx7-pbo1-pbd1-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s10_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 16 -H 8 -W 8 -k 1024 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t128x256x64-w2x4-a16x16x16-v8x8x8-mem-cshuffle-grp-s1x1-d1x1-sk8-xcd6-lxor-tapk-tpf1-bkp4-bpp4-pps2-pbx77-pbo1-pbd1-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s1_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-f0x3-s1x1-d1x1-wpe2-xcd6-lxor-tapk-tpf3-xh-bkp2-ilv4-xhx-mch2-lda1-lsb-sp1-bw-bpad4-zt1-ak4-xo6-xdf4-xfa1-xep1-elb-nag-mb11-xsm-xyr130-xel-xtr-xwm-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s1_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-f0x3-s1x1-d1x1-wpe2-xcd6-lxor-tapk-tpf3-xh-bkp2-ilv4-xhx-mch2-lda1-lsb-sp1-bw-bpad4-zt1-ak4-xo6-xdf4-xfa1-xep1-elb-nag-mb11-xsm-xyr130-xel-xtr-xwm-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s2_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t256x128x16-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-f0x3-s1x1-d1x1-wpe2-xcd6-lxor-tapk-tpf1-xh-bkp4-ilv4-xhx-mch2-lda1-lsb-sp1-bw-bpad4-zt2-ak4-xo2-xfa1-xep1-elb-mb16-xsm-xel-xtr-xwm-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s2_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t512x128x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-s1x1-d1x1-xcd6-lxor-tapk-tpf1-bkp4-mch2-bpp4-pps6-ppe2-zt1-pbs1-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s3_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 2
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s3_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s4_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 2
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s4_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s5_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 66 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 2
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s5_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 64 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s6_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 66 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 2
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s6_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 64 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s7_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 34 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-s1x1-d1x1-sk3-xcd6-lxor-tapk-tpf1-bkp4-mch2-bpp4-pps12-pbs3-elb-pbx8-pbd1-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s7_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-s1x1-d1x1-sk3-xcd6-lxor-tapk-tpf1-bkp4-mch2-bpp4-pps12-pbs3-pbx8-pbd1-msg1024-wave64-gfx942-llvm22"
+    },
+    "dgrad_s8_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 34 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 2
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s8_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s9_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 2
+      },
+      "wtv": 3
+     }
+    },
+    "dgrad_s9_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": true,
+       "z_tile": 2,
+       "n_tile": 64,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 3
+     }
+    },
+    "fwd_s10_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 18 -H 8 -W 8 -k 1024 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x128x64-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-nopad-vmi4-kprd-pp5-ppm1-ppbd-sapl-skx6-psf3-fbse-sdet3-wave64-gfx942-llvm22 @split_k=7"
+    },
+    "fwd_s10_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 16 -H 8 -W 8 -k 1024 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x128x64-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-nopad-vmi4-kprd-pp5-ppm1-ppbd-sapl-skx6-psf3-fbse-sdet3-wave64-gfx942-llvm22 @split_k=7"
+    },
+    "fwd_s1_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-nag-mb32-xsm-fxd1036-wave64-gfx942-llvm22"
+    },
+    "fwd_s1_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-nag-mb32-xsm-fxd1036-wave64-gfx942-llvm22"
+    },
+    "fwd_s2_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-mb32-xsm-fxd2016-wave64-gfx942-llvm22"
+    },
+    "fwd_s2_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-kprd-uxh4-prio2-lxrk-xws-eqx4-mb32-xsm-fxd2016-wave64-gfx942-llvm22"
+    },
+    "fwd_s3_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 0
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s3_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s4_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 0
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s4_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s5_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 66 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 0
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s5_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 64 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s6_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 66 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1,
+       "bps_halo_z": 0
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s6_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 64 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s7_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 34 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-mch2-nopad-vmi4-kprd-cg2-prio1-pp5-lxrk-sapl-psf10-fbse-shy16-sdet3-wave64-gfx942-llvm22 @split_k=228"
+    },
+    "fwd_s7_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 2,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-mch2-nopad-vmi4-kprd-cg2-prio1-pp5-lxrk-sapl-psf10-fbse-shy16-sdet3-wave64-gfx942-llvm22 @split_k=228"
+    },
+    "fwd_s8_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 34 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-sk2-ukd-rpf1-lxor-tapf-mch2-nopad-vmi5-kprd-cg2-pp5-lxrk-sapl-psf10-fbse-shy16-sdet3-wave64-gfx942-llvm22 @split_k=228"
+    },
+    "fwd_s8_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "winograd",
+     "winograd": {
+      "spec": {
+       "stage": "lds16",
+       "op_dtype": "f16",
+       "fill_il": true,
+       "waves": 8,
+       "nsplit": false,
+       "z_tile": 4,
+       "n_tile": 32,
+       "nfast": true,
+       "pkrtz": true,
+       "epi_vec": true,
+       "yf16": true,
+       "xcd": 6,
+       "ksplit": 4,
+       "bps": 1,
+       "bps_halo": 1
+      },
+      "wtv": 4
+     }
+    },
+    "fwd_s9_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-tapf-kprd-uxh8-prio1-lxrk-xws-eqx4-nag-xsm-fxd1036-xyr14-wave64-gfx942-llvm22"
+    },
+    "fwd_s9_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 1 -t 1 -V 0",
+     "calls": 1,
+     "route": "padcopy_halo",
+     "kernel": "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-xcd6-ukd-rpf1-lxor-tapf-kprd-uxh8-prio1-lxrk-xws-eqx4-nag-xsm-fxd1036-xyr14-wave64-gfx942-llvm22"
+    },
+    "wgrad_s10_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 18 -H 8 -W 8 -k 1024 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t256x256x32-w2x4-a16x16x16-v8x8x1-mem-default-grp-kpad4-pfr1-kp2-sepa2-wpl4-esf-wave64-gfx942-llvm22"
+    },
+    "wgrad_s10_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 16 -H 8 -W 8 -k 1024 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t256x256x32-w2x4-a16x16x16-v8x8x1-mem-default-grp-kpad4-pfr1-kp2-sepa2-wpl4-esf-wave64-gfx942-llvm22"
+    },
+    "wgrad_s1_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t64x192x32-w1x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1024-pfr1-kp2-xcd6-xw3-xg4-xpp8-xgn2-wss1-xps1-xrot1-xko1-wave64-gfx942-llvm22 @split_k=304"
+    },
+    "wgrad_s1_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t64x192x32-w1x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1024-pfr1-kp2-xcd6-xw3-xg4-xpp8-xgn2-wss1-xps1-xrot1-xko1-wave64-gfx942-llvm22 @split_k=304"
+    },
+    "wgrad_s2_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 258 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t64x192x32-w1x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1024-pfr1-kp2-xcd6-xw3-xg4-xpp8-xgn2-wss1-xps1-xrot1-xko1-wave64-gfx942-llvm22 @split_k=304"
+    },
+    "wgrad_s2_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 256 -H 128 -W 128 -k 64 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t64x192x32-w1x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1024-pfr1-kp2-xcd6-xw3-xg4-xpp8-xgn2-wss1-xps1-xko1-wave64-gfx942-llvm22 @split_k=304"
+    },
+    "wgrad_s3_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-mb1-wave64-gfx942-llvm22 @split_k=38"
+    },
+    "wgrad_s3_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-mb1-wave64-gfx942-llvm22 @split_k=38"
+    },
+    "wgrad_s4_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=24"
+    },
+    "wgrad_s4_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 128 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1024-pfr1-kp2-xcd6-xw3-xg2-xpp8-xgn2-wss1-wave64-gfx942-llvm22 @split_k=24"
+    },
+    "wgrad_s5_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 66 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-sk2-2stage-wsr8-pfr1-kp2-xcd6-sepa2-kpl8-wss1-wpl2-wave64-gfx942-llvm22 @split_k=4"
+    },
+    "wgrad_s5_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 64 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1024-pfr1-kp2-xcd6-xw3-xg2-xpp8-xgn2-wss1-wave64-gfx942-llvm22 @split_k=6"
+    },
+    "wgrad_s6_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 66 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-mb1-wave64-gfx942-llvm22 @split_k=6"
+    },
+    "wgrad_s6_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 64 -H 32 -W 32 -k 256 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=6"
+    },
+    "wgrad_s7_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 34 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t256x256x32-w2x4-a16x16x16-v8x8x1-mem-default-grp-kpad4-sk2-2stage-wsr8-pfr1-kp2-xcd6-sepa2-wss1-wpl4-wave64-gfx942-llvm22 @split_k=2"
+    },
+    "wgrad_s7_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 2,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-sk2-2stage-wsr8-pfr1-kp2-xcd6-sepa2-kpl8-wss1-wpl4-wave64-gfx942-llvm22 @split_k=2"
+    },
+    "wgrad_s8_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 34 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t256x256x32-w2x4-a16x16x16-v8x8x1-mem-default-grp-kpad4-pfr1-kp2-sepa2-kpl8-wpl2-wave64-gfx942-llvm22"
+    },
+    "wgrad_s8_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 1024 --in_d 32 -H 16 -W 16 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t256x256x32-w2x4-a16x16x16-v8x8x1-mem-default-grp-kpad4-pfr1-kp2-sepa2-kpl8-wpl4-esf-wave64-gfx942-llvm22"
+    },
+    "wgrad_s9_pad011": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 130 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-mb1-wave64-gfx942-llvm22 @split_k=48"
+    },
+    "wgrad_s9_pad1": {
+     "cmd": "MIOpenDriver convbfp16 -n 1 -c 64 --in_d 128 -H 64 -W 64 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 1 -p 1 -q 1 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
+     "calls": 1,
+     "route": "direct",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr1024-pfr1-kp2-xcd6-pfs1-xw3-wss1-wave64-gfx942-llvm22 @split_k=48"
+    }
+   }
+  }
+ }
+}
