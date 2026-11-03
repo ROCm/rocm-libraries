@@ -4724,7 +4724,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # otherwise open with a few thousand lines of nothing.
                 n_skipped += 1
                 continue
-            # The problem the kernels launch on (dgrad runs width-folded, as
+            # The problem the kernels launch on (fwd and dgrad run width-folded, as
             # the dispatcher launches it); the tensors, the reference and the
             # FLOP count stay the case's own -- the fold keeps every byte.
             run_problem = _launch_problem(direction, problem)
@@ -5213,20 +5213,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
 def _launch_problem(direction, problem):
     """The problem the cached kernels of ``direction`` launch on for ``problem``.
 
-    A dgrad whose width folds into its channels runs folded
+    A forward or dgrad pass whose width folds into its channels runs folded
     (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`) -- the same
-    bytes in all three tensors, in fewer and wider sub-GEMMs -- exactly as
-    ``dispatch.grouped_convolution`` launches it, so what is benchmarked here
-    is what dispatch runs.
-
-    A forward folds the same way: the identity behind ``fold_width`` does not
-    depend on the direction, so a patch embedding (stride = filter, no
-    padding) or a 2x2 stride-2 downsample runs as a ``Y x 1`` convolution
-    over ``X * C`` contiguous channels -- vector-wide A loads instead of
-    ``C``-element gathers -- on exactly the case's tensors. Every other
-    problem launches as it is.
+    bytes in all three tensors, fewer and wider sub-GEMMs (dgrad) or
+    vector-wide patch rows (fwd) -- exactly as ``dispatch.grouped_convolution``
+    launches it, so what is benchmarked here is what dispatch runs. Every
+    other problem (and wgrad) launches as it is.
     """
-    if direction not in ("dgrad", "fwd"):
+    if direction not in ("fwd", "dgrad"):
         return problem
     from kernels.common.conv_implicit_gemm_dgrad import fold_width
 

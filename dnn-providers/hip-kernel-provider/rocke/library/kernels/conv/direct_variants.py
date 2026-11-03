@@ -26,6 +26,7 @@ __all__ = [
     "DIRECT_DGRAD_PATCH_WMMA",
     "DIRECT_DGRAD_SMALLC_WMMA",
     "DIRECT_DGRAD_WMMA",
+    "DIRECT_DEPTHWISE_WIN_FWD",
     "DIRECT_FWD_SMALLC_WMMA",
     "DIRECT_FWD_SMALLK_WMMA",
     "DIRECT_FWD_WMMA",
@@ -58,6 +59,11 @@ DIRECT_DGRAD_WMMA = "direct_dgrad_wmma"
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
 DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
+# Depthwise (and 8..64-channel grouped) forward, stride 1 or 2, square filter,
+# on the windowed dgrad kernel's Toeplitz MFMA form with the filter rotated
+# (``fwd=True``): the spec's problem is the transposed stride-1 grid
+# (dw_win_fwd_problem); the kernel takes the forward kernarg block.
+DIRECT_DEPTHWISE_WIN_FWD = "direct_depthwise_win"
 # Wave32 WMMA dgrad of stem convolutions (C <= 4, ungrouped): a patch
 # embedding as one GEMM with a pixel-shuffle store, and overlapping stems as a
 # GEMM over the flattened (r, s, c) followed by col2im in LDS.
@@ -80,6 +86,9 @@ DIRECT_HALO_VARIANTS = ("direct_nongrouped", DIRECT_GROUPED_HALO)
 # sums into the output. Shape-independent (one binary per split_c and dtype),
 # cached under its own direction and found by exact identity.
 DIRECT_SPLIT_REDUCE = "direct_split_reduce"
+# Stride-1 depthwise dgrad through the output-stationary forward kernel with
+# the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
+DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 # variant -> (transpose helper, reorganize helper)
 DIRECT_MFMA_HELPERS = {
     "direct_grouped_dgrad_mfma": (DIRECT_DGRAD_TRANSPOSE, DIRECT_DGRAD_REORGANIZE),
@@ -125,6 +134,7 @@ DIRECT_WAVE_PARAMETRIC = frozenset(
         "direct_depthwise_spatial",
         "direct_depthwise_tiled",
         "direct_depthwise_col",
+        DIRECT_DEPTHWISE_TILED_DGRAD,
     }
 )
 
@@ -200,6 +210,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return dc.DirectDepthwiseTiledSpec(
             problem=problem, name="rocke_direct_depthwise_tiled", **knobs
         )
+    if variant == DIRECT_DEPTHWISE_TILED_DGRAD:
+        return dc.DirectDepthwiseTiledSpec(
+            problem=problem, name="rocke_direct_dw_tiled_dgrad", dgrad=True, **knobs
+        )
     if variant == "direct_depthwise_col":
         # The col spec carries its own element type; a binary serves only the
         # dtype it was built for, so it follows the problem's.
@@ -216,6 +230,15 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     if variant == "direct_depthwise_dgrad_win":
         return dc.DirectDepthwiseDgradWindowedSpec(
             problem=problem, name="rocke_direct_dw_dgrad_win", **knobs
+        )
+    if variant == DIRECT_DEPTHWISE_WIN_FWD:
+        return dc.DirectDepthwiseDgradWindowedSpec(
+            problem=dc.dw_win_fwd_problem(problem),
+            name="rocke_direct_dw_win_fwd",
+            mfma=True,
+            fwd=True,
+            out_stride=problem.stride,
+            **knobs,
         )
     if variant == "direct_grouped_dgrad":
         return dc.DirectConvDgradSpec(
@@ -469,14 +492,14 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return is_valid_fwd_smallk_spec(spec, arch=arch)
         if variant == "direct_depthwise_spatial":
             return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
-        if variant == "direct_depthwise_tiled":
+        if variant in ("direct_depthwise_tiled", DIRECT_DEPTHWISE_TILED_DGRAD):
             return dc.is_valid_depthwise_tiled_spec(spec, arch=arch)
         if variant == "direct_depthwise_col":
             spec.validate()
             return dc.is_valid_depthwise_col_spec(spec, arch=arch)
         if variant == "direct_depthwise_dgrad":
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
-        if variant == "direct_depthwise_dgrad_win":
+        if variant in ("direct_depthwise_dgrad_win", DIRECT_DEPTHWISE_WIN_FWD):
             return dc.is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
             return dc.is_valid_dgrad_spec(spec, arch=arch)
@@ -588,9 +611,11 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_depthwise": dc.build_direct_depthwise,
         "direct_depthwise_spatial": dc.build_direct_depthwise_spatial,
         "direct_depthwise_tiled": dc.build_direct_depthwise_tiled,
+        DIRECT_DEPTHWISE_TILED_DGRAD: dc.build_direct_depthwise_tiled,
         "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_depthwise_dgrad_win": dc.build_direct_depthwise_dgrad_windowed,
+        DIRECT_DEPTHWISE_WIN_FWD: dc.build_direct_depthwise_dgrad_windowed,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         "direct_grouped_dgrad_4c": dc.build_direct_conv_4c,
         "direct_grouped_dgrad_fused": dc.build_direct_conv,
@@ -650,6 +675,12 @@ def direct_spec_for_problem(
         return None, (
             f"binary bakes C={knobs['channels']}, problem has C={problem.groups}"
         )
+    if getattr(problem, "pad_w", -1) < -1:
+        return None, f"pad_w must be -1 (PAD) or at least 0 (got {problem.pad_w})"
+    if getattr(problem, "PAD_W", problem.PAD) != problem.PAD and (
+        variant != DIRECT_DEPTHWISE_TILED_DGRAD
+    ):
+        return None, "one padding for both axes (only the rotated-filter dgrad differs)"
     spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:

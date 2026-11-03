@@ -173,8 +173,6 @@ void case_gfx1250_standalone_bridge()
     const std::string ir = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
     const std::string ir24
         = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM24);
-    if(ir24 != ir)
-        fail("LLVM24 bridge output differs from its shared LLVM23 profile", __LINE__);
 
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.signal(i32 1)");
@@ -187,6 +185,11 @@ void case_gfx1250_standalone_bridge()
     EXPECT_IR(ir, "call <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.load.to.lds(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
+    EXPECT_IR(ir24, "addrspacecast ptr addrspace(3)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.barrier.init(ptr addrspace(15)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.barrier.signal.var(ptr addrspace(15)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.barrier.join(ptr addrspace(15)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15)");
 }
 
 void case_inline_asm_rejects_non_string_minimum_flavor()

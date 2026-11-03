@@ -13,9 +13,10 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -75,6 +76,13 @@ struct VerificationRun
     // The first executeAndValidate call computes the CPU reference and sets this flag.
     bool referenceReady = false;
 };
+
+/// Runs the CPU reference executor on a serialized graph. Defined in
+/// IntegrationGraphVerificationReference.cpp so the executor's templates are compiled
+/// once per executable rather than in every translation unit that includes this header.
+void executeCpuReferenceGraph(void* graphBuffer,
+                              size_t size,
+                              const std::unordered_map<int64_t, void*>& variantPack);
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
@@ -412,7 +420,7 @@ private:
         auto [serializedGraph, serErr] = graph.to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        executeCpuReferenceGraph(
             serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());
     }
 

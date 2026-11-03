@@ -117,7 +117,8 @@ arch over `reduction.aot_budget_per_arch` (checked before anything is written),
 `--check-placeholders` findings, an emitted file that cannot be read back, or a template
 error; `2` unusable input: a missing or invalid config, a non-existent `--emitted-root`, an
 `--output-dir` that is not a directory, a non-empty output directory without `--force`,
-a config the renderer rejects, an `--ids-from` or `--engine-ids-from` that does not exist,
+a config the renderer rejects, `--check-placeholders` on a slotted config (descriptors
+only: nothing to check), an `--ids-from` or `--engine-ids-from` that does not exist,
 is not a directory or does not yield usable ids (ambiguous, wrong bundle, missing KDP),
 `--new-ids` together with `--ids-from` or `--engine-ids-from`, or a bad flag (argparse).
 `--dry-run` resolves ids too, so it exits 2 for an unusable previous bundle. A default run
@@ -150,8 +151,8 @@ turns off sibling discovery (below).
 An installed or `--ids-from` bundle is read strictly: an unusable one is an error. When the
 installed bundle is used by default and the output directory also holds a bundle (a previous
 scratch pass), that bundle is read as a second, gap-filling source (`Also reading <dir> for
-the ids of descriptors added since installation; installed ids win wherever both have
-one.`). A scratch bundle made with different engine ids (say a `--new-ids` run), or one that
+the ids of descriptors added since installation, slot descriptors included; installed ids win
+wherever both have one.`). A scratch bundle made with different engine ids (say a `--new-ids` run), or one that
 cannot be read, is ignored with a stderr warning. An explicit `--ids-from` replaces the
 default, and the installed bundle is then not consulted. Regenerating an
 unchanged config rewrites every descriptor byte for byte, and adding a kernel adds only
@@ -377,7 +378,8 @@ verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` be
                                     # descriptors/<producer>/<bundle>/ (packaged)
     <slug>.kmd.json                 # KMD -- the engine's per-kernel metadata schema
     <slug>.ued.json                 # UED -- the engine descriptor
-    <slug>.udd.json                 # UDD -- dispatch symbol
+    <slug>.udd.json                 # UDD -- dispatch symbol (a slotted engine: one
+                                    # <slug>_<slot>.udd.json per slot)
     <slug>.uhd.json                 # UHD -- only when engine.heuristic != "none"
     kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
     <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
@@ -992,13 +994,47 @@ names it launches and owns their order, and the provider drops a kernel whose la
 differ from the handler's when it builds its catalog. One engine has one handler, so every
 kernel of an engine must name the same set of launches: a config mixing single- and
 multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
-engines by launch set). An operation whose variants need different launch counts, such as
-a single-launch prefill and a two-launch decode of SDPA forward, is therefore split into
-separate engines, one per launch set. The generated native stub declares `launchNames()`
-from the config's launches and notes in `prepare()` that each launch is built with
-`launchKernelDefinition`; the generated census test checks each kernel's `sources` entries
-against the emitted source kind. See the
+engines by launch set). In a slotted engine the rule holds per slot, because each slot has
+its own handler (see "Slotted engines"). An operation whose variants need different launch
+counts, such as a single-launch prefill and a two-launch decode of SDPA forward, is
+therefore split into separate engines, one per launch set. The generated native stub
+declares `launchNames()` from the config's launches and notes in `prepare()` that each
+launch is built with `launchKernelDefinition`; the generated census test checks each
+kernel's `sources` entries against the emitted source kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
+
+## Slotted engines: `slots`
+
+A config with a `slots` list describes a slotted engine (RFC 0021): `engine.shared_workspace`
+names the shared-workspace token, each slot declares `name`, `kmd_fields`, `knobs`, `ranker`
+and `specialization`, and every pack names its `slot`. The loader refuses `kmd_fields`,
+`specialization`, `engine.knobs` and a non-`none` `engine.heuristic` beside `slots`, so a
+slotted config declares them per slot. `tests/fixtures/slotted_three_slot.yaml` is the
+reference. A slotted config generates descriptors only: no native stub, census, matcher test or fragments,
+and no provider splice (`generate.py` prints `Descriptors only: no provider splice for slotted
+engines`), and `--check-placeholders` is refused for it (exit 2). The slotted engine's runtime
+behavior, benchmarking and tooling are in the
+[RUNBOOK](../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md#slotted-engines-rfc-0021).
+
+Each slot emits its own KMD, its own UDD (`<slug>_<slot>.udd.json`, dispatch symbol
+`<namespace>.<slot>_dispatch`) and, when it ranks, its own UHD; a slot's KDPs name the slot's
+UDD. Packs with different launch sets need different dispatch descriptors (RFC 0021 §4), so
+a single-launch `prep` slot can sit beside a multi-launch `dkdv` slot. In the packaged
+dialect a slotted `rocke`, `hip` or `hsaco` pack accepts `launches` exactly as an unslotted
+one does and emits the authored UKD with a `sources` map (UKD 1.1); the launch-set check
+runs per slot, and a slot mixing single- and multi-launch kernels is a `ConfigError`. For
+`hsaco`, `sources` is the default route to launches that live in one code object. The
+alternative is one single-launch UKD whose slot native handler launches the other kernels by
+symbol names its KMD records; it needs no launch set and no per-launch signature (RFC 0021
+§3). Regenerating into an existing tree keeps ids as for an unslotted
+engine ([Descriptor ids](#descriptor-ids)): each slot's KMD, UDD and UHD are matched by slot
+name, its kernels within the slot, and only a new slot or a retuned kernel gets a new id. The
+scratch bundle (`also_from`) supplies the same ids for a slot added since installation. A slotted
+engine is one bundle, so `--engine-ids-from` (sibling mode) is refused for it. Unslotted output
+is byte-identical to a generator without slots (`tests/test_slots.py` pins it against a golden).
+
+CI covers slots through the validator roots (`hipdnn_validate_descriptors_slotted_*`) and this
+suite; the `uhd_gen` slot tests run locally only (see the uhd_gen README).
 
 ## The five pre-mint config-loader checks
 

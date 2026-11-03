@@ -30,6 +30,11 @@ namespace stinkytofu {
 // its start) has one batch: all its loads are released at once, as early as the graph lets them.
 // Stages are paced independently: two stages open at the same time each take their own quota. Once
 // the region's last WMMA has issued nothing is held.
+//
+// `start` is the opening barrier's planned window. noteOpen() moves it to where that barrier
+// actually issued, when that is later and the stage has not issued a load yet, and recounts the
+// batches over the remaining span. The end stays, so the last load is still due at the barrier it
+// feeds. A stage whose loads name different opening barriers keeps its plan.
 class DsSpreadPacer {
    public:
     struct Load {
@@ -38,6 +43,10 @@ class DsSpreadPacer {
         int end;           // WMMA index of the barrier it feeds (INT_MAX = the region end)
         int earliest = 0;  // WMMA count the graph lets it issue at the soonest
         int drain = 0;     // WMMAs its barrier keeps for the last load to return
+        // DAG node of the barrier that sets `start` (UINT_MAX = none). Loads of one stage that
+        // name different barriers leave the stage without one, so a late barrier cannot move
+        // loads that do not wait behind it.
+        unsigned opener = UINT_MAX;
     };
 
     // A stage the LDS rate can not finish by its end: its loads need `needed` WMMAs from its start
@@ -96,9 +105,11 @@ class DsSpreadPacer {
                 Stage st;
                 st.start = start;
                 st.end = end;
+                st.opener = l.opener;
                 stages_.push_back(st);
             }
             Stage& cur = stages_[it->second];
+            if (!fresh && cur.opener != l.opener) cur.opener = UINT_MAX;
             ++cur.total;
             cur.lastDs = std::max(cur.lastDs, l.earliest);
             stageOf_[l.nodeId] = it->second;
@@ -144,6 +155,33 @@ class DsSpreadPacer {
         return (open ? st.inBatch : 0) < (open ? st.allow : allowFor(st, idx));
     }
 
+    // Loads the even line has placed by the current batch minus the loads the stage has issued
+    // (> 0: the load's stage is behind its line).
+    int behind(unsigned nodeId, int wmmaIssued) const {
+        auto it = stageOf_.find(nodeId);
+        if (!active_ || it == stageOf_.end() || wmmaIssued >= wmmaTotal_) return 0;
+        const Stage& st = stages_[it->second];
+        const int idx = batchOf(st, wmmaIssued);
+        if (idx >= st.batches) return 0;
+        return std::max(0, evenLine(st, idx) - st.issued);
+    }
+
+    // The barrier `openerId` issued with `wmmaIssued` WMMAs of the region issued so far. A stage
+    // it opens, and that has not issued a load yet, takes this as its start and recounts its
+    // batches up to the same end. On time, or after a load has already been paced, this is a no-op.
+    void noteOpen(unsigned openerId, int wmmaIssued) {
+        if (!active_) return;
+        for (Stage& st : stages_) {
+            if (st.opener != openerId || st.issued != 0 || wmmaIssued <= st.start) continue;
+            st.start = wmmaIssued;
+            if (st.end < st.start) st.end = st.start;
+            st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
+            st.batchIdx = -1;
+            st.inBatch = 0;
+            st.allow = 0;
+        }
+    }
+
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
     void noteIssue(unsigned nodeId, int wmmaIssued) {
         auto it = stageOf_.find(nodeId);
@@ -161,8 +199,9 @@ class DsSpreadPacer {
 
    private:
     struct Stage {
-        int start = 0;    // WMMA index the stage opens at
-        int end = 0;      // WMMA index the stage ends at
+        int start = 0;  // WMMA index the stage opens at
+        int end = 0;    // WMMA index the stage ends at
+        unsigned opener = UINT_MAX;
         int lastDs = 0;   // WMMA count its last load can first issue at
         int batches = 1;  // batches between its start and its end minus the drain
         int total = 0;    // its loads
