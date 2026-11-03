@@ -252,10 +252,11 @@ namespace rocalution
         // Empty matrix
         if(mat.GetNnz() == 0)
         {
-            int mb = (mat.GetM() + 1) / 2;
-            int nb = (mat.GetN() + 1) / 2;
+            int blockdim = this->mat_.blockdim;
+            int mb       = (mat.GetM() + blockdim - 1) / blockdim;
+            int nb       = (mat.GetN() + blockdim - 1) / blockdim;
 
-            this->AllocateBCSR(0, mb, nb, 2);
+            this->AllocateBCSR(0, mb, nb, blockdim);
 
             return true;
         }

@@ -617,7 +617,6 @@ TYPED_TEST(local_matrix, allocate_sets_the_format_and_the_sizes)
 
     auto B = empty_local_matrix<T>(this->backend());
     B->AllocateBCSR("B", 3, 2, 3, 3);
-    KNOWN_BUG("AllocateBCSR of a matrix not in BCSR uses block dimension 2");
     EXPECT_EQ(B->GetBlockDimension(), 3);
     EXPECT_EQ(B->GetM(), 6);
     EXPECT_EQ(B->GetN(), 9);
@@ -680,7 +679,8 @@ TEST_P(local_matrix_data_ptr, leave_and_set_data_ptr_hand_over_the_arrays)
             break;
         case BCSR:
         {
-            int blockdim = format().blockdim;
+            // For a BCSR matrix the block dimension is only an output
+            int blockdim = 0;
             A->LeaveDataPtrBCSR(&row, &col, &val, blockdim);
             EXPECT_EQ(blockdim, format().blockdim);
             B->SetDataPtrBCSR(&row,
@@ -973,10 +973,6 @@ TEST_P(local_matrix_formats, converts_between_formats_on_its_backend)
         B->ConvertToBCSR(3);
         expect_matrix(*B, ref, Format{BCSR, 3}, backend());
         B->ConvertTo(format().id, format().blockdim);
-        if(is(BCSR))
-        {
-            KNOWN_BUG("ConvertTo keeps the block dimension of a BCSR matrix");
-        }
         expect_kept(*B, ref);
     });
 }
@@ -1474,11 +1470,6 @@ TEST_P(local_matrix_formats, lu_factorizations_solve_a_banded_system)
             {
                 killed.push_back(
                     {"the SymbolicPower structure loses its zero entries in DIA and DENSE", k});
-            }
-            else if(name == "ILUpFactorize(1) without levels" && is(BCSR))
-            {
-                killed.push_back(
-                    {"the MatrixAdd fallback converts back to BCSR with block dimension 1", k});
             }
             else
             {
@@ -2116,19 +2107,6 @@ TEST_P(local_matrix_formats, matrix_add_scales_and_adds)
 
         // The pattern of the summand is part of the pattern of the matrix
         const Csr<T> part = lower(a, true);
-
-        // A known bug ends the process in every BCSR MatrixAdd
-        if(is(BCSR))
-        {
-            KNOWN_BUG("the MatrixAdd fallback converts back to BCSR with block dimension 1");
-            expect_in_child([&] {
-                add_to(a, 2, b, -1, false);
-                add_to(a, 0.5, c, 3, true);
-            });
-            KNOWN_BUG("MatrixAdd does not scale the entries outside the summand's pattern");
-            expect_in_child([&] { add_to(a, 2, part, 1, false); });
-            return;
-        }
 
         add_to(a, 2, b, -1, false);
         add_to(a, 0.5, c, 3, true);

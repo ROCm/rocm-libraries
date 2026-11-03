@@ -43,6 +43,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed copying an MCSR matrix that was never allocated to, from or on the accelerator ending the process with a HIP error. This also affected `MatrixMult()` into an MCSR matrix and reading a matrix file into an MCSR matrix on the accelerator.
 * Fixed copying a BCSR matrix that was never allocated or was cleared asserting or failing with a HIP out-of-memory error, because the block counts were left uninitialized or kept. This also affected `MatrixMult()` into a BCSR matrix and `ReadFileCSR()` into a BCSR matrix on the accelerator.
+* Fixed BCSR matrices ignoring the requested block dimension. `AllocateBCSR()` and converting a matrix without entries used block dimension 2, `ConvertTo()` kept the block dimension of a matrix that already was BCSR, and the `MatrixAdd()` fallback converted back to BCSR with block dimension 1 and ended the process, which also affected `ILUpFactorize()` without levels.
 
 ## (Unreleased) rocALUTION 4.1.1
 

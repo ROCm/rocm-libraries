@@ -1320,12 +1320,6 @@ namespace
         auto A = empty_matrix<T>(b, f);
         ASSERT_TRUE(A->ConvertFrom(*csr));
         EXPECT_EQ(A->GetNnz(), 0);
-
-        if(f.blockdim != 2)
-        {
-            KNOWN_BUG("an empty matrix gets block dimension 2 and even dimensions");
-        }
-
         EXPECT_EQ(A->GetM(), nrow);
         EXPECT_EQ(A->GetN(), ncol);
         EXPECT_EQ(A->GetMatBlockDimension(), f.blockdim);
