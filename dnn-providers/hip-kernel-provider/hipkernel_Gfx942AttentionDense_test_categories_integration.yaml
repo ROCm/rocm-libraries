@@ -6,7 +6,9 @@
 # Pinned to hipkernel:Gfx942AttentionDense via --test-engine. Selects the shared sweeps
 # integration-test-bundles/{quick,standard,comprehensive,full}/SdpaFwd/Default/ by suite,
 # not by text in the case id: import_graph.py names cases in its own format, so a name
-# pattern would miss the cases it adds. Engine pinning and support claims do the rest: a
+# pattern would miss the cases it adds. It also selects the dense BSHD stats (LSE)
+# bundles, SdpaFwd/bshd/<dtype>/*_stats/, the only SdpaFwd bundles whose stats output
+# this engine serves. Engine pinning and support claims do the rest: a
 # claimed case the engine declines fails its lane, an unclaimed one it declines skips,
 # and an unclaimed one it accepts runs and is reported as unclaimed support.
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick +
@@ -21,6 +23,7 @@ test_categories:
     description: "Quick gfx942 dense attention BSHD bundle coverage"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_bshd_*_stats_*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -31,7 +34,9 @@ test_categories:
     description: "Standard gfx942 dense attention BSHD bundle coverage"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_bshd_*_stats_*"
       - "standard_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_bshd_*_stats_*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -42,8 +47,11 @@ test_categories:
     description: "Comprehensive gfx942 dense attention coverage: quick + standard + comprehensive-tier bundles"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_bshd_*_stats_*"
       - "standard_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_bshd_*_stats_*"
       - "comprehensive_SdpaFwd_Default.*"
+      - "comprehensive_SdpaFwd_bshd_*_stats_*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -54,6 +62,7 @@ test_categories:
     description: "Full gfx942 dense attention coverage"
     test_patterns:
       - "*_SdpaFwd_Default.*"
+      - "*_SdpaFwd_bshd_*_stats_*"
     exclude: *common_excludes
     labels:
       - "full"
@@ -63,6 +72,7 @@ test_categories:
     description: "Fast-feedback quick tier: BSHD quick bundles"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_bshd_*_stats_*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"

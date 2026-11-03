@@ -253,7 +253,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
         INSTALL_STAGING_KEY hkp_census_gfx942
         REFERENCE_EXECUTOR gpu
-        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+        # The shared Default sweeps, and the dense BSHD stats (LSE) bundles: no other
+        # SdpaFwd bundle binds a stats output this engine serves.
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*:*_SdpaFwd_bshd_*_stats_*"
         ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()
