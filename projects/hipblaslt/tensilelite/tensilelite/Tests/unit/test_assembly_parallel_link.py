@@ -64,6 +64,50 @@ def test_links_are_single_threaded_when_jobs_outnumber_cpus(tmp_path, monkeypatc
     assert [threads for _, _, threads in linker.calls] == [1, 1, 1]
 
 
+def test_independent_links_overlap(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, "CPUThreadCount", lambda: 2)
+    bothLinking = threading.Barrier(2, timeout=5)
+
+    class OverlappingLinker(_RecordingLinker):
+        def __call__(self, objFiles, coFileRaw, threads=None):
+            # Neither link can finish until the other one has started.
+            bothLinking.wait()
+            super().__call__(objFiles, coFileRaw, threads=threads)
+
+    outputs = _build(tmp_path, OverlappingLinker(), _kernels({"A": 1, "B": 1}))
+    assert [p.name for p in outputs] == ["A.co", "B.co"]
+    assert [p.read_text() for p in outputs] == ["co", "co"]
+
+
+@pytest.mark.parametrize("failedStage", ["link", "bundle"])
+def test_worker_errors_reach_the_caller(tmp_path, monkeypatch, failedStage):
+    monkeypatch.setattr(A, "CPUThreadCount", lambda: 2)
+    error = RuntimeError(f"{failedStage} failed for B")
+
+    class FailingLinker(_RecordingLinker):
+        def __call__(self, objFiles, coFileRaw, threads=None):
+            if failedStage == "link" and Path(coFileRaw).name == "B.co.raw":
+                raise error
+            super().__call__(objFiles, coFileRaw, threads=threads)
+
+    class FailingBundler(_StubBundler):
+        def compress(self, raw, co, gfx):
+            if failedStage == "bundle" and Path(raw).name == "B.co.raw":
+                raise error
+            super().compress(raw, co, gfx)
+
+    with pytest.raises(RuntimeError, match=f"{failedStage} failed for B") as raised:
+        buildAssemblyCodeObjectFiles(
+            FailingLinker(),
+            FailingBundler(),
+            _kernels({"A": 1, "B": 1}),
+            tmp_path / "dest",
+            tmp_path,
+            compress=True,
+        )
+    assert raised.value is error
+
+
 def test_largest_links_start_first_and_output_order_is_kept(tmp_path, monkeypatch):
     # One worker runs the links in the order they were submitted.
     monkeypatch.setattr(A, "CPUThreadCount", lambda: 1)
