@@ -77,7 +77,7 @@ std::string to_str(io_data_label io)
     {                                                                               \
         if(AXIS_IDX >= get_full_rank())                                             \
             throw std::out_of_range(ROCFFT_CURRENT_FUNCTION                         \
-                                    + " accessing an out-of-range layout axis.");   \
+                                    + " accessing an out-of-range data set axis."); \
         return AXIS_IDX < len_axes.size() ? len_axes[AXIS_IDX]                      \
                                           : batch_axes[AXIS_IDX - len_axes.size()]; \
     } while(0)
@@ -114,7 +114,7 @@ data_set_t::data_set_t(const std::vector<size_t>& lower,
         {
             throw std::invalid_argument(
                 ROCFFT_CURRENT_FUNCTION
-                + " detected an invalid range of logical indices along layout axis "
+                + " detected an invalid range of logical indices along data set axis "
                 + std::to_string(dim) + ": lower (" + std::to_string(lower[dim])
                 + ") is larger than upper (" + std::to_string(upper[dim]) + ").");
         }
@@ -186,7 +186,7 @@ std::vector<size_t> data_set_t::contiguous_strides_and_distances() const
 {
     if(is_contiguous())
     {
-        // a layout may be "contiguous" even if not ordered by increasing strides, e.g.,
+        // a data set may be "contiguous" even if not ordered by increasing strides, e.g.,
         // lower := {0, 0}, upper := {a, b} and strides := {b, 1} is continuous...
         return strides_and_distances();
     }
@@ -238,7 +238,7 @@ size_t data_set_t::batch() const
 {
     if(batch_axes.size() != 1)
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + " is restricted to data layouts with only one batch axis.");
+                               + " is restricted to data sets with only one batch axis.");
     return batch_axes[0].logical_span();
 }
 
@@ -246,7 +246,7 @@ size_t data_set_t::distance() const
 {
     if(batch_axes.size() != 1)
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + " is restricted to data layouts with only one batch axis.");
+                               + " is restricted to data sets with only one batch axis.");
     return batch_axes[0].inbuffer_stride;
 }
 
@@ -545,7 +545,7 @@ std::optional<data_set_t>
         throw std::invalid_argument("Unknown I/O data label given to " + ROCFFT_CURRENT_FUNCTION);
 
     if(is_empty())
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " queried on an empty layout");
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " queried on an empty data set");
 
     if(std::any_of(
            len_axes.begin(), len_axes.end(), [](const auto& axis) { return axis.lower != 0; }))
@@ -594,7 +594,7 @@ std::optional<data_set_t>
         if(!strides_are_consistent)
             return std::nullopt;
     }
-    // copy layout and modify what needs be
+    // copy data set and modify what needs be
     auto ret = std::make_optional<data_set_t>(*this);
     (*ret)[0].upper
         = is_real_domain(fft_type, other_io)
