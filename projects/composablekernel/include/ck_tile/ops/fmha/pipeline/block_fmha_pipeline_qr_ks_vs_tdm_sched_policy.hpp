@@ -51,8 +51,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static constexpr index_t kVFootprintBytes =
         kVFootprintElements * sizeof(typename Geometry::VDataType);
     // Named geometry knobs. Values frozen to the current D128/D192 formulas.
-    static constexpr bool kEarlyOutputRescale = Geometry::kHeadDimQK == 128;
-    static constexpr bool kLeadFirstLoad      = Geometry::kHeadDimQK == 128;
+    static constexpr bool kEarlyOutputRescale      = Geometry::kHeadDimQK == 128;
+    static constexpr bool kLeadFirstLoad           = Geometry::kHeadDimQK == 128;
     static constexpr index_t kKPrefetchTensorCount = Tuning::kKWait;
     static constexpr index_t kVPrefetchTensorCount = Tuning::kVWait;
     static constexpr bool kPrefetchTailDrain       = Tuning::kTailDrain;
