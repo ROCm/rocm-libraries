@@ -26,7 +26,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/allocator/allocator_traits.h>
+#include <thrust/detail/allocator/allocator_system.h>
 #include <thrust/detail/copy.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
@@ -37,6 +37,7 @@
 #include _THRUST_STD_INCLUDE(__host_stdlib/memory)
 #include _THRUST_STD_INCLUDE(__iterator/advance.h)
 #include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__memory/allocator_traits.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_trivially_copy_constructible.h)
 #include _THRUST_STD_INCLUDE(tuple)
@@ -55,18 +56,17 @@ struct copy_construct_with_allocator
     const InputType& in = _THRUST_STD::get<0>(t);
     OutputType& out     = _THRUST_STD::get<1>(t);
 
-    allocator_traits<Allocator>::construct(a, &out, in);
+    _THRUST_STD::allocator_traits<Allocator>::construct(a, &out, in);
   }
 };
 
-// we need to use allocator_traits<Allocator>::construct() to
+// we need to use _THRUST_STD::allocator_traits<Allocator>::construct() to
 // copy construct a T if either:
 // 1. Allocator has a 2-argument construct() member or
 // 2. T has a non-trivial copy constructor
 template <typename Allocator, typename T>
 inline constexpr bool needs_copy_construct_via_allocator =
-  allocator_traits_detail::has_member_construct2<Allocator, T, T>::value
-  || !_THRUST_STD::is_trivially_copy_constructible_v<T>;
+  _THRUST_STD::__has_construct<Allocator, T*, T> || !_THRUST_STD::is_trivially_copy_constructible_v<T>;
 
 // we know that std::allocator::construct's only effect is to call T's
 // copy constructor, so we needn't consider or use its construct() member for copy construction
