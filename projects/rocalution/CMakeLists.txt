@@ -384,6 +384,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocalution-coverage_*.profraw -o ./coverage-report/rocalution.profdata
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_filter_lcov_exclusions.py
     COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ${COVERAGE_FILTER_OPTIONS} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
     ${COVERAGE_HTML_COMMAND}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

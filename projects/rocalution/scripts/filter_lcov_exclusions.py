@@ -54,6 +54,11 @@ record on the line of the opening brace.
 The line, branch and function totals (LF/LH, BRF/BRH, FNF/FNH) are recomputed
 for every source file.
 
+The script fails, and removes the output, when a source file cannot be read,
+or when its markers do not pair up: a START that is never closed, a START inside
+an open block of the same kind, a STOP without a START, or an *_EXCL_* marker
+that is not one of the above.
+
 Usage:
     filter_lcov_exclusions.py [--no-mpi] [--exclude-branches REGEX] input.info output.info
 """
@@ -74,6 +79,21 @@ EXCL_BR_LINE_PATTERN = re.compile(PREFIX + r"BR_LINE")
 # reached in a build without MPI, but is measured in one with MPI.
 NO_MPI_START_PATTERN = re.compile(r"COVERAGE_EXCL_NO_MPI_START")
 NO_MPI_STOP_PATTERN = re.compile(r"COVERAGE_EXCL_NO_MPI_STOP")
+
+# Anything that looks like a marker, in any case, to catch misspelled ones
+MARKER_PATTERN = re.compile(r"\b(?:LCOV|GCOVR?|COVERAGE)_EXCL_\w*", re.IGNORECASE)
+KNOWN_MARKERS = {
+    f"{prefix}_EXCL_{kind}"
+    for prefix in ("LCOV", "GCOV", "GCOVR")
+    for kind in ("START", "STOP", "LINE", "BR_START", "BR_STOP", "BR_LINE")
+} | {"COVERAGE_EXCL_NO_MPI_START", "COVERAGE_EXCL_NO_MPI_STOP"}
+
+# Each kind of block is opened and closed independently of the others
+BLOCKS = {
+    "LCOV_EXCL": (EXCL_START_PATTERN, EXCL_STOP_PATTERN),
+    "LCOV_EXCL_BR": (EXCL_BR_START_PATTERN, EXCL_BR_STOP_PATTERN),
+    "COVERAGE_EXCL_NO_MPI": (NO_MPI_START_PATTERN, NO_MPI_STOP_PATTERN),
+}
 
 DEFAULT_BRANCH_EXCLUDE = r"\b(LOG_INFO|LOG_VERBOSE_INFO)\s*\("
 
@@ -123,17 +143,20 @@ class SourceExclusions:
         self.lines = set()  # DA, BRDA and FN records
         self.branches = set()  # BRDA records only
         self.no_code = set()  # DA records, unless a function starts there
+        self.errors = []
 
         if not os.path.isfile(source_file):
+            self.errors.append(f"{source_file}: source file not found")
             return
         try:
             with open(source_file, "r", encoding="utf-8", errors="replace") as f:
                 text = f.readlines()
         except OSError as e:
-            print(f"Warning: Could not read {source_file}: {e}", file=sys.stderr)
+            self.errors.append(f"{source_file}: cannot read the source file: {e}")
             return
 
-        in_block = in_no_mpi = in_br_block = in_comment = False
+        open_at = dict.fromkeys(BLOCKS)  # line of the START of each open block
+        in_comment = False
         for num, line in enumerate(text, start=1):
             if has_no_code(line, in_comment):
                 self.no_code.add(num)
@@ -142,43 +165,46 @@ class SourceExclusions:
             elif in_comment and "*/" in line:
                 in_comment = False
 
-            if EXCL_BR_START_PATTERN.search(line):
-                in_br_block = True
+            for marker in MARKER_PATTERN.findall(line):
+                if marker not in KNOWN_MARKERS:
+                    self.errors.append(f"{source_file}:{num}: unknown marker {marker}")
+
+            # A block covers the lines of its START and STOP. A STOP after the
+            # START on the same line covers only that line.
+            in_block = {}
+            for kind, (start_pattern, stop_pattern) in BLOCKS.items():
+                start = start_pattern.search(line) is not None
+                stop = stop_pattern.search(line) is not None
+                in_block[kind] = start or stop or open_at[kind] is not None
+                if start and open_at[kind] is not None:
+                    self.errors.append(
+                        f"{source_file}:{num}: {kind}_START inside the block opened at line {open_at[kind]}"
+                    )
+                elif start and not stop:
+                    open_at[kind] = num
+                elif stop and not start:
+                    if open_at[kind] is None:
+                        self.errors.append(
+                            f"{source_file}:{num}: {kind}_STOP without a START"
+                        )
+                    open_at[kind] = None
+
             if (
-                in_br_block
+                in_block["LCOV_EXCL_BR"]
                 or EXCL_BR_LINE_PATTERN.search(line)
                 or branch_regex.search(line)
             ):
                 self.branches.add(num)
-            if EXCL_BR_STOP_PATTERN.search(line):
-                in_br_block = False
 
-            # A STOP after the START on the same line closes the block there
-            no_mpi_start = NO_MPI_START_PATTERN.search(line) is not None
-            no_mpi_stop = NO_MPI_STOP_PATTERN.search(line) is not None
-            if no_mpi_start or no_mpi_stop or in_no_mpi:
-                in_no_mpi = (in_no_mpi or no_mpi_start) and not no_mpi_stop
-                if exclude_no_mpi:
-                    self.lines.add(num)
-                    continue
-                if no_mpi_stop:
-                    continue
-
-            start = EXCL_START_PATTERN.search(line) is not None
-            stop = EXCL_STOP_PATTERN.search(line) is not None
-            if start or stop or in_block or EXCL_LINE_PATTERN.search(line):
-                in_block = (in_block or start) and not stop
+            if in_block["COVERAGE_EXCL_NO_MPI"] and exclude_no_mpi:
+                self.lines.add(num)
+            elif in_block["LCOV_EXCL"] or EXCL_LINE_PATTERN.search(line):
                 self.lines.add(num)
 
-        for name, still_open in (
-            ("LCOV_EXCL_START", in_block),
-            ("COVERAGE_EXCL_NO_MPI_START", in_no_mpi),
-            ("LCOV_EXCL_BR_START", in_br_block),
-        ):
-            if still_open:
-                print(
-                    f"Warning: {source_file}: {name} without a STOP excludes the rest of the file",
-                    file=sys.stderr,
+        for kind, start_line in open_at.items():
+            if start_line is not None:
+                self.errors.append(
+                    f"{source_file}:{start_line}: {kind}_START without a STOP"
                 )
 
 
@@ -242,6 +268,8 @@ def filter_section(records, excl, stats):
 
 
 def filter_lcov_file(input_path, output_path, exclude_no_mpi, branch_regex):
+    """Write the filtered report and return the statistics, or return the list
+    of errors without writing anything."""
     stats = {"lines": 0, "branches": 0, "functions": 0, "files_dropped": 0}
     cache = {}
     output = []
@@ -273,9 +301,15 @@ def filter_lcov_file(input_path, output_path, exclude_no_mpi, branch_regex):
             elif source is not None:
                 records.append(line)
 
+    errors = [e for excl in cache.values() for e in excl.errors]
+    if errors:
+        # A report from an earlier run must not be uploaded instead
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        return None, errors
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(output) + "\n")
-    return stats
+    return stats, []
 
 
 def main():
@@ -297,9 +331,14 @@ def main():
         print(f"Error: Input file not found: {args[0]}", file=sys.stderr)
         sys.exit(1)
 
-    stats = filter_lcov_file(
+    stats, errors = filter_lcov_file(
         args[0], args[1], exclude_no_mpi, re.compile(branch_exclude or r"(?!)")
     )
+    if errors:
+        for e in errors:
+            print(f"Error: {e}", file=sys.stderr)
+        print(f"Error: {args[1]} was not written", file=sys.stderr)
+        sys.exit(1)
     print("Filtered LCOV coverage file:")
     print(f"  Input:  {args[0]}")
     print(f"  Output: {args[1]}")

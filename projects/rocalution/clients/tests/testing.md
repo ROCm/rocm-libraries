@@ -441,8 +441,11 @@ parameter sets and is **required for `test_itersolver`** (skipped otherwise).
   `COVERAGE_EXCL_NO_MPI_STOP` and only excluded in builds without MPI.
 
 The script also drops the line records of lines without code (blank lines, comments, braces and
-preprocessor directives), which `llvm-cov` can report as missed. Jenkins `codecov.groovy` uploads
-`coverage-report/coverage.info`.
+preprocessor directives), which `llvm-cov` can report as missed. It fails, and removes the report,
+when a source file cannot be read or its markers do not pair up: a START that is never closed, a
+START inside an open block of the same kind, a STOP without a START, or a misspelled marker. Its
+self-tests, `scripts/test_filter_lcov_exclusions.py`, run as part of `make coverage`. Jenkins
+`codecov.groovy` uploads `coverage-report/coverage.info`.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.
