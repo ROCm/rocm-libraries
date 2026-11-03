@@ -21,28 +21,9 @@ import numpy as np
 
 from dispatch.sdpa import SdpaRequest
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
+from .helpers import strided_view
 
 __all__ = ["sdpa_reference_from_request"]
-
-
-def _strided_view(
-    name: str, buffer: np.ndarray, base: int, shape: tuple, strides: tuple
-) -> np.ndarray:
-    """Read ``shape`` from a flat buffer at element offset ``base`` with element strides."""
-    if any(s < 0 for s in strides):
-        raise ValueError(f"{name}: negative strides {strides} are not supported")
-    if 0 in shape:
-        return np.zeros(shape, dtype=buffer.dtype)
-    last = base + sum((n - 1) * s for n, s in zip(shape, strides))
-    if base < 0 or last >= buffer.size:
-        raise ValueError(
-            f"{name}: dims {shape} with strides {strides} at offset {base} need "
-            f"{last + 1} elements, buffer has {buffer.size}"
-        )
-    item = buffer.itemsize
-    return np.lib.stride_tricks.as_strided(
-        buffer[base:], shape=shape, strides=tuple(s * item for s in strides)
-    )
 
 
 def _dense_operand(name: str, array: Any, tensor: Any) -> np.ndarray:
@@ -58,7 +39,7 @@ def _dense_operand(name: str, array: Any, tensor: Any) -> np.ndarray:
         return arr
     if arr.ndim == 1:
         flat = np.ascontiguousarray(arr)
-        return _strided_view(name, flat, 0, dims, tuple(tensor.strides))
+        return strided_view(name, flat, 0, dims, tuple(tensor.strides))
     if arr.size == math.prod(dims):
         return arr.reshape(dims)
     raise ValueError(
@@ -98,18 +79,15 @@ def _ragged_operand(
     out = np.zeros(tensor.dims, dtype=flat.dtype)
     for b in range(batch):
         n = int(lengths[b])
-        out[b, :, :n, :] = _strided_view(
+        out[b, :, :n, :] = strided_view(
             f"{name}[{b}]", flat, int(elems[b]), (heads, n, d), (s_h, s_s, s_d)
         )
     return out, lengths
 
 
 def _seq_lengths(name: str, array: Any, batch: int, extent: int) -> np.ndarray:
+    # SdpaRequest fixes the shape at [B, 1, 1, 1], so there is one per batch.
     lengths = np.asarray(array).reshape(-1).astype(np.int64)
-    if lengths.size != batch:
-        raise ValueError(
-            f"{name}: need one length per batch ({batch}), got {lengths.size}"
-        )
     if np.any(lengths < 0) or np.any(lengths > extent):
         raise ValueError(f"{name}: lengths {lengths.tolist()} must be in [0, {extent}]")
     return lengths
@@ -138,7 +116,8 @@ def _descale(
     return values.reshape(batch, heads_kv)[:, np.arange(h_q) // (h_q // heads_kv)]
 
 
-# What hipDNN's CPU reference rejects too, by SdpaRequest.features() name.
+# Features this oracle does not model yet, by SdpaRequest.features() name. hipDNN's
+# CPU reference implements them; a kernel test that needs one compares against it.
 UNSUPPORTED_FEATURES = (
     "dropout",
     "paged",
@@ -189,7 +168,7 @@ def sdpa_reference_from_request(
 
     Raises ``NotImplementedError`` naming the feature for dropout, paged KV,
     block masks, sinks, ALiBi, FP8 softmax/output scaling, and max/sum_exp
-    outputs, which hipDNN's CPU reference rejects too.
+    outputs, which this oracle does not model yet (hipDNN's CPU reference does).
     """
     features = req.features()
     unsupported = [name for name in UNSUPPORTED_FEATURES if name in features]
@@ -198,7 +177,7 @@ def sdpa_reference_from_request(
             f"sdpa_reference_from_request does not implement {', '.join(unsupported)}"
         )
     batch, h_q, s_q, _ = req.q.dims
-    h_k, s_kv = req.k.dims[1], req.k.dims[2]
+    h_k, s_kv = req.k.dims[1], req.s_kv
     h_v = req.v.dims[1]
 
     def operand(name: str, offsets_key: str) -> tuple[np.ndarray, np.ndarray | None]:

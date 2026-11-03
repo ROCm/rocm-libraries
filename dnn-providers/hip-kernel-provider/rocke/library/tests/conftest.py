@@ -74,6 +74,15 @@ def pytest_addoption(parser):
             "score-hook IR-identity check (default: gfx950,gfx942,gfx1151)"
         ),
     )
+    parser.addoption(
+        "--rocke-require-hipdnn-assets",
+        action="store_true",
+        default=False,
+        help=(
+            "fail, instead of skip, the SDPA tests that read hipDNN's graph "
+            "template and golden bundles when those are missing"
+        ),
+    )
 
 
 def pytest_configure(config):

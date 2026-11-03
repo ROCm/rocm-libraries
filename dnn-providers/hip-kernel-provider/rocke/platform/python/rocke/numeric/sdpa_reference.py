@@ -12,7 +12,7 @@ Semantics follow the hipDNN CPU reference for the SDPA forward node:
   bottom-right one. ``-1`` means unbounded; values below ``-1`` are invalid.
   ``left = W`` therefore keeps ``W + 1`` keys (the diagonal plus ``W`` to its left).
   That is FlashAttention's window; hipDNN's graph ``left_bound = L`` keeps ``L``
-  keys (cuDNN's meaning, since hipDNN #14483), so pass ``W = L - 1``
+  keys (cuDNN's meaning; ``SdpaSemanticsRegister`` SEM-001), so pass ``W = L - 1``
   (:func:`hipdnn_left_to_window`).
 * Softmax is over the kept keys; ``LSE`` is the natural log of the softmax
   denominator (max-shifted: ``LSE = max + log(sum exp(s - max))``).
@@ -56,6 +56,8 @@ __all__ = [
     "SdpaBwdResult",
     "keep",
     "resolve_diagonal_band",
+    "as_index",
+    "check_hipdnn_band",
     "hipdnn_left_to_window",
     "resolve_hipdnn_band",
     "sdpa_reference",
@@ -94,19 +96,36 @@ def resolve_diagonal_band(
     return left, right, bool(top_left)
 
 
-def _hipdnn_bound(value, name):
-    """A hipDNN band bound: ``None`` is unbounded (-1); a non-integer is an error.
+def as_index(value, name):
+    """``value`` as an ``int``; a float, bool or string is an error, not rounded.
 
-    Truncating would change the band: ``int(-1.75)`` is the unbounded ``-1``.
+    Truncating would change a band: ``int(-1.75)`` is the unbounded ``-1``.
     """
-    if value is None:
-        return -1
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer, got {value!r}")
     try:
         return operator.index(value)
     except TypeError:
         raise ValueError(f"{name} must be an integer, got {value!r}") from None
+
+
+def _hipdnn_bound(value, name):
+    """A hipDNN band bound: ``None`` is unbounded (-1); a non-integer is an error."""
+    return -1 if value is None else as_index(value, name)
+
+
+def check_hipdnn_band(left_bound, right_bound):
+    """Reject a band outside hipDNN's domain (``SdpaSemanticsRegister`` SEM-005).
+
+    ``left_bound`` is ``-1`` (unbounded) or ``>= 1``; ``right_bound >= -1``. The one
+    copy of ``detail::validateSdpaDiagonalBand`` for rocKE: the band resolver, the
+    ``L -> L - 1`` conversion and ``SdpaRequest`` all call it.
+    """
+    if left_bound == 0 or left_bound < -1 or right_bound < -1:
+        raise ValueError(
+            "left_bound must be -1 (unbounded) or >= 1 and right_bound >= -1, got "
+            f"left_bound={left_bound}, right_bound={right_bound}"
+        )
 
 
 def resolve_hipdnn_band(
@@ -128,7 +147,7 @@ def resolve_hipdnn_band(
     (unbounded) and does not override the flag's right bound. Both flags set, a
     bound below ``-1``, or ``left_bound = 0`` is an error.
 
-    The bounds keep hipDNN's (cuDNN's, since hipDNN #14483) meaning:
+    The bounds keep hipDNN's (cuDNN's; SEM-001) meaning:
     ``left_bound = L`` keeps the ``L`` keys ending at the diagonal. :func:`keep`
     and :func:`sdpa_reference` take FlashAttention's window, so pass them
     ``L - 1`` (see :func:`hipdnn_left_to_window`).
@@ -147,11 +166,7 @@ def resolve_hipdnn_band(
         raise ValueError(f"unknown diagonal_alignment {alignment!r}")
     left = _hipdnn_bound(left_bound, "left_bound")
     right = _hipdnn_bound(right_bound, "right_bound")
-    if left == 0 or left < -1 or right < -1:
-        raise ValueError(
-            "left_bound must be -1 (unbounded) or >= 1 and right_bound >= -1 "
-            f"(got left_bound={left}, right_bound={right})"
-        )
+    check_hipdnn_band(left, right)
     if causal_mask or causal_mask_bottom_right:
         right = right if right >= 0 else 0
         if causal_mask_bottom_right:
@@ -169,8 +184,7 @@ def hipdnn_left_to_window(left_bound):
     because ``L - 1`` would turn it into the unbounded ``-1``.
     """
     left = _hipdnn_bound(left_bound, "left_bound")
-    if left == 0 or left < -1:
-        raise ValueError(f"left_bound must be -1 (unbounded) or >= 1, got {left}")
+    check_hipdnn_band(left, -1)
     return -1 if left == -1 else left - 1
 
 

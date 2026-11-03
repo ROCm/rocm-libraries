@@ -184,7 +184,6 @@ def test_arch_is_canonical(arch):
 @pytest.mark.parametrize(
     "field, empty, populated, feature",
     [
-        ("paged", SdpaPaged(), SdpaPaged(max_seq_len_kv=8), "paged"),
         ("fp8", SdpaFp8(), SdpaFp8(descale_q=packed((1,))), "fp8"),
         (
             "dropout",
@@ -201,6 +200,10 @@ def test_empty_group_is_absent(field, empty, populated, feature):
     assert getattr(req, field) is None
     assert req == BASE and req.normalized() == BASE.normalized()
     assert feature in replace(BASE, **{field: populated}).features()
+
+
+def test_empty_paged_group_is_absent():
+    assert replace(BASE, paged=SdpaPaged()).paged is None
 
 
 def test_tuning_knobs_are_part_of_the_identity():
@@ -244,13 +247,47 @@ def test_bottom_right_on_per_sequence_lengths_moves(name):
 # --- ragged and alignment cover every operand, not only Q/K/V/O ----------------
 
 
-def _f32(dims, ragged=False, **kw):
+def _f32(dims, ragged=False, dtype="fp32", **kw):
     strides = [1]
     for d in reversed(dims[1:]):
         strides.insert(0, strides[0] * d)
     if ragged:
         kw["ragged_offset"] = ragged_offset(dims[0])
-    return SdpaTensor("fp32", dims, tuple(strides), **kw)
+    return SdpaTensor(dtype, dims, tuple(strides), **kw)
+
+
+def _i32(dims, **kw):
+    return _f32(dims, dtype="int32", **kw)
+
+
+@pytest.mark.parametrize(
+    "changes, match",
+    [
+        (
+            {"paged": SdpaPaged(max_seq_len_kv=8)},
+            "max_seq_len_kv is only valid with paged K/V",
+        ),
+        (
+            {
+                "k": replace(BASE.k, dims=(5, 4, 4, 16), strides=(256, 64, 16, 1)),
+                "paged": SdpaPaged(page_table_k=_i32((2, 1, 2, 1))),
+                "seq_len_q": _i32((2, 1, 1, 1)),
+            },
+            "paged K/V needs seq_len_q and seq_len_kv",
+        ),
+        ({"seq_len_q": _i32((3, 1, 1, 1))}, r"seq_len_q must have dims \[B, 1, 1, 1\]"),
+        ({"seq_len_kv": _f32((2, 1, 1, 1))}, "seq_len_kv must be int32"),
+        (
+            {"sink_token": _f32((1, 2, 1, 1))},
+            r"sink_token must have dims \[1, H_q, 1, 1\]",
+        ),
+        ({"sink_token": _f32((1, 4, 1, 1), dtype="fp16")}, "sink_token must be fp32"),
+    ],
+)
+def test_sdpa_fwd_node_operand_rules(changes, match):
+    """SdpaFwdNode's paging, seq-len and sink rules hold for a direct Python caller too."""
+    with pytest.raises(ValueError, match=match):
+        replace(BASE, **changes)
 
 
 # name -> a request field holding that operand, built from BASE (B=2, H=4, S=8)
@@ -258,8 +295,8 @@ _AUX_OPERANDS = {
     "bias": lambda **kw: {"bias": SdpaBias(_f32((1, 1, 8, 8), **kw))},
     "block_mask": lambda **kw: {"block_mask": _f32((2, 1, 8, 8), **kw)},
     "sink_token": lambda **kw: {"sink_token": _f32((1, 4, 1, 1), **kw)},
-    "seq_len_q": lambda **kw: {"seq_len_q": _f32((2, 1, 1, 1), **kw)},
-    "seq_len_kv": lambda **kw: {"seq_len_kv": _f32((2, 1, 1, 1), **kw)},
+    "seq_len_q": lambda **kw: {"seq_len_q": _i32((2, 1, 1, 1), **kw)},
+    "seq_len_kv": lambda **kw: {"seq_len_kv": _i32((2, 1, 1, 1), **kw)},
     "stats": lambda **kw: {"stats": _f32((2, 4, 8, 1), **kw)},
     "max": lambda **kw: {"max": _f32((2, 4, 8, 1), **kw)},
     "sum_exp": lambda **kw: {"sum_exp": _f32((2, 4, 8, 1), **kw)},

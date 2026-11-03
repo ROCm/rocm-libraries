@@ -33,12 +33,13 @@ of the strides.
 
 from __future__ import annotations
 
-import operator
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any, Literal, TypeAlias
 
 from rocke.dispatch.core import OperatorRequest
 from rocke.dispatch.tuning.identity import normalize_knobs
+from rocke.numeric.sdpa_reference import as_index as _as_int
+from rocke.numeric.sdpa_reference import check_hipdnn_band
 
 from ..attention.common import canonical_arch
 
@@ -151,16 +152,6 @@ def _check_dtype(dtype: object, what: str) -> None:
 def _check_choice(value: object, choices: tuple[str, ...], what: str) -> None:
     if value not in choices:
         raise ValueError(f"{what} must be one of {choices}, got {value!r}")
-
-
-def _as_int(value: object, what: str) -> int:
-    """``value`` as an ``int``; a float, bool or string is malformed, not rounded."""
-    if isinstance(value, bool):
-        raise ValueError(f"{what} must be an integer, got {value!r}")
-    try:
-        return operator.index(value)
-    except TypeError:
-        raise ValueError(f"{what} must be an integer, got {value!r}") from None
 
 
 def _check_bool(value: object, what: str) -> None:
@@ -393,7 +384,7 @@ class SdpaRequest(OperatorRequest):
       features), so a candidate's ``Capability.layouts`` must stay empty or it
       declines every request.
     - ``left_bound = L`` keeps the ``L`` keys ending at the diagonal, diagonal
-      included (cuDNN's meaning, hipDNN's since #14483). ``AttentionBand`` /
+      included (cuDNN's meaning; hipDNN's ``SdpaSemanticsRegister`` SEM-001). ``AttentionBand`` /
       ``sliding_window`` ``W`` counts keys the same way, so lower it unchanged.
       A FlashAttention-style ``window_left`` (and ``numeric.sdpa_reference``'s
       ``keep``) is ``L - 1``.
@@ -489,11 +480,7 @@ class SdpaRequest(OperatorRequest):
         _check_choice(self.diagonal, _DIAGONALS, "diagonal")
         _check_choice(self.scale_source, _SCALE_SOURCES, "scale_source")
         _check_choice(self.implementation, _IMPLEMENTATIONS, "implementation")
-        if self.left_bound == 0 or self.left_bound < -1 or self.right_bound < -1:
-            raise ValueError(
-                "left_bound must be -1 (unbounded) or >= 1 and right_bound >= -1, got "
-                f"left_bound={self.left_bound}, right_bound={self.right_bound}"
-            )
+        check_hipdnn_band(self.left_bound, self.right_bound)
 
         for name in ("q", "k", "v", "o"):
             rank = len(getattr(self, name).dims)
@@ -511,12 +498,32 @@ class SdpaRequest(OperatorRequest):
             raise ValueError(f"head dim mismatch: Q {q[3]} vs K {k[3]}")
         if not paged_k and not paged_v and k[2] != v[2]:
             raise ValueError(f"seq_kv mismatch: K {k[2]} vs V {v[2]}")
-        if self.paged is not None:
-            self._validate_paged(q[0])
+        self._validate_paged(q[0])
         if q[1] % k[1] or q[1] % v[1]:
             raise ValueError(
                 f"h_q={q[1]} must be divisible by h_k={k[1]} and h_v={v[1]}"
             )
+        for name in ("seq_len_q", "seq_len_kv"):
+            seq_len = getattr(self, name)
+            if seq_len is None:
+                continue
+            if seq_len.dims != (q[0], 1, 1, 1):
+                raise ValueError(
+                    f"{name} must have dims [B, 1, 1, 1] with B={q[0]}, "
+                    f"got {seq_len.dims}"
+                )
+            if seq_len.dtype != "int32":
+                raise ValueError(f"{name} must be int32, got {seq_len.dtype!r}")
+        if self.sink_token is not None:
+            if self.sink_token.dims != (1, q[1], 1, 1):
+                raise ValueError(
+                    f"sink_token must have dims [1, H_q, 1, 1] with H_q={q[1]}, "
+                    f"got {self.sink_token.dims}"
+                )
+            if self.sink_token.dtype != "fp32":
+                raise ValueError(
+                    f"sink_token must be fp32, got {self.sink_token.dtype!r}"
+                )
         if o != (q[0], q[1], q[2], v[3]):
             raise ValueError(
                 f"O dims {o} must be (B, H_q, S_q, D_v) = {(q[0], q[1], q[2], v[3])}"
@@ -551,8 +558,18 @@ class SdpaRequest(OperatorRequest):
                     )
 
     def _validate_paged(self, batch: int) -> None:
-        """``SdpaFwdNode::validatePagedKv``'s shape rules for each page table."""
+        """``SdpaFwdNode::validatePagedKv``'s rules for the paged group."""
+        if self.paged is None:
+            return
         max_len = self.paged.max_seq_len_kv
+        if not (self.paged_k or self.paged_v):
+            # max_seq_len_kv is the only field left: SdpaPaged() normalizes to None.
+            raise ValueError(
+                "max_seq_len_kv is only valid with paged K/V "
+                "(page_table_k / page_table_v)"
+            )
+        if self.seq_len_q is None or self.seq_len_kv is None:
+            raise ValueError("paged K/V needs seq_len_q and seq_len_kv")
         for name, table, container in (
             ("page_table_k", self.paged.page_table_k, self.k),
             ("page_table_v", self.paged.page_table_v, self.v),

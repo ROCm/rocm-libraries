@@ -223,7 +223,7 @@ def _hipdnn_extract_diagonal_band(left, right, top_left, causal, causal_br):
     right = -1 if right is None else right
     if left < -1 or right < -1:
         raise ValueError("bounds")
-    # hipDNN #14483: left_bound counts the diagonal key, so 0 is rejected.
+    # SEM-005: left_bound counts the diagonal key, so 0 is rejected.
     if left == 0:
         raise ValueError("left_bound 0")
     if causal and causal_br:
@@ -344,10 +344,26 @@ class TestResolveHipdnnBand(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "left_bound must be -1"):
                     resolve_hipdnn_band(**kw)
 
-    def test_result_feeds_keep(self):
-        diagonal, left, right = resolve_hipdnn_band(causal_mask_bottom_right=True)
-        self.assertTrue(keep(1, 4, 2, 5, diagonal, left, right))
-        self.assertFalse(keep(0, 4, 2, 5, diagonal, left, right))
+    def test_result_feeds_keep_through_the_window_conversion(self):
+        """resolve_hipdnn_band -> hipdnn_left_to_window -> keep is hipDNN's mask;
+        feeding keep the unconverted L keeps one key too many."""
+        s_q, s_kv = 2, 5
+        offset = s_kv - s_q
+        for left_bound in (1, 2, 3):
+            diagonal, left, right = resolve_hipdnn_band(
+                left_bound=left_bound, causal_mask_bottom_right=True
+            )
+            window = hipdnn_left_to_window(left)
+            mismatched = 0
+            for q in range(s_q):
+                for k in range(s_kv):
+                    want = q + offset - left_bound < k <= q + offset
+                    with self.subTest(left_bound=left_bound, q=q, k=k):
+                        self.assertEqual(
+                            keep(q, k, s_q, s_kv, diagonal, window, right), want
+                        )
+                    mismatched += keep(q, k, s_q, s_kv, diagonal, left, right) != want
+            self.assertGreater(mismatched, 0)
 
 
 class TestHipdnnLeftToWindow(unittest.TestCase):

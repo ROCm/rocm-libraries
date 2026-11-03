@@ -24,7 +24,8 @@ import numpy as np
 import pytest
 
 from dispatch.sdpa import SdpaBias, SdpaFp8, SdpaTensor
-from tests.sdpa.request_reference import _strided_view, sdpa_reference_from_request
+from tests.sdpa.helpers import strided_view
+from tests.sdpa.request_reference import sdpa_reference_from_request
 from tests.sdpa.request_cases import (
     CASES,
     bhsd,
@@ -191,8 +192,8 @@ def test_mask_agrees_with_hipdnn(diagonal, left, right, s_q, s_kv):
 @pytest.mark.parametrize(
     "left, kept",
     [
-        # hipDNN #14483's hand-checked cases (LeftBoundKeepsLKeysIncludingDiagonal
-        # LikeCudnn): L = 2 at query 5 keeps {4, 5}; L = 1 keeps only the diagonal.
+        # hipDNN's hand-checked cases (TestCpuFpReferenceSdpa's LeftBoundKeepsL
+        # KeysIncludingDiagonalLikeCudnn): L = 2 at query 5 keeps {4, 5}; L = 1 keeps only the diagonal.
         (2, {4, 5}),
         (1, {5}),
         (6, {0, 1, 2, 3, 4, 5}),
@@ -449,12 +450,6 @@ MALFORMED_OPERANDS = [
         "\\[9, 1\\] must be in \\[0, S_max=8\\]",
     ),
     (
-        "seq_len_count",
-        make_request(seq_len_q=packed((3, 1, 1, 1), "int32")),
-        {"seq_len_q": np.array([1, 2, 3])},
-        "one length per batch \\(2\\), got 3",
-    ),
-    (
         "seq_len_above_extent",
         make_request(seq_len_q=_SEQ),
         {"seq_len_q": np.array([9, 2])},
@@ -508,7 +503,7 @@ def test_negative_strides_are_rejected():
     """``SdpaTensor`` rejects these first; the oracle reads requests by attribute,
     so a duck-typed request reaches this check."""
     with pytest.raises(ValueError, match="negative strides \\(-1,\\)"):
-        _strided_view("q", np.zeros(8, np.float32), 0, (2,), (-1,))
+        strided_view("q", np.zeros(8, np.float32), 0, (2,), (-1,))
 
 
 # --- PyTorch math SDPA, the hipDNN golden generator's backend --------------------
