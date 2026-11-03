@@ -195,22 +195,6 @@ using is_integral_or_enum =
 
 }
 
-// CUB removed this API, and suggests to use `::cuda::ceil_div` instead,
-// which is implemented in file `libcudacxx/include/cuda/__cmath/ceil_div.h`.
-// Remove when hip::ceil_div is implemented.
-template<typename NumeratorT, typename DenominatorT>
-HIPCUB_DEPRECATED_BECAUSE("Use hip::ceil_div instead from 'libhipcxx'")
-HIPCUB_HOST_DEVICE __forceinline__ constexpr NumeratorT
-    DivideAndRoundUp(NumeratorT n, DenominatorT d)
-{
-  static_assert(hipcub::detail::is_integral_or_enum<NumeratorT>::value &&
-                hipcub::detail::is_integral_or_enum<DenominatorT>::value,
-                "DivideAndRoundUp is only intended for integral types.");
-
-  // Static cast to undo integral promotion.
-  return static_cast<NumeratorT>(n / d + (n % d != 0 ? 1 : 0));
-}
-
 #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
 /******************************************************************************
