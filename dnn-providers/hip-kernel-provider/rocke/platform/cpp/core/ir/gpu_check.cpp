@@ -404,12 +404,7 @@ std::pair<const rocke_op_t*, const rocke_value_t*>
 bool states_facts(const kernel_view_t& view, const rocke_value_t* v)
 {
     if(const rocke_param_t* p = view.param_of(v))
-    {
-        for(const char* word : {"ge", "gt", "le", "lt", "eq", "multiple_of"})
-            if(rocke_attr_get(&p->attrs, word))
-                return true;
-        return false;
-    }
+        return rocke_param_states_facts(p);
     const rocke_op_t* op = v->op;
     if(!is(op, ROCKE_OP_ARITH_ASSUME_RANGE))
         return false;

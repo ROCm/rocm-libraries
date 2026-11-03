@@ -392,6 +392,45 @@ bool rocke_int_type_limits(const rocke_type_t* t, int64_t* lo, int64_t* hi);
  * multiple_of) is among its attrs. Pointer attributes are not facts. */
 bool rocke_param_states_facts(const rocke_param_t* p);
 
+/* Whether `key` is one of param_facts.FACT_WORDS. */
+bool rocke_param_is_fact_word(const char* key);
+
+/* One param attr value as a portable-IR document holds it. Each importer turns
+ * its own document node into this, so both read a param's attrs through
+ * rocke_param_opts_set_attr. `str` is borrowed from the document. */
+typedef enum rocke_param_attr_kind
+{
+    ROCKE_PARAM_ATTR_BOOL,
+    ROCKE_PARAM_ATTR_NUMBER,
+    ROCKE_PARAM_ATTR_STRING,
+    ROCKE_PARAM_ATTR_OTHER
+} rocke_param_attr_kind_t;
+
+typedef struct rocke_param_attr_value
+{
+    rocke_param_attr_kind_t kind;
+    bool b;
+    double number;
+    const char* str;
+} rocke_param_attr_value_t;
+
+/* Store attr `key` = `value` of param `param` in *opts: a key rocke_param_opts_t
+ * carries (ROCKE_PARAM_ATTR_KEYS) with a value of its kind. Returns NULL, or the
+ * refusal, written to `buf`, for an unknown key or a value of the wrong kind; a
+ * dropped attr would silently change the lowered kernel. A fact bound is an
+ * integer or a relation's canonical intexpr JSON (a string, kept borrowed; the
+ * builder checks it). (cpp/core/ir/param_facts.cpp) */
+const char* rocke_param_opts_set_attr(rocke_param_opts_t* opts,
+                                      const char* param,
+                                      const char* key,
+                                      const rocke_param_attr_value_t* value,
+                                      char* buf,
+                                      size_t cap);
+
+/* The refusal for a param whose attrs are not an object; the argument is the
+ * param's name. */
+#define ROCKE_PARAM_ATTRS_NOT_OBJECT "param '%s' attrs is not an object"
+
 /* Mirrors ir_print._format_param's facts: appends " {ge = %N, le = 4096}" for
  * the facts `p` states, nothing when it states none. */
 void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* out);

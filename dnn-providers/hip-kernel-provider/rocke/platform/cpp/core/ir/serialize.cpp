@@ -2538,19 +2538,13 @@ static const char* canon_rename_leaf(void* ctx, const char* name)
  * leaves are renamed by walking its tree, never by text substitution. */
 static void canon_rename_param_relations(rename_table_t* rt, rocke_kernel_def_t* k)
 {
-    static const char* const words[] = {"ge", "gt", "le", "lt", "eq", "multiple_of"};
     for(int i = 0; i < k->num_params; ++i)
     {
         rocke_attr_map_t* attrs = &k->params[i]->attrs;
         for(int j = 0; j < attrs->count; ++j)
         {
             rocke_attr_entry_t* e = &attrs->entries[j];
-            bool is_fact = false;
-            for(const char* word : words)
-            {
-                is_fact = is_fact || strcmp(e->key, word) == 0;
-            }
-            if(!is_fact || e->value.kind != ROCKE_ATTR_STR)
+            if(!rocke_param_is_fact_word(e->key) || e->value.kind != ROCKE_ATTR_STR)
             {
                 continue;
             }

@@ -22,6 +22,7 @@
 #include <initializer_list>
 #include <string>
 
+#include "malformed_param_attrs.h"
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
 #include "rocke/ir_import.h"
@@ -279,26 +280,7 @@ void test_concrete_importer_param_attrs()
         }
     }
 
-    struct bad_t
-    {
-        const char* what;
-        const char* attrs;
-        const char* message;
-    };
-    const bad_t bad[] = {
-        {"unknown key",
-         R"json({"el":1048576})json",
-         "param 'P' has unknown attr 'el' -- a param attr is one of " ROCKE_PARAM_ATTR_KEYS},
-        {"non-bool flag", R"json({"nonnull":1})json", "param 'P' attr nonnull is not a bool"},
-        {"non-integral dereferenceable",
-         R"json({"dereferenceable":1.5})json",
-         "param dereferenceable is not an integer"},
-        {"non-string addr_space",
-         R"json({"addr_space":3})json",
-         "param 'P' attr addr_space is not a string"},
-        {"non-object attrs", R"json([])json", "param 'P' attrs is not an object"},
-    };
-    for(const bad_t& c : bad)
+    for(const malformed_param_attr_t& c : kMalformedParamAttrs)
     {
         const std::string artifact = param_artifact(c.attrs);
         rocke_ir_builder_t builder;
@@ -398,7 +380,6 @@ void test_concrete_importer_param_facts()
          "ldc: the relation names K, which is not a parameter of this kernel"},
         {R"json({"lt":4096,"le":4095})json",
          "param ldc: states two upper bounds (lt, le) -- state one"},
-        {R"json({"ge":true})json", "param fact"},
     };
     for(const auto& c : bad)
     {

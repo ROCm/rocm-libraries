@@ -878,25 +878,21 @@ static const char* rv_bind_name(rvm_t* vm, const jd_val_t* instr, const char* fa
     return b ? rv_resolve_name(vm, b) : fallback;
 }
 
-/* The bound a fact word names (ge / gt / le / lt / eq), or NULL for another key. */
-static rocke_int_bound_t* rv_fact_bound(rocke_int_facts_t* facts, const char* key)
+/* A param attr value, as rocke_param_opts_set_attr reads it. */
+static rocke_param_attr_value_t rv_param_attr_value(const jd_val_t* v)
 {
-    if(strcmp(key, "ge") == 0)
-        return &facts->ge;
-    if(strcmp(key, "gt") == 0)
-        return &facts->gt;
-    if(strcmp(key, "le") == 0)
-        return &facts->le;
-    if(strcmp(key, "lt") == 0)
-        return &facts->lt;
-    if(strcmp(key, "eq") == 0)
-        return &facts->eq;
-    return NULL;
+    rocke_param_attr_value_t value = {ROCKE_PARAM_ATTR_OTHER, false, 0.0, NULL};
+    if(v->kind == JD_BOOL)
+        value = {ROCKE_PARAM_ATTR_BOOL, v->b, 0.0, NULL};
+    else if(v->kind == JD_NUM)
+        value = {ROCKE_PARAM_ATTR_NUMBER, false, v->num, NULL};
+    else if(v->kind == JD_STR)
+        value = {ROCKE_PARAM_ATTR_STRING, false, 0.0, v->str};
+    return value;
 }
 
-/* Read a param instr's attrs into *opts. Every key is one rocke_param_opts_t
- * carries, with a value of its kind; anything else fails the replay, because a
- * dropped attr would silently change the lowered kernel. */
+/* Read a param instr's attrs into *opts through rocke_param_opts_set_attr, the
+ * one reader both portable-IR importers share. */
 static bool
     rv_param_attrs(rvm_t* vm, const char* name, const jd_val_t* pa, rocke_param_opts_t* opts)
 {
@@ -905,111 +901,17 @@ static bool
         return true;
     if(pa->kind != JD_OBJ)
     {
-        rv_fail(vm, "param '%s' attrs is not an object", name);
+        rv_fail(vm, ROCKE_PARAM_ATTRS_NOT_OBJECT, name);
         return false;
     }
     for(int k = 0; k < pa->obj_len; k++)
     {
-        const char* key = pa->obj[k].key;
-        const jd_val_t* v = pa->obj[k].val;
-        bool* flag = NULL;
-        bool* flag_set = NULL;
-        double d;
-        if(strcmp(key, "noalias") == 0)
+        const rocke_param_attr_value_t value = rv_param_attr_value(pa->obj[k].val);
+        char err[ROCKE_ERR_MSG_CAP];
+        if(const char* refusal
+           = rocke_param_opts_set_attr(opts, name, pa->obj[k].key, &value, err, sizeof err))
         {
-            flag = &opts->noalias;
-            flag_set = &opts->noalias_set;
-        }
-        else if(strcmp(key, "readonly") == 0)
-        {
-            flag = &opts->readonly;
-            flag_set = &opts->readonly_set;
-        }
-        else if(strcmp(key, "writeonly") == 0)
-        {
-            flag = &opts->writeonly;
-            flag_set = &opts->writeonly_set;
-        }
-        else if(strcmp(key, "nocapture") == 0)
-        {
-            flag = &opts->nocapture;
-            flag_set = &opts->nocapture_set;
-        }
-        else if(strcmp(key, "nonnull") == 0)
-        {
-            flag = &opts->nonnull;
-            flag_set = &opts->nonnull_set;
-        }
-        if(flag)
-        {
-            if(v->kind != JD_BOOL)
-            {
-                rv_fail(vm, "param '%s' attr %s is not a bool", name, key);
-                return false;
-            }
-            *flag = v->b;
-            *flag_set = true;
-        }
-        else if(strcmp(key, "align") == 0)
-        {
-            long align;
-            if(!rocke_jnum(v, &d) || !rv_number_to_long(d, &align) || align < INT_MIN
-               || align > INT_MAX)
-            {
-                rv_fail(vm, "param '%s' align is not an integer", name);
-                return false;
-            }
-            opts->align = (int)align;
-            opts->align_set = true;
-        }
-        else if(strcmp(key, "dereferenceable") == 0)
-        {
-            if(!rocke_jnum(v, &d) || !rv_number_to_int64(d, &opts->dereferenceable))
-            {
-                rv_fail(vm, "param '%s' dereferenceable is not an integer", name);
-                return false;
-            }
-            opts->dereferenceable_set = true;
-        }
-        else if(strcmp(key, "addr_space") == 0)
-        {
-            if(v->kind != JD_STR)
-            {
-                rv_fail(vm, "param '%s' attr addr_space is not a string", name);
-                return false;
-            }
-            opts->addr_space = v->str;
-        }
-        else if(strcmp(key, "multiple_of") == 0)
-        {
-            if(!rocke_jnum(v, &d) || !rv_number_to_int64(d, &opts->facts.multiple_of))
-            {
-                rv_fail(vm, "param '%s' multiple_of is not an integer", name);
-                return false;
-            }
-            opts->facts.multiple_of_set = true;
-        }
-        else if(rocke_int_bound_t* bound = rv_fact_bound(&opts->facts, key))
-        {
-            /* An int, or a relation (its canonical intexpr JSON, a string). */
-            if(v->kind == JD_STR)
-            {
-                bound->relation = v->str;
-            }
-            else if(!rocke_jnum(v, &d) || !rv_number_to_int64(d, &bound->value))
-            {
-                rv_fail(vm, "param '%s' %s is not an integer or a relation", name, key);
-                return false;
-            }
-            bound->set = true;
-        }
-        else
-        {
-            rv_fail(
-                vm,
-                "param '%s' has unknown attr '%s' -- a param attr is one of " ROCKE_PARAM_ATTR_KEYS,
-                name,
-                key);
+            rv_fail(vm, "%s", refusal);
             return false;
         }
     }

@@ -34,6 +34,7 @@
 #include <string>
 #include <vector>
 
+#include "malformed_param_attrs.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/recipe_vm.h"
@@ -438,27 +439,7 @@ void check_param_attrs()
         ll.find("ptr addrspace(1) nonnull dereferenceable(64) %P") != std::string::npos,
         "nonnull and dereferenceable reach the lowered param, and nocapture=false drops nocapture");
 
-    struct bad_t
-    {
-        const char* what;
-        const char* attrs;
-        const char* message;
-    };
-    const bad_t bad[] = {
-        {"unknown key",
-         R"json({"el": 1048576})json",
-         "param 'P' has unknown attr 'el' -- a param attr is one of " ROCKE_PARAM_ATTR_KEYS},
-        {"non-bool flag", R"json({"nonnull": 1})json", "param 'P' attr nonnull is not a bool"},
-        {"non-integral dereferenceable",
-         R"json({"dereferenceable": 1.5})json",
-         "param 'P' dereferenceable is not an integer"},
-        {"non-integral align", R"json({"align": "16"})json", "param 'P' align is not an integer"},
-        {"non-string addr_space",
-         R"json({"addr_space": 3})json",
-         "param 'P' attr addr_space is not a string"},
-        {"non-object attrs", R"json([])json", "param 'P' attrs is not an object"},
-    };
-    for(const bad_t& c : bad)
+    for(const malformed_param_attr_t& c : kMalformedParamAttrs)
     {
         ll.clear();
         err.clear();
@@ -494,7 +475,6 @@ void check_param_facts()
     const char* const bad[][2] = {
         {R"json({"ge": "{\"param\":\"K\"}"})json",
          "ldc: the relation names K, which is not a parameter of this kernel"},
-        {R"json({"ge": true})json", "param 'ldc' ge is not an integer or a relation"},
     };
     for(const auto& c : bad)
     {

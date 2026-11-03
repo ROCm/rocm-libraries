@@ -15,6 +15,7 @@
  * int, {"param": NAME}, or {"add"|"sub"|"mul"|"div": [a, b]}).
  */
 #include <algorithm>
+#include <limits.h>
 #include <map>
 #include <math.h>
 #include <optional>
@@ -37,7 +38,17 @@ namespace
 {
 
 const char* const kFactWords[] = {"ge", "gt", "le", "lt", "eq", "multiple_of"};
-const char* const kBoundWords[] = {"ge", "gt", "le", "lt", "eq"};
+/* The fact words that take a bound (Python param_facts._BOUND_WORDS), each with
+ * the rocke_int_facts_t field it fills. */
+const struct
+{
+    const char* word;
+    rocke_int_bound_t rocke_int_facts_t::*bound;
+} kBoundWords[] = {{"ge", &rocke_int_facts_t::ge},
+                   {"gt", &rocke_int_facts_t::gt},
+                   {"le", &rocke_int_facts_t::le},
+                   {"lt", &rocke_int_facts_t::lt},
+                   {"eq", &rocke_int_facts_t::eq}};
 const char* const kPointerAttrs[] = {"noalias",
                                      "readonly",
                                      "writeonly",
@@ -572,8 +583,9 @@ void checker_t::run()
                              + name + " is " + tname);
     if(!errors.empty())
         return;
-    for(const char* word : kBoundWords)
+    for(const auto& bound_word : kBoundWords)
     {
+        const char* word = bound_word.word;
         const rocke_attr_value_t* v = rocke_attr_get(attrs, word);
         if(v && v->kind != ROCKE_ATTR_INT && v->kind != ROCKE_ATTR_STR)
             errors.push_back("param " + name + ": " + word + " must be an integer or a relation");
@@ -628,8 +640,9 @@ void checker_t::run()
                                    "hold exactly");
         }
     resolver_t resolver{params, index, &arena, {}};
-    for(const char* word : kBoundWords)
+    for(const auto& bound_word : kBoundWords)
     {
+        const char* word = bound_word.word;
         const rocke_attr_value_t* v = rocke_attr_get(attrs, word);
         if(!v || v->kind != ROCKE_ATTR_STR)
             continue;
@@ -644,6 +657,30 @@ void checker_t::run()
         if(name_errors(name, tree))
             quotient_errors(name, tree, &resolver);
     }
+}
+
+/* The bool attrs of rocke_param_opts_t, each with its *_set companion. */
+const struct
+{
+    const char* key;
+    bool rocke_param_opts_t::*value;
+    bool rocke_param_opts_t::*set;
+} kFlagAttrs[] = {{"noalias", &rocke_param_opts_t::noalias, &rocke_param_opts_t::noalias_set},
+                  {"readonly", &rocke_param_opts_t::readonly, &rocke_param_opts_t::readonly_set},
+                  {"writeonly", &rocke_param_opts_t::writeonly, &rocke_param_opts_t::writeonly_set},
+                  {"nocapture", &rocke_param_opts_t::nocapture, &rocke_param_opts_t::nocapture_set},
+                  {"nonnull", &rocke_param_opts_t::nonnull, &rocke_param_opts_t::nonnull_set}};
+
+/* A number that is an exact integer, or false. */
+bool attr_int(const rocke_param_attr_value_t* value, int64_t* out)
+{
+    return value->kind == ROCKE_PARAM_ATTR_NUMBER && exact_int(value->number, out);
+}
+
+const char* refuse(char* buf, size_t cap, const std::string& message)
+{
+    snprintf(buf, cap, "%s", message.c_str());
+    return buf;
 }
 
 } // namespace
@@ -711,6 +748,83 @@ extern "C" bool rocke_param_states_facts(const rocke_param_t* p)
         if(rocke_attr_get(&p->attrs, word))
             return true;
     return false;
+}
+
+extern "C" bool rocke_param_is_fact_word(const char* key)
+{
+    for(const char* word : kFactWords)
+        if(key && strcmp(key, word) == 0)
+            return true;
+    return false;
+}
+
+extern "C" const char* rocke_param_opts_set_attr(rocke_param_opts_t* opts,
+                                                 const char* param,
+                                                 const char* key,
+                                                 const rocke_param_attr_value_t* value,
+                                                 char* buf,
+                                                 size_t cap)
+{
+    const std::string named = std::string("param '") + param + "' ";
+    for(const auto& flag : kFlagAttrs)
+    {
+        if(strcmp(key, flag.key) != 0)
+            continue;
+        if(value->kind != ROCKE_PARAM_ATTR_BOOL)
+            return refuse(buf, cap, named + "attr " + key + " is not a bool");
+        opts->*flag.value = value->b;
+        opts->*flag.set = true;
+        return NULL;
+    }
+    for(const auto& entry : kBoundWords)
+    {
+        if(strcmp(key, entry.word) != 0)
+            continue;
+        rocke_int_bound_t* bound = &(opts->facts.*entry.bound);
+        /* An int, or a relation (its canonical intexpr JSON, a string). */
+        if(value->kind == ROCKE_PARAM_ATTR_STRING)
+            bound->relation = value->str;
+        else if(!attr_int(value, &bound->value))
+            return refuse(buf, cap, named + key + " is not an integer or a relation");
+        bound->set = true;
+        return NULL;
+    }
+    if(strcmp(key, "align") == 0)
+    {
+        int64_t number = 0;
+        if(!attr_int(value, &number))
+            return refuse(buf, cap, named + "align is not an integer");
+        if(number < INT_MIN || number > INT_MAX)
+            return refuse(buf, cap, named + "align is outside the int range");
+        opts->align = (int)number;
+        opts->align_set = true;
+        return NULL;
+    }
+    if(strcmp(key, "dereferenceable") == 0)
+    {
+        if(!attr_int(value, &opts->dereferenceable))
+            return refuse(buf, cap, named + "dereferenceable is not an integer");
+        opts->dereferenceable_set = true;
+        return NULL;
+    }
+    if(strcmp(key, "multiple_of") == 0)
+    {
+        if(!attr_int(value, &opts->facts.multiple_of))
+            return refuse(buf, cap, named + "multiple_of is not an integer");
+        opts->facts.multiple_of_set = true;
+        return NULL;
+    }
+    if(strcmp(key, "addr_space") == 0)
+    {
+        if(value->kind != ROCKE_PARAM_ATTR_STRING)
+            return refuse(buf, cap, named + "attr addr_space is not a string");
+        opts->addr_space = value->str;
+        return NULL;
+    }
+    return refuse(buf,
+                  cap,
+                  named + "has unknown attr '" + key
+                      + "' -- a param attr is one of " ROCKE_PARAM_ATTR_KEYS);
 }
 
 extern "C" void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* out)
