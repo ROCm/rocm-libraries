@@ -55,7 +55,7 @@ static const char* mem_idx_join(rocke_h_lowerer_t* lw, rocke_value_t* const* val
 
 /* Resolve the `_storage` symbol for a tile.smem_alloc result Value via the
  * lowerer side table. NULL on a miss (the Python "before smem_alloc was
- * lowered" RuntimeError case). */
+ * lowered" ValueError case). */
 static const char* mem_storage_of(rocke_h_lowerer_t* lw, const rocke_value_t* smem)
 {
     return rocke_h_smem_storage(lw, smem);
