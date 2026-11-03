@@ -795,7 +795,7 @@ class _Lowerer:
         vec = int(op.attrs["vec"])
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem store_vN before smem_alloc was lowered")
+            raise ValueError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "smem_store_vN")
@@ -809,7 +809,7 @@ class _Lowerer:
         indices = op.operands[1:-1]
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem store before smem_alloc was lowered")
+            raise ValueError("smem store before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         self._emit(f"{storage}[{idx_str}] = {_name(value)};")
 
@@ -817,7 +817,7 @@ class _Lowerer:
         smem, row, col = op.operands
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem load before smem_alloc was lowered")
+            raise ValueError("smem load before smem_alloc was lowered")
         nice = _name(op.result)
         self._emit(f"f16x4 {nice};")
         for i in range(4):
@@ -1300,7 +1300,7 @@ class _Lowerer:
         (smem,) = op.operands
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem_addr_of before smem_alloc was lowered")
+            raise ValueError("smem_addr_of before smem_alloc was lowered")
         self._emit(f"int64_t {_name(op.result)} = (int64_t)(&{storage}[0]);")
 
     def _op_tile_global_addr_of(self, op: Op) -> None:
@@ -2350,7 +2350,7 @@ class _Lowerer:
         smem, values = op.operands
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem_store_distributed before smem_alloc was lowered")
+            raise ValueError("smem_store_distributed before smem_alloc was lowered")
         from ..core.ir import VectorType
 
         n = values.type.count if isinstance(values.type, VectorType) else 1
@@ -2379,7 +2379,7 @@ class _Lowerer:
         cpp_t = _type_to_hip(val.type)
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("lds_atomic_add before smem_alloc was lowered")
+            raise ValueError("lds_atomic_add before smem_alloc was lowered")
         idx_expr = "][".join(_name(i) for i in indices)
         self._emit(
             f"{cpp_t} {_name(op.result)} = atomicAdd(&{storage}[{idx_expr}], "
@@ -2438,7 +2438,7 @@ class _Lowerer:
         prefix = _vec_prefix(elem_name, "smem_load_vN")
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem load_vN before smem_alloc was lowered")
+            raise ValueError("smem load_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
         if byte_count & (byte_count - 1):
@@ -2464,7 +2464,7 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem store_vN_f32 before smem_alloc was lowered")
+            raise ValueError("smem store_vN_f32 before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         self._emit(
             f"*reinterpret_cast<f32x{n}*>(&{storage}[{idx_str}]) = {_name(value)};"
@@ -2476,7 +2476,7 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("smem load_vN_f32 before smem_alloc was lowered")
+            raise ValueError("smem load_vN_f32 before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         self._emit(
             f"f32x{n} {_name(op.result)} = "
@@ -2540,7 +2540,7 @@ class _Lowerer:
         size_bytes = dwords * 4
         storage = lds_val.op.attrs.get("_storage") if lds_val.op else None
         if storage is None:
-            raise RuntimeError("async_buffer_load_lds before smem_alloc was lowered")
+            raise ValueError("async_buffer_load_lds before smem_alloc was lowered")
         # Same builtin-vs-intrinsic distinction as the addr variant above:
         # call the LLVM intrinsic via the prologue's ``_llvm_amdgcn_*``
         # shim so size=12 / size=16 don't trip clang's builtin validator.
@@ -2712,7 +2712,7 @@ class _Lowerer:
         indices = op.operands[1:]
         storage = smem.op.attrs.get("_storage")
         if storage is None:
-            raise RuntimeError("ds_read_tr16_b64 before smem_alloc was lowered")
+            raise ValueError("ds_read_tr16_b64 before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem = op.attrs.get("elem_type", "f16")
         vec_prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")

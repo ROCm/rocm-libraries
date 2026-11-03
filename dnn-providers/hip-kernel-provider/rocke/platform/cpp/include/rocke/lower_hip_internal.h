@@ -238,7 +238,7 @@ rocke_status_t rocke_h_require_ds_read_tr(rocke_h_lowerer_t* lw, const char* op_
  *
  * rocke_h_smem_set_storage records "<name>_storage" for the smem alloc result;
  * rocke_h_smem_storage looks it up for a consuming op's smem operand. A lookup
- * miss is the Python "smem op before smem_alloc was lowered" RuntimeError case:
+ * miss is the Python "smem op before smem_alloc was lowered" ValueError case:
  * the caller should rocke_h_fail. Returns NULL on miss. */
 void rocke_h_smem_set_storage(rocke_h_lowerer_t* lw,
                               const rocke_value_t* smem_result,
