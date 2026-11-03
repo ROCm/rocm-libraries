@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA Corporation
+// SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA, Corporation
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
@@ -69,10 +69,10 @@ public:
   using difference_type = typename super_t::difference_type;
   //! \endcond
 
-  static_assert(::cuda::std::random_access_iterator<RandomAccessIterator>,
+  static_assert(_THRUST_STD::random_access_iterator<RandomAccessIterator>,
                 "The iterator underlying a strided_iterator must be a random access iterator.");
-  static_assert(::cuda::std::is_same_v<iterator_traversal_t<RandomAccessIterator>, random_access_traversal_tag>);
-  static_assert(::cuda::std::is_convertible_v<decltype(StrideHolder::value), difference_type>,
+  static_assert(_THRUST_STD::is_same_v<iterator_traversal_t<RandomAccessIterator>, random_access_traversal_tag>);
+  static_assert(_THRUST_STD::is_convertible_v<decltype(StrideHolder::value), difference_type>,
                 "The stride must be convertible to the iterator's difference_type");
 
   strided_iterator() = default;
