@@ -23,9 +23,8 @@
 
 #include "rocke/instance_gemm_internal.h"
 
-/* Forward declarations. rocke_gemm_drain_sync takes is_tdm from K-loops that
- * already hold it; rocke_gemm_drain_prefetch_and_sync reads it from the spec. */
-static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm);
+/* Forward declarations. */
+static void rocke_gemm_tdm_drain(rocke_ir_builder_t* b);
 static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx);
 
 /* ===================================================================== *
@@ -352,23 +351,23 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
     ctx->num_for_results = for_op.op->num_results;
 }
 
-/* Mirrors Python _sync_after_load / _drain_prefetch_and_sync. */
-static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm)
+/* Drain every TDM fill, then rendezvous on LDS. TENSORcnt ticks once per
+ * descriptor, so a full drain is 0 regardless of tile shape. Shared by the
+ * K-loops whose non-TDM form waits and barriers instead. Mirrors Python
+ * _tdm_drain. */
+static void rocke_gemm_tdm_drain(rocke_ir_builder_t* b)
 {
-    if(is_tdm)
-    {
-        rocke_b_s_wait_tensorcnt(b, 0);
-        rocke_b_sync_lds_only(b);
-    }
-    else
-    {
-        rocke_b_sync(b);
-    }
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_sync_lds_only(b);
 }
 
+/* The simple K-loop's drain after its load phase. */
 static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx)
 {
-    rocke_gemm_drain_sync(ctx->b, ctx->spec->trait.tdm);
+    if(ctx->spec->trait.tdm)
+        rocke_gemm_tdm_drain(ctx->b);
+    else
+        rocke_b_sync(ctx->b);
 }
 
 /* Workgroup barrier ids of the split barrier: signal / wait the whole WG. */
@@ -619,8 +618,13 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
          * or s_wait_tensorcnt(0) + sync_lds_only (TDM depth=2 ping-pong). */
         if(split)
             rocke_b_s_barrier_wait(b, ROCKE_GEMM_WG_WAIT);
+        else if(is_tdm)
+            rocke_gemm_tdm_drain(b);
         else
-            rocke_gemm_drain_sync(b, is_tdm);
+        {
+            rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
+            rocke_b_s_barrier_bare(b);
+        }
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
         if(split)
             rocke_gemm_emit_wmma_phase_ex(ctx,
@@ -653,8 +657,13 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
 
         if(split)
             rocke_b_s_barrier_wait(b, ROCKE_GEMM_WG_WAIT);
+        else if(is_tdm)
+            rocke_gemm_tdm_drain(b);
         else
-            rocke_gemm_drain_sync(b, is_tdm);
+        {
+            rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
+            rocke_b_s_barrier_bare(b);
+        }
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, tail_accs, num_tail, 0, final_parity, epi_accs);
 

@@ -2534,6 +2534,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         b.s_waitcnt(lgkmcnt=0)
         _tdm_publish(allowed)
 
+    def _tdm_drain() -> None:
+        """Drain every TDM fill, then rendezvous on LDS. TENSORcnt ticks once per
+        descriptor, so a full drain is 0 regardless of tile shape. Shared by the
+        K-loops whose non-TDM form waits and barriers instead."""
+        b.s_wait_tensorcnt(0)
+        b.sync_lds_only()
+
     def _k_tile_count() -> Value:
         """ceil((K - k_lo) / block_k): the K tiles of this K range. The last one is
         partial when K is not a multiple of block_k; the mover clips it to K.
@@ -2696,11 +2703,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # hints in ``emit_mfma_phase`` carry the in-tile interleave.
             emit_load_phase(A_smem, B_smem, k0)
             if spec.trait.tdm:
-                # TENSORcnt ticks once per descriptor, so a full drain is 0
-                # regardless of tile shape (unlike ASYNCcnt, which counts
-                # instructions and would need passes_a + passes_b).
-                b.s_wait_tensorcnt(0)
-                b.sync_lds_only()
+                # Unlike ASYNCcnt, which counts instructions and would need
+                # passes_a + passes_b, TENSORcnt drains to 0 for any tile.
+                _tdm_drain()
             else:
                 b.sync()
 
@@ -2935,8 +2940,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 # this point -- the next tile is issued after the drain -- so a
                 # full TENSORcnt drain still leaves the copy overlapped with
                 # the previous iteration's WMMAs.
-                b.s_wait_tensorcnt(0)
-                b.sync_lds_only()
+                _tdm_drain()
             else:
                 b.s_waitcnt(vmcnt=0, lgkmcnt=0)
                 b.s_barrier_bare()
@@ -2958,8 +2962,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if split:
             b.s_barrier_wait(_WG_WAIT)
         elif spec.trait.tdm:
-            b.s_wait_tensorcnt(0)
-            b.sync_lds_only()
+            _tdm_drain()
         else:
             b.s_waitcnt(vmcnt=0, lgkmcnt=0)
             b.s_barrier_bare()
