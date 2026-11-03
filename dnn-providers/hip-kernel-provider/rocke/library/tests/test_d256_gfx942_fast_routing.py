@@ -260,8 +260,19 @@ def _is_last_index_of(value, param):
     )
 
 
+def _is_last_page_of(value, param):
+    """``value`` is ``(load(param, ...) - 1) >> k`` (the last valid page)."""
+    op = value.op
+    return (
+        op is not None
+        and op.name == "arith.lshr"
+        and _is_last_index_of(op.operands[0], param)
+    )
+
+
 def _clamped_to_last_of(value, param):
-    """The index DAG of ``value`` passes through ``select(cmp, x, load(param)-1)``."""
+    """The index DAG of ``value`` passes through ``select(cmp, x, load(param)-1)``
+    (last key / token) or ``smin(x, (load(param)-1) >> k)`` (last page)."""
     seen, stack = set(), [value]
     while stack:
         v = stack.pop()
@@ -270,6 +281,10 @@ def _clamped_to_last_of(value, param):
         seen.add(id(v))
         op = v.op
         if op.name == "arith.select" and _is_last_index_of(op.operands[2], param):
+            return True
+        if op.name == "arith.smin" and any(
+            _is_last_page_of(x, param) for x in op.operands
+        ):
             return True
         stack.extend(op.operands)
     return False
@@ -281,7 +296,7 @@ class TestLeanBodyBoundsReads(unittest.TestCase):
     The 64-key tiles and the 128-row Q block run past the sequence when its length
     is not a tile multiple. An unbounded block-table read returns an arbitrary page
     id and the K/V load built from it faults (D256 q=129 did). The GPU oracle is
-    ``test_gfx942_4wgqa_lean_bounds_numeric``; this structural check runs anywhere.
+    ``test_gfx942_4wgqa_bounds_numeric``; this structural check runs anywhere.
     """
 
     def _kernel(self, head_size, hq=16, hkv=2):
@@ -322,6 +337,72 @@ class TestLeanBodyBoundsReads(unittest.TestCase):
                     self.assertTrue(
                         _clamped_to_last_of(op.operands[1], "seq_lens_ptr"),
                         f"D{hd}: {param} read not bounded by seq_len - 1",
+                    )
+
+
+class TestD128BodyBoundsReads(unittest.TestCase):
+    """The same reads in the D128 body of ``build_gfx942_4warp_gqa``, which bounds
+    the block-table page rather than the key. A one-token decode sequence otherwise
+    reads 127 Q rows past its token. Covers the head-fold, plain and block-size-64
+    single-buffer variants."""
+
+    # (dtype, num_query_heads, num_kv_heads, block_size); bf16 4:1 bs<=32 folds.
+    _VARIANTS = (
+        ("bf16", 32, 8, 16),
+        ("fp16", 32, 8, 16),
+        ("bf16", 64, 8, 32),
+        ("bf16", 32, 8, 64),
+    )
+
+    def _kernels(self):
+        for dt, hq, hkv, bs in self._VARIANTS:
+            problem = _d256_problem(
+                head_size=128,
+                dtype=dt,
+                num_query_heads=hq,
+                num_kv_heads=hkv,
+                block_size=bs,
+                sliding_window=512,
+            )
+            with _PinArch("gfx942"):
+                spec = au._tiled_spec_from_problem(problem, "gfx942")
+                kernel = t2d.build_gfx942_4warp_gqa(spec, arch="gfx942")
+            yield f"{dt} {hq}/{hkv} bs{bs}", kernel
+
+    def test_variants_cover_fold_and_plain(self):
+        names = [k.name for _, k in self._kernels()]
+        self.assertTrue(names[0].endswith("_4wgqa_fold"), names[0])
+        self.assertTrue(all(n.endswith("_4wgqa") for n in names[1:]), names)
+
+    def test_block_table_reads_clamped_to_last_page(self):
+        for tag, k in self._kernels():
+            loads = _global_loads(k, "block_tables_ptr")
+            self.assertTrue(loads)
+            for op in loads:
+                self.assertTrue(
+                    _clamped_to_last_of(op.operands[1], "seq_lens_ptr"),
+                    f"{tag}: block-table read not bounded by the last page",
+                )
+
+    def test_query_reads_clamped_to_last_token(self):
+        for tag, k in self._kernels():
+            loads = _global_loads(k, "query_ptr")
+            self.assertTrue(loads)
+            for op in loads:
+                self.assertTrue(
+                    _clamped_to_last_of(op.operands[1], "query_start_len_ptr"),
+                    f"{tag}: Q read not bounded by the sequence's last token",
+                )
+
+    def test_kv_reads_go_through_the_block_table(self):
+        for tag, k in self._kernels():
+            for param in ("key_cache_ptr", "value_cache_ptr"):
+                loads = _global_loads(k, param)
+                self.assertTrue(loads)
+                for op in loads:
+                    self.assertTrue(
+                        _clamped_to_last_of(op.operands[1], "seq_lens_ptr"),
+                        f"{tag}: {param} read not bounded by the last page",
                     )
 
 

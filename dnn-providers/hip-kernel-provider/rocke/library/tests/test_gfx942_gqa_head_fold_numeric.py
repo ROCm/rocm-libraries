@@ -63,10 +63,9 @@ def _gpu_ready():
         return False
     if not torch.cuda.is_available():
         return False
-    name = torch.cuda.get_device_name(0).lower()
-    # Substring match against the runtime device name; kept lowercase and generic
-    # so it accepts every gfx942 part this cohort can run on.
-    return "mi300" in name or "gfx942" in name
+    # Gate on ``gcnArchName`` (the ISA target), not the marketing name, which
+    # varies across gfx942 parts.
+    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
 
 
 requires_gfx942_gpu = pytest.mark.skipif(
