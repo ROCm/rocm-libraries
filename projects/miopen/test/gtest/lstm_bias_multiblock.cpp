@@ -7,8 +7,9 @@
 // sequence length of them) and is computed with miopenReduceTensor. It takes the multi-block path
 // of the reduction (the partial results are stored in the workspace of the reduction) when there
 // are more than 1024 rows. The other LSTM tests have far fewer rows, and most of them are in the
-// Full tier. The data of the LSTM test is small, so this test checks that the path runs and is
-// correct; reduce_multiblock.cpp checks that its partial results are not clipped.
+// Full tier. The data of the LSTM test is small, so this test checks that the path runs and that
+// its result is correct (the harness of lstm.hpp prints a mismatch, and the test fails if it
+// printed one); reduce_multiblock.cpp checks that its partial results are not clipped.
 namespace {
 
 struct TestCase
@@ -61,17 +62,24 @@ protected:
         this->dirMode    = dirMode;
         this->algoMode   = algoMode;
     }
+
+    void RunCheckedTest()
+    {
+        this->RunTest();
+        EXPECT_EQ(this->verifyFailures, 0u)
+            << "the CPU and the GPU results of the LSTM differ, or the GPU run threw";
+    }
 };
 
 using GPU_LSTMBiasMultiBlock_FP16 = GPU_LSTMBiasMultiBlock_test<half_float::half>;
 
-TEST_P(GPU_LSTMBiasMultiBlock_FP16, HalfTest) { RunTest(); }
+TEST_P(GPU_LSTMBiasMultiBlock_FP16, HalfTest) { RunCheckedTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_LSTMBiasMultiBlock_FP16, testing::ValuesIn(GetTestCases()));
 
 using GPU_LSTMBiasMultiBlock_FP32 = GPU_LSTMBiasMultiBlock_test<float>;
 
-TEST_P(GPU_LSTMBiasMultiBlock_FP32, FloatTest) { RunTest(); }
+TEST_P(GPU_LSTMBiasMultiBlock_FP32, FloatTest) { RunCheckedTest(); }
 
 // the FP32 reduction has the same compute and input type; one case is a control
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_LSTMBiasMultiBlock_FP32, testing::Values(TestCase(0, 0)));

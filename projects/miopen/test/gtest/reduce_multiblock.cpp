@@ -76,6 +76,8 @@ struct MultiBlockCase
     float alpha      = 1.0f;
     float beta       = 0.0f;
     float outputInit = 0.0f; // initial value of the output elements (matters if beta != 0)
+    // the NaN propagation selects another instance of the kernels (CK_PARAM_NAN_PROPAGATE)
+    bool propagateNan = false;
 
     friend std::ostream& operator<<(std::ostream& os, const MultiBlockCase& c)
     {
@@ -346,8 +348,9 @@ void RunCase(const MultiBlockCase& c)
             ? miopen::TensorDescriptor{c.inType, c.shape.lengths}
             : miopen::TensorDescriptor{c.inType, c.shape.lengths, c.shape.inStrides};
     const miopen::TensorDescriptor outDesc{c.inType, outLengths};
+    const auto nanOpt = c.propagateNan ? MIOPEN_PROPAGATE_NAN : MIOPEN_NOT_PROPAGATE_NAN;
     const miopen::ReduceTensorDescriptor reduceDesc{
-        c.op, c.compType, MIOPEN_NOT_PROPAGATE_NAN, c.indices, MIOPEN_32BIT_INDICES};
+        c.op, c.compType, nanOpt, c.indices, MIOPEN_32BIT_INDICES};
 
     const std::size_t wsBytes  = reduceDesc.GetWorkspaceSize(handle, inDesc, outDesc);
     const std::size_t idxBytes = reduceDesc.GetIndicesSize(inDesc, outDesc);
@@ -532,8 +535,8 @@ std::vector<MultiBlockCase> SameCompTypeStandard()
 
 // The reduction the RNN code runs for the gradient of the bias (see rnn_util.hpp): the sum over
 // all the rows of the workspace (batch size times sequence length of them) of the bias columns
-// of the rows, accumulated into the weights (beta = 1), FP32 compute. The rows are longer than
-// the bias, so the input is strided.
+// of the rows, accumulated into the weights (beta = 1), FP32 compute, NaN propagation on. The rows
+// are longer than the bias, so the input is strided.
 std::vector<MultiBlockCase> RnnBiasGradientStandard()
 {
     // 1 x rows x biasCount, rows are rowStride apart
@@ -558,7 +561,29 @@ std::vector<MultiBlockCase> RnnBiasGradientStandard()
                         Pattern::Const300);
     avg.beta       = 1.0f;
     avg.outputInit = 5.0f;
-    return {c, avg};
+
+    std::vector<MultiBlockCase> cases{c, avg};
+    for(auto& rnnCase : cases)
+        rnnCase.propagateNan = true;
+    return cases;
+}
+
+// The kernels of the reductions that propagate NaN are another instance than the ones of the
+// cases above (the RNN-shaped cases excepted). One case per first-pass variant (all dims, some
+// dims) and per second-pass kernel (threadwise, warpwise, blockwise).
+std::vector<MultiBlockCase> NanPropagationStandard()
+{
+    constexpr auto hf = miopenHalf;
+    constexpr auto fl = miopenFloat;
+
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : {&thread2Partial, &warp2Partial, &warp2All, &block2All})
+    {
+        cases.push_back(
+            MakeCase("Avg300Nan", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const300));
+        cases.back().propagateNan = true;
+    }
+    return cases;
 }
 
 std::vector<MultiBlockCase> Fp32Standard()
@@ -717,6 +742,8 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                              cases.insert(cases.end(), rnn.begin(), rnn.end());
                              const auto same = SameCompTypeStandard();
                              cases.insert(cases.end(), same.begin(), same.end());
+                             const auto nan = NanPropagationStandard();
+                             cases.insert(cases.end(), nan.begin(), nan.end());
                              return cases;
                          }()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
