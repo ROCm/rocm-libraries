@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  COO (AoS) matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalCooAoS
@@ -48,9 +48,7 @@ public:
             &descr, rows, cols, nnz, cooInd, cooValues, cooIdxType, idxBase, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateCooAoS failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateCooAoS", status);
         }
     }
 
@@ -61,7 +59,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalCooAoS destructor");
+                log_hipsparse_error("hipsparseDestroySpMat", status);
             }
         }
     }

@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  sliced ELL matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalSlicedEll
@@ -63,9 +63,7 @@ public:
                                                                   valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateSlicedEll failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateSlicedEll", status);
         }
     }
 
@@ -76,8 +74,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status,
-                                                "ERROR: hipsparseLocalSlicedEll destructor");
+                log_hipsparse_error("hipsparseDestroySpMat", status);
             }
         }
     }

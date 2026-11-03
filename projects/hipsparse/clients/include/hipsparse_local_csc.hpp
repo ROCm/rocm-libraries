@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  CSC matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalCsc
@@ -59,9 +59,7 @@ public:
                                                             valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateCsc failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateCsc", status);
         }
     }
 
@@ -72,7 +70,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalCsc destructor");
+                log_hipsparse_error("hipsparseDestroySpMat", status);
             }
         }
     }

@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  BSR matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalBsr
@@ -65,9 +65,7 @@ public:
                                                             order);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateBsr failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateBsr", status);
         }
     }
 
@@ -78,7 +76,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalBsr destructor");
+                log_hipsparse_error("hipsparseDestroySpMat", status);
             }
         }
     }

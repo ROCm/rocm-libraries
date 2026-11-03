@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  blocked ELL matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalBlockedEll
@@ -57,9 +57,7 @@ public:
                                                                    valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateBlockedEll failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateBlockedEll", status);
         }
     }
 
@@ -70,8 +68,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status,
-                                                "ERROR: hipsparseCreateBlockedEll destructor");
+                log_hipsparse_error("hipsparseDestroySpMat", status);
             }
         }
     }
