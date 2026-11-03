@@ -111,7 +111,7 @@ TEST(csrmv_adaptive_analysis, numThreadsForReduction_custom_wg_size)
 }
 
 // csrmv_adaptive_partition_is_poor_fit decides when default SpMV selects nnz-split.
-// gen_wg 256 is the short-row workgroup, so the wide-block limit is 32*256.
+// A block is wide when it spans more than csrmv_adaptive_wide_block_rows rows.
 TEST(csrmv_adaptive_analysis, poor_fit_wide_blocks_covering_the_matrix)
 {
     const int        n = 10000;
@@ -119,19 +119,29 @@ TEST(csrmv_adaptive_analysis, poor_fit_wide_blocks_covering_the_matrix)
     std::vector<int> ptr(static_cast<size_t>(n) + 1, 0);
     ptr.back() = 2;
     EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), n, 256u));
+        blocks.data(), blocks.size(), ptr.data(), n));
 }
 
-// The wide-block limit is 32 workgroups, so it scales with the workgroup size.
-TEST(csrmv_adaptive_analysis, poor_fit_span_limit_follows_workgroup)
+// The wide-block limit is the empty-edge length adaptive skips, so an empty
+// prefix too short to be skipped is not wide either. general_wg_size returns 128
+// for some matrices, and 32 * 128 rows must not be the limit.
+TEST(csrmv_adaptive_analysis, poor_fit_span_limit_matches_the_skipped_edge)
 {
-    const int        n = 2000;
-    std::vector<int> blocks{0, n};
-    std::vector<int> ptr(static_cast<size_t>(n) + 1, 0);
-    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), n, 256u));
-    EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), n, 32u));
+    auto empty_prefix = [](int edge) {
+        const int        populated = 1000;
+        const int        n         = edge + populated;
+        std::vector<int> blocks{0, edge, n};
+        std::vector<int> ptr(static_cast<size_t>(edge) + 1, 0);
+        for(int row = 0; row < populated; ++row)
+        {
+            ptr.push_back(row + 1);
+        }
+        return rocsparse::csrmv_adaptive_partition_is_poor_fit(
+            blocks.data(), blocks.size(), ptr.data(), n);
+    };
+    EXPECT_FALSE(empty_prefix(4097));
+    EXPECT_FALSE(empty_prefix(8192));
+    EXPECT_TRUE(empty_prefix(8193));
 }
 
 // A wide block that is only a small share of the matrix, and no transition
@@ -161,7 +171,7 @@ TEST(csrmv_adaptive_analysis, good_fit_when_wide_blocks_are_a_small_share)
         push(span, 200);
     }
     EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), n, 256u));
+        blocks.data(), blocks.size(), ptr.data(), n));
 }
 
 TEST(csrmv_adaptive_analysis, poor_fit_when_a_quarter_of_blocks_are_underfilled)
@@ -176,7 +186,7 @@ TEST(csrmv_adaptive_analysis, poor_fit_when_a_quarter_of_blocks_are_underfilled)
         blocks.push_back(row + 1);
     }
     EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), 8, 256u));
+        blocks.data(), blocks.size(), ptr.data(), 8));
 }
 
 TEST(csrmv_adaptive_analysis, good_fit_below_a_quarter_underfilled)
@@ -191,7 +201,7 @@ TEST(csrmv_adaptive_analysis, good_fit_below_a_quarter_underfilled)
         blocks.push_back(row + 1);
     }
     EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), 8, 256u));
+        blocks.data(), blocks.size(), ptr.data(), 8));
 }
 
 // Seven underfilled blocks are not enough to call the pattern systematic.
@@ -207,17 +217,43 @@ TEST(csrmv_adaptive_analysis, good_fit_without_enough_blocks)
         blocks.push_back(row + 1);
     }
     EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), 7, 256u));
+        blocks.data(), blocks.size(), ptr.data(), 7));
 }
 
 // Intermediate chunks of one long row have a zero row span and are ignored.
+// Counted, the zero-span entry would be an eighth comparable block, and an
+// underfilled one.
 TEST(csrmv_adaptive_analysis, zero_span_chunks_are_ignored)
 {
-    const std::vector<int> blocks{5, 5, 5, 8};
-    std::vector<int>       ptr(9, 0);
-    ptr[8] = 200;
+    const std::vector<int> blocks{0, 1, 2, 3, 4, 5, 6, 7, 7};
+    std::vector<int>       ptr;
+    for(int row = 0; row <= 7; ++row)
+    {
+        ptr.push_back(10 * row);
+    }
     EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), 8, 256u));
+        blocks.data(), blocks.size(), ptr.data(), 7));
+}
+
+// Empty rows between long rows become one-row blocks without nonzeros. They do
+// as little work as one-nonzero blocks and count as underfilled the same way.
+TEST(csrmv_adaptive_analysis, poor_fit_counts_empty_blocks_as_underfilled)
+{
+    for(const int short_nnz : {0, 1})
+    {
+        std::vector<int> blocks{0};
+        std::vector<int> ptr{0};
+        int              nnz = 0;
+        for(int row = 0; row < 16; ++row)
+        {
+            nnz += (row % 2 == 0) ? 2000 : short_nnz;
+            ptr.push_back(nnz);
+            blocks.push_back(row + 1);
+        }
+        EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
+            blocks.data(), blocks.size(), ptr.data(), 16))
+            << "short_nnz=" << short_nnz;
+    }
 }
 
 TEST(csrmv_adaptive_analysis, good_fit_for_empty_partition)
@@ -225,5 +261,5 @@ TEST(csrmv_adaptive_analysis, good_fit_for_empty_partition)
     const std::vector<int> blocks{0};
     const std::vector<int> ptr{0};
     EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
-        blocks.data(), blocks.size(), ptr.data(), 0, 256u));
+        blocks.data(), blocks.size(), ptr.data(), 0));
 }

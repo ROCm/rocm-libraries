@@ -319,7 +319,7 @@ namespace rocsparse
             I num_rows = rowBlocksBase[1] - rowBlocksBase[0];
             if(num_rows > ROWS_FOR_VECTOR)
             {
-                if(first_row_with_nonzeros > 32 * WG_SIZE)
+                if(first_row_with_nonzeros > static_cast<I>(csrmv_adaptive_wide_block_rows))
                 {
                     first_row = std::max((I)0, first_row_with_nonzeros - (ROWS_FOR_VECTOR + 1));
                 }
@@ -328,7 +328,7 @@ namespace rocsparse
             num_rows = rowBlocksBase[rowBlockSize - 1] - rowBlocksBase[rowBlockSize - 2];
             if(num_rows > ROWS_FOR_VECTOR)
             {
-                if(nRows - last_row_with_nonzeros > 32 * WG_SIZE)
+                if(nRows - last_row_with_nonzeros > static_cast<I>(csrmv_adaptive_wide_block_rows))
                 {
                     last_row
                         = std::min(nRows, (last_row_with_nonzeros + (ROWS_FOR_VECTOR + 1)) + 1);
@@ -751,6 +751,8 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                        info,
                        (info->csr_row_ptr != csr_row_ptr || info->csr_col_ind != csr_col_ind),
                        rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(
+        10, info, (info->adaptive.row_blocks == nullptr), rocsparse_status_invalid_value);
 
     // Stream
     hipStream_t stream = handle->stream;

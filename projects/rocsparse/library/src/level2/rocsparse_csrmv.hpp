@@ -108,6 +108,8 @@ namespace rocsparse
                                                           const J*                  csr_col_ind,
                                                           rocsparse_csrmv_info*     p_csrmv_info);
 
+    // known_max_row_nnz is the longest row of the matrix when the caller already
+    // has it, or nullptr to compute it here.
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_nnzsplit_template_dispatch(rocsparse_handle          handle,
                                                                rocsparse_operation       trans,
@@ -118,7 +120,9 @@ namespace rocsparse
                                                                const A*                  csr_val,
                                                                const I*              csr_row_ptr,
                                                                const J*              csr_col_ind,
-                                                               rocsparse_csrmv_info* p_csrmv_info);
+                                                               rocsparse_csrmv_info* p_csrmv_info,
+                                                               const int64_t* known_max_row_nnz
+                                                               = nullptr);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_template(rocsparse_handle          handle,

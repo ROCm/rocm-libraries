@@ -102,8 +102,7 @@ rocsparse_status rocsparse::csrmv_select_algorithm(rocsparse_handle             
     alg = rocsparse::csrmv_adaptive_partition_is_poor_fit(partition.row_blocks.data(),
                                                           partition.row_blocks.size(),
                                                           partition.row_ptr.data(),
-                                                          static_cast<I>(m),
-                                                          partition.gen_wg)
+                                                          static_cast<I>(m))
               ? rocsparse::csrmv_alg_nnzsplit
               : rocsparse::csrmv_alg_adaptive;
 
@@ -144,8 +143,18 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
 
     // Filled when the selection already ran the first adaptive analysis phase.
     rocsparse::csrmv_adaptive_partition<I, J> partition;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csrmv_select_algorithm(handle, trans, m, nnz, csr_row_ptr, alg, partition));
+    if(std::is_same<A, _Float16>{} || std::is_same<A, rocsparse_bfloat16>{})
+    {
+        // Half-precision matrices keep the adaptive default. Their output can be
+        // half precision, and nnz-split adds every partial sum to y with an
+        // atomic in the output type.
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans, nullptr));
+    }
+    else
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmv_select_algorithm(handle, trans, m, nnz, csr_row_ptr, alg, partition));
+    }
 
     switch(alg)
     {
@@ -180,8 +189,27 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
 
     case rocsparse::csrmv_alg_nnzsplit:
     {
+        // The selection copied the row pointers to the host, so the longest row
+        // does not need another device pass.
+        int64_t max_row_nnz = 0;
+        for(size_t row = 1; row < partition.row_ptr.size(); ++row)
+        {
+            max_row_nnz = std::max(
+                max_row_nnz,
+                static_cast<int64_t>(partition.row_ptr[row] - partition.row_ptr[row - 1]));
+        }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
-            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
+            handle,
+            trans,
+            m,
+            n,
+            nnz,
+            descr,
+            csr_val,
+            csr_row_ptr,
+            csr_col_ind,
+            p_csrmv_info,
+            partition.row_ptr.empty() ? nullptr : &max_row_nnz));
         break;
     }
 

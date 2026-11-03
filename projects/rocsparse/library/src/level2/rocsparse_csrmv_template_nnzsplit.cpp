@@ -463,7 +463,8 @@ rocsparse_status
                                                          const A*                  csr_val,
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
-                                                         rocsparse_csrmv_info*     p_csrmv_info)
+                                                         rocsparse_csrmv_info*     p_csrmv_info,
+                                                         const int64_t* known_max_row_nnz)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -476,8 +477,15 @@ rocsparse_status
     // nnz-per-thread granularity folds in the row-skew guard and real occupancy.
     const uint32_t block       = rocsparse::nnzsplit_block_size(handle);
     int64_t        max_row_nnz = 0;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csrmv_nnzsplit_max_row_nnz(handle, m, csr_row_ptr, &max_row_nnz));
+    if(known_max_row_nnz != nullptr)
+    {
+        max_row_nnz = *known_max_row_nnz;
+    }
+    else
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmv_nnzsplit_max_row_nnz(handle, m, csr_row_ptr, &max_row_nnz));
+    }
     const uint32_t npt = rocsparse::nnzsplit_nnz_per_thread(
         handle->properties, block, static_cast<int64_t>(m), static_cast<int64_t>(nnz), max_row_nnz);
 
@@ -494,8 +502,15 @@ rocsparse_status
     csrmv_info->m            = m;
     csrmv_info->n            = n;
     csrmv_info->nnz          = nnz;
+    csrmv_info->descr        = descr;
+    csrmv_info->csr_row_ptr  = csr_row_ptr;
+    csrmv_info->csr_col_ind  = csr_col_ind;
     csrmv_info->index_type_I = rocsparse::get_indextype<I>();
     csrmv_info->index_type_J = rocsparse::get_indextype<J>();
+
+    // Preprocess blocks the host, so the analysis must be complete before the
+    // caller can change the handle stream.
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     return rocsparse_status_success;
 }
@@ -670,6 +685,27 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
         }
     }
 
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(6, descr);
+    ROCSPARSE_CHECKARG_POINTER(10, csrmv_info);
+
+    // Check if info matches current matrix
+    ROCSPARSE_CHECKARG(10,
+                       csrmv_info,
+                       (csrmv_info->m != m || csrmv_info->n != n || csrmv_info->nnz != nnz),
+                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(
+        10, csrmv_info, (csrmv_info->descr != descr), rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG(
+        10,
+        csrmv_info,
+        (csrmv_info->csr_row_ptr != csr_row_ptr || csrmv_info->csr_col_ind != csr_col_ind),
+        rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(10,
+                       csrmv_info,
+                       (csrmv_info->nnzsplit.starting_ids == nullptr),
+                       rocsparse_status_invalid_value);
+
     const J ysize = (trans == rocsparse_operation_none) ? m : n;
 
     const bool skip_diag = (descr->type == rocsparse_matrix_type_symmetric);
@@ -722,7 +758,8 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
         const ATYPE*              csr_val,                                          \
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
-        rocsparse_csrmv_info*     p_csrmv_info);
+        rocsparse_csrmv_info*     p_csrmv_info,                                     \
+        const int64_t*            known_max_row_nnz);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, _Float16);

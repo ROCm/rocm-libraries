@@ -25,8 +25,10 @@
 #include "rocsparse_csrmv_adaptive_analysis.hpp"
 
 template <typename I>
-bool rocsparse::csrmv_adaptive_partition_is_poor_fit(
-    const I* row_blocks, std::size_t row_block_size, const I* row_ptr, I n_rows, uint32_t gen_wg)
+bool rocsparse::csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
+                                                     std::size_t row_block_size,
+                                                     const I*    row_ptr,
+                                                     I           n_rows)
 {
     if(row_block_size < 2 || n_rows <= 0)
     {
@@ -34,7 +36,7 @@ bool rocsparse::csrmv_adaptive_partition_is_poor_fit(
     }
 
     const std::size_t nblocks         = row_block_size - 1;
-    const I           span_limit      = static_cast<I>(32) * static_cast<I>(gen_wg);
+    const I           span_limit      = static_cast<I>(csrmv_adaptive_wide_block_rows);
     const I           underfilled_nnz = static_cast<I>(csrmv_adaptive_block_nnz / 8);
 
     int64_t     wide_rows   = 0;
@@ -58,7 +60,7 @@ bool rocsparse::csrmv_adaptive_partition_is_poor_fit(
 
         const I block_nnz = row_ptr[end] - row_ptr[begin];
         ++comparable;
-        if(block_nnz > 0 && block_nnz < underfilled_nnz)
+        if(block_nnz < underfilled_nnz)
         {
             ++underfilled;
         }
@@ -70,16 +72,13 @@ bool rocsparse::csrmv_adaptive_partition_is_poor_fit(
         return true;
     }
 
-    // At least a quarter of the row blocks are transition fragments.
+    // At least a quarter of the row blocks are short-row runs between long rows.
     return comparable >= 8 && underfilled * 4 >= comparable;
 }
 
-#define INSTANTIATE(I)                                                                           \
-    template bool rocsparse::csrmv_adaptive_partition_is_poor_fit<I>(const I*    row_blocks,     \
-                                                                     std::size_t row_block_size, \
-                                                                     const I*    row_ptr,        \
-                                                                     I           n_rows,         \
-                                                                     uint32_t    gen_wg);
+#define INSTANTIATE(I)                                                \
+    template bool rocsparse::csrmv_adaptive_partition_is_poor_fit<I>( \
+        const I* row_blocks, std::size_t row_block_size, const I* row_ptr, I n_rows);
 
 INSTANTIATE(int32_t);
 INSTANTIATE(int64_t);

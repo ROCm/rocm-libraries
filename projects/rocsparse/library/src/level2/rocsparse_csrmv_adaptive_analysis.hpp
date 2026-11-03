@@ -84,18 +84,31 @@ namespace rocsparse
     // rocsparse_csrmv_template_adaptive.cpp.
     inline constexpr uint32_t csrmv_adaptive_block_nnz = 1024;
 
+    // Rows of 32 workgroups of 256 threads. ComputeRowBlocks skips an empty
+    // prefix or suffix longer than this, and csrmv_adaptive_partition_is_poor_fit
+    // counts a block spanning more rows than this as wide. Sharing the limit
+    // keeps an empty edge that adaptive does not skip from counting as wide.
+    inline constexpr uint32_t csrmv_adaptive_wide_block_rows = 32 * 256;
+
     // True when the adaptive row blocks are a poor fit for this matrix, so that
     // csrmv_select_algorithm chooses nnz-split for csrmv_alg_default.
     //
     // A zero row span is an intermediate chunk of one long row and is ignored.
     // The two poor partitions are:
-    // - blocks that span many mostly empty rows, walked serially by one workgroup
-    // - many blocks closed by a long/short transition before they hold a full
-    //   block of nonzeros, so most of the grid does almost no numeric work
+    // - wide blocks, walked serially by one workgroup, that together span at
+    //   least one eighth of the rows
+    // - at least 8 blocks, a quarter or more of which hold fewer than
+    //   csrmv_adaptive_block_nnz / 8 nonzeros (empty blocks included). These are
+    //   the runs of short rows that adaptive cuts off between long rows, so most
+    //   of the grid does almost no numeric work.
+    //
+    // The fractions and the 8-block minimum are heuristics that separate the
+    // scattered-row and alternating-row patterns from populated matrices and
+    // from the empty edges adaptive skips. They were checked on gfx1201 (wave32)
+    // and gfx90a (wave64).
     template <typename I>
     bool csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
                                               std::size_t row_block_size,
                                               const I*    row_ptr,
-                                              I           n_rows,
-                                              uint32_t    gen_wg);
+                                              I           n_rows);
 }

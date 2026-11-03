@@ -25,7 +25,8 @@
 //
 // Default CSR SpMV selects nnz-split only for a poor adaptive partition, and
 // only when the caller asked for the default algorithm. These tests run the
-// public analysis and read which analysis buffers and algorithm were stored.
+// public SpMV routines, read which analysis buffers and algorithm were stored,
+// and check y against a host reference.
 //
 #include "unit_test_utils.hpp"
 
@@ -35,238 +36,284 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <complex>
 #include <cstdint>
+#include <cstring>
+#include <type_traits>
 #include <vector>
 
 using namespace rocsparse_ut;
 
 namespace
 {
-    struct HostCsr
+    // Stored pattern: the rows of a CSR matrix, or the columns of a CSC matrix.
+    struct Pattern
     {
         int64_t              m = 0;
         int64_t              n = 0;
-        std::vector<int32_t> row_ptr;
-        std::vector<int32_t> col_ind;
-        std::vector<float>   val;
+        std::vector<int64_t> ptr{0};
+        std::vector<int64_t> ind;
 
         int64_t nnz() const
         {
-            return static_cast<int64_t>(col_ind.size());
+            return static_cast<int64_t>(ind.size());
+        }
+
+        void add(const std::vector<int64_t>& cols)
+        {
+            ind.insert(ind.end(), cols.begin(), cols.end());
+            ptr.push_back(nnz());
+            ++m;
+        }
+
+        void add(int64_t len)
+        {
+            std::vector<int64_t> cols(static_cast<size_t>(len));
+            for(int64_t k = 0; k < len; ++k)
+            {
+                cols[static_cast<size_t>(k)] = k;
+            }
+            add(cols);
         }
     };
 
-    void add_row(HostCsr& a, int32_t len)
-    {
-        for(int32_t k = 0; k < len; ++k)
-        {
-            a.col_ind.push_back(k);
-            a.val.push_back(1.0f);
-        }
-        a.row_ptr.push_back(static_cast<int32_t>(a.col_ind.size()));
-        ++a.m;
-    }
-
     // One nonzero at each end and a long empty gap between them. Adaptive keeps
     // that gap in one row block.
-    HostCsr scattered_gap()
+    Pattern scattered_gap()
     {
-        HostCsr a;
+        Pattern a;
         a.n = 1;
-        a.row_ptr.push_back(0);
-        add_row(a, 1);
+        a.add(1);
         for(int i = 0; i < 20000; ++i)
         {
-            add_row(a, 0);
+            a.add(0);
         }
-        add_row(a, 1);
+        a.add(1);
+        return a;
+    }
+
+    // The same gap in a square lower-triangular matrix, so it can be symmetric.
+    Pattern scattered_gap_lower()
+    {
+        Pattern a;
+        a.n = 20002;
+        a.add(std::vector<int64_t>{0});
+        for(int i = 0; i < 20000; ++i)
+        {
+            a.add(0);
+        }
+        a.add(std::vector<int64_t>{0, 20001});
         return a;
     }
 
     // Every row is short and populated, so one adaptive block holds the matrix.
-    HostCsr populated()
+    Pattern populated()
     {
-        HostCsr a;
+        Pattern a;
         a.n = 8;
-        a.row_ptr.push_back(0);
         for(int i = 0; i < 64; ++i)
         {
-            add_row(a, 8);
+            a.add(8);
         }
         return a;
     }
 
     // A just-long row, then two short rows, repeated. Adaptive cuts a block on
     // every long-to-short transition.
-    HostCsr alternating()
+    Pattern alternating()
     {
-        HostCsr a;
+        Pattern a;
         a.n = 160;
-        a.row_ptr.push_back(0);
         for(int g = 0; g < 8; ++g)
         {
-            add_row(a, 160);
-            add_row(a, 3);
-            add_row(a, 3);
+            a.add(160);
+            a.add(3);
+            a.add(3);
         }
         return a;
     }
 
     // Long rows, then an empty suffix adaptive already skips.
-    HostCsr long_then_empty()
+    Pattern long_then_empty()
     {
-        HostCsr a;
+        Pattern a;
         a.n = 200;
-        a.row_ptr.push_back(0);
         for(int i = 0; i < 4; ++i)
         {
-            add_row(a, 200);
+            a.add(200);
         }
         for(int i = 0; i < 20000; ++i)
         {
-            add_row(a, 0);
+            a.add(0);
         }
         return a;
     }
 
-    std::vector<float> host_spmv(const HostCsr& a)
+    using cd = std::complex<double>;
+
+    // Small multiples of a quarter, exact in every tested precision.
+    cd value_of(int64_t k)
     {
-        std::vector<float> y(static_cast<size_t>(a.m), 0.0f);
-        for(int64_t row = 0; row < a.m; ++row)
-        {
-            float sum = 0.0f;
-            for(int32_t k = a.row_ptr[static_cast<size_t>(row)];
-                k < a.row_ptr[static_cast<size_t>(row) + 1];
-                ++k)
-            {
-                sum += a.val[static_cast<size_t>(k)];
-            }
-            y[static_cast<size_t>(row)] = sum;
-        }
-        return y;
+        return {1.0 + 0.25 * static_cast<double>(k % 4), 0.5 * static_cast<double>(k % 3 - 1)};
     }
 
-    struct Selection
+    cd x_of(int64_t j)
+    {
+        return {1.0 + static_cast<double>(j % 3), 0.0};
+    }
+
+    cd y0_of(int64_t i)
+    {
+        return {0.5 * static_cast<double>(1 + i % 2), 0.0};
+    }
+
+    template <typename T>
+    T to_type(const cd& v)
+    {
+        if constexpr(std::is_same<T, rocsparse_float_complex>{}
+                     || std::is_same<T, rocsparse_double_complex>{})
+        {
+            return T(v.real(), v.imag());
+        }
+        else
+        {
+            return static_cast<T>(static_cast<float>(v.real()));
+        }
+    }
+
+    template <typename T>
+    cd to_cd(const T& v)
+    {
+        if constexpr(std::is_same<T, rocsparse_float_complex>{}
+                     || std::is_same<T, rocsparse_double_complex>{})
+        {
+            return {static_cast<double>(std::real(v)), static_cast<double>(std::imag(v))};
+        }
+        else
+        {
+            return {static_cast<double>(static_cast<float>(v)), 0.0};
+        }
+    }
+
+    struct Options
+    {
+        rocsparse_spmv_alg   alg         = rocsparse_spmv_alg_default;
+        rocsparse_spmv_alg   compute_alg = rocsparse_spmv_alg_default;
+        rocsparse_operation  op          = rocsparse_operation_none;
+        rocsparse_operation  compute_op  = rocsparse_operation_none;
+        bool                 as_csc      = false;
+        bool                 symmetric   = false;
+        rocsparse_index_base base        = rocsparse_index_base_zero;
+        double               beta        = 0.0;
+        bool                 v2          = false;
+        // Point the descriptor at copies of the arrays between the two stages.
+        bool repoint = false;
+    };
+
+    Options with_alg(rocsparse_spmv_alg alg)
+    {
+        Options o;
+        o.alg         = alg;
+        o.compute_alg = alg;
+        return o;
+    }
+
+    Options with_op(rocsparse_operation op)
+    {
+        Options o;
+        o.op         = op;
+        o.compute_op = op;
+        return o;
+    }
+
+    struct Result
     {
         bool                 has_info        = false;
         bool                 adaptive_blocks = false;
         bool                 nnzsplit_tuned  = false;
         bool                 copy_ok         = false;
         rocsparse::csrmv_alg selected        = rocsparse::csrmv_alg_default;
-        std::vector<float>   y;
+        rocsparse_status     compute_status  = rocsparse_status_internal_error;
     };
 
-    Selection run_spmv(rocsparse_handle    handle,
-                       const HostCsr&      a,
-                       rocsparse_spmv_alg  alg,
-                       rocsparse_operation op,
-                       bool                as_csc,
-                       bool                check_y)
+    // y = op(A) x + beta y0, with A the matrix the routine sees: m x n stored
+    // rows for CSR, and the transpose of the stored pattern for CSC.
+    std::vector<cd> reference(const Pattern& a, const std::vector<cd>& val, const Options& o)
     {
-        device_vector<int32_t> d_ptr{a.row_ptr};
-        device_vector<int32_t> d_ind{a.col_ind};
-        device_vector<float>   d_val{a.val};
-        const int64_t          rows = as_csc ? a.n : a.m;
-        const int64_t          cols = as_csc ? a.m : a.n;
-        const int64_t          xlen = (op == rocsparse_operation_none) ? cols : rows;
-        const int64_t          ylen = (op == rocsparse_operation_none) ? rows : cols;
-        device_vector<float>   d_x{std::vector<float>(static_cast<size_t>(xlen), 1.0f)};
-        device_vector<float>   d_y{std::vector<float>(static_cast<size_t>(ylen), 0.0f)};
-        if(!d_ptr.ptr || !d_ind.ptr || !d_val.ptr || !d_x.ptr || !d_y.ptr)
+        const int64_t rows = o.as_csc ? a.n : a.m;
+        const int64_t cols = o.as_csc ? a.m : a.n;
+        const int64_t ylen = (o.compute_op == rocsparse_operation_none) ? rows : cols;
+
+        std::vector<cd> y(static_cast<size_t>(ylen));
+        for(int64_t i = 0; i < ylen; ++i)
         {
-            ADD_FAILURE() << "device allocation failed";
-            return {};
+            y[static_cast<size_t>(i)] = o.beta * y0_of(i);
         }
 
-        auto require = [](rocsparse_status status) {
-            EXPECT_EQ(status, rocsparse_status_success);
-            return status == rocsparse_status_success;
-        };
-
-        rocsparse_spmat_descr mat = nullptr;
-        if(as_csc)
+        for(int64_t s = 0; s < a.m; ++s)
         {
-            // The host "row" pointers are the CSC column pointers, so the CSR
-            // view of A^T has the same empty-line pattern.
-            if(!require(rocsparse_create_csc_descr(&mat,
-                                                   a.n,
-                                                   a.m,
-                                                   a.nnz(),
-                                                   d_ptr.ptr,
-                                                   d_ind.ptr,
-                                                   d_val.ptr,
-                                                   rocsparse_indextype_i32,
-                                                   rocsparse_indextype_i32,
-                                                   rocsparse_index_base_zero,
-                                                   rocsparse_datatype_f32_r)))
+            for(int64_t k = a.ptr[static_cast<size_t>(s)]; k < a.ptr[static_cast<size_t>(s) + 1];
+                ++k)
             {
-                return {};
+                const int64_t t = a.ind[static_cast<size_t>(k)];
+                const int64_t r = o.as_csc ? t : s;
+                const int64_t c = o.as_csc ? s : t;
+                const cd      v = val[static_cast<size_t>(k)];
+                switch(o.compute_op)
+                {
+                case rocsparse_operation_none:
+                {
+                    y[static_cast<size_t>(r)] += v * x_of(c);
+                    if(o.symmetric && r != c)
+                    {
+                        y[static_cast<size_t>(c)] += v * x_of(r);
+                    }
+                    break;
+                }
+                case rocsparse_operation_transpose:
+                {
+                    y[static_cast<size_t>(c)] += v * x_of(r);
+                    break;
+                }
+                case rocsparse_operation_conjugate_transpose:
+                {
+                    y[static_cast<size_t>(c)] += std::conj(v) * x_of(r);
+                    break;
+                }
+                }
             }
         }
-        else
+        return y;
+    }
+
+    bool same_device_bytes(const void* a, const void* b, size_t bytes)
+    {
+        std::vector<char> ha(bytes);
+        std::vector<char> hb(bytes);
+        return hipMemcpy(ha.data(), a, bytes, hipMemcpyDeviceToHost) == hipSuccess
+               && hipMemcpy(hb.data(), b, bytes, hipMemcpyDeviceToHost) == hipSuccess
+               && std::memcmp(ha.data(), hb.data(), bytes) == 0;
+    }
+
+    void inspect(rocsparse_csrmv_info info, Result& out)
+    {
+        if(info == nullptr)
         {
-            if(!require(rocsparse_create_csr_descr(&mat,
-                                                   a.m,
-                                                   a.n,
-                                                   a.nnz(),
-                                                   d_ptr.ptr,
-                                                   d_ind.ptr,
-                                                   d_val.ptr,
-                                                   rocsparse_indextype_i32,
-                                                   rocsparse_indextype_i32,
-                                                   rocsparse_index_base_zero,
-                                                   rocsparse_datatype_f32_r)))
-            {
-                return {};
-            }
+            return;
+        }
+        out.has_info        = true;
+        out.adaptive_blocks = info->adaptive.row_blocks != nullptr;
+        out.selected        = info->selected_alg;
+        out.nnzsplit_tuned
+            = info->nnzsplit.starting_ids != nullptr && info->nnzsplit.block_size != 0;
+        if(!out.nnzsplit_tuned)
+        {
+            return;
         }
 
-        rocsparse_dnvec_descr dx = nullptr;
-        rocsparse_dnvec_descr dy = nullptr;
-        if(!require(rocsparse_create_dnvec_descr(&dx, xlen, d_x.ptr, rocsparse_datatype_f32_r))
-           || !require(rocsparse_create_dnvec_descr(&dy, ylen, d_y.ptr, rocsparse_datatype_f32_r)))
-        {
-            EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
-            EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
-            return {};
-        }
-
-        const float alpha       = 1.0f;
-        const float beta        = 0.0f;
-        size_t      buffer_size = 0;
-        if(!require(rocsparse_spmv(handle,
-                                   op,
-                                   &alpha,
-                                   mat,
-                                   dx,
-                                   &beta,
-                                   dy,
-                                   rocsparse_datatype_f32_r,
-                                   alg,
-                                   rocsparse_spmv_stage_preprocess,
-                                   &buffer_size,
-                                   nullptr)))
-        {
-            EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
-            EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
-            EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
-            return {};
-        }
-
-        Selection            out;
-        rocsparse_csrmv_info info = mat->info->get_csrmv_info();
-        if(info != nullptr)
-        {
-            out.has_info        = true;
-            out.adaptive_blocks = info->adaptive.row_blocks != nullptr;
-            out.selected        = info->selected_alg;
-            out.nnzsplit_tuned
-                = info->nnzsplit.starting_ids != nullptr && info->nnzsplit.block_size != 0;
-            if(out.nnzsplit_tuned)
-            {
-                rocsparse_csrmv_info copied = new _rocsparse_csrmv_info();
-                const bool           copied_ok
-                    = rocsparse::copy_csrmv_info(copied, info) == rocsparse_status_success
+        rocsparse_csrmv_info copied = new _rocsparse_csrmv_info();
+        out.copy_ok = rocsparse::copy_csrmv_info(copied, info) == rocsparse_status_success
                       && copied->nnzsplit.starting_ids != nullptr
                       && copied->nnzsplit.starting_ids != info->nnzsplit.starting_ids
                       && copied->nnzsplit.size == info->nnzsplit.size
@@ -275,49 +322,299 @@ namespace
                       && copied->nnzsplit.starting_ids_size_in_bytes
                              == info->nnzsplit.starting_ids_size_in_bytes
                       && copied->selected_alg == info->selected_alg
-                      && copied->adaptive.row_blocks == nullptr;
-                const bool offsets_ok
-                    = copied_ok
+                      && copied->adaptive.row_blocks == nullptr
                       && (static_cast<char*>(copied->nnzsplit.starting_block_ids)
                           - static_cast<char*>(copied->nnzsplit.starting_ids))
                              == (static_cast<char*>(info->nnzsplit.starting_block_ids)
-                                 - static_cast<char*>(info->nnzsplit.starting_ids));
-                delete copied;
-                out.copy_ok = offsets_ok;
-            }
+                                 - static_cast<char*>(info->nnzsplit.starting_ids))
+                      && same_device_bytes(copied->nnzsplit.starting_ids,
+                                           info->nnzsplit.starting_ids,
+                                           info->nnzsplit.starting_ids_size_in_bytes);
+        delete copied;
+    }
+
+    // A is the matrix and x value type, Y the output type and T the compute type.
+    template <typename I, typename J, typename A, typename Y, typename T = Y>
+    Result run(rocsparse_handle handle, const Pattern& a, const Options& o)
+    {
+        Result out;
+
+        auto require = [](rocsparse_status status) {
+            EXPECT_EQ(status, rocsparse_status_success);
+            return status == rocsparse_status_success;
+        };
+
+        const int64_t  b = (o.base == rocsparse_index_base_one) ? 1 : 0;
+        std::vector<I> h_ptr(a.ptr.size());
+        std::vector<J> h_ind(a.ind.size());
+        std::vector<A> h_val(a.ind.size());
+        for(size_t i = 0; i < a.ptr.size(); ++i)
+        {
+            h_ptr[i] = static_cast<I>(a.ptr[i] + b);
+        }
+        for(size_t k = 0; k < a.ind.size(); ++k)
+        {
+            h_ind[k] = static_cast<J>(a.ind[k] + b);
+            h_val[k] = to_type<A>(value_of(static_cast<int64_t>(k)));
         }
 
-        if(check_y
-           && require(rocsparse_spmv(handle,
-                                     op,
-                                     &alpha,
-                                     mat,
-                                     dx,
-                                     &beta,
-                                     dy,
-                                     rocsparse_datatype_f32_r,
-                                     alg,
-                                     rocsparse_spmv_stage_compute,
-                                     &buffer_size,
-                                     nullptr)))
+        const int64_t rows = o.as_csc ? a.n : a.m;
+        const int64_t cols = o.as_csc ? a.m : a.n;
+        auto          xlen = [&](rocsparse_operation op) {
+            return (op == rocsparse_operation_none) ? cols : rows;
+        };
+        auto ylen = [&](rocsparse_operation op) {
+            return (op == rocsparse_operation_none) ? rows : cols;
+        };
+        auto vec = [](int64_t len, cd (*f)(int64_t)) {
+            std::vector<Y> v(static_cast<size_t>(len));
+            for(int64_t i = 0; i < len; ++i)
+            {
+                v[static_cast<size_t>(i)] = to_type<Y>(f(i));
+            }
+            return v;
+        };
+        auto xvec = [&](int64_t len) {
+            std::vector<A> v(static_cast<size_t>(len));
+            for(int64_t i = 0; i < len; ++i)
+            {
+                v[static_cast<size_t>(i)] = to_type<A>(x_of(i));
+            }
+            return v;
+        };
+
+        device_vector<I> d_ptr{h_ptr};
+        device_vector<J> d_ind{h_ind};
+        device_vector<A> d_val{h_val};
+        device_vector<I> d_ptr2{h_ptr};
+        device_vector<J> d_ind2{h_ind};
+        device_vector<A> d_val2{h_val};
+        device_vector<A> d_x{xvec(xlen(o.op))};
+        device_vector<Y> d_y{vec(ylen(o.op), y0_of)};
+        device_vector<A> d_cx{xvec(xlen(o.compute_op))};
+        device_vector<Y> d_cy{vec(ylen(o.compute_op), y0_of)};
+        if(!d_ptr.ptr || !d_ind.ptr || !d_val.ptr || !d_ptr2.ptr || !d_ind2.ptr || !d_val2.ptr
+           || !d_x.ptr || !d_y.ptr || !d_cx.ptr || !d_cy.ptr)
+        {
+            ADD_FAILURE() << "device allocation failed";
+            return out;
+        }
+
+        rocsparse_spmat_descr  mat    = nullptr;
+        const rocsparse_status create = o.as_csc ? rocsparse_create_csc_descr(&mat,
+                                                                              rows,
+                                                                              cols,
+                                                                              a.nnz(),
+                                                                              d_ptr.ptr,
+                                                                              d_ind.ptr,
+                                                                              d_val.ptr,
+                                                                              it_of<I>(),
+                                                                              it_of<J>(),
+                                                                              o.base,
+                                                                              dt_of<A>())
+                                                 : rocsparse_create_csr_descr(&mat,
+                                                                              rows,
+                                                                              cols,
+                                                                              a.nnz(),
+                                                                              d_ptr.ptr,
+                                                                              d_ind.ptr,
+                                                                              d_val.ptr,
+                                                                              it_of<I>(),
+                                                                              it_of<J>(),
+                                                                              o.base,
+                                                                              dt_of<A>());
+        if(!require(create))
+        {
+            return out;
+        }
+        if(o.symmetric)
+        {
+            const rocsparse_matrix_type type = rocsparse_matrix_type_symmetric;
+            const rocsparse_fill_mode   fill = rocsparse_fill_mode_lower;
+            EXPECT_EQ(rocsparse_spmat_set_attribute(
+                          mat, rocsparse_spmat_matrix_type, &type, sizeof(type)),
+                      rocsparse_status_success);
+            EXPECT_EQ(
+                rocsparse_spmat_set_attribute(mat, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
+                rocsparse_status_success);
+        }
+
+        rocsparse_dnvec_descr dx  = nullptr;
+        rocsparse_dnvec_descr dy  = nullptr;
+        rocsparse_dnvec_descr dcx = nullptr;
+        rocsparse_dnvec_descr dcy = nullptr;
+        EXPECT_EQ(rocsparse_create_dnvec_descr(&dx, xlen(o.op), d_x.ptr, dt_of<A>()),
+                  rocsparse_status_success);
+        EXPECT_EQ(rocsparse_create_dnvec_descr(&dy, ylen(o.op), d_y.ptr, dt_of<Y>()),
+                  rocsparse_status_success);
+        EXPECT_EQ(rocsparse_create_dnvec_descr(&dcx, xlen(o.compute_op), d_cx.ptr, dt_of<A>()),
+                  rocsparse_status_success);
+        EXPECT_EQ(rocsparse_create_dnvec_descr(&dcy, ylen(o.compute_op), d_cy.ptr, dt_of<Y>()),
+                  rocsparse_status_success);
+
+        const T alpha = to_type<T>(cd(1.0, 0.0));
+        const T beta  = to_type<T>(cd(o.beta, 0.0));
+
+        auto repoint = [&]() {
+            if(o.repoint)
+            {
+                EXPECT_EQ(o.as_csc
+                              ? rocsparse_csc_set_pointers(mat, d_ptr2.ptr, d_ind2.ptr, d_val2.ptr)
+                              : rocsparse_csr_set_pointers(mat, d_ptr2.ptr, d_ind2.ptr, d_val2.ptr),
+                          rocsparse_status_success);
+            }
+        };
+
+        if(o.v2)
+        {
+            rocsparse_spmv_descr descr   = nullptr;
+            rocsparse_error      error[] = {nullptr};
+            EXPECT_EQ(rocsparse_create_spmv_descr(&descr), rocsparse_status_success);
+            const rocsparse_datatype ytype = dt_of<T>();
+            EXPECT_EQ(rocsparse_spmv_set_input(
+                          handle, descr, rocsparse_spmv_input_alg, &o.alg, sizeof(o.alg), error),
+                      rocsparse_status_success);
+            EXPECT_EQ(
+                rocsparse_spmv_set_input(
+                    handle, descr, rocsparse_spmv_input_operation, &o.op, sizeof(o.op), error),
+                rocsparse_status_success);
+            EXPECT_EQ(rocsparse_spmv_set_input(handle,
+                                               descr,
+                                               rocsparse_spmv_input_scalar_datatype,
+                                               &ytype,
+                                               sizeof(ytype),
+                                               error),
+                      rocsparse_status_success);
+            EXPECT_EQ(rocsparse_spmv_set_input(handle,
+                                               descr,
+                                               rocsparse_spmv_input_compute_datatype,
+                                               &ytype,
+                                               sizeof(ytype),
+                                               error),
+                      rocsparse_status_success);
+
+            auto stage = [&](rocsparse_v2_spmv_stage s) {
+                size_t size = 0;
+                EXPECT_EQ(
+                    rocsparse_v2_spmv_buffer_size(handle, descr, mat, dcx, dcy, s, &size, error),
+                    rocsparse_status_success);
+                void* buffer = nullptr;
+                if(size > 0)
+                {
+                    EXPECT_EQ(hipMalloc(&buffer, size), hipSuccess);
+                }
+                const rocsparse_status status = rocsparse_v2_spmv(
+                    handle, descr, &alpha, mat, dcx, &beta, dcy, s, size, buffer, error);
+                if(buffer != nullptr)
+                {
+                    EXPECT_EQ(hipFree(buffer), hipSuccess);
+                }
+                return status;
+            };
+            EXPECT_EQ(stage(rocsparse_v2_spmv_stage_analysis), rocsparse_status_success);
+            repoint();
+            out.compute_status = stage(rocsparse_v2_spmv_stage_compute);
+            if(error[0] != nullptr)
+            {
+                EXPECT_EQ(rocsparse_destroy_error(error[0]), rocsparse_status_success);
+            }
+            EXPECT_EQ(rocsparse_destroy_spmv_descr(descr), rocsparse_status_success);
+        }
+        else
+        {
+            auto spmv = [&](rocsparse_operation   op,
+                            rocsparse_spmv_alg    alg,
+                            rocsparse_dnvec_descr vx,
+                            rocsparse_dnvec_descr vy,
+                            rocsparse_spmv_stage  s,
+                            size_t*               size,
+                            void*                 buffer) {
+                return rocsparse_spmv(
+                    handle, op, &alpha, mat, vx, &beta, vy, dt_of<T>(), alg, s, size, buffer);
+            };
+
+            size_t size = 0;
+            EXPECT_EQ(spmv(o.op, o.alg, dx, dy, rocsparse_spmv_stage_buffer_size, &size, nullptr),
+                      rocsparse_status_success);
+            size_t compute_size = 0;
+            EXPECT_EQ(spmv(o.compute_op,
+                           o.compute_alg,
+                           dcx,
+                           dcy,
+                           rocsparse_spmv_stage_buffer_size,
+                           &compute_size,
+                           nullptr),
+                      rocsparse_status_success);
+            size         = std::max(size, compute_size);
+            void* buffer = nullptr;
+            EXPECT_EQ(hipMalloc(&buffer, std::max<size_t>(size, 1)), hipSuccess);
+
+            if(require(spmv(o.op, o.alg, dx, dy, rocsparse_spmv_stage_preprocess, &size, buffer)))
+            {
+                inspect(mat->info->get_csrmv_info(), out);
+                repoint();
+                out.compute_status = spmv(o.compute_op,
+                                          o.compute_alg,
+                                          dcx,
+                                          dcy,
+                                          rocsparse_spmv_stage_compute,
+                                          &size,
+                                          buffer);
+            }
+            EXPECT_EQ(hipFree(buffer), hipSuccess);
+        }
+
+        if(out.compute_status == rocsparse_status_success)
         {
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
-            out.y = to_host(d_y.ptr, static_cast<size_t>(ylen));
+            const std::vector<Y> y = to_host(d_cy.ptr, d_cy.n);
+            std::vector<cd>      val(h_val.size());
+            for(size_t k = 0; k < h_val.size(); ++k)
+            {
+                val[k] = to_cd(h_val[k]);
+            }
+            const std::vector<cd> ref = reference(a, val, o);
+            EXPECT_EQ(y.size(), ref.size());
+            for(size_t i = 0; i < std::min(y.size(), ref.size()); ++i)
+            {
+                const cd got = to_cd(y[i]);
+                EXPECT_NEAR(got.real(), ref[i].real(), 1e-4 * std::max(1.0, std::abs(ref[i])))
+                    << "y[" << i << "]";
+                EXPECT_NEAR(got.imag(), ref[i].imag(), 1e-4 * std::max(1.0, std::abs(ref[i])))
+                    << "y[" << i << "]";
+            }
         }
 
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_dnvec_descr(dcx), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_dnvec_descr(dcy), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
         return out;
     }
 
-    void expect_y(const std::vector<float>& y, const std::vector<float>& ref)
+    Result run_f32(rocsparse_handle handle, const Pattern& a, const Options& o)
     {
-        ASSERT_EQ(y.size(), ref.size());
-        for(size_t i = 0; i < y.size(); ++i)
-        {
-            EXPECT_FLOAT_EQ(y[i], ref[i]) << "y[" << i << "]";
-        }
+        return run<int32_t, int32_t, float, float>(handle, a, o);
+    }
+
+    void expect_nnzsplit(const Result& got)
+    {
+        EXPECT_EQ(got.compute_status, rocsparse_status_success);
+        EXPECT_TRUE(got.has_info);
+        EXPECT_EQ(got.selected, rocsparse::csrmv_alg_nnzsplit);
+        EXPECT_TRUE(got.nnzsplit_tuned);
+        EXPECT_TRUE(got.copy_ok);
+        EXPECT_FALSE(got.adaptive_blocks);
+    }
+
+    void expect_adaptive(const Result& got, rocsparse::csrmv_alg selected)
+    {
+        EXPECT_EQ(got.compute_status, rocsparse_status_success);
+        EXPECT_TRUE(got.has_info);
+        EXPECT_EQ(got.selected, selected);
+        EXPECT_TRUE(got.adaptive_blocks);
+        EXPECT_FALSE(got.nnzsplit_tuned);
     }
 }
 
@@ -327,82 +624,152 @@ class CsrmvDefaultDispatch : public HandleTest
 
 TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_for_internal_empty_gap)
 {
-    const HostCsr a = scattered_gap();
-    const auto    got
-        = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
-    EXPECT_TRUE(got.has_info);
-    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_nnzsplit);
-    EXPECT_TRUE(got.nnzsplit_tuned);
-    EXPECT_TRUE(got.copy_ok);
-    EXPECT_FALSE(got.adaptive_blocks);
-    expect_y(got.y, host_spmv(a));
+    expect_nnzsplit(run_f32(handle, scattered_gap(), Options{}));
 }
 
 TEST_F(CsrmvDefaultDispatch, explicit_adaptive_is_not_replaced)
 {
-    const HostCsr a   = scattered_gap();
-    const auto    got = run_spmv(
-        handle, a, rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_none, false, true);
-    EXPECT_TRUE(got.has_info);
-    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_default);
-    EXPECT_TRUE(got.adaptive_blocks);
-    EXPECT_FALSE(got.nnzsplit_tuned);
-    expect_y(got.y, host_spmv(a));
+    expect_adaptive(run_f32(handle, scattered_gap(), with_alg(rocsparse_spmv_alg_csr_adaptive)),
+                    rocsparse::csrmv_alg_default);
 }
 
 TEST_F(CsrmvDefaultDispatch, default_keeps_adaptive_for_populated_rows)
 {
-    const HostCsr a = populated();
-    const auto    got
-        = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
-    EXPECT_TRUE(got.has_info);
-    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_adaptive);
-    EXPECT_TRUE(got.adaptive_blocks);
-    EXPECT_FALSE(got.nnzsplit_tuned);
-    expect_y(got.y, host_spmv(a));
+    expect_adaptive(run_f32(handle, populated(), Options{}), rocsparse::csrmv_alg_adaptive);
 }
 
 TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_for_alternating_row_lengths)
 {
-    const HostCsr a = alternating();
-    const auto    got
-        = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
-    EXPECT_TRUE(got.has_info);
-    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_nnzsplit);
-    EXPECT_TRUE(got.nnzsplit_tuned);
-    EXPECT_TRUE(got.copy_ok);
-    EXPECT_FALSE(got.adaptive_blocks);
-    expect_y(got.y, host_spmv(a));
+    expect_nnzsplit(run_f32(handle, alternating(), Options{}));
 }
 
 TEST_F(CsrmvDefaultDispatch, default_keeps_adaptive_when_empty_suffix_is_skipped)
 {
-    const HostCsr a = long_then_empty();
-    const auto    got
-        = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
-    EXPECT_TRUE(got.has_info);
-    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_adaptive);
-    EXPECT_TRUE(got.adaptive_blocks);
-    EXPECT_FALSE(got.nnzsplit_tuned);
-    expect_y(got.y, host_spmv(a));
+    expect_adaptive(run_f32(handle, long_then_empty(), Options{}), rocsparse::csrmv_alg_adaptive);
 }
 
-TEST_F(CsrmvDefaultDispatch, transpose_default_stays_on_rowsplit)
+TEST_F(CsrmvDefaultDispatch, switched_default_with_int64_indices)
 {
-    const HostCsr a   = scattered_gap();
-    const auto    got = run_spmv(
-        handle, a, rocsparse_spmv_alg_default, rocsparse_operation_transpose, false, false);
-    EXPECT_FALSE(got.has_info);
+    expect_nnzsplit(run<int64_t, int64_t, float, float>(handle, scattered_gap(), Options{}));
+    expect_nnzsplit(run<int64_t, int32_t, float, float>(handle, alternating(), Options{}));
+}
+
+TEST_F(CsrmvDefaultDispatch, switched_default_with_base_one)
+{
+    Options o;
+    o.base = rocsparse_index_base_one;
+    expect_nnzsplit(run_f32(handle, scattered_gap(), o));
+    expect_nnzsplit(run_f32(handle, alternating(), o));
+}
+
+TEST_F(CsrmvDefaultDispatch, switched_default_with_beta)
+{
+    Options o;
+    o.beta = 2.0;
+    expect_nnzsplit(run_f32(handle, scattered_gap(), o));
+    expect_nnzsplit(run_f32(handle, alternating(), o));
+}
+
+TEST_F(CsrmvDefaultDispatch, switched_default_with_complex_values)
+{
+    Options o;
+    o.beta = 0.5;
+    expect_nnzsplit(run<int32_t, int32_t, rocsparse_float_complex, rocsparse_float_complex>(
+        handle, alternating(), o));
+    expect_nnzsplit(run<int64_t, int64_t, rocsparse_double_complex, rocsparse_double_complex>(
+        handle, scattered_gap(), o));
+}
+
+TEST_F(CsrmvDefaultDispatch, switched_default_with_symmetric_matrix)
+{
+    Options o;
+    o.symmetric = true;
+    o.beta      = 1.0;
+    expect_nnzsplit(run_f32(handle, scattered_gap_lower(), o));
+    expect_nnzsplit(run<int32_t, int32_t, rocsparse_float_complex, rocsparse_float_complex>(
+        handle, scattered_gap_lower(), o));
+}
+
+TEST_F(CsrmvDefaultDispatch, switched_default_with_v2_spmv)
+{
+    Options o;
+    o.v2   = true;
+    o.beta = 1.0;
+    EXPECT_EQ(run_f32(handle, scattered_gap(), o).compute_status, rocsparse_status_success);
+    EXPECT_EQ(run_f32(handle, alternating(), o).compute_status, rocsparse_status_success);
+    o.op         = rocsparse_operation_conjugate_transpose;
+    o.compute_op = o.op;
+    o.as_csc     = true;
+    EXPECT_EQ((run<int64_t, int32_t, rocsparse_float_complex, rocsparse_float_complex>(
+                   handle, alternating(), o)
+                   .compute_status),
+              rocsparse_status_success);
+}
+
+// f16 and bf16 outputs are accumulated in the output type by nnz-split, so
+// half-precision matrices keep adaptive.
+TEST_F(CsrmvDefaultDispatch, half_precision_default_keeps_adaptive)
+{
+    expect_adaptive(run<int32_t, int32_t, _Float16, float>(handle, scattered_gap(), Options{}),
+                    rocsparse::csrmv_alg_adaptive);
+    expect_adaptive(
+        run<int32_t, int32_t, _Float16, _Float16, float>(handle, scattered_gap(), Options{}),
+        rocsparse::csrmv_alg_adaptive);
+    expect_adaptive(run<int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float>(
+                        handle, scattered_gap(), Options{}),
+                    rocsparse::csrmv_alg_adaptive);
 }
 
 TEST_F(CsrmvDefaultDispatch, transposed_csc_default_uses_the_csr_rule)
 {
-    const HostCsr a   = scattered_gap();
-    const auto    got = run_spmv(
-        handle, a, rocsparse_spmv_alg_default, rocsparse_operation_transpose, true, false);
-    EXPECT_TRUE(got.has_info);
+    Options o = with_op(rocsparse_operation_transpose);
+    o.as_csc  = true;
+    o.beta    = 1.0;
+    expect_nnzsplit(run_f32(handle, scattered_gap(), o));
+    expect_nnzsplit(run_f32(handle, alternating(), o));
+}
+
+TEST_F(CsrmvDefaultDispatch, conjugate_transposed_csc_default_uses_the_csr_rule)
+{
+    Options o = with_op(rocsparse_operation_conjugate_transpose);
+    o.as_csc  = true;
+    expect_nnzsplit(run<int32_t, int32_t, rocsparse_float_complex, rocsparse_float_complex>(
+        handle, alternating(), o));
+    expect_nnzsplit(run<int64_t, int64_t, rocsparse_double_complex, rocsparse_double_complex>(
+        handle, scattered_gap(), o));
+}
+
+// The selection is stored for the operation that was analysed. A transposed
+// compute on the same descriptor falls back to the transpose default.
+TEST_F(CsrmvDefaultDispatch, preprocess_none_then_compute_transpose)
+{
+    Options o;
+    o.compute_op = rocsparse_operation_transpose;
+    expect_nnzsplit(run_f32(handle, scattered_gap(), o));
+    expect_nnzsplit(run_f32(handle, alternating(), o));
+    o.compute_op = rocsparse_operation_conjugate_transpose;
+    expect_nnzsplit(run<int32_t, int32_t, rocsparse_float_complex, rocsparse_float_complex>(
+        handle, alternating(), o));
+}
+
+// nnz-split compute checks the analysed pointers, as adaptive compute does.
+TEST_F(CsrmvDefaultDispatch, switched_default_rejects_changed_pointers)
+{
+    Options o;
+    o.repoint = true;
+    EXPECT_EQ(run_f32(handle, scattered_gap(), o).compute_status, rocsparse_status_invalid_pointer);
+    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_invalid_pointer);
+    o.alg         = rocsparse_spmv_alg_csr_nnzsplit;
+    o.compute_alg = o.alg;
+    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_invalid_pointer);
+}
+
+// An nnz-split analysis has no row blocks for an adaptive compute to launch.
+TEST_F(CsrmvDefaultDispatch, adaptive_compute_rejects_switched_analysis)
+{
+    Options o;
+    o.compute_alg    = rocsparse_spmv_alg_csr_adaptive;
+    const Result got = run_f32(handle, scattered_gap(), o);
     EXPECT_EQ(got.selected, rocsparse::csrmv_alg_nnzsplit);
-    EXPECT_TRUE(got.nnzsplit_tuned);
-    EXPECT_TRUE(got.copy_ok);
-    EXPECT_FALSE(got.adaptive_blocks);
+    EXPECT_EQ(got.compute_status, rocsparse_status_invalid_value);
 }
