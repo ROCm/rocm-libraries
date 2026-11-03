@@ -8,8 +8,9 @@
  * and tests/core/test_zero_vec_and_lds_element_types.py (zero_vec of f64 and
  * i16, LDS loads of i16). The LDS pool layout cases at the end also cover
  * the segment alignment of tests/core/test_smem_access_alignment.py through
- * the C API: a vector access moves its segment to the vector alignment, and
- * a store alignment that is not an integer power of two is refused.
+ * the C API: a vector access moves its segment to the vector alignment, a
+ * store alignment that is not an integer power of two is refused, and a
+ * whole-value store of a <3 x float> claims its element width.
  */
 
 #include "rocke/error.hpp"
@@ -529,6 +530,48 @@ static int test_store_alignment_not_an_integer_is_refused()
     return 0;
 }
 
+/* A one-element f16 buffer, then an f32 buffer written by one
+ * smem_store_vN(..., n=1) of a <3 x float> value, which goes through the
+ * whole-value tile.smem_store. The 12-byte value claims its 4-byte element
+ * width (`align 12` is not valid LLVM) and its segment sits at byte 4. Mirrors
+ * test_a_whole_value_store_whose_width_is_not_a_power_of_two_claims_its_element_width
+ * in tests/core/test_smem_access_alignment.py. */
+static int test_whole_value_store_of_three_floats_claims_its_element_width()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_align_f16_one_f32x3") == ROCKE_OK);
+    rocke_value_t* out = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int half_shape[] = {1};
+    const int float_shape[] = {12};
+    rocke_value_t* half_buf = rocke_b_smem_alloc(&b, rocke_f16(), half_shape, 1, "h");
+    rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
+    rocke_value_t* h = rocke_b_trunc_f32_to_f16(&b, rocke_b_const_f32(&b, 1.0));
+    rocke_value_t* const at_zero[] = {zero};
+    rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, h);
+    rocke_value_t* triple = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), 3, 4);
+    rocke_b_smem_store_vN(&b, float_buf, at_zero, 1, triple, 1);
+    rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, h);
+    rocke_b_ret(&b);
+    CHECK(rocke_ir_builder_ok(&b));
+
+    char* llvm_text = NULL;
+    CHECK(rocke_lower_kernel_to_llvm(b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &llvm_text)
+          == ROCKE_OK);
+    CHECK(std::strstr(llvm_text,
+                      "= getelementptr inbounds i8, ptr addrspace(3) "
+                      "@smem_pool.lds_align_f16_one_f32x3, i32 4\n")
+          != NULL);
+    const char* store = std::strstr(llvm_text, "store <3 x float> %");
+    CHECK(store != NULL);
+    const std::string store_line(store, std::strchr(store, '\n'));
+    CHECK(store_line.find("ptr addrspace(3)") != std::string::npos);
+    CHECK(store_line.size() > 9 && store_line.compare(store_line.size() - 9, 9, ", align 4") == 0);
+    std::free(llvm_text);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 int main()
 {
     if(test_unsupported_ops_rejected() || test_rcp_divides_in_double()
@@ -540,7 +583,8 @@ int main()
        || test_lds_allocation_is_8_byte_aligned()
        || test_vector_access_moves_its_segment_to_the_vector_alignment()
        || test_store_alignment_not_a_power_of_two_is_refused()
-       || test_store_alignment_not_an_integer_is_refused())
+       || test_store_alignment_not_an_integer_is_refused()
+       || test_whole_value_store_of_three_floats_claims_its_element_width())
     {
         std::fprintf(stderr, "f64 lowering contract failed\n");
         return 1;
