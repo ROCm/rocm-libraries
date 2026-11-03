@@ -124,9 +124,11 @@ TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPrefersTheEarliestRankedTile)
     const std::vector<RocRollerSelectedTile> ranked
         = {tile(64, 64, 128, true, false), tile(256, 256, 128, true, false)};
 
-    const auto early = rocRollerFallbackRank(kernel(64, 64, 128, false), ranked, 1024, 9);
-    const auto late  = rocRollerFallbackRank(wgm256x256, ranked, 1024, 1);
-    const auto none  = rocRollerFallbackRank(kernel(512, 512, 128, true), ranked, 1024, 0);
+    const auto early
+        = rocRollerFallbackRank(kernel(64, 64, 128, false), ranked, 1024, 1024, 1024, 9);
+    const auto late = rocRollerFallbackRank(wgm256x256, ranked, 1024, 1024, 1024, 1);
+    const auto none
+        = rocRollerFallbackRank(kernel(512, 512, 128, true), ranked, 1024, 1024, 1024, 0);
     EXPECT_EQ(early.tilePosition, 0u);
     EXPECT_EQ(late.tilePosition, 1u);
     EXPECT_EQ(none.tilePosition, ranked.size());
@@ -138,8 +140,10 @@ TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPrefersTheLargerTileAmongUnlist
 {
     const std::vector<RocRollerSelectedTile> ranked = {tile(32, 32, 128, false, false)};
 
-    const auto big   = rocRollerFallbackRank(kernel(256, 128, 128, false), ranked, 1024, 7);
-    const auto small = rocRollerFallbackRank(kernel(128, 128, 128, false), ranked, 1024, 2);
+    const auto big
+        = rocRollerFallbackRank(kernel(256, 128, 128, false), ranked, 1024, 1024, 1024, 7);
+    const auto small
+        = rocRollerFallbackRank(kernel(128, 128, 128, false), ranked, 1024, 1024, 1024, 2);
     EXPECT_EQ(big.area, 256 * 128);
     EXPECT_LT(big, small);
 }
@@ -150,8 +154,10 @@ TEST(HostUnitRocRollerKernelMatch, smoke_FallbackCountsDifferencesFromTheRankedV
     // the plain one in WGM.
     const std::vector<RocRollerSelectedTile> ranked = {tile(128, 128, 128, true, false)};
 
-    const auto wgm   = rocRollerFallbackRank(kernel(128, 128, 128, true), ranked, 1024, 5);
-    const auto plain = rocRollerFallbackRank(kernel(128, 128, 128, false), ranked, 1024, 3);
+    const auto wgm
+        = rocRollerFallbackRank(kernel(128, 128, 128, true), ranked, 1024, 1024, 1024, 5);
+    const auto plain
+        = rocRollerFallbackRank(kernel(128, 128, 128, false), ranked, 1024, 1024, 1024, 3);
     EXPECT_EQ(wgm.mismatches, 0);
     EXPECT_EQ(plain.mismatches, 1);
     EXPECT_LT(wgm, plain);
@@ -159,31 +165,108 @@ TEST(HostUnitRocRollerKernelMatch, smoke_FallbackCountsDifferencesFromTheRankedV
     // A StreamK tile wants no workgroup mapping even when the ranker set it,
     // and every checked-in kernel differs from it in StreamK.
     const std::vector<RocRollerSelectedTile> skRanked = {tile(128, 128, 128, true, true)};
-    EXPECT_EQ(rocRollerFallbackRank(kernel(128, 128, 128, false), skRanked, 1024, 0).mismatches, 1);
-    EXPECT_EQ(rocRollerFallbackRank(kernel(128, 128, 128, true), skRanked, 1024, 0).mismatches, 2);
+    EXPECT_EQ(rocRollerFallbackRank(kernel(128, 128, 128, false), skRanked, 1024, 1024, 1024, 0)
+                  .mismatches,
+              1);
+    EXPECT_EQ(rocRollerFallbackRank(kernel(128, 128, 128, true), skRanked, 1024, 1024, 1024, 0)
+                  .mismatches,
+              2);
 }
 
-TEST(HostUnitRocRollerKernelMatch, smoke_FallbackWantsWgmOnAnUnlistedTileExactlyAtLargeK)
+// An unlisted tile wants WGM exactly when the ranker would give it WGM.
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackWantsWgmOnAnUnlistedTileAsTheRankerWould)
 {
     const std::vector<RocRollerSelectedTile> ranked = {tile(16, 16, 128, false, false)};
     const RocRollerKernelTraits              wgm    = kernel(128, 128, 128, true);
     const RocRollerKernelTraits              plain  = kernel(128, 128, 128, false);
 
-    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4095, 0).mismatches, 1);
-    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4095, 0).mismatches, 0);
-    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4096, 0).mismatches, 0);
-    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4096, 0).mismatches, 1);
+    // 32 x 32 = 1024 tiles of 128x128: only K decides.
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4096, 4096, 4095, 0).mismatches, 1);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4096, 4096, 4095, 0).mismatches, 0);
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4096, 4096, 4096, 0).mismatches, 0);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4096, 4096, 4096, 0).mismatches, 1);
+
+    // 8 x 8 = 64 tiles: too small a grid for WGM at any K.
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 1024, 1024, 16384, 0).mismatches, 1);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 1024, 1024, 16384, 0).mismatches, 0);
 }
 
 TEST(HostUnitRocRollerKernelMatch, smoke_FallbackBreaksAFullTieOnTheSolutionIndex)
 {
     const std::vector<RocRollerSelectedTile> ranked = {tile(64, 64, 128, false, false)};
 
-    std::vector<RocRollerFallbackRank> ranks = {rocRollerFallbackRank(plain16x16, ranked, 1024, 12),
-                                                rocRollerFallbackRank(plain16x16, ranked, 1024, 4),
-                                                rocRollerFallbackRank(plain16x16, ranked, 1024, 8)};
+    std::vector<RocRollerFallbackRank> ranks
+        = {rocRollerFallbackRank(plain16x16, ranked, 1024, 1024, 1024, 12),
+           rocRollerFallbackRank(plain16x16, ranked, 1024, 1024, 1024, 4),
+           rocRollerFallbackRank(plain16x16, ranked, 1024, 1024, 1024, 8)};
     std::sort(ranks.begin(), ranks.end());
     EXPECT_EQ(ranks[0].solutionIndex, 4);
     EXPECT_EQ(ranks[1].solutionIndex, 8);
     EXPECT_EQ(ranks[2].solutionIndex, 12);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_OutputTilesRoundUpEachDimension)
+{
+    EXPECT_EQ(rocRollerOutputTiles(256, 256, 128, 128), 4);
+    EXPECT_EQ(rocRollerOutputTiles(257, 129, 128, 128), 6);
+    EXPECT_EQ(rocRollerOutputTiles(0, 256, 128, 128), 0);
+    EXPECT_EQ(rocRollerOutputTiles(256, 256, 0, 128), 0);
+}
+
+// WGM only for K >= 4096, MT0 >= 128 and at least 512 output tiles; each
+// bound is checked on both sides with the other two satisfied.
+TEST(HostUnitRocRollerKernelMatch, smoke_WorkgroupMappingNeedsLongKWideTilesAndALargeGrid)
+{
+    // 16 x 32 = 512 tiles of 128x128.
+    EXPECT_TRUE(rocRollerWantsWorkgroupMapping(2048, 4096, 4096, 128, 128));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(2048, 4096, 4095, 128, 128));
+
+    // N = 3969 still cuts into 32 columns; 3968 into 31, 496 tiles.
+    EXPECT_TRUE(rocRollerWantsWorkgroupMapping(2048, 3969, 4096, 128, 128));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(2048, 3968, 4096, 128, 128));
+
+    // Narrow tiles never, however large the grid.
+    EXPECT_TRUE(rocRollerWantsWorkgroupMapping(8192, 8192, 8192, 128, 64));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(8192, 8192, 8192, 64, 128));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(8192, 8192, 8192, 16, 16));
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_UsableCUsHonourOnlyASmallerRequest)
+{
+    EXPECT_EQ(rocRollerUsableCUs(0, 256), 256);
+    EXPECT_EQ(rocRollerUsableCUs(-1, 256), 256);
+    EXPECT_EQ(rocRollerUsableCUs(80, 256), 80);
+    EXPECT_EQ(rocRollerUsableCUs(256, 256), 256);
+    EXPECT_EQ(rocRollerUsableCUs(512, 256), 256);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_LastWaveFill)
+{
+    const RocRollerKernelTraits t128 = kernel(128, 128, 128, false);
+
+    // 16 tiles on 256 CUs: one sixteenth busy.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 512, 512, 1, 256), 16.0 / 256);
+    // 256 tiles: one full wave.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 2048, 2048, 1, 256), 1.0);
+    // 260 tiles (N rounds up to 13 columns): a second wave of 4.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 2560, 1540, 1, 256), 260.0 / 512);
+    // The batch multiplies the grid.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 512, 512, 16, 256), 1.0);
+    // Nothing to fill, or nothing to fill it with.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 0, 512, 1, 256), 0.0);
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 512, 512, 1, 0), 0.0);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FirstFillingKeepsTheHeadUnlessAnEarlyEntryFills)
+{
+    const std::vector<double> fills = {0.25, 0.4, 0.6, 0.9, 1.0, 1.0};
+
+    EXPECT_EQ(rocRollerFirstFilling(fills, rocRollerRankedFillWindow, rocRollerRankedMinFill), 2u);
+    EXPECT_EQ(rocRollerFirstFilling(fills, fills.size(), rocRollerFallbackMinFill), 3u);
+    // Outside the window does not count, and no hit keeps the head.
+    EXPECT_EQ(rocRollerFirstFilling(fills, 2, rocRollerRankedMinFill), 0u);
+    EXPECT_EQ(rocRollerFirstFilling({0.1, 0.2, 0.3}, 5, rocRollerRankedMinFill), 0u);
+    EXPECT_EQ(rocRollerFirstFilling({}, 5, rocRollerRankedMinFill), 0u);
+    // A head that already fills stays.
+    EXPECT_EQ(rocRollerFirstFilling({0.5, 1.0}, 5, rocRollerRankedMinFill), 0u);
 }

@@ -4,6 +4,7 @@
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
 #include "kernel_type.hpp"
+#include "rocroller_kernel_match.hpp"
 #include "solution_ranker.hpp"
 #include "utility.hpp"
 
@@ -22,7 +23,6 @@ const int MAX_BITS_WORKGROUPTILE_N     = 8;
 const int MAX_BITS_WORKGROUPTILE_K     = 7;
 const int REQUIRED_MULTIPLE_M_N        = 16;
 const int REQUIRED_MULTIPLE_K          = 32;
-const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
 
 /**
  **************************************************************************************************
@@ -487,13 +487,11 @@ std::vector<SolutionIndexParameters>
 
         bool useTailLoops = true;
 
-        
-
-        bool useWorkgroupMapping = true;
-        if(prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
-        {
-            useWorkgroupMapping = false;
-        }
+        bool useWorkgroupMapping = rocRollerWantsWorkgroupMapping(static_cast<int64_t>(prob.m),
+                                                                  static_cast<int64_t>(prob.n),
+                                                                  static_cast<int64_t>(prob.k),
+                                                                  wgt.m,
+                                                                  wgt.n);
 
         // Enable StreamK when:
         // 1. Number of output tiles < number of CUs

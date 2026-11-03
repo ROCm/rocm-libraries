@@ -7757,8 +7757,9 @@ namespace
 // No ranked tile has an accepting checked-in kernel, typically because the
 // ranker asks for a WGM or StreamK variant of a tile that is not checked in.
 // Choose among the accepting kernels in RocRollerFallbackRank order, with M and
-// K whole multiples of the tile as the ranked lookup requires. cap < 0 returns
-// every candidate.
+// K whole multiples of the tile as the ranked lookup requires, except that the
+// first of them whose last wave fills rocRollerFallbackMinFill of the CUs goes
+// first. cap < 0 returns every candidate.
 template <typename Accepts, typename FitsWorkspace>
 static std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     selectRocRollerFallback(const RocblasltContractionProblem&           prob,
@@ -7766,6 +7767,7 @@ static std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                             const std::vector<RocRollerCheckedInKernel>& kernels,
                             const Accepts&                               accepts,
                             const FitsWorkspace&                         fitsWorkspace,
+                            int64_t                                      cus,
                             int                                          cap)
 {
     std::vector<std::pair<RocRollerFallbackRank, const RocRollerCheckedInKernel*>> candidates;
@@ -7779,11 +7781,21 @@ static std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
         if(!accepts(*kernel.solution) || !fitsWorkspace(*kernel.solution))
             continue;
         candidates.emplace_back(
-            rocRollerFallbackRank(traits, ranked, prob.k, kernel.solution->index), &kernel);
+            rocRollerFallbackRank(traits, ranked, prob.m, prob.n, prob.k, kernel.solution->index),
+            &kernel);
     }
     std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
         return a.first < b.first;
     });
+
+    std::vector<double> fills;
+    fills.reserve(candidates.size());
+    for(const auto& candidate : candidates)
+        fills.push_back(
+            rocRollerLastWaveFill(candidate.second->traits, prob.m, prob.n, prob.batch_count, cus));
+    const size_t first = rocRollerFirstFilling(fills, fills.size(), rocRollerFallbackMinFill);
+    if(first != 0)
+        std::rotate(candidates.begin(), candidates.begin() + first, candidates.begin() + first + 1);
 
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
     for(const auto& candidate : candidates)
@@ -7831,8 +7843,10 @@ static rocblaslt_status
     if(!library || !hardware)
         return rocblaslt_status_invalid_pointer;
 
-    auto       tensileProblem = ConstructTensileProblem(prob);
-    const auto kernels        = rocRollerCheckedInKernels(*library, tensileProblem, *hardware);
+    auto          tensileProblem = ConstructTensileProblem(prob);
+    const auto    kernels        = rocRollerCheckedInKernels(*library, tensileProblem, *hardware);
+    const int64_t cus            = rocRollerUsableCUs(prob.sm_count_target,
+                                           deviceProp ? deviceProp->multiProcessorCount : 0);
 
     // A tile match does not establish eligibility: for example, a one-sided MX
     // problem must not use a kernel that reads both scale tensors, and the scale
@@ -7853,11 +7867,13 @@ static rocblaslt_status
         return solution.requiredWorkspaceSize(tensileProblem, *hardware) <= maxWorkSpaceBytes;
     };
 
-    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
+    // The fill check looks at the first few matches even when fewer are asked for.
     const int cap = requestedAlgoCount < 0 ? static_cast<int>(ranked.size()) : requestedAlgoCount;
+    const size_t collect = std::max<size_t>(cap, rocRollerRankedFillWindow);
+    std::vector<const RocRollerCheckedInKernel*> matched;
     for(const RocRollerSelectedTile& tile : ranked)
     {
-        if(static_cast<int>(chosen.size()) >= cap)
+        if(matched.size() >= collect)
             break;
         if(tile.m <= 0 || tile.n <= 0 || tile.k <= 0)
             continue;
@@ -7869,13 +7885,13 @@ static rocblaslt_status
         if(prob.m % tile.m != 0 || prob.k % tile.k != 0)
             continue;
 
-        std::shared_ptr<TensileLite::ContractionSolution> found;
-        int                                               matches = 0;
+        const RocRollerCheckedInKernel* found   = nullptr;
+        int                             matches = 0;
         for(const auto& kernel : kernels)
         {
             if(!rocRollerKernelMatchesTile(kernel.traits, tile) || !accepts(*kernel.solution))
                 continue;
-            found = kernel.solution;
+            found = &kernel;
             // A second hit means two kernels still implement this tile; scan
             // only long enough to know.
             if(++matches > 1)
@@ -7895,15 +7911,44 @@ static rocblaslt_status
             }
             continue;
         }
-        if(!fitsWorkspace(*found))
+        if(!fitsWorkspace(*found->solution))
             continue;
 
-        chosen.push_back(found);
+        matched.push_back(found);
+    }
+
+    // A head that leaves most CUs idle in its last wave yields to the first of
+    // the next few matches that fills them.
+    std::vector<double> fills;
+    for(size_t i = 0; i < std::min(matched.size(), rocRollerRankedFillWindow); ++i)
+        fills.push_back(
+            rocRollerLastWaveFill(matched[i]->traits, prob.m, prob.n, prob.batch_count, cus));
+    const size_t first
+        = rocRollerFirstFilling(fills, rocRollerRankedFillWindow, rocRollerRankedMinFill);
+    if(first != 0)
+    {
+        std::rotate(matched.begin(), matched.begin() + first, matched.begin() + first + 1);
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "rocRoller ranked match " << first
+                << " fills the last wave better than the head; "
+                << matched.front()->solution->KernelName() << " goes first";
+            log_info(__func__, msg.str());
+        }
+    }
+
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
+    for(const auto* kernel : matched)
+    {
+        if(static_cast<int>(chosen.size()) >= cap)
+            break;
+        chosen.push_back(kernel->solution);
     }
 
     if(chosen.empty() && !ranked.empty())
         chosen = selectRocRollerFallback(
-            prob, ranked, kernels, accepts, fitsWorkspace, requestedAlgoCount < 0 ? -1 : cap);
+            prob, ranked, kernels, accepts, fitsWorkspace, cus, requestedAlgoCount < 0 ? -1 : cap);
 
     const int convertCount = requestedAlgoCount < 0 ? static_cast<int>(chosen.size())
                                                     : requestedAlgoCount;
