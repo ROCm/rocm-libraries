@@ -195,31 +195,20 @@ TYPED_TEST(matrix_mcsr, matrices_without_entries_apply_as_zero)
 // A matrix that was never allocated copies as the 0 x 0 matrix
 TYPED_TEST(matrix_mcsr, copy_of_an_unallocated_matrix_is_empty)
 {
-    using T     = typename TypeParam::value_type;
-    auto checks = [] {
-        auto src = empty_matrix<T>(Backend::Host, mcsr_format);
-        auto dst = empty_matrix<T>(TypeParam::backend, mcsr_format);
-        if(auto accel = dynamic_cast<rocalution::AcceleratorMatrix<T>*>(dst.get()))
-        {
-            accel->CopyFromHost(*dynamic_cast<HostMatrix<T>*>(src.get()));
-        }
-        else
-        {
-            dst->CopyFrom(*src);
-        }
-        EXPECT_EQ(dst->GetM(), 0);
-        EXPECT_EQ(dst->GetN(), 0);
-        EXPECT_EQ(dst->GetNnz(), 0);
-    };
-
-    if(TypeParam::backend == Backend::Accelerator)
+    using T  = typename TypeParam::value_type;
+    auto src = empty_matrix<T>(Backend::Host, mcsr_format);
+    auto dst = empty_matrix<T>(TypeParam::backend, mcsr_format);
+    if(auto accel = dynamic_cast<rocalution::AcceleratorMatrix<T>*>(dst.get()))
     {
-        KNOWN_BUG("the HIP MCSR copies read the row offsets of an unallocated source and exit "
-                  "with a HIP error");
-        expect_in_child(checks);
-        return;
+        accel->CopyFromHost(*dynamic_cast<HostMatrix<T>*>(src.get()));
     }
-    checks();
+    else
+    {
+        dst->CopyFrom(*src);
+    }
+    EXPECT_EQ(dst->GetM(), 0);
+    EXPECT_EQ(dst->GetN(), 0);
+    EXPECT_EQ(dst->GetNnz(), 0);
 }
 
 namespace
