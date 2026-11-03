@@ -193,7 +193,7 @@ extern "C" bool rocke_grouped_wgrad_mfma_is_valid_spec(const rocke_grouped_wgrad
         arch = "gfx950";
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
         set_reason(reason, reason_cap, msg);
         return false;

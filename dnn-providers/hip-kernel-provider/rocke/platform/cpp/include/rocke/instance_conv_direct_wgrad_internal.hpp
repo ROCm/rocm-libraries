@@ -89,22 +89,6 @@ inline void set_reason(char* out, size_t cap, const char* msg)
     }
 }
 
-/* conv_direct_grouped.dilation_reason. */
-inline bool dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t cap)
-{
-    if(p->dil_h != 1 || p->dil_w != 1)
-    {
-        ROCKE_ERR_SNPRINTF(why,
-                           cap,
-                           "this direct conv kernel has no dilation (got %dx%d); only the "
-                           "non-grouped forward kernel computes a dilated convolution",
-                           p->dil_h,
-                           p->dil_w);
-        return true;
-    }
-    return false;
-}
-
 /* `raise ValueError(f"{prefix}: {reason}")` on the builder. */
 inline void fail_invalid(rocke_ir_builder_t* b, const char* prefix, const char* reason)
 {

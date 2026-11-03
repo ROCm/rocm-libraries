@@ -33,7 +33,9 @@
  *     sign) and DirectConvProblem.Ho / Wo, which a too-small input must give
  *     as Python does (floor, not truncation);
  *   - the forward WMMA validator tail's refusal of an unknown scheduler, which
- *     must carry normalize_scheduler_strategy's text, choices included.
+ *     must carry normalize_scheduler_strategy's text, choices included;
+ *   - the direct wgrad validators' refusal of a dilated problem, which must
+ *     carry conv_direct_grouped.dilation_reason's text.
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -46,11 +48,16 @@
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
+#include "rocke/instance_conv_direct_dw_wgrad.h"
+#include "rocke/instance_conv_direct_dw_wgrad_mfma.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
+#include "rocke/instance_conv_direct_grouped_wgrad_mfma.h"
+#include "rocke/instance_conv_direct_wgrad_gather.h"
+#include "rocke/instance_conv_direct_wgrad_tiled.h"
 #include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/lower_llvm.h"
 
@@ -628,8 +635,44 @@ static void test_total_channels_past_i32(void)
           reason);
 }
 
+/* Every direct wgrad validator refuses a dilated problem with Python's
+ * dilation_reason text (test_direct_wgrad_specs.py pins the Python side to
+ * the same literal). */
+template <typename Spec, typename Valid>
+static void check_wgrad_dilation(const char* kernel, Spec spec, Valid is_valid)
+{
+    char reason[ERR_CAP];
+    spec.problem.dil_h = 2;
+    reason[0] = '\0';
+    CHECK(!is_valid(&spec, "gfx950", reason, sizeof(reason)), "%s accepted dilation 2x1", kernel);
+    CHECK(strcmp(reason, "this direct conv kernel has no dilation (got 2x1)") == 0,
+          "%s dilation reason: %s",
+          kernel,
+          reason);
+}
+
+static void test_wgrad_dilation_reason(void)
+{
+    check_wgrad_dilation("wgrad_tiled",
+                         rocke_direct_wgrad_tiled_spec_default(),
+                         rocke_direct_wgrad_tiled_is_valid_spec);
+    check_wgrad_dilation("wgrad_gather",
+                         rocke_direct_wgrad_gather_spec_default(),
+                         rocke_direct_wgrad_gather_is_valid_spec);
+    check_wgrad_dilation(
+        "dw_wgrad_cols", rocke_dw_wgrad_cols_spec_default(), rocke_dw_wgrad_cols_is_valid_spec);
+    check_wgrad_dilation(
+        "dw_wgrad_lds", rocke_dw_wgrad_lds_spec_default(), rocke_dw_wgrad_lds_is_valid_spec);
+    check_wgrad_dilation(
+        "dw_wgrad_mfma", rocke_dw_wgrad_mfma_spec_default(), rocke_dw_wgrad_mfma_is_valid_spec);
+    check_wgrad_dilation("grouped_wgrad_mfma",
+                         rocke_grouped_wgrad_mfma_spec_default(),
+                         rocke_grouped_wgrad_mfma_is_valid_spec);
+}
+
 int main(void)
 {
+    test_wgrad_dilation_reason();
     test_total_channels_past_i32();
     test_ceil_floor_div();
     test_problem_output_extents();

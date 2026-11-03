@@ -1059,8 +1059,9 @@ class DirectCaps:
     stride: int
     cpg: int
     kpg: int
-    # Filter dilation per axis; only the non-grouped forward kernel has rows
-    # with dilation.
+    # Filter dilation per axis; only the variants that compute a dilated
+    # convolution (direct_nongrouped, direct_fwd_wmma, direct_fwd_tapouter_wmma
+    # and direct_dgrad_wmma) have rows with dilation.
     dil_h: int = 1
     dil_w: int = 1
     # Filter width and column padding where they differ from KH / PAD (0 and

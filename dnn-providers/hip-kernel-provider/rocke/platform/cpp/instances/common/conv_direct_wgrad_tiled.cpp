@@ -369,7 +369,7 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
         set_reason(reason, reason_cap, msg);
         return false;

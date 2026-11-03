@@ -310,7 +310,7 @@ extern "C" bool rocke_dw_wgrad_cols_is_valid_spec(const rocke_dw_wgrad_cols_spec
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
         set_reason(reason, reason_cap, msg);
         return false;
@@ -742,7 +742,7 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
         set_reason(reason, reason_cap, msg);
         return false;

@@ -98,6 +98,8 @@ def test_forward_entries_only_use_same_padding(jobs):
 
 
 def test_only_the_nongrouped_kernel_is_dilated(jobs):
+    """On gfx950 (``_ARCH``) the non-grouped kernel is the one direct variant
+    with dilated rows; the gfx1250 WMMA variants add their own."""
     dilated = [
         j.identity for j in jobs if j.identity.dilation_h * j.identity.dilation_w > 1
     ]
