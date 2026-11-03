@@ -161,7 +161,12 @@ static int64_t ll_lds_natural_align(rocke_lower_t* L, const rocke_op_t* op)
     switch(op->opcode)
     {
     case ROCKE_OP_TILE_SMEM_STORE:
-        return rocke_i_type_bytes(op->operands[op->num_operands - 1]->type);
+    {
+        /* One store of the whole value, which may be a vector: smem_store_vN
+         * routes n=1 here whatever the value's type. */
+        const rocke_type_t* stored = op->operands[op->num_operands - 1]->type;
+        return ll_vector_access_align(rocke_i_count_of(stored), rocke_i_elem_of(stored));
+    }
     case ROCKE_OP_TILE_SMEM_STORE_VN:
         return ll_store_align_attr(
             L,

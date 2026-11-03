@@ -995,6 +995,14 @@ def element_type(t: Type) -> Type:
     return t.elem if isinstance(t, VectorType) else t
 
 
+def lane_count(t: Type) -> int:
+    """The lane count of a vector type, or 1 for a scalar.
+
+    The C++ engine's twin is ``rocke_i_count_of``.
+    """
+    return t.count if isinstance(t, VectorType) else 1
+
+
 def type_bytes(t: Type) -> int:
     """The number of whole bytes a value of IR type ``t`` occupies.
 

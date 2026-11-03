@@ -81,6 +81,7 @@ from .ir import (
     gpu_check_word_symbol,
     require_streaming_arch,
     element_type,
+    lane_count,
     smem_vec_align_elems,
     split_loc,
     type_bytes,
@@ -1395,7 +1396,7 @@ def _smem_storage_type(t: SmemType) -> str:
 # Alignment of the single LDS pool global that backs every smem allocation.
 # No segment can be aligned more strictly than the pool it lives in. Public:
 # the fused-MoE LDS budget (instances/common/_moe_fused_mega_lds.py) bounds
-# the pool with it. The C++ engine's twin is ROCKESMEM_POOL_ALIGN
+# the pool with it. The C++ engine's twin is ROCKE_SMEM_POOL_ALIGN
 # (rocke/lower_llvm.h).
 SMEM_POOL_ALIGN = 16
 
@@ -1466,7 +1467,10 @@ def _lds_natural_align(op: Op) -> int | None:
     """The natural alignment of ``op``'s LDS access, before the pool cap."""
     name = op.name
     if name == "tile.smem_store":
-        return type_bytes(op.operands[-1].type)
+        # One store of the whole value, which may be a vector:
+        # smem_store_vN routes n=1 here whatever the value's type.
+        stored = op.operands[-1].type
+        return _vector_access_align(lane_count(stored), element_type(stored))
     if name == "tile.smem_store_vN":
         vec = int(op.attrs["vec"])
         elem = element_type(op.operands[-1].type)
@@ -3884,9 +3888,6 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
-        # Alignment is the element byte size: 1 for i8/u8, 2 for f16/bf16,
-        # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
-        # stores with under-aligned addresses on ``addrspace(3)``.
         align = _lds_access_align(op)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
@@ -4668,7 +4669,7 @@ class _Lowerer:
         """
         smem = op.operands[0]
         values = op.operands[1]
-        n = values.type.count if isinstance(values.type, VectorType) else 1
+        n = lane_count(values.type)
         gname, stype = self._smem_global_name(smem)
         base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)

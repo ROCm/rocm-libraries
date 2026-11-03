@@ -402,3 +402,36 @@ def test_an_eight_byte_element_segment_is_aligned_to_its_width():
     segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
     assert segs == ["8"]
     assert _lower_cpp(b.kernel) == ll
+
+
+def _f16_then_one_f32x3_store():
+    """A one-element f16 buffer, then an f32 buffer written by one
+    ``smem_store_vN(..., n=1)`` of a ``<3 x float>`` value. ``n=1`` routes the
+    store through the whole-value ``tile.smem_store``."""
+    b = IRBuilder("lds_align_f16_one_f32x3")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    half_buf = b.smem_alloc(F16, [1], name_hint="h")
+    float_buf = b.smem_alloc(F32, [12], name_hint="f")
+    h = b.trunc_f32_to_f16(b.const_f32(1.0))
+    b.smem_store_f16(half_buf, [zero], h)
+    triple = b.global_load_vN(out, zero, F32, 3, align=4)
+    b.smem_store_vN(float_buf, [zero], triple, 1)
+    b.smem_store_f16(half_buf, [zero], h)
+    b.ret()
+    return b.kernel
+
+
+def test_a_whole_value_store_whose_width_is_not_a_power_of_two_claims_its_element_width():
+    """A 12-byte ``<3 x float>`` stored as one value claims 4 bytes, not 12
+    (``align 12`` is not valid LLVM), and its segment sits at a 4-byte offset
+    the claim holds at; both engines emit the same IR."""
+    kernel = _f16_then_one_f32x3_store()
+    ll = _lower(kernel)
+    assert re.search(
+        r"store <3 x float> \S+, ptr addrspace\(3\) \S+, align 4$", ll, re.MULTILINE
+    )
+    segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
+    assert segs == ["4"]
+    assert _alignment_violations(ll) == []
+    assert _lower_cpp(kernel) == ll
