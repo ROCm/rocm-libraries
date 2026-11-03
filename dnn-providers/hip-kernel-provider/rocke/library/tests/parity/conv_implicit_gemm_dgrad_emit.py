@@ -1685,6 +1685,10 @@ _GFX942_3D_PP = {
     108: dict(_T128, tapk_pingpong=2, lds_xor=False),
     109: dict(_T128, tapk_pingpong=3, split_k=4),
 }
+# 116-117: pp_boxes 8 (the pixel-list binary of pp_boxes 7; the records come
+# from the host-side makespan plan) on 105 and on 76 (pp_box_det 1).
+_GFX942_3D_PP[116] = dict(_GFX942_3D_PP[105], pp_boxes=8)
+_GFX942_3D_PP[117] = dict(_GFX942_3D_PP[76], pp_boxes=8)
 
 
 # 77-80: the x-halo (tapk_xhalo) record kernel family on the W-extended
@@ -1765,6 +1769,12 @@ _GFX942_3D_XH[110] = dict(_GFX942_3D_XH[77], tapk_setprio=2, **_XH_PLAIN)
 _GFX942_3D_XH[111] = dict(_GFX942_3D_XH[82], **_XH_PLAIN)
 # 112: 77 with the B tiles swizzled under lds_xor instead of padded (xh_b_kpad 0).
 _GFX942_3D_XH[112] = dict(_GFX942_3D_XH[77], xh_b_kpad=0)
+# 113-115: the W-column store mask (xh_dx_wmask) on 77 (linear store with row
+# and plane gaps), on 77 without xh_epi_lin (masked descriptor store) and on
+# the y-ring 81.
+_GFX942_3D_XH[113] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True)
+_GFX942_3D_XH[114] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True, xh_epi_lin=False)
+_GFX942_3D_XH[115] = dict(_GFX942_3D_XH[81], xh_dx_wmask=True)
 
 
 def _gfx942_3d_xh_spec(idx: int):

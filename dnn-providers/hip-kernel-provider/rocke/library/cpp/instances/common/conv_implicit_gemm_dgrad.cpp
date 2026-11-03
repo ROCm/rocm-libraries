@@ -87,6 +87,15 @@ static const rocke_type_t* _dtype_to_ir(const char* dtype)
 // Spec default + property accessors  (Python DgradConvSpec @property)
 // ---------------------------------------------------------------------------
 
+/* pp_boxes 7 / 77 / 8: the records' rows are pixel lists (one binary; 77
+ * and 8 differ from 7 in the host-side records only: 77 fills the launch's
+ * partial tile with the cheapest class, 8 packs the records by the makespan
+ * plan of kernels/common/conv_dgrad_box_plan.py). */
+static bool _dgrad_pp_pixel_lists(int pp_boxes)
+{
+    return pp_boxes == 7 || pp_boxes == 77 || pp_boxes == 8;
+}
+
 rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void)
 {
     rocke_dgrad_conv_spec_t s;
@@ -411,6 +420,8 @@ rocke_status_t
         ROCKE_DGRAD_NAME_APPEND("_xtr");
     if(s->xh_yring > 0)
         ROCKE_DGRAD_NAME_APPEND("_xyr%d", s->xh_yring);
+    if(s->xh_dx_wmask)
+        ROCKE_DGRAD_NAME_APPEND("_xwm");
     if(s->no_agpr)
         ROCKE_DGRAD_NAME_APPEND("_nag");
     /* The launch-order tile walk (Python flag "noxcd"). */
@@ -433,7 +444,7 @@ rocke_status_t
         ROCKE_DGRAD_NAME_APPEND("_pzs");
     if(s->pp_boxes > 0)
         ROCKE_DGRAD_NAME_APPEND("_pbx");
-    if(s->pp_boxes == 7 || s->pp_boxes == 77)
+    if(_dgrad_pp_pixel_lists(s->pp_boxes))
         ROCKE_DGRAD_NAME_APPEND("_pbl");
     if(s->pp_box_order > 0)
         ROCKE_DGRAD_NAME_APPEND("_pbo%d", s->pp_box_order);
@@ -816,8 +827,8 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     if(s->pp_boxes)
     {
         const int pb = s->pp_boxes;
-        bool cls
-            = pb == 3 || pb == 5 || pb == 33 || pb == 55 || ((pb == 7 || pb == 77) && !s->pp_zskip);
+        bool cls = pb == 3 || pb == 5 || pb == 33 || pb == 55
+                   || (_dgrad_pp_pixel_lists(pb) && !s->pp_zskip);
         if(pb >= 100 && pb <= 555)
         {
             cls = true;
@@ -834,7 +845,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             snprintf(reason,
                      reason_cap,
                      "pp_boxes (3 or 5) needs tapk_pingpong >= 4, the cshuffle epilogue "
-                     "(tapk_pp_epi only with split_k 1), stride 1, no pp_streamk");
+                     "(tapk_pp_epi only with split_k 1), no pp_streamk, stride 1");
             return false;
         }
     }
@@ -867,9 +878,9 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         snprintf(reason, reason_cap, "pp_zskip needs tapk_pingpong and a 3-D problem");
         return false;
     }
-    if(s->pp_zskip && (s->pp_boxes == 7 || s->pp_boxes == 77))
+    if(s->pp_zskip && _dgrad_pp_pixel_lists(s->pp_boxes))
     {
-        snprintf(reason, reason_cap, "pp_boxes 7/77 do not take pp_zskip");
+        snprintf(reason, reason_cap, "pp_boxes 7/77/8 do not take pp_zskip");
         return false;
     }
     /* _tapk_pingpong_conflict: the schedule rules. */
@@ -905,6 +916,16 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             "ring of P = k * Wi >= tile_m + X - 1 rows within the A slab");
         return false;
     }
+    /* _xhalo_knob_conflict: the W-column store mask (after the xh_yring rule). */
+    if(s->xh_dx_wmask
+       && !(s->tapk_xhalo && s->xh_epi >= 1 && s->problem.is_3d && s->epilogue
+            && strcmp(s->epilogue, "cshuffle") == 0))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "xh_dx_wmask needs the 3-D x-halo loop with its cshuffle epilogue (xh_epi >= 1)");
+        return false;
+    }
     if(s->xh_a_k4
        && !(s->tapk_xhalo && s->lds_xor && (s->tile_k == 16 || s->tile_k == 32 || s->tile_k == 64)
             && s->warp_tile_m * s->warp_tile_k / s->wave_size == 4
@@ -933,7 +954,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || s->tapk_pp_persist || s->tapk_pp_xhalo || (s->tapk_ztrim && !xh_ok && !s->tapk_pingpong)
        || (s->tapk_pp_bslab && !s->tapk_pingpong) || (s->xh_a_k4 && !xh_ok)
        || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok) || (s->xh_fast_a && !xh_ok)
-       || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode
+       || (s->xh_epi && !xh_ok) || s->xh_epi > 1 || s->xh_persist || s->pp_streamk || s->pp_sk_mode
        || (s->pp_boxes && !s->tapk_pingpong)
        || (s->pp_box_det
            && !((s->pp_box_det == 1 || s->pp_box_det == 2) && s->pp_boxes && s->split_k > 1))
@@ -3266,6 +3287,18 @@ static void _emit_xh_cshuffle_epilogue(rocke_ir_builder_t* b,
     addr_ctx.c_group_base = c_group_base;
     rocke_value_t* bound_m = params->p_dg_M;
     rocke_value_t* bound_n = params->p_dg_N;
+    /* xh_dx_wmask (Python _xh_wmask_wrap): the store is valid only for
+     * (X-1)/2 <= wi < Wi - (X-1)/2. */
+    const bool wmask = spec->xh_dx_wmask;
+    dgrad_magic_div_t md_w = {params->p_Wi, params->p_magic_m_Wi_mult, params->p_magic_m_Wi_shift};
+    dgrad_magic_div_t md_h = {params->p_Hi, params->p_magic_m_Hi_mult, params->p_magic_m_Hi_shift};
+    rocke_value_t* wm_hw = NULL;
+    rocke_value_t* wm_hi = NULL;
+    if(wmask)
+    {
+        wm_hw = rocke_b_const_i32(b, (spec->problem.X - 1) / 2);
+        wm_hi = rocke_b_sub(b, params->p_Wi, wm_hw);
+    }
     const int mc = spec->cshuffle_m_chunks > 1 ? spec->cshuffle_m_chunks : 1;
     const int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
     const int mfmas_n = rocke_dgrad_conv_spec_mfmas_per_warp_n(spec);
@@ -3304,6 +3337,10 @@ static void _emit_xh_cshuffle_epilogue(rocke_ir_builder_t* b,
     const int n_groups = atom->c_per_lane / 4;
     rocke_value_t* lin_ok = NULL;
     rocke_value_t* sw = params->p_dX_stride_wi;
+    rocke_value_t* lin_rgap = NULL; /* xh_dx_wmask: linear store gaps and mask */
+    rocke_value_t* lin_gap = NULL;
+    rocke_value_t* lin_hw = NULL;
+    rocke_value_t* lin_hi = NULL;
     if(spec->xh_epi_lin)
     {
         rocke_value_t* sh = params->p_dX_stride_hi;
@@ -3324,6 +3361,22 @@ static void _emit_xh_cshuffle_epilogue(rocke_ir_builder_t* b,
             rocke_value_t* shh = rocke_b_mul(b, sh, params->p_Hi);
             rocke_value_t* e2 = rocke_b_cmp_eq(b, params->p_dX_stride_n, shh);
             lin_ok = rocke_b_land(b, lin_ok, e2);
+        }
+        if(wmask)
+        {
+            /* Rows and planes may sit apart (an interior view of a larger dX,
+             * or a W-extended view of a narrower one): offset = m * sw
+             * + row * (sh - Wi * sw) + plane * (sd - Hi * sh); only the image
+             * stride must be consistent. */
+            rocke_value_t* sd = params->p_dX_stride_di;
+            rocke_value_t* sdd = rocke_b_mul(b, sd, params->p_Di);
+            lin_ok = rocke_b_cmp_eq(b, params->p_dX_stride_n, sdd);
+            rocke_value_t* swi = rocke_b_mul(b, sw, params->p_Wi);
+            lin_rgap = rocke_b_sub(b, sh, swi);
+            rocke_value_t* shh = rocke_b_mul(b, sh, params->p_Hi);
+            lin_gap = rocke_b_sub(b, sd, shh);
+            lin_hw = rocke_b_const_i32(b, (spec->problem.X - 1) / 2);
+            lin_hi = rocke_b_sub(b, params->p_Wi, lin_hw);
         }
     }
     for(int c = 0; c < mc; ++c)
@@ -3393,14 +3446,43 @@ static void _emit_xh_cshuffle_epilogue(rocke_ir_builder_t* b,
                     = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bound_m, bound_n, sv);
                 rocke_value_t* valid = NULL;
                 rocke_value_t* off_elems;
-                if(lin)
+                if(lin && wmask)
+                {
+                    rocke_value_t* c_ = c_group_base ? rocke_b_add(b, n_val, c_group_base) : n_val;
+                    rocke_value_t *q, *wi, *plane, *h_;
+                    _magic_divmod(b, m_val, &md_w, &q, &wi);
+                    _magic_divmod(b, q, &md_h, &plane, &h_);
+                    (void)h_;
+                    rocke_value_t* mw = rocke_b_mul(b, m_val, sw);
+                    rocke_value_t* qg = rocke_b_mul(b, q, lin_rgap);
+                    rocke_value_t* o1 = rocke_b_add(b, mw, qg);
+                    rocke_value_t* pg = rocke_b_mul(b, plane, lin_gap);
+                    rocke_value_t* o2 = rocke_b_add(b, o1, pg);
+                    off_elems = rocke_b_add(b, o2, c_);
+                    rocke_value_t* ge = rocke_b_cmp_ge(b, wi, lin_hw);
+                    rocke_value_t* lt = rocke_b_cmp_lt(b, wi, lin_hi);
+                    valid = rocke_b_land(b, ge, lt);
+                }
+                else if(lin)
                 {
                     rocke_value_t* c_ = c_group_base ? rocke_b_add(b, n_val, c_group_base) : n_val;
                     rocke_value_t* mw = rocke_b_mul(b, m_val, sw);
                     off_elems = rocke_b_add(b, mw, c_);
                 }
                 else
+                {
                     off_elems = _dgrad_dx_addr_fn(b, m_val, n_val, &valid, &addr_ctx);
+                    if(wmask)
+                    {
+                        rocke_value_t *q_, *wi;
+                        _magic_divmod(b, m_val, &md_w, &q_, &wi);
+                        (void)q_;
+                        rocke_value_t* ge = rocke_b_cmp_ge(b, wi, wm_hw);
+                        rocke_value_t* lt = rocke_b_cmp_lt(b, wi, wm_hi);
+                        rocke_value_t* okw = rocke_b_land(b, ge, lt);
+                        valid = valid == NULL ? okw : rocke_b_land(b, valid, okw);
+                    }
+                }
                 if(valid != NULL)
                     ok = ok == NULL ? valid : rocke_b_land(b, ok, valid);
                 rocke_value_t* off_b = rocke_b_mul(b, off_elems, c_eb);
@@ -4392,7 +4474,7 @@ static rocke_kernel_def_t*
         rocke_value_t* _magic_base = rocke_b_add(b, _magic_rec_end, _magic_rec_off);
         /* pp_boxes 7/77: a record's rows are its pixel list (after the magic
          * table: row bases, then the rows); emitted before the magic loads. */
-        if(spec->pp_boxes == 7 || spec->pp_boxes == 77)
+        if(_dgrad_pp_pixel_lists(spec->pp_boxes))
         {
             rocke_value_t* cm = rocke_b_const_i32(
                 b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS + ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS);

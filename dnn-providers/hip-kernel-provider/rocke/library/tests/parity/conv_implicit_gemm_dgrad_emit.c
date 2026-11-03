@@ -501,6 +501,22 @@ static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx >= 113 && idx <= 115)
+    {
+        /* xh_dx_wmask on 77 (linear store), 77 without xh_epi_lin, and 81 */
+        const int r = make_cfg_3d_xh(idx == 115 ? 81 : 77, spec, arch);
+        spec->xh_dx_wmask = true;
+        if(idx == 114)
+            spec->xh_epi_lin = false;
+        return r;
+    }
+    if(idx == 116 || idx == 117)
+    {
+        /* pp_boxes 8 (pp_boxes 7's binary) on 105 and 76 */
+        const int r = make_cfg_3d_pp(idx == 116 ? 105 : 76, spec, arch);
+        spec->pp_boxes = 8;
+        return r;
+    }
     if(idx == 95 || idx == 96)
     {
         /* xh_fast_a without xh_tap_rsrc on 77 / 79 */

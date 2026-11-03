@@ -240,6 +240,10 @@ typedef struct rocke_dgrad_conv_spec
     int pp_box_cus;
     int pp_box_order;
     int pp_box_det;
+    /* DgradConvSpec.xh_dx_wmask: the x-halo cshuffle epilogue (xh_epi 1, 3-D)
+     * stores only the dX pixels with (X-1)/2 <= wi < Wi - (X-1)/2; with
+     * xh_epi_lin the linear store offset accepts row and plane gaps. */
+    bool xh_dx_wmask;
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
