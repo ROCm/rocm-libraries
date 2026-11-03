@@ -1021,6 +1021,7 @@ _GFX942_3D_OFFSET = 32
 #  124-127: 56 / 55 + lds_ahead / defer_mfma / defer_mfma_per_write
 #  128-130: 55 + the plain uk_xhalo loop (defer_mfma, lds_ahead, chunk groups)
 #  131-132: 55 + the plain uk_xhalo loop with xh_stride_m
+#  133-134: 55 + split_k 2 with split_atomic_agent (+ split_atomic_pairs)
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1382,6 +1383,10 @@ def _gfx942_3d_spec(idx: int):
         ),
     )
     knobs[130] = (55, dict(_xp, epi_quad_xpose=0))
+    # 133-134: split_atomic_agent (device-scope packed atomics), plain and
+    # with lane-contiguous pairs.
+    knobs[133] = (55, dict(split_k=2, split_atomic_agent=True))
+    knobs[134] = (55, dict(split_k=2, split_atomic_agent=True, split_atomic_pairs=True))
     # 131-132: the plain uk_xhalo loop with xh_stride_m (the A store's _xa
     # map, each tap's fragments shifted from the previous tap's).
     knobs[131] = (55, dict(_xp, xh_stride_m=True, defer_mfma=2, vmem_interleave=2))

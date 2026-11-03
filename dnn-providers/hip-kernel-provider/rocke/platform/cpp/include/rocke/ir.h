@@ -1104,6 +1104,15 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* idx,
                                                  rocke_value_t* value,
                                                  const char* ordering);
+/* global_atomic_add_pk_bf16(..., syncscope=, scope=) (Python IRBuilder): an
+ * optional LLVM syncscope ("agent") or scope attr, at most one (NULL = none). */
+rocke_value_t* rocke_b_global_atomic_add_pk_bf16_ex(rocke_ir_builder_t* b,
+                                                    rocke_value_t* ptr,
+                                                    rocke_value_t* idx,
+                                                    rocke_value_t* value,
+                                                    const char* ordering,
+                                                    const char* syncscope,
+                                                    const char* scope);
 rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
                                                 rocke_value_t* ptr,
                                                 rocke_value_t* idx,

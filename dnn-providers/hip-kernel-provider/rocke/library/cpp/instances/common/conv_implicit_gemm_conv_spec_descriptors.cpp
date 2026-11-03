@@ -483,7 +483,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
         ROCKE_FLAG(mch > 1, "mch%d", mch);
     }
     ROCKE_FLAG(s->xh_wait_smem, "xws");
-    /* (saa: Python-only, off.) */
+    ROCKE_FLAG(s->split_atomic_agent, "saa");
     ROCKE_FLAG(s->split_atomic_pairs, "sapl");
     /* (sapf, esf: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_xcd_remap > 0, "skx%d", s->split_xcd_remap);
@@ -1127,10 +1127,11 @@ int rocke_conv_xhalo_b_rows(const rocke_implicit_gemm_conv_spec_t* s)
     return rows + (((rows * (s->tile_k / vb)) % bs) ? 1 : 0);
 }
 
-/* fwd_split_k_conflict(spec), wave64 MFMA atomic split (split_k > 1). */
-bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
-                                       char* reason,
-                                       size_t reason_cap)
+/* The split_atomic rule at the head of Python fwd_split_k_conflict: it selects
+ * the atomic form for a 2-D wave64 split only. */
+bool rocke_conv_fwd_split_atomic_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                    char* reason,
+                                    size_t reason_cap)
 {
     if(s->split_atomic
        && (s->split_k < 2 || s->wave_size != 64 || s->problem.is_3d || s->split_k_cluster))
@@ -1139,8 +1140,16 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                         "split_atomic selects the wave64 MFMA atomic split-K for a 2-D "
                         "problem: it needs split_k > 1, wave_size 64 and no split_k_cluster "
                         "(a 3-D split is always atomic)");
-    const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_det || s->split_xcd_remap
-                       || s->split_streamk || s->split_hybrid;
+    return true;
+}
+
+/* fwd_split_k_conflict(spec), wave64 MFMA atomic split (split_k > 1). */
+bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                       char* reason,
+                                       size_t reason_cap)
+{
+    const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_atomic_agent
+                       || s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid;
     if(s->split_k == 1)
     {
         if(s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid)
@@ -1148,7 +1157,7 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "split_xcd_remap / split_streamk / split_flag_store need the split-K "
                             "binary");
-        if(s->split_atomic_pairs)
+        if(s->split_atomic_pairs || s->split_atomic_agent)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "split_atomic_agent/split_atomic_pairs need the split-K binary "
@@ -1665,6 +1674,10 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     {
         return false;
     }
+    if(!rocke_conv_fwd_split_atomic_ok(s, reason, reason_cap))
+    {
+        return false;
+    }
     if(!rocke_conv_fwd_asplit_conflict_ok(s, reason, reason_cap))
     {
         return false;
@@ -1948,7 +1961,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
-    if(s->split_atomic && !rocke_conv_fwd_asplit_conflict_ok(s, reason, reason_cap))
+    if(!rocke_conv_fwd_split_atomic_ok(s, reason, reason_cap))
         return false;
     if(s->split_k != 1 || s->split_k_cluster)
     {

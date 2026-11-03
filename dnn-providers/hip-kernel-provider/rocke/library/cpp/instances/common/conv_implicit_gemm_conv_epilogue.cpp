@@ -793,6 +793,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     if(atomic_d != NULL)
     {
         epi.atomic_pair_lanes = spec->split_atomic_pairs;
+        if(spec->split_atomic_agent)
+            epi.atomic_syncscope = "agent";
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
         dctx.k_out_group_base = k_out_group_base;

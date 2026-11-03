@@ -751,6 +751,11 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  * with split_atomic -- the atomic split-K forward rather than the two-stage
  * workspace split. */
 bool rocke_conv_fwd_split_k_atomic(const rocke_implicit_gemm_conv_spec_t* s);
+/* The split_atomic rule of fwd_split_k_conflict: false with Python's reason when
+ * split_atomic is set off a 2-D wave64 split. */
+bool rocke_conv_fwd_split_atomic_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                    char* reason,
+                                    size_t reason_cap);
 /* Python _fxd_wave_rows / _xhalo_a_rows / _xhalo_b_rows. */
 int rocke_conv_fxd_wave_rows(const rocke_implicit_gemm_conv_spec_t* s);
 int rocke_conv_xhalo_a_rows(const rocke_implicit_gemm_conv_spec_t* s);

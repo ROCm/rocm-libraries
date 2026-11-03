@@ -193,6 +193,9 @@ typedef struct rocke_cshuffle_epilogue
      * wave-uniform, one iteration per lane at most) the rows' map done once
      * and read back with v_readlane (Python atomic_row_batch). Default false. */
     bool atomic_row_batch;
+    /* atomic_store's packed bf16 atomics: LLVM sync scope (NULL = system,
+     * the default; "agent" = device scope). Python atomic_syncscope. */
+    const char* atomic_syncscope;
     /* atomic_store(row_map=): the destination row of tile row m (NULL = m).
      * Read by the atomic_pair_lanes paths. Default NULL. */
     rocke_value_t* (*atomic_row_map)(rocke_ir_builder_t* b, rocke_value_t* m, void* user);

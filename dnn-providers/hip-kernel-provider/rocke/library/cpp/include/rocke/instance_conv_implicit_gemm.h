@@ -301,6 +301,9 @@ typedef struct rocke_implicit_gemm_conv_spec
      * reduction unsplit and store plainly; their other slices exit. Appends
      * the full_tiles kernarg. */
     bool split_tail; /* default false */
+    /* split_atomic_agent: the split-K packed atomics at device (agent) scope,
+     * performed in the L2 (Python split_atomic_agent; tag saa). */
+    bool split_atomic_agent; /* default false */
     /* split_atomic_pairs: the bf16 atomic store as lane-contiguous pairs (one
      * 4-byte LDS read per pair). */
     bool split_atomic_pairs; /* default false */
