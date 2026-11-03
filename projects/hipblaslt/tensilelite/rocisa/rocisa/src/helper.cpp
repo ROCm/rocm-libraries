@@ -212,10 +212,15 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
     CloseHandle(state.hChildStd_OUT_Rd);
     state.hChildStd_OUT_Rd = NULL;
 
-    // Wait for the child process to finish.
-    WaitForSingleObject(state.piProcInfo.hProcess, INFINITE);
+    // Wait for the child process to finish. Without its exit code there is no
+    // answer; 0 would read as an accepted source.
     DWORD exitCode = 0;
-    GetExitCodeProcess(state.piProcInfo.hProcess, &exitCode);
+    if(WaitForSingleObject(state.piProcInfo.hProcess, INFINITE) != WAIT_OBJECT_0
+       || !GetExitCodeProcess(state.piProcInfo.hProcess, &exitCode))
+    {
+        DWORD err = GetLastError();
+        throw std::runtime_error("Waiting for the child failed with error " + std::to_string(err));
+    }
     return {static_cast<int>(exitCode), result};
 }
 
@@ -240,6 +245,8 @@ std::string nullDevicePath()
 
 #else
 // POSIX implementation.
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -295,12 +302,29 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
     else
     {
         close(p[0]);
-        write(p[1], input.c_str(), input.size());
+        // Python's signal handlers don't restart interrupted system calls, so
+        // both calls below retry on EINTR. An interrupted write would leave the
+        // child an empty or partial source, which the assembler may well accept.
+        for(size_t written = 0; written < input.size();)
+        {
+            ssize_t n = write(p[1], input.data() + written, input.size() - written);
+            if(n == -1 && errno == EINTR)
+                continue;
+            if(n == -1)
+                break; // The child stopped reading; its exit status tells the rest.
+            written += static_cast<size_t>(n);
+        }
         close(p[1]);
         // The child's output is not captured (see above), so there is no result text.
         std::string result;
         int         status = 0;
-        waitpid(pid, &status, 0);
+        pid_t       waited;
+        do
+            waited = waitpid(pid, &status, 0);
+        while(waited == -1 && errno == EINTR);
+        // Without the child's status there is no answer; status 0 would read as accepted.
+        if(waited == -1)
+            throw std::runtime_error(std::string("waitpid failed: ") + std::strerror(errno));
         // Like a shell, a child killed by a signal is 128 + the signal, so it can't
         // read as an exit code (SIGHUP would otherwise look like a rejection, 1).
         int rcode = status;

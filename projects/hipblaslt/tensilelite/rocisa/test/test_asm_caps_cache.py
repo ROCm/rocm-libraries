@@ -19,16 +19,22 @@ _ISAS = [(9, 4, 2), (9, 5, 0)]
 # rocIsa keeps capabilities for the life of the process, so each probe runs in a
 # fresh interpreter that imports the same rocisa as this one.
 _PROBE = """
-import json, sys
+import json, signal, sys
 sys.path[:] = json.loads(sys.argv[1])
 import rocisa
 isas = [tuple(isa) for isa in json.loads(sys.argv[2])]
+interval = float(sys.argv[5])
 ti = rocisa.rocIsa.getInstance()
+if interval:
+    # Interrupts the system calls probing waits in, as a SIGALRM-based timeout would.
+    signal.signal(signal.SIGALRM, lambda *_: None)
+    signal.setitimer(signal.ITIMER_REAL, interval, interval)
 if sys.argv[4] == "many":
     ti.initMany(isas, sys.argv[3], False)
 else:
     for isa in isas:
         ti.init(isa, sys.argv[3], False)
+signal.setitimer(signal.ITIMER_REAL, 0)
 print(json.dumps({str(isa): dict(ti.getIsaInfo(isa).asmCaps) for isa in isas}, sort_keys=True))
 """
 
@@ -59,14 +65,23 @@ def _runs(tmp_path):
     return len(log.read_text().splitlines()) if log.exists() else 0
 
 
-def _probe(assembler, cacheDir, isas=_ISAS, mode="many", disable=False):
+def _probe(assembler, cacheDir, isas=_ISAS, mode="many", disable=False, interval=0):
     env = {k: v for k, v in os.environ.items() if k != "TENSILE_DISABLE_ASM_CAPS_CACHE"}
     env["TENSILE_ASM_CAPS_CACHE_DIR"] = str(cacheDir)
     if disable:
         env["TENSILE_DISABLE_ASM_CAPS_CACHE"] = "1"
     parentPath = json.dumps([os.path.abspath(p) for p in sys.path])
     result = subprocess.run(
-        [sys.executable, "-c", _PROBE, parentPath, json.dumps(isas), str(assembler), mode],
+        [
+            sys.executable,
+            "-c",
+            _PROBE,
+            parentPath,
+            json.dumps(isas),
+            str(assembler),
+            mode,
+            str(interval),
+        ],
         env=env,
         # Under nohup the runner ignores SIGHUP and its children inherit that, so
         # restore it for the probe, whose assembler may have to die of it.
@@ -171,3 +186,19 @@ def test_probes_killed_by_a_signal_are_not_cached(tmp_path, signal):
     caps = _probe(script, cache, isas=_ISAS[:1])
     assert all(c["SupportedISA"] == 1 for c in caps.values())
     assert not list(cache.glob("*.txt"))
+
+
+def test_probes_interrupted_by_a_signal_still_get_the_answer(tmp_path):
+    # Python's signal handlers don't restart interrupted system calls, so a
+    # timer going off while a probe waits for the assembler fails the wait with
+    # EINTR. Taken as an answer, that wait reads as an accepted source.
+    script = tmp_path / "amdclang++"
+    script.write_text('#!/bin/sh\nsrc=$(cat)\n[ -n "$src" ] || exit 0\nsleep 0.005\nexit 1\n')
+    script.chmod(0o755)
+    cache = tmp_path / "cache"
+
+    uninterrupted = _probe(script, cache, isas=_ISAS[:1], mode="init", disable=True)
+    assert all(c["SupportedISA"] == 1 for c in uninterrupted.values())
+    assert _probe(script, cache, isas=_ISAS[:1], mode="init", interval=0.001) == uninterrupted
+    assert len(list(cache.glob("*.txt"))) == 1
+    assert _probe(script, cache, isas=_ISAS[:1], mode="init") == uninterrupted
