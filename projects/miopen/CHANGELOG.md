@@ -41,7 +41,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   configuration (the CK grouped backward-weights solvers, `ConvHipConv`) this can be smaller than
   what `miopenConvolution*GetSolutionWorkspaceSize` returns, which covers every configuration.
 * [Conv] Fixed wrong workspace sizes in the system find-dbs for gfx908, gfx90a (104 CU), gfx942,
-  gfx950 and gfx1201, mostly for `GemmWrwUniversal`, the CK grouped solvers and
+  gfx950, gfx1151 and gfx1201, mostly for `GemmWrwUniversal`, the CK grouped solvers and
   `TransposedConvBinWinoRxS`. DBSync now checks the workspace stored in each find-db record.
 * [Conv] Fixed HIP graph captures of convolutions failing with `hipErrorStreamCaptureInvalidated`
   after a find had skipped a naive solver for exceeding `MIOPEN_NAIVE_TIMEOUT` (#12121). Scratch
