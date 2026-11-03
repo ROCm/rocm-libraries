@@ -322,7 +322,7 @@ namespace rocalution
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, UAnalyse, false);
 
         this->diag_entries_.CloneBackend(*this->op_);
-        this->SGS_.ExtractInverseDiagonal(&this->diag_entries_);
+        this->SGS_.ExtractDiagonal(&this->diag_entries_);
 
         this->v_.CloneBackend(*this->op_);
         this->v_.Allocate("v", this->op_->GetM());

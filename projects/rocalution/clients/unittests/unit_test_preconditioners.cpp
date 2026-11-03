@@ -1192,8 +1192,6 @@ TYPED_TEST(preconditioners, sgs_is_the_symmetric_gauss_seidel_sweep)
     move(other(this->backend()), p, *A);
     const std::vector<T> moved = apply(p, *A, r);
     expect_near(moved, built, scaled_tol<T>(1e-14));
-
-    KNOWN_BUG("Build scales by the inverse diagonal instead of the diagonal");
     expect_near(built, symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
     expect_near(moved, symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 }
