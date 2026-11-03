@@ -57,19 +57,8 @@ for its assembly, so the bundle's main kernel is the `Relocatable` and its
 `solutions` are the kernel's. A HIP main kernel stays a plain `Artifact`, and
 its backend builds the bundle's `ContractionSolution`s itself.
 
-`hipblaslt-jit-component.hpp` also declares the generation flow, which no code
-in this source implements yet. `Backend::generate` returns source bundles, best
-first, each carrying the solutions its executable runs. `Jit::generate` builds
-each bundle, keeps the solutions `supportingSolutions` accepts for the
-request, and publishes the executable with them through its `SolutionStore`,
-a required component whose `publish` takes the executable and those
-`ContractionSolution`s as `JitLibrary::publish` does. The JIT solution library
-is the only place a JIT solution lives: nothing is loaded in process, and a
-bundle whose build, support check or publish fails is reported and contributes
-no solution. `getJitAlgo`, in `hipblaslt-jit.hpp`, sets a
-`hipblasLtMatmulHeuristicResult_t` whose `algo` carries the JIT solution
-library index, in [2^30, 0x60000000), and whose `workspaceSize` is the
-published solution's workspace.
+`hipblaslt-jit-component.hpp` in this PR is limited to source-bundle parsing
+and build/publish helpers.
 
 A `Target` holds the TensileLite `AMDGPU::Processor`, an `Any`, `On` or `Off`
 setting for each of `sramecc` and `xnack`, and the device's ASIC revision.

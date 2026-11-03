@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "hipblaslt-jit-backend.hpp"
 #include <Tensile/AMDGPU.hpp>
 #include <algorithm>
 #include <cstdint>
@@ -197,33 +196,14 @@ namespace hipblaslt_jit
     // that file in the message. Does nothing without a log or a scratch directory.
     void keepBuildLog(Status& status, const std::filesystem::path& scratch);
 
-    using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
-
-    // "configure", "generate", ... as reports name stages.
-    const char* toString(Stage stage) noexcept;
-
     // The Target of a device: gcnArchName parsed, with its asicRevision.
     struct DeviceTarget : Target
     {
-        int             device = -1;
-        hipDeviceProp_t properties{};
-        int             wavefrontSize = 0;
-        int             cuCount       = 0;
+        int                                    device = -1;
+        hipDeviceProp_t                        properties{};
+        int                                    wavefrontSize = 0;
+        int                                    cuCount       = 0;
         std::shared_ptr<TensileLite::Hardware> hardware;
-
-        // Fails when gcnArchName is not a known target ID.
-        static Status make(int device, DeviceTarget& target);
-    };
-
-    struct GenerationRequest
-    {
-        const GemmRequest&  request;
-        const DeviceTarget&      target;
-        size_t                   count      = 1;
-        size_t                   workspaceLimit = 0;
-        std::vector<std::string> excludeKernels; // kernels the caller already has
-        std::filesystem::path    scratch; // private directory owned by this call
-        int codeObjectVersion = jitCodeObjectVersion; // for generators and each bundle
     };
 
     struct BackendInfo
@@ -232,88 +212,4 @@ namespace hipblaslt_jit
         std::string name; // reported as Diagnostics::backend
         uint32_t    version = 0; // increment when the generated solutions can change
     };
-
-    class Backend
-    {
-    public:
-        virtual ~Backend()                               = default;
-        virtual const BackendInfo& info() const noexcept = 0;
-        // Returns up to request.count source bundles for the request, best
-        // first, and loads nothing. Each bundle names the request's target, its
-        // code-object version and the solutions its executable runs. NotSupported
-        // means the request is outside the backend's domain.
-        virtual Status generate(const GenerationRequest&, std::vector<SourceCodeBundle>&) const
-            = 0;
-    };
-
-    class SolutionStore
-    {
-    public:
-        virtual ~SolutionStore() = default;
-        // Up to count indices of stored solutions for exactly this request that
-        // need at most maxWorkspaceBytes, best first, without excluded kernels.
-        virtual Status lookup(const GemmRequest&,
-                              const DeviceTarget&,
-                              size_t                          count,
-                              size_t                          maxWorkspaceBytes,
-                              const std::vector<std::string>& excludeKernels,
-                              std::vector<int32_t>&           indices) const
-            = 0;
-        // Publishes executable with solutions, those of its bundle that support
-        // the request, best first, as JitLibrary::publish does. Returns one
-        // library index per solution, in order.
-        virtual Status publish(
-            const GemmRequest&,
-            const DeviceTarget&,
-            const Artifact&                                                       executable,
-            const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
-            std::vector<int32_t>&                                                 indices) const
-            = 0;
-    };
-
-    class Jit
-    {
-    public:
-        struct Components
-        {
-            std::shared_ptr<const Backend>           backend;
-            std::shared_ptr<const CodeObjectBuilder> builder;
-            std::shared_ptr<const SolutionStore>     store;
-        };
-
-        struct Outcome
-        {
-            std::vector<int32_t> indices; // published, best first
-            std::vector<Status>  failures; // in the order they happened
-            std::string          summary; // the backend's success note
-        };
-
-        // Throws std::invalid_argument when a component is missing.
-        explicit Jit(Components components);
-
-        // Generate, check each bundle's solutions with supportingSolutions,
-        // build, then publish to the store. Returns the library indices of at
-        // most count published solutions that support the request, best first;
-        // JitLibrary is the only place they live, and nothing is loaded in
-        // process. A bundle whose support check, build or publish fails adds a
-        // failure and contributes no solution. Thread-safe. Sets the stage of
-        // every failure it reports.
-        Outcome generate(const GemmRequest&         request,
-                         const DeviceTarget&             target,
-                         size_t                          count,
-                         size_t                          workspaceLimit,
-                         const std::vector<std::string>& excludeKernels) const;
-
-        const Components& components() const noexcept
-        {
-            return m_components;
-        }
-
-    private:
-        Components m_components;
-    };
-
-    // The comgr builder and a store in the process JIT solution library around
-    // one backend.
-    std::shared_ptr<const Jit> makeJit(std::shared_ptr<const Backend> backend);
 }
