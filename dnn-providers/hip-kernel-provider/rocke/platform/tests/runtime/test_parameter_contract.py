@@ -218,9 +218,8 @@ def test_write_artifact_refuses_a_kernel_that_checks_on_the_gpu(tmp_path):
     with pytest.raises(ValueError) as caught:
         write_artifact(_artifact(b.kernel), tmp_path, {})
     assert str(caught.value) == (
-        "checks_on_the_gpu: this kernel checks gpu_checked_value facts, and only "
-        "rocke's runtime reads its GPU-check word, so a launch from the code object "
-        "alone whose fact is false would succeed with every output undefined -- "
+        "checks_on_the_gpu: only rocke's runtime reads this kernel's GPU-check "
+        "word, so a false gpu_checked_value fact would go unseen -- "
         "launch it through KernelLauncher.from_artifact"
     )
     assert not list(tmp_path.iterdir())

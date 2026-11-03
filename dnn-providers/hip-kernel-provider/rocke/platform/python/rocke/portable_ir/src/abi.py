@@ -65,6 +65,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Dict, List, Optional
 
 from rocke.core.param_facts import FACT_WORDS
@@ -156,8 +157,11 @@ PARAM_FACTS_LEVEL = 4
 _BODY_KEYS = ("body", "then", "else")
 
 
-def _walk_instrs(program: Any):
-    """Every instruction in a program, including nested compile-time bodies."""
+def walk_instrs(program: Any) -> Iterator[dict[str, Any]]:
+    """Every instruction in a recipe program, in order, including those in
+    nested bodies (``static_for`` / ``scf_for`` bodies and both arms of an
+    if). Anything that is not an instruction object is skipped, so a foreign
+    or malformed program can be inspected without raising."""
     if not isinstance(program, list):
         return
     for instr in program:
@@ -165,7 +169,7 @@ def _walk_instrs(program: Any):
             continue
         yield instr
         for key in _BODY_KEYS:
-            yield from _walk_instrs(instr.get(key))
+            yield from walk_instrs(instr.get(key))
 
 
 def _walk_dicts(node: Any):
@@ -189,7 +193,7 @@ def recipe_min_reader(recipe: Dict[str, Any], *, strict: bool = True) -> int:
     should not be stamping compatibility claims about it. Pass False to inspect
     a foreign or future recipe without tripping over its unknowns."""
     level = 1
-    for instr in _walk_instrs(recipe.get("program")):
+    for instr in walk_instrs(recipe.get("program")):
         op = instr.get("op")
         if op in INSTR_OPS:
             level = max(level, INSTR_OPS[op])

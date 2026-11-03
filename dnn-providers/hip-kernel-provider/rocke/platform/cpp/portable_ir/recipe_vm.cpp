@@ -2030,6 +2030,24 @@ static bool rv_plan_workgroup_size(const rocke_kernel_def_t* kernel,
     return true;
 }
 
+/* A kernel with a gpu_checked_value: a lane whose fact is false stores to the
+ * kernel's GPU-check word and returns, and a caller launching from a plan never
+ * reads that word, so the launch would succeed with every output undefined.
+ * Such a recipe is refused. (Mirrored, with the same message, by
+ * _refuse_gpu_checks in portable_ir/src/launch.py.) */
+static bool rv_plan_gpu_checks(const rocke_kernel_def_t* kernel, char* err, size_t cap)
+{
+    if(!rocke_i_kernel_checks_on_gpu(kernel))
+        return true;
+    if(err && cap)
+        ROCKE_ERR_SNPRINTF(err,
+                           cap,
+                           "%s: " ROCKE_GPU_CHECK_UNREAD_REASON
+                           " -- " ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT,
+                           kernel->name);
+    return false;
+}
+
 static rocke_status_t rv_plan_on(jd_val_t* root,
                                  const rocke_recipe_spec_int_t* ints,
                                  int n_ints,
@@ -2071,6 +2089,11 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
             rocke_ir_builder_free(&b);
             return ROCKE_ERR_VALUE;
         }
+    }
+    if(!rv_plan_gpu_checks(kernel, err, err_cap))
+    {
+        rocke_ir_builder_free(&b);
+        return ROCKE_ERR_VALUE;
     }
 
     rocke_launch_plan_t* plan = (rocke_launch_plan_t*)calloc(1, sizeof *plan);

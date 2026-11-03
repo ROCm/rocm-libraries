@@ -31,11 +31,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.intexpr import eval_intexpr
 from rocke.core.ir import (
+    GPU_CHECK_UNREAD_REASON,
     LAUNCH_THROUGH_FROM_ARTIFACT,
     PARAM_FACTS_UNCHECKED_REASON,
     check_cluster_dims,
 )
 from rocke.core.param_facts import FACT_WORDS
+from rocke.portable_ir.src.abi import walk_instrs
 from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
 
 # Kernarg representations, mirroring rv_arg_classify in recipe_vm.cpp:
@@ -306,6 +308,11 @@ def plan(
     cannot check them, and the GPU would trust them unchecked. Pointer
     attributes such as ``align`` are not facts and plan as before.
 
+    Refuses a recipe whose kernel checks ``gpu_checked_value`` facts: a lane
+    whose fact is false stores to the kernel's GPU-check word and returns, and
+    the caller of a plan never reads that word, so the launch would succeed with
+    every output undefined.
+
     For a kernel that states an exact ``workgroup_size`` N, the recipe's block
     must be (N, 1, 1), and a recipe without a block is refused: the kernel is
     compiled for exactly N threads, so a smaller block runs it with threads
@@ -316,6 +323,7 @@ def plan(
     )
     flat = expand_recipe(recipe, {**spec_int, **spec_str})
     _refuse_stated_facts(flat, kernel_name)
+    _refuse_gpu_checks(flat, kernel_name)
     args = _signature(flat)
     geometry = eval_launch(recipe, spec_int, spec_str)
     cluster = eval_cluster(recipe, geometry)
@@ -362,3 +370,14 @@ def _refuse_stated_facts(flat: dict[str, Any], kernel_name: str) -> None:
                 f"{kernel_name}: {PARAM_FACTS_UNCHECKED_REASON} -- "
                 f"{LAUNCH_THROUGH_FROM_ARTIFACT}"
             )
+
+
+def _refuse_gpu_checks(flat: dict[str, Any], kernel_name: str) -> None:
+    """Mirrors rv_plan_gpu_checks in recipe_vm.cpp, with its message."""
+    if any(
+        instr.get("op") == "emit" and instr.get("opcode") == "tile.gpu_check_failed"
+        for instr in walk_instrs(flat["program"])
+    ):
+        raise ExpandError(
+            f"{kernel_name}: {GPU_CHECK_UNREAD_REASON} -- {LAUNCH_THROUGH_FROM_ARTIFACT}"
+        )

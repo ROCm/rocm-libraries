@@ -1125,10 +1125,9 @@ def test_a_kernel_checking_a_value_on_the_gpu_is_refused_before_it_is_compiled(
         )
     assert str(raised.value) == (
         f"builder 'build_with_a_gpu_check' @ {ARCH} returned kernel "
-        "'checks_on_the_gpu': this kernel checks gpu_checked_value facts, and only "
-        "rocke's runtime reads its GPU-check word, so a launch from the code object "
-        "alone whose fact is false would succeed with every output undefined -- "
-        "launch it through KernelLauncher.from_artifact instead of packing it"
+        "'checks_on_the_gpu': only rocke's runtime reads this kernel's GPU-check "
+        "word, so a false gpu_checked_value fact would go unseen -- launch it "
+        "through KernelLauncher.from_artifact instead of packing it"
     )
     assert not (tmp_path / "co").exists()
 

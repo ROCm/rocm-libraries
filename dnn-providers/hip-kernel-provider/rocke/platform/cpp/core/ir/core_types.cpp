@@ -517,6 +517,25 @@ const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kern
     return rocke_arena_printf(arena, "rocke_gpu_check_failed_%s", kernel_name ? kernel_name : "");
 }
 
+static bool rocke_i_region_checks_on_gpu(const rocke_region_t* region)
+{
+    for(int i = 0; region && i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(op->opcode == ROCKE_OP_TILE_GPU_CHECK_FAILED)
+            return true;
+        for(int r = 0; r < op->num_regions; r++)
+            if(rocke_i_region_checks_on_gpu(op->regions[r]))
+                return true;
+    }
+    return false;
+}
+
+bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel)
+{
+    return kernel && rocke_i_region_checks_on_gpu(kernel->body);
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)

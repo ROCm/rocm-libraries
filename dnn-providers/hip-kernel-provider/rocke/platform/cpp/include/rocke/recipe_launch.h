@@ -127,6 +127,11 @@ typedef struct rocke_launch_plan rocke_launch_plan_t;
  * the kernarg itself, so the plan cannot check them, and the GPU would trust
  * them unchecked. Pointer attributes such as `align` are not facts.
  *
+ * Also ROCKE_ERR_VALUE for a kernel that checks gpu_checked_value facts: a lane
+ * whose fact is false stores 1 to the kernel's GPU-check word and returns, and
+ * nothing the plan describes reads that word, so the launch would succeed with
+ * every output undefined.
+ *
  * And ROCKE_ERR_VALUE for a kernel that states an exact `workgroup_size` N
  * unless the recipe's block is (N, 1, 1): the kernel is compiled for exactly N
  * threads. A recipe without launch geometry is refused too, since the caller

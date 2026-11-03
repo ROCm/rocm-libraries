@@ -195,7 +195,10 @@ Doors that see only code-object bytes cannot see the contract and check nothing:
 and `hkp_pack`, which hand out only bytes, refuse a kernel whose contract the bytes would drop, with the
 reason `ParameterContract.code_object_refusal` gives: it states parameter facts or a `workgroup_size`
 (pointer alignment alone is not refused: written kernels always launched without checking it), or it
-checks a `gpu_checked_value`.
+checks a `gpu_checked_value`. Both engines' recipe launch plans, whose callers pack and launch the
+code object themselves, refuse the same kernels: one stating parameter facts, one checking a
+`gpu_checked_value` (with that same reason), and one stating a `workgroup_size` N unless the recipe's
+block is (N, 1, 1).
 
 The GPU checks of a kernel (`gpu_checked_value`, listed in the contract) are read by `rocke.runtime` at
 its next wait on the launch's stream, whichever door launched it: a false fact raises `GpuCheckFailed`

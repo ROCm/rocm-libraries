@@ -47,6 +47,7 @@ from ..core.intexpr import (
     relation_text,
 )
 from ..core.ir import (
+    GPU_CHECK_UNREAD_REASON,
     GPU_CHECKED_VALUE_WRITER,
     PARAM_FACTS_UNCHECKED_REASON,
     KernelDef,
@@ -194,11 +195,7 @@ class ParameterContract:
         if reasons:
             return "; ".join(reasons)
         if self.gpu_checks:
-            return (
-                "this kernel checks gpu_checked_value facts, and only rocke's "
-                "runtime reads its GPU-check word, so a launch from the code object "
-                "alone whose fact is false would succeed with every output undefined"
-            )
+            return GPU_CHECK_UNREAD_REASON
         return None
 
     def check(

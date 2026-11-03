@@ -1169,6 +1169,17 @@ def gpu_check_word_symbol(kernel_name: str) -> str:
     return f"rocke_gpu_check_failed_{kernel_name}"
 
 
+# Why a kernel holding a gpu_checked_value must not be launched from its code
+# object alone: nothing but rocke.runtime reads its GPU-check word, so a false
+# fact would go unseen. Every door that hands out a code object or a plan to
+# launch one refuses such a kernel with this text (ParameterContract's
+# code_object_refusal and the recipe launch plans), and the C++ engine's
+# recipe plan uses the same words (ROCKE_GPU_CHECK_UNREAD_REASON).
+GPU_CHECK_UNREAD_REASON = (
+    "only rocke's runtime reads this kernel's GPU-check word, so a false "
+    "gpu_checked_value fact would go unseen"
+)
+
 # Why a kernel whose parameters state facts must not be launched from its code
 # object alone or from a recipe launch plan: neither reads the facts, and only
 # KernelLauncher.from_artifact checks them. Every such door refuses the kernel

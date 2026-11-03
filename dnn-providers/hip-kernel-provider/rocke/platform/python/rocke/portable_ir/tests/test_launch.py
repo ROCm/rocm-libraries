@@ -235,6 +235,58 @@ class TestExactWorkgroupSize(unittest.TestCase):
         self.assertEqual(str(cm.exception), NO_BLOCK_REFUSAL)
 
 
+def gpu_check_recipe(*, with_facts=False):
+    """A recorded kernel that checks a loaded value with ``gpu_checked_value``,
+    with launch geometry. ``with_facts`` also states a fact on a parameter."""
+    from rocke.core.ir import I32, IRBuilder, PtrType
+    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+    b = IRBuilder("gpu_checked")
+    out = b.param("out", PtrType(I32, "global"))
+    if with_facts:
+        b.param("n", I32, ge=1)
+    loaded = b.readfirstlane(b.global_load(out, b.block_id_x(), I32))
+    b.global_store(out, b.const_i32(0), b.gpu_checked_value(loaded, ge=0, le=100))
+    b.ret()
+    return launch.attach_launch(
+        kerneldef_to_recipe(b.kernel), grid=[1, 1, 1], block=[64, 1, 1]
+    )
+
+
+GPU_CHECK_REFUSAL = (
+    "gpu_checked: only rocke's runtime reads this kernel's GPU-check word, so a "
+    "false gpu_checked_value fact would go unseen -- launch it through "
+    "KernelLauncher.from_artifact"
+)
+
+
+GPU_CHECK_AND_FACTS_REFUSAL = (
+    "gpu_checked: parameters carry facts, which a launch from a code object or "
+    "from a launch plan does not check -- launch it through "
+    "KernelLauncher.from_artifact"
+)
+
+
+class TestGpuChecks(unittest.TestCase):
+    """A lane whose gpu_checked_value fact is false stores to the kernel's
+    GPU-check word and returns. A plan's caller never reads that word, so the
+    launch would succeed with every output undefined: the plan is refused."""
+
+    def test_a_recipe_whose_kernel_checks_on_the_gpu_is_refused(self):
+        recipe = gpu_check_recipe()
+        top_level = [i.get("opcode") for i in recipe["program"]]
+        self.assertNotIn("tile.gpu_check_failed", top_level, "the check is nested")
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(recipe, {}, {})
+        self.assertEqual(str(cm.exception), GPU_CHECK_REFUSAL)
+
+    def test_stated_facts_are_named_first(self):
+        """Both engines refuse in the same order, so they give the same text."""
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(gpu_check_recipe(with_facts=True), {}, {})
+        self.assertEqual(str(cm.exception), GPU_CHECK_AND_FACTS_REFUSAL)
+
+
 def int_list(*vals):
     """A kernel list attr as rocke.core.ir_export._attrs_to_json writes it."""
     return {"t": "l", "v": [{"_": {"t": "i", "v": v}} for v in vals]}
@@ -459,6 +511,13 @@ class TestCEngineAgrees(unittest.TestCase):
         self.assertTrue(
             str(cm.exception).endswith(wrong_block_refusal((32, 1, 1))),
             str(cm.exception),
+        )
+
+    def test_gpu_checks_refused_by_c_too_with_the_same_message(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(cbor_encode(gpu_check_recipe()))
+        self.assertTrue(
+            str(cm.exception).endswith(GPU_CHECK_REFUSAL), str(cm.exception)
         )
 
     def test_partial_cluster_refused_by_c_too(self):

@@ -262,9 +262,20 @@ const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, s
  * it after the launch. */
 const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kernel_name);
 
+/* Whether `kernel` holds a tile.gpu_check_failed anywhere in its body, nested
+ * regions included: a kernel with a gpu_checked_value, whose false fact only a
+ * host reading the GPU-check word sees. */
+bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
+
 /* The `by` of the range marker rocke_b_gpu_checked_value writes (Python
  * core/ir.py::GPU_CHECKED_VALUE_WRITER). */
 #define ROCKE_GPU_CHECKED_VALUE_WRITER "gpu_checked_value"
+
+/* Why such a kernel must not be launched from its code object alone (Python
+ * core/ir.py::GPU_CHECK_UNREAD_REASON, same words). */
+#define ROCKE_GPU_CHECK_UNREAD_REASON                                      \
+    "only rocke's runtime reads this kernel's GPU-check word, so a false " \
+    "gpu_checked_value fact would go unseen"
 
 /* Why a kernel whose parameters state facts must not be launched from a launch
  * plan (Python core/ir.py::PARAM_FACTS_UNCHECKED_REASON, same words). */

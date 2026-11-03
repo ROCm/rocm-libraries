@@ -409,8 +409,8 @@ blamed on the next one.
 nothing: call `Runtime.check_gpu_checks(stream)` after it. Nothing reads the word after a graph
 replay, so the runtime refuses to queue a checked kernel on a stream that is being captured
 (`GpuCheckCaptureRefused`). A launch of the code object outside `rocke.runtime` is never noted, so
-nothing reads the word for it and its failure is silent. That is why `hkp_pack` and
-`write_artifact` refuse a kernel that holds a check.
+nothing reads the word for it and its failure is silent. That is why `hkp_pack`,
+`write_artifact` and both engines' recipe launch plans refuse a kernel that holds a check.
 
 The check does not trap. A trapped wave is parked by the trap handler (and on gfx11 `llvm.trap`
 ends in an `s_sethalt` loop); the launch ends only when the driver turns the trap's interrupt into a
