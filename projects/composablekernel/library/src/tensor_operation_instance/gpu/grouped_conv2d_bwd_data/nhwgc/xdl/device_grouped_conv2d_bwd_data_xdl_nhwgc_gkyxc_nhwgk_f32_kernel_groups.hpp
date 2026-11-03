@@ -12,32 +12,39 @@
 
 #include "ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_data/device_grouped_conv_bwd_data_xdl_instance.hpp"
 
-namespace ck
-{
-namespace tensor_operation
-{
-namespace device
-{
-namespace instance
-{
+namespace ck {
+namespace tensor_operation {
+namespace device {
+namespace instance {
 
-namespace detail
-{
+namespace detail {
 
-using F32BaseOp =
-    DeviceGroupedConvBwdDataMultipleD<2, NHWGK, GKYXC, Empty_Tuple, NHWGC, F32, F32, Empty_Tuple,
-                                      F32, PassThrough, PassThrough, PassThrough>;
+using F32BaseOp = DeviceGroupedConvBwdDataMultipleD<2,
+                                                    NHWGK,
+                                                    GKYXC,
+                                                    Empty_Tuple,
+                                                    NHWGC,
+                                                    F32,
+                                                    F32,
+                                                    Empty_Tuple,
+                                                    F32,
+                                                    PassThrough,
+                                                    PassThrough,
+                                                    PassThrough>;
 
 template <ConvolutionBackwardDataSpecialization ConvSpec>
 using GenericF32 =
     device_grouped_conv_bwd_data_xdl_f32_instances<2, NHWGK, GKYXC, Empty_Tuple, NHWGC, ConvSpec>;
 
 template <ConvolutionBackwardDataSpecialization ConvSpec>
-using NoshuffleF32 =
-    device_grouped_conv_bwd_data_xdl_f32_noshuffle_instances<2, NHWGK, GKYXC, Empty_Tuple, NHWGC,
-                                                             ConvSpec>;
+using NoshuffleF32 = device_grouped_conv_bwd_data_xdl_f32_noshuffle_instances<2,
+                                                                              NHWGK,
+                                                                              GKYXC,
+                                                                              Empty_Tuple,
+                                                                              NHWGC,
+                                                                              ConvSpec>;
 
-inline constexpr std::size_t GenericF32Count = 17;
+inline constexpr std::size_t GenericF32Count   = 17;
 inline constexpr std::size_t NoshuffleF32Count = 15;
 using F32KernelSlots =
     std::array<std::unique_ptr<F32BaseOp>, 2 * (GenericF32Count + NoshuffleF32Count)>;
@@ -45,8 +52,8 @@ using F32KernelSlots =
 // Keep shared single-group GEMM instantiations in one translation unit. Each
 // (BlockSize, MPerBlock, NPerBlock) tile bucket owns both epilogues and both
 // convolution specializations. These indices refer to the existing full tuples.
-using GenericGroup0 = std::index_sequence<1, 2, 3, 5, 7, 11, 12, 13, 14, 16>;
-using GenericGroup1 = std::index_sequence<0, 4, 6, 8, 9, 10, 15>;
+using GenericGroup0   = std::index_sequence<1, 2, 3, 5, 7, 11, 12, 13, 14, 16>;
+using GenericGroup1   = std::index_sequence<0, 4, 6, 8, 9, 10, 15>;
 using NoshuffleGroup0 = std::index_sequence<0, 1, 3, 5, 9, 10, 11, 12, 14>;
 using NoshuffleGroup1 = std::index_sequence<2, 4, 6, 7, 8, 13>;
 
@@ -58,7 +65,8 @@ constexpr bool covers_tuple_once(std::index_sequence<Left...>, std::index_sequen
     ((++counts[Right]), ...);
     for(auto count : counts)
     {
-        if(count != 1) return false;
+        if(count != 1)
+            return false;
     }
     return true;
 }

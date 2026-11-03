@@ -3,17 +3,12 @@
 
 #include "device_grouped_conv2d_bwd_data_xdl_nhwgc_gkyxc_nhwgk_f32_kernel_groups.hpp"
 
-namespace ck
-{
-namespace tensor_operation
-{
-namespace device
-{
-namespace instance
-{
+namespace ck {
+namespace tensor_operation {
+namespace device {
+namespace instance {
 
-namespace detail
-{
+namespace detail {
 
 void add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_kernel_group1_instances(
     F32KernelSlots& slots)
