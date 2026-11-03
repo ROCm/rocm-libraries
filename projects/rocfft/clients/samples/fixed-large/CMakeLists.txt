@@ -64,7 +64,7 @@ foreach( sample ${sample_list} )
     PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
   )
 
-  target_link_libraries( ${sample} PRIVATE roc::rocfft hip::device )
+  target_link_libraries( ${sample} PRIVATE roc::rocfft )
 
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} )
 
