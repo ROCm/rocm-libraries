@@ -32,6 +32,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/expanduser.hpp>
 #include <miopen/filesystem_checker.hpp>
+#include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/version.h>
 #if MIOPEN_ENABLE_SQLITE
@@ -72,14 +73,29 @@ static fs::path ComputeUserCachePath()
                                 + "." + std::to_string(MIOPEN_VERSION_PATCH) //
                                 + "." + MIOPEN_STRINGIZE(MIOPEN_VERSION_TWEAK);
     p = miopen::ExpandUser(cache_dir) / version;
-#if !MIOPEN_BUILD_DEV
-    /// \ref nfs-detection
-    if(GetFilesystemChecker().IsNetworkedFilesystem(p) &&
-       custom.empty()) // Only if env variable isn't set
+    if(GetFilesystemChecker().IsNetworkedFilesystem(p))
     {
-        p = fs::temp_directory_path() / ".cache" / "miopen" / version;
-    }
+#if !MIOPEN_BUILD_DEV
+        if(custom.empty())
+        {
+            const auto fallback = fs::temp_directory_path() / ".cache" / "miopen" / version;
+            MIOPEN_LOG_W(
+                "Kernel cache path '"
+                << p << "' is on a network filesystem. " << "Redirecting to '" << fallback
+                << "'; cached kernels may not persist. "
+                << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage for safe, fast caching.");
+            p = fallback;
+        }
+        else
 #endif
+        {
+            MIOPEN_LOG_W(
+                "Kernel cache path '"
+                << p << "' is on a network filesystem. "
+                << "This can cause very slow algorithm finds, timeouts, and database corruption. "
+                << "Set MIOPEN_CUSTOM_CACHE_DIR to node-local storage.");
+        }
+    }
 
     if(!fs::exists(p) && !MIOPEN_DISABLE_USERDB)
         fs::create_directories(p);
@@ -166,10 +182,10 @@ bool IsCacheDisabled()
 using KDb = DbTimer<MultiFileDb<KernDb, KernDb, false>>;
 KDb GetDb(const TargetProperties& target, size_t num_cu)
 {
-    static const auto user_dir = ComputeUserCachePath();
-    static const auto sys_dir  = ComputeSysCachePath();
-    fs::path user_path         = user_dir / (Handle::GetDbBasename(target, num_cu) + ".ukdb");
-    fs::path sys_path          = sys_dir / (Handle::GetDbBasename(target, num_cu) + ".kdb");
+    const auto& user_dir = GetUserCachePathInternal();
+    const auto& sys_dir  = GetSysCachePathInternal();
+    fs::path user_path   = user_dir / (Handle::GetDbBasename(target, num_cu) + ".ukdb");
+    fs::path sys_path    = sys_dir / (Handle::GetDbBasename(target, num_cu) + ".kdb");
     if(user_dir.empty())
         user_path = user_dir;
     if(!fs::exists(sys_path))

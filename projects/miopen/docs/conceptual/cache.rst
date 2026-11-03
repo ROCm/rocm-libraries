@@ -9,6 +9,50 @@ Kernel cache
 MIOpen caches binary kernels to disk so they don't need to be compiled the next time you run the
 application. This cache is stored in ``$HOME/.cache/miopen`` by default, but you can change this at
 build time by setting the ``MIOPEN_CACHE_DIR`` CMake variable.
+At runtime, ``MIOPEN_CUSTOM_CACHE_DIR`` overrides this location. MIOpen appends a version-specific
+subdirectory to the selected kernel cache directory.
+
+.. _cache-storage:
+
+Choosing cache and database storage
+====================================================
+
+Use low-latency, node-local storage for the writable kernel cache and user find/performance
+databases. Network or parallel filesystems can make algorithm finds, compilation, and tuning
+extremely slow, cause timeouts, and expose databases to corruption from unreliable locking.
+The SQLite kernel cache uses write-ahead logging (WAL), which requires same-host shared-memory
+coordination and is `not supported on network filesystems <https://www.sqlite.org/wal.html>`_.
+Moving only the find/performance databases does not address a network-backed kernel cache.
+
+Set both locations before starting the application, using paths on verified node-local storage:
+
+.. code:: bash
+
+   export MIOPEN_CUSTOM_CACHE_DIR="/local/scratch/$USER/miopen/cache"
+   export MIOPEN_USER_DB_PATH="/local/scratch/$USER/miopen/db"
+
+Replace ``/local/scratch`` with the appropriate local filesystem on your machine. Persistent local
+storage preserves compiled kernels and tuning results between runs. Temporary storage such as
+tmpfs or ``/tmp`` may be cleared, requiring subsequent runs to compile and tune again. ``/tmp`` and
+``$TMPDIR`` are not guaranteed to be node-local; check their filesystem before using them.
+
+On Linux, MIOpen warns when a selected user cache/database path is on a recognized network
+filesystem, including explicitly configured paths. The warning identifies the path and the
+environment variable used to relocate it. Explicit overrides remain unchanged.
+
+In non-development builds, a recognized network-backed *default* kernel cache is redirected to
+``temp_directory_path()/.cache/miopen/<version>``. The default user find/performance database path
+is similarly redirected to ``temp_directory_path()/.config/miopen``. These redirects emit warnings
+because the temporary caches and tuning results may not persist. Development builds warn without
+redirecting; their kernel cache is disabled by default unless enabled at configuration time.
+Warnings follow the normal ``MIOPEN_LOG_LEVEL`` setting and are emitted when the cached paths are
+initialized, not on every database access.
+
+Detection recognizes NFS, SMB/SMB2/CIFS, Coda, OCFS2, AFS, Lustre, Ceph, GPFS, BeeGFS, PanFS,
+and 9p. Other filesystems, including network-backed FUSE mounts, might not be recognized.
+Absence of a warning does not guarantee adequate storage performance or safe network sharing.
+The warnings do not change SQLite's network-filesystem limitations.
+
 
 Clear the cache
 ====================================================

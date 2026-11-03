@@ -157,26 +157,31 @@ fs::path PrepareUserDbPath()
     /// If MIOPEN_USER_DB_PATH is set in the environment, then assume that the user wants
     /// the library to use exactly that path.
     const auto p = env::value(MIOPEN_USER_DB_PATH);
-    if(!p.empty())
-    {
-        auto result = ExpandUser(p);
-        return result;
-    }
-    /// \anchor nfs-detection
-    /// Otherwise, check if the user-db-path denotes a network filesystem. If this is the case, then
-    /// let's assume that the library is running on a cluster system, where home directory is shared
-    /// between all the nodes. In order to prevent the slowdown due to concurrent file access, let's
-    /// use the local temporary directory.
-    /// WARNING: This makes all the library's user databases non-persistent. However, for now, we
-    /// assume that the performance hit associated with the usage of shared home dir is worse than
-    /// the deletion of user databases.
-    auto result = ExpandUser("${MIOPEN_USER_DB_PATH}");
-#if !MIOPEN_BUILD_DEV
+    auto result  = ExpandUser(p.empty() ? "${MIOPEN_USER_DB_PATH}" : p);
     if(GetFilesystemChecker().IsNetworkedFilesystem(result))
     {
-        result = fs::temp_directory_path() / ".config" / "miopen";
-    }
+#if !MIOPEN_BUILD_DEV
+        // Only the default path may be redirected; explicit overrides are preserved.
+        if(p.empty())
+        {
+            const auto fallback = fs::temp_directory_path() / ".config" / "miopen";
+            MIOPEN_LOG_W(
+                "User find/performance database path '"
+                << result << "' is on a network filesystem. Redirecting to '" << fallback
+                << "'; tuning results may not persist. "
+                << "Set MIOPEN_USER_DB_PATH to node-local storage for safe, fast database access.");
+            result = fallback;
+        }
+        else
 #endif
+        {
+            MIOPEN_LOG_W(
+                "User find/performance database path '"
+                << result << "' is on a network filesystem. "
+                << "This can cause slow tuning and database access, and database corruption. "
+                << "Set MIOPEN_USER_DB_PATH to node-local storage.");
+        }
+    }
     return result;
 }
 } // namespace

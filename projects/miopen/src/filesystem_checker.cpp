@@ -11,10 +11,6 @@
 #include <sys/vfs.h>
 #include <linux/magic.h>
 
-// NOTE: The IsNetworkedFilesystem implementation and related filesystem magic definitions
-// were relocated from expanduser.cpp to this file in order to allow for unit testing code
-// through mocking. See git history of expanduser.cpp for original context.
-
 // The magic number 0x0BD00BD0 (LL_SUPER_MAGIC) is defined in the Lustre filesystem source code.
 // Please refer to the Lustre project's documentation or source code for details.
 #ifndef LL_SUPER_MAGIC
@@ -44,6 +40,22 @@
 #endif
 #ifndef AFS_SUPER_MAGIC
 #define AFS_SUPER_MAGIC 0x5346414f
+#endif
+// GPFS and PanFS values are also used by MPICH's ROMIO filesystem detection:
+// https://github.com/pmodels/mpich/blob/main/src/mpi/romio/adio/common/ad_fstype.c
+#ifndef GPFS_SUPER_MAGIC
+#define GPFS_SUPER_MAGIC 0x47504653
+#endif
+#ifndef PAN_KERNEL_FS_CLIENT_SUPER_MAGIC
+#define PAN_KERNEL_FS_CLIENT_SUPER_MAGIC 0xAAD7AAEA
+#endif
+// https://github.com/ThinkParQ/beegfs/blob/master/client_module/source/filesystem/FhgfsOpsSuper.h
+#ifndef BEEGFS_MAGIC
+#define BEEGFS_MAGIC 0x19830326
+#endif
+// https://github.com/torvalds/linux/blob/master/include/uapi/linux/magic.h
+#ifndef V9FS_MAGIC
+#define V9FS_MAGIC 0x01021997
 #endif
 #ifndef EXT2_OLD_SUPER_MAGIC
 #define EXT2_OLD_SUPER_MAGIC 0xef51
@@ -80,6 +92,10 @@ const char* Stringize(unsigned long ft)
         CASE_RET_STRING(AFS_SUPER_MAGIC)
         CASE_RET_STRING(LL_SUPER_MAGIC)
         CASE_RET_STRING(CEPH_SUPER_MAGIC)
+        CASE_RET_STRING(GPFS_SUPER_MAGIC)
+        CASE_RET_STRING(BEEGFS_MAGIC)
+        CASE_RET_STRING(PAN_KERNEL_FS_CLIENT_SUPER_MAGIC)
+        CASE_RET_STRING(V9FS_MAGIC)
         CASE_RET_STRING(TMPFS_MAGIC)
         CASE_RET_STRING(OVERLAYFS_SUPER_MAGIC)
         CASE_RET_STRING(EXT2_OLD_SUPER_MAGIC)
@@ -92,15 +108,19 @@ bool IsNetworked(unsigned long ft)
 {
     switch(ft)
     {
-    case NFS_SUPER_MAGIC:   // fall through
-    case SMB_SUPER_MAGIC:   // fall through
-    case SMB2_MAGIC_NUMBER: // fall through
-    case CIFS_MAGIC_NUMBER: // fall through
-    case CODA_SUPER_MAGIC:  // fall through
-    case OCFS2_SUPER_MAGIC: // fall through
-    case AFS_SUPER_MAGIC:   // fall through
-    case LL_SUPER_MAGIC:    // fall through
-    case CEPH_SUPER_MAGIC: return true;
+    case NFS_SUPER_MAGIC:                  // fall through
+    case SMB_SUPER_MAGIC:                  // fall through
+    case SMB2_MAGIC_NUMBER:                // fall through
+    case CIFS_MAGIC_NUMBER:                // fall through
+    case CODA_SUPER_MAGIC:                 // fall through
+    case OCFS2_SUPER_MAGIC:                // fall through
+    case AFS_SUPER_MAGIC:                  // fall through
+    case LL_SUPER_MAGIC:                   // fall through
+    case CEPH_SUPER_MAGIC:                 // fall through
+    case GPFS_SUPER_MAGIC:                 // fall through
+    case BEEGFS_MAGIC:                     // fall through
+    case PAN_KERNEL_FS_CLIENT_SUPER_MAGIC: // fall through
+    case V9FS_MAGIC: return true;
     default: return false;
     }
 }
@@ -132,7 +152,13 @@ bool FilesystemChecker::IsNetworkedFilesystem(const fs::path& path_) const
         MIOPEN_LOG_NQI2("Path does not exist: '" << path << '\'');
         path = path.parent_path();
         if(path.empty())
+        {
+            // A relative path with no existing named ancestor still belongs to the
+            // current directory's filesystem; statfs("") cannot determine its type.
+            if(!path_.empty() && path_.is_relative())
+                path = ".";
             break;
+        }
     }
     struct statfs stat;
     const int rc = statfs(path.c_str(), &stat);

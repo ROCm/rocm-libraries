@@ -77,6 +77,10 @@ versions of kernels needed on your specific GPU will be saved. The presence of e
 reduces first time run delay by reducing the compile time.
 
 The cache directory defaults to "$HOME/.cache/miopen".
+Use node-local storage for both the kernel cache and user find/performance databases. A network-backed
+kernel cache can cause find timeouts even when the user databases are local. See :ref:`cache-storage`
+for relocation examples, network-filesystem warnings, and temporary fallback behavior.
+
 
 Post tuning
 ==========================================================

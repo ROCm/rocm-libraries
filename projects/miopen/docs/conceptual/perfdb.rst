@@ -28,8 +28,13 @@ a specific configuration. The auto-tune process might take a long time, but afte
 found, they're stored in the User PerfDb. MIOpen then automatically reads and uses these parameter
 values.
 
-By default, System PerfDb resides within the MIOpen install location, while User PerfDb resides in your
-home directory. For more information, see :ref:`setting up locations <setting-up-locations>`.
+By default, System PerfDb resides within the MIOpen install location, while User PerfDb resides in
+``$HOME/.config/miopen``. ``MIOPEN_USER_DB_PATH`` overrides the user find/performance database
+directory at runtime. Use low-latency node-local storage to avoid slow tuning and database access.
+Recognized network filesystems produce warnings even for explicit overrides; non-development
+builds redirect a network-backed default directory to temporary storage. See :ref:`cache-storage`
+for storage requirements, relocation settings, and persistence implications, and
+:ref:`setting up locations <setting-up-locations>` for additional location settings.
 
 The System PerfDb is not modified during the MIOpen installation.
 
