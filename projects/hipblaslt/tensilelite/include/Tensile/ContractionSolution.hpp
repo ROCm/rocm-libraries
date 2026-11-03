@@ -1118,11 +1118,6 @@ namespace TensileLite
             return internalArgsSupport.persistentLoopArgsVersion == 2;
         }
 
-        // Fraction of spatial-cluster peers that own a real output tile.
-        // Used only to rank analytical candidates; explicit solution dispatch
-        // and measured exact matches keep their selected kernel.
-        double streamKClusterUtilization(Problem const& problem) const;
-
         void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
                                           PersistentLaunchSettings const& launch) const;
 
@@ -1372,6 +1367,8 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
+            bool occupancyProbe     = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };
@@ -1424,6 +1421,11 @@ namespace TensileLite
             // a runtime-group kernel matches several group sizes.
             int  mxBlockA                   = 0;
             int  mxBlockB                   = 0;
+            // Free-dimension extent of the MX scaling tile (M for A, N for B).
+            // 1 == the original 1xmxBlock layout; absent from older logic files,
+            // where mapOptional leaves it at 1.
+            int  mxBlockFreeA               = 1;
+            int  mxBlockFreeB               = 1;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
 

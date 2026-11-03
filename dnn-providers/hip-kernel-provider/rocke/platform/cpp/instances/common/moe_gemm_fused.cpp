@@ -317,7 +317,8 @@ int rocke_moe_kloop_plan_init(rocke_moe_kloop_plan_t* out,
 
     int threads = u->block_size;
     int load_vec = 0;
-    if(rocke_choose_load_vec(t->tile_m, t->tile_n, t->tile_k, u->block_size, &load_vec) != ROCKE_OK)
+    if(rocke_choose_load_vec(t->tile_m, t->tile_n, t->tile_k, u->block_size, 2, &load_vec)
+       != ROCKE_OK)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "_MoeKloopPlan: choose_load_vec failed");
         return 0;

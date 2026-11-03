@@ -10,6 +10,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
@@ -24,6 +25,8 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/candidate_preparation_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/error_paths_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/utility_helpers_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
@@ -40,6 +43,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
 )
 
