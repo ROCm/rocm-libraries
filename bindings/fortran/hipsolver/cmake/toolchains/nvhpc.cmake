@@ -22,12 +22,12 @@
 #
 # ########################################################################
 
-# Classic Intel toolchain (ifort). Deprecated by Intel in favour of ifx; kept for sites still pinned to it.
+# NVIDIA HPC SDK toolchain (nvfortran).
 #
-# Usage, from projects/hipsolver/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-classic.cmake
+# Usage, from bindings/fortran/hipsolver:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/nvhpc.cmake
 #
 # The compilers are looked up on PATH; libhipsolver is needed only at link time.
 
-set(CMAKE_Fortran_COMPILER ifort CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER nvfortran CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       nvc CACHE FILEPATH "C compiler")

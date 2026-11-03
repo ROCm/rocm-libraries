@@ -280,8 +280,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hipsolver-fortran-config.cmak
 
 # Read from this tree, not hipsolver_VERSION, which standalone is the INSTALLED hipSOLVER's.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _hipsolver_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipsolver/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipsolver/CMakeLists.txt" _hipsolver_root)
   string(REGEX MATCH "set\\([ \t]*VERSION_STRING[ \t]+\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
          _m "${_hipsolver_root}")
   if(CMAKE_MATCH_1)
