@@ -2,7 +2,7 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 5.1.0 for ROCm x.y.z (unreleased)
+## rocPRIM 5.1.0 for ROCm 10.3.0
 
 ### Added
 
