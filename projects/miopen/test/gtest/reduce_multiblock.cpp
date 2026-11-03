@@ -45,14 +45,14 @@ namespace {
 
 enum class Pattern
 {
-    Const100,         // every element is 100
-    Const300,         // every element is 300
-    Const12,          // every element is 12
-    Const1,           // every element is 1
-    SignedHalves300,  // +300 in the first half of the reduced elements, -300 in the second
-    CancelPrecision,  // +/-(20 + (j % 7) / 64): exact in FP32, but not in FP16 once summed
-    MulUnderOver,     // 0.97 in the first half, 1 / 0.97 in the second: blocks under/overflow
-    ExtremeIndices,   // 0..63 repeating, 100 planted at 3K/4, -120 planted at K/3
+    Const100,        // every element is 100
+    Const300,        // every element is 300
+    Const12,         // every element is 12
+    Const1,          // every element is 1
+    SignedHalves300, // +300 in the first half of the reduced elements, -300 in the second
+    CancelPrecision, // +/-(20 + (j % 7) / 64): exact in FP32, but not in FP16 once summed
+    MulUnderOver,    // 0.97 in the first half, 1 / 0.97 in the second: blocks under/overflow
+    ExtremeIndices,  // 0..63 repeating, 100 planted at 3K/4, -120 planted at K/3
 };
 
 struct Shape
@@ -71,9 +71,9 @@ struct MultiBlockCase
     miopenReduceTensorIndices_t indices;
     Shape shape;
     Pattern pattern;
-    float alpha        = 1.0f;
-    float beta         = 0.0f;
-    float outputInit   = 0.0f; // initial value of the output elements (matters if beta != 0)
+    float alpha      = 1.0f;
+    float beta       = 0.0f;
+    float outputInit = 0.0f; // initial value of the output elements (matters if beta != 0)
 
     friend std::ostream& operator<<(std::ostream& os, const MultiBlockCase& c)
     {
@@ -197,29 +197,30 @@ Reference ComputeReference(const MultiBlockCase& c,
     std::vector<int> idxMin(outTotal, 0), idxMax(outTotal, 0), idxAmax(outTotal, 0);
     std::vector<std::size_t> count(outTotal, 0);
 
-    ForEachElement(c.shape.lengths, outLengths, [&](std::size_t lin, std::size_t o, std::size_t pos) {
-        const double v = input[lin];
-        sum[o] += v;
-        sumAbs[o] += std::abs(v);
-        sumSq[o] += v * v;
-        prod[o] *= v;
-        if(v < mn[o])
-        {
-            mn[o]     = v;
-            idxMin[o] = static_cast<int>(pos);
-        }
-        if(v > mx[o])
-        {
-            mx[o]     = v;
-            idxMax[o] = static_cast<int>(pos);
-        }
-        if(std::abs(v) > amx[o])
-        {
-            amx[o]     = std::abs(v);
-            idxAmax[o] = static_cast<int>(pos);
-        }
-        count[o]++;
-    });
+    ForEachElement(
+        c.shape.lengths, outLengths, [&](std::size_t lin, std::size_t o, std::size_t pos) {
+            const double v = input[lin];
+            sum[o] += v;
+            sumAbs[o] += std::abs(v);
+            sumSq[o] += v * v;
+            prod[o] *= v;
+            if(v < mn[o])
+            {
+                mn[o]     = v;
+                idxMin[o] = static_cast<int>(pos);
+            }
+            if(v > mx[o])
+            {
+                mx[o]     = v;
+                idxMax[o] = static_cast<int>(pos);
+            }
+            if(std::abs(v) > amx[o])
+            {
+                amx[o]     = std::abs(v);
+                idxAmax[o] = static_cast<int>(pos);
+            }
+            count[o]++;
+        });
 
     Reference ref;
     ref.values.resize(outTotal);
@@ -247,7 +248,8 @@ Reference ComputeReference(const MultiBlockCase& c,
             ref.indices[o] = idxAmax[o];
             break;
         }
-        ref.values[o] = static_cast<double>(c.alpha) * r + static_cast<double>(c.beta) * outputInit[o];
+        ref.values[o] =
+            static_cast<double>(c.alpha) * r + static_cast<double>(c.beta) * outputInit[o];
     }
     return ref;
 }
@@ -359,9 +361,9 @@ void RunCase(const MultiBlockCase& c)
 
     std::vector<std::uint8_t> wsAfter(wsBytes + canaryBytes);
     wspace.ReadTo(wsAfter);
-    EXPECT_TRUE(std::all_of(wsAfter.begin() + wsBytes, wsAfter.end(), [](auto b) {
-        return b == canaryByte;
-    })) << "the reduction wrote behind the end of the workspace of " << wsBytes << " bytes";
+    EXPECT_TRUE(std::all_of(
+        wsAfter.begin() + wsBytes, wsAfter.end(), [](auto b) { return b == canaryByte; }))
+        << "the reduction wrote behind the end of the workspace of " << wsBytes << " bytes";
 }
 
 void RunCaseDispatch(const MultiBlockCase& c)
@@ -377,12 +379,12 @@ void RunCaseDispatch(const MultiBlockCase& c)
 }
 
 // The shapes; see the comment at the top of the file for what each one exercises.
-const Shape thread2Partial{"Thread2Partial", {2, 2048}, {1}};         // 2 partials per output
-const Shape thread2All{"Thread2All", {1, 2048}, {1}};                 // 8 partials, 1 output
-const Shape warp2Partial{"Warp2Partial", {2, 20480}, {1}};            // 20 partials per output
-const Shape warp2All{"Warp2All", {1, 8192}, {1}};                     // 32 partials, 1 output
-const Shape block2All{"Block2All", {1, 131072}, {1}};                 // 512 partials, 1 output
-const Shape nchwPartial{"NchwPartial", {1, 4, 64, 64}, {0, 2, 3}};   // 4 partials per output
+const Shape thread2Partial{"Thread2Partial", {2, 2048}, {1}};      // 2 partials per output
+const Shape thread2All{"Thread2All", {1, 2048}, {1}};              // 8 partials, 1 output
+const Shape warp2Partial{"Warp2Partial", {2, 20480}, {1}};         // 20 partials per output
+const Shape warp2All{"Warp2All", {1, 8192}, {1}};                  // 32 partials, 1 output
+const Shape block2All{"Block2All", {1, 131072}, {1}};              // 512 partials, 1 output
+const Shape nchwPartial{"NchwPartial", {1, 4, 64, 64}, {0, 2, 3}}; // 4 partials per output
 
 MultiBlockCase MakeCase(const std::string& what,
                         miopenDataType_t inType,
@@ -399,8 +401,18 @@ std::vector<MultiBlockCase> Fp16CompFp32Smoke()
 {
     // the reproducer from the ticket and its NORM2 sibling
     return {
-        MakeCase("Avg100", miopenHalf, miopenFloat, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const100),
-        MakeCase("Norm2_12", miopenHalf, miopenFloat, MIOPEN_REDUCE_TENSOR_NORM2, thread2All, Pattern::Const12),
+        MakeCase("Avg100",
+                 miopenHalf,
+                 miopenFloat,
+                 MIOPEN_REDUCE_TENSOR_AVG,
+                 thread2Partial,
+                 Pattern::Const100),
+        MakeCase("Norm2_12",
+                 miopenHalf,
+                 miopenFloat,
+                 MIOPEN_REDUCE_TENSOR_NORM2,
+                 thread2All,
+                 Pattern::Const12),
     };
 }
 
@@ -411,34 +423,46 @@ std::vector<MultiBlockCase> Fp16CompFp32Standard()
 
     std::vector<MultiBlockCase> cases;
 
-    for(const auto* s : {&thread2Partial, &thread2All, &warp2Partial, &warp2All, &block2All, &nchwPartial})
+    for(const auto* s :
+        {&thread2Partial, &thread2All, &warp2Partial, &warp2All, &block2All, &nchwPartial})
     {
         // a block of a one-output reduction sums 512 elements, a block of any other 1024
-        cases.push_back(MakeCase("Avg300", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const300));
-        cases.push_back(MakeCase("Norm2_12", hf, fl, MIOPEN_REDUCE_TENSOR_NORM2, *s, Pattern::Const12));
-        cases.push_back(MakeCase("AddSigned300", hf, fl, MIOPEN_REDUCE_TENSOR_ADD, *s, Pattern::SignedHalves300));
-        cases.push_back(MakeCase("AddCancel", hf, fl, MIOPEN_REDUCE_TENSOR_ADD, *s, Pattern::CancelPrecision));
+        cases.push_back(
+            MakeCase("Avg300", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const300));
+        cases.push_back(
+            MakeCase("Norm2_12", hf, fl, MIOPEN_REDUCE_TENSOR_NORM2, *s, Pattern::Const12));
+        cases.push_back(MakeCase(
+            "AddSigned300", hf, fl, MIOPEN_REDUCE_TENSOR_ADD, *s, Pattern::SignedHalves300));
+        cases.push_back(
+            MakeCase("AddCancel", hf, fl, MIOPEN_REDUCE_TENSOR_ADD, *s, Pattern::CancelPrecision));
         // the product of the 0.97 half and the 1/0.97 half underflows for long reductions
         if(s != &block2All)
-            cases.push_back(MakeCase("MulUnderOver", hf, fl, MIOPEN_REDUCE_TENSOR_MUL, *s, Pattern::MulUnderOver));
-        cases.push_back(MakeCase("MaxNoIndices", hf, fl, MIOPEN_REDUCE_TENSOR_MAX, *s, Pattern::ExtremeIndices));
+            cases.push_back(MakeCase(
+                "MulUnderOver", hf, fl, MIOPEN_REDUCE_TENSOR_MUL, *s, Pattern::MulUnderOver));
+        cases.push_back(MakeCase(
+            "MaxNoIndices", hf, fl, MIOPEN_REDUCE_TENSOR_MAX, *s, Pattern::ExtremeIndices));
     }
 
     // the reproducer from the ticket
-    cases.push_back(MakeCase("Avg100", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const100));
+    cases.push_back(
+        MakeCase("Avg100", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const100));
 
     // MIN/MAX/AMAX with flattened indices: the workspace holds the partial values and the
     // partial indices
     for(const auto* s : {&thread2Partial, &warp2All, &block2All})
     {
         constexpr auto ind = MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES;
-        cases.push_back(MakeCase("MinIdx", hf, fl, MIOPEN_REDUCE_TENSOR_MIN, *s, Pattern::ExtremeIndices, ind));
-        cases.push_back(MakeCase("MaxIdx", hf, fl, MIOPEN_REDUCE_TENSOR_MAX, *s, Pattern::ExtremeIndices, ind));
-        cases.push_back(MakeCase("AmaxIdx", hf, fl, MIOPEN_REDUCE_TENSOR_AMAX, *s, Pattern::ExtremeIndices, ind));
+        cases.push_back(
+            MakeCase("MinIdx", hf, fl, MIOPEN_REDUCE_TENSOR_MIN, *s, Pattern::ExtremeIndices, ind));
+        cases.push_back(
+            MakeCase("MaxIdx", hf, fl, MIOPEN_REDUCE_TENSOR_MAX, *s, Pattern::ExtremeIndices, ind));
+        cases.push_back(MakeCase(
+            "AmaxIdx", hf, fl, MIOPEN_REDUCE_TENSOR_AMAX, *s, Pattern::ExtremeIndices, ind));
     }
 
     // alpha / beta blend of the combined partials
-    auto blend = MakeCase("AvgBlend", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const100);
+    auto blend =
+        MakeCase("AvgBlend", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const100);
     blend.alpha      = 0.5f;
     blend.beta       = 0.5f;
     blend.outputInit = 10.0f;
@@ -451,17 +475,44 @@ std::vector<MultiBlockCase> Fp16CompFp32Standard()
 std::vector<MultiBlockCase> SameCompTypeStandard()
 {
     return {
-        MakeCase("HalfCompAvg1", miopenHalf, miopenHalf, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const1),
-        MakeCase("HalfCompAvg1", miopenHalf, miopenHalf, MIOPEN_REDUCE_TENSOR_AVG, warp2All, Pattern::Const1),
-        MakeCase("HalfCompMaxIdx", miopenHalf, miopenHalf, MIOPEN_REDUCE_TENSOR_MAX, thread2Partial, Pattern::ExtremeIndices, MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES),
+        MakeCase("HalfCompAvg1",
+                 miopenHalf,
+                 miopenHalf,
+                 MIOPEN_REDUCE_TENSOR_AVG,
+                 thread2Partial,
+                 Pattern::Const1),
+        MakeCase("HalfCompAvg1",
+                 miopenHalf,
+                 miopenHalf,
+                 MIOPEN_REDUCE_TENSOR_AVG,
+                 warp2All,
+                 Pattern::Const1),
+        MakeCase("HalfCompMaxIdx",
+                 miopenHalf,
+                 miopenHalf,
+                 MIOPEN_REDUCE_TENSOR_MAX,
+                 thread2Partial,
+                 Pattern::ExtremeIndices,
+                 MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES),
     };
 }
 
 std::vector<MultiBlockCase> Fp32Standard()
 {
     return {
-        MakeCase("Avg100", miopenFloat, miopenFloat, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const100),
-        MakeCase("AmaxIdx", miopenFloat, miopenFloat, MIOPEN_REDUCE_TENSOR_AMAX, warp2All, Pattern::ExtremeIndices, MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES),
+        MakeCase("Avg100",
+                 miopenFloat,
+                 miopenFloat,
+                 MIOPEN_REDUCE_TENSOR_AVG,
+                 thread2Partial,
+                 Pattern::Const100),
+        MakeCase("AmaxIdx",
+                 miopenFloat,
+                 miopenFloat,
+                 MIOPEN_REDUCE_TENSOR_AMAX,
+                 warp2All,
+                 Pattern::ExtremeIndices,
+                 MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES),
     };
 }
 
@@ -469,8 +520,18 @@ std::vector<MultiBlockCase> Fp32Standard()
 std::vector<MultiBlockCase> Int8Standard()
 {
     return {
-        MakeCase("Avg100", miopenInt8, miopenFloat, MIOPEN_REDUCE_TENSOR_AVG, thread2Partial, Pattern::Const100),
-        MakeCase("Avg100", miopenInt8, miopenFloat, MIOPEN_REDUCE_TENSOR_AVG, warp2Partial, Pattern::Const100),
+        MakeCase("Avg100",
+                 miopenInt8,
+                 miopenFloat,
+                 MIOPEN_REDUCE_TENSOR_AVG,
+                 thread2Partial,
+                 Pattern::Const100),
+        MakeCase("Avg100",
+                 miopenInt8,
+                 miopenFloat,
+                 MIOPEN_REDUCE_TENSOR_AVG,
+                 warp2Partial,
+                 Pattern::Const100),
     };
 }
 
@@ -523,18 +584,18 @@ class GPU_ReduceMultiBlock_FP16 : public ::testing::TestWithParam<MultiBlockCase
 class GPU_ReduceMultiBlock_FP32 : public ::testing::TestWithParam<MultiBlockCase>
 {
 };
-class GPU_ReduceMultiBlock_INT8 : public ::testing::TestWithParam<MultiBlockCase>
+class GPU_ReduceMultiBlock_I8 : public ::testing::TestWithParam<MultiBlockCase>
 {
 };
-class GPU_ReduceMultiBlockWorkspace : public ::testing::TestWithParam<WorkspaceSizeCase>
+class GPU_ReduceMultiBlockWorkspace_FP16 : public ::testing::TestWithParam<WorkspaceSizeCase>
 {
 };
 
 TEST_P(GPU_ReduceMultiBlock_FP16, PartialResultsKeepComputeType) { RunCaseDispatch(GetParam()); }
 TEST_P(GPU_ReduceMultiBlock_FP32, PartialResultsKeepComputeType) { RunCaseDispatch(GetParam()); }
-TEST_P(GPU_ReduceMultiBlock_INT8, PartialResultsKeepComputeType) { RunCaseDispatch(GetParam()); }
+TEST_P(GPU_ReduceMultiBlock_I8, PartialResultsKeepComputeType) { RunCaseDispatch(GetParam()); }
 
-TEST_P(GPU_ReduceMultiBlockWorkspace, PartialsAreStoredInComputeType)
+TEST_P(GPU_ReduceMultiBlockWorkspace_FP16, PartialsAreStoredInComputeType)
 {
     const auto& c = GetParam();
     auto&& handle = get_handle();
@@ -563,7 +624,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ReduceMultiBlock_FP16,
                          ::testing::ValuesIn([] {
-                             auto cases = Fp16CompFp32Standard();
+                             auto cases      = Fp16CompFp32Standard();
                              const auto same = SameCompTypeStandard();
                              cases.insert(cases.end(), same.begin(), same.end());
                              return cases;
@@ -574,10 +635,10 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          ::testing::ValuesIn(Fp32Standard()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         GPU_ReduceMultiBlock_INT8,
+                         GPU_ReduceMultiBlock_I8,
                          ::testing::ValuesIn(Int8Standard()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         GPU_ReduceMultiBlockWorkspace,
+                         GPU_ReduceMultiBlockWorkspace_FP16,
                          ::testing::ValuesIn(GetWorkspaceSizeCases()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
