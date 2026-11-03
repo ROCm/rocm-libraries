@@ -1090,6 +1090,17 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
             return -1;
         spec->xh_stride_m = true;
         return 0;
+    case 121:
+    case 122:
+    case 123:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = 1;
+        spec->uniform_k_decode = idx == 122;
+        spec->rpf_lds_barrier = idx != 122;
+        spec->rpf_fetch_late = idx != 121;
+        spec->sched_strategy = idx == 123 ? 2 : 0;
+        return 0;
     case 102:
         if(make_cfg_3d_base(55, spec, arch) != 0)
             return -1;

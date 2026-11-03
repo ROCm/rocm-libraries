@@ -214,6 +214,12 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
     }
+    if(spec->sched_strategy && b->kernel != NULL)
+    {
+        static const char* const strategies[6]
+            = {"", "max-ilp", "max-memory-clause", "iterative-ilp", "iterative-minreg", "iterative-maxocc"};
+        rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", strategies[spec->sched_strategy]);
+    }
     if(spec->no_agpr && b->kernel != NULL)
         rocke_attr_set_str(b, &b->kernel->attrs, "agpr_alloc", "0,0");
 

@@ -1017,6 +1017,7 @@ _GFX942_3D_OFFSET = 32
 #  118: 55 + xh_stride_m without uk_xhalo: rejected by both engines
 #  119: 116 + xh_yring=14 (the input-row ring, early reload)
 #  120: 116 + xh_yring=2
+#  121-123: 55 + reg_prefetch=1 with rpf_lds_barrier / rpf_fetch_late / sched_strategy
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1314,6 +1315,14 @@ def _gfx942_3d_spec(idx: int):
     knobs[118] = (55, dict(xh_stride_m=True))
     knobs[119] = (55, dict(_s4, uk_tap_fast=True, xh_yring=14))
     knobs[120] = (55, dict(_s4, uk_tap_fast=True, xh_yring=2))
+    # 121-123: reg_prefetch=1 loop knobs (rpf_lds_barrier, rpf_fetch_late) and
+    # the scheduler strategy attribute.
+    knobs[121] = (55, dict(reg_prefetch=1, rpf_lds_barrier=True))
+    knobs[122] = (55, dict(uniform_k_decode=True, reg_prefetch=1, rpf_fetch_late=True))
+    knobs[123] = (
+        55,
+        dict(reg_prefetch=1, rpf_fetch_late=True, rpf_lds_barrier=True, sched_strategy=2),
+    )
     _pp.update(
         {
             110: dict(_p84, xcd_remap=0, split_streamk=True),

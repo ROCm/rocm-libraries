@@ -1535,7 +1535,27 @@ static void conv_run_loop(rocke_conv_build_ctx_t* ctx,
         rocke_b_region_enter(b, f.body);
         {
             conv_kl_adv(u, iv + n_acc, n_state, st1);
-            conv_kl_fetch(ctx, u, rocke_b_add(b, f.iv, ctx->c_block_k), st1, st);
+            /* rpf_fetch_late: the next tile's reads go behind the first LDS
+             * fragment reads (the MFMA phase calls back). */
+            struct late_fetch
+            {
+                rocke_conv_build_ctx_t* ctx;
+                conv_uk_t* u;
+                rocke_value_t* kv;
+                rocke_value_t* const* st1;
+                conv_rpf_staged_t* st;
+            } lf = {ctx, u, f.iv, st1, st};
+            if(spec->rpf_fetch_late)
+            {
+                ctx->after_first_reads_user = &lf;
+                ctx->after_first_reads = [](void* user) {
+                    late_fetch* l = (late_fetch*)user;
+                    rocke_value_t* k1 = rocke_b_add(l->ctx->b, l->kv, l->ctx->c_block_k);
+                    conv_kl_fetch(l->ctx, l->u, k1, l->st1, l->st);
+                };
+            }
+            else
+                conv_kl_fetch(ctx, u, rocke_b_add(b, f.iv, ctx->c_block_k), st1, st);
             if(spec->vmem_interleave)
                 ctx->vmi_pending = st->a.count + st->b.count; /* the MFMA phase places them */
             else
@@ -1544,12 +1564,19 @@ static void conv_run_loop(rocke_conv_build_ctx_t* ctx,
             if(spec->rpf_setprio)
                 rocke_b_s_setprio(b, spec->rpf_setprio);
             rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
+            ctx->after_first_reads = NULL;
             rocke_b_sched_barrier(b, 0);
             if(spec->rpf_setprio)
                 rocke_b_s_setprio(b, 0);
-            rocke_b_sync(b);
+            if(spec->rpf_lds_barrier)
+                rocke_b_sync_lds_only(b);
+            else
+                rocke_b_sync(b);
             conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
-            rocke_b_sync(b);
+            if(spec->rpf_lds_barrier)
+                rocke_b_sync_lds_only(b);
+            else
+                rocke_b_sync(b);
             for(int i = 0; i < n_state; ++i)
                 acc_a[n_acc + i] = st1[i];
             rocke_b_scf_yield(b, acc_a, n_acc + n_state);

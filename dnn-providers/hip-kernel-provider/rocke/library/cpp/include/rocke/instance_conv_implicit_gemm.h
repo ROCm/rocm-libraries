@@ -329,6 +329,12 @@ typedef struct rocke_implicit_gemm_conv_spec
     int cshuffle_m_chunks; /* default 1 */
     /* epi_lds_barriers: the cshuffle epilogue's barriers as LDS-only ones. */
     bool epi_lds_barriers; /* default false */
+    /* reg_prefetch=1 loop: LDS-only per-tile barriers (rpf_lds_barrier) and
+     * the next tile's reads after the first fragment reads (rpf_fetch_late). */
+    bool rpf_lds_barrier;
+    bool rpf_fetch_late;
+    /* AMDGPU machine-scheduler strategy (0 = default, 1..5). */
+    int sched_strategy;
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

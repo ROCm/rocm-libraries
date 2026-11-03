@@ -468,7 +468,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* (lah, dfr: Python-only, off.) */
     ROCKE_FLAG(s->vmem_interleave > 0, "vmi%d", s->vmem_interleave);
     ROCKE_FLAG(s->lds_kpack_read, "kprd");
-    /* (lbar, flate: Python-only, off.) */
+    ROCKE_FLAG(s->rpf_lds_barrier, "lbar");
+    ROCKE_FLAG(s->rpf_fetch_late, "flate");
     ROCKE_FLAG(s->uk_xhalo > 0, "uxh%d", s->uk_xhalo);
     /* (xdpp: Python-only, off.) */
     ROCKE_FLAG(s->rpf_setprio > 0, "prio%d", s->rpf_setprio);
@@ -491,7 +492,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* (ppeg: Python-only, off.) */
     ROCKE_FLAG(s->epi_lds_barriers, "elb");
     ROCKE_FLAG(s->split_hybrid > 0, "shy%d", s->split_hybrid);
-    /* (mss, stc: Python-only knobs, off.) */
+    ROCKE_FLAG(s->sched_strategy > 0, "mss%d", s->sched_strategy);
+    /* (stc: Python-only, off.) */
     ROCKE_FLAG(s->split_det > 0, "sdet%d", s->split_det);
     ROCKE_FLAG(s->pp_split_fetch > 0, "psf%d", s->pp_split_fetch);
     ROCKE_FLAG(s->no_agpr, "nag");
@@ -1368,6 +1370,21 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
             reason, reason_cap, "pp_split_fetch (1-10) shapes the plain rpf_pingpong 5 loop");
     if(s->pp_split_fetch >= 5 && s->pp_split_fetch <= 9)
         ROCKE_SPEC_FAIL(reason, reason_cap, "pp_split_fetch 5-9 are not ported to the C engine");
+    if(s->rpf_fetch_late && (s->reg_prefetch != 1 || s->vmem_interleave))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "rpf_fetch_late is implemented in the reg_prefetch=1 loop without "
+                        "vmem_interleave");
+    if(s->rpf_lds_barrier && s->reg_prefetch != 1)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "rpf_lds_barrier is implemented in the reg_prefetch=1 loop only "
+                        "(defer_mfma and a_direct already use LDS-only barriers)");
+    if(s->rpf_fetch_late && s->uk_xhalo)
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "uk_xhalo does not combine with a_direct or rpf_fetch_late");
+    if(s->sched_strategy < 0 || s->sched_strategy > 5)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "sched_strategy must be 0..5");
     if(s->pp_pre_mfma < 0)
         ROCKE_SPEC_FAIL(reason, reason_cap, "pp_pre_mfma must be >= 0");
     if(s->uk_xhalo && s->split_k > 1)

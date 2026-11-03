@@ -697,6 +697,13 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
     {
         int na = 0, nb = 0;
         conv_load_frags(e, kk, a_rows, &na, b_cols, &nb);
+        if(kk == 0 && ctx->after_first_reads != NULL)
+        {
+            /* rpf_fetch_late: the next tile's global reads go here, behind the
+             * first LDS fragment reads and ahead of every MFMA. */
+            rocke_b_sched_barrier(b, 0);
+            ctx->after_first_reads(ctx->after_first_reads_user);
+        }
         int flat = 0;
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {

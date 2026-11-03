@@ -401,6 +401,9 @@ typedef struct rocke_conv_build_ctx
     int wg_b_buf_rows;
     rocke_value_t* wg_xw_nb0;
     int wg_xw_nsub;
+    /* rpf_fetch_late: called once after the MFMA phase's first fragment reads. */
+    void (*after_first_reads)(void* user);
+    void* after_first_reads_user;
     /* dgrad 3-D kernargs (Python params, is_3d). */
     rocke_value_t* p_W_stride_z;
     rocke_value_t* p_magic_m_Di_mult;
