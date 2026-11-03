@@ -1979,17 +1979,21 @@ int drainLatencyAfterIssueOffsets(int burstDrainLatency, int lastDsLoadLatency, 
 //            loads, the ones issued together). Without DsSpread it is the full matching burst,
 //            shortened when credit spacing exceeds kDrainNeutralThrottleCyclesPerDs.
 //  Step 4b - second estimate from register dependencies already in regionDag_.
-//            For every matching ds_load, take its direct parent WMMAs (predecessors
-//            that are matrix ops) and keep the largest 1-based index. A ds_load that
+//            For every matching ds_load, walk its whole predecessor chain and keep the
+//            largest 1-based WMMA index on it. A VALU or SALU has no index of its own; it
+//            passes the WMMA index behind it forward, so WMMA → v_add → ds_load still sees
+//            that WMMA. A direct parent WMMA is the same index as before. A ds_load that
 //            overwrites a WMMA source also waits out WmmaVgprSrcToDsWrite
 //            (pipeOpDistance_, the same WMMA count pickOne enforces), so that gap is
-//            added to the index. The cycles added to that index are the same
+//            added once to the index. The cycles added to that index are the same
 //            latencyForAfterThreshold Step 4 already computed (configured drain, the last
 //            DsSpread batch, or the credit-spaced burst), converted with the same budget
 //            formula. If index + gap + budget exceeds step 4, that base replaces the
 //            step-4 threshold; the drain value itself stays. The WMMA-to-WMMA chain
-//            requested later in onInitRegion is not in this graph. The gap is 0 when ESM2 VALU-src
-//            tracking is off, because pickOne does not apply the rule then.
+//            requested later in onInitRegion is not in this graph, and neither are barrier
+//            thresholds, which overlap adjustment can still move. earliestAt applies both
+//            later, for the pacer. The gap is 0 when ESM2 VALU-src tracking is off, because
+//            pickOne does not apply the rule then.
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -2014,8 +2018,10 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
 
     // Direct predecessors in the register DAG, plus each node's 1-based WMMA index
     // (0 when the node is not a WMMA). Same numbering as lastOverlap below.
+    // ancestorWmmaIdx[n] is the latest such index on n's predecessor chain.
     std::vector<std::vector<unsigned>> predIds;
     std::vector<int> wmmaIndexByNode;
+    std::vector<int> ancestorWmmaIdx;
     if (regionDag_ != nullptr) {
         const unsigned dagNodes = static_cast<unsigned>(regionDag_->nodes.size());
         predIds.resize(dagNodes);
@@ -2026,6 +2032,14 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             for (unsigned succ : regionDag_->graph[id]) {
                 if (succ < dagNodes) predIds[succ].push_back(id);
             }
+        }
+        // Predecessors are earlier instructions, so one pass in node order sees their
+        // chain index first. A non-WMMA keeps its predecessors' index and adds nothing.
+        ancestorWmmaIdx.assign(dagNodes, 0);
+        for (unsigned id = 0; id < dagNodes; ++id) {
+            int idx = wmmaIndexByNode[id];
+            for (unsigned pred : predIds[id]) idx = std::max(idx, ancestorWmmaIdx[pred]);
+            ancestorWmmaIdx[id] = idx;
         }
     }
     // Same conversion Step 4 uses. latency is in cycles; the result is a WMMA count.
@@ -2122,21 +2136,21 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
         // Step 4b. lastOverlap only sees the latest ds_read. An earlier matching ds_read can
-        // still be waiting on a later WMMA (the WMMA reads a VGPR that ds_read will overwrite).
-        // That WMMA index is another dependency base. The latency added to it is the drain
-        // Step 4 already stored in latencyForAfterThreshold, converted with the same budget
-        // formula. The pair replaces Step 4 only when its sum is strictly larger.
+        // still be waiting on a later WMMA that reaches it through a VALU or SALU. That WMMA
+        // index is another dependency base. The latency added to it is the drain Step 4
+        // already stored in latencyForAfterThreshold, converted with the same budget formula.
+        // The pair replaces Step 4 only when its sum is strictly larger.
         int maxParentWmmaIdx = 0;
         if (regionDag_ != nullptr) {
             for (StinkyInstruction* load : matchingDsLoadInsts) {
                 auto idIt = regionDag_->instToId.find(load);
-                if (idIt == regionDag_->instToId.end() || idIt->second >= predIds.size()) continue;
-                for (unsigned pred : predIds[idIt->second])
-                    maxParentWmmaIdx = std::max(maxParentWmmaIdx, wmmaIndexByNode[pred]);
+                if (idIt == regionDag_->instToId.end() || idIt->second >= ancestorWmmaIdx.size())
+                    continue;
+                maxParentWmmaIdx = std::max(maxParentWmmaIdx, ancestorWmmaIdx[idIt->second]);
             }
         }
-        // The ds_load cannot issue on the parent WMMA's index: WmmaVgprSrcToDsWrite
-        // holds it until this many later WMMAs have issued. No parent means no gap.
+        // The ds_load cannot issue on that WMMA's index: WmmaVgprSrcToDsWrite holds it
+        // until this many later WMMAs have issued. No WMMA on the chain means no gap.
         if (maxParentWmmaIdx > 0) maxParentWmmaIdx += wmmaToDsWarGate;
         const int depLatency = latencyForAfterThreshold;
         const int depLatencyBudget = latencyBudget(depLatency);

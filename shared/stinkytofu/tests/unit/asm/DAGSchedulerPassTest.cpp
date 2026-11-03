@@ -866,6 +866,49 @@ TEST_F(DAGSchedulerPassTest, BarrierAfterUsesParentWmmaWhenItExceedsDrainThresho
     EXPECT_LT(positionOf(*bb, afterParentWmma), positionOf(*bb, lateSignal)) << scheduleOrder(*bb);
 }
 
+// The matching ds_load's address is a v_add of WMMA 12's dest, so that WMMA is an
+// ancestor and the ds_load's direct parent is the v_add. One matching ds_load among
+// 22 ds_loads and 22 WMMAs needs one window, so the overlap after is 1 + 56/8 + 1
+// = 9. The ancestor index plus that same budget is 12 + 8 = 20, and the barrier
+// keeps 20. DsSpread is off, so the drain is the instruction latency. The trailing
+// compare keeps the loop tail from being a WMMA.
+TEST_F(DAGSchedulerPassTest, BarrierAfterUsesAncestorWmmaThroughValu) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* producerWmma = nullptr;
+    const int producerDest = 1100 + 11 * 16;
+    for (int i = 0; i < 12; ++i) {
+        StinkyInstruction* wmma = createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16,
+                                                              /*src0Start=*/3000 + i * 16);
+        if (i == 11) producerWmma = wmma;
+    }
+    createVAddInBlock(bb, arch, /*destReg=*/200, /*src0Reg=*/producerDest,
+                      /*src1Reg=*/producerDest);
+    StinkyInstruction* preBarrierDs =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/3);
+    for (int i = 0; i < 10; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + i * 16, /*src0Start=*/5000 + i * 16);
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/3);
+    (void)wait;
+    createUnrelatedDsLoads(21);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    int wmmasBeforeBarrier = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == signal) break;
+        if (isMatrixInstruction(*inst)) ++wmmasBeforeBarrier;
+    }
+
+    ASSERT_NE(producerWmma, nullptr);
+    EXPECT_LT(positionOf(*bb, producerWmma), positionOf(*bb, preBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, preBarrierDs), positionOf(*bb, signal)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBeforeBarrier, 20) << scheduleOrder(*bb);
+}
+
 // One stage barrier with ds_loads on both sides is in both threshold maps.
 // The pre-barrier ds_load overwrites a VGPR read by WMMA 16, so the after
 // threshold is that parent plus the single-load drain budget
