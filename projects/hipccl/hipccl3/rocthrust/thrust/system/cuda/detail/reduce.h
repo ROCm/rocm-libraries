@@ -679,7 +679,7 @@ _CCCL_HOST_DEVICE T reduce(execution_policy<Derived>& policy, InputIt first, Inp
 {
   using size_type = thrust::detail::it_difference_t<InputIt>;
   // FIXME: Check for RA iterator.
-  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
+  size_type num_items = static_cast<size_type>(::cuda::std::distance(first, last));
   return cuda_cub::reduce_n(policy, first, num_items, init, binary_op);
 }
 
@@ -704,4 +704,4 @@ THRUST_NAMESPACE_END
 #  include <thrust/memory.h>
 #  include <thrust/reduce.h>
 
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

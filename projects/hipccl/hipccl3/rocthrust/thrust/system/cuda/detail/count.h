@@ -68,4 +68,4 @@ count(execution_policy<Derived>& policy, InputIt first, InputIt last, Value cons
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()
