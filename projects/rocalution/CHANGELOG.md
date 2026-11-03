@@ -43,6 +43,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed `SGS` scaling by the inverse of the diagonal instead of the diagonal between its two triangular solves after `Build()`.
 * Fixed `Jacobi::ResetOperator()`, `GS::ResetOperator()` and `SGS::ResetOperator()` ignoring the given operator and rebuilding from the previous one.
+* Fixed `FSAI` keeping the pattern value in a row of the pattern that holds only the diagonal, unless the diagonal is the first entry of that row of the matrix.
 
 ## (Unreleased) rocALUTION 4.1.1
 

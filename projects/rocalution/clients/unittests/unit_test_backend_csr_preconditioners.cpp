@@ -636,9 +636,6 @@ TYPED_TEST(backend_csr_preconditioners,
     const Csr<T> G = csr_of(*A);
     ASSERT_EQ(G.row_offset, diagonal.row_offset);
     EXPECT_NEAR(G.val[0], static_cast<T>(1) / std::sqrt(dense(ref)[0]), tol<T>());
-
-    KNOWN_BUG("a row with only the diagonal in the pattern is set to 1 / a_ii only if the "
-              "diagonal is the first entry of the row of A");
     expect_near(G, fsai(ref, diagonal), tol<T>());
 }
 

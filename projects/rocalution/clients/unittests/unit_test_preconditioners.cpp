@@ -1860,9 +1860,6 @@ TYPED_TEST(preconditioners, fsai_factor_lives_on_an_external_pattern)
     p.Build();
     expect_near(apply(p, *A, r), fsai(ref, pattern(tridiagonal), r), scaled_tol<T>(1e-13));
 
-    KNOWN_BUG("a row of the pattern with only the diagonal keeps the pattern value unless the "
-              "row of the matrix starts at the diagonal");
-
     Csr<T> identity(12);
     for(int i = 0; i < 12; ++i)
     {
