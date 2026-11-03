@@ -35,6 +35,7 @@
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
+#include "rocke/helper_rocke.helpers.layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -823,13 +824,12 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
         c->zero_elem = rocke_b_vec_extract(b, zv, 0);
     }
 
-    /* wave32 transpose-read address (see rocke_dconv_wgrad_build_image). */
+    /* wave32 transpose-read address: the shared lane map, flattened over the
+     * 16-wide LDS rows. */
     {
-        rocke_value_t* tr_blk = rocke_b_div(b, q_in_lane, c8);
-        rocke_value_t* tr_col = rocke_b_mul(b, tr_blk, c8);
-        rocke_value_t* tr_hi = rocke_b_mul(b, c4, c16);
-        rocke_value_t* tr_lo = rocke_b_mod(b, c->lane, c8);
-        rocke_value_t* tr_row = rocke_b_add(b, tr_hi, tr_lo);
+        rocke_value_t* tr_col;
+        rocke_value_t* tr_row;
+        rocke_conv_tr_lane_offsets32(b, c->lane, 16, NULL, NULL, &tr_col, &tr_row);
         rocke_value_t* tr_rowf = rocke_b_mul(b, tr_row, c16);
         c->tr_flat = rocke_b_add(b, tr_rowf, tr_col);
         c->c_tr_hi = rocke_b_const_i32(b, 8 * 16);

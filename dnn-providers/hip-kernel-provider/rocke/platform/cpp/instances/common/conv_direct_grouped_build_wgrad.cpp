@@ -31,6 +31,7 @@
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
+#include "rocke/helper_rocke.helpers.layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -699,24 +700,13 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
          * lanes: the group addresses the 8-channel block holding column
          * lane % 16, and lane l supplies spatial row (l / 16) * 16 + l % 8.
          * Two reads 8 rows apart give lane l spatial rows (l / 16) * 16 +
-         * 0..15 of channel l % 16 -- the WMMA A/B fragment.
+         * 0..15 of channel l % 16 -- the WMMA A/B fragment. The lane map is
+         * the shared rocke_conv_tr_lane_offsets32:
          *   tr_col  = ((lane % 16) / 8) * 8
          *   tr_row  = (lane/16)*FRAG + lane % 8
          *   tr_flat = tr_row*TR_N + tr_col */
-        rocke_value_t* c8 = rocke_b_const_i32(b, 8);
         rocke_value_t* tr_col;
-        {
-            rocke_value_t* c16 = rocke_b_const_i32(b, 16);
-            rocke_value_t* lane_mod16 = rocke_b_mod(b, ctx->lane, c16);
-            rocke_value_t* blk = rocke_b_div(b, lane_mod16, c8);
-            tr_col = rocke_b_mul(b, blk, c8);
-        }
-        {
-            rocke_value_t* c_frag = rocke_b_const_i32(b, ctx->FRAG);
-            rocke_value_t* lhs = rocke_b_mul(b, ctx->c4, c_frag);
-            rocke_value_t* rhs = rocke_b_mod(b, ctx->lane, c8);
-            ctx->tr_row = rocke_b_add(b, lhs, rhs);
-        }
+        rocke_conv_tr_lane_offsets32(b, ctx->lane, ctx->FRAG, NULL, NULL, &tr_col, &ctx->tr_row);
         {
             rocke_value_t* lhs = rocke_b_mul(b, ctx->tr_row, ctx->c_TR_N);
             ctx->tr_flat = rocke_b_add(b, lhs, tr_col);

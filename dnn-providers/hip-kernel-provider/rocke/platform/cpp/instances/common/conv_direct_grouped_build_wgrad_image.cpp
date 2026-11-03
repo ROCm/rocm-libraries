@@ -33,6 +33,7 @@
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
+#include "rocke/helper_rocke.helpers.layouts.h" /* rocke_conv_tr_lane_offsets32 */
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -1066,21 +1067,12 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_image(rocke_ir_builder_t* b,
     c_rows_per_pass = rocke_b_const_i32(b, c->ROWS_PER_PASS);
     c_STRIP_COLS = rocke_b_const_i32(b, STRIP_COLS);
 
-    /* wave32 transpose-read address (see build_direct_conv_wgrad). */
+    /* wave32 transpose-read address: the shared lane map, flattened over the
+     * TR_N-wide LDS rows. */
     {
-        rocke_value_t* c8 = rocke_b_const_i32(b, 8);
         rocke_value_t* tr_col;
         rocke_value_t* tr_row;
-        {
-            rocke_value_t* blk = rocke_b_div(b, q_in_lane, c8);
-            tr_col = rocke_b_mul(b, blk, c8);
-        }
-        {
-            rocke_value_t* c_frag = rocke_b_const_i32(b, FRAG);
-            rocke_value_t* lhs = rocke_b_mul(b, c4, c_frag);
-            rocke_value_t* rhs = rocke_b_mod(b, lane, c8);
-            tr_row = rocke_b_add(b, lhs, rhs);
-        }
+        rocke_conv_tr_lane_offsets32(b, lane, FRAG, NULL, NULL, &tr_col, &tr_row);
         {
             rocke_value_t* lhs = rocke_b_mul(b, tr_row, c->c_TR_N);
             c->tr_flat = rocke_b_add(b, lhs, tr_col);

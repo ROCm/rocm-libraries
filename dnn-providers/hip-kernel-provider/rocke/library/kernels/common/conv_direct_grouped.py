@@ -88,6 +88,7 @@ from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
+from rocke.helpers.layouts import ConvKOuterFragmentReader
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -5667,10 +5668,9 @@ def _build_direct_conv_wgrad_image(spec: DirectConvWgradSpec, arch: str) -> Kern
     c_rows_per_pass = b.const_i32(ROWS_PER_PASS)
     c_STRIP_COLS = b.const_i32(STRIP_COLS)
 
-    # wave32 transpose-read address (see build_direct_conv_wgrad).
-    c8 = b.const_i32(8)
-    tr_col = b.mul(b.div(q_in_lane, c8), c8)
-    tr_row = b.add(b.mul(c4, b.const_i32(FRAG)), b.mod(lane, c8))
+    # wave32 transpose-read address: the shared lane map, flattened over the
+    # TR_N-wide LDS rows.
+    tr_col, tr_row = ConvKOuterFragmentReader.wave32_lane_offsets(b, lane, n=FRAG)
     tr_flat = b.add(b.mul(tr_row, c_TR_N), tr_col)
 
     def _dy_part(tk: int) -> "Value":
@@ -6538,12 +6538,9 @@ def _build_direct_conv_wgrad_small_c(spec: DirectConvWgradSpec, arch: str) -> Ke
                 _store(x_lds, x_runs[j], q * X_SUB, vecs[i], x_grp_ok[j])
                 i += 1
 
-    # wave32 transpose-read address (see _build_direct_conv_wgrad_image).
-    tr_blk = b.div(q_in_lane, c8)
-    tr_col = b.mul(tr_blk, c8)
-    tr_hi = b.mul(c4, c16)
-    tr_lo = b.mod(lane, c8)
-    tr_row = b.add(tr_hi, tr_lo)
+    # wave32 transpose-read address: the shared lane map, flattened over the
+    # 16-wide LDS rows.
+    tr_col, tr_row = ConvKOuterFragmentReader.wave32_lane_offsets(b, lane, n=16)
     tr_rowf = b.mul(tr_row, c16)
     tr_flat = b.add(tr_rowf, tr_col)
     c_tr_hi = b.const_i32(8 * 16)
@@ -7095,12 +7092,10 @@ def build_direct_conv_wgrad(
         # ds_load_tr16_b128 transposes an 8x8 block within each group of 8
         # lanes: the group addresses the 8-channel block holding column
         # lane % 16, and lane l supplies spatial row (l // 16) * 16 + l % 8
-        # (the wave32 branch of ConvKOuterFragmentReader, verified on
-        # silicon). Two reads 8 rows apart give lane l spatial rows
+        # (ConvKOuterFragmentReader's wave32 lane map, verified on silicon).
+        # Two reads 8 rows apart give lane l spatial rows
         # (l // 16) * 16 + 0..15 of channel l % 16 -- the WMMA A/B fragment.
-        c8 = b.const_i32(8)
-        tr_col = b.mul(b.div(b.mod(lane, b.const_i32(16)), c8), c8)
-        tr_row = b.add(b.mul(c4, b.const_i32(FRAG)), b.mod(lane, c8))
+        tr_col, tr_row = ConvKOuterFragmentReader.wave32_lane_offsets(b, lane, n=FRAG)
         tr_flat = b.add(b.mul(tr_row, c_TR_N), tr_col)
     else:
         tr_row = b.add(
