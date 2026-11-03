@@ -275,6 +275,11 @@ def scenarios():
     s["dvc_enum"] = dvc_files()
     s["dvc_enum"][f"{GEN}/configs/fake.engine.yaml"] = "authored_subpath: rocKE/fake\n"
     s["dvc_enum"][f"{GEN}/tools/registry_enumerator.py"] = ENUMERATOR
+    s["dvc_enum_sources"] = dvc_files()
+    s["dvc_enum_sources"][
+        f"{GEN}/configs/fake.engine.yaml"
+    ] = "authored_subpath: rocKE/fake\n"
+    s["dvc_enum_sources"][f"{GEN}/tools/registry_enumerator.py"] = ENUMERATOR_SOURCES
     narrowed = (KDP_VARIANTS[0], {**KDP_VARIANTS[1], "arch": ["gfx1100"]})
     s["generic"] = tree_files(
         variants=narrowed, arch=("gfx1100", "gfx1101", "gfx1200"), target="generic"
@@ -417,7 +422,7 @@ def test_extra_param_lists_every_variant_and_shows_head_list(emit, repo, tmp_pat
 def test_body_only_change_is_ir_changed_not_params(emit, repo, tmp_path):
     rc, doc = run(emit, repo, "base", "body", tmp_path)
     assert rc == 0
-    assert doc["schema"] == 5
+    assert doc["schema"] == 6
     # the recorded ids are the real tree ids, and differ when the sides differ
     assert doc["base_tree"] == git_out(repo, "rev-parse", "base^{tree}")
     assert doc["head_tree"] == git_out(repo, "rev-parse", "body^{tree}")
@@ -763,3 +768,222 @@ def test_timeout_kills_a_grandchild_holding_the_pipes_and_exits_one(
     assert rc == 1 and doc is None
     err = capsys.readouterr().err.strip().splitlines()
     assert len(err) == 1 and err[0].startswith("impact_emit: ")
+
+
+def sources_kdp(ukds, arch=("gfx950",)):
+    return json.dumps({"arch": list(arch), "kernelDescriptors": ukds})
+
+
+KS = {
+    "kind": "rocke",
+    "source": "kernels/gfx_fake/fake_attn.py",
+    "builder": "build_fake",
+    "spec": {"n": 1},
+}
+
+
+def discover(emit, tmp_path, ukds):
+    kdp = tmp_path / emit.DESCRIPTORS / "rocKE" / "x" / "x.kdp.json"
+    kdp.parent.mkdir(parents=True)
+    kdp.write_text(sources_kdp(ukds))
+    return emit._discover(tmp_path)
+
+
+def test_sources_ukd_sharing_source_builder_spec_is_one_variant_named_by_the_ukd(
+    emit, tmp_path
+):
+    # catches: a multi-launch UKD skipped, or one variant per launch (a second build and a
+    # name that is not the UKD's)
+    ukd = {"name": "attn", "sources": {"decode": KS, "merge": {**KS, "role": "merge"}}}
+    variants, skipped = discover(emit, tmp_path, [ukd])
+    assert skipped == []
+    assert len(variants) == 1
+    v = variants[0]
+    assert (v["name"], v["source"], v["builder"], v["spec"], v["target"]) == (
+        "attn",
+        KS["source"],
+        "build_fake",
+        {"n": 1},
+        "native",
+    )
+    assert v["arches"] == ["gfx950"] and v["origin"] == "kdp-in-git"
+
+
+def test_sources_ukd_launches_with_different_specs_are_variants_named_by_launch(
+    emit, tmp_path
+):
+    # catches: launches differing in spec collapsed into one variant, or named alike
+    ukd = {
+        "name": "attn",
+        "sources": {
+            "merge": {**KS, "spec": {"n": 2}},
+            "decode": KS,
+            "decode2": {**KS, "spec": {"n": 1}},
+        },
+    }
+    variants, skipped = discover(emit, tmp_path, [ukd])
+    assert skipped == []
+    assert {v["name"]: v["spec"] for v in variants} == {
+        "attn@decode+decode2": {"n": 1},
+        "attn@merge": {"n": 2},
+    }
+
+
+def test_sources_spec_key_order_does_not_split_a_variant(emit, tmp_path):
+    # catches: a group key that compares spec dicts by identity or insertion order
+    ukd = {
+        "name": "attn",
+        "sources": {
+            "a": {**KS, "spec": {"n": 1, "m": 2}},
+            "b": {**KS, "spec": {"m": 2, "n": 1}},
+        },
+    }
+    variants, _ = discover(emit, tmp_path, [ukd])
+    assert [v["name"] for v in variants] == ["attn"]
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        {"a": {"kind": "rocke", "source": "s.py"}},
+        {"a": {"kind": "rocke", "builder": "build_x"}},
+        {"a": {**KS, "kind": "hip"}},
+        {"a": "not-an-object"},
+        {},
+        ["a"],
+    ],
+    ids=[
+        "no-builder",
+        "no-source",
+        "not-rocke",
+        "entry-not-object",
+        "empty",
+        "not-object",
+    ],
+)
+def test_unreadable_sources_ukd_is_not_inspected_and_yields_no_variant(
+    emit, tmp_path, sources
+):
+    # catches: a `sources` UKD or entry the emitter cannot read dropped silently
+    good = {"name": "ok", "kernel_source": KS}
+    variants, skipped = discover(
+        emit, tmp_path, [{"name": "bad", "sources": sources}, good]
+    )
+    assert [v["name"] for v in variants] == ["ok"]
+    assert len(skipped) == 1
+    assert skipped[0]["kdp"].endswith("x/x.kdp.json")
+    assert skipped[0]["reason"].startswith("bad: ")
+
+
+def test_ukd_with_both_kernel_source_and_sources_is_not_inspected(emit, tmp_path):
+    variants, skipped = discover(
+        emit, tmp_path, [{"name": "both", "kernel_source": KS, "sources": {"a": KS}}]
+    )
+    assert variants == []
+    assert [s["reason"].split(":")[0] for s in skipped] == ["both"]
+
+
+def test_single_kernel_source_without_source_and_builder_is_still_skipped_silently(
+    emit, tmp_path
+):
+    variants, skipped = discover(
+        emit,
+        tmp_path,
+        [{"name": "hip", "kernel_source": {"kind": "hip", "file": "k.hip"}}],
+    )
+    assert variants == [] and skipped == []
+
+
+ENUMERATOR_SOURCES = textwrap.dedent(
+    """
+    import argparse, json
+    p = argparse.ArgumentParser(); p.add_argument("--manifest"); p.add_argument("--out")
+    a = p.parse_args()
+    ks = {"kind": "rocke", "source": "kernels/gfx_fake/fake_attn.py",
+          "builder": "build_fake", "spec": {"n": 1}}
+    open(a.out, "w").write(json.dumps({"packs": [{"arch": ["gfx950"], "kernels": [
+        {"name": "enum_m", "sources": {"decode": ks, "merge": {**ks, "role": "merge"}}},
+        {"name": "enum_bad", "sources": {"x": {"kind": "rocke", "source": "s.py"}}}]}]}))
+    """
+)
+
+
+def test_regenerated_sources_ukd_is_one_variant_and_an_unreadable_one_is_not_inspected(
+    emit, repo, tmp_path
+):
+    # catches: the enumerator's `sources` kernels read differently from the git-tracked ones
+    _, doc = run(emit, repo, "dvc_enum_sources", "dvc_enum_sources", tmp_path)
+    f = only_family(doc)
+    assert f["variants"] == {"base": 1, "head": 1}
+    assert f["failures"] == {"base": {}, "head": {}}
+    assert sorted(
+        (n["side"], n["reason"].split(":")[0]) for n in doc["not_inspected"]
+    ) == [
+        ("base", "enum_bad"),
+        ("head", "enum_bad"),
+    ]
+
+
+def family(names, params_by_name, ir="ir"):
+    return {
+        "arch": "gfx950",
+        "source": "s.py",
+        "builder": "build_x",
+        "kdp": "k.kdp.json",
+        "spec_origin": "kdp-in-git",
+        "names": list(names),
+        "built": {
+            n: {"params": params_by_name[n], "ir": ir, "comgr": None} for n in names
+        },
+        "failures": {},
+    }
+
+
+def test_compare_params_reordered_is_params_changed(emit):
+    # catches: params compared as a set or by sorted names, so a reorder (a different
+    # kernarg ABI) reads unchanged
+    qn = [["q", "ptr"], ["n", "i32"]]
+    nq = [["n", "i32"], ["q", "ptr"]]
+    (f,) = emit.compare(
+        {"families": [family(["v"], {"v": qn})]},
+        {"families": [family(["v"], {"v": nq})]},
+    )
+    assert f["params_changed"] == ["v"]
+    assert f["ir_changed"] == []
+
+
+def test_compare_lists_variants_only_on_each_side(emit):
+    # catches: only_in_base and only_in_head swapped or merged, and a family present on
+    # one side only losing its variants
+    p = [["q", "ptr"]]
+    (f,) = emit.compare(
+        {"families": [family(["keep", "gone"], {"keep": p, "gone": p})]},
+        {"families": [family(["keep", "new"], {"keep": p, "new": p})]},
+    )
+    assert f["only_in_base"] == ["gone"]
+    assert f["only_in_head"] == ["new"]
+    (g,) = emit.compare({"families": []}, {"families": [family(["new"], {"new": p})]})
+    assert g["only_in_head"] == ["new"] and g["only_in_base"] == []
+    assert g["variants"] == {"base": 0, "head": 1}
+    (g,) = emit.compare({"families": [family(["old"], {"old": p})]}, {"families": []})
+    assert g["only_in_base"] == ["old"] and g["only_in_head"] == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX")
+def test_run_tree_own_group_false_keeps_the_child_in_the_callers_group(emit):
+    # catches: an enumerator launched through run_tree landing in its own session, out of
+    # reach of the killpg that bounds the child
+    code = [emit.sys.executable, "-c", "import os; print(os.getpgrp())"]
+    inherited = emit.run_tree(code, 30, own_group=False)
+    own = emit.run_tree(code, 30)
+    assert int(inherited.stdout) == os.getpgrp()
+    assert int(own.stdout) != os.getpgrp()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX")
+def test_run_tree_own_group_false_still_times_out_and_kills_the_child(emit):
+    code = [emit.sys.executable, "-c", "import time; time.sleep(60)"]
+    t0 = time.time()
+    with pytest.raises(subprocess.TimeoutExpired):
+        emit.run_tree(code, 1, own_group=False)
+    assert time.time() - t0 < 30

@@ -18,7 +18,8 @@ change that breaks them leaves the default build green.
 | Launch surface | Python grid, block, LDS and tile tables | the `cpp_mirror` files a `launch_surface:` entry names in `projects/hipdnn/tools/IngestorGenerator/configs/*.engine.yaml` |
 | Applicability | Python spec validity and constants (scale range, tile legality) | native pack matchers and scores |
 | Shipped variants | `*.kdp.json` (DVC-held for gfx950; the emitter regenerates its variant list with the generator's registry enumerator, so a changed DVC pointer stays `changed`: the file's other fields are not read) | loader, native packs |
-| Generic targets | `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json` and `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets*` | packer and loader |
+| Generic targets | `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets*` and its CMake template `projects/hipdnn/plugin_sdk/cmake/GpuGenericTargetsTable.hpp.in` | packer and loader |
+| Loader code | the ingestor SDK headers under `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, and every plugin SDK header they include (`ArchMatch.hpp`, `heuristics/uhd/`; tagged `sdk-loader`) | the native packs and the loader that compile them |
 | Python symbols | rocKE and `hkp_pack` modules | other modules and tests that import them |
 
 Test code, CMake, CI test-category lists and `requirements*.txt` are not judged here: they are
@@ -30,19 +31,36 @@ How the copies are paired:
 - A `launch_surface` entry's `python_source` symbol resolves as `launch_surface.py --check`
   resolves it: any function of that name anywhere in the module (`ast.walk`), a method, a nested
   function or a def under `if`, `try` or `with` included. Every function of that name is compared,
-  and the symbol is reported missing only when none exists.
+  and the symbol is reported missing only when none exists. A locator that is a path alone names
+  no symbol, and the whole module is its Python side.
+- A host-side surface function (a grid or block helper: anything but the builder the packer
+  compiles, or a `kernargs` entry) is compared together with every top-level def, class and
+  assignment it reaches by name, followed through `from` imports. A grid that hands off to
+  `NONPERSIST_DECODES[...].grid` changes when that class does, and no emitted IR covers it.
 - A declared `kernargs` pair compares each static C++ list in its `cpp_mirror` with the builder
   whose `b.param` list it matches, searched in the surface's module and the manifest's own
   `source` module, the declared function first. A multi-launch pack holds one list per launch (a
   segment and a reduce kernel), and a declared function may be a `SignatureBuilder` factory with no
-  `b.param` list; the row then names the builder it was paired with. A list that matches no
-  builder but is related to one (it shares at least two names, and at least half of its own) is
-  compared with the related builder it shares most names with, and is a `mismatch`. An unrelated
-  list is skipped; when no list of the mirror was compared, one `changed` row says `cannot
-  compare`.
+  `b.param` list; the row then names the builder it was paired with. A list related to the
+  declared builder (it shares at least two names, and at least half of its own) is compared with
+  it unless another builder shares more names, so a list cut short of the declared builder's
+  params is a `mismatch`, not a match with a smaller builder. A list that matches no builder but
+  is related to one is compared with the related builder it shares most names with, and is a
+  `mismatch`. An unrelated list is skipped; when no list of the mirror was compared, one
+  `changed` row says `cannot compare`.
+- A `global_buffer` entry is a pointer unless its declared size says otherwise; a 4-byte one
+  disagrees with a pointer param, as `requireSignatureMatch` refuses it. The C++ side has no type
+  field, so the scripts compare names, order and sizes.
 - A copy that holds the old list is `changed`, not `mismatch`, when it still matches the new
   list with the new conditional parameters left out: variants that do not enable them pass that
   list. The variants that do enable them are what the emitter or a device run settles.
+- A `NEEDS-DEVICE` arch list comes from the shipped descriptors: the UKD's `arch` array, else its
+  KDP's, with generic targets expanded through `gpu_generic_targets.json`. A file outside the
+  shipped closure (a pack, a descriptor, a DVC pointer) names its arch by path, widened to every
+  arch a KDP named for that arch ships on.
+- A flatc `*_generated.h` reads as regenerated only beside a change to its own `.fbs` or
+  `flatc_flags.txt` (for the flatbuffers SDK, `schemas/<name>.fbs` and `cmake/flatc_flags.txt`).
+  Any other generated artifact needs a change under its source tree; a test file never counts.
 
 ## The scripts
 
@@ -52,9 +70,10 @@ How the copies are paired:
 - `scripts/impact_emit.py` imports and runs rocKE code from the two trees: a `git archive` extract
   per side, in a child process whose whole process tree is killed at its timeout, with an
   environment reduced to system, temp, locale and Python user-site variables, so credentials such
-  as `GH_TOKEN` are not passed. That is the same code execution as building the head. It builds
-  every shipped variant at both sides on the CPU (no GPU, comgr or network): a few minutes, with
-  the two sides on two concurrent workers.
+  as `GH_TOKEN` are not passed. That is the same code execution as building the head, and it is
+  not a sandbox: the child keeps `HOME` (`USERPROFILE` on Windows) and network access, and only
+  tokens held in environment variables are dropped. It builds every shipped variant at both sides
+  on the CPU (no GPU or comgr): a few minutes, with the two sides on two concurrent workers.
 
 Both exit 0 when the analysis ran, whatever it found, and 1 with one line (`impact: <reason>` or
 `impact_emit: <reason>`) on stderr when they could not run. An exit 1 is never a verdict.
@@ -77,7 +96,7 @@ stands in for when one of them is on the surface or a test.
 | `outside` | Not on the surface; counted, never dropped |
 
 The last line of `report` is the rollup:
-`Runtime impact: BREAKS | NEEDS-DEVICE <arch: suite, ...> | NONE (<n> files inspected) | N/A (no surface file)`.
+`Runtime impact: BREAKS | NEEDS-DEVICE <arch, ...> | NONE (<n> files inspected) | N/A (no surface file)`.
 `BREAKS` is any `mismatch`, `NEEDS-DEVICE` any `changed`, `NONE` all surface rows `inert`, `N/A` no
 surface file. An empty diff is an error, never `NONE`. A `not judged here:` note counts the files
 left to other checks: `BUILD` is CMake and CI test-category lists, `DEPS` is `requirements*.txt`
@@ -90,8 +109,9 @@ Run it when any rocKE or `hkp_pack` Python file changed in code, including rows 
 it) misses a call through a dynamic lookup. It records each variant's argument list, IR digest and
 COMGR inputs (ISA name, codegen options, fresh-process compile); a builder that returns a
 `KernelModule` is lowered kernel by kernel, as the packer does, and each companion launch's
-argument list is recorded and compared too. `impact.py report --emit` folds the result into the
-rows.
+argument list is recorded and compared too. A multi-launch UKD (`sources`) gives one variant per
+distinct source, builder, spec and target of its launches; one the emitter cannot read is listed
+under `not_inspected`. `impact.py report --emit` folds the result into the rows.
 
 - The emitter exiting 1 (it could not run, or a side timed out) leaves no proof. Never fold an emit
   file from an earlier run. `impact.py` refuses an emit file made for another base or head, or one
@@ -101,7 +121,8 @@ rows.
   read a failure as equal.
 - An all-equal emit folds only the rows of modules a built family imports, and never a row on code
   that runs after lowering (`rocke/helpers/compile.py`, `rocke/runtime/`): the IR digest does not
-  cover it. A static kernarg `mismatch` is never downgraded.
+  cover it. A static kernarg `mismatch` is never downgraded. In the merged view it folds only the
+  rows of modules whose merged content is the head's: the emitter never saw the target's.
 
 ## Predicate tables
 
@@ -165,7 +186,7 @@ change and gets no severity of its own; mention it only when the change makes it
 
 ## C++ differential tables (judge-written)
 
-The scripts compare the names, order and types of a C++ copy, never its values or what it refuses.
+The scripts compare the names, order and sizes of a C++ copy, never its values or what it refuses.
 For a `changed` `launch_surface` row whose C++ side is header-only and includes no HIP header
 (geometry, split rule, workspace, arguments), settle the values with a throwaway table. A
 `kernargs` or `workspace` row qualifies like any other, whether its C++ list is built from
@@ -236,7 +257,7 @@ deciding.
 |---|---|
 | `mismatch` | A break: quote the producer line and every disagreeing copy. A `merged-only` mismatch breaks the target once merged; the fix is to rebase and update the named copy. If the same mismatch exists at the base, it predates the change |
 | `changed`, dispatch | Read the C++ function and its Python counterpart. A divergence (a constant, a range, a tile set, a mask or layout rule that the other side does not share) is a break; quote both sides. Consistent: no break |
-| `changed`, emitted code or arguments | Consistent with every copy, names and types: no break. A row that says `types not compared` or `cannot compare` is not consistency: compare the types and sizes of both lists by hand. The variants changed on an architecture need a device run there |
+| `changed`, emitted code or arguments | Consistent with every copy, names and sizes: no break. A row that says `sizes not compared` or `cannot compare` is not consistency: compare the sizes of both lists by hand. The variants changed on an architecture need a device run there |
 | `changed`, descriptor or generic target | Check the loader's rules for the changed fields (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`); a value the loader rejects or ignores is a break. A membership change names the architectures whose archives change |
 | `inert`, `outside` | Count them; list each `inert` reason once |
 
@@ -264,9 +285,10 @@ a flags-ON build when one exists), the architecture, and the flags.
 - A rocKE C++ engine source (`rocke/platform/cpp/`) reads `inert` only while no provider build file
   outside rocKE links the engine and the packer pins the Python backend; the row says so, so check
   that both still hold for the change.
-- A static list is paired with the builder its names match. A C++ list that by mistake matches a
-  different builder of the same modules exactly is compared with that one, not the launch it is
-  used for; the row names the pairing, so check it.
+- A static list is paired with the builder its names match, the declared builder first. A C++
+  list that by mistake matches a different builder of the same modules exactly, sharing more names
+  with it than with the declared one, is compared with that one, not the launch it is used for;
+  the row names the pairing, so check it.
 - The emitter compares emitted arguments with the static C++ lists only for variants whose
   arguments changed between base and head. The variants of a new engine have no base side, so
   their lists are checked statically only.

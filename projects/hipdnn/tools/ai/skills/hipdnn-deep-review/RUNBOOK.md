@@ -353,6 +353,8 @@ Findings whose `Where` is in `affected.txt`, and every `process` finding, are af
 each lane the delta touches, every lane `FAILED` earlier (closing its `ORCH` finding when it
 completes), and always `AUTH` and `LEAK`: a new head brings new commits, PR text and CI runs.
 Re-run `DRIFT` whenever the round's `drift.txt` says `Trigger: yes`: the target moves between rounds.
+Re-run `IMPACT` whenever the target tip moved since its last run, on a new head or the same one:
+its merged view is computed against that tip and goes stale with it.
 Re-verify every affected `OPEN` or `UNVERIFIED` finding. A lane not re-run carries forward
 (Coverage and Lanes rows copied, marked `carried from r<M>`).
 

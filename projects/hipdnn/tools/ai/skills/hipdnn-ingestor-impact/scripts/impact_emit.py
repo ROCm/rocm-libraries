@@ -17,7 +17,12 @@ every kernel. A packer that pins another lowering backend fails every variant. T
 EXECUTES rocKE code from the reviewed revisions, like building the head does.
 
 Variants come from every `*.kdp.json` under the shipped descriptor root whose
-`kernelDescriptors[].kernel_source` names a rocKE `source` + `builder`. A KDP held by
+`kernelDescriptors[].kernel_source` names a rocKE `source` + `builder`. A UKD with
+`sources` (several launches) yields one variant per distinct (source, builder, spec,
+target) of its launches, as hkp_pack compiles them: the UKD `name` when there is one, else
+`<name>@<launch>[+<launch>...]` with the group's launch names sorted. A `sources` UKD
+or entry that cannot be read (not rocke, no source or builder, both `kernel_source` and
+`sources`) is listed under `not_inspected`. A KDP held by
 DVC (`artifacts.dvc`, no `.kdp.json`) is regenerated with that side's
 `IngestorGenerator/tools/registry_enumerator.py`; when neither works the KDP is listed
 under `not_inspected`, never treated as equal. A variant is its descriptor `name`; a
@@ -308,6 +313,71 @@ def _arch_list(value):
     return [a for a in value or [] if isinstance(a, str)]
 
 
+def _spec_json(spec):
+    return json.dumps(spec, sort_keys=True, default=str)
+
+
+def _ukd_variants(d, arches, kdp, origin):
+    """(variants, reason) of one descriptor dict, as hkp_pack enumerates it. A single
+    `kernel_source` is one variant named by the descriptor (none when it lacks source and
+    builder, e.g. a hip kernel). A `sources` UKD groups its launches by (source, builder,
+    spec, target); each group is one variant, named by the descriptor when there is one group,
+    else `<name>@<launch>[+<launch>...]` with the launch names sorted. REASON, set when the
+    descriptor cannot be read, is for `not_inspected` and the variants are then empty.
+    """
+    has_ks, has_sources = "kernel_source" in d, "sources" in d
+    name = d.get("name") or d.get("id") or "?"
+    if has_ks and has_sources:
+        return [], f"{name}: carries both `kernel_source` and `sources`"
+    if has_sources:
+        entries = d["sources"]
+        if not isinstance(entries, dict) or not entries:
+            return [], f"{name}: `sources` is not a non-empty object"
+        groups = {}
+        for launch, ks in entries.items():
+            if not isinstance(ks, dict):
+                return [], f"{name}: sources entry `{launch}` is not an object"
+            if ks.get("kind") != "rocke":
+                return (
+                    [],
+                    f"{name}: sources entry `{launch}` has kind {ks.get('kind')!r}, not rocke",
+                )
+            if not (ks.get("source") and ks.get("builder")):
+                return (
+                    [],
+                    f"{name}: sources entry `{launch}` lacks `source` or `builder`",
+                )
+            key = (
+                ks["source"],
+                ks["builder"],
+                _spec_json(ks.get("spec") or {}),
+                ks.get("target", "native"),
+            )
+            groups.setdefault(key, (ks, []))[1].append(launch)
+        out = []
+        for ks, launches in groups.values():
+            vname = name if len(groups) == 1 else f"{name}@{'+'.join(sorted(launches))}"
+            out.append(_variant(vname, arches, ks, kdp, origin))
+        return out, None
+    ks = d.get("kernel_source") or {}
+    if not (ks.get("source") and ks.get("builder")):
+        return [], None
+    return [_variant(d["name"], arches, ks, kdp, origin)], None
+
+
+def _variant(name, arches, ks, kdp, origin):
+    return dict(
+        name=name,
+        arches=arches,
+        source=ks["source"],
+        builder=ks["builder"],
+        spec=ks.get("spec") or {},
+        target=ks.get("target", "native"),
+        kdp=kdp,
+        origin=origin,
+    )
+
+
 def _discover(root):
     """(variants, not_inspected) of one extract: variants are dicts with name, arch,
     source, builder, spec, target, kdp, origin."""
@@ -329,30 +399,19 @@ def _discover(root):
                 skipped.append({"kdp": rel, "reason": f"unreadable KDP: {e}"})
                 continue
             for d in doc.get("kernelDescriptors") or []:
-                ks = d.get("kernel_source") or {}
-                if not (ks.get("source") and ks.get("builder")):
-                    continue
                 # A descriptor's own `arch` narrows the KDP-level one.
                 arches = _arch_list(d.get("arch")) or _arch_list(doc.get("arch"))
-                if not arches:
+                vs, reason = _ukd_variants(d, arches, rel, "kdp-in-git")
+                if reason:
+                    skipped.append({"kdp": rel, "reason": reason})
+                elif vs and not arches:
                     skipped.append({"kdp": rel, "reason": f"{d['name']}: no `arch`"})
-                    continue
-                variants.append(
-                    dict(
-                        name=d["name"],
-                        arches=arches,
-                        source=ks["source"],
-                        builder=ks["builder"],
-                        spec=ks.get("spec") or {},
-                        target=ks.get("target", "native"),
-                        kdp=rel,
-                        origin="kdp-in-git",
-                    )
-                )
+                else:
+                    variants.extend(vs)
         if "artifacts.dvc" in filenames and not kdps:
             dvc_dirs.append(here)
     for d in dvc_dirs:
-        got, why = _regenerate(base, d)
+        got, why = _regenerate(base, d, skipped)
         if why:
             kdp = (d / f"{d.name}.kdp.json").relative_to(base).as_posix()
             skipped.append({"kdp": kdp, "reason": why})
@@ -361,8 +420,10 @@ def _discover(root):
     return variants, skipped
 
 
-def _regenerate(base, dvc_dir):
-    """Variants of a DVC-held KDP from the registry enumerator, or (None, reason)."""
+def _regenerate(base, dvc_dir, unreadable):
+    """Variants of a DVC-held KDP from the registry enumerator, or (None, reason). A kernel
+    the enumerator emitted that cannot be read is appended to UNREADABLE (not_inspected).
+    """
     rel_dir = dvc_dir.relative_to(base / DESCRIPTORS).as_posix()
     kdp = (dvc_dir / f"{dvc_dir.name}.kdp.json").relative_to(base).as_posix()
     enum = base / ENUMERATOR
@@ -397,6 +458,7 @@ def _regenerate(base, dvc_dir):
             [sys.executable, str(enum), "--manifest", str(manifest), "--out", str(out)],
             int(os.environ.get("IMPACT_EMIT_ENUM_TIMEOUT", "600")),
             cwd=str(base),
+            own_group=False,
         )
     except subprocess.TimeoutExpired:
         return None, "registry_enumerator.py timed out"
@@ -410,28 +472,18 @@ def _regenerate(base, dvc_dir):
         pack = yaml.safe_load(out.read_text(encoding="utf-8"))["packs"][0]
     except (OSError, KeyError, IndexError, TypeError, yaml.YAMLError) as e:
         return None, f"registry_enumerator.py output unusable: {type(e).__name__}: {e}"
-    got = []
+    got, bad = [], []
     for k in pack.get("kernels") or []:
-        ks = k.get("kernel_source") or {}
-        if not (ks.get("source") and ks.get("builder")):
-            continue
         arches = _arch_list(k.get("arch")) or _arch_list(pack.get("arch"))
-        if not arches:
+        vs, reason = _ukd_variants(k, arches, kdp, "registry_enumerator")
+        if reason:
+            bad.append({"kdp": kdp, "reason": reason})
+        elif vs and not arches:
             return None, f"registry_enumerator.py output has no arch for {k['name']}"
-        got.append(
-            dict(
-                name=k["name"],
-                arches=arches,
-                source=ks["source"],
-                builder=ks["builder"],
-                spec=ks.get("spec") or {},
-                target=ks.get("target", "native"),
-                kdp=kdp,
-                origin="registry_enumerator",
-            )
-        )
-    if not got:
+        got.extend(vs)
+    if not got and not bad:
         return None, "registry_enumerator.py produced no rocKE kernels"
+    unreadable.extend(bad)
     return got, None
 
 
@@ -927,7 +979,7 @@ def child_env(root, flavor):
     return env
 
 
-def _kill_tree(proc):
+def _kill_tree(proc, own_group=True):
     if os.name == "nt":
         try:
             subprocess.run(
@@ -935,7 +987,7 @@ def _kill_tree(proc):
             )
         except OSError:
             pass
-    else:
+    elif own_group:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except OSError:
@@ -946,15 +998,20 @@ def _kill_tree(proc):
         pass
 
 
-def run_tree(cmd, timeout, **kw):
+def run_tree(cmd, timeout, *, own_group=True, **kw):
     """subprocess.run with captured text output that, on timeout, kills the child's whole
     process tree and raises TimeoutExpired without waiting for pipes a grandchild holds.
+    OWN_GROUP (default) makes the child lead a new process group (POSIX session) that the
+    kill takes as a whole; with False the child stays in the caller's group, so a caller
+    that is itself killed as a group takes the child with it, and only the child is killed
+    here (plus its tree on Windows).
     """
     if os.name == "nt":
-        kw["creationflags"] = kw.get("creationflags", 0) | (
-            subprocess.CREATE_NEW_PROCESS_GROUP
-        )
-    else:
+        if own_group:
+            kw["creationflags"] = kw.get("creationflags", 0) | (
+                subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+    elif own_group:
         kw["start_new_session"] = True
     proc = subprocess.Popen(
         cmd,
@@ -968,7 +1025,7 @@ def run_tree(cmd, timeout, **kw):
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        _kill_tree(proc)
+        _kill_tree(proc, own_group)
         try:
             proc.wait(timeout=10)
             proc.communicate(timeout=5)
@@ -976,7 +1033,7 @@ def run_tree(cmd, timeout, **kw):
             pass  # give up on pipes some survivor still holds
         raise
     except BaseException:
-        _kill_tree(proc)
+        _kill_tree(proc, own_group)
         proc.wait()
         raise
     return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
@@ -1132,7 +1189,7 @@ def cmd_run(a):
     ]
     seconds = round(time.time() - t0, 1)
     doc = {
-        "schema": 5,
+        "schema": 6,
         "tool": "impact_emit",
         "flavor": flavor,
         "base": a.base,

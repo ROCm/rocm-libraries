@@ -59,7 +59,7 @@ searched as copies and readers, so a stale pin or a stale import is yours.
 | Judgment | Finding |
 |---|---|
 | A `mismatch` that holds | A `source-claim` at `BLOCKING` ([../policy.md](../policy.md): an ABI break without a migration path). **Where**: the producer line and every disagreeing copy. **Proof**: the command and both quoted lists. A `merged-only` mismatch: **Fix** is to rebase and update the named copy. The same mismatch at `$BASE` is pre-existing: `FUTURE WORK` at most |
-| A dispatch divergence | A `source-claim` at `IMPORTANT` or higher, quoting both sides |
+| A dispatch divergence | A `source-claim` at `BLOCKING`, quoting both sides |
 | A descriptor or generic-target value the loader rejects or ignores | A finding, citing the loader rule |
 | No break (`changed` but consistent), `inert`, `outside` | No finding. Count them under **Checked, no finding**; list each `inert` reason once |
 | A predicate-table finding in state `new` or `first shipped` that holds | A `defect` at `IMPORTANT`: the packer accepts a spec its builder rejects, or a value the kernel cannot use. For `first shipped`, say the predicate is older and ships for the first time. **Proof**: the table's row (predicate, field, values, seed, the builder's error). A finding `at base` predates the change: `FUTURE WORK` at most |

@@ -517,7 +517,7 @@ def family(**fields) -> dict:
 def write_emit(path, repo, base, head, families=None, tables=(), **fields):
     """An impact_emit document made for base..head, holding `families` (default: one family
     built from `fields`) and the predicate `tables`."""
-    doc = {"schema": 5, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
+    doc = {"schema": 6, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
            "base_tree": tree_of(repo, base), "head_tree": tree_of(repo, head),
            "families": [family(**fields)] if families is None else families,
            "predicate_tables": list(tables), "not_inspected": [], "seconds": 1.0}  # fmt: skip
@@ -991,7 +991,7 @@ FACTORY_MANIFEST = manifest(
      ({SIG_FACTORY: FACTORY.replace("def attn_signature", "def attn_sig")},
       "mismatch", "function attn_signature"),
      ({BUILDER: BODY_EDIT}, "changed", "the manifest declares attn_signature"),
-     ({BUILDER: BUILD.replace('"scale", F32', '"scale", F64')}, "mismatch", "types do not")],
+     ({BUILDER: BUILD.replace('"scale", F32', '"scale", F64')}, "mismatch", "sizes do not")],
     ids=["mirror-edited", "mirror-reordered", "factory-renamed", "source-builder-edited",
          "source-builder-type-changed"],
 )  # fmt: skip
@@ -1175,6 +1175,7 @@ def test_conflict_only_in_a_test_still_marks_the_merged_view_changed(
         == "conflicted"
     )
     assert any(r["view"] == "merged" and r["status"] == "changed" for r in data["rows"])
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE all-ingestor-archs"
     # a docs-only change conflicting in docs still has no surface file
     doc = "projects/hipdnn/docs/x.md"
     repo, base = make_repo(tmp_path / "b", {doc: "a\n"})
@@ -1197,6 +1198,7 @@ def test_unrelated_target_history_skips_the_merged_view_as_changed(
         next(v for v in data["views"] if v["label"] == "merged")["status"] == "skipped"
     )
     assert any(r["view"] == "merged" and r["status"] == "changed" for r in data["rows"])
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE all-ingestor-archs"
 
 
 def test_non_ascii_path_is_reported_under_its_real_name(mod, capsys, tmp_path):
@@ -1371,3 +1373,215 @@ def test_changed_dvc_pointer_is_not_folded_by_a_regenerated_catalog(
         (ptr, "changed")
     ]
     assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+DECODE = HKP + "rocke/library/kernels/gfx1151/decode.py"
+DESCRIPTORS = HKP + "src/engines/kernel_ingestor_engine/descriptors/rocKE/"
+DECODE_KDP = DESCRIPTORS + "gfx1151_decode/gfx1151_decode.kdp.json"
+GFX11_TABLE = json.dumps(
+    {"schemaVersion": 1, "generics": {"gfx11-generic": ["gfx1100", "gfx1151"]}}
+)
+
+
+def test_multi_launch_ukd_roots_its_module_on_the_kdp_arch_list(mod, capsys, tmp_path):
+    # catches: `sources` launches skipped by the shipped closure, so a decode body edit reads
+    # "reached by no shipped variant"; or the device list read from the path (gfx1151 alone)
+    # instead of the KDP's arch array, generic targets expanded
+    launch = {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/decode.py",
+        "builder": "build_decode",
+    }
+    kdp = {"arch": ["gfx11-generic", "gfx1200"], "kernelDescriptors": [
+        {"name": "d", "sources": {"decode": launch, "merge": {**launch, "role": "merge"}}}]}  # fmt: skip
+    body = "def build_decode(spec):\n    return {}\n"
+    files = {DECODE: body.format(1), DECODE_KDP: json.dumps(kdp), GENERIC: GFX11_TABLE}
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {DECODE: body.format(2)})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = rows_of(data, "file")
+    assert row["status"] == "changed"
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx1100, gfx1151, gfx1200"
+
+
+def test_pack_named_for_an_arch_needs_every_arch_its_kdp_ships(mod, capsys, tmp_path):
+    # catches: a NEEDS-DEVICE list read from the first gfx name in the path, naming one arch of
+    # the several the KDP named for it ships (UKD-level arrays included)
+    pack = HKP + "src/engines/kernel_ingestor_engine/packs/Gfx1151Wmma.cpp"
+    kdp = {"arch": ["gfx1100", "gfx1151"], "kernelDescriptors": [
+        {"name": "a", "arch": ["gfx1200", "gfx1201"], "kernel_source": {"source": "x.py"}}]}  # fmt: skip
+    files = {pack: "int f() { return 1; }\n", DECODE_KDP: json.dumps(kdp)}
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {pack: "int f() { return 2; }\n"})
+    data = report(mod, capsys, repo, base, head)
+    assert (
+        data["rollup"]
+        == "Runtime impact: NEEDS-DEVICE gfx1100, gfx1151, gfx1200, gfx1201"
+    )
+
+
+def test_grid_surface_handing_off_to_another_module_is_not_folded_by_equal_ir(
+    mod, capsys, tmp_path
+):
+    # catches: a host-side surface compared as its named def alone, so an edit of the class it
+    # hands off to (`NONPERSIST_DECODES[...].grid`) folds to NONE on equal IR
+    decode = HKP + "rocke/library/kernels/common/decode.py"
+    cls = 'class Qb:\n    def grid(self, spec):\n        return (1, 2, 3)\n\n\nDECODES = {"a": Qb()}\n'
+    builder = ("from kernels.common.decode import DECODES\n\n\ndef attn_grid(spec):\n"
+               "    return DECODES[spec.kind].grid(spec)\n\n\n" + BUILD)  # fmt: skip
+    grid = manifest(("grid", "kernels/gfx950/attn.py:attn_grid", GEOM))
+    files = {
+        BUILDER: builder,
+        decode: cls,
+        KDP: KDP_JSON,
+        GEOM: "int grid();\n",
+        MANIFEST: grid,
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {decode: cls.replace("(1, 2, 3)", "(2, 1, 3)")})
+    emit = write_emit(tmp_path / "eq.json", repo, base, head)
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    (row,) = rows_of(data, "surfaces")
+    assert (row["name"], row["status"]) == ("grid:attn_grid", "changed")
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+SERIALIZATION = HKP + "src/engines/kernel_ingestor_engine/serialization/"
+PLAN_H = SERIALIZATION + "ingestor_plan_generated.h"
+PLAN_HEADER = "struct P { int VT_OFFSET = 4; int VT_NAME = 6; };\n"
+
+
+@pytest.mark.parametrize(
+    "extra, status",
+    [({}, "changed"),
+     ({"projects/hipdnn/tools/IngestorGenerator/tests/helpers.py": "x = 2\n"}, "changed"),
+     ({SERIALIZATION + "ingestor_plan.fbs": "table P { b: int; }\n"}, "inert"),
+     ({SERIALIZATION + "flatc_flags.txt": "--scoped-enums\n"}, "inert")],
+    ids=["header-alone", "beside-a-generator-test", "beside-its-schema", "beside-its-flags"],
+)  # fmt: skip
+def test_generated_header_is_regenerated_only_with_its_own_schema_or_flags(
+    mod, capsys, tmp_path, extra, status
+):
+    # catches: a hand edit of a flatc header read as regenerated because any file under the
+    # generator or the flatbuffers SDK moved, a test included; a header changed alone read
+    # inert; or flatc_flags.txt read as documentation, so a flag change regenerates nothing
+    files = {PLAN_H: PLAN_HEADER, SERIALIZATION + "ingestor_plan.fbs": "table P { a: int; }\n",
+             SERIALIZATION + "flatc_flags.txt": "--gen-mutable\n",
+             "projects/hipdnn/tools/IngestorGenerator/tests/helpers.py": "x = 1\n"}  # fmt: skip
+    repo, base = make_repo(tmp_path, files)
+    swapped = (
+        PLAN_HEADER.replace("= 4", "= @").replace("= 6", "= 4").replace("= @", "= 6")
+    )
+    head = commit(repo, {PLAN_H: swapped, **extra})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = [r for r in rows_of(data, "file") if r["path"] == PLAN_H]
+    assert row["status"] == status
+
+
+SDK_INC = "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/"
+
+
+def test_sdk_header_the_loader_includes_is_on_the_surface(mod, capsys, tmp_path):
+    # catches: SDK headers outside ingestor/ that the loader compiles in (ArchMatch.hpp) or
+    # the generic-target table's CMake template tagged `other`, so an edit reads N/A
+    loader = SDK_INC + "ingestor/DescriptorLoader.hpp"
+    arch_match, other = SDK_INC + "ArchMatch.hpp", SDK_INC + "Unrelated.hpp"
+    template = "projects/hipdnn/plugin_sdk/cmake/GpuGenericTargetsTable.hpp.in"
+    body = "inline bool f(int a) {{ return a > {}; }}\n"
+    files = {loader: "#include <hipdnn_plugin_sdk/ArchMatch.hpp>\n", arch_match: body.format(3),
+             other: body.format(3), template: "constexpr int k = 1;\n"}  # fmt: skip
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {arch_match: body.format(4), other: body.format(4),
+                         template: "constexpr int k = 2;\n"})  # fmt: skip
+    data = report(mod, capsys, repo, base, head)
+    status = {r["path"]: r["status"] for r in rows_of(data, "file")}
+    assert status == {arch_match: "changed", other: "outside", template: "changed"}
+
+
+def test_member_read_of_a_moved_class_is_not_a_removal_reader(mod, capsys, tmp_path):
+    # catches: a member reader matched by its class's name alone, so a class moved to another
+    # module under the same name reads `Space.outer_knob is removed but still referenced`
+    old, new, user = HKP_PACK + "tuning.py", HKP_PACK + "waves.py", HKP_PACK + "user.py"
+    cls = "class Space:\n    def outer_knob(self):\n        return 1\n"
+    reader = "from hkp_pack.tuning import Space\n\n\ndef f():\n    return Space().outer_knob()\n"
+    repo, base = make_repo(tmp_path, {old: cls, user: reader})
+    moved = {old: "X = 1\n", new: cls}
+    head = commit(
+        repo, {**moved, user: reader.replace("hkp_pack.tuning", "hkp_pack.waves")}
+    )
+    assert not rows_of(report(mod, capsys, repo, base, head), "symbols", "mismatch")
+    # a reader still importing the class from its old module does read the removed one
+    stale = commit(repo, moved, parent=base)
+    rows = rows_of(report(mod, capsys, repo, base, stale), "symbols", "mismatch")
+    assert "Space.outer_knob" in {r["name"] for r in rows}
+
+
+def test_target_tip_keeps_the_emit_fold_for_modules_the_head_owns(
+    mod, capsys, tmp_path
+):
+    # catches: the emit fold applied to base..head only, so the merged view re-adds the
+    # shipped module's row as changed and merged-only, and no run with a tip reaches NONE
+    repo, base = make_repo(
+        tmp_path, {BUILDER: BUILD, KDP: KDP_JSON, "README.md": "a\n"}
+    )
+    head = branch_commit(repo, base, {BUILDER: BODY_EDIT}, "feature")
+    tip = branch_commit(repo, base, {"README.md": "b\n"}, "target")
+    emit = write_emit(tmp_path / "eq.json", repo, base, head)
+    data = report(mod, capsys, repo, base, head, "--target-tip", tip, "--emit", emit)
+    assert data["rollup"] == "Runtime impact: NONE (1 files inspected)"
+    assert not [r for r in data["rows"] if r["merged_only"]]
+    # the target edits the module too: the merged content is not what the emitter built
+    extra = "def extra():\n    return 1\n\n\n" + BUILD
+    tip = branch_commit(repo, base, {BUILDER: extra}, "target2")
+    data = report(mod, capsys, repo, base, head, "--target-tip", tip, "--emit", emit)
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+def test_emit_params_reordered_against_the_static_list_is_mismatch(
+    mod, capsys, tmp_path
+):
+    # catches: emitted params compared with the static C++ list as sorted names
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON, PACK: PACK_STATIC})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    swapped = [["k_ptr", "ptr"], ["q_ptr", "ptr"], ["scale", "float"]]
+    emit = write_emit(tmp_path / "p.json", repo, base, head, params_changed=["v"],
+                      params={"base": None, "head": swapped})  # fmt: skip
+    (row,) = rows_of(report(mod, capsys, repo, base, head, "--emit", emit), "kernargs", "mismatch")  # fmt: skip
+    assert row["path"] == PACK and "reordered" in row["reason"]
+
+
+def test_global_buffer_declared_four_bytes_disagrees_with_a_pointer_param(
+    mod, capsys, tmp_path
+):
+    # catches: every global_buffer read as a pointer whatever its declared size, so an I32
+    # q_ptr reads as agreeing although requireSignatureMatch refuses it
+    files = {BUILDER: BUILD, PACK: PACK_STATIC, MANIFEST: MANIFEST_YAML}
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {PACK: PACK_STATIC.replace("PTR, 0,", "I32, 0,")})
+    (row,) = rows_of(report(mod, capsys, repo, base, head), "kernargs", "mismatch")
+    assert "q_ptr: builder pointer, C++ 4-byte" in row["reason"]
+
+
+def test_path_only_python_source_still_checks_the_declared_pair(mod, capsys, tmp_path):
+    # catches: a `python_source` with no `:symbol` dropped, though launch_surface.py --check
+    # accepts it, so a type-only builder change reads NEEDS-DEVICE instead of BREAKS
+    path_only = MANIFEST_YAML.replace("attn.py:build_attn", "attn.py")
+    repo, base = abi_repo(tmp_path, {PACK: PACK_STATIC, MANIFEST: path_only})
+    head = commit(repo, {BUILDER: BUILD.replace('"scale", F32', '"scale", I64')})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = rows_of(data, "kernargs", "mismatch")
+    assert row["path"] == PACK and "scale" in row["reason"]
+    assert data["rollup"] == "Runtime impact: BREAKS"
+
+
+def test_static_list_cut_short_of_the_declared_builder_is_mismatch(
+    mod, capsys, tmp_path
+):
+    # catches: a cut-down C++ list paired with a smaller builder it happens to fit (a five-entry
+    # cut of the dense signature matches the persistent builder), so it reads changed
+    small = '\n\ndef build_small(b, spec):\n    b.param("q_ptr", PTR)\n    b.param("k_ptr", PTR)\n    return b\n'
+    files = {BUILDER: BUILD + small, PACK: PACK_STATIC, MANIFEST: MANIFEST_YAML}
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {PACK: ptr_sig("attnSignature", ["q_ptr", "k_ptr"])})
+    (row,) = rows_of(report(mod, capsys, repo, base, head), "kernargs", "mismatch")
+    assert "builder build_attn" in row["reason"]
