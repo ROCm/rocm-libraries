@@ -6966,6 +6966,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                      || (arg.print_solution_found && arg.print_kernel_info))
                                             ? hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
                                             : -1;
+            uint64_t    solutionUid   = 0;
             std::string solutionName  = "";
             std::string kernelName    = "";
             std::string archName      = "";
@@ -7012,12 +7013,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                         kernelName = hipblaslt_ext::getKernelNameFromAlgo(
                             handle, heuristicResult[sol].algo);
                     }
+                    solutionUid = hipblaslt_ext::getUidFromAlgo(
+                        handle, heuristicResult[sol].algo);
                 }
                 ArgumentModel<argument_param>{}.log_args(
                     Talpha,
                     hipblaslt_cout,
                     sol,
                     solutionIndex,
+                    solutionUid,
                     solutionName,
                     kernelName,
                     archName,
@@ -7351,6 +7355,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 = (tuningEnv || arg.print_kernel_info)
                       ? hipblaslt_ext::getIndexFromAlgo(heuristicResult[best_sol].algo)
                       : -1;
+            uint64_t    solutionUid  = 0;
             std::string solutionName = "";
             std::string kernelName   = "";
             std::string archName     = "";
@@ -7366,6 +7371,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 solutionName = best.s_name;
                 kernelName   = best.k_name;
+                solutionUid  = hipblaslt_ext::getUidFromAlgo(
+                    handle, heuristicResult[best_sol].algo);
             }
 
             hipblaslt_cout << "Winner: " << std::endl;
@@ -7374,6 +7381,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout,
                 best_sol,
                 solutionIndex,
+                solutionUid,
                 solutionName,
                 kernelName,
                 archName,

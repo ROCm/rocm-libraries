@@ -1,9 +1,44 @@
 # Solution UID foundation
 
-`SolutionUID` is a stable 64-bit identifier for a hipBLASLt/TensileLite
-solution. This first migration step provides the identifier format and
-maintenance tooling, but does not assign or consume UIDs in library generation
-or at runtime.
+`SolutionUID` is a 64-bit identifier for a hipBLASLt/TensileLite solution
+record. An identifier persisted in logic YAML stays stable across library
+rebuilds. Library generation decodes that identifier and stores it in runtime
+metadata. When the YAML has no UID, generation assigns one for that build
+without updating the YAML; rebuilding can produce a different UID. Loading
+older prebuilt metadata with no UID leaves the runtime value at zero.
+Runtime selection by UID is a later migration step.
+
+Geko assigns a fresh UID to solutions copied into `final_libs` or `full_libs`,
+including copies from Origami. These are new records, even when they describe
+the same GPU kernel. `TensileMergeLibrary` matches `SolutionNameMin`. A matching
+name keeps the pooled Equality solution and ignores the incoming UID. The merge
+also claims a UID for every solution copied from the base file into the output.
+A base UID that is already unique and non-zero is kept. A base UID that is
+missing, zero, malformed, or duplicated inside that base file is replaced in
+the merged file. The input file is left unchanged unless the output path is
+that file.
+
+## Solution indices and the UID
+
+A solution has three numbers:
+
+- `SolutionIndex` in logic YAML is the solution's position in that file. Every
+  file starts at 0, and the file's size table refers to solutions by this
+  position. Tuning, `TensileMergeLibrary`, and Geko renumber it when they add,
+  remove, or copy solutions.
+- The solution index used by `hipblaslt-bench --solution_index`,
+  `getIndexFromAlgo`, and `MatchTable.yaml` is not stored anywhere. Each
+  `TensileCreateLibrary` run assigns it by numbering the solutions of every
+  architecture and logic file in the build, so adding, removing, or filtering
+  logic files, or building a different set of architectures, can change it.
+- `SolutionUID` is stored with the solution record and is not derived from
+  either position. Tools that move, copy, or renumber a record keep its UID, so
+  the UID stays the same while both indices change. Generation needs no shared
+  counter: the timestamp separates UIDs drawn at different times, and the
+  random bits separate UIDs drawn in the same millisecond.
+
+A UID is stable only while the YAML keeps it. A tool that rewrites a logic
+file must carry `SolutionUID` forward instead of dropping or regenerating it.
 
 ## Identifier format
 
@@ -30,11 +65,11 @@ the optional, unquoted `SolutionUID` field immediately after the local
   SolutionUID: 0u3E
 ```
 
-YAML readers decode the text immediately and all identity, comparison, and
-mapping operations use the unsigned 64-bit value. New dict-format files from
-LibraryLogic (tuning) and TensileMergeLibrary keep `SolutionUID` immediately
-after `SolutionIndex`. Legacy list-format files keep keys in their existing
-alphabetical layout, so `SolutionUID` follows `SolutionNameMin`.
+Decoding is explicit: a reader calls ``decode_solution_uid`` and then uses the
+unsigned 64-bit value for identity, comparison, and mapping. New dict-format
+files from LibraryLogic (tuning) and TensileMergeLibrary keep `SolutionUID`
+immediately after `SolutionIndex`. Legacy list-format files keep keys in their
+existing alphabetical layout, so `SolutionUID` follows `SolutionNameMin`.
 
 ## Regenerate a UID
 
@@ -49,5 +84,12 @@ python3 -m tensilelite.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 `--inplace`, the command prints the new canonical `0u` UID without modifying
 the file.
 
-Repository-wide assignment, runtime selection, and mandatory uniqueness are
-introduced by later migration steps.
+One Tensile process and one Geko generation each replace a zero, malformed, or
+colliding UID in the files that run writes. A missing YAML field is not written
+back there: library generation assigns a UID for that build only.
+`TensileMergeLibrary` writes its output, and that output replaces a missing,
+zero, malformed, or colliding UID on every solution it contains, including
+solutions copied from the base file. A unique non-zero base UID is kept.
+Uniqueness across the shipped logic tree remains the ``library-uniqueness``
+check, and `TensileCreateLibrary` fails when one architecture's assembled
+library maps a UID to two solution indices.

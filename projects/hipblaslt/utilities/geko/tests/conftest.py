@@ -15,6 +15,26 @@ from geko.constants import SUPPORTED_ARCH
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _clear_solution_id_gen_binding() -> None:
+    """Clear the process-wide hipBLASLt checkout between tests.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
+    from geko import paths
+
+    paths._BOUND_HIPBLASLT_PATH = None
+    yield
+    paths._BOUND_HIPBLASLT_PATH = None
+
+
 def pytest_configure(config) -> None:
     """Register custom pytest markers for this package."""
     config.addinivalue_line(

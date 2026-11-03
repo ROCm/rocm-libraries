@@ -10,7 +10,7 @@ import multiprocessing as mp
 import os
 from pathlib import Path
 from types import ModuleType
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pytest
 
@@ -115,8 +115,89 @@ def test_collect_yaml_files_includes_all_yaml_names(tmp_path: Path) -> None:
     assert _collect_yaml_files(tmp_path) == [conventional, user_args]
 
 
+_SOLUTION_KEYS = ("SolutionIndex", "SolutionUID")
+
+
+def _strip_comment(line: str) -> str:
+    """Remove an unquoted YAML comment from one line.
+
+    A ``#`` starts a comment at the start of the line or after whitespace,
+    outside single or double quotes.
+
+    Args:
+        line: One line of a logic YAML file.
+
+    Returns:
+        The line without its comment.
+    """
+    if "#" not in line:
+        return line
+    quote = ""
+    for position, character in enumerate(line):
+        if quote:
+            if character == quote:
+                quote = ""
+        elif character in "'\"":
+            quote = character
+        elif character == "#" and (position == 0 or line[position - 1] in " \t"):
+            return line[:position]
+    return line
+
+
+class _SolutionItem:
+    """``SolutionIndex`` and ``SolutionUID`` text seen in one sequence item."""
+
+    __slots__ = ("key_column", "index", "uid")
+
+    def __init__(self, key_column: int) -> None:
+        """Start an item whose mapping keys begin at ``key_column``.
+
+        Args:
+            key_column: Column of the item's first mapping key.
+
+        Returns:
+            None.
+        """
+        self.key_column = key_column
+        self.index: Optional[str] = None
+        self.uid: Optional[str] = None
+
+    def record(self, key: str, value: str, yaml_path: Path) -> None:
+        """Store one ``SolutionIndex`` or ``SolutionUID`` value.
+
+        Args:
+            key: ``SolutionIndex`` or ``SolutionUID``.
+            value: The value text after the colon.
+            yaml_path: File being scanned, for error messages.
+
+        Returns:
+            None.
+
+        Raises:
+            ValueError: If the item already has a value for ``key``.
+        """
+        if key == "SolutionIndex":
+            if self.index is not None:
+                raise ValueError(f"{yaml_path}: solution has two SolutionIndex keys")
+            self.index = value
+        else:
+            if self.uid is not None:
+                raise ValueError(
+                    f"{yaml_path}: solution has two SolutionUID keys "
+                    f"(SolutionIndex={self.index})"
+                )
+            self.uid = value
+
+
 def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
     """Extract SolutionUID entries from one logic YAML.
+
+    The file is read once, line by line, without a YAML parser. Unquoted
+    comments are removed. ``SolutionIndex`` and ``SolutionUID`` are collected
+    per sequence item, in either order, from block keys at the item's key
+    column. This covers dict-format files, where solutions are top-level items
+    under ``Solutions:``, and list-format files, where solutions are nested one
+    level deeper. Logic files do not write solutions as flow mappings.
 
     Args:
         yaml_path: Path to a logic YAML file.
@@ -127,54 +208,213 @@ def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
         ``missing_count`` counts solutions without the field.
 
     Raises:
-        TypeError: If a UID value is not a string.
-        ValueError: If a UID is malformed, zero, out of range, or an index
-            value is not an integer.
+        ValueError: If a UID is malformed, zero, or out of range, an index is
+            not an integer, a solution repeats either key, or a UID has no
+            ``SolutionIndex`` in the same item.
     """
     entries: List[Tuple[int, str, int]] = []
     missing = 0
-    current_index: int | None = None
-    current_uid: int | None = None
+    stack: List[_SolutionItem] = []
 
-    def flush_solution() -> None:
-        """Record the current solution before scanning the next one.
+    def close(item: _SolutionItem) -> None:
+        """Record a finished item that names a solution.
 
         Args:
-            None.
+            item: Item whose last line has been read.
 
         Returns:
             None.
 
         Raises:
-            None.
+            ValueError: If the item's index or UID is invalid.
         """
-        nonlocal missing, current_index, current_uid
-        if current_index is None:
+        nonlocal missing
+        if item.index is None and item.uid is None:
             return
-        if current_uid is None:
+        if item.index is None:
+            raise ValueError(f"{yaml_path}: SolutionUID {item.uid} has no SolutionIndex")
+        try:
+            local_index = int(item.index)
+        except ValueError as error:
+            raise ValueError(f"{yaml_path}: bad SolutionIndex {item.index!r}") from error
+        if item.uid is None:
             missing += 1
-        else:
-            entries.append((current_uid, str(yaml_path), current_index))
-        current_index = None
-        current_uid = None
+            return
+        try:
+            uid = decode_solution_uid(item.uid)
+        except ValueError as error:
+            raise ValueError(
+                f"{yaml_path} (SolutionIndex={local_index}): {error}"
+            ) from error
+        if uid == 0:
+            raise ValueError(
+                f"Stored SolutionUID must not be zero: {yaml_path} "
+                f"(SolutionIndex={local_index})"
+            )
+        entries.append((uid, str(yaml_path), local_index))
 
+    top_column = -1
     with yaml_path.open(encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            stripped = line.strip()
-            if stripped.startswith("- SolutionIndex:") or stripped.startswith("SolutionIndex:"):
-                flush_solution()
-                current_index = int(stripped.split(":", 1)[1].strip())
-            elif current_index is not None and stripped.startswith("SolutionUID:"):
-                encoded_uid = stripped.split(":", 1)[1].strip()
-                current_uid = decode_solution_uid(encoded_uid)
-                if current_uid == 0:
-                    raise ValueError(
-                        f"Stored SolutionUID must not be zero: {yaml_path} "
-                        f"(SolutionIndex={current_index})"
-                    )
+            content = line.lstrip(" ")
+            column = len(line) - len(content)
+            if (
+                column >= top_column
+                and not content.startswith("- ")
+                and not content.startswith("Solution")
+            ):
+                continue
+            if "#" in line:
+                line = _strip_comment(line)
+                content = line.lstrip(" ")
+                column = len(line) - len(content)
+            if not content or content.isspace():
+                continue
+            if column < top_column:
+                while stack and stack[-1].key_column > column:
+                    close(stack.pop())
+                top_column = stack[-1].key_column if stack else -1
 
-    flush_solution()
+            if content.startswith("- "):
+                if ":" not in content:
+                    continue
+                while content.startswith("- "):
+                    content = content[2:]
+                    stripped = content.lstrip(" ")
+                    column += 2 + len(content) - len(stripped)
+                    content = stripped
+                content = content.rstrip()
+                if ": " in content or content.endswith(":"):
+                    stack.append(_SolutionItem(column))
+                    top_column = column
+            elif content.startswith("Solution"):
+                content = content.rstrip()
+            else:
+                continue
+
+            if column != top_column or not content.startswith("Solution"):
+                continue
+            key, _, value = content.partition(":")
+            key = key.rstrip()
+            if key in _SOLUTION_KEYS:
+                stack[-1].record(key, value.strip(), yaml_path)
+
+    while stack:
+        close(stack.pop())
     return entries, missing
+
+
+def test_scan_handles_reordered_keys_and_comments(tmp_path: Path) -> None:
+    """Verify the scan groups keys by item and ignores comments.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If any solution is attributed to the wrong UID or index.
+    """
+    logic = tmp_path / "dict.yaml"
+    logic.write_text(
+        "ProblemType:\n"
+        "  SolutionIndex: 99\n"
+        "Solutions:\n"
+        "- SolutionUID: 0u3E  # written before the index\n"
+        "  SolutionIndex: 0\n"
+        "  Nested:\n"
+        "    SolutionUID: 0u5\n"
+        "- SolutionIndex: 1\n"
+        "  # SolutionUID: 0u3E\n"
+        "  SolutionUID: 0u3F\n"
+        "- SolutionIndex: 2\n"
+        "ExactLogic:\n"
+        "- - [64, 64, 1, 64]\n"
+        "  - [0, 1.0]\n",
+        encoding="utf-8",
+    )
+
+    entries, missing = _scan_yaml_file(logic)
+
+    path = str(logic)
+    assert entries == [
+        (decode_solution_uid("0u3E"), path, 0),
+        (decode_solution_uid("0u3F"), path, 1),
+    ]
+    assert missing == 1
+
+
+def test_scan_reads_list_format_solutions(tmp_path: Path) -> None:
+    """Verify nested list-format solutions are read at their own key column.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a list-format solution is missed or misattributed.
+    """
+    logic = tmp_path / "list.yaml"
+    logic.write_text(
+        "- {MinimumRequiredVersion: 5.0.0}\n"
+        "- gfx950\n"
+        "- Activation: true\n"
+        "  DataType: 0\n"
+        "- - 1LDSBuffer: 0\n"
+        "    SFCWGM:\n"
+        "    - [1, 1]\n"
+        "    SolutionIndex: 0\n"
+        "    SolutionUID: 0u3E\n"
+        "  - 1LDSBuffer: 1\n"
+        "    SolutionUID: 0u3F\n"
+        "    SolutionIndex: 1\n"
+        "- [2, 3, 0, 1]\n"
+        "- - - [64, 64, 1, 64]\n"
+        "    - [0, 1.0]\n",
+        encoding="utf-8",
+    )
+
+    entries, missing = _scan_yaml_file(logic)
+
+    path = str(logic)
+    assert entries == [
+        (decode_solution_uid("0u3E"), path, 0),
+        (decode_solution_uid("0u3F"), path, 1),
+    ]
+    assert missing == 0
+
+
+@pytest.mark.parametrize(
+    "solutions",
+    [
+        "- SolutionIndex: 0\n  SolutionUID: 0u0\n",
+        "- SolutionIndex: 0\n  SolutionUID: 0u3E # comment\n  SolutionUID: 0u3F\n",
+        "- SolutionUID: 0u3E\n  KernelNameMin: k\n",
+        "- SolutionIndex: 0\n  SolutionUID: 0u03E\n",
+    ],
+    ids=["zero", "repeated-key", "no-index", "leading-zero"],
+)
+def test_scan_rejects_invalid_solutions(tmp_path: Path, solutions: str) -> None:
+    """Verify invalid UID entries still fail the scan.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+        solutions: ``Solutions`` block containing one invalid entry.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the scan accepts the invalid entry.
+    """
+    logic = tmp_path / "bad.yaml"
+    logic.write_text("Solutions:\n" + solutions, encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        _scan_yaml_file(logic)
 
 
 def collect_solution_uids(

@@ -1156,6 +1156,24 @@ namespace hipblaslt_ext
                                                          hipblasLtMatmulAlgo_t& algo);
 
     /*! \ingroup library_module
+     *  \brief Retrieve the solution UID.
+     *
+     *  @param[in]
+     *  handle  Pointer to the allocated hipBLASLt handle for the
+     * hipBLASLt context. See \ref hipblasLtHandle_t .
+     *  @param[in]
+     *  algo    The algorithm.
+     *
+     *  \retval uint64_t The solution UID stored in the generated library.
+     * Logic YAML without a persisted UID receives a build-specific UID during
+     * generation. Only UIDs persisted in logic YAML stay stable across rebuilds.
+     * Returns 0 for non-TensileLite algorithms or older prebuilt metadata with
+     * no UID.
+     */
+    HIPBLASLT_EXPORT uint64_t getUidFromAlgo(hipblasLtHandle_t      handle,
+                                             hipblasLtMatmulAlgo_t& algo);
+
+    /*! \ingroup library_module
      *  \brief Retrieve the kernel name
      *
      *  @param[in]

@@ -63,7 +63,7 @@ namespace TensileLite
                 }
                 case msgpack::type::object_type::POSITIVE_INTEGER:
                 {
-                    auto iKey = element.key.as<uint32_t>();
+                    auto iKey = element.key.as<uint64_t>();
                     key       = std::to_string(iKey);
                     break;
                 }
@@ -289,47 +289,69 @@ namespace TensileLite
         return true;
     }
 
-    std::map<int, std::string> MessagePackLoadLibraryMapping(std::string const& filename)
+    namespace
     {
-        if(Debug::Instance().printDataInit())
-            std::cout << "Loading library mapping from file: " << filename << std::endl;
-        msgpack::object_handle result;
-        if(!fileToMsgObject(filename, result))
-            return {};
-
-        std::map<int, std::string> libraryMapping;
-        try
-        {
-            std::unordered_map<std::string, msgpack::object> objectMap;
-            Serialization::objectToMap(result.get(), objectMap);
-
-            for(auto const& pair : objectMap)
-            {
-                int         key   = 0;
-                char const* first = pair.first.data();
-                char const* last  = first + pair.first.size();
-                auto const  conv  = std::from_chars(first, last, key);
-                if(conv.ec != std::errc{} || conv.ptr != last)
-                {
-                    if(Debug::Instance().printDataInit())
-                        std::cout << "Error loading library mapping: invalid key \""
-                                  << pair.first << "\"" << std::endl;
-                    return {};
-                }
-                std::string value;
-                pair.second.convert(value);
-                libraryMapping[key] = value;
-            }
-        }
-        catch(std::exception const& exc)
+        template <typename Key, typename Value, typename ValueLoader>
+        std::map<Key, Value> messagePackLoadStringKeyMapping(std::string const& filename,
+                                                             char const*         label,
+                                                             ValueLoader         loadValue)
         {
             if(Debug::Instance().printDataInit())
-                std::cout << "Error loading library mapping: " << exc.what() << std::endl;
+                std::cout << "Loading " << label << " from file: " << filename << std::endl;
+            msgpack::object_handle result;
+            if(!fileToMsgObject(filename, result))
+                return {};
 
-            return {};
+            std::map<Key, Value> mapping;
+            try
+            {
+                std::unordered_map<std::string, msgpack::object> objectMap;
+                Serialization::objectToMap(result.get(), objectMap);
+
+                for(auto const& pair : objectMap)
+                {
+                    Key         key   = 0;
+                    char const* first = pair.first.data();
+                    char const* last  = first + pair.first.size();
+                    auto const  conv  = std::from_chars(first, last, key);
+                    if(conv.ec != std::errc{} || conv.ptr != last)
+                    {
+                        if(Debug::Instance().printDataInit())
+                            std::cout << "Error loading " << label << ": invalid key \""
+                                      << pair.first << "\"" << std::endl;
+                        return {};
+                    }
+                    Value value{};
+                    loadValue(pair.second, value);
+                    mapping[key] = value;
+                }
+            }
+            catch(std::exception const& exc)
+            {
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Error loading " << label << ": " << exc.what() << std::endl;
+
+                return {};
+            }
+
+            return mapping;
         }
+    } // namespace
 
-        return libraryMapping;
+    std::map<int, std::string> MessagePackLoadLibraryMapping(std::string const& filename)
+    {
+        return messagePackLoadStringKeyMapping<int, std::string>(
+            filename,
+            "library mapping",
+            [](msgpack::object const& object, std::string& value) { object.convert(value); });
+    }
+
+    std::map<uint64_t, int> MessagePackLoadUidMapping(std::string const& filename)
+    {
+        return messagePackLoadStringKeyMapping<uint64_t, int>(
+            filename, "UID mapping", [](msgpack::object const& object, int& value) {
+                object.convert(value);
+            });
     }
 
     template <typename MyProblem, typename MySolution>

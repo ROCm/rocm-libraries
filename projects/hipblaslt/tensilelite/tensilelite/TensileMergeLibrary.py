@@ -38,6 +38,7 @@ from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
 from .Common import ParallelMap2
 from .Common.GlobalParameters import defaultSolution
 from .Common import assignParameterWithDefault
+from .Common.SolutionIdGen import claim_solution_uid
 from .CustomYamlLoader import load_yaml_stream
 from .ExecutionPolicy import normalize_execution_policy_with_defaults
 
@@ -108,7 +109,27 @@ def fixSizeInconsistencies(sizes, fileType):
     return newSizes, len(newSizes)
 
 
-def addKernel(solutionPool, solDict, solution):
+def addKernel(solutionPool, solDict, solution, seen: set[str] | None = None):
+    """Add a solution, or reuse one with the same ``SolutionNameMin``.
+
+    A reused name keeps the solution already in the pool, including its UID.
+    A new solution is copied in. When ``seen`` is provided, that copy's UID is
+    made unique among the files in this merge.
+
+    Args:
+        solutionPool: Solutions accumulated for the merged file.
+        solDict: ``SolutionNameMin`` to the pooled solution.
+        solution: Incoming solution.
+        seen: Canonical UIDs already reserved by this merge. Omitted by callers
+            that do not assign UIDs.
+
+    Returns:
+        Updated pool, name map, and the solution index to record.
+
+    Raises:
+        RuntimeError: If a unique SolutionUID cannot be drawn.
+        ValueError: If UID generation overflows the 40-bit timestamp.
+    """
     if solution["SolutionNameMin"] in solDict:
         index = solDict[solution["SolutionNameMin"]]["SolutionIndex"]
         debug("...Reuse previously existed solution", end="")
@@ -116,6 +137,8 @@ def addKernel(solutionPool, solDict, solution):
         index = len(solutionPool)
         _solution = deepcopy(solution)
         _solution["SolutionIndex"] = index
+        if seen is not None:
+            claim_solution_uid(_solution, seen)
         solutionPool.append(_solution)
         solDict[solution["SolutionNameMin"]] = _solution
         debug("...A new solution has been added", end="")
@@ -414,6 +437,12 @@ def mergeLogic(oriData: dict[str, Any], incData: dict[str, Any], forceMerge, noE
 
     solutionPool = deepcopy(oriSolutions)
     solDict = {sol["SolutionNameMin"]: sol for sol in oriSolutions}
+    # Claim every copied base solution into the output. A unique non-zero UID
+    # is kept. A missing, zero, malformed, or duplicate base UID is replaced
+    # here and is not written back to the input file.
+    seenUids: set[str] = set()
+    for pooled in solutionPool:
+        claim_solution_uid(pooled, seenUids)
     solutionMap = deepcopy(oriExactLogic)
 
     origDict = {tuple(origSize): [i, origEff] for i, [origSize, [origIndex, origEff]] in enumerate(oriExactLogic)}
@@ -428,14 +457,14 @@ def mergeLogic(oriData: dict[str, Any], incData: dict[str, Any], forceMerge, noE
                 elif forceMerge:
                     verbose("[!]", incSize, "already exists but does not improve in performance.", end="")
                 verbose("Efficiency:", origEff, "->", incEff, "(force_merge=True)" if forceMerge else "")
-                solutionPool, solDict, index = addKernel(solutionPool, solDict, incSolution)
+                solutionPool, solDict, index = addKernel(solutionPool, solDict, incSolution, seenUids)
                 solutionMap[j][1] = [index, storeEff]
             else:
                 verbose("[X]", incSize, "already exists but does not improve in performance.", end="")
                 verbose("Efficiency:", origEff, "->", incEff)
         except KeyError:
             verbose("[-]", incSize, "has been added to solution table, Efficiency: N/A ->", incEff)
-            solutionPool, solDict, index = addKernel(solutionPool, solDict, incSolution)
+            solutionPool, solDict, index = addKernel(solutionPool, solDict, incSolution, seenUids)
             solutionMap.append([incSize, [index, storeEff]])
 
     verbose(numOrigRemoved, "unused solutions removed from base logic file")
