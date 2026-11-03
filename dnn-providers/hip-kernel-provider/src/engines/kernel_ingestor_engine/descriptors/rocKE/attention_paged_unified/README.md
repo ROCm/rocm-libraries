@@ -18,6 +18,7 @@ padding, SEM-009 paged K/V, SEM-010 empty rows), one SDPA-forward node, compute 
 | page tables | `[B, 1, M, 1]` INT32 | `page_table_k` and `page_table_v`: one tensor for both, or two tensors with the same `M` and batch stride; unit stride along M; not packed |
 | `seq_len_q`, `seq_len_kv` | `[B,1,1,1]` INT32 | both required, as for every paged graph |
 | `max_seq_len_kv` | | set or unset; unset is inferred as `M * block_size` |
+| `sink_token` | `[1, Hq, 1, 1]` | optional; the Q/K/V/O data type (FP16 or BF16, not FLOAT) and a unit head stride (see [Attention sinks](#attention-sinks)) |
 
 - Head size 64, 128 or 256; block size 16, 32 or 64; `Hq / Hkv` in {1, 2, 4, 5, 6, 7, 8, 16}.
 - Masking: bottom-right causal (`right_bound` 0), optionally with a `left_bound` L, which
@@ -30,7 +31,7 @@ A dense Q's rows past `seq_len_q[b]` (up to `Sq`) are padding and get O = 0. A r
 writes only its live rows, the first `seq_len_q[b]` rows from its origin: rows of the offset
 block past them belong to no sequence (RFC 0014), so the kernel leaves them untouched and
 never writes past the last live row. A live row with no visible key, including every row
-of a sequence with `seq_len_kv == 0`, also gets O = 0. The kernel never
+of a sequence with `seq_len_kv == 0`, also gets O = 0, with or without a sink. The kernel never
 loads K/V past `seq_len_kv` nor page-table entries past `ceil(seq_len_kv / block_size)`, so
 unused entries may hold anything (`-1`, a null block). K pages through `page_table_k` and V
 through `page_table_v`, so with two tables V may sit in other blocks than K.
@@ -59,13 +60,14 @@ hipDNN graphs this kernel cannot read:
 | `not_paged` | neither K nor V paged |
 | `one_sided_paging` | only K or only V paged |
 | `page_table` | K and V page tables of different widths `M` or batch strides, a packed table (with a ragged offset), a table that is not INT32 `[B, 1, M, 1]` with a unit entry stride |
-| `alignment` | a declared tensor `alignment` (engine API 1.3.0) below what the kernels load: Q, K, V or O not a multiple of 16 bytes (16-byte vectors), or a page table, `seq_len_q`, `seq_len_kv` or ragged offset not a multiple of 4 bytes (INT32 words) |
+| `alignment` | a declared tensor `alignment` (engine API 1.3.0) below what the kernels load: Q, K, V, O or `sink_token` not a multiple of 16 bytes (16-byte vectors), or a page table, `seq_len_q`, `seq_len_kv` or ragged offset not a multiple of 4 bytes (INT32 words) |
 | `block_size` | K and V block sizes differ, or a block size outside 16/32/64 |
 | `seq_len_q`, `seq_len_kv` | a missing or malformed length tensor |
 | `ragged` | a ragged Q/O whose `ragged_offset_multiplier` is not its token (sequence-axis) stride, i.e. offsets stored in other units than tokens (RFC 0014 allows them; the kernel reads offsets as token counts); a ragged K or V; Q and O not ragged through one offset tensor; an offset tensor that is not INT32 `[B+1, 1, 1, 1]` |
 | `mask` | no causal mask, top-left alignment, a right bound other than 0, `left_bound = 0` |
+| `sinks` | a `sink_token` that is not `[1, Hq, 1, 1]`, a FLOAT sink (cuDNN's form; the kernels load the sink in the I/O dtype), or a sink without a unit head stride |
 
-Other causes: `sinks`, `alibi_mask`, `fp8`, `stats`, `dropout`, `attn_mask`,
+Other causes: `alibi_mask`, `fp8`, `stats`, `dropout`, `attn_mask`,
 `scale_tensor`, `block_mask`, `implementation`, `gqa`, `head_size`, `kv_layout`, `layout`,
 `size_limit`, `operand`, `node`, `compute_data_type`, `shape`, `mma_core_mode`, `scale`.
 
@@ -76,7 +78,10 @@ and no allocation, so after a first (warm-up) execution on a device, which loads
 module, a plan can be captured into a HIP graph and replayed with new lengths, block ids
 and data (`IntegrationGpuAttentionPagedUnified.HipGraphCaptureReplaysWithChangedLengthsAndBlocks`).
 
-Each kernel is one object per (arch, dtype, head size, block size, GQA ratio). The grid
+Each kernel is one object per (arch, dtype, head size, block size, GQA ratio, sinks): every
+combination ships twice, as `paged_unified.<dtype>_d<D>_bs<bs>_g<ratio>.<arch>` and as
+`..._g<ratio>_sinks.<arch>` (KMD `use_sinks` 1), which the matcher selects exactly when the
+graph has a `sink_token`. The grid
 is `(Hkv, q_block_grid)` with `num_warps * 64` threads; query blocks are walked by a
 grid-stride loop, so a ragged batch whose total token count exceeds `Sq` is still covered.
 K and V are read through one 64-bit buffer resource per page; K's page ids come from
@@ -120,3 +125,16 @@ live batch carry `seq_len_q = seq_len_kv = 0` and their rows come back zero. For
 the cache's K and V halves as two containers over one allocation, its `block_table` as both
 page tables (one tensor, `[B, 1, max_blocks, 1]`), `seq_lens` as `seq_len_kv`, the query lengths as
 `seq_len_q`, and `query_start_loc` as the ragged offset of Q and O.
+
+## Attention sinks
+
+`sink_token` adds one logit per query head to the softmax max and denominator, with no value
+row and no `attn_scale` (SdpaSemanticsRegister SEM-022); a row with no visible key still gets
+O = 0. cuDNN and the hipDNN frontend take it as FLOAT `[1, Hq, 1, 1]`. This engine reads it in
+the Q data type instead (FP16 or BF16), because vLLM keeps sinks in the model dtype
+(`layer.sinks`, a `[Hq]` tensor of raw logits): bind it without a copy as the view
+`[1, Hq, 1, 1]` with strides `[Hq, 1, 1, 1]`. The buffer must be 16-byte aligned; a graph
+declaring a smaller `alignment` for it is declined with cause `alignment`. FLOAT sinks
+are declined with cause `sinks`. Graphs with a Q-dtype sink need a frontend that accepts that
+data type, which is still to be agreed with the hipDNN team; until then the sink integration
+tests skip with that reason.

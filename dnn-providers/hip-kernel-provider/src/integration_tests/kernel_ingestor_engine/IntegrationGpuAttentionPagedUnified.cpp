@@ -33,12 +33,12 @@
  * @brief End-to-end runs of hipkernel:AttentionPagedUnified through the hipDNN frontend:
  *        paged uniform decode (dense Q), ragged Q over paged K/V (mixed decode and
  *        chunked prefill, a first origin past 0), sliding windows, separate K and V page
- *        tables, and HIP-graph capture/replay with changed sequence lengths, block ids and
- *        data. Every output is compared with a host gather-then-dense fp32 reference over
- *        the same page tables, which is itself checked against hipDNN's CPU SDPA reference.
- *        A dense Q's rows past seq_len_q, and rows with no visible key, must be zero
- *        (SdpaSemanticsRegister SEM-008, SEM-010); a ragged Q's rows past seq_len_q belong
- *        to no sequence (RFC 0014) and must keep their contents.
+ *        tables, attention sinks, and HIP-graph capture/replay with changed sequence
+ *        lengths, block ids and data. Every output is compared with a host gather-then-dense
+ *        fp32 reference over the same page tables, which is itself checked against hipDNN's
+ *        CPU SDPA reference. A dense Q's rows past seq_len_q, and rows with no visible key,
+ *        must be zero (SdpaSemanticsRegister SEM-008, SEM-010); a ragged Q's rows past
+ *        seq_len_q belong to no sequence (RFC 0014) and must keep their contents.
  *
  * Set HIPDNN_TEST_EXPECTED_ARCH=gfx942 (or gfx950) on required runs so a missing or
  * different device fails instead of skipping.
@@ -105,6 +105,7 @@ struct Problem
     bool setMaxSeqLenKv = true; ///< false leaves max_seq_len_kv for the engine to infer
     int64_t leftBound = -1; ///< the graph's (cuDNN) left_bound; -1 = none
     int64_t qTokenHeads = 0; ///< Q token stride in heads; 0 = queryHeads
+    bool sinks = false; ///< a sink_token `[1, Hq, 1, 1]` in the I/O dtype
     /// V pages through its own page_table_v, which places V in other blocks than K;
     /// otherwise one tensor is both page_table_k and page_table_v.
     bool separateVTable = false;
@@ -157,6 +158,7 @@ struct HostState
     std::vector<int32_t> queryLengths;
     std::vector<int32_t> offsets; ///< ragged token offsets [B+1]
     int64_t qTokens = 0; ///< tokens of the Q/O storage
+    std::vector<uint16_t> sinks; ///< [Hq] sink logits (p.sinks only)
 };
 
 /// seq_len_q[b]: the live query rows of sequence b.
@@ -279,12 +281,24 @@ HostState makeState(const Problem& p, uint32_t seed)
             }
         }
     }
+    if(p.sinks)
+    {
+        // From negligible to row-dominating, so a head that loses its sink, or reads
+        // another head's, fails the comparison.
+        std::uniform_real_distribution<float> logit(-4.0F, 6.0F);
+        s.sinks.resize(static_cast<size_t>(p.queryHeads));
+        for(auto& x : s.sinks)
+        {
+            x = toBits(logit(rng), p.type);
+        }
+    }
     return s;
 }
 
 /// fp32 gather-then-dense reference: for each sequence, gather its K and V through their
 /// page tables into dense rows, then bottom-right causal (plus window) softmax attention.
-/// Rows past seq_len_q and rows with no visible key stay zero.
+/// A sink joins the row max and the denominator. Rows past seq_len_q and rows with no
+/// visible key stay zero.
 std::vector<float> reference(const Problem& p, const HostState& s, float scale)
 {
     const int64_t d = p.headSize;
@@ -335,8 +349,14 @@ std::vector<float> reference(const Problem& p, const HostState& s, float scale)
                 {
                     continue; // no visible key: zeros
                 }
-                const float maximum = *std::max_element(scores.begin(), scores.end());
-                float sum = 0.0F;
+                float maximum = *std::max_element(scores.begin(), scores.end());
+                const float sink
+                    = p.sinks ? fromBits(s.sinks[static_cast<size_t>(h)], p.type) : 0.0F;
+                if(p.sinks)
+                {
+                    maximum = std::max(maximum, sink);
+                }
+                float sum = p.sinks ? std::exp(sink - maximum) : 0.0F;
                 for(auto& x : scores)
                 {
                     x = std::exp(x - maximum);
@@ -424,6 +444,17 @@ std::vector<float> hipdnnReferenceAs(const Problem& p, HostState s, float scale)
                        .setScale(scale)
                        .setBand(p.leftBound, 0, false)
                        .setSeqLens(&qLengths, &kvLengths);
+    // The reference takes cuDNN's FLOAT sink; the Q-dtype values upcast exactly.
+    Tensor<float> sink({1, p.queryHeads, 1, 1});
+    if(p.sinks)
+    {
+        for(int64_t h = 0; h < p.queryHeads; ++h)
+        {
+            sink.setHostValue(fromBits(s.sinks[static_cast<size_t>(h)], p.type),
+                              std::vector<int64_t>{0, h, 0, 0});
+        }
+        options.setSink(&sink);
+    }
     CpuFpReferenceSdpa::forward<T, T, T, float>(q, k, v, o, options);
 
     std::vector<float> out(static_cast<size_t>(tokens * p.queryHeads * d), 0.0F);
@@ -537,6 +568,7 @@ protected:
         SEQ_LEN_KV = 6,
         SEQ_LEN_Q = 7,
         OFFSETS = 8,
+        SINK = 9,
         PAGE_TABLE_V = 10
     };
 
@@ -603,6 +635,11 @@ protected:
         {
             attributes.set_diagonal_band_left_bound(p.leftBound);
         }
+        if(p.sinks)
+        {
+            attributes.set_sink_token(
+                make(SINK, p.type, {1, p.queryHeads, 1, 1}, {p.queryHeads, 1, 1, 1}));
+        }
         auto o = graph.sdpa(q, k, v, attributes)[0];
         o->set_uid(O)
             .set_output(true)
@@ -613,7 +650,20 @@ protected:
         {
             o->set_ragged_offset(offsets).set_ragged_offset_multiplier(p.queryHeads * d);
         }
-        ASSERT_TRUE(ok(graph.validate()));
+        // The engine reads sinks in the I/O dtype (vLLM keeps them in the model dtype). A
+        // frontend that accepts only cuDNN's FLOAT sink_token rejects that graph before any
+        // engine sees it, so the sink cases skip there instead of failing. Only that data
+        // type rejection skips; any other validate() error fails.
+        const auto validated = graph.validate();
+        if(p.sinks && validated.code != ErrorCode::OK
+           && validated.err_msg.find("sink_token must have FLOAT data type") != std::string::npos)
+        {
+            GTEST_SKIP() << "the hipDNN frontend rejects a sink_token in the Q data type ("
+                         << validated.err_msg << "); " << ENGINE
+                         << " serves only Q-dtype sinks, so this case needs a frontend that "
+                            "accepts them";
+        }
+        ASSERT_TRUE(ok(validated));
         ASSERT_TRUE(ok(graph.build_operation_graph(_handle)));
         ASSERT_TRUE(ok(graph.create_execution_plan_ext(
             hipdnn_data_sdk::utilities::engineNameToId(ENGINE), {})));
@@ -645,6 +695,10 @@ protected:
         {
             built.buffers[OFFSETS] = built.memory.allocate(static_cast<size_t>((batch + 1) * 4));
         }
+        if(p.sinks)
+        {
+            built.buffers[SINK] = built.memory.allocate(static_cast<size_t>(p.queryHeads * 2));
+        }
     }
 
     /// Uploads @p s and poisons O with SENTINEL (stream-ordered).
@@ -666,6 +720,10 @@ protected:
         {
             copy(built.buffers[OFFSETS], s.offsets.data(), s.offsets.size() * 4);
         }
+        if(p.sinks)
+        {
+            copy(built.buffers[SINK], s.sinks.data(), s.sinks.size() * 2);
+        }
         std::vector<uint16_t> poison(built.oBytes / 2, SENTINEL);
         copy(built.buffers[O], poison.data(), built.oBytes);
     }
@@ -683,7 +741,8 @@ protected:
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
         const auto expected = reference(p, s, built.scale);
         // hipDNN's CPU SDPA reference on the same inputs: the test's own gather-then-dense
-        // reference must agree with it.
+        // reference must agree with it. The reference takes the sink as FLOAT; the
+        // engine's Q-dtype sink values upcast exactly.
         const auto contract = hipdnnReference(p, s, built.scale);
         const int64_t d = p.headSize;
         std::vector<bool> written(built.oBytes / 2 / static_cast<size_t>(p.queryHeads * d), false);
@@ -741,7 +800,7 @@ protected:
     {
         Built built;
         build(p, built);
-        if(::testing::Test::HasFatalFailure())
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped())
         {
             return;
         }
@@ -919,6 +978,24 @@ TEST_F(IntegrationGpuAttentionPagedUnified, SeparateKAndVPageTablesRaggedWithWin
     p.setMaxSeqLenKv = false;
     run(p);
 }
+
+/// gpt-oss style sinks with GQA (8 KV heads): every query head's sink, including those
+/// of KV heads past the first, must reach the softmax; keyless rows stay zero.
+TEST_F(IntegrationGpuAttentionPagedUnified, DecodeWithAttentionSinksBf16)
+{
+    Problem p = decodeProblem(DataType::BFLOAT16);
+    p.sinks = true;
+    run(p);
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnified, RaggedQueryWithAttentionSinksAndWindowHalf)
+{
+    Problem p = mixedProblem(DataType::HALF);
+    p.sinks = true;
+    p.leftBound = 32;
+    run(p);
+}
+
 /// One plan, captured once into a HIP graph and replayed with new lengths, new block ids
 /// and new data: the engine reads all of them from device memory, so the replay must
 /// match a fresh reference every time.
