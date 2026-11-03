@@ -968,10 +968,30 @@ def test_shared_default_flavor_is_the_heads_newest_that_the_base_knows(
 ):
     # catches: a base lacking the head's top flavor failing every variant
     srcs = {"b": base_src, "h": head_src}
-    monkeypatch.setattr(
-        emit, "git", lambda repo, cmd, spec, **kw: srcs[spec.split(":")[0]]
-    )
+
+    def fake_git(repo, cmd, *rest, **kw):
+        return "" if cmd == "ls-tree" else srcs[rest[0].split(":")[0]]
+
+    monkeypatch.setattr(emit, "git", fake_git)
     assert emit.shared_default_flavor(".", "b", "h") == expected
+
+
+def test_default_flavor_follows_the_ladder_into_llvm_profile(emit, monkeypatch):
+    # catches: the ladder read from lower_llvm.py only, which newer trees reduce to an import
+    # from rocke/core/llvm_profile.py, so every run fails with "no _LLVM_FLAVOR_LADDER"
+    files = {
+        emit.LOWER_LLVM: "from .llvm_profile import LLVM_FLAVORS, _LLVM_FLAVOR_LADDER\n",
+        emit.LLVM_PROFILE: LADDER_23,
+    }
+
+    def fake_git(repo, cmd, *rest, **kw):
+        if cmd == "ls-tree":
+            return "\n".join(p for p in rest[-1:] if p in files)
+        return files[rest[0].split(":", 1)[1]]
+
+    monkeypatch.setattr(emit, "git", fake_git)
+    assert emit.default_flavor(".", "rev") == "llvm23"
+    assert emit.shared_default_flavor(".", "b", "h") == "llvm23"
 
 
 def test_child_env_is_an_allow_list_that_pins_the_rocke_variables(
@@ -1098,7 +1118,7 @@ def test_sources_spec_key_order_does_not_split_a_variant(emit, tmp_path):
     [
         {"a": {"kind": "rocke", "source": "s.py"}},
         {"a": {"kind": "rocke", "builder": "build_x"}},
-        {"a": {**KS, "kind": "hip"}},
+        {"a": KS, "b": {**KS, "kind": "hip"}},
         {"a": "not-an-object"},
         {},
         ["a"],
@@ -1106,7 +1126,7 @@ def test_sources_spec_key_order_does_not_split_a_variant(emit, tmp_path):
     ids=[
         "no-builder",
         "no-source",
-        "not-rocke",
+        "mixed-kinds",
         "entry-not-object",
         "empty",
         "not-object",
@@ -1141,6 +1161,19 @@ def test_single_kernel_source_without_source_and_builder_is_still_skipped_silent
         emit,
         tmp_path,
         [{"name": "hip", "kernel_source": {"kind": "hip", "file": "k.hip"}}],
+    )
+    assert variants == [] and skipped == []
+
+
+@pytest.mark.parametrize("kind", ["hip", "hsaco"])
+def test_multi_launch_ukd_of_another_kind_is_skipped_like_a_single_launch(
+    emit, tmp_path, kind
+):
+    # catches: a hip or hsaco `sources` UKD, which the packer accepts and the emitter has
+    # nothing to build for, listed as not inspected, so no emit file could ever fold
+    launch = {"kind": kind, "file": "k.co", "symbol": "k"}
+    variants, skipped = discover(
+        emit, tmp_path, [{"name": kind, "sources": {"a": launch, "b": dict(launch)}}]
     )
     assert variants == [] and skipped == []
 

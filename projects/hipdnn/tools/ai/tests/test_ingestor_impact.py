@@ -1753,3 +1753,32 @@ def test_python_symbol_lookup_is_launch_surface_checks(mod, launch_surface, sour
     # (an async def, a def under `with` or a nested def found by one and not the other)
     found = bool(mod.defs_named(ast.parse(source), "f"))
     assert found == launch_surface.python_symbol_exists(source, "f")
+
+
+@pytest.mark.parametrize(
+    "catalog, status",
+    [
+        ("FlyDSL/rmsnorm/gfx942.dvc", "inert"),
+        ("rocKE/gfx942_attn/artifacts.dvc", "changed"),
+    ],
+    ids=["another-producer", "rocke"],
+)
+def test_only_a_rocke_catalog_ships_the_rocke_kernels_of_its_arch(
+    mod, capsys, tmp_path, catalog, status
+):
+    # catches: another producer's DVC-held catalog (FlyDSL keeps one per arch) taken to ship
+    # every rocKE kernel of that arch, so an unshipped kernel edit reads NEEDS-DEVICE
+    pointer = HKP + "src/engines/kernel_ingestor_engine/descriptors/" + catalog
+    body = "def f():\n    return {}\n"
+    files = {
+        OTHER_KERNEL: body.format(1),
+        pointer: "outs:\n- md5: a.dir\n  path: artifacts\n",
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {OTHER_KERNEL: body.format(2)})
+    (row,) = [
+        r
+        for r in rows_of(report(mod, capsys, repo, base, head), "file")
+        if r["path"] == OTHER_KERNEL
+    ]
+    assert row["status"] == status

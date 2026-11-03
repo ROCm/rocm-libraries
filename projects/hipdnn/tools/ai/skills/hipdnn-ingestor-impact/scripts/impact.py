@@ -81,6 +81,8 @@ ROCKE_LIB = HKP + "rocke/library/"
 IMPORT_ROOTS = (ROCKE_LIB, HKP + "rocke/platform/python/")
 ENGINE = HKP + "src/engines/kernel_ingestor_engine/"
 DESC_DIR = ENGINE + "descriptors/"
+#: The rocKE producer's descriptor tree; FlyDSL and other producers have their own.
+ROCKE_DESC_DIR = DESC_DIR + "rocKE/"
 PACKER = HKP + "descriptor-packaging/"
 GEN = "projects/hipdnn/tools/IngestorGenerator/"
 SDK = "projects/hipdnn/plugin_sdk/"
@@ -1694,8 +1696,10 @@ def build_closure(tree: Tree) -> Closure:
             if not archs:
                 archs = expand_archs(arch_names(path, target), generics)
             roots.append((f"{path}:{line}", target, archs, True))
+    # A DVC-held catalog stands for the rocKE kernels of its arch only under the rocKE
+    # producer tree; another producer's catalog (FlyDSL) ships no rocKE module.
     for path in sorted(
-        p for p in tree.paths if p.startswith(DESC_DIR) and p.endswith(".dvc")
+        p for p in tree.paths if p.startswith(ROCKE_DESC_DIR) and p.endswith(".dvc")
     ):
         arch = arch_of(path)
         if arch:

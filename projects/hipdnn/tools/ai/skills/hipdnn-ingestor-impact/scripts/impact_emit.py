@@ -48,7 +48,8 @@ thread: a builder that never returns on a spec the predicate accepts costs only 
 family is 5 s past its budget; the families and `not_inspected` are still written and compared.
 
 The flavor defaults to the newest flavor the head and the base both know (the top rung
-of `_LLVM_FLAVOR_LADDER` in `rocke/platform/python/rocke/core/lower_llvm.py`, else the last
+of `_LLVM_FLAVOR_LADDER` in `rocke/platform/python/rocke/core/llvm_profile.py`, or in
+`lower_llvm.py` in trees from before that module, else the last
 of `LLVM_FLAVORS`); with none shared it is the head's newest and the base fails loudly.
 The child gets an allow-listed environment and runs in its own process group, which
 `--timeout` kills as a whole. Each side's tree id (`base_tree`, `head_tree`, resolved once
@@ -87,6 +88,8 @@ GENERATOR = "projects/hipdnn/tools/IngestorGenerator"
 ENUMERATOR = f"{GENERATOR}/tools/registry_enumerator.py"
 MANIFESTS = f"{GENERATOR}/configs"
 LOWER_LLVM = f"{ROCKE_PLATFORM}/rocke/core/lower_llvm.py"
+#: Where newer trees define the flavor ladder; lower_llvm.py re-exports it from here.
+LLVM_PROFILE = f"{ROCKE_PLATFORM}/rocke/core/llvm_profile.py"
 
 REQUIRED_TREES = (ROCKE_PLATFORM, ROCKE_LIBRARY, PACKAGING)
 OPTIONAL_TREES = (DESCRIPTORS, GENERATOR)
@@ -152,15 +155,15 @@ def extract(repo, rev, dest, name=None):
                 target.write_bytes(tf.extractfile(m).read())
 
 
-def _known_flavors(src, where):
-    """Flavors of one lower_llvm.py source, oldest first, parsed without importing: the
-    rungs of `_LLVM_FLAVOR_LADDER` by major version; older trees have no ladder, so
+def _known_flavors(src, where, path=LOWER_LLVM):
+    """Flavors of one flavor-defining source (PATH), oldest first, parsed without importing:
+    the rungs of `_LLVM_FLAVOR_LADDER` by major version; older trees have no ladder, so
     their `LLVM_FLAVORS` in order.
     """
     try:
         tree = ast.parse(src)
     except SyntaxError as e:
-        raise Fatal(f"cannot parse {LOWER_LLVM} at {where}: {e}; pass --flavor")
+        raise Fatal(f"cannot parse {path} at {where}: {e}; pass --flavor")
     consts, ladder, flavors = {}, None, None
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -187,7 +190,7 @@ def _known_flavors(src, where):
         if known and isinstance(known[-1], str):
             return [k for k in known if isinstance(k, str)]
         raise Fatal(
-            f"no _LLVM_FLAVOR_LADDER or LLVM_FLAVORS in {LOWER_LLVM} at {where}; pass --flavor"
+            f"no _LLVM_FLAVOR_LADDER or LLVM_FLAVORS in {path} at {where}; pass --flavor"
         )
     rungs = []
     for el in ladder.elts:
@@ -207,21 +210,25 @@ def _known_flavors(src, where):
     return [flavor for _, flavor in sorted(rungs)]
 
 
+def _flavors_at(repo, rev):
+    """Known flavors of REV, oldest first, read from `llvm_profile.py` when the tree has it
+    and from `lower_llvm.py` before that module existed."""
+    path = LLVM_PROFILE if existing_paths(repo, rev, [LLVM_PROFILE]) else LOWER_LLVM
+    return _known_flavors(git(repo, "show", f"{rev}:{path}"), rev, path)
+
+
 def default_flavor(repo, rev):
     """Newest flavor of REV: the top ladder rung, else the last entry of `LLVM_FLAVORS`."""
-    src = git(repo, "show", f"{rev}:{LOWER_LLVM}")
-    return _known_flavors(src, rev)[-1]
+    return _flavors_at(repo, rev)[-1]
 
 
 def shared_default_flavor(repo, base, head):
     """The head's newest flavor that the base also knows, so a base from before the head's
     top rung is not failed wholesale. With none shared, the head's top (it then fails
     loudly); a base whose flavors cannot be read leaves the head's top as well."""
-    head_known = _known_flavors(git(repo, "show", f"{head}:{LOWER_LLVM}"), head)
+    head_known = _flavors_at(repo, head)
     try:
-        base_known = set(
-            _known_flavors(git(repo, "show", f"{base}:{LOWER_LLVM}"), base)
-        )
+        base_known = set(_flavors_at(repo, base))
     except Fatal:
         return head_known[-1]
     return next((f for f in reversed(head_known) if f in base_known), head_known[-1])
@@ -317,6 +324,10 @@ def _arch_list(value):
     return [a for a in value or [] if isinstance(a, str)]
 
 
+#: Packer `kernel_source` kinds with no rocKE build: the emitter has nothing to lower for them.
+_OTHER_KINDS = {"hip", "hsaco", "kpack", "embedded_source"}
+
+
 def _spec_json(spec):
     return json.dumps(spec, sort_keys=True, default=str)
 
@@ -326,8 +337,10 @@ def _ukd_variants(d, arches, kdp, origin):
     `kernel_source` is one variant named by the descriptor (none when it lacks source and
     builder, e.g. a hip kernel). A `sources` UKD groups its launches by (source, builder,
     spec, target); each group is one variant, named by the descriptor when there is one group,
-    else `<name>@<launch>[+<launch>...]` with the launch names sorted. REASON, set when the
-    descriptor cannot be read, is for `not_inspected` and the variants are then empty.
+    else `<name>@<launch>[+<launch>...]` with the launch names sorted. A `sources` UKD whose
+    launches all share one other packer kind (hip, hsaco) has no rocKE build and gives none,
+    as a single hip launch does. REASON, set when the descriptor cannot be read, is for
+    `not_inspected` and the variants are then empty.
     """
     has_ks, has_sources = "kernel_source" in d, "sources" in d
     name = d.get("name") or d.get("id") or "?"
@@ -337,6 +350,11 @@ def _ukd_variants(d, arches, kdp, origin):
         entries = d["sources"]
         if not isinstance(entries, dict) or not entries:
             return [], f"{name}: `sources` is not a non-empty object"
+        kinds = {
+            ks.get("kind") if isinstance(ks, dict) else None for ks in entries.values()
+        }
+        if len(kinds) == 1 and kinds & _OTHER_KINDS:
+            return [], None
         groups = {}
         for launch, ks in entries.items():
             if not isinstance(ks, dict):
