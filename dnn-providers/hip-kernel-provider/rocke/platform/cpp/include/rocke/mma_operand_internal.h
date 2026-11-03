@@ -12,7 +12,8 @@
  * rocke_mma_operand_needs_reinterpret is the rule, with no output syntax. Each
  * lowerer renders its answer in its own language (LLVM `bitcast`, HIP
  * `__builtin_bit_cast`), so both lowerers of both engines accept and refuse the
- * same operands with the same text.
+ * same operands with the same text. rocke_mma_result_needs_reinterpret is the
+ * same rule for the value the instruction returns.
  */
 #ifndef ROCKE_MMA_OPERAND_INTERNAL_H
 #define ROCKE_MMA_OPERAND_INTERNAL_H
@@ -45,5 +46,21 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
                                          const rocke_type_t* operand_type,
                                          const rocke_type_t* register_type,
                                          const char* gfx);
+
+/* Whether the result of MMA `op_id`, of type `result_type`, must be
+ * reinterpreted from the `register_type` the instruction returns on target
+ * `gfx` (Python mma_result_needs_reinterpret): the operand rule with the
+ * catalog's result dtype (rocke_mma_op_dst_dtype). False when the result has
+ * the register type; true when it holds the register's element type or the
+ * catalog's result element type in the register's bit width (vec<bf16x8> for
+ * bf16 results returned as <8 x i16>).
+ *
+ * Throws ckc::ValueError, with the Python text, for a result of another number
+ * format (vec<f16x8> where the catalog row returns bf16) and for a result of
+ * another bit width. */
+bool rocke_mma_result_needs_reinterpret(const char* op_id,
+                                        const rocke_type_t* result_type,
+                                        const rocke_type_t* register_type,
+                                        const char* gfx);
 
 #endif /* ROCKE_MMA_OPERAND_INTERNAL_H */

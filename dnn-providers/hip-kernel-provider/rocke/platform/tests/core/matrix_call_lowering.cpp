@@ -354,11 +354,13 @@ static void test_as_is_results()
         as_is("i16", 8),
         NULL,
     };
+    /* The gfx12 bf16 WMMA returns its bf16 results as <8 x i16>; a result
+     * declared as the catalog's bf16 is the same bits, one bitcast back. */
     {
         Lowerer lw("gfx1201", ROCKE_LLVM_FLAVOR_LLVM20);
         const rocke_type_t* i16x8 = lw.vec(rocke_i16(), 8);
         MmaOp m(i16x8, i16x8, i16x8, lw.vec(rocke_bf16(), 8));
-        rocke_ll_emit_matrix_call(&lw.L, &m.op, "example", &k_i16_result);
+        rocke_ll_emit_matrix_call(&lw.L, &m.op, "wmma_gfx12_bf16_16x16x16_bf16", &k_i16_result);
         std::vector<std::string> lines = lw.lines();
         check_equal(lines.at(0),
                     "%mma_d.1 = call <8 x i16> @llvm.amdgcn.example.i16.result("
@@ -384,6 +386,39 @@ static void test_as_is_results()
                     "MMA result of 'example' is vec<f32x8> (256 bits); the instruction returns "
                     "vec<f32x4> (128 bits)",
                     "a result of another bit width");
+    }
+}
+
+/* A result of the register's width but another number format would read the
+ * instruction's bits as other values (bf16 bits as f16), so it is refused
+ * rather than bitcast. */
+static void test_results_of_another_number_format()
+{
+    {
+        Lowerer lw("gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+        const rocke_type_t* bf16x16 = lw.vec(rocke_bf16(), 16);
+        MmaOp m(bf16x16, bf16x16, lw.vec(rocke_f32(), 8), lw.vec(rocke_f16(), 8));
+        const char* op_id = "wmma_gfx1250_bf16f32_16x16x32_bf16";
+        check_equal(error_of([&] {
+                        rocke_ll_emit_matrix_call(
+                            &lw.L, &m.op, op_id, rocke_matrix_call_for(op_id));
+                    }),
+                    "MMA result of 'wmma_gfx1250_bf16f32_16x16x32_bf16' holds f16 values; the "
+                    "instruction returns bf16 -- declare the result with one of those element "
+                    "types",
+                    "an f16 result of a bf16 instruction");
+    }
+    {
+        Lowerer lw("gfx1151", ROCKE_LLVM_FLAVOR_LLVM20);
+        const rocke_type_t* f16x16 = lw.vec(rocke_f16(), 16);
+        MmaOp m(f16x16, f16x16, lw.vec(rocke_f16(), 8), lw.vec(rocke_i16(), 8));
+        check_equal(error_of([&] {
+                        rocke_ll_emit_matrix_call(
+                            &lw.L, &m.op, "wmma_f16_16x16x16_f16", &k_even_halves);
+                    }),
+                    "MMA result of 'wmma_f16_16x16x16_f16' holds i16 values; the instruction "
+                    "returns f16 -- declare the result with one of those element types",
+                    "an i16 result of an f16 instruction in the even halves");
     }
 }
 
@@ -719,6 +754,7 @@ int main()
     test_the_call_and_its_declaration_take_the_same_types();
     test_as_is();
     test_as_is_results();
+    test_results_of_another_number_format();
     test_zero_padded();
     test_even_halves();
     test_the_schema();

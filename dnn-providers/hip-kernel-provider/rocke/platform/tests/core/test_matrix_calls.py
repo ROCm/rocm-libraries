@@ -239,7 +239,9 @@ def test_as_is_refuses_an_accumulator_of_another_number_format():
     )
 
 
-def test_as_is_bitcasts_a_result_of_the_same_bits_back():
+def test_as_is_bitcasts_a_result_of_the_catalog_element_back():
+    """The gfx12 bf16 WMMA returns its bf16 results as <8 x i16>; a result
+    declared as the catalog's bf16 is the same bits, one bitcast back."""
     call = MatrixCall(
         intrinsic="llvm.amdgcn.example.i16.result",
         args=(A, B, C),
@@ -251,7 +253,11 @@ def test_as_is_bitcasts_a_result_of_the_same_bits_back():
     lowerer = _lowerer("gfx1201")
     i16x8 = VectorType(I16, 8)
     emit_matrix_call(
-        lowerer, _mma_op("example", i16x8, i16x8, i16x8, VectorType(BF16, 8)), call
+        lowerer,
+        _mma_op(
+            "wmma_gfx12_bf16_16x16x16_bf16", i16x8, i16x8, i16x8, VectorType(BF16, 8)
+        ),
+        call,
     )
     assert _emitted(lowerer) == [
         (
@@ -260,6 +266,45 @@ def test_as_is_bitcasts_a_result_of_the_same_bits_back():
         ),
         "%d = bitcast <8 x i16> %mma_d.1 to <8 x bfloat>",
     ]
+
+
+@pytest.mark.parametrize(
+    ("op_id", "result", "returns"),
+    [
+        ("wmma_gfx1250_bf16f32_16x16x32_bf16", VectorType(F16, 8), "bf16"),
+        ("wmma_gfx12_bf16_16x16x16_bf16", VectorType(F16, 8), "bf16 or i16"),
+        ("wmma_gfx1250_f32_16x16x4_f32", VectorType(I32, 8), "f32"),
+    ],
+)
+def test_as_is_refuses_a_result_of_another_number_format(op_id, result, returns):
+    """A result of the register's width but another number format would read
+    the instruction's bits as other values (bf16 bits as f16), so it is refused
+    rather than bitcast."""
+    call = MATRIX_CALLS[op_id]
+    flavor = LLVM_FLAVOR_LLVM23
+    arch = next(a for a in known_arches() if ArchTarget.from_gfx(a).mma.by_op_id(op_id))
+    operands = [_operand_type(call.form(x), flavor) for x in (A, B, C)]
+    with pytest.raises(ValueError) as error:
+        emit_matrix_call(
+            _lowerer(arch, flavor), _mma_op(op_id, *operands, result), call
+        )
+    assert str(error.value) == (
+        f"MMA result of {op_id!r} holds {result.elem.name} values; the instruction "
+        f"returns {returns} -- declare the result with one of those element types"
+    )
+
+
+def test_even_halves_refuses_a_result_of_another_number_format():
+    f16x16 = VectorType(F16, 16)
+    op = _mma_op(
+        "wmma_f16_16x16x16_f16", f16x16, f16x16, VectorType(F16, 8), VectorType(I16, 8)
+    )
+    with pytest.raises(ValueError) as error:
+        emit_matrix_call(_lowerer("gfx1151"), op, _EVEN_HALVES)
+    assert str(error.value) == (
+        "MMA result of 'wmma_f16_16x16x16_f16' holds i16 values; the instruction "
+        "returns f16 -- declare the result with one of those element types"
+    )
 
 
 def test_as_is_refuses_a_result_of_another_bit_width():

@@ -159,7 +159,8 @@ static const char* even_halves_operand(rocke_lower_t* L,
     return spread;
 }
 
-/* Python AsIs.emit_result. */
+/* Python AsIs.emit_result: the call's value, or one bitcast of it, as the
+ * result rule (rocke_mma_result_needs_reinterpret) decides. */
 static void as_is_result(rocke_lower_t* L,
                          const rocke_op_t* op,
                          const char* op_id,
@@ -167,22 +168,11 @@ static void as_is_result(rocke_lower_t* L,
                          const std::string& call)
 {
     const rocke_value_t* result = op->results[0];
-    if(rocke_type_eq(result->type, register_type))
+    if(!rocke_mma_result_needs_reinterpret(op_id, result->type, register_type, L->backend->gfx))
     {
         rocke_ll_emitf(L, "  %s = %s", result->name, call.c_str());
         return;
     }
-    const int result_bits = rocke_i_type_bits(result->type);
-    const int register_bits = rocke_i_type_bits(register_type);
-    if(result_bits != register_bits)
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "MMA result of '%s' is %s (%d bits); the instruction returns %s (%d bits)",
-                      op_id,
-                      result->type->name,
-                      result_bits,
-                      register_type->name,
-                      register_bits);
     const char* returned = rocke_ll_fresh(L, "mma_d");
     rocke_ll_emitf(L, "  %s = %s", returned, call.c_str());
     rocke_ll_emitf(L,
@@ -212,10 +202,11 @@ static void even_halves_result(rocke_lower_t* L,
                       result->type->name,
                       logical->count,
                       rocke_ll_llvm_type(L, register_type));
+    const bool reinterpret
+        = rocke_mma_result_needs_reinterpret(op_id, result->type, logical, L->backend->gfx);
     const char* returned = rocke_ll_fresh(L, "mma_d");
     rocke_ll_emitf(L, "  %s = %s", returned, call.c_str());
-    const bool same = rocke_type_eq(result->type, logical);
-    const char* gathered = same ? result->name : rocke_ll_fresh(L, "mma_gather");
+    const char* gathered = reinterpret ? rocke_ll_fresh(L, "mma_gather") : result->name;
     std::string mask;
     for(int i = 0; i < logical->count; ++i)
         mask += (i ? ", i32 " : "i32 ") + std::to_string(2 * i);
@@ -228,7 +219,7 @@ static void even_halves_result(rocke_lower_t* L,
                    register_text,
                    logical->count,
                    mask.c_str());
-    if(!same)
+    if(reinterpret)
         rocke_ll_emitf(L,
                        "  %s = bitcast %s %s to %s",
                        result->name,

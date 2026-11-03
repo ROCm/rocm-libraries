@@ -40,7 +40,11 @@ from dataclasses import dataclass
 from ..arch.mfma_scale import matrix_operand_packing, require_matrix_format
 from ..dtypes import dtype_info
 from ..ir import I32, Op, Type, VectorType, type_bits
-from ..mma_operand import MmaOperandRole, mma_operand_value
+from ..mma_operand import (
+    MmaOperandRole,
+    mma_operand_value,
+    mma_result_needs_reinterpret,
+)
 
 
 def _llvm_type(t: Type) -> str:
@@ -125,7 +129,8 @@ class AsIs(_Form):
     """Pass the value as the register type: unchanged, or with one ``bitcast``.
 
     As a result form, the call returns the register type and the IR result is
-    either that type or the same bits in another shape (one ``bitcast`` back).
+    either that type or the same bits in another shape (one ``bitcast`` back),
+    as :func:`~rocke.core.mma_operand.mma_result_needs_reinterpret` decides.
     """
 
     def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
@@ -136,15 +141,11 @@ class AsIs(_Form):
         """Emit ``call`` and bind its value to ``op``'s result."""
         register = self.register_type_at(lowerer._flavor)
         result = op.results[0]
-        if result.type == register:
+        if not mma_result_needs_reinterpret(
+            _op_id(op), result.type, register, lowerer._backend.arch
+        ):
             lowerer._current().emit(f"  {result.name} = {call}")
             return
-        result_bits, register_bits = type_bits(result.type), type_bits(register)
-        if result_bits != register_bits:
-            raise ValueError(
-                f"MMA result of {_op_id(op)!r} is {result.type.name} ({result_bits} "
-                f"bits); the instruction returns {register.name} ({register_bits} bits)"
-            )
         returned = lowerer._fresh("mma_d")
         lowerer._current().emit(f"  {returned} = {call}")
         lowerer._current().emit(
@@ -274,11 +275,12 @@ class EvenHalves(_Form):
                 f"returns {logical.count} results in the even halves of "
                 f"{_llvm_type(register)}"
             )
+        reinterpret = mma_result_needs_reinterpret(
+            _op_id(op), result.type, logical, lowerer._backend.arch
+        )
         returned = lowerer._fresh("mma_d")
         lowerer._current().emit(f"  {returned} = {call}")
-        gathered = (
-            result.name if result.type == logical else lowerer._fresh("mma_gather")
-        )
+        gathered = lowerer._fresh("mma_gather") if reinterpret else result.name
         mask = ", ".join(f"i32 {2 * i}" for i in range(logical.count))
         lowerer._current().emit(
             f"  {gathered} = shufflevector {_llvm_type(register)} {returned}, "
