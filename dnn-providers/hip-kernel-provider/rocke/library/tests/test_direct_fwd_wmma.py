@@ -218,6 +218,83 @@ class TestFwdWmmaSpec(unittest.TestCase):
             )
         )
 
+    def test_engines_refuse_non_positive_extents(self):
+        """Every user of the forward WMMA gate (direct, gstream, tap-outer,
+        small C, small K) refuses a zero or negative extent first, with the
+        same text in both engines. groups = 0 used to pass: K = 0 is a
+        multiple of every block_k and the tensors are 0 bytes."""
+        import dataclasses
+
+        eng = pytest.importorskip("rocke_engine")
+        from kernels.common.conv_direct_fwd_gstream_wmma import (
+            FwdGstreamWmmaSpec,
+            fwd_gstream_reason,
+        )
+        from kernels.common.conv_direct_fwd_tapouter_wmma import (
+            DirectFwdTapOuterSpec,
+            tapouter_reason,
+        )
+        from kernels.common.conv_direct_grouped import PROBLEM_DIMS
+        from kernels.common.conv_fwd_small_wmma import (
+            FwdSmallcWmmaSpec,
+            FwdSmallkWmmaSpec,
+            fwd_smallc_reason,
+            fwd_smallk_reason,
+        )
+        from rocke.core import backend as be
+
+        families = (
+            (
+                DirectFwdWmmaSpec(problem=_problem()),
+                fwd_wmma_reason,
+                eng.conv_direct_fwd_wmma_describe,
+                be.conv_direct_fwd_wmma_spec_to_dict,
+            ),
+            (
+                DirectFwdWmmaSpec(problem=_problem(C=64, K=64, groups=4)),
+                fwd_wmma_reason,
+                eng.conv_direct_fwd_wmma_describe,
+                be.conv_direct_fwd_wmma_spec_to_dict,
+            ),
+            (
+                FwdGstreamWmmaSpec(problem=_problem(C=128, K=128, groups=8)),
+                fwd_gstream_reason,
+                eng.conv_direct_fwd_gstream_wmma_describe,
+                be.conv_direct_fwd_gstream_wmma_spec_to_dict,
+            ),
+            (
+                DirectFwdTapOuterSpec(
+                    problem=_problem(H=29, W=37, PAD=12, dil_h=12, dil_w=12)
+                ),
+                tapouter_reason,
+                eng.conv_direct_fwd_tapouter_wmma_describe,
+                be.conv_direct_fwd_tapouter_wmma_spec_to_dict,
+            ),
+            (
+                FwdSmallcWmmaSpec(problem=_problem(H=32, W=48, C=3, K=64)),
+                fwd_smallc_reason,
+                eng.conv_direct_fwd_smallc_wmma_describe,
+                be.conv_direct_fwd_smallc_wmma_spec_to_dict,
+            ),
+            (
+                FwdSmallkWmmaSpec(problem=_problem(H=32, W=48, C=64, K=4)),
+                fwd_smallk_reason,
+                eng.conv_direct_fwd_smallk_wmma_describe,
+                be.conv_direct_fwd_smallk_wmma_spec_to_dict,
+            ),
+        )
+        for base, reason, describe, to_dict in families:
+            self.assertIsNone(reason(base, "gfx1250"), base)
+            for name in PROBLEM_DIMS:
+                for value in (0, -1, -16):
+                    problem = dataclasses.replace(base.problem, **{name: value})
+                    spec = dataclasses.replace(base, problem=problem)
+                    want = f"{name} must be >= 1 (got {value})"
+                    self.assertEqual(reason(spec, "gfx1250"), want, spec)
+                    ok, why_cpp, *_ = describe(to_dict(spec), "gfx1250")
+                    self.assertFalse(ok, spec)
+                    self.assertEqual(why_cpp, want, spec)
+
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs (the

@@ -49,6 +49,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     one_padding_reason,
     pad_w_reason,
+    problem_dims_reason,
 )
 
 __all__ = [
@@ -103,11 +104,11 @@ def wmma_fwd_gate(
     per_axis_pad: bool = False,
 ) -> tuple[str | None, ArchTarget | None]:
     """``(why, target)``: why kernel ``name`` cannot run ``p`` on ``arch`` at
-    the spec's ``wave_size`` (``None`` when the target and the padding
-    qualify), and the resolved :class:`ArchTarget` so callers need not resolve
-    it again. The target is ``None`` only when ``arch`` is unknown.
-    ``per_axis_pad`` lets a kernel that offsets columns by ``PAD_W`` take a
-    column padding of its own."""
+    the spec's ``wave_size`` (``None`` when the target, the problem extents
+    (:func:`problem_dims_reason`) and the padding qualify), and the resolved
+    :class:`ArchTarget` so callers need not resolve it again. The target is
+    ``None`` only when ``arch`` is unknown. ``per_axis_pad`` lets a kernel
+    that offsets columns by ``PAD_W`` take a column padding of its own."""
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
@@ -129,7 +130,10 @@ def wmma_fwd_gate(
         k=WMMA_K,
     ):
         return f"missing wmma_f32_{WMMA_M}x{WMMA_N}x{WMMA_K}_{ab} on {arch}", target
-    return (pad_w_reason(p) if per_axis_pad else one_padding_reason(p)), target
+    why = problem_dims_reason(p)
+    if why is None:
+        why = pad_w_reason(p) if per_axis_pad else one_padding_reason(p)
+    return why, target
 
 
 def wmma_fwd_limits_reason(

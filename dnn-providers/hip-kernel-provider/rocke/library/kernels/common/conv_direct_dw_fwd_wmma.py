@@ -76,6 +76,7 @@ from kernels.common.conv_direct_grouped import (
     dilation_reason,
     emit_direct_params,
     one_padding_reason,
+    problem_dims_reason,
 )
 from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
 
@@ -187,6 +188,9 @@ class DwFwdWmmaSpec:
 def dw_fwd_wmma_reason(spec: DwFwdWmmaSpec) -> Optional[str]:
     """Why ``spec`` cannot be built or run on its problem (``None`` if it can)."""
     p = spec.problem
+    why = problem_dims_reason(p)
+    if why is not None:
+        return why
     if p.dtype not in ("fp16", "bf16"):
         return f"unsupported dtype {p.dtype!r}; expected fp16 or bf16"
     if p.cpg != 1 or p.kpg != 1:

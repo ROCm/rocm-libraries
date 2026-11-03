@@ -482,6 +482,22 @@ def channel_totals_reason(p: "DirectConvProblem") -> Optional[str]:
     return None
 
 
+PROBLEM_DIMS = ("N", "H", "W", "groups", "cpg", "kpg", "KH", "KW")
+
+
+def problem_dims_reason(p: "DirectConvProblem") -> Optional[str]:
+    """Why ``p`` is not a convolution the forward WMMA kernels can launch:
+    every extent of :data:`PROBLEM_DIMS` must be at least 1. A zero or
+    negative one passes the divisibility and tensor-size checks (zero bytes)
+    but gives an empty or negative grid, so those validators check this
+    before any of them."""
+    for name in PROBLEM_DIMS:
+        value = getattr(p, name)
+        if value < 1:
+            return f"{name} must be >= 1 (got {value})"
+    return None
+
+
 def dilation_reason(p: "DirectConvProblem") -> Optional[str]:
     """Why a direct-conv kernel without dilation support cannot compute ``p``."""
     if p.is_dilated:

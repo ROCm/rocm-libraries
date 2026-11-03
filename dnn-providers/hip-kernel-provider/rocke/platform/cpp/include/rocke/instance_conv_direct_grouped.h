@@ -155,6 +155,14 @@ bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* wh
 bool rocke_direct_channel_totals_reason(const rocke_direct_conv_problem_t* p,
                                         char* why,
                                         size_t why_cap);
+/* problem_dims_reason(p): why p is not a convolution the forward WMMA kernels
+ * can launch. Returns true (and writes "<name> must be >= 1 (got <v>)" for the
+ * first of N, H, W, groups, cpg, kpg, KH, KW below 1) when an extent is zero
+ * or negative; the dw fwd validator and rocke_wmma_fwd_gate check it before
+ * any divisibility, size or grid rule. */
+bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
+                                      char* why,
+                                      size_t why_cap);
 
 /* The problem's dtype, NULL read as "fp16" (see the dtype field). */
 const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p);

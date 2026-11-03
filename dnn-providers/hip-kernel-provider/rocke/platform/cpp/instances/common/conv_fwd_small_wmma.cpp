@@ -497,12 +497,6 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(p->kpg < 1)
-    {
-        snprintf(msg, sizeof msg, "K %d must be >= 1", p->kpg);
-        rocke_spec_set_reason(reason, reason_cap, msg);
-        return false;
-    }
     if(p->cpg % 8 != 0)
     {
         snprintf(msg, sizeof msg, "C %d must be a multiple of 8 (16-byte input rows)", p->cpg);

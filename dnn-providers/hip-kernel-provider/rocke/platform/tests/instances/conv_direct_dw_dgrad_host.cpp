@@ -37,7 +37,10 @@
  *     so must the dgrad WMMA and Winograd GEMM validators), the name quoted
  *     as Python's repr (rocke_py_str_repr);
  *   - the direct wgrad validators' refusal of a dilated problem, which must
- *     carry conv_direct_grouped.dilation_reason's text.
+ *     carry conv_direct_grouped.dilation_reason's text;
+ *   - a zero or negative extent (N, H, W, groups, cpg, kpg, KH, KW) given to
+ *     the dw fwd and forward WMMA validators, which must refuse it first with
+ *     conv_direct_grouped.problem_dims_reason's text.
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -50,6 +53,7 @@
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
+#include "rocke/instance_conv_direct_dw_fwd_wmma.h"
 #include "rocke/instance_conv_direct_dw_wgrad.h"
 #include "rocke/instance_conv_direct_dw_wgrad_mfma.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
@@ -834,8 +838,78 @@ static void test_channel_totals_refused(void)
                          rocke_grouped_wgrad_mfma_is_valid_spec);
 }
 
+/* A zero or negative extent is refused first, with Python's
+ * problem_dims_reason text: groups = 0 passed every later rule of the dw fwd
+ * validator (groups = -16 its divisibility too) and gave an empty grid. */
+template <typename Spec, typename Valid>
+static void check_problem_dims(const char* kernel, Spec spec, Valid is_valid)
+{
+    static const char* const names[] = {"N", "H", "W", "groups", "cpg", "kpg", "KH", "KW"};
+    for(int i = 0; i < 8; ++i)
+    {
+        for(const int value : {0, -1, -16})
+        {
+            Spec s = spec;
+            int* const fields[] = {&s.problem.N,
+                                   &s.problem.H,
+                                   &s.problem.W,
+                                   &s.problem.groups,
+                                   &s.problem.cpg,
+                                   &s.problem.kpg,
+                                   &s.problem.KH,
+                                   &s.problem.KW};
+            *fields[i] = value;
+            char reason[ERR_CAP];
+            char expected[ERR_CAP];
+            snprintf(expected, sizeof(expected), "%s must be >= 1 (got %d)", names[i], value);
+            reason[0] = '\0';
+            CHECK(!is_valid(&s, "gfx1250", reason, sizeof(reason)),
+                  "%s accepted %s = %d",
+                  kernel,
+                  names[i],
+                  value);
+            CHECK(strcmp(reason, expected) == 0,
+                  "%s %s = %d reason: %s",
+                  kernel,
+                  names[i],
+                  value,
+                  reason);
+        }
+    }
+}
+
+static void test_problem_dims_refused(void)
+{
+    rocke_direct_dw_fwd_wmma_spec_t dw = rocke_direct_dw_fwd_wmma_spec_default();
+    dw.problem = dense_problem(20, 37, 1, 1);
+    dw.problem.groups = 64;
+    check_problem_dims("direct_dw_fwd_wmma", dw, rocke_direct_dw_fwd_wmma_is_valid_spec);
+
+    rocke_direct_fwd_wmma_spec_t fw = rocke_direct_fwd_wmma_spec_default();
+    fw.problem = dense_problem(13, 21, 64, 96);
+    check_problem_dims("direct_fwd_wmma", fw, rocke_direct_fwd_wmma_is_valid_spec);
+
+    rocke_fwd_gstream_wmma_spec_t gs = rocke_fwd_gstream_wmma_spec_default();
+    gs.problem = dense_problem(28, 28, 16, 16);
+    gs.problem.groups = 8;
+    check_problem_dims("direct_fwd_gstream_wmma", gs, rocke_fwd_gstream_wmma_is_valid_spec);
+
+    rocke_fwd_tapouter_wmma_spec_t to = rocke_fwd_tapouter_wmma_spec_default();
+    to.problem = dense_problem(29, 37, 64, 96);
+    check_problem_dims("direct_fwd_tapouter_wmma", to, rocke_fwd_tapouter_wmma_is_valid_spec);
+
+    rocke_fwd_smallc_wmma_spec_t sc = rocke_fwd_smallc_wmma_spec_default();
+    sc.problem = dense_problem(32, 48, 3, 64);
+    check_problem_dims("fwd_smallc_wmma", sc, rocke_fwd_smallc_wmma_is_valid_spec);
+
+    rocke_fwd_smallk_wmma_spec_t sk = rocke_fwd_smallk_wmma_spec_default();
+    sk.problem = dense_problem(32, 48, 64, 4);
+    check_problem_dims("fwd_smallk_wmma", sk, rocke_fwd_smallk_wmma_is_valid_spec);
+}
+
 int main(void)
 {
+    test_problem_dims_refused();
     test_channel_totals_refused();
     test_wgrad_dilation_reason();
     test_total_channels_past_i32();

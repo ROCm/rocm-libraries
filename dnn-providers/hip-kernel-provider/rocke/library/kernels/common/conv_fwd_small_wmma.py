@@ -720,8 +720,6 @@ def fwd_smallk_reason(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> str | N
         return why
     if p.kpg > SMALLK_MAX_K:
         return f"K {p.kpg} > {SMALLK_MAX_K}"
-    if p.kpg < 1:
-        return f"K {p.kpg} must be >= 1"
     if p.cpg % 8:
         return f"C {p.cpg} must be a multiple of 8 (16-byte input rows)"
     if spec.ck % WMMA_K or spec.ck <= 0:

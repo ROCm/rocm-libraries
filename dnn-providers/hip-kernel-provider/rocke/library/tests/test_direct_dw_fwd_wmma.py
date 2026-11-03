@@ -78,6 +78,10 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
             (_problem(pad_w=0), {}, "one padding"),
             (_problem(PAD=3), {}, "degenerate"),
             (_problem(C=12), {}, "groups % 8"),
+            (_problem(C=0), {}, "groups must be >= 1 (got 0)"),
+            (_problem(C=-16), {}, "groups must be >= 1 (got -16)"),
+            (_problem(N=0), {}, "N must be >= 1 (got 0)"),
+            (_problem(K=0, PAD=0), {}, "KH must be >= 1 (got 0)"),
             (_problem(), dict(block_h=0), "block_h"),
             (_problem(), dict(block_waves=17), "block_waves"),
             (_problem(), dict(w_fold=3), "w_fold"),
@@ -90,6 +94,32 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
             why = dw_fwd_wmma_reason(DwFwdWmmaSpec(problem=problem, **knobs))
             self.assertIsNotNone(why, (problem, knobs))
             self.assertIn(needle, why)
+
+    def test_engines_refuse_non_positive_extents(self):
+        """A zero or negative extent is refused before any other rule, with
+        the same text in both engines: groups = 0 passed the divisibility and
+        tensor-size rules (0 bytes) and gave a zero grid Y."""
+        import dataclasses
+
+        import pytest
+
+        eng = pytest.importorskip("rocke_engine")
+        from kernels.common.conv_direct_grouped import PROBLEM_DIMS
+        from rocke.core.backend import conv_direct_dw_fwd_wmma_spec_to_dict
+
+        base = DwFwdWmmaSpec(problem=_problem())
+        self.assertIsNone(dw_fwd_wmma_reason(base))
+        for name in PROBLEM_DIMS:
+            for value in (0, -1, -16):
+                problem = dataclasses.replace(base.problem, **{name: value})
+                spec = dataclasses.replace(base, problem=problem)
+                want = f"{name} must be >= 1 (got {value})"
+                self.assertEqual(_reason(spec, "gfx1250"), want, spec)
+                ok, why_cpp, *_ = eng.conv_direct_dw_fwd_wmma_describe(
+                    conv_direct_dw_fwd_wmma_spec_to_dict(spec), "gfx1250"
+                )
+                self.assertFalse(ok, spec)
+                self.assertEqual(why_cpp, want, spec)
 
     def test_aot_grid(self):
         from kernels.conv.direct_aot_jobs import (
@@ -159,6 +189,12 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
             (_problem(PAD=3), {}),
             (_problem(H=1, PAD=0), {}),
             (_problem(C=12), {}),
+            # groups = 0 (and -16) passed the divisibility rule and gave an
+            # empty grid; every non-positive extent is refused first.
+            (_problem(C=0), {}),
+            (_problem(C=-16), {}),
+            (_problem(N=0), {}),
+            (_problem(N=-1), {}),
             (_problem(), dict(block_h=0)),
             (_problem(), dict(block_waves=17)),
             (_problem(), dict(w_fold=3)),

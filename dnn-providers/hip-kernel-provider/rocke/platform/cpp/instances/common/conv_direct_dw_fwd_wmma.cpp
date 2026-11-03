@@ -138,6 +138,8 @@ rocke_status_t rocke_direct_dw_fwd_wmma_kernel_name(const rocke_direct_dw_fwd_wm
 static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason, size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(rocke_direct_problem_dims_reason(p, reason, cap))
+        return false;
     const char* dtype = rocke_direct_conv_problem_dtype(p);
     if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
         ROCKE_SPEC_FAIL(reason, cap, "unsupported dtype '%s'; expected fp16 or bf16", dtype);

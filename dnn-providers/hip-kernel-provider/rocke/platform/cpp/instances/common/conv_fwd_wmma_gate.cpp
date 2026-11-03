@@ -100,6 +100,8 @@ bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
+    if(rocke_direct_problem_dims_reason(p, reason, reason_cap))
+        return false;
     if(per_axis_pad)
         return !rocke_direct_conv_pad_w_reason(p, "", reason, reason_cap);
     return !rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap);

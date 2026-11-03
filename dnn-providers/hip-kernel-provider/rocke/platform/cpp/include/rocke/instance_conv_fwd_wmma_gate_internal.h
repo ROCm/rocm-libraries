@@ -63,10 +63,11 @@ const char* rocke_wmma_fwd_op_id(rocke_ir_builder_t* b,
                                  const char* who);
 
 /* wmma_fwd_gate: whether kernel `name` can run `p` on `arch` at the spec's
- * `wave_size`, with one padding for both axes (any column padding when
- * `per_axis_pad`: the kernel offsets columns by PAD_W). On success stores the resolved target in `*target_out` and
- * returns true, so callers need not resolve it again; otherwise writes the
- * reason and returns false. */
+ * `wave_size`, with every extent at least 1 (rocke_direct_problem_dims_reason)
+ * and one padding for both axes (any column padding when `per_axis_pad`: the
+ * kernel offsets columns by PAD_W). On success stores the resolved target in
+ * `*target_out` and returns true, so callers need not resolve it again;
+ * otherwise writes the reason and returns false. */
 bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
                          const char* arch,
                          const char* name,

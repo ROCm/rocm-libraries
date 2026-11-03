@@ -236,6 +236,35 @@ bool rocke_direct_channel_totals_reason(const rocke_direct_conv_problem_t* p,
     return true;
 }
 
+/* problem_dims_reason(p): declared in rocke/instance_conv_direct_grouped.h;
+ * the extents in Python's PROBLEM_DIMS order. */
+bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
+                                      char* why,
+                                      size_t why_cap)
+{
+    const struct
+    {
+        const char* name;
+        int value;
+    } dims[] = {{"N", p->N},
+                {"H", p->H},
+                {"W", p->W},
+                {"groups", p->groups},
+                {"cpg", p->cpg},
+                {"kpg", p->kpg},
+                {"KH", p->KH},
+                {"KW", p->KW}};
+    for(const auto& d : dims)
+    {
+        if(d.value < 1)
+        {
+            rocke_spec_set_reasonf(why, why_cap, "%s must be >= 1 (got %d)", d.name, d.value);
+            return true;
+        }
+    }
+    return false;
+}
+
 /* dilation_reason(p): declared in rocke/instance_conv_direct_grouped.h. */
 bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap)
 {
