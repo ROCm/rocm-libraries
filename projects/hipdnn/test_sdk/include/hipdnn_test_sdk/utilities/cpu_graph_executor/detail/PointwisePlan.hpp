@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
@@ -329,6 +330,29 @@ public:
         }
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
+
+        // Every input must broadcast to the output shape
+        std::vector<int64_t> inputUids = {nodeAttributes->in_0_tensor_uid()};
+        for(const auto& optionalUid :
+            {nodeAttributes->in_1_tensor_uid(), nodeAttributes->in_2_tensor_uid()})
+        {
+            if(optionalUid.has_value())
+            {
+                inputUids.push_back(optionalUid.value());
+            }
+        }
+        const auto* outDims = tensorMap.at(nodeAttributes->out_0_tensor_uid())->dims();
+        for(const auto uid : inputUids)
+        {
+            const auto* inDims = tensorMap.at(uid)->dims();
+            if(inDims == nullptr || outDims == nullptr
+               || !hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(
+                   std::vector<int64_t>(inDims->begin(), inDims->end()),
+                   std::vector<int64_t>(outDims->begin(), outDims->end())))
+            {
+                return false;
+            }
+        }
 
         return true;
     }

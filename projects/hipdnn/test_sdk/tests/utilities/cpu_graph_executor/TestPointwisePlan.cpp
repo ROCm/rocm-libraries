@@ -2544,3 +2544,51 @@ TEST_F(TestPointwisePlan, GenIndexIgnoresEveryScalarAttribute)
         }
     }
 }
+
+TEST(TestPointwisePlanBuilder, DeclinesNonBroadcastableShapes)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    // The frontend rejects non-broadcastable shapes, so edit the serialized graph instead
+    auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
+    const GraphWrapper original(serializedGraph.data(), serializedGraph.size());
+    const auto secondInputUid
+        = original.getNodeWrapper(0).attributesAs<PointwiseAttributes>().in_1_tensor_uid().value();
+    for(auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == secondInputUid)
+        {
+            tensor->dims = {1, 3, 5, 2};
+        }
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    auto badGraph = builder.Release();
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(badGraph.data(), badGraph.size()));
+    EXPECT_THROW(executor.execute(badGraph.data(), badGraph.size(), variantPack),
+                 CpuReferenceNotApplicableError);
+}
+
+TEST(TestPointwisePlanBuilder, MissingPlanBuilderIsNotApplicable)
+{
+    PlanBuilderRegistry registry;
+    const PointwiseSignatureKey unregistered(
+        PointwiseMode::ADD, DataType::INT32, DataType::FLOAT, DataType::INT32, DataType::INT32);
+
+    EXPECT_THROW(registry.getPlanBuilder(unregistered), CpuReferenceNotApplicableError);
+}
