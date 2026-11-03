@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Best 96-WGP kernel for f8_tn_mab. Concurrent mean 6.564 TB/s, +9.70% versus the previous [2,2] winner.
 
 GlobalParameters:
   NumElementsToValidate: -1
