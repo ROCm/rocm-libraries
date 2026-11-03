@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-"""Regenerate Gfx942AttentionUnified3dKvCachePolicyTable.inc.
+"""Print Gfx942AttentionUnified3dKvCachePolicyTable.inc.
 
 Every row is rocKE's own answer: the problem is built by
 ``dispatch.attention.common._problem_with_num_cus`` for a strided single-token
@@ -15,11 +15,12 @@ holds K/V of exactly 256 MiB (B 8, Skv 8192, Hkv 8, D 128: "all", the rule is
 "greater than") and the next batch up (B 9: "stream"), so moving the threshold
 or turning ">" into ">=" changes a sampled row.
 
-Regenerate (from the provider root, dnn-providers/hip-kernel-provider):
+The build generates the table into the build tree through
+gen_gfx942_attention_unified_3d_table.py (kernel_ingestor_engine/CMakeLists.txt);
+it is never committed. To print it by hand, from the provider root:
 
     cd rocke/library && PYTHONPATH=.:../platform/python python3 \\
-        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_kv_cache_policy.py \\
-        > ../../src/tests/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dKvCachePolicyTable.inc
+        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_kv_cache_policy.py
 """
 
 import itertools

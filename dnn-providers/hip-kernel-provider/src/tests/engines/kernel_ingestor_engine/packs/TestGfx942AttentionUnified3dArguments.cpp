@@ -26,9 +26,9 @@
  *
  * The table (Gfx942AttentionUnified3dArgumentsTable.inc) is produced by
  * gen_gfx942_attention_unified_3d_arguments.py from rocKE's `_3d_signature(...,
- * strided_kv=True)` and `StridedKvCacheLayout(...).arguments()`. Regenerate it with the
- * command in that script's docstring; a stale table fails the drift test
- * test_gfx942_arguments_table_current.py.
+ * strided_kv=True)` and `StridedKvCacheLayout(...).arguments()`. The build generates it from
+ * the rocKE source tree (kernel_ingestor_engine/CMakeLists.txt), so a change to the signature
+ * order or the stride packing fails here.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-"""Regenerate Gfx942AttentionUnified3dArgumentsTable.inc.
+"""Print Gfx942AttentionUnified3dArgumentsTable.inc.
 
 Every row is one strided decode case (K and V layouts, batch, scale) and the
 segment kernel's full ordered argument list rocKE would pass for it:
@@ -20,11 +20,12 @@ segment kernel's full ordered argument list rocKE would pass for it:
 TestGfx942AttentionUnified3dArguments.cpp asserts gfx942StridedKvArguments() and
 gfx942Unified3dSegmentArguments() reproduce every row value-by-value, in order.
 
-Regenerate (from the provider root, dnn-providers/hip-kernel-provider):
+The build generates the table into the build tree through
+gen_gfx942_attention_unified_3d_table.py (kernel_ingestor_engine/CMakeLists.txt);
+it is never committed. To print it by hand, from the provider root:
 
     cd rocke/library && PYTHONPATH=.:../platform/python python3 \
-        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_arguments.py \
-        > ../../src/tests/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dArgumentsTable.inc
+        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_arguments.py
 """
 
 import struct

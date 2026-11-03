@@ -138,7 +138,7 @@ const std::vector<KvCachePolicyRow> KV_CACHE_POLICY_TABLE = {
 } // namespace
 
 // gen_gfx942_attention_unified_3d_kv_cache_policy.py asks rocKE's _kv_cache_policy_3d on a
-// grid that straddles 256 MiB; test_gfx942_kv_cache_policy_table_current.py keeps it current.
+// grid that straddles 256 MiB; the build generates the table from the rocKE source tree.
 TEST(TestGfx942AttentionUnified3dGeometry, KvCachePolicyMatchesRockeOnEveryGeneratedRow)
 {
     // 8 batches x 2 KV heads x 3 D x 6 seqlen_k.

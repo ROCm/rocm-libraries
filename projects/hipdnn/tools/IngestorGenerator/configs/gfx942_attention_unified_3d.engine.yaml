@@ -355,8 +355,8 @@ launch_surface:
       equal in block_size and num_segments, so it never removes a candidate. A
       record whose kv_cache_policy is missing or neither "stream" nor "all" is
       declined in kernelMatches(). The restatement holds for fp16/bf16 K/V,
-      the only dtypes graph_match admits. A rocKE-generated table straddling
-      256 MiB pins it, kept current by a quick pytest drift guard.
+      the only dtypes graph_match admits. A table straddling 256 MiB, generated
+      from rocKE at build time, pins it.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dGeometry.cpp
 
   - name: admission
@@ -377,8 +377,8 @@ launch_surface:
       elements at the graph's batch (i32 offsets). A record missing a field,
       with block_size outside {16,32,64}, num_segments <= 0, or a
       tile_size_override other than rocKE's gfx942 rule is declined. The
-      admission table is generated from rocKE and kept current by a quick
-      pytest drift guard.
+      admission table is generated from rocKE at build time and never
+      committed.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dAdmission.cpp
 
   - name: kernargs
@@ -394,7 +394,7 @@ launch_surface:
       and per-head span. segmentSignature() is derived from it, and prepare()
       compares it and the reduce list (_reduce_signature(dtype) without LSE)
       with both launches' recorded lists (names included) before loading
-      either. A rocKE-generated table pins every value and the order for
-      BHSD, BSHD, padded-row, padded-capacity and mixed K/V layouts, kept
-      current by a quick pytest drift guard.
+      either. A table generated from rocKE at build time pins every value and
+      the order for BHSD, BSHD, padded-row, padded-capacity and mixed K/V
+      layouts.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dArguments.cpp

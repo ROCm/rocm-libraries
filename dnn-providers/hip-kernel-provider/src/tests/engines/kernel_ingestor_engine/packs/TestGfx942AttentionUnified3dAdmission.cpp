@@ -21,8 +21,8 @@
  * Gfx942AttentionUnified3dAdmissionTable.inc holds, per request, what
  * `dispatch.attention.strided_decode.make_candidate().admits(req)` answers at each
  * `kv_block_size` (16, 32, 64); gen_gfx942_attention_unified_3d_admission.py writes it and
- * documents the graph -> request mapping. The drift test
- * descriptor-packaging/tests/rocke/test_gfx942_admission_table_current.py keeps it current.
+ * documents the graph -> request mapping. The build generates it from the rocKE source tree
+ * (kernel_ingestor_engine/CMakeLists.txt), so a change to rocKE's admission fails here.
  *
  * For each row this builds the hipDNN graph and asserts:
  *

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-"""Regenerate Gfx942AttentionUnified3dAdmissionTable.inc.
+"""Print Gfx942AttentionUnified3dAdmissionTable.inc.
 
 Every row is rocKE's own answer: the strided split-KV decode candidate
 (``dispatch.attention.strided_decode.make_candidate()``) is asked
@@ -28,11 +28,12 @@ Graph -> request mapping (what the C++ test builds for a row):
 the kernel's ``block_size`` field. A row records the answer for each of 16, 32
 and 64.
 
-Regenerate (from the provider root, dnn-providers/hip-kernel-provider):
+The build generates the table into the build tree through
+gen_gfx942_attention_unified_3d_table.py (kernel_ingestor_engine/CMakeLists.txt);
+it is never committed. To print it by hand, from the provider root:
 
     cd rocke/library && PYTHONPATH=.:../platform/python python3 \\
-        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_admission.py \\
-        > ../../src/tests/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dAdmissionTable.inc
+        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_admission.py
 """
 
 import itertools

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-"""Regenerate Gfx942AttentionUnified3dSplitRuleTable.inc.
+"""Print Gfx942AttentionUnified3dSplitRuleTable.inc.
 
 Every row is rocKE's own answer: the problem is built by
 ``dispatch.attention.common._problem_with_num_cus`` (the body of ``_problem``
@@ -11,11 +11,12 @@ single-token decode request, and the segment count is
 TestGfx942AttentionUnified3dSplitRule.cpp asserts the C++ restatement agrees
 with every row.
 
-Regenerate (from the provider root, dnn-providers/hip-kernel-provider):
+The build generates the table into the build tree through
+gen_gfx942_attention_unified_3d_table.py (kernel_ingestor_engine/CMakeLists.txt);
+it is never committed. To print it by hand, from the provider root:
 
     cd rocke/library && PYTHONPATH=.:../platform/python python3 \
-        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_split_rule.py \
-        > ../../src/tests/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dSplitRuleTable.inc
+        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_gfx942_attention_unified_3d_split_rule.py
 """
 
 import itertools

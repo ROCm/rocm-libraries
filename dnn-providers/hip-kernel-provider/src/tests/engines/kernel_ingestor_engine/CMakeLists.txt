@@ -43,6 +43,43 @@ if(_hkp_offers_gfx942_unified_3d)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dDispatch.cpp)
 endif()
 
+# The gfx942 unified 3D host tests check the engine's C++ restatements of rocKE rules
+# (admission, split rule, kernel arguments, K/V cache policy) against tables rocKE itself
+# answers. Each table is generated here, in the build tree, from the rocKE source tree and
+# is never committed, so it cannot drift from rocKE. The generators need only the standard
+# library and rocKE's Python, so this runs whether or not the rocKE engine is built. The
+# depfile lists every rocKE module a generator imported: changing any of them regenerates
+# its table, and the test that includes it then checks the C++ against the new answers.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(_gfx942_u3d_packs "${CMAKE_CURRENT_SOURCE_DIR}/packs")
+set(_gfx942_u3d_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(_gfx942_u3d_tables)
+foreach(_table admission:Admission split_rule:SplitRule arguments:Arguments
+                kv_cache_policy:KvCachePolicy)
+    string(REPLACE ":" ";" _table "${_table}")
+    list(GET _table 0 _script)
+    list(GET _table 1 _name)
+    set(_inc "${_gfx942_u3d_generated}/Gfx942AttentionUnified3d${_name}Table.inc")
+    add_custom_command(
+        OUTPUT "${_inc}"
+        COMMAND "${Python3_EXECUTABLE}" -I
+                "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_table.py"
+                "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_${_script}.py"
+                --out "${_inc}" --depfile "${_inc}.d"
+        DEPENDS "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_table.py"
+                "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_${_script}.py"
+        DEPFILE "${_inc}.d"
+        COMMENT "Generating the gfx942 unified 3D ${_script} table from rocKE"
+        VERBATIM)
+    list(APPEND _gfx942_u3d_tables "${_inc}")
+endforeach()
+# hip_kernel_provider_tests is created in the parent directory, so the custom commands
+# above reach it through this target rather than as its sources.
+add_custom_target(hkp_gfx942_unified_3d_test_tables DEPENDS ${_gfx942_u3d_tables}
+                  COMMENT "gfx942 unified 3D test tables generated from rocKE")
+add_dependencies(hip_kernel_provider_tests hkp_gfx942_unified_3d_test_tables)
+target_include_directories(hip_kernel_provider_tests PRIVATE "${_gfx942_u3d_generated}")
+
 # The schema hash test compares the pinned constant with the hash of the schema file. Line
 # ends are normalised to LF, so a CRLF checkout gives the same hash.
 set(HKP_INGESTOR_PLAN_SOURCE_DIR

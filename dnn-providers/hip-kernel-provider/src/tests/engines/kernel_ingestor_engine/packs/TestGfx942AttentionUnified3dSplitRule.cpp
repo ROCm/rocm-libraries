@@ -21,8 +21,8 @@
  * The table (Gfx942AttentionUnified3dSplitRuleTable.inc) is produced by
  * gen_gfx942_attention_unified_3d_split_rule.py, which builds each problem through
  * `dispatch.attention.common._problem_with_num_cus` and asks
- * `kernels.common.attention_unified._num_segments`. Regenerate it with the command in
- * that script's docstring whenever the Python rule changes; a stale table fails here.
+ * `kernels.common.attention_unified._num_segments`. The build generates it from the rocKE
+ * source tree (kernel_ingestor_engine/CMakeLists.txt), so a change to the rule fails here.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
