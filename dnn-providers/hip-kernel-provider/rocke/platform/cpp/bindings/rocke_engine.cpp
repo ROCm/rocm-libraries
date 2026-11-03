@@ -303,7 +303,10 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "tdm_depth",
                               "split_barrier",
                               "tdm_alternate_issuers",
-                              "tdm_early_refill"};
+                              "tdm_early_refill",
+                              "split_k",
+                              "emit_sched_hints",
+                              "cshuffle_no_alias"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -354,6 +357,15 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
             = dict_bool(tr, "tdm_alternate_issuers", spec->trait.tdm_alternate_issuers);
         spec->trait.tdm_early_refill
             = dict_bool(tr, "tdm_early_refill", spec->trait.tdm_early_refill);
+        spec->trait.split_k = dict_int(tr, "split_k", spec->trait.split_k);
+        /* Optional[bool]: absent or None leaves the hints arch-resolved. */
+        if(tr.contains("emit_sched_hints") && !tr["emit_sched_hints"].is_none())
+        {
+            spec->trait.emit_sched_hints_set = true;
+            spec->trait.emit_sched_hints = tr["emit_sched_hints"].cast<bool>();
+        }
+        spec->trait.cshuffle_no_alias
+            = dict_bool(tr, "cshuffle_no_alias", spec->trait.cshuffle_no_alias);
     }
 
     /* ---- data ---- */
@@ -475,7 +487,10 @@ SpecHolder build_spec(const py::dict& root)
                               "tdm_depth",
                               "split_barrier",
                               "tdm_alternate_issuers",
-                              "tdm_early_refill"};
+                              "tdm_early_refill",
+                              "split_k",
+                              "emit_sched_hints",
+                              "cshuffle_no_alias"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -527,6 +542,15 @@ SpecHolder build_spec(const py::dict& root)
             = dict_bool(tr, "tdm_alternate_issuers", h.spec.trait.tdm_alternate_issuers);
         h.spec.trait.tdm_early_refill
             = dict_bool(tr, "tdm_early_refill", h.spec.trait.tdm_early_refill);
+        h.spec.trait.split_k = dict_int(tr, "split_k", h.spec.trait.split_k);
+        /* Optional[bool]: absent or None leaves the hints arch-resolved. */
+        if(tr.contains("emit_sched_hints") && !tr["emit_sched_hints"].is_none())
+        {
+            h.spec.trait.emit_sched_hints_set = true;
+            h.spec.trait.emit_sched_hints = tr["emit_sched_hints"].cast<bool>();
+        }
+        h.spec.trait.cshuffle_no_alias
+            = dict_bool(tr, "cshuffle_no_alias", h.spec.trait.cshuffle_no_alias);
     }
 
     /* ---- data ---- */

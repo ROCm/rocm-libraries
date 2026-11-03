@@ -577,6 +577,9 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         split_barrier=tr.split_barrier,
         tdm_alternate_issuers=tr.tdm_alternate_issuers,
         tdm_early_refill=tr.tdm_early_refill,
+        split_k=tr.split_k,
+        emit_sched_hints=tr.emit_sched_hints,
+        cshuffle_no_alias=tr.cshuffle_no_alias,
         # data
         dtype_a=d.dtype_a,
         dtype_b=d.dtype_b,
@@ -781,6 +784,9 @@ def _gemm_subspec_to_dict(spec: Any) -> Dict[str, Any]:
         split_barrier=tr.split_barrier,
         tdm_alternate_issuers=tr.tdm_alternate_issuers,
         tdm_early_refill=tr.tdm_early_refill,
+        split_k=tr.split_k,
+        emit_sched_hints=tr.emit_sched_hints,
+        cshuffle_no_alias=tr.cshuffle_no_alias,
         wave_size=spec.wave_size,
         block_size=spec.block_size,
     )

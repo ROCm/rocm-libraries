@@ -75,6 +75,35 @@ class TestGemmTdmTraitsSpecDict(unittest.TestCase):
                 self.assertIn(key, d)
                 self.assertEqual(d[key], getattr(spec.trait, key))
 
+    def test_spec_dicts_carry_every_trait_field(self):
+        """A TraitSpec field missing from the dict reaches the C++ engine as
+        its default, so it validates and plans a different kernel."""
+        import dataclasses
+
+        from rocke.core.backend import (
+            _gemm_subspec_to_dict,
+            universal_gemm_spec_to_dict,
+        )
+        from rocke.instances.common.gemm_universal import TraitSpec
+
+        # Non-default values, so a dict that hard-codes a default is caught.
+        base = _spec(split_barrier=True)
+        spec = replace(
+            base,
+            trait=replace(
+                base.trait, split_k=2, emit_sched_hints=False, cshuffle_no_alias=True
+            ),
+        )
+        for label, to_dict in (
+            ("universal", universal_gemm_spec_to_dict),
+            ("subspec", _gemm_subspec_to_dict),
+        ):
+            d = to_dict(spec)
+            for f in dataclasses.fields(TraitSpec):
+                with self.subTest(label, field=f.name):
+                    self.assertIn(f.name, d)
+                    self.assertEqual(d[f.name], getattr(spec.trait, f.name))
+
 
 class TestGemmTdmTraitsKernelName(unittest.TestCase):
     """Kernels that differ only in a K-loop knob must not share a name."""
@@ -230,6 +259,24 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
         ok, why = rocke_engine.gemm_is_valid(universal_gemm_spec_to_dict(spec), ARCH)
         self.assertFalse(ok)
         self.assertIn("'mem' pipeline", why)
+
+    def test_cpp_sees_split_k(self):
+        """split_k reaches the engine: both reject split_barrier with it."""
+        import rocke_engine
+
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        base = _spec(split_barrier=True)
+        self.assertTrue(is_valid_spec(base, arch=ARCH)[0])
+        self.assertTrue(
+            rocke_engine.gemm_is_valid(universal_gemm_spec_to_dict(base), ARCH)[0]
+        )
+        spec = replace(base, trait=replace(base.trait, split_k=2))
+        py = is_valid_spec(spec, arch=ARCH)
+        cpp = rocke_engine.gemm_is_valid(universal_gemm_spec_to_dict(spec), ARCH)
+        self.assertFalse(py[0])
+        self.assertEqual(tuple(cpp), tuple(py))
 
     def test_both_engines_agree_on_target_scope(self):
         """The summed cshuffle budget on CDNA and the lds_swizzle reject on RDNA
