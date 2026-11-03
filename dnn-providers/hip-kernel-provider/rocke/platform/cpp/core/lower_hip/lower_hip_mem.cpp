@@ -1074,8 +1074,8 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
     }
     ptr = op->operands[0];
     num_bytes = op->operands[1];
-    /* num_records is cast to (int), which ROCm 7's builtin (int num_records)
-     * and later clang's (uint64_t num_records) both accept; the cast would
+    /* num_records is cast to (int), which ROCm 7.1's builtin (int num_records)
+     * and later clang's (a 64-bit num_records) both accept; the cast would
      * truncate an i64 byte count. A constant-space ptr is kept: the HIP
      * signature declares every pointer parameter the same way, and the builtin
      * takes a void*. */

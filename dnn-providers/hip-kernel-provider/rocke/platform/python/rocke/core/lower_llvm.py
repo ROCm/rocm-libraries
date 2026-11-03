@@ -1882,13 +1882,15 @@ class _Lowerer:
         the call site has to name the pointer's real type. Naming a bare
         ``ptr`` for an ``addrspace(N)`` value is not a lax spelling -- LLVM
         rejects the module outright with "defined with type
-        'ptr addrspace(N)' but expected 'ptr'".
+        'ptr addrspace(N)' but expected 'ptr'". A pointer in another space is
+        refused with a ``TypeError``, as :meth:`_require_global_header_ptr`
+        refuses one.
         """
         ty = self._ptr_llvm_type(ptr)
         for space, text in allowed.items():
             if text == ty:
                 return space, text
-        raise ValueError(
+        raise TypeError(
             f"{op}: pointer operand is {ty}, but the op accepts only "
             f"{', '.join(allowed[s] for s in sorted(allowed))}"
         )
@@ -1924,27 +1926,48 @@ class _Lowerer:
         IR type at a call site instead would emit a type mismatch against the
         signature.
         """
-        for p in self.kernel.params:
-            if f"%{p.name}" == v.name:
-                return _param_llvm_type(p)
+        param = self._param_of(v)
+        if param is not None:
+            return _param_llvm_type(param)
         return _llvm_type(v.type)
 
-    def _require_global_header_ptr(self, op_name: str, ptr: Value) -> None:
-        """Refuse ``op_name`` when the module types its ``ptr`` operand other
-        than ``ptr addrspace(1)``.
+    def _param_of(self, v: Value) -> Param | None:
+        """The kernel parameter ``v`` names, or ``None`` for any other value."""
+        for p in self.kernel.params:
+            if f"%{p.name}" == v.name:
+                return p
+        return None
 
-        The global-pointer ops emit against ``ptr addrspace(1)``. The IR rules
-        check the IR type, but a parameter's ``addr_space`` override (such as
-        ``"constant"``) moves its header type away from it, and the emitted
-        instruction would then not match the header. The C++ engine
-        (``ll_require_global_header_ptr``) refuses with the same text.
+    def _require_header_ptr(
+        self, op_name: str, ptr: Value, operand: str, space: str, expected: str
+    ) -> None:
+        """Refuse ``op_name`` unless the module types its ``operand`` as
+        ``expected``, the LLVM pointer text of the ``space`` the op names.
+
+        An op that names its pointer in one fixed space checks it here. The IR
+        rules check the IR type, but a parameter's ``addr_space`` override
+        (such as ``"constant"``) moves its header type away from it, and the
+        emitted instruction would then not match the header; the message
+        blames the override only when it moved the header. ``op_name`` is the
+        op's builder. The C++ engine (``rocke_ll_require_header_ptr``) refuses
+        with the same text.
         """
         header = self._ptr_llvm_type(ptr)
-        if header != "ptr addrspace(1)":
-            raise TypeError(
-                f"{op_name} ptr must be a global pointer, got {header} "
-                "(its parameter's addr_space)"
-            )
+        if header == expected:
+            return
+        param = self._param_of(ptr)
+        moved = param is not None and _param_llvm_type(param) != _llvm_type(param.type)
+        cause = " (its parameter's addr_space)" if moved else ""
+        raise TypeError(
+            f"{op_name} {operand} must be a {space} pointer, got {header}{cause}"
+        )
+
+    def _require_global_header_ptr(
+        self, op_name: str, ptr: Value, operand: str = "ptr"
+    ) -> None:
+        """:meth:`_require_header_ptr` for an op that names its pointer
+        ``ptr addrspace(1)``."""
+        self._require_header_ptr(op_name, ptr, operand, "global", "ptr addrspace(1)")
 
     def _need(self, key: str) -> None:
         """Register a demand for an intrinsic declaration, and vet it.
@@ -3438,7 +3461,7 @@ class _Lowerer:
 
     def _op_memref_global_load(self, op: Op) -> None:
         ptr, idx = op.operands
-        _, ptr_ty = self._anyptr_space("global_load", ptr, _GLOBAL_LOAD_PTR_TYPES)
+        _, ptr_ty = self._anyptr_space("global_load_f16", ptr, _GLOBAL_LOAD_PTR_TYPES)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 2))
         self._current().emit(
@@ -3451,7 +3474,7 @@ class _Lowerer:
 
     def _op_memref_global_load_typed(self, op: Op) -> None:
         ptr, idx = op.operands
-        _, ptr_ty = self._anyptr_space("global_load_typed", ptr, _GLOBAL_LOAD_PTR_TYPES)
+        _, ptr_ty = self._anyptr_space("global_load", ptr, _GLOBAL_LOAD_PTR_TYPES)
         elem_ty = _llvm_type(op.result.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
@@ -3465,7 +3488,7 @@ class _Lowerer:
 
     def _op_memref_global_store(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        self._require_global_header_ptr("global_store", ptr)
+        self._require_global_header_ptr("store_f16", ptr)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 2))
         self._current().emit(
@@ -3478,7 +3501,7 @@ class _Lowerer:
 
     def _op_memref_global_store_typed(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        self._require_global_header_ptr("global_store_typed", ptr)
+        self._require_global_header_ptr("global_store", ptr)
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
@@ -5086,11 +5109,7 @@ class _Lowerer:
             "global_prefetch", _OpTargetFact.GLOBAL_PREFETCH
         )
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError(
-                f"global_prefetch ptr must be a global pointer, "
-                f"got {self._ptr_llvm_type(ptr)}"
-            )
+        self._require_global_header_ptr("global_prefetch", ptr)
         cp = self._check_cachepolicy("global_prefetch", op.attrs.get("cachepolicy", 0))
         self._need("global.prefetch")
         self._current().emit(
@@ -5101,11 +5120,7 @@ class _Lowerer:
     def _op_tile_flat_prefetch(self, op: Op) -> None:
         self._require_llvm23_target_fact("flat_prefetch", _OpTargetFact.GLOBAL_PREFETCH)
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr":
-            raise TypeError(
-                f"flat_prefetch ptr must be a flat pointer, "
-                f"got {self._ptr_llvm_type(ptr)}"
-            )
+        self._require_header_ptr("flat_prefetch", ptr, "ptr", "flat", "ptr")
         cp = self._check_cachepolicy("flat_prefetch", op.attrs.get("cachepolicy", 0))
         self._need("flat.prefetch")
         self._current().emit(
@@ -5612,10 +5627,9 @@ class _Lowerer:
         if len(op.operands) != 2:
             raise ValueError("global_store_async_from_lds expects two operands")
         dst_ptr, lds_ptr = op.operands
-        if self._ptr_llvm_type(dst_ptr) != "ptr addrspace(1)":
-            raise TypeError(
-                "global_store_async_from_lds dst_ptr must be a global pointer"
-            )
+        self._require_global_header_ptr(
+            "global_store_async_from_lds", dst_ptr, operand="dst_ptr"
+        )
         width = int(op.attrs["width_bytes"])
         if width not in (1, 4, 8, 16):
             raise ValueError(
@@ -5648,8 +5662,9 @@ class _Lowerer:
         if len(op.operands) != 1:
             raise ValueError("global_load_tr16_b128 expects one operand")
         src_ptr = op.operands[0]
-        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
-            raise TypeError("global_load_tr16_b128 src_ptr must be a global pointer")
+        self._require_global_header_ptr(
+            "global_load_tr16_b128", src_ptr, operand="src_ptr"
+        )
         dtype = str(op.attrs.get("dtype", ""))
         suffixes = {"f16": "v8f16", "bf16": "v8bf16", "i16": "v8i16"}
         if dtype not in suffixes:
@@ -5684,8 +5699,7 @@ class _Lowerer:
         if len(op.operands) != 2 or len(op.results) != 1:
             raise ValueError("cluster_load expects two operands and one result")
         ptr, mask = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError("cluster_load ptr must be a global pointer")
+        self._require_global_header_ptr("cluster_load", ptr)
         if mask.type != I32:
             raise TypeError("cluster_load mask must be i32")
         width = int(op.attrs.get("width_bytes", 0))
@@ -5721,10 +5735,9 @@ class _Lowerer:
         if len(op.operands) != 3:
             raise ValueError("cluster_load_async_to_lds expects three operands")
         src_ptr, lds_ptr, mask = op.operands
-        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
-            raise TypeError(
-                "cluster_load_async_to_lds src_ptr must be a global pointer"
-            )
+        self._require_global_header_ptr(
+            "cluster_load_async_to_lds", src_ptr, operand="src_ptr"
+        )
         if mask.type != I32:
             raise TypeError("cluster_load_async_to_lds mask must be i32")
         width = int(op.attrs.get("width_bytes", 0))

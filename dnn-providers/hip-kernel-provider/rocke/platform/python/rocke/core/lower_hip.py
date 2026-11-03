@@ -2402,10 +2402,10 @@ class _Lowerer:
         # ``raw_buffer_load/store`` family takes as its first argument.
         # Using the opaque type keeps the bitcast pun out of the user code.
         #
-        # Signature on ROCm 7 amdclang:
+        # Signature on ROCm 7.1 amdclang:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
-        # int num_records, int flags)``; later clang takes a ``uint64_t``
-        # ``num_records``.
+        # int num_records, int flags)``; later clang takes a 64-bit
+        # ``num_records`` (``int64_t`` in LLVM 22, ``uint64_t`` after).
         #
         # The flags word is the rsrc DWORD3. Its format / out-of-bounds
         # encoding is ISA-specific (the gfx9 value makes every raw buffer

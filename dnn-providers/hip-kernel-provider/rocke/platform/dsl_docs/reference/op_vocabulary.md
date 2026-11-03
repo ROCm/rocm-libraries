@@ -109,8 +109,9 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 A pointer parameter declared `addr_space="constant"` is `ptr addrspace(4)` in the kernel header. The
 three global loads above read through it as `load addrspace(4)`; they refuse a flat or LDS pointer.
 Every other op that addresses global memory through it (the stores, atomics and flag ops above,
-`cooperative_global_store`, `global_load_tr16_b128`, and the copies between global memory and LDS) is
-refused by the LLVM lowering of both engines.
+`cooperative_global_store`, `global_prefetch`, `global_load_tr16_b128`, the cluster loads, and the
+copies between global memory and LDS) is refused by the LLVM lowering of both engines. Each of these
+refusals is a `TypeError` (`ROCKE_ERR_TYPE` in the C++ engine) that names the op's builder.
 
 ### Global pointers
 

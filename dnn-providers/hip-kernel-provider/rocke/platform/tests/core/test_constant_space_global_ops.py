@@ -12,10 +12,20 @@ types it ``ptr addrspace(4)``. An instruction that names it
   and the module compiles. They refuse a pointer in any other space (flat or
   LDS), which they used to name ``ptr addrspace(1)`` as well.
 - Every other op that addresses global memory through the pointer -- stores,
-  atomics, flag ops, the cooperative store, the transposed load and the copies
-  between global memory and LDS -- is refused by the LLVM lowering of both
-  engines. Most use the text the ``global_ptr_*`` ops use; the two ops that
-  already refused a non-global pointer keep their own text.
+  atomics, flag ops, the cooperative store, prefetch, the transposed and
+  cluster loads, and the copies between global memory and LDS -- is refused by
+  the LLVM lowering of both engines, with one text that names the op's builder
+  and the operand. ``flat_prefetch`` refuses a parameter whose override moved
+  it out of the flat space the same way.
+- Every one of these refusals is a ``TypeError`` (``ROCKE_ERR_TYPE`` in the
+  C++ engine). The text blames the parameter's ``addr_space`` only when the
+  override moved its header type.
+
+Each case runs per engine, so the Python engine is checked in every lane; the
+C++ cases skip where the ``rocke_engine`` binding is not built. There,
+``future_intrinsic_lowering``'s ``constant_space_global_ops`` CTest case
+checks a sample of the C++ engine's side: the three loads and the
+``store_f16``, ``global_store`` and ``global_atomic_add`` refusals.
 """
 
 from __future__ import annotations
@@ -35,10 +45,10 @@ from rocke.core.ir import (
     Type,
     Value,
 )
-from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
+from rocke.core.lower_llvm import LLVM_FLAVORS
+from rocke.tests.engines import ENGINES, assert_engine_rejects, lower_with_engine
 from rocke.tests.ir_validity import assert_target_accepts
 
-FLAVORS = ("llvm20", "llvm22", "llvm23", "llvm24")
 ARCH = "gfx942"
 
 
@@ -76,14 +86,15 @@ def _load_kernel(
     return b.kernel
 
 
+# builder -> (the load applied to X, element type of X, GEP element, loaded type)
 LOADS = {
-    "global_load": (
+    "global_load_f16": (
         lambda b, x: b.global_load_f16(x, b.const_i32(1)),
         F16,
         "half",
         "half",
     ),
-    "global_load_typed": (
+    "global_load": (
         lambda b, x: b.global_load(x, b.const_i32(1), F32, align=4),
         F32,
         "float",
@@ -98,40 +109,50 @@ LOADS = {
 }
 
 
-@pytest.mark.parametrize("flavor", FLAVORS)
-@pytest.mark.parametrize("op_name", sorted(LOADS))
-def test_both_llvm_lowerings_load_through_a_constant_space_parameter(op_name, flavor):
-    load, dtype, elem_ty, loaded_ty = LOADS[op_name]
-    ir = lower_with_both_engines(
-        _load_kernel(f"{op_name}_constant", load, dtype), ARCH, llvm_flavor=flavor
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+@pytest.mark.parametrize("builder", sorted(LOADS))
+def test_a_load_reads_through_a_constant_space_parameter(builder, flavor, engine):
+    load, dtype, elem_ty, loaded_ty = LOADS[builder]
+    ir = lower_with_engine(
+        _load_kernel(f"{builder}_constant", load, dtype),
+        ARCH,
+        engine=engine,
+        llvm_flavor=flavor,
     )
-    assert f"@{op_name}_constant(ptr addrspace(4) nocapture %X, " in ir
+    assert f"@{builder}_constant(ptr addrspace(4) nocapture %X, " in ir
     assert f"getelementptr inbounds {elem_ty}, ptr addrspace(4) %X, i32 " in ir
     assert f"= load {loaded_ty}, ptr addrspace(4) %gep" in ir
     assert "ptr addrspace(1) %X" not in ir
 
 
-@pytest.mark.parametrize("op_name", sorted(LOADS))
-def test_a_load_through_a_constant_space_parameter_compiles(op_name):
-    load, dtype, _, _ = LOADS[op_name]
-    ir = lower_with_both_engines(_load_kernel(f"{op_name}_compiles", load, dtype), ARCH)
+@pytest.mark.parametrize("builder", sorted(LOADS))
+def test_a_load_through_a_constant_space_parameter_compiles(builder):
+    """The IR is the same for both engines (the test above), so one compile
+    judges it."""
+    load, dtype, _, _ = LOADS[builder]
+    ir = lower_with_engine(
+        _load_kernel(f"{builder}_compiles", load, dtype), ARCH, engine="python"
+    )
     assert_target_accepts(ir, ARCH)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     "x_space, header_type", [("private", "ptr"), ("lds", "ptr addrspace(3)")]
 )
-@pytest.mark.parametrize("op_name", sorted(LOADS))
-def test_both_llvm_lowerings_refuse_a_load_through_another_space(
-    op_name, x_space, header_type
+@pytest.mark.parametrize("builder", sorted(LOADS))
+def test_a_load_refuses_a_pointer_in_another_space(
+    builder, x_space, header_type, engine
 ):
-    load, dtype, _, _ = LOADS[op_name]
-    kernel = _load_kernel(f"{op_name}_{x_space}", load, dtype, x_space)
-    assert_both_engines_reject(
+    load, dtype, _, _ = LOADS[builder]
+    kernel = _load_kernel(f"{builder}_{x_space}", load, dtype, x_space)
+    assert_engine_rejects(
         kernel,
         ARCH,
-        ValueError,
-        f"{op_name}: pointer operand is {header_type}, but the op accepts only "
+        engine=engine,
+        error_type=TypeError,
+        message=f"{builder}: pointer operand is {header_type}, but the op accepts only "
         "ptr addrspace(1), ptr addrspace(4)",
     )
 
@@ -141,9 +162,9 @@ def test_both_llvm_lowerings_refuse_a_load_through_another_space(
 # --------------------------------------------------------------------------
 
 
-def _header_refusal(op_name: str) -> str:
+def _header_refusal(builder: str, operand: str = "ptr") -> str:
     return (
-        f"{op_name} ptr must be a global pointer, got ptr addrspace(4) "
+        f"{builder} {operand} must be a global pointer, got ptr addrspace(4) "
         "(its parameter's addr_space)"
     )
 
@@ -152,23 +173,23 @@ def _lds_address(b: IRBuilder, dtype: Type) -> Value:
     return b.smem_addr_of(b.smem_alloc(dtype, [64], name_hint="stage"))
 
 
-# op name -> (element type of X, the op applied to X, arch, flavor, message)
+# builder -> (element type of X, the op applied to X, arch, flavor, message)
 REFUSALS = {
-    "global_store": (
+    "store_f16": (
         F16,
         lambda b, x: b.store_f16(
             x, b.const_i32(0), b.global_load_f16(x, b.const_i32(1))
         ),
         ARCH,
         None,
-        _header_refusal("global_store"),
+        _header_refusal("store_f16"),
     ),
-    "global_store_typed": (
+    "global_store": (
         F32,
         lambda b, x: b.global_store(x, b.const_i32(0), b.const_f32(1.0)),
         ARCH,
         None,
-        _header_refusal("global_store_typed"),
+        _header_refusal("global_store"),
     ),
     "global_store_vN": (
         F16,
@@ -257,22 +278,89 @@ REFUSALS = {
         ),
         "gfx1250",
         "llvm23",
-        "global_store_async_from_lds dst_ptr must be a global pointer",
+        _header_refusal("global_store_async_from_lds", "dst_ptr"),
     ),
     "global_load_tr16_b128": (
         I16,
         lambda b, x: b.global_load_tr16_b128(x, dtype=I16),
         "gfx1250",
         "llvm23",
-        "global_load_tr16_b128 src_ptr must be a global pointer",
+        _header_refusal("global_load_tr16_b128", "src_ptr"),
+    ),
+    "global_prefetch": (
+        I32,
+        lambda b, x: b.global_prefetch(x),
+        "gfx1250",
+        "llvm23",
+        _header_refusal("global_prefetch"),
+    ),
+    "cluster_load": (
+        I32,
+        lambda b, x: b.cluster_load(x, b.const_i32(1)),
+        "gfx1250",
+        "llvm23",
+        _header_refusal("cluster_load"),
+    ),
+    "cluster_load_async_to_lds": (
+        I32,
+        lambda b, x: b.cluster_load_async_to_lds(
+            x, _lds_address(b, I32), b.const_i32(1), width_bytes=4
+        ),
+        "gfx1250",
+        "llvm23",
+        _header_refusal("cluster_load_async_to_lds", "src_ptr"),
     ),
 }
 
 
-@pytest.mark.parametrize("op_name", sorted(REFUSALS))
-def test_both_llvm_lowerings_refuse_a_constant_space_parameter(op_name):
-    dtype, apply_op, arch, flavor, message = REFUSALS[op_name]
-    b = IRBuilder(f"{op_name}_constant")
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("builder", sorted(REFUSALS))
+def test_an_op_that_names_a_global_pointer_refuses_a_constant_space_parameter(
+    builder, engine
+):
+    dtype, apply_op, arch, flavor, message = REFUSALS[builder]
+    b = IRBuilder(f"{builder}_constant")
     apply_op(b, _constant_param(b, dtype))
     b.ret()
-    assert_both_engines_reject(b.kernel, arch, TypeError, message, llvm_flavor=flavor)
+    assert_engine_rejects(
+        b.kernel,
+        arch,
+        engine=engine,
+        error_type=TypeError,
+        message=message,
+        llvm_flavor=flavor,
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_the_refusal_blames_addr_space_only_when_the_override_moved_it(engine):
+    """An LDS parameter without an ``addr_space`` override reaches the store as
+    ``ptr addrspace(3)``; its own type is the cause, not an override."""
+    b = IRBuilder("store_lds_param")
+    x = b.param("X", PtrType(F32, "lds"))
+    b.global_store(x, b.const_i32(0), b.const_f32(1.0))
+    b.ret()
+    assert_engine_rejects(
+        b.kernel,
+        ARCH,
+        engine=engine,
+        error_type=TypeError,
+        message="global_store ptr must be a global pointer, got ptr addrspace(3)",
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_flat_prefetch_refuses_a_parameter_moved_to_constant_space(engine):
+    b = IRBuilder("flat_prefetch_constant")
+    x = b.param("X", PtrType(I32, "private"), addr_space="constant")
+    b.flat_prefetch(x)
+    b.ret()
+    assert_engine_rejects(
+        b.kernel,
+        "gfx1250",
+        engine=engine,
+        error_type=TypeError,
+        message="flat_prefetch ptr must be a flat pointer, got ptr addrspace(4) "
+        "(its parameter's addr_space)",
+        llvm_flavor="llvm23",
+    )
