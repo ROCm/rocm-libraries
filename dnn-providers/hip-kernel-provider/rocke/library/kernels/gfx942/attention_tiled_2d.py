@@ -6197,7 +6197,6 @@ def build_gfx942_4warp_gqa(
     # bs64-D128 runs the single-buffer (D256-style) path at BN=64 (bs64 extension).
     HD128_PIPE = HD128 and BS <= 32
     BN = 32 if HD128_PIPE else 64
-    BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8() if spec.dtype == "bf16" else MfmaAtom.f16_32x32x8()
     APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
     NKEYT = BN // 32
@@ -6340,13 +6339,21 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # Every K/V key is bounded by the last valid key and every Q row by the last
+    # token of its sequence, as in the lean body: the KV tiles and the TOKBLK-row Q
+    # block otherwise read block-table entries, K/V rows and Q rows past the
+    # sequence when its length is not a tile multiple (decode reads 127 Q rows past
+    # a 1-token sequence, off the end of the Q tensor). Clamped keys are masked to
+    # -inf (P = 0) and clamped rows are never stored, so only the addresses change.
+    k_last = b.sub(klen, b.const_i32(1))
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
+        key = b.select(b.cmp_lt(key, k_last), key, k_last)
+        lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
         pb = b.global_load_i32(BT, lblk)
-        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
+        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
 
     sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
     ninf = b.const_f32(-1e30)
@@ -6533,12 +6540,14 @@ def build_gfx942_4warp_gqa(
                 # geometry); head BASE strides by GQAG (the GQA group).
                 _m = b.add(wq, ld.n_in_atom)
                 _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+                _tok = b.select(b.cmp_lt(_tok, q_last), _tok, q_last)
                 _hd = b.add(
                     b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
                 )
                 q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
             else:
                 q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
                 q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
