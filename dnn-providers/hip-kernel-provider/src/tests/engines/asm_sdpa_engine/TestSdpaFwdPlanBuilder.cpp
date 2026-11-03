@@ -44,28 +44,6 @@ namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 using hipdnn_flatbuffers_sdk::data_objects::GraphT;
 using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
 
-flatbuffers::FlatBufferBuilder mutateGraph(flatbuffers::FlatBufferBuilder&& builder,
-                                           const std::function<void(GraphT&)>& mutate)
-{
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
-    mutate(*graph);
-    flatbuffers::FlatBufferBuilder mutated;
-    mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
-    return mutated;
-}
-
-TensorAttributesT& findTensor(GraphT& graph, const std::string& name)
-{
-    for(auto& tensor : graph.tensors)
-    {
-        if(tensor->name == name)
-        {
-            return *tensor;
-        }
-    }
-    throw std::runtime_error("No tensor named " + name);
-}
-
 TensorAttributesT& findTensorByUid(GraphT& graph, int64_t uid)
 {
     for(auto& tensor : graph.tensors)
@@ -308,6 +286,14 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       DataType::FLOAT),
                    "mma_core_mode = FLOAT"},
+         false},
+        {GraphTest{mutateGraph(createSdpaFwdGraph(),
+                               [](GraphT& graph) { findTensor(graph, "q").virtual_ = true; }),
+                   "virtual q tensor"},
+         false},
+        {GraphTest{mutateGraph(createSdpaFwdGraph(),
+                               [](GraphT& graph) { findTensor(graph, "o").virtual_ = true; }),
+                   "virtual o tensor"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)

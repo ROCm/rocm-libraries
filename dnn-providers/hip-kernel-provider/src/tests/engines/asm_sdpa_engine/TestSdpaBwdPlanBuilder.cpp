@@ -28,6 +28,8 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
 namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestSdpaBwdPlanBuilder : public ::testing::Test
@@ -47,6 +49,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaBwdGraph)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
+// createValidSdpaBwdGraph stamps the I/O dtype into the node's compute_data_type; the engine
+// requires FLOAT, so graphs built from it are re-tagged here.
+flatbuffers::FlatBufferBuilder
+    withNodeComputeType(flatbuffers::FlatBufferBuilder&& builder,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType computeType)
+{
+    return mutateGraph(std::move(builder), [computeType](GraphT& graph) {
+        graph.nodes.front()->compute_data_type = computeType;
+    });
+}
+
 auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType
                         = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
@@ -57,20 +70,22 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         bool overrideShapeEnabled = false)
 {
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dims,
-                                                               strides,
-                                                               dataType,
-                                                               withScale,
-                                                               alibiMask,
-                                                               paddingMask,
-                                                               causalMask,
-                                                               overrideShapeEnabled);
+    return withNodeComputeType(
+        hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(dims,
+                                                            strides,
+                                                            dims,
+                                                            strides,
+                                                            dims,
+                                                            strides,
+                                                            dims,
+                                                            strides,
+                                                            dataType,
+                                                            withScale,
+                                                            alibiMask,
+                                                            paddingMask,
+                                                            causalMask,
+                                                            overrideShapeEnabled),
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
@@ -184,6 +199,25 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, true),
                    "with scale tensor"},
          true},
+
+        // Compute type must be FLOAT (fp32 accumulation), for either I/O dtype.
+        {GraphTest{withNodeComputeType(createSdpaBwdGraph(), DataType::BFLOAT16),
+                   "compute_data_type = BFLOAT16"},
+         false},
+        {GraphTest{withNodeComputeType(createSdpaBwdGraph({4, 8, 256, 128}, DataType::HALF),
+                                       DataType::HALF),
+                   "compute_data_type = HALF on fp16 tensors"},
+         false},
+
+        // Virtual operands have no device buffer; reject inputs and outputs alike.
+        {GraphTest{mutateGraph(createSdpaBwdGraph(),
+                               [](GraphT& graph) { findTensor(graph, "q").virtual_ = true; }),
+                   "virtual q tensor"},
+         false},
+        {GraphTest{mutateGraph(createSdpaBwdGraph(),
+                               [](GraphT& graph) { findTensor(graph, "dq").virtual_ = true; }),
+                   "virtual dq tensor"},
+         false},
     };
 
     for(const auto& [test, applicability] : applicabilityTests)
@@ -841,16 +875,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
     const std::vector<int64_t> vDims = {2, 4, 256, 128};
     const std::vector<int64_t> oDims = {2, 6, 256, 128};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qDims,
-        hipdnn_data_sdk::utilities::generateStrides(qDims),
-        kDims,
-        hipdnn_data_sdk::utilities::generateStrides(kDims),
-        vDims,
-        hipdnn_data_sdk::utilities::generateStrides(vDims),
-        oDims,
-        hipdnn_data_sdk::utilities::generateStrides(oDims),
-        DataType::BFLOAT16);
+    auto builder = withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                           qDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(qDims),
+                                           kDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(kDims),
+                                           vDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(vDims),
+                                           oDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(oDims),
+                                           DataType::BFLOAT16),
+                                       DataType::FLOAT);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -879,16 +914,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsIntegralGqaRatio)
     const std::vector<int64_t> vDims = {1, 8, 256, 128};
     const std::vector<int64_t> oDims = {1, 32, 256, 128};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qDims,
-        hipdnn_data_sdk::utilities::generateStrides(qDims),
-        kDims,
-        hipdnn_data_sdk::utilities::generateStrides(kDims),
-        vDims,
-        hipdnn_data_sdk::utilities::generateStrides(vDims),
-        oDims,
-        hipdnn_data_sdk::utilities::generateStrides(oDims),
-        DataType::BFLOAT16);
+    auto builder = withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                           qDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(qDims),
+                                           kDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(kDims),
+                                           vDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(vDims),
+                                           oDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(oDims),
+                                           DataType::BFLOAT16),
+                                       DataType::FLOAT);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -916,16 +952,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
     const std::vector<int64_t> vDims = {2, 8, 256, 64};
     const std::vector<int64_t> oDims = {2, 8, 256, 64};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qDims,
-        hipdnn_data_sdk::utilities::generateStrides(qDims),
-        kDims,
-        hipdnn_data_sdk::utilities::generateStrides(kDims),
-        vDims,
-        hipdnn_data_sdk::utilities::generateStrides(vDims),
-        oDims,
-        hipdnn_data_sdk::utilities::generateStrides(oDims),
-        DataType::BFLOAT16);
+    auto builder = withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                           qDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(qDims),
+                                           kDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(kDims),
+                                           vDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(vDims),
+                                           oDims,
+                                           hipdnn_data_sdk::utilities::generateStrides(oDims),
+                                           DataType::BFLOAT16),
+                                       DataType::FLOAT);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1033,7 +1070,7 @@ flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithMask(
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_bwd",
-                                     DataType::BFLOAT16,
+                                     DataType::FLOAT,
                                      NodeAttributes::SdpaBackwardAttributes,
                                      sdpaAttributes.Union()));
 
@@ -1460,16 +1497,17 @@ auto createSdpaBwdGraphForDims(const std::vector<int64_t>& qDims,
 {
     const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
     const std::vector<int64_t> strides = {32768, 32768, 128, 1};
-    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qDims,
-        strides,
-        kDims,
-        strides,
-        vDims,
-        strides,
-        oDims,
-        strides,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    return withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                   qDims,
+                                   strides,
+                                   kDims,
+                                   strides,
+                                   vDims,
+                                   strides,
+                                   oDims,
+                                   strides,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16),
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 }
 
 struct BwdDimRangeCase
@@ -1636,16 +1674,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
 
     auto buildWithKSeqStride = [&](int64_t kSeqStride) {
         const std::vector<int64_t> kStrides = {kSeqStride, kSeqStride, kSeqStride, 1};
-        return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-            dims,
-            normalStrides,
-            dims,
-            kStrides,
-            dims,
-            normalStrides,
-            dims,
-            normalStrides,
-            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+        return withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                       dims,
+                                       normalStrides,
+                                       dims,
+                                       kStrides,
+                                       dims,
+                                       normalStrides,
+                                       dims,
+                                       normalStrides,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16),
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     };
 
     auto builderAtLimit = buildWithKSeqStride(limit);

@@ -493,6 +493,11 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                    != NodeAttributes::SdpaBackwardAttributes,
                                "Node attribute type is not SdpaBackwardAttributes");
 
+    HIP_KERNEL_RETURN_FALSE_IF(
+        nodeWrappers.front()->computeDataType() != DataType::FLOAT,
+        "compute_data_type must be FLOAT (fp32 accumulation) (Actual value: "
+            + std::string(EnumNameDataType(nodeWrappers.front()->computeDataType())) + ")");
+
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaBackwardAttributes>();
 
     // Graph features the engine does not currently dispatch.
@@ -575,6 +580,22 @@ bool SdpaBwdPlanBuilder::isApplicable(
        || dkTensor == nullptr || dvTensor == nullptr)
     {
         return false;
+    }
+
+    // Virtual tensors have no device buffer and take their dtype from the graph's
+    // intermediate_data_type; this kernel only reads and writes device buffers.
+    for(const auto& [label, tensor] : {std::pair{"q", qTensor},
+                                       std::pair{"k", kTensor},
+                                       std::pair{"v", vTensor},
+                                       std::pair{"o", oTensor},
+                                       std::pair{"do", doTensor},
+                                       std::pair{"stats", statsTensor},
+                                       std::pair{"dq", dqTensor},
+                                       std::pair{"dk", dkTensor},
+                                       std::pair{"dv", dvTensor}})
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(tensor->virtual_(),
+                                   std::string(label) + " tensor must not be virtual");
     }
 
     HIP_KERNEL_RETURN_FALSE_IF(

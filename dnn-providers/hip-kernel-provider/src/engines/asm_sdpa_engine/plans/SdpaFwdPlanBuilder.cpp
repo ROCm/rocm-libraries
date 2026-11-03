@@ -383,8 +383,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    != NodeAttributes::SdpaAttributes,
                                "Node attribute type is not SdpaAttributes");
 
-    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->computeDataType() != DataType::FLOAT,
-                               "Compute data type must be FLOAT");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        nodeWrappers.front()->computeDataType() != DataType::FLOAT,
+        "compute_data_type must be FLOAT (fp32 accumulation) (Actual value: "
+            + std::string(EnumNameDataType(nodeWrappers.front()->computeDataType())) + ")");
 
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
@@ -427,6 +429,17 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* kTensor = tensorMap.at(kUid);
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
+
+    // Virtual tensors have no device buffer and take their dtype from the graph's
+    // intermediate_data_type; these kernels only read and write device buffers.
+    for(const auto& [label, tensor] : {std::pair{"q", qTensor},
+                                       std::pair{"k", kTensor},
+                                       std::pair{"v", vTensor},
+                                       std::pair{"o", oTensor}})
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(tensor->virtual_(),
+                                   std::string(label) + " tensor must not be virtual");
+    }
 
     BatchMode batchMode;
     {
