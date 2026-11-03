@@ -78,7 +78,11 @@ struct PointwiseParams
     }
 };
 
-template <typename Input0Type, typename Input1Type, typename Input2Type, typename OutputType>
+template <typename Input0Type,
+          typename Input1Type,
+          typename Input2Type,
+          typename OutputType,
+          typename ComputeType>
 class PointwisePlan : public IGraphNodePlanExecutor
 {
 public:
@@ -119,13 +123,13 @@ private:
 
         if(_params.mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
         {
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
-                _params.mode, *shallowOut0Tensor, _params.axis.value());
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type>::
+                pointwiseCompute(_params.mode, *shallowOut0Tensor, _params.axis.value());
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
-                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type>::
+                pointwiseCompute(_params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -137,7 +141,7 @@ private:
             auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
                 pointwiseCompute(
                     _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
         }
@@ -156,13 +160,16 @@ private:
                 auto shallowIn2Tensor = createShallowTensor<Input2Type>(
                     _params.in2Tensor.value(), variantPack.at(_params.in2Tensor.value().uid));
 
-                utilities::
-                    CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type, Input2Type>::
-                        pointwiseCompute(_params.mode,
-                                         *shallowOut0Tensor,
-                                         *shallowIn0Tensor,
-                                         *shallowIn1Tensor,
-                                         *shallowIn2Tensor);
+                utilities::CpuReferencePointwiseImpl<
+                    OutputType,
+                    ComputeType,
+                    Input0Type,
+                    Input1Type,
+                    Input2Type>::pointwiseCompute(_params.mode,
+                                                  *shallowOut0Tensor,
+                                                  *shallowIn0Tensor,
+                                                  *shallowIn1Tensor,
+                                                  *shallowIn2Tensor);
             }
             else
             {
@@ -185,16 +192,16 @@ private:
 
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
-                _params.mode,
-                *shallowOut0Tensor,
-                *shallowIn0Tensor,
-                _params.reluLowerClip.value_or(0.0f),
-                _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
-                _params.reluLowerClipSlope.value_or(0.0f),
-                _params.swishBeta.value_or(1.0f),
-                _params.eluAlpha.value_or(1.0f),
-                _params.softplusBeta.value_or(1.0f));
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type>::
+                pointwiseCompute(_params.mode,
+                                 *shallowOut0Tensor,
+                                 *shallowIn0Tensor,
+                                 _params.reluLowerClip.value_or(0.0f),
+                                 _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                                 _params.reluLowerClipSlope.value_or(0.0f),
+                                 _params.swishBeta.value_or(1.0f),
+                                 _params.eluAlpha.value_or(1.0f),
+                                 _params.softplusBeta.value_or(1.0f));
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -206,7 +213,7 @@ private:
             auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
+            utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
                 pointwiseCompute(_params.mode,
                                  *shallowOut0Tensor,
                                  *shallowIn0Tensor,
@@ -350,7 +357,8 @@ public:
                                      ? tensorMap.at(*nodeAttributes->in_2_tensor_uid())
                                      : nullptr);
 
-        return std::make_unique<PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType>>(
+        return std::make_unique<
+            PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType, ComputeType>>(
             PointwiseParams(nodeAttributes->operation(),
                             *in0Tensor,
                             in1Tensor,
