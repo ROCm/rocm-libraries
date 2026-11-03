@@ -8,21 +8,32 @@ from __future__ import annotations
 import importlib
 import json
 from collections import Counter
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 
 import pytest
 
+import dispatch.sdpa as sdpa_family
 from dispatch.sdpa import (
     SDPA_DIM_VOCABULARY,
     SDPA_FEATURES,
+    SDPA_REGISTRY,
     SdpaBias,
     SdpaDropout,
     SdpaFp8,
     SdpaPaged,
     SdpaRequest,
     SdpaTensor,
+    dispatch_sdpa_all,
+    registered_sdpa_combos,
+    sdpa_sweep_space,
 )
-from rocke.dispatch.core import Capability, stable_json_hash
+from rocke.dispatch.core import (
+    Capability,
+    CandidateRegistry,
+    DispatchResult,
+    KernelCandidate,
+    stable_json_hash,
+)
 from tests.sdpa.request_cases import (
     CASES,
     bhsd,
@@ -70,8 +81,8 @@ def test_normalized_round_trips(name):
         ("causal_br", {"layout_bshd", "causal_br"}),
         ("window_causal", {"layout_bshd", "window"}),
         ("window_br", {"layout_bshd", "window", "window_br"}),
-        ("window_right", {"layout_bshd", "window", "window_right"}),
-        ("window_left_only", {"layout_bshd", "window", "window_right"}),
+        ("noncausal_window", {"layout_bshd", "window", "noncausal_window"}),
+        ("window_left_only", {"layout_bshd", "window", "noncausal_window"}),
         ("bias_full", {"layout_bshd", "bias"}),
         ("bias_broadcast", {"layout_bshd", "bias", "bias_broadcast"}),
         ("padding_mask_only", {"layout_bshd", "padded"}),
@@ -109,7 +120,7 @@ COVERAGE_ROWS = [
     ("Causal top-left", "causal_tl", "causal_tl"),
     ("Causal bottom-right", "causal_br", "causal_br"),
     ("Window band", "window_causal", "window"),
-    ("Window with right > 0", "window_right", "window_right"),
+    ("Window with right > 0", "noncausal_window", "noncausal_window"),
     ("Bias tensor", "bias_full", "bias"),
     ("Bias broadcast", "bias_broadcast", "bias_broadcast"),
     ("ALiBi", "alibi", "alibi"),
@@ -149,10 +160,15 @@ def test_minus_one_is_unbounded_and_is_kept():
     assert req.features() == BASE.features()
 
 
-@pytest.mark.parametrize("left, right", [(-2, -1), (-1, -2), (-7, -2), (-4, 0)])
-def test_bounds_below_minus_one_are_rejected(left, right):
-    """hipDNN's resolvers throw for a bound < -1; it must not read as unbounded."""
-    with pytest.raises(ValueError, match=r"must be >= -1"):
+@pytest.mark.parametrize(
+    "left, right", [(-2, -1), (-1, -2), (-7, -2), (-4, 0), (0, -1), (0, 0)]
+)
+def test_bounds_outside_hipdnn_domain_are_rejected(left, right):
+    """hipDNN throws for a bound < -1 and for ``left_bound = 0``; neither may read
+    as unbounded (``0 - 1`` is the unbounded ``-1`` in a FlashAttention window)."""
+    with pytest.raises(
+        ValueError, match=r"left_bound must be -1 \(unbounded\) or >= 1"
+    ):
         replace(BASE, left_bound=left, right_bound=right)
 
 
@@ -168,7 +184,6 @@ def test_arch_is_canonical(arch):
 @pytest.mark.parametrize(
     "field, empty, populated, feature",
     [
-        ("paged", SdpaPaged(), SdpaPaged(max_seq_len_kv=8), "paged"),
         ("fp8", SdpaFp8(), SdpaFp8(descale_q=packed((1,))), "fp8"),
         (
             "dropout",
@@ -185,6 +200,10 @@ def test_empty_group_is_absent(field, empty, populated, feature):
     assert getattr(req, field) is None
     assert req == BASE and req.normalized() == BASE.normalized()
     assert feature in replace(BASE, **{field: populated}).features()
+
+
+def test_empty_paged_group_is_absent():
+    assert replace(BASE, paged=SdpaPaged()).paged is None
 
 
 def test_tuning_knobs_are_part_of_the_identity():
@@ -228,13 +247,47 @@ def test_bottom_right_on_per_sequence_lengths_moves(name):
 # --- ragged and alignment cover every operand, not only Q/K/V/O ----------------
 
 
-def _f32(dims, ragged=False, **kw):
+def _f32(dims, ragged=False, dtype="fp32", **kw):
     strides = [1]
     for d in reversed(dims[1:]):
         strides.insert(0, strides[0] * d)
     if ragged:
         kw["ragged_offset"] = ragged_offset(dims[0])
-    return SdpaTensor("fp32", dims, tuple(strides), **kw)
+    return SdpaTensor(dtype, dims, tuple(strides), **kw)
+
+
+def _i32(dims, **kw):
+    return _f32(dims, dtype="int32", **kw)
+
+
+@pytest.mark.parametrize(
+    "changes, match",
+    [
+        (
+            {"paged": SdpaPaged(max_seq_len_kv=8)},
+            "max_seq_len_kv is only valid with paged K/V",
+        ),
+        (
+            {
+                "k": replace(BASE.k, dims=(5, 4, 4, 16), strides=(256, 64, 16, 1)),
+                "paged": SdpaPaged(page_table_k=_i32((2, 1, 2, 1))),
+                "seq_len_q": _i32((2, 1, 1, 1)),
+            },
+            "paged K/V needs seq_len_q and seq_len_kv",
+        ),
+        ({"seq_len_q": _i32((3, 1, 1, 1))}, r"seq_len_q must have dims \[B, 1, 1, 1\]"),
+        ({"seq_len_kv": _f32((2, 1, 1, 1))}, "seq_len_kv must be int32"),
+        (
+            {"sink_token": _f32((1, 2, 1, 1))},
+            r"sink_token must have dims \[1, H_q, 1, 1\]",
+        ),
+        ({"sink_token": _f32((1, 4, 1, 1), dtype="fp16")}, "sink_token must be fp32"),
+    ],
+)
+def test_sdpa_fwd_node_operand_rules(changes, match):
+    """SdpaFwdNode's paging, seq-len and sink rules hold for a direct Python caller too."""
+    with pytest.raises(ValueError, match=match):
+        replace(BASE, **changes)
 
 
 # name -> a request field holding that operand, built from BASE (B=2, H=4, S=8)
@@ -242,8 +295,8 @@ _AUX_OPERANDS = {
     "bias": lambda **kw: {"bias": SdpaBias(_f32((1, 1, 8, 8), **kw))},
     "block_mask": lambda **kw: {"block_mask": _f32((2, 1, 8, 8), **kw)},
     "sink_token": lambda **kw: {"sink_token": _f32((1, 4, 1, 1), **kw)},
-    "seq_len_q": lambda **kw: {"seq_len_q": _f32((2, 1, 1, 1), **kw)},
-    "seq_len_kv": lambda **kw: {"seq_len_kv": _f32((2, 1, 1, 1), **kw)},
+    "seq_len_q": lambda **kw: {"seq_len_q": _i32((2, 1, 1, 1), **kw)},
+    "seq_len_kv": lambda **kw: {"seq_len_kv": _i32((2, 1, 1, 1), **kw)},
     "stats": lambda **kw: {"stats": _f32((2, 4, 8, 1), **kw)},
     "max": lambda **kw: {"max": _f32((2, 4, 8, 1), **kw)},
     "sum_exp": lambda **kw: {"sum_exp": _f32((2, 4, 8, 1), **kw)},
@@ -508,6 +561,70 @@ def test_every_all_entry_resolves(module):
     """A stale ``__all__`` name breaks ``from module import *``."""
     mod = importlib.import_module(module)
     assert [name for name in mod.__all__ if not hasattr(mod, name)] == []
+
+
+# --- sweep/dispatch entry points (SDPA_REGISTRY has no candidate yet) ----------
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_empty_registry_reports_nothing(name):
+    assert isinstance(SDPA_REGISTRY, CandidateRegistry)
+    assert SDPA_REGISTRY.candidates() == ()
+    req = CASES[name]
+    assert registered_sdpa_combos(req) == ()
+    assert tuple(sdpa_sweep_space(req)) == ()
+    assert dispatch_sdpa_all(req) == ()
+
+
+@dataclass(frozen=True)
+class _ProbeSpec:
+    tile: int = 64
+
+
+def _probe_registry():
+    """A registry holding one candidate that admits every request."""
+    reg = CandidateRegistry("sdpa", dim_vocabulary=SDPA_DIM_VOCABULARY)
+    reg.register(
+        KernelCandidate(
+            name="probe",
+            family="sdpa",
+            algorithm="probe",
+            spec_id="probe",
+            abi_version="probe/v1",
+            priority=0,
+            _supports=lambda req: (True, "ok"),
+            select_spec=lambda req: _ProbeSpec(),
+            signature=lambda spec: (),
+            grid=lambda spec, req: (1, 1, 1),
+            block=lambda spec: (64, 1, 1),
+            sweep_space=lambda req: (_ProbeSpec(64), _ProbeSpec(128)),
+            capability=Capability(arches=(BASE.arch,), supports_features=SDPA_FEATURES),
+        )
+    )
+    return reg
+
+
+def test_entry_points_delegate_to_the_registry(monkeypatch):
+    """A candidate registered in SDPA_REGISTRY is reached without other changes,
+    and dispatch_sdpa_all returns DispatchResults keyed by the sdpa_fwd op."""
+    monkeypatch.setattr(sdpa_family, "SDPA_REGISTRY", _probe_registry())
+    combos = registered_sdpa_combos(BASE)
+    assert [(c.name, spec.tile) for c, spec in combos] == [
+        ("probe", 64),
+        ("probe", 128),
+    ]
+    assert [spec.tile for spec in sdpa_sweep_space(BASE)] == [64, 128]
+    results = dispatch_sdpa_all(BASE)
+    assert results and all(isinstance(r, DispatchResult) for r in results)
+    assert {r.kernel_id.op for r in results} == {"sdpa_fwd"}
+    assert {r.kernel_id.abi_version for r in results} == {"probe/v1"}
+
+
+@pytest.mark.parametrize("bad", ["not a request", replace(BASE, op="sdpa_bwd")])
+def test_request_errors_short_circuit_before_the_registry(monkeypatch, bad):
+    monkeypatch.setattr(sdpa_family, "SDPA_REGISTRY", _probe_registry())
+    for fn in (registered_sdpa_combos, sdpa_sweep_space, dispatch_sdpa_all):
+        assert tuple(fn(bad)) == ()
 
 
 # --- Capability.check gates on the request --------------------------------------

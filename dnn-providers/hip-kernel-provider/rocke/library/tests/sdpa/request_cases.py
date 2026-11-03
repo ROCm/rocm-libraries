@@ -143,7 +143,7 @@ def _cases() -> dict[str, SdpaRequest]:
         "window_br": make_request(
             s_q=4, s_kv=8, left_bound=3, right_bound=0, diagonal="bottom_right"
         ),
-        "window_right": replace(base, left_bound=2, right_bound=1),
+        "noncausal_window": replace(base, left_bound=2, right_bound=1),
         "window_left_only": replace(base, left_bound=2),
         "bias_full": replace(base, bias=SdpaBias(packed((2, 4, 8, 8)))),
         "bias_broadcast": replace(base, bias=SdpaBias(packed((8, 8)))),
@@ -161,10 +161,16 @@ def _cases() -> dict[str, SdpaRequest]:
             base,
             dropout=SdpaDropout(0.1, seed=_scalar("int64"), offset=_scalar("int64")),
         ),
+        # K/V are [num_blocks, H, block_size, D] containers: 6 blocks of 4 keys,
+        # each batch's 8 keys addressed through 2 page-table entries.
         "paged": replace(
             base,
+            k=bshd(6, 4, 4, 16),
+            v=bshd(6, 4, 4, 16),
+            seq_len_q=seq_lens,
+            seq_len_kv=seq_lens,
             paged=SdpaPaged(
-                packed((2, 1, 4, 1), "int32"), packed((2, 1, 4, 1), "int32"), 8
+                packed((2, 1, 2, 1), "int32"), packed((2, 1, 2, 1), "int32"), 8
             ),
         ),
         "block_mask": replace(base, block_mask=packed((2, 4, 1, 1), "uint8")),

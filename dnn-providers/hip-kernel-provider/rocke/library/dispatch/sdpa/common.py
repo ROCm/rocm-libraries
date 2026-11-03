@@ -13,8 +13,9 @@ plus what a direct Python caller could break (ranks, strides, literals).
 The request is normalized on construction, so one meaning has one spelling and
 :meth:`SdpaRequest.normalized` is a stable cache key:
 
-- a band bound is ``-1`` (unbounded) or ``>= 0``; hipDNN's resolvers reject
-  anything below ``-1``, so this does too;
+- a band bound is ``-1`` (unbounded) or a key count: ``left_bound >= 1`` and
+  ``right_bound >= 0``, the domain ``SdpaFwdNode`` accepts (``left_bound = 0``
+  is rejected there, so it is here too);
 - the scale has exactly one source, and ``scale`` is ``1.0`` unless that source is
   ``"value"``; a baked ``1.0`` is the default source, because hipDNN reads an
   unset scale as 1.0;
@@ -32,16 +33,17 @@ of the strides.
 
 from __future__ import annotations
 
-import operator
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any, Literal, TypeAlias
 
-from rocke.core.arch import base_arch_from_target_id
 from rocke.dispatch.core import OperatorRequest
 from rocke.dispatch.tuning.identity import normalize_knobs
+from rocke.numeric.sdpa_reference import as_index as _as_int
+from rocke.numeric.sdpa_reference import check_hipdnn_band
+
+from ..attention.common import canonical_arch
 
 __all__ = [
-    "SDPA_ABI_VERSION",
     "SDPA_DIM_VOCABULARY",
     "SDPA_DTYPES",
     "SDPA_FEATURES",
@@ -53,8 +55,6 @@ __all__ = [
     "SdpaRequest",
     "SdpaTensor",
 ]
-
-SDPA_ABI_VERSION = "rocke-sdpa-stride/v1"
 
 Dtype: TypeAlias = Literal[
     "fp16",
@@ -124,7 +124,7 @@ SDPA_FEATURES = frozenset(
         "causal_br",
         "window",
         "window_br",
-        "window_right",
+        "noncausal_window",
         "bias",
         "bias_broadcast",
         "alibi",
@@ -152,16 +152,6 @@ def _check_dtype(dtype: object, what: str) -> None:
 def _check_choice(value: object, choices: tuple[str, ...], what: str) -> None:
     if value not in choices:
         raise ValueError(f"{what} must be one of {choices}, got {value!r}")
-
-
-def _as_int(value: object, what: str) -> int:
-    """``value`` as an ``int``; a float, bool or string is malformed, not rounded."""
-    if isinstance(value, bool):
-        raise ValueError(f"{what} must be an integer, got {value!r}")
-    try:
-        return operator.index(value)
-    except TypeError:
-        raise ValueError(f"{what} must be an integer, got {value!r}") from None
 
 
 def _check_bool(value: object, what: str) -> None:
@@ -312,6 +302,13 @@ class SdpaPaged:
     page_table_v: SdpaTensor | None = None
     max_seq_len_kv: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.max_seq_len_kv is not None:
+            length = _as_int(self.max_seq_len_kv, "max_seq_len_kv")
+            if length <= 0:
+                raise ValueError(f"max_seq_len_kv must be positive, got {length}")
+            object.__setattr__(self, "max_seq_len_kv", length)
+
 
 @dataclass(frozen=True)
 class SdpaFp8:
@@ -386,8 +383,11 @@ class SdpaRequest(OperatorRequest):
     - :meth:`normalized` has no ``layout`` key (layout is the ``layout_*``
       features), so a candidate's ``Capability.layouts`` must stay empty or it
       declines every request.
-    - hipDNN ``left_bound = W`` keeps ``W + 1`` keys; ``AttentionBand`` /
-      ``sliding_window`` ``W`` sees ``W`` keys. Lower with ``left_bound + 1``.
+    - ``left_bound = L`` keeps the ``L`` keys ending at the diagonal, diagonal
+      included (cuDNN's meaning; hipDNN's ``SdpaSemanticsRegister`` SEM-001). ``AttentionBand`` /
+      ``sliding_window`` ``W`` counts keys the same way, so lower it unchanged.
+      A FlashAttention-style ``window_left`` (and ``numeric.sdpa_reference``'s
+      ``keep``) is ``L - 1``.
     - ``causal_tl`` / ``causal_br`` / ``window*`` here correspond to
       ``ATTENTION_FEATURES`` ``causal`` / ``causal_bottom_right`` / ``band``.
     """
@@ -447,11 +447,9 @@ class SdpaRequest(OperatorRequest):
         self._validate()
 
     def _normalize(self) -> None:
-        # Same canonical form as AttentionRequest (dispatch.attention.common.canonical_arch),
-        # so "gfx950:sramecc+" passes Capability.check's exact arch match.
-        object.__setattr__(
-            self, "arch", base_arch_from_target_id(self.arch.strip().lower())
-        )
+        # AttentionRequest's arch authority, so "gfx950:sramecc+" passes
+        # Capability.check's exact arch match and a missing arch stays "".
+        object.__setattr__(self, "arch", canonical_arch(self.arch))
         object.__setattr__(self, "left_bound", _as_int(self.left_bound, "left_bound"))
         object.__setattr__(
             self, "right_bound", _as_int(self.right_bound, "right_bound")
@@ -482,27 +480,50 @@ class SdpaRequest(OperatorRequest):
         _check_choice(self.diagonal, _DIAGONALS, "diagonal")
         _check_choice(self.scale_source, _SCALE_SOURCES, "scale_source")
         _check_choice(self.implementation, _IMPLEMENTATIONS, "implementation")
-        if self.left_bound < -1 or self.right_bound < -1:
-            raise ValueError(
-                "left_bound and right_bound must be >= -1 (-1 is unbounded), got "
-                f"left_bound={self.left_bound}, right_bound={self.right_bound}"
-            )
+        check_hipdnn_band(self.left_bound, self.right_bound)
 
         for name in ("q", "k", "v", "o"):
             rank = len(getattr(self, name).dims)
             if rank != 4:
                 raise ValueError(f"{name} must be rank 4 (BHSD), got rank {rank}")
         q, k, v, o = self.q.dims, self.k.dims, self.v.dims, self.o.dims
-        if not q[0] == k[0] == v[0]:
-            raise ValueError(f"batch mismatch: Q {q[0]}, K {k[0]}, V {v[0]}")
+        # A paged K or V is a [num_blocks, H, block_size, D] container, so its
+        # dims 0 and 2 are not the batch and key length; SdpaFwdNode skips those
+        # checks per paged side, and so does this.
+        paged_k, paged_v = self.paged_k, self.paged_v
+        for name, dims, paged in (("K", k, paged_k), ("V", v, paged_v)):
+            if not paged and dims[0] != q[0]:
+                raise ValueError(f"batch mismatch: Q {q[0]} vs {name} {dims[0]}")
         if q[3] != k[3]:
             raise ValueError(f"head dim mismatch: Q {q[3]} vs K {k[3]}")
-        if k[2] != v[2]:
+        if not paged_k and not paged_v and k[2] != v[2]:
             raise ValueError(f"seq_kv mismatch: K {k[2]} vs V {v[2]}")
+        self._validate_paged(q[0])
         if q[1] % k[1] or q[1] % v[1]:
             raise ValueError(
                 f"h_q={q[1]} must be divisible by h_k={k[1]} and h_v={v[1]}"
             )
+        for name in ("seq_len_q", "seq_len_kv"):
+            seq_len = getattr(self, name)
+            if seq_len is None:
+                continue
+            if seq_len.dims != (q[0], 1, 1, 1):
+                raise ValueError(
+                    f"{name} must have dims [B, 1, 1, 1] with B={q[0]}, "
+                    f"got {seq_len.dims}"
+                )
+            if seq_len.dtype != "int32":
+                raise ValueError(f"{name} must be int32, got {seq_len.dtype!r}")
+        if self.sink_token is not None:
+            if self.sink_token.dims != (1, q[1], 1, 1):
+                raise ValueError(
+                    f"sink_token must have dims [1, H_q, 1, 1] with H_q={q[1]}, "
+                    f"got {self.sink_token.dims}"
+                )
+            if self.sink_token.dtype != "fp32":
+                raise ValueError(
+                    f"sink_token must be fp32, got {self.sink_token.dtype!r}"
+                )
         if o != (q[0], q[1], q[2], v[3]):
             raise ValueError(
                 f"O dims {o} must be (B, H_q, S_q, D_v) = {(q[0], q[1], q[2], v[3])}"
@@ -524,14 +545,51 @@ class SdpaRequest(OperatorRequest):
         if self.bias is not None:
             # Last two dims are the frontend's rule. B and H are checked too: the
             # hipDNN reference indexes a non-broadcast bias dim with the output
-            # index, so any other extent reads out of range.
-            want = (q[0], q[1], q[2], k[2])
+            # index, so any other extent reads out of range. A paged key length
+            # is max_seq_len_kv; without it SdpaFwdNode leaves s_kv to the engine.
+            known_s_kv = not (paged_k or paged_v) or self.paged.max_seq_len_kv
+            want = (q[0], q[1], q[2], self.s_kv if known_s_kv else None)
             got = self.bias.tensor.dims
             for axis, name in enumerate(("batch", "h_q", "s_q", "s_kv")):
-                if got[axis] not in (1, want[axis]):
+                if want[axis] is not None and got[axis] not in (1, want[axis]):
                     raise ValueError(
                         f"bias {name} dim {got[axis]} must be {want[axis]} or 1 "
                         f"(bias dims {got}, target {want})"
+                    )
+
+    def _validate_paged(self, batch: int) -> None:
+        """``SdpaFwdNode::validatePagedKv``'s rules for the paged group."""
+        if self.paged is None:
+            return
+        max_len = self.paged.max_seq_len_kv
+        if not (self.paged_k or self.paged_v):
+            # max_seq_len_kv is the only field left: SdpaPaged() normalizes to None.
+            raise ValueError(
+                "max_seq_len_kv is only valid with paged K/V "
+                "(page_table_k / page_table_v)"
+            )
+        if self.seq_len_q is None or self.seq_len_kv is None:
+            raise ValueError("paged K/V needs seq_len_q and seq_len_kv")
+        for name, table, container in (
+            ("page_table_k", self.paged.page_table_k, self.k),
+            ("page_table_v", self.paged.page_table_v, self.v),
+        ):
+            if table is None:
+                continue
+            dims = table.dims
+            if len(dims) != 4 or dims[0] != batch or dims[1] != 1 or dims[3] != 1:
+                raise ValueError(
+                    f"{name} must have dims [B, 1, max_blocks_per_seq, 1] with "
+                    f"B={batch}, got {dims}"
+                )
+            if table.dtype != "int32":
+                raise ValueError(f"{name} must be int32, got {table.dtype!r}")
+            if max_len is not None:
+                want = -(-max_len // container.dims[2])
+                if dims[2] != want:
+                    raise ValueError(
+                        f"{name} max_blocks_per_seq must equal ceil(max_seq_len_kv / "
+                        f"block_size) = {want}, got {dims[2]}"
                     )
 
     # Derived, read-only views
@@ -561,8 +619,33 @@ class SdpaRequest(OperatorRequest):
         return self.q.dims[2]
 
     @property
+    def paged_k(self) -> bool:
+        """K is a paged container addressed through ``paged.page_table_k``."""
+        return self.paged is not None and self.paged.page_table_k is not None
+
+    @property
+    def paged_v(self) -> bool:
+        """V is a paged container addressed through ``paged.page_table_v``."""
+        return self.paged is not None and self.paged.page_table_v is not None
+
+    @property
     def s_kv(self) -> int:
-        return self.k.dims[2]
+        """The key length: K's dim 2, or the paged length when K or V is paged.
+
+        A paged container's dim 2 is its block size, so the length is
+        ``max_seq_len_kv``, or, when that is unset, what cuDNN infers from the
+        first paged side: ``max_blocks_per_seq * block_size``.
+        """
+        if not (self.paged_k or self.paged_v):
+            return self.k.dims[2]
+        if self.paged.max_seq_len_kv is not None:
+            return self.paged.max_seq_len_kv
+        table, container = (
+            (self.paged.page_table_k, self.k)
+            if self.paged_k
+            else (self.paged.page_table_v, self.v)
+        )
+        return table.dims[2] * container.dims[2]
 
     @property
     def d_qk(self) -> int:
@@ -700,8 +783,9 @@ class SdpaRequest(OperatorRequest):
         """Classify the band. ``causal_br`` on a square problem is ``causal_tl``.
 
         Any other bounded band is a ``window``; ``window_br`` says its diagonal
-        actually moves, and ``window_right`` says it keeps keys right of the
-        diagonal, which the production ``dist < W`` windows never do.
+        actually moves, and ``noncausal_window`` says it keeps keys right of the
+        diagonal, which the production ``dist < W`` windows never do. (Not
+        ``AttentionRequest.window_right``, which is the bound itself.)
 
         A bottom-right diagonal moves when ``s_q != s_kv``, and also whenever the
         lengths are per sequence (padded, ragged or paged): the offset is then
@@ -728,7 +812,7 @@ class SdpaRequest(OperatorRequest):
         if moved:
             active.add("window_br")
         if right != 0:
-            active.add("window_right")
+            active.add("noncausal_window")
         return active
 
     def normalized(self) -> dict:
@@ -760,22 +844,6 @@ _NESTED: dict[str, type] = {
     "paged": SdpaPaged,
     "fp8": SdpaFp8,
 }
-
-
-def _request_errors(req: OperatorRequest) -> list[str]:
-    """Family-level validity, independent of any candidate.
-
-    Only things that make a request *malformed* enough that translating it
-    to an ``AttentionRequest`` cannot be trusted. Every field is already type-
-    and value-checked at construction (``SdpaRequest.__post_init__`` and the
-    ``_check_*`` helpers above); the type check here is for a caller that
-    passes something else entirely. Whether any kernel can serve a
-    well-formed request is the unified/dense admission gate's question, not
-    this one's.
-    """
-    if not isinstance(req, SdpaRequest):
-        return [f"expected an SdpaRequest, got {type(req).__name__}"]
-    return []
 
 
 def _tensor_from(payload: dict[str, Any]) -> SdpaTensor:

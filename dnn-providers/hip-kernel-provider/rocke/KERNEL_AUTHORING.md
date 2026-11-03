@@ -231,8 +231,8 @@ worked example is SDPA forward:
       matches hipDNN's CPU reference and golden generator, including edge cases
       (fully masked rows, padding), reusing the operator's existing array oracle
       rather than a second copy of the math. For SDPA,
-      [numeric/sdpa_request_reference.py](platform/python/rocke/numeric/sdpa_request_reference.py)
-      decodes the request and delegates to
+      [tests/sdpa/request_reference.py](library/tests/sdpa/request_reference.py)
+      decodes the request (gating on its `features()`) and delegates to
       [numeric/sdpa_reference.py](platform/python/rocke/numeric/sdpa_reference.py).
       Features it does not implement raise `NotImplementedError` by name.
 - [ ] **Case table.** One shared list of requests that together report every
@@ -536,10 +536,9 @@ Python emitter and the compiled C emitter for each config index and diffs the
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
 
-> Known layout-independent residuals reproduce on `develop` and are **not** your
+> Known layout-independent residual reproduces on `develop` and is **not** your
 > regression: 7 `TestDatalayoutDriftGuard` subtests on a mismatched local clang
-> vintage, and 6 `conv/*` golden cases when the C++ engine is not built (see
-> [BUILDING.md](BUILDING.md)).
+> vintage (see [BUILDING.md](BUILDING.md)).
 
 ### G. Promote a common optimization to platform
 

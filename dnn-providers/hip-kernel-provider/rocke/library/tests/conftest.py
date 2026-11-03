@@ -65,6 +65,24 @@ def pytest_addoption(parser):
         default=None,
         help="run GDN all-candidate numeric coverage for one stable spec ID",
     )
+    parser.addoption(
+        "--rocke-seam-arches",
+        action="store",
+        default=None,
+        help=(
+            "comma-separated arch list for test_attention_body_seams's "
+            "score-hook IR-identity check (default: gfx950,gfx942,gfx1151)"
+        ),
+    )
+    parser.addoption(
+        "--rocke-require-hipdnn-assets",
+        action="store_true",
+        default=False,
+        help=(
+            "fail, instead of skip, the SDPA tests that read hipDNN's graph "
+            "template and golden bundles when those are missing"
+        ),
+    )
 
 
 def pytest_configure(config):

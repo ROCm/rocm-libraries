@@ -6,24 +6,31 @@
 :class:`SdpaRequest` represents every field of a hipDNN SDPA forward node;
 :func:`from_hipdnn` builds one from the node's flatbuffer JSON. Candidates gate
 on :meth:`SdpaRequest.features` through the shared ``Capability`` contract.
+
+No SDPA kernel is registered yet (kernel wiring is a follow-up -- see
+``KERNEL_AUTHORING.md``), so :data:`SDPA_REGISTRY` is an empty
+``CandidateRegistry``. :func:`registered_sdpa_combos`, :func:`sdpa_sweep_space`
+and :func:`dispatch_sdpa_all` are the same wrappers every family has (see
+``rocke.dispatch.families.norm``): each short-circuits on a request error, then
+delegates to the registry, so a candidate registered there is reachable through
+them without changing this module. The ABI version arrives with the first
+candidate, whose ``KernelCandidate.abi_version`` carries it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from typing import Any, Sequence, Tuple
 
-from rocke.dispatch.core import DispatchResult, KernelCandidate
-
-from dispatch.attention import (
-    attention_sweep_space,
-    dispatch_attention_all,
-    registered_attention_combos,
+from rocke.dispatch.core import (
+    CandidateRegistry,
+    DispatchResult,
+    KernelCandidate,
+    KernelId,
+    OperatorRequest,
+    make_kernel_id,
 )
 
-from .bind_shared import to_attention_request
 from .common import (
-    SDPA_ABI_VERSION,
     SDPA_DIM_VOCABULARY,
     SDPA_DTYPES,
     SDPA_FEATURES,
@@ -34,46 +41,57 @@ from .common import (
     SdpaPaged,
     SdpaRequest,
     SdpaTensor,
-    _request_errors,
 )
 from .hipdnn import HIPDNN_DTYPES, from_hipdnn, from_hipdnn_graph
 
+SDPA_REGISTRY = CandidateRegistry("sdpa", dim_vocabulary=SDPA_DIM_VOCABULARY)
+
+
+def _request_errors(req: OperatorRequest) -> list[str]:
+    """Why ``req`` cannot reach the registry; empty when it can.
+
+    An ``SdpaRequest`` is validated at construction, so the remaining error is
+    a request of another family.
+    """
+    if not isinstance(req, SdpaRequest):
+        return [f"expected SdpaRequest, got {type(req).__name__}"]
+    if req.op != "sdpa_fwd":
+        return [f"unsupported op {req.op!r}"]
+    return []
+
+
+def _kernel_id(req: SdpaRequest, candidate: KernelCandidate, spec: Any) -> KernelId:
+    return make_kernel_id(req, candidate, spec, op="sdpa_fwd")
+
 
 def registered_sdpa_combos(
-    req: SdpaRequest,
-) -> tuple[tuple[KernelCandidate, Any], ...]:
-    """Every registered unified or dense ``(candidate, spec)`` that can launch ``req``.
-
-    Delegates to the existing ``dispatch.attention`` registry through the
-    same ``to_attention_request`` translation the unified and dense bindings
-    use: SDPA registers no candidate, knob or registry of its own, so there is
-    nothing here beyond that translation.
-    """
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, Any], ...]:
+    """Every registered SDPA candidate that can launch ``req``, with its specs."""
     if _request_errors(req):
         return ()
-    return registered_attention_combos(to_attention_request(req))
+    return SDPA_REGISTRY.combos(req)
 
 
-def sdpa_sweep_space(req: SdpaRequest) -> Sequence[Any]:
-    """Every admissible spec for ``req``, opt-in (dense) candidates included."""
+def sdpa_sweep_space(req: OperatorRequest) -> Sequence[Any]:
     if _request_errors(req):
         return ()
-    return attention_sweep_space(to_attention_request(req))
+    return SDPA_REGISTRY.sweep_space(req)
 
 
-def dispatch_sdpa_all(req: SdpaRequest) -> tuple[DispatchResult, ...]:
-    """Every eligible unified or dense kernel for ``req``, one result per combo."""
+def dispatch_sdpa_all(req: OperatorRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible SDPA kernel for ``req``, including opt-in variants."""
     if _request_errors(req):
         return ()
-    return dispatch_attention_all(to_attention_request(req))
+    return SDPA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 __all__ = [
     "HIPDNN_DTYPES",
-    "SDPA_ABI_VERSION",
     "SDPA_DIM_VOCABULARY",
     "SDPA_DTYPES",
     "SDPA_FEATURES",
+    "SDPA_REGISTRY",
     "Dtype",
     "SdpaBias",
     "SdpaDropout",

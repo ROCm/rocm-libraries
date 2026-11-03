@@ -1431,6 +1431,14 @@ namespace rocalution
                                  ? rocsparse_itilu0_option_coo_format
                                  : 0;
 
+            // rocSPARSE evaluates the stopping criteria and records the convergence history
+            // from the residual norm, which it only computes when explicitly requested
+            if((option & (ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory)) > 0
+               || history != NULL)
+            {
+                itilu0_option |= rocsparse_itilu0_option_compute_nrm_residual;
+            }
+
             // Create buffer
             size_t buffer_size = 0;
             status             = rocsparse_csritilu0_buffer_size(
@@ -1493,23 +1501,8 @@ namespace rocalution
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
             niter[0] = max_iter;
 
-            // The in-place algorithm only records its convergence history while computing the
-            // residual norms; otherwise rocsparse_csritilu0_history reads an uninitialized buffer
-            const bool history_recorded
-                = (itilu0_alg != rocsparse_itilu0_alg_default
-                   && itilu0_alg != rocsparse_itilu0_alg_async_inplace)
-                  || (itilu0_option & rocsparse_itilu0_option_compute_nrm_residual) > 0;
-
-            if(history != NULL && !history_recorded)
+            if(history != NULL)
             {
-                LOG_INFO("*** warning: HIPAcceleratorMatrixCSR::ItILU0Factorize() convergence "
-                         "history is not available for the in-place algorithm without "
-                         "ItILU0Option::ComputeNrmResidual");
-                niter[0] = 0;
-            }
-            else if(history != NULL)
-            {
-                assert((option & ItILU0Option::StoppingCriteria) > 0);
                 if(std::is_same<ValueType, double>{}
                    || std::is_same<ValueType, std::complex<double>>{})
                 {

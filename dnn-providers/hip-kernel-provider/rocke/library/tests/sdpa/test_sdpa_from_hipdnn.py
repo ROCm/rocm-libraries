@@ -178,10 +178,16 @@ def test_mask_merges_deprecated_flags_like_hipdnn(attributes, band):
         # The flag's right bound of 0 must not mask an invalid stored bound.
         {"causal_mask": True, "right_bound": -5},
         {"causal_mask_bottom_right": True, "left_bound": -3},
+        # SdpaFwdNode rejects left_bound = 0 (SEM-005): a provider's L - 1
+        # would turn it into the unbounded -1.
+        {"left_bound": 0},
+        {"causal_mask": True, "left_bound": 0},
     ],
 )
-def test_bounds_below_minus_one_are_rejected_like_hipdnn(attributes):
-    with pytest.raises(ValueError, match=r"must be >= -1"):
+def test_bounds_outside_hipdnn_domain_are_rejected(attributes):
+    with pytest.raises(
+        ValueError, match=r"left_bound must be -1 \(unbounded\) or >= 1"
+    ):
         _request(attributes=attributes)
 
 
@@ -355,15 +361,13 @@ def test_stats_needs_generate_stats_and_a_tensor():
     [
         ({"attributes": {"alibi_mask": True}}, "alibi"),
         ({"attributes": {"padding_mask": True}}, "padded"),
-        ({"inputs": {"seq_len_q_tensor_uid": 10}}, "padded"),
+        ({"inputs": {"seq_len_q_tensor_uid": 11}}, "padded"),
         ({"inputs": {"attn_mask_tensor_uid": 10}}, "bias"),
         ({"inputs": {"block_mask_tensor_uid": 10}}, "block_mask"),
-        ({"inputs": {"sink_token_tensor_uid": 10}}, "sinks"),
+        ({"inputs": {"sink_token_tensor_uid": 12}}, "sinks"),
         ({"attributes": {"dropout_probability": 0.1}}, "dropout"),
         ({"inputs": {"seed_tensor_uid": 10}}, "dropout"),
         ({"outputs": {"rng_dump_tensor_uid": 10}}, "dropout"),
-        ({"inputs": {"page_table_k_tensor_uid": 10}}, "paged"),
-        ({"attributes": {"max_seq_len_kv": 64}}, "paged"),
         ({"inputs": {"descale_q_tensor_uid": 10}}, "fp8"),
         ({"inputs": {"scale_o_tensor_uid": 10}}, "fp8_s_o"),
         ({"outputs": {"amax_s_tensor_uid": 10}}, "fp8_s_o"),
@@ -374,7 +378,11 @@ def test_stats_needs_generate_stats_and_a_tensor():
     ],
 )
 def test_field_reaches_features(kwargs, feature):
-    extra = [_tensor(10, (1, 1, S, S), "float")]
+    extra = [
+        _tensor(10, (1, 1, S, S), "float"),
+        _tensor(11, (B, 1, 1, 1), "int32"),
+        _tensor(12, (1, H, 1, 1), "float"),
+    ]
     req = _request(tensors=extra, **kwargs)
     assert feature in req.features()
 
@@ -488,6 +496,15 @@ def test_unknown_keys_are_rejected_not_dropped(graph_edit):
 _SDPA_GRAPH_TEMPLATE = hipdnn_assets.sdpa_graph_template()
 
 
+def test_hipdnn_assets_are_present_when_required(request):
+    """The installed CTest entry asks for the hipDNN copy it installed; without it
+    the template and golden-graph tests below would skip and the lane still pass."""
+    if not request.config.getoption("--rocke-require-hipdnn-assets"):
+        pytest.skip("--rocke-require-hipdnn-assets not given")
+    assert _SDPA_GRAPH_TEMPLATE is not None, hipdnn_assets.SKIP_REASON
+    assert hipdnn_assets.sdpa_fwd_golden_graphs(), hipdnn_assets.SKIP_REASON
+
+
 @pytest.mark.skipif(_SDPA_GRAPH_TEMPLATE is None, reason=hipdnn_assets.SKIP_REASON)
 def test_key_sets_match_the_ingestor_sdpa_graph_template():
     """The ingestor's SDPA graph template carries every key hipDNN writes."""
@@ -503,13 +520,146 @@ def test_key_sets_match_the_ingestor_sdpa_graph_template():
 # --- the checked-in hipDNN golden bundles ------------------------------------------
 
 _BUNDLES = hipdnn_assets.golden_bundle_root()
+
+
+@pytest.mark.parametrize("paged_sides", [("k",), ("v",), ("k", "v")])
+@pytest.mark.parametrize("max_seq_len_kv", [None, 2 * S])
+def test_paged_containers_are_not_compared_with_the_batch(paged_sides, max_seq_len_kv):
+    """A paged K or V is [num_blocks, H, block_size, D]: its dims 0 and 2 are not
+    the batch and key length, so SdpaFwdNode skips those checks per paged side
+    (hipDNN's paged golden graphs have num_blocks != B)."""
+    block, blocks_per_seq = S // 2, 4
+    container = (B * blocks_per_seq + 3, H, block, D)
+    tensors = [
+        _tensor(10, (B, 1, 1, 1), "int32"),
+        _tensor(11, (B, 1, 1, 1), "int32"),
+        _tensor(12, (B, 1, blocks_per_seq, 1), "int32"),
+        _tensor(13, (B, 1, blocks_per_seq, 1), "int32"),
+    ]
+    graph = _graph(
+        attributes={"max_seq_len_kv": max_seq_len_kv},
+        inputs={
+            "seq_len_q_tensor_uid": 10,
+            "seq_len_kv_tensor_uid": 11,
+            **{f"page_table_{side}_tensor_uid": 12 + i for i, side in enumerate("kv")},
+        },
+        tensors=tensors,
+    )
+    for side in "kv":
+        if side not in paged_sides:
+            graph["nodes"][0]["inputs"][f"page_table_{side}_tensor_uid"] = None
+    for uid, side in ((1, "k"), (2, "v")):
+        if side in paged_sides:
+            graph["tensors"][uid] = _tensor(uid, container)
+    req = from_hipdnn_graph(graph, "gfx950")
+    assert (req.paged_k, req.paged_v) == ("k" in paged_sides, "v" in paged_sides)
+    assert req.batch == B and req.s_kv == 2 * S
+    assert "paged" in req.features()
+    assert SdpaRequest.from_normalized(json.loads(json.dumps(req.normalized()))) == req
+
+
+@pytest.mark.parametrize(
+    "table_dims, max_seq_len_kv, match",
+    [
+        ((B + 1, 1, 4, 1), None, r"dims \[B, 1, max_blocks_per_seq, 1\]"),
+        ((B, 1, 4), None, r"dims \[B, 1, max_blocks_per_seq, 1\]"),
+        ((B, 1, 3, 1), 2 * S, r"ceil\(max_seq_len_kv / block_size\) = 4"),
+        ((B, 1, 4, 1), 0, "max_seq_len_kv must be positive"),
+    ],
+)
+def test_page_table_shape_is_validated_like_hipdnn(table_dims, max_seq_len_kv, match):
+    graph = _graph(
+        attributes={"max_seq_len_kv": max_seq_len_kv},
+        inputs={
+            "seq_len_q_tensor_uid": 10,
+            "seq_len_kv_tensor_uid": 11,
+            "page_table_k_tensor_uid": 12,
+        },
+        tensors=[
+            _tensor(10, (B, 1, 1, 1), "int32"),
+            _tensor(11, (B, 1, 1, 1), "int32"),
+            _tensor(12, table_dims, "int32"),
+        ],
+    )
+    graph["tensors"][1] = _tensor(1, (9, H, S // 2, D))
+    with pytest.raises(ValueError, match=match):
+        from_hipdnn_graph(graph, "gfx950")
+
+
+@pytest.mark.parametrize(
+    "inputs, attributes, tensors, match",
+    [
+        # max_seq_len_kv without a page table.
+        ({}, {"max_seq_len_kv": 2 * S}, [], "max_seq_len_kv is only valid with paged"),
+        # Paging without both seq-lens.
+        (
+            {"page_table_k_tensor_uid": 12, "seq_len_q_tensor_uid": 10},
+            {},
+            [_tensor(10, (B, 1, 1, 1), "int32"), _tensor(12, (B, 1, 4, 1), "int32")],
+            "paged K/V needs seq_len_q and seq_len_kv",
+        ),
+        # seq_len_* is INT32 [B, 1, 1, 1].
+        (
+            {"seq_len_q_tensor_uid": 10},
+            {},
+            [_tensor(10, (1, 1, S, S), "int32")],
+            r"seq_len_q must have dims \[B, 1, 1, 1\]",
+        ),
+        (
+            {"seq_len_kv_tensor_uid": 10},
+            {},
+            [_tensor(10, (B, 1, 1, 1), "int64")],
+            "seq_len_kv must be int32",
+        ),
+        # sink_token is FLOAT [1, H_q, 1, 1].
+        (
+            {"sink_token_tensor_uid": 10},
+            {},
+            [_tensor(10, (1, 1, S, S), "float")],
+            r"sink_token must have dims \[1, H_q, 1, 1\]",
+        ),
+        (
+            {"sink_token_tensor_uid": 10},
+            {},
+            [_tensor(10, (1, H, 1, 1), "half")],
+            "sink_token must be fp32",
+        ),
+    ],
+)
+def test_frontend_operand_rules_match_sdpa_fwd_node(inputs, attributes, tensors, match):
+    """SdpaFwdNode::pre_validate_node's paging, seq-len and sink rules: a graph
+    hipDNN rejects must not become a request."""
+    graph = _graph(attributes=attributes, inputs=inputs, tensors=tensors)
+    if "page_table_k_tensor_uid" in inputs:
+        graph["tensors"][1] = _tensor(1, (9, H, S // 2, D))
+    with pytest.raises(ValueError, match=match):
+        from_hipdnn_graph(graph, "gfx950")
+
+
 _GRAPHS = hipdnn_assets.sdpa_fwd_golden_graphs()
+
+
+# Older RuntimeScale bundles whose seq_len_q / seq_len_kv are [B + 1], not the
+# [B, 1, 1, 1] SdpaFwdNode::pre_validate_node now requires: hipDNN's frontend would
+# not build them, so neither does from_hipdnn. Drop an entry once hipDNN regenerates
+# the bundle; the test below fails when a listed graph starts translating.
+_FRONTEND_REJECTED_GOLDENS = {
+    "comprehensive/SdpaFwdRuntimeScale/bhsd/bf16/hd128_causal_group/Small/Small.json",
+    "full/SdpaFwdRuntimeScale/bhsd/bf16/hd128_nomask_group/Small/Small.json",
+    "quick/SdpaFwdRuntimeScale/bhsd/fp8/hd128_causal_group/Small/Small.json",
+}
 
 
 @pytest.mark.skipif(not _GRAPHS, reason=hipdnn_assets.SKIP_REASON)
 @pytest.mark.parametrize("path", _GRAPHS, ids=lambda p: str(p.relative_to(_BUNDLES)))
 def test_golden_bundle_graphs_translate(path):
     graph = json.loads(path.read_text())
+    if path.relative_to(_BUNDLES).as_posix() in _FRONTEND_REJECTED_GOLDENS:
+        with pytest.raises(
+            ValueError, match=r"seq_len_q must have dims \[B, 1, 1, 1\]"
+        ):
+            from_hipdnn_graph(graph, "gfx950")
+        return
     req = from_hipdnn_graph(graph, "gfx950")
     assert SdpaRequest.from_normalized(json.loads(json.dumps(req.normalized()))) == req
     node = graph["nodes"][0]
