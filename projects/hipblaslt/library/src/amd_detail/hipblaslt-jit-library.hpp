@@ -301,4 +301,7 @@ namespace hipblaslt_jit
         std::map<std::string, std::shared_ptr<GenerationAttempt>> m_attempts;
     };
 
+    // Stores GEMM solutions in library under the cache key of backend.
+    std::shared_ptr<const SolutionStore>
+        makeLibraryStore(JitLibrary& library, const BackendInfo& backend, int codeObjectVersion);
 }
