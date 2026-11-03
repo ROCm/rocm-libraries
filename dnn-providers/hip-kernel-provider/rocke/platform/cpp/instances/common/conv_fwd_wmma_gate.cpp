@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "rocke/arch_target.h" /* rocke_set_unknown_arch_reason, rocke_mma_catalog_has_shape */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_floor_div, rocke_ceil_div */
 #include "rocke/ir.h" /* rocke_scheduler_strategy_is_valid */
 
 namespace
@@ -27,15 +28,6 @@ void gate_set_reason(char* reason, size_t reason_cap, const char* msg)
 const char* gate_dtype(const rocke_direct_conv_problem_t* p)
 {
     return p->dtype ? p->dtype : "fp16";
-}
-
-/* Python floor division. */
-long long gate_floordiv(long long a, long long b)
-{
-    long long q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
 }
 
 constexpr long long kGateI32Max = 2147483647LL;
@@ -122,16 +114,10 @@ bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
         gate_set_reason(reason, reason_cap, msg);
         return false;
     }
-    const long long total_c = (long long)p->groups * p->cpg;
-    const long long total_k = (long long)p->groups * p->kpg;
-    const long long Ho
-        = gate_floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
-                        p->stride)
-          + 1;
-    const long long Wo = gate_floordiv((long long)p->W + 2 * rocke_direct_conv_problem_pad_w(p)
-                                           - (long long)(p->KW - 1) * p->dil_w - 1,
-                                       p->stride)
-                         + 1;
+    const long long total_c = rocke_direct_conv_problem_total_c(p);
+    const long long total_k = rocke_direct_conv_problem_total_k(p);
+    const long long Ho = rocke_direct_conv_problem_Ho(p);
+    const long long Wo = rocke_direct_conv_problem_Wo(p);
     const long long bytes[3] = {2LL * p->N * p->H * p->W * total_c,
                                 2LL * total_k * p->KH * p->KW * p->cpg,
                                 2LL * p->N * Ho * Wo * total_k};
@@ -163,11 +149,11 @@ int rocke_wmma_fwd_halo_extent(int stride, int tile, int k, int dil)
 int rocke_wmma_fwd_halo_cols(const rocke_direct_conv_problem_t* p, int tile_w, bool phase_split)
 {
     if(phase_split)
-        return tile_w + (int)gate_floordiv((long long)(p->KW - 1) * p->dil_w, p->stride);
+        return tile_w + (int)rocke_floor_div((long long)(p->KW - 1) * p->dil_w, p->stride);
     return rocke_wmma_fwd_halo_extent(p->stride, tile_w, p->KW, p->dil_w);
 }
 
 int rocke_wmma_fwd_lead_cols(int pad_w, int stride, bool phase_split)
 {
-    return phase_split ? (int)-gate_floordiv(-(long long)pad_w, stride) : pad_w;
+    return phase_split ? (int)rocke_ceil_div(pad_w, stride) : pad_w;
 }

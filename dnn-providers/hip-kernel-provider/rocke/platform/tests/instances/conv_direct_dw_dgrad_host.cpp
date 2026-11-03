@@ -27,7 +27,11 @@
  *     a grouped KxK strided view, a polyphase view whose column padding is
  *     below S / 2, a zero ck (refused, not divided by), a padded polyphase
  *     view whose chunk is wider than one wave zeroes, and a tap-outer TDM
- *     split over more than 2 stages.
+ *     split over more than 2 stages;
+ *   - the shared host arithmetic the forward WMMA validators and grids read:
+ *     rocke_floor_div / rocke_ceil_div (Python's // and ceil_div, for any
+ *     sign) and DirectConvProblem.Ho / Wo, which a too-small input must give
+ *     as Python does (floor, not truncation).
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -36,6 +40,7 @@
 #include <string.h>
 
 #include "rocke/abi.h"
+#include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
@@ -447,8 +452,79 @@ static void test_stem_wmma_kernels_refuse_per_axis_padding(void)
     check_wmma_padding("dgrad_smallc_wmma", smallc, rocke_dgrad_smallc_wmma_is_valid_spec);
 }
 
+/* Python: a // b and ceil_div(a, b) = -(-a // b), for every sign. */
+static void test_ceil_floor_div(void)
+{
+    const long long cases[][4] = {/* a, b, a // b, ceil_div(a, b) */
+                                  {7, 2, 3, 4},
+                                  {8, 2, 4, 4},
+                                  {0, 3, 0, 0},
+                                  {-7, 2, -4, -3},
+                                  {-8, 2, -4, -4},
+                                  {7, -2, -4, -3},
+                                  {-7, -2, 3, 4},
+                                  {1, 32, 0, 1},
+                                  {4294967296LL, 3, 1431655765LL, 1431655766LL}};
+    for(const auto& c : cases)
+    {
+        CHECK(rocke_floor_div(c[0], c[1]) == c[2],
+              "rocke_floor_div(%lld, %lld) = %lld, want %lld",
+              c[0],
+              c[1],
+              rocke_floor_div(c[0], c[1]),
+              c[2]);
+        CHECK(rocke_ceil_div(c[0], c[1]) == c[3],
+              "rocke_ceil_div(%lld, %lld) = %lld, want %lld",
+              c[0],
+              c[1],
+              rocke_ceil_div(c[0], c[1]),
+              c[3]);
+    }
+}
+
+/* DirectConvProblem.Ho / Wo: strided, dilated, column padding PAD_W, and
+ * Python's floor division when the input is smaller than the filter. */
+static void test_problem_output_extents(void)
+{
+    rocke_direct_conv_problem_t p = dense_problem(35, 35, 64, 64);
+    p.KH = 3;
+    p.KW = 3;
+    p.PAD = 0;
+    p.stride = 2;
+    CHECK(rocke_direct_conv_problem_Ho(&p) == 17 && rocke_direct_conv_problem_Wo(&p) == 17,
+          "3x3 s2 valid on 35x35: %lldx%lld",
+          rocke_direct_conv_problem_Ho(&p),
+          rocke_direct_conv_problem_Wo(&p));
+    p = dense_problem(1, 100, 64, 64);
+    p.KH = 1;
+    p.KW = 7;
+    p.PAD = 0;
+    p.pad_w = 9;
+    p.dil_w = 3;
+    /* Wo = (100 + 18 - 18 - 1) // 1 + 1 = 100 */
+    CHECK(rocke_direct_conv_problem_Ho(&p) == 1 && rocke_direct_conv_problem_Wo(&p) == 100,
+          "1x7 d3 pw9 on 1x100: %lldx%lld",
+          rocke_direct_conv_problem_Ho(&p),
+          rocke_direct_conv_problem_Wo(&p));
+    p = dense_problem(2, 2, 64, 64);
+    p.KH = 5;
+    p.KW = 5;
+    p.PAD = 0;
+    p.stride = 2;
+    /* (2 - 4 - 1) // 2 + 1 = -1 in Python; truncation would give 0. */
+    CHECK(rocke_direct_conv_problem_Ho(&p) == -1 && rocke_direct_conv_problem_Wo(&p) == -1,
+          "5x5 s2 on 2x2: %lldx%lld",
+          rocke_direct_conv_problem_Ho(&p),
+          rocke_direct_conv_problem_Wo(&p));
+    CHECK(rocke_direct_conv_problem_total_c(&p) == 64
+              && rocke_direct_conv_problem_total_k(&p) == 64,
+          "total_c / total_k");
+}
+
 int main(void)
 {
+    test_ceil_floor_div();
+    test_problem_output_extents();
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();
     test_stream_refuses_per_axis_padding();

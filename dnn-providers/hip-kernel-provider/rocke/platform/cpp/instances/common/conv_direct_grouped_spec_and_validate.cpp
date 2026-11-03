@@ -12,6 +12,7 @@
  *   --------------------------------------     ----------------------------------
  *   DirectConvProblem defaults                 rocke_direct_conv_problem_default()
  *     .total_c / .total_k / .flops             rocke_direct_conv_problem_total_c/...
+ *     .Ho / .Wo                                rocke_direct_conv_problem_Ho / _Wo
  *     .short()                                 rocke_direct_conv_problem_short()
  *   DirectConv16cSpec defaults                 rocke_direct_conv_16c_spec_default()
  *     .threads_per_block / .n_acc_slots        rocke_direct_conv_16c_*
@@ -78,23 +79,18 @@ int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p)
     return p->groups * p->kpg;
 }
 
-/* Dilated filter extent (KH - 1) * dil + 1. A dilation below 1 is not
- * normalised: every validator rejects it (dilation_reason, and the non-grouped
- * kernel's positivity check). */
-static int dconv_dilated_extent(int k, int dil)
+long long rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p)
 {
-    return (k - 1) * dil + 1;
+    return rocke_floor_div((long long)p->H + 2LL * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
+                           p->stride)
+           + 1;
 }
 
-int rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p)
+long long rocke_direct_conv_problem_Wo(const rocke_direct_conv_problem_t* p)
 {
-    return (p->H + 2 * p->PAD - dconv_dilated_extent(p->KH, p->dil_h)) / p->stride + 1;
-}
-
-int rocke_direct_conv_problem_Wo(const rocke_direct_conv_problem_t* p)
-{
-    return (p->W + 2 * rocke_direct_conv_problem_pad_w(p) - dconv_dilated_extent(p->KW, p->dil_w))
-               / p->stride
+    return rocke_floor_div((long long)p->W + 2LL * rocke_direct_conv_problem_pad_w(p)
+                               - (long long)(p->KW - 1) * p->dil_w - 1,
+                           p->stride)
            + 1;
 }
 
@@ -2618,7 +2614,7 @@ int rocke_direct_conv_wgrad_n_ho_blocks(const rocke_direct_conv_wgrad_spec_t* sp
 
 int rocke_direct_conv_wgrad_n_wo_tiles(const rocke_direct_conv_wgrad_spec_t* spec)
 {
-    int Wo = rocke_direct_conv_problem_Wo(&spec->problem);
+    int Wo = (int)rocke_direct_conv_problem_Wo(&spec->problem);
     int wo_block = rocke_direct_conv_wgrad_wo_block(spec);
     return (Wo + wo_block - 1) / wo_block;
 }

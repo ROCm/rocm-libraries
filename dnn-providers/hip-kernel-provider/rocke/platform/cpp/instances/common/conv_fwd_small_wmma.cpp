@@ -24,7 +24,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
 #include "rocke/instance_conv_fwd_wmma_tdm_internal.h" /* rocke_fwd_tdm_descriptor_3d */
@@ -42,23 +42,10 @@
 namespace
 {
 
-/* Python floor division / ceil division / round-up on ints. */
-long long fsw_floordiv(long long a, long long b)
-{
-    long long q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
-}
-
-int fsw_ceil_div(long long a, long long b)
-{
-    return (int)-fsw_floordiv(-a, b);
-}
-
+/* Round-up on ints. */
 int fsw_round_up(long long a, long long b)
 {
-    return (int)(fsw_ceil_div(a, b) * b);
+    return (int)(rocke_ceil_div(a, b) * b);
 }
 
 void fsw_set_reason(char* reason, size_t reason_cap, const char* msg)
@@ -77,21 +64,6 @@ const char* fsw_dtype(const rocke_direct_conv_problem_t* p)
 bool fsw_is_bf16(const rocke_direct_conv_problem_t* p)
 {
     return strcmp(fsw_dtype(p), "bf16") == 0;
-}
-
-long long fsw_ho(const rocke_direct_conv_problem_t* p)
-{
-    return fsw_floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
-                        p->stride)
-           + 1;
-}
-
-long long fsw_wo(const rocke_direct_conv_problem_t* p)
-{
-    return fsw_floordiv((long long)p->W + 2 * rocke_direct_conv_problem_pad_w(p)
-                            - (long long)(p->KW - 1) * p->dil_w - 1,
-                        p->stride)
-           + 1;
 }
 
 /* _common_shape_reason(p, square): the problem shapes small C and small K
@@ -135,11 +107,12 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
         return false;
     }
     {
-        long long total_c = (long long)p->groups * p->cpg;
-        long long total_k = (long long)p->groups * p->kpg;
+        long long total_c = rocke_direct_conv_problem_total_c(p);
+        long long total_k = rocke_direct_conv_problem_total_k(p);
         long long bytes[3] = {2LL * p->N * p->H * p->W * total_c,
                               2LL * total_k * p->KH * p->KW * p->cpg,
-                              2LL * p->N * fsw_ho(p) * fsw_wo(p) * total_k};
+                              2LL * p->N * rocke_direct_conv_problem_Ho(p)
+                                  * rocke_direct_conv_problem_Wo(p) * total_k};
         long long mx = bytes[0];
         if(bytes[1] > mx)
             mx = bytes[1];
@@ -175,11 +148,11 @@ bool fsw_common_reason(const rocke_direct_conv_problem_t* p,
 /* ---- FwdSmallcWmmaSpec @property helpers the builder shares. */
 int sc_run(const rocke_fwd_smallc_wmma_spec_t* s)
 {
-    return fsw_ceil_div((long long)s->problem.KW * s->problem.cpg, 2);
+    return (int)rocke_ceil_div((long long)s->problem.KW * s->problem.cpg, 2);
 }
 int sc_steps(const rocke_fwd_smallc_wmma_spec_t* s)
 {
-    return fsw_ceil_div((long long)s->problem.KH * sc_run(s), 16);
+    return (int)rocke_ceil_div((long long)s->problem.KH * sc_run(s), 16);
 }
 int sc_win_h(const rocke_fwd_smallc_wmma_spec_t* s)
 {
@@ -291,10 +264,12 @@ long rocke_fwd_smallc_wmma_lds_bytes(const rocke_fwd_smallc_wmma_spec_t* spec)
 void rocke_fwd_smallc_wmma_grid(const rocke_fwd_smallc_wmma_spec_t* spec, int grid[3])
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    long long n_tiles = (long long)p->N * fsw_ceil_div(fsw_ho(p), spec->out_h)
-                        * fsw_ceil_div(fsw_wo(p), spec->out_w);
-    grid[0] = fsw_ceil_div(n_tiles, spec->tiles_per_block);
-    grid[1] = fsw_ceil_div((long long)p->groups * p->kpg, rocke_fwd_smallc_wmma_block_k(spec));
+    long long n_tiles = (long long)p->N
+                        * rocke_ceil_div(rocke_direct_conv_problem_Ho(p), spec->out_h)
+                        * rocke_ceil_div(rocke_direct_conv_problem_Wo(p), spec->out_w);
+    grid[0] = (int)rocke_ceil_div(n_tiles, spec->tiles_per_block);
+    grid[1] = (int)rocke_ceil_div(rocke_direct_conv_problem_total_k(p),
+                                  rocke_fwd_smallc_wmma_block_k(spec));
     grid[2] = 1;
 }
 
@@ -480,8 +455,8 @@ long rocke_fwd_smallk_wmma_lds_bytes(const rocke_fwd_smallk_wmma_spec_t* spec)
 void rocke_fwd_smallk_wmma_grid(const rocke_fwd_smallk_wmma_spec_t* spec, int grid[3])
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    grid[0] = (int)((long long)p->N * fsw_ceil_div(fsw_ho(p), spec->out_h)
-                    * fsw_ceil_div(fsw_wo(p), spec->out_w));
+    grid[0] = (int)((long long)p->N * rocke_ceil_div(rocke_direct_conv_problem_Ho(p), spec->out_h)
+                    * rocke_ceil_div(rocke_direct_conv_problem_Wo(p), spec->out_w));
     grid[1] = 1;
     grid[2] = 1;
 }
@@ -838,7 +813,7 @@ void sc_stage(sc_ctx& c, rocke_value_t* tile, int buf)
     if(max_prefix)
     {
         rocke_value_t* nvec = rocke_b_div(b, prefix, c.c8);
-        for(int j = 0; j < fsw_ceil_div(max_prefix, 8); j += c.THREADS)
+        for(int j = 0; j < (int)rocke_ceil_div(max_prefix, 8); j += c.THREADS)
         {
             rocke_value_t* cj = ci(b, j);
             rocke_value_t* v = rocke_b_add(b, c.tid, cj);
@@ -1710,7 +1685,7 @@ rocke_kernel_def_t*
         {
             rocke_value_t* zero_v = rocke_b_zero_vec(b, c.io_type, 8);
             rocke_value_t* z_vecs = rocke_b_div(b, c.z_elems, c.c8);
-            for(int j = 0; j < fsw_ceil_div(max_z, 8); j += THREADS)
+            for(int j = 0; j < (int)rocke_ceil_div(max_z, 8); j += THREADS)
             {
                 rocke_value_t* cj = ci(b, j);
                 rocke_value_t* v = rocke_b_add(b, tid, cj);
@@ -1812,7 +1787,7 @@ rocke_kernel_def_t*
 
     /* ---- epilogue 2: overlap-add, one output pixel (all K) per thread. */
     int E = OH * OW;
-    for(int it = 0; it < fsw_ceil_div(E, THREADS); ++it)
+    for(int it = 0; it < (int)rocke_ceil_div(E, THREADS); ++it)
     {
         rocke_value_t* e;
         {

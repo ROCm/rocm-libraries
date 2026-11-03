@@ -26,7 +26,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h"
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_dw_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -38,11 +38,6 @@ typedef rocke_value_t V;
 
 namespace
 {
-
-int dfw_cdiv(long long a, long long b)
-{
-    return (int)((a + b - 1) / b);
-}
 
 /* _dw_mfma_passes(KW): ceil((KW + 1) / 4). */
 int dfw_passes(int KW)
@@ -100,8 +95,8 @@ int rocke_direct_dw_fwd_wmma_in_passes(const rocke_direct_dw_fwd_wmma_spec_t* sp
     const int per_px = rocke_direct_dw_fwd_wmma_block_ch(spec) / ROCKE_DW_DGRAD_MFMA_CH;
     if(rocke_direct_dw_fwd_wmma_threads_per_block(spec) <= 0)
         return 0; /* block_waves < 1 is rejected */
-    return dfw_cdiv((long long)spec->w_fold * win * per_px,
-                    rocke_direct_dw_fwd_wmma_threads_per_block(spec));
+    return (int)rocke_ceil_div((long long)spec->w_fold * win * per_px,
+                               rocke_direct_dw_fwd_wmma_threads_per_block(spec));
 }
 
 int rocke_direct_dw_fwd_wmma_frag_vgprs(const rocke_direct_dw_fwd_wmma_spec_t* spec)
@@ -118,9 +113,9 @@ long rocke_direct_dw_fwd_wmma_lds_bytes(const rocke_direct_dw_fwd_wmma_spec_t* s
     const int per_px = block_ch / ROCKE_DW_DGRAD_MFMA_CH;
     if(per_px <= 0)
         return 0; /* block_waves < 1 is rejected */
-    const int in_px = dfw_cdiv((long long)rocke_direct_dw_fwd_wmma_in_passes(spec)
-                                   * rocke_direct_dw_fwd_wmma_threads_per_block(spec),
-                               per_px);
+    const int in_px = (int)rocke_ceil_div((long long)rocke_direct_dw_fwd_wmma_in_passes(spec)
+                                              * rocke_direct_dw_fwd_wmma_threads_per_block(spec),
+                                          per_px);
     const int out_px = spec->w_fold * rocke_direct_dw_fwd_wmma_tile_w(spec);
     return 2L * (in_px + out_px) * (block_ch + ROCKE_DW_DGRAD_MFMA_CH) * 2;
 }
@@ -130,23 +125,14 @@ int rocke_direct_dw_fwd_wmma_unrolled_wmmas(const rocke_direct_dw_fwd_wmma_spec_
     return spec->block_h * spec->problem.KH * dfw_passes(spec->problem.KW);
 }
 
-static long long dfw_ho(const rocke_direct_conv_problem_t* p)
-{
-    /* DirectConvProblem.Ho at stride 1, undilated (checked before use). */
-    return (long long)p->H + 2 * p->PAD - p->KH + 1;
-}
-
-static long long dfw_wo(const rocke_direct_conv_problem_t* p)
-{
-    return (long long)p->W + 2 * rocke_direct_conv_problem_pad_w(p) - p->KW + 1;
-}
-
 void rocke_direct_dw_fwd_wmma_grid(const rocke_direct_dw_fwd_wmma_spec_t* spec, int grid[3])
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    grid[0] = dfw_cdiv(dfw_wo(p), rocke_direct_dw_fwd_wmma_tile_w(spec));
-    grid[1] = dfw_cdiv(p->groups, rocke_direct_dw_fwd_wmma_block_ch(spec));
-    grid[2] = dfw_cdiv(p->N, spec->w_fold) * dfw_cdiv(dfw_ho(p), spec->block_h);
+    grid[0] = (int)rocke_ceil_div(rocke_direct_conv_problem_Wo(p),
+                                  rocke_direct_dw_fwd_wmma_tile_w(spec));
+    grid[1] = (int)rocke_ceil_div(p->groups, rocke_direct_dw_fwd_wmma_block_ch(spec));
+    grid[2] = (int)rocke_ceil_div(p->N, spec->w_fold)
+              * (int)rocke_ceil_div(rocke_direct_conv_problem_Ho(p), spec->block_h);
 }
 
 rocke_status_t rocke_direct_dw_fwd_wmma_kernel_name(const rocke_direct_dw_fwd_wmma_spec_t* spec,
@@ -203,7 +189,7 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
         return false;
     {
         const int kmax = p->KH > p->KW ? p->KH : p->KW;
-        const long long Ho = dfw_ho(p), Wo = dfw_wo(p);
+        const long long Ho = rocke_direct_conv_problem_Ho(p), Wo = rocke_direct_conv_problem_Wo(p);
         if(!(0 <= p->PAD && p->PAD < kmax) || Ho <= 0 || Wo <= 0)
             DFW_FAIL("degenerate geometry (PAD=%d, Ho=%lld, Wo=%lld)", p->PAD, Ho, Wo);
     }
@@ -249,7 +235,8 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
     }
     {
         const long long x = (long long)p->N * p->H * p->W * p->groups * 2;
-        const long long y = (long long)p->N * dfw_ho(p) * dfw_wo(p) * p->groups * 2;
+        const long long y = (long long)p->N * rocke_direct_conv_problem_Ho(p)
+                            * rocke_direct_conv_problem_Wo(p) * p->groups * 2;
         const long long mx = x > y ? x : y;
         if(mx > ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES)
             DFW_FAIL("X/Y of %lld bytes exceed the %lld-byte sentinel addressing range",
@@ -479,7 +466,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     const int n_out = F * TW * PER_PX;
     V* c_TW = rocke_b_const_i32(b, TW);
     std::vector<dfw_plan> drain;
-    for(int i = 0; i < dfw_cdiv(n_out, THREADS); ++i)
+    for(int i = 0; i < (int)rocke_ceil_div(n_out, THREADS); ++i)
     {
         V* ci = rocke_b_const_i32(b, i * THREADS);
         V* idx = rocke_b_add(b, tid, ci);
@@ -510,8 +497,8 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
 
     /* X staging [buffer, window column, channel]. */
     const int n_in = F * U * PER_PX;
-    const int in_passes = dfw_cdiv(n_in, THREADS);
-    const int in_px = dfw_cdiv((long long)in_passes * THREADS, PER_PX);
+    const int in_passes = (int)rocke_ceil_div(n_in, THREADS);
+    const int in_px = (int)rocke_ceil_div((long long)in_passes * THREADS, PER_PX);
     const int i_shape[3] = {2, in_px, CH_PAD};
     V* i_smem = rocke_b_smem_alloc(b, io_type, i_shape, 3, "x_stage");
     V* c_U = rocke_b_const_i32(b, U);

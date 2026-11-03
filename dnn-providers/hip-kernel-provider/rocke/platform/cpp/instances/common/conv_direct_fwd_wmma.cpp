@@ -28,7 +28,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
 #include "rocke/instance_conv_fwd_wmma_tdm_internal.h" /* rocke_fwd_tdm_descriptor_3d */
@@ -45,20 +45,6 @@ namespace
 {
 
 using V = rocke_value_t*;
-
-int fww_ceil_div(int a, int b)
-{
-    return (a + b - 1) / b;
-}
-
-/* Python floor division (the output extents of a too-small input). */
-long long fww_floordiv(long long a, long long b)
-{
-    long long q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
-}
 
 void fww_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
@@ -78,21 +64,6 @@ bool fww_is_bf16(const rocke_direct_fwd_wmma_spec_t* spec)
     return strcmp(fww_dtype(spec), "bf16") == 0;
 }
 
-/* DirectConvProblem.Ho / Wo (strided, dilated). */
-long long fww_Ho(const rocke_direct_conv_problem_t* p)
-{
-    return fww_floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
-                        p->stride)
-           + 1;
-}
-long long fww_Wo(const rocke_direct_conv_problem_t* p)
-{
-    return fww_floordiv((long long)p->W + 2 * rocke_direct_conv_problem_pad_w(p)
-                            - (long long)(p->KW - 1) * p->dil_w - 1,
-                        p->stride)
-           + 1;
-}
-
 /* spec.vp: the problem the tile loop sees, ``problem`` itself, its
  * polyphase view (1 x m, stride 1) or its strided-GEMM view (1x1, stride 1,
  * over the Ho x Wo output grid). */
@@ -102,9 +73,9 @@ rocke_direct_conv_problem_t fww_vp(const rocke_direct_fwd_wmma_spec_t* s)
     const rocke_direct_conv_problem_t* p = &s->problem;
     if(s->poly_view)
     {
-        const int m = p->stride ? (int)fww_floordiv(p->KW, p->stride) : 0;
+        const int m = p->stride ? (int)rocke_floor_div(p->KW, p->stride) : 0;
         v.H = 1;
-        v.W = (int)fww_Wo(p) + m - 1;
+        v.W = (int)rocke_direct_conv_problem_Wo(p) + m - 1;
         v.cpg = p->stride * p->cpg;
         v.KH = 1;
         v.KW = m;
@@ -115,7 +86,7 @@ rocke_direct_conv_problem_t fww_vp(const rocke_direct_fwd_wmma_spec_t* s)
     }
     if(!s->strided_view)
         return v;
-    const int Ho = (int)fww_Ho(p), Wo = (int)fww_Wo(p);
+    const int Ho = (int)rocke_direct_conv_problem_Ho(p), Wo = (int)rocke_direct_conv_problem_Wo(p);
     v.N = s->fold_n ? 1 : p->N;
     v.H = s->fold_n ? p->N * Ho : Ho;
     v.W = Wo;
@@ -183,7 +154,7 @@ int fww_kpg_eff(const rocke_direct_fwd_wmma_spec_t* s)
 int fww_groups_eff(const rocke_direct_fwd_wmma_spec_t* s)
 {
     /* Python floor division; pack_groups >= 1 for every spec that builds. */
-    return s->pack_groups > 0 ? (int)fww_floordiv(s->problem.groups, s->pack_groups) : 0;
+    return s->pack_groups > 0 ? (int)rocke_floor_div(s->problem.groups, s->pack_groups) : 0;
 }
 int fww_image_elems(const rocke_direct_fwd_wmma_spec_t* s)
 {
@@ -257,7 +228,7 @@ int rocke_direct_fwd_wmma_block_p(const rocke_direct_fwd_wmma_spec_t* spec)
 int rocke_direct_fwd_wmma_tile_h(const rocke_direct_fwd_wmma_spec_t* spec)
 {
     int d = spec->tile_w * spec->tile_n;
-    return d > 0 ? (int)fww_floordiv(rocke_direct_fwd_wmma_block_p(spec), d) : 0;
+    return d > 0 ? (int)rocke_floor_div(rocke_direct_fwd_wmma_block_p(spec), d) : 0;
 }
 
 int rocke_direct_fwd_wmma_threads_per_block(const rocke_direct_fwd_wmma_spec_t* spec)
@@ -286,11 +257,11 @@ void rocke_direct_fwd_wmma_grid(const rocke_direct_fwd_wmma_spec_t* spec, int gr
 {
     const rocke_direct_conv_problem_t v = fww_vp(spec);
     const rocke_direct_conv_problem_t* p = &v;
-    long long n_kt = fww_ceil_div(fww_kpg_eff(spec), rocke_direct_fwd_wmma_block_k(spec));
-    long long n_ht = fww_ceil_div((int)fww_Ho(p), rocke_direct_fwd_wmma_tile_h(spec));
-    long long n_wt = fww_ceil_div((int)fww_Wo(p), spec->tile_w);
-    long long g
-        = (long long)fww_ceil_div(p->N, spec->tile_n) * fww_groups_eff(spec) * n_ht * n_wt * n_kt;
+    long long n_kt = rocke_ceil_div(fww_kpg_eff(spec), rocke_direct_fwd_wmma_block_k(spec));
+    long long n_ht
+        = rocke_ceil_div(rocke_direct_conv_problem_Ho(p), rocke_direct_fwd_wmma_tile_h(spec));
+    long long n_wt = rocke_ceil_div(rocke_direct_conv_problem_Wo(p), spec->tile_w);
+    long long g = rocke_ceil_div(p->N, spec->tile_n) * fww_groups_eff(spec) * n_ht * n_wt * n_kt;
     grid[0] = (int)g;
     grid[1] = 1;
     grid[2] = 1;
@@ -428,7 +399,8 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
             FWW_FAIL("a KxK strided_view serves ungrouped convs");
         if(p->KH > 1 && spec->ck != 0 && (p->KW * p->cpg) % spec->ck)
             FWW_FAIL("a %d-channel patch run is not whole ck %d chunks", p->KW * p->cpg, spec->ck);
-        if(spec->fold_n && (p->H != p->stride * fww_Ho(p) || spec->tile_n != 1))
+        if(spec->fold_n
+           && (p->H != p->stride * rocke_direct_conv_problem_Ho(p) || spec->tile_n != 1))
             FWW_FAIL("fold_n needs H == stride * Ho and one image per tile");
     }
     else if(spec->fold_n)
@@ -494,7 +466,7 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         if(pad_w < 0 || pad_w > (p->KW - 1) * dmax)
             FWW_FAIL("PAD_W %d outside 0..(KW-1)*dilation", pad_w);
     }
-    long long Ho = fww_Ho(p), Wo = fww_Wo(p);
+    long long Ho = rocke_direct_conv_problem_Ho(p), Wo = rocke_direct_conv_problem_Wo(p);
     if(Ho < 1 || Wo < 1)
         FWW_FAIL("empty output %lldx%lld", Ho, Wo);
     int G = spec->pack_groups;
@@ -607,10 +579,10 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
      * bytes and the tile index is a flat block id. */
     {
         const rocke_direct_conv_problem_t v = fww_vp(spec);
-        long long tiles = (long long)fww_ceil_div(v.N, spec->tile_n) * fww_groups_eff(spec)
-                          * fww_ceil_div((int)fww_Ho(&v), TH)
-                          * fww_ceil_div((int)fww_Wo(&v), spec->tile_w)
-                          * fww_ceil_div(fww_kpg_eff(spec), rocke_direct_fwd_wmma_block_k(spec));
+        long long tiles = rocke_ceil_div(v.N, spec->tile_n) * fww_groups_eff(spec)
+                          * rocke_ceil_div(rocke_direct_conv_problem_Ho(&v), TH)
+                          * rocke_ceil_div(rocke_direct_conv_problem_Wo(&v), spec->tile_w)
+                          * rocke_ceil_div(fww_kpg_eff(spec), rocke_direct_fwd_wmma_block_k(spec));
         if(!rocke_wmma_fwd_limits_ok(&spec->problem, spec->sched, tiles, reason, reason_cap))
             return false;
     }
@@ -1145,7 +1117,7 @@ void chunk_pp(fww_ctx& c, V kc, std::vector<V>& accs)
     V wei_base = c.G == 1 ? mulk(c, stage, c.WEI) : c.c0;
     int PG = c.spec->pp_group;
     int n_steps = (int)c.steps.size();
-    int n_groups = fww_ceil_div(n_steps, PG);
+    int n_groups = (int)rocke_ceil_div(n_steps, PG);
     for(int j = 0; j < n_groups; ++j)
     {
         std::vector<std::vector<V>> fa, fb;
@@ -1852,7 +1824,7 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
             for(int a = 0; a < (int)c.sub_halos.size(); ++a)
             {
                 V z_vecs = divk(c, c.sub_halos[a].z_elems, 8);
-                for(int j = 0; j < fww_ceil_div(max_z, 8); j += c.THREADS)
+                for(int j = 0; j < (int)rocke_ceil_div(max_z, 8); j += c.THREADS)
                 {
                     V v = addk(c, c.tid, j);
                     V cond = rocke_b_cmp_lt(b, v, z_vecs);

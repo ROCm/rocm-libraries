@@ -21,6 +21,7 @@
  *   ------------------------------------   -------------------------------------
  *   @dataclass(frozen) DirectConvProblem    rocke_direct_conv_problem_t
  *     .total_c/.total_k/.flops (@property)   rocke_direct_conv_problem_total_c/...
+ *     .Ho/.Wo (@property)                    rocke_direct_conv_problem_Ho / _Wo
  *     .short()                               rocke_direct_conv_problem_short
  *   @dataclass(frozen) DirectConv16cSpec     rocke_direct_conv_16c_spec_t
  *     .threads_per_block / .n_acc_slots      rocke_direct_conv_16c_*
@@ -146,6 +147,12 @@ bool rocke_direct_conv_one_padding_reason(const rocke_direct_conv_problem_t* p,
 int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
 /* @property total_k -> groups * kpg. */
 int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p);
+/* @property Ho -> (H + 2*PAD - (KH-1)*dil_h - 1) // stride + 1 and
+ * @property Wo -> (W + 2*PAD_W - (KW-1)*dil_w - 1) // stride + 1: the output
+ * extents of a strided, dilated convolution, with Python's floor division
+ * (rocke_floor_div), so a too-small input gives the same value as Python. */
+long long rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p);
+long long rocke_direct_conv_problem_Wo(const rocke_direct_conv_problem_t* p);
 /* @property flops -> 2*N*H*W*groups*kpg*KH*KW*cpg (returned as int64). */
 long long rocke_direct_conv_problem_flops(const rocke_direct_conv_problem_t* p);
 

@@ -27,7 +27,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
@@ -46,19 +46,6 @@ constexpr int kWmmaK = ROCKE_FWD_WMMA_K;
 constexpr int kChPad = ROCKE_FWD_WMMA_CH_PAD;
 constexpr long long kI32Max = 2147483647LL;
 
-long long to_cdiv(long long a, long long b)
-{
-    return (a + b - 1) / b;
-}
-
-long long to_floordiv(long long a, long long b)
-{
-    long long q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
-}
-
 bool to_is_bf16(const rocke_direct_conv_problem_t* p)
 {
     return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
@@ -68,21 +55,6 @@ void to_set_reason(char* reason, size_t cap, const char* msg)
 {
     if(reason != NULL && cap > 0)
         snprintf(reason, cap, "%s", msg);
-}
-
-long long to_ho(const rocke_direct_conv_problem_t* p)
-{
-    return to_floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
-                       p->stride)
-           + 1;
-}
-
-long long to_wo(const rocke_direct_conv_problem_t* p)
-{
-    return to_floordiv((long long)p->W + 2 * rocke_direct_conv_problem_pad_w(p)
-                           - (long long)(p->KW - 1) * p->dil_w - 1,
-                       p->stride)
-           + 1;
 }
 
 int to_x_pitch(const rocke_fwd_tapouter_wmma_spec_t* s)
@@ -108,8 +80,10 @@ long to_stage_elems(const rocke_fwd_tapouter_wmma_spec_t* s)
 long long to_grid0(const rocke_fwd_tapouter_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return (long long)p->N * p->groups * to_cdiv(to_ho(p), rocke_fwd_tapouter_wmma_tile_h(s))
-           * to_cdiv(to_wo(p), s->tile_w) * to_cdiv(p->kpg, rocke_fwd_tapouter_wmma_block_k(s));
+    return (long long)p->N * p->groups
+           * rocke_ceil_div(rocke_direct_conv_problem_Ho(p), rocke_fwd_tapouter_wmma_tile_h(s))
+           * rocke_ceil_div(rocke_direct_conv_problem_Wo(p), s->tile_w)
+           * rocke_ceil_div(p->kpg, rocke_fwd_tapouter_wmma_block_k(s));
 }
 
 } // namespace
@@ -149,8 +123,9 @@ int rocke_fwd_tapouter_wmma_block_p(const rocke_fwd_tapouter_wmma_spec_t* spec)
 
 int rocke_fwd_tapouter_wmma_tile_h(const rocke_fwd_tapouter_wmma_spec_t* spec)
 {
-    return spec->tile_w > 0 ? (int)to_floordiv(rocke_fwd_tapouter_wmma_block_p(spec), spec->tile_w)
-                            : 0;
+    return spec->tile_w > 0
+               ? (int)rocke_floor_div(rocke_fwd_tapouter_wmma_block_p(spec), spec->tile_w)
+               : 0;
 }
 
 int rocke_fwd_tapouter_wmma_threads_per_block(const rocke_fwd_tapouter_wmma_spec_t* spec)
@@ -178,10 +153,12 @@ double rocke_fwd_tapouter_wmma_tile_efficiency(const rocke_fwd_tapouter_wmma_spe
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const int th = rocke_fwd_tapouter_wmma_tile_h(spec);
     const int bk = rocke_fwd_tapouter_wmma_block_k(spec);
-    const double t0 = (double)(to_cdiv(to_ho(p), th) * th);
-    const double t1 = (double)(to_cdiv(to_wo(p), spec->tile_w) * spec->tile_w);
-    const double t2 = (double)(to_cdiv(p->kpg, bk) * bk);
-    return (double)(to_ho(p) * to_wo(p) * p->kpg) / (t0 * t1 * t2);
+    const double t0 = (double)(rocke_ceil_div(rocke_direct_conv_problem_Ho(p), th) * th);
+    const double t1
+        = (double)(rocke_ceil_div(rocke_direct_conv_problem_Wo(p), spec->tile_w) * spec->tile_w);
+    const double t2 = (double)(rocke_ceil_div(p->kpg, bk) * bk);
+    return (double)(rocke_direct_conv_problem_Ho(p) * rocke_direct_conv_problem_Wo(p) * p->kpg)
+           / (t0 * t1 * t2);
 }
 
 rocke_status_t rocke_fwd_tapouter_wmma_kernel_name(const rocke_fwd_tapouter_wmma_spec_t* spec,
@@ -261,7 +238,7 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
         TO_FAIL("dilation %dx%d < 1", p->dil_h, p->dil_w);
     if(p->PAD < 0)
         TO_FAIL("PAD %d < 0", p->PAD);
-    const long long Ho = to_ho(p), Wo = to_wo(p);
+    const long long Ho = rocke_direct_conv_problem_Ho(p), Wo = rocke_direct_conv_problem_Wo(p);
     if(Ho < 1 || Wo < 1)
         TO_FAIL("empty output %lldx%lld", Ho, Wo);
     if(p->cpg % 8 != 0 || p->kpg % 8 != 0)
