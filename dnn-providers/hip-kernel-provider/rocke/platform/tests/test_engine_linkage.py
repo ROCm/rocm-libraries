@@ -211,6 +211,19 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             for test in tests
             if test["name"] == "rocke_optimization_barrier_hip_pair"
         )
+        # A mixed private-variable spelling can configure successfully while
+        # appending this incoming registration to an unused CMake string.
+        sdpa = next(
+            test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
+        )
+        assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
+        assert environment_for(tests, "rocke_library_sdpa_pytest") == {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library"
+        }
+        if "--rocke-require-hipdnn-assets" in sdpa["command"]:
+            install_script = (build / "cmake_install.cmake").read_text()
+            assert "attention_sdpa_fwd.graph.json" in install_script
+            assert "/tests/library/tests/sdpa/hipdnn" in install_script
         command = pair["command"]
         native = command[command.index("--native") + 1]
         assert native == native_artifact("rocke_optimization_barrier_emit")
