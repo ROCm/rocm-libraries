@@ -530,7 +530,9 @@ static void conv_k_decode3(rocke_conv_build_ctx_t* ctx,
 }
 
 /* Python k_decode3_at: (z, y, x, c) of reduction index k_off + col of the
- * current tile. Every element decodes its own index. */
+ * current tile. Every element decodes its own index; with
+ * split_addr_k_decode the tile lies inside one tap, decoded from k_off, and
+ * the channel is the origin's plus col. */
 static void conv_k_decode3_at(rocke_conv_build_ctx_t* ctx,
                               rocke_value_t* col,
                               rocke_value_t** z,
@@ -538,6 +540,13 @@ static void conv_k_decode3_at(rocke_conv_build_ctx_t* ctx,
                               rocke_value_t** x,
                               rocke_value_t** c)
 {
+    if(ctx->spec->split_addr_k_decode)
+    {
+        rocke_value_t* c_t;
+        conv_k_decode3(ctx, ctx->k_off_capture, z, y, x, &c_t);
+        *c = rocke_b_add(ctx->b, c_t, col);
+        return;
+    }
     rocke_value_t* k = rocke_b_add(ctx->b, ctx->k_off_capture, col);
     conv_k_decode3(ctx, k, z, y, x, c);
 }

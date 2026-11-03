@@ -462,7 +462,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->lds_xor, "lxor");
     /* (pfr: Python-only, off.) */
     ROCKE_FLAG(s->split_tail, "spt");
-    /* (sakd, adir: Python-only, off.) */
+    ROCKE_FLAG(s->split_addr_k_decode, "sakd");
+    /* (adir: Python-only, off.) */
     ROCKE_FLAG(s->uk_tap_fast, "tapf");
     ROCKE_FLAG(s->uk_chunk_group > 0, "cg%d", s->uk_chunk_group);
     ROCKE_FLAG(s->lds_ahead, "lah");
@@ -1557,8 +1558,21 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     if(s->reg_prefetch < 0 || s->reg_prefetch > 2)
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "reg_prefetch must be 0, 1 or 2, got %d", s->reg_prefetch);
+    if(s->split_addr_k_decode
+       && (!s->problem.is_3d || rocke_conv_problem_is_pointwise(&s->problem) || s->group_merge > 1))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "split_addr_k_decode is built on the 3-D split-addressing path "
+                        "(no pointwise, no group_merge)");
+    if(s->split_addr_k_decode && rocke_conv_problem_cpg(&s->problem) % s->tile_k)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "split_addr_k_decode needs cpg %% tile_k == 0");
     if(!kloops)
         return true;
+    if(s->split_addr_k_decode)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "uniform_k_decode/reg_prefetch do not combine with prefetch_regs "
+                        "or split_addr_k_decode; set one K-loop family");
     if(s->async_dma)
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
