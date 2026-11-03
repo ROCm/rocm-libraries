@@ -2035,8 +2035,8 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    for(const auto& [nb, overlap] :
-        std::vector<std::pair<int, int>>{{1, 0}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {4, 0}})
+    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{
+            {1, 0}, {1, 2}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 0}, {4, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                         local(nb);
@@ -2046,16 +2046,6 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
         p.Build();
         expect_near(apply(p, *A, r), additive_schwarz(ref, nb, overlap, r), scaled_tol<T>(1e-13));
     }
-
-    KNOWN_BUG("a block between two others halves the weights of its left overlap twice and "
-              "those of its right overlap not at all");
-
-    ExactSolvers<T>                         local(3);
-    rocalution::AS<Matrix<T>, Vector<T>, T> p;
-    p.Set(3, 1, local.get());
-    p.SetOperator(*A);
-    p.Build();
-    expect_near(apply(p, *A, r), additive_schwarz(ref, 3, 1, r), scaled_tol<T>(1e-13));
 }
 
 TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
@@ -2066,7 +2056,7 @@ TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
     auto                 A   = this->make(ref);
 
     for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{
-            {1, 0}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 1}})
+            {1, 0}, {1, 2}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                          local(nb);
@@ -2086,8 +2076,6 @@ TYPED_TEST(preconditioners, schwarz_blocks_cover_the_rows_beyond_a_multiple_of_t
     const Csr<T>         ref = nonsymmetric<T>(13);
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
-
-    KNOWN_BUG("the last n % nb rows belong to no block");
 
     ExactSolvers<T>                         as_local(2);
     rocalution::AS<Matrix<T>, Vector<T>, T> as;
