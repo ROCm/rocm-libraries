@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import contextlib
 import json
 import re
 import subprocess
@@ -88,8 +89,9 @@ import sys
 import tempfile
 from importlib.resources import files as resource_files
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import Callable, Iterator, NamedTuple
 
+from _bounded_run import run_bounded, stop_all
 from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
@@ -598,13 +600,10 @@ def _name_exists_many(
         "\n".join(decl.strip() for _key, decl in items) + "\n", encoding="utf-8"
     )
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             [opt, "-S", "-o", "-", str(src)],
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=PROBE_TIMEOUT_S,
-            cwd=str(scratch),
+            cwd=scratch,
         )
     except subprocess.TimeoutExpired:
         proc = None
@@ -659,13 +658,10 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> NameVerdict:
     proc = None
     for attempt in (1, 2):
         try:
-            proc = subprocess.run(
+            proc = run_bounded(
                 [opt, "-S", "-o", "-", str(src)],
-                capture_output=True,
-                text=True,
-                check=False,
                 timeout=PROBE_TIMEOUT_S,
-                cwd=str(scratch),
+                cwd=scratch,
             )
         except subprocess.TimeoutExpired:
             if attempt == 1:
@@ -729,7 +725,9 @@ def _classify(rc: int, diag: str) -> tuple[str, str]:
         return STATUS_NAME_ABSENT, _first_error(diag)
     # Four ways the backend says "this target cannot lower that": no ISel
     # pattern, type legalisation cannot break the operand down, the lowering
-    # wants a libcall the device lacks, and (llvm23) it says so outright. All
+    # wants a libcall the device lacks, or LLVM names a missing target feature.
+    # LLVM 23 says the unsupported-subtarget case outright; LLVM 24 names the
+    # required feature instead. All
     # are reached only after the name resolved, so the flavor axis is already
     # settled by _name_exists() and cannot be confused with these.
     if (
@@ -737,6 +735,7 @@ def _classify(rc: int, diag: str) -> tuple[str, str]:
         or "do not know how to expand this operator's operand" in low
         or "no libcall available for" in low
         or "intrinsic not supported on subtarget" in low
+        or "requires target feature" in low
     ):
         return STATUS_ARCH_ABSENT, _first_error(diag)
     # The compiler died rather than answered. NOT arch_absent: we learned only
@@ -883,18 +882,15 @@ def _probe(
         str(path),
     ]
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             argv,
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=timeout,
             # Run from the scratch directory, not from wherever the sweep was
             # invoked. Probing is *expected* to crash clang -- that is what
             # `toolchain_crash` records -- and a crash on a host with core dumps
             # enabled drops a multi-megabyte `core` next to the caller. Run the
             # sweep from a checkout and those land in the worktree.
-            cwd=str(out.parent),
+            cwd=out.parent,
         )
     except subprocess.TimeoutExpired:
         return (
@@ -963,14 +959,7 @@ def _assemble(
     ]
     for step in (argv, mc):
         try:
-            proc = subprocess.run(
-                step,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout,
-                cwd=str(out.parent),
-            )
+            proc = run_bounded(step, timeout=timeout, cwd=out.parent)
         except subprocess.TimeoutExpired:
             return (
                 STATUS_TOOLCHAIN_TIMEOUT,
@@ -992,40 +981,26 @@ def _assemble(
 def _decl_table(flavor: str) -> dict[str, str]:
     """The decls a _Lowerer would resolve for this flavor.
 
-    Mirrors `_Lowerer.__init__` exactly -- base table, then the per-flavor
-    override dict. Duplicating the merge here rather than importing a private
-    helper keeps the tool honest about what it measured, but it is a mirror and
-    must be updated if the resolution rule gains a rung.
+    Uses the lowerer's profile-aware resolver directly so a new compiler lane
+    cannot silently fall back to the LLVM20 declaration shapes.
     """
     from rocke.core import lower_llvm as L
 
-    decls = dict(L._INTRINSIC_DECLS)
-    if flavor == L.LLVM_FLAVOR_LLVM22:
-        decls.update(L._INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif flavor == L.LLVM_FLAVOR_LLVM23:
-        decls.update(L._INTRINSIC_DECLS_LLVM23_OVERRIDES)
-    return decls
+    return L._decls_for_flavor(flavor)
 
 
 def _drift(committed: str, fresh: str) -> str | None:
     """Describe how a committed column differs from a fresh run, or None.
 
-    None means "differs only in which compiler build answered" -- every cell
-    agrees, and so does every field describing how the probe was posed. That is
-    not staleness and must not fail: `toolchain.clang` records the exact ROCm
-    build, so a byte comparison reds on any host whose patch level differs from
-    the one that blessed the column, which is most of them. This check exists to
-    catch a *wrong measurement*, and a column this host reproduces cell for cell
-    is not one.
-
-    Everything else is drift, including the rest of `toolchain`. Those fields
-    are our own settings rather than properties of the host: `generator`,
-    `probe_cflags` and `probe_timeout_s` say how the question was asked, and a
-    change to any of them means the committed answers were obtained by a method
-    we no longer use. `probe_cflags` is the concrete example -- the same clang
-    reports `ok` or hangs for the same key depending on whether it carries
-    `-O0` -- so forgiving a difference there would forgive precisely the defect
-    that field was added to make visible.
+    Exact reproduction is meaningful only with the compiler build recorded in
+    ``toolchain.clang``. The caller checks that provenance before probing, so a
+    different compiler build is unvalidated rather than drift. Once applicable,
+    every toolchain field remains part of the artifact: ``generator``,
+    ``probe_cflags`` and ``probe_timeout_s`` say how the question was asked, and
+    changing any of them means the committed answers were obtained by a method
+    we no longer use. ``probe_cflags`` is the concrete example -- the same clang
+    reports ``ok`` or hangs for the same key depending on whether it carries
+    ``-O0``.
     """
     try:
         a, b = json.loads(committed), json.loads(fresh)
@@ -1044,8 +1019,6 @@ def _drift(committed: str, fresh: str) -> str | None:
         more = f" (+{len(changed) - 5} more)" if len(changed) > 5 else ""
         return f"measurements changed -- {head}{more}"
 
-    for doc in (a, b):
-        doc.get("toolchain", {}).pop("clang", None)
     if a != b:
         fields = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
         return f"differs in {', '.join(fields)}, not in the measurements"
@@ -1109,6 +1082,25 @@ def _nonnegative_jobs(raw: str) -> int:
 def _probe_jobs(requested: int) -> int:
     """Resolve the quota-aware default while preserving an explicit override."""
     return requested or min(MAX_PROBE_JOBS, available_cpus())
+
+
+@contextlib.contextmanager
+def _probe_pool(max_workers: int) -> Iterator[cf.ThreadPoolExecutor]:
+    """A thread pool for probes that stops promptly on Ctrl-C.
+
+    Ctrl-C reaches only the main thread, and every probe runs in its own
+    session, so the terminal's interrupt reaches neither the workers nor their
+    compilers. Leaving a plain pool would then wait out each running probe's
+    timeout. On `KeyboardInterrupt` this cancels the queued probes and ends the
+    running ones before the pool waits for its workers.
+    """
+    with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        try:
+            yield ex
+        except KeyboardInterrupt:
+            ex.shutdown(wait=False, cancel_futures=True)
+            stop_all()
+            raise
 
 
 def _schedule_probes(
@@ -1356,6 +1348,16 @@ def main() -> int:
         return 2
 
     flavor = L._resolve_llvm_flavor()
+    out = args.out or default_out(flavor)
+    if args.check and args.out is None and not out.is_file():
+        print("rocKE intrinsic arch-domain generator")
+        print(f"   flavor : {flavor}")
+        print(
+            f"\nUNVALIDATED: no committed column for {flavor} "
+            f"({out.name}); nothing to check. Run without --check to add one."
+        )
+        return _unvalidated_exit(args.unvalidated_exit_code, 0)
+
     clang = _llvm_tool("clang")
     opt = _llvm_tool("opt")
 
@@ -1436,13 +1438,34 @@ def main() -> int:
         )
         return 1
 
+    # A measured column is an artifact of one exact compiler build, not every
+    # compiler that reports the same LLVM major. Development snapshots within a
+    # flavor can change intrinsic availability and even ABI. Re-probing with a
+    # different build would compare two different questions and make ordinary
+    # CI depend on whichever compiler-runtime artifact it happened to receive.
+    # Report that honestly as unvalidated before starting the expensive sweep.
+    if args.check and out.is_file():
+        try:
+            committed_doc = json.loads(out.read_text())
+        except json.JSONDecodeError:
+            # The final drift check owns the actionable malformed-JSON error.
+            committed_doc = {}
+        blessed_identity = committed_doc.get("toolchain", {}).get("clang")
+        if blessed_identity and blessed_identity != identity:
+            print(
+                f"\nUNVALIDATED: {out.name} was measured with a different "
+                "compiler build; exact artifact reproduction is not applicable.\n"
+                f"      blessed by: {blessed_identity}\n"
+                f"      this host : {identity}"
+            )
+            return _unvalidated_exit(args.unvalidated_exit_code, 0)
+
     arches = sorted(args.arch) if args.arch else sorted(wired_arches())
     decls = _decl_table(flavor)
     keys = sorted(k for k in decls if not args.only or args.only in k)
     print(f"   arches : {', '.join(arches)}")
     print(f"   keys   : {len(keys)}")
 
-    out = args.out or default_out(flavor)
     expected_cells: dict[str, dict[str, dict[str, str]]] = {}
     if args.check and out.is_file():
         try:
@@ -1474,7 +1497,7 @@ def main() -> int:
         )
 
     preflight: dict[str, tuple[str, str]] = {}
-    with cf.ThreadPoolExecutor(max_workers=min(jobs, len(arches))) as ex:
+    with _probe_pool(min(jobs, len(arches))) as ex:
         for arch, answer in ex.map(preflight_one, arches):
             preflight[arch] = answer
     preflight_retry = _retry_target_preflights(
@@ -1679,7 +1702,7 @@ def main() -> int:
                 status, evidence = terminal
                 record(key, arch, status, evidence)
 
-    with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
+    with _probe_pool(jobs) as ex:
         futures: dict[cf.Future, str] = {}
         for arch, batch in positive_batches.items():
             if batch:
@@ -1782,8 +1805,8 @@ def main() -> int:
 
     if args.check:
         if not out.is_file():
-            # Not a failure: a host can only measure its own flavor, so
-            # failing here would red every CI machine on a newer ROCm.
+            # A custom --out path still validates toolchain consistency before
+            # reporting that there is no baseline to compare.
             print(
                 f"\nUNVALIDATED: no committed column for {flavor} "
                 f"({out.name}); nothing to check. Run without --check to add one."
@@ -1795,16 +1818,7 @@ def main() -> int:
             return 0
         why = _drift(committed, text)
         if why is None:
-            # Reproduced cell for cell by a different build of the same
-            # flavor -- a stronger pass than a byte match, since two
-            # independent builds agreeing shows the column describes the
-            # flavor rather than one machine. See `_drift`.
-            print(
-                f"\nOK: {out.name} is up to date -- every cell reproduces "
-                "here; only the compiler build differs.\n"
-                f"      blessed by: {json.loads(committed)['toolchain']['clang']}\n"
-                f"      this host : {identity}"
-            )
+            print(f"\nOK: {out.name} is semantically unchanged.")
             return 0
         print(
             f"\nFAIL: {out} is stale -- regenerating changed it.\n"

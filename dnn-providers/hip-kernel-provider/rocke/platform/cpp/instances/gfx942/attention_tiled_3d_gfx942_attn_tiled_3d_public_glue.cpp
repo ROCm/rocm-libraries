@@ -189,6 +189,20 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs fp16/bf16 KV");
         return false;
     }
+    /* The swizzle XORs a row's 16-byte chunk index with row % chunks, which
+     * stays inside the row only for a power-of-two chunk count. */
+    {
+        const int chunks = s->head_size / 8;
+        if(s->use_kv_lds_swizzle && (chunks & (chunks - 1)) != 0)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "use_kv_lds_swizzle needs head_size / 8 a power of two "
+                            "(got head_size=%d)",
+                            s->head_size);
+            return false;
+        }
+    }
     if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
@@ -378,6 +392,7 @@ rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled
     memset(&s, 0, sizeof(s));
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
+    s.emit_lse = false;
     return s;
 }
 
@@ -395,7 +410,7 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+     *   seg<NUM_SEG>, dtype[, "lse"]) */
     char d_part[32];
     char h_part[32];
     char seg_part[32];
@@ -418,6 +433,10 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
@@ -505,11 +524,11 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
         ATTN3D_REASON(reason_buf);
         return false;
     }
-    if(head_size != 64 && head_size != 128 && head_size != 256)
+    if(head_size != 64 && head_size != 128 && head_size != 192 && head_size != 256)
     {
         snprintf(reason_buf,
                  sizeof(reason_buf),
-                 "tiled 3D kernel only supports head_size in {64,128,256} (got %d)",
+                 "tiled 3D kernel only supports head_size in {64,128,192,256} (got %d)",
                  head_size);
         ATTN3D_REASON(reason_buf);
         return false;
@@ -563,11 +582,8 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
         ATTN3D_REASON(reason_buf);
         return false;
     }
-    if(16 % num_queries_per_kv != 0)
-    {
-        ATTN3D_REASON("tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16");
-        return false;
-    }
+    /* A num_queries_per_kv that does not divide BLOCK_M=16 is supported: see
+     * supports_tiled_3d in the Python twin. */
     ATTN3D_REASON("supported");
     return true;
 #undef ATTN3D_REASON
@@ -667,6 +683,8 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->QK_N_TILES = out->T / ROCKE_ATTN3D_MFMA_N;
     out->PV_K_ITERS = out->T / out->PV_K_STEP;
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D_MFMA_N;
+    /* D192 stages Q through the V slot (Python: Q_IN_V_SLOT). */
+    out->Q_IN_V_SLOT = out->HD == 192 && out->T >= out->BLOCK_M;
 
     out->THREADS = 64;
     out->binary_search_iters = rocke_unified_attention_3d_tiled_spec_binary_search_iters(spec);

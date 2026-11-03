@@ -173,6 +173,18 @@ memory-address pairs under 8 cycles.
    stage (4x8 tile) shows the same band: good 15-30, bad at 10 and from 35. The cliff moved by about
    5 windows when the stage halved, so the lead is a time (about 130-290 cycles before the next
    tensor_load), not a fraction of the stage.
+3f. Single-stage prefetch hold. A prefetch group in a single-stage loop (lead below
+   `kSingleStageLeadBelow`) is held while `needsMoreInstsBeforeIssue` says its address VALUs'
+   `va_vdst` is not yet hidden, as develop's hazard gate did. A group not ready by the stage
+   barrier then lands after its tensor_load. The negative need-by skip of 3d applies to
+   single-stage loops only. `unplacedMemWaitsOut` holds a VMEM load or unpinned prefetch the same
+   way, but only behind a WMMA that can issue; when the most-ready WMMA still has a source-data
+   wait, Phase E lets the held op through Phase G instead of stalling.
+3g. Both 3f patches are needed. Removing them (asm differs on the 5 MAB kernels only; medium and
+   MAF are identical) costs on b8-3, % vs develop, pinned stack vs patches removed: bbs mab
+   -0.02/+0.05, f8 mab -0.17/+1.24, mxf4 mab -0.33/+0.06, mxf8 mab -0.24/+0.35, nvf4 mab
+   -1.18/+0.25. Final stack vs develop on all 21 perf yamls (8 interleaved reps): -1.20% to
+   +0.42%; the worst are f8 medium +0.42% (sd 0.9), mxf4 maf +0.26% and mxf4 medium +0.24%.
 4. Next: filler pacer (catch-up instead of the per-window quota), replacing the critical fillers
    and the strict-count hold; cross-queue order in its init plan.
 5. Rule 2 as a hold, once the pacer gives held VALUs a later slot. Tried alone it made things
@@ -185,10 +197,6 @@ memory-address pairs under 8 cycles.
   pass's BB entry state.
 - When a candidate needs both `va_vdst` and `vm_vsrc`, how their two counts combine in the rank.
 - Loop strict waits rose by 5 in step 3: traced and fixed in step 3b (medium mxf8 stays at 5).
-- `f8_tn_mab` stays +0.49% behind develop. Its loop is 8 WMMAs; develop issues the 3 prefetches at
-  the end (window 8), the stack at 6, 7, 8, taking the `va_vdst` wait develop avoided by waiting out
-  the gap. Holding a pinned prefetch while `untilFree > 0` should restore 8, bounded by the barrier
-  that precedes its load (the planned window is 3 and the barrier issues at 8).
 - The prefetch lead is an empirical time, not derived. The MI400 shader guide gives the semantics
   (a SCOPE_SE prefetch fills GL2 only, returns nothing, and only VM_VSRC waits on it) but no
   latencies. A formula would need the TDM completion time and GL2 residency.
@@ -196,3 +204,7 @@ memory-address pairs under 8 cycles.
   old address (`vm_vsrc(0)`). Its need-by window (4-8) is far behind the region (WMMA 12-20), so
   holding it only delays the ds that need the new address. The cause is ds issuing late
   (rule-conflicts P1), not filler placement.
+- Loop waits left after 3g, over the 21 yamls: 4 strict `va_vdst(0)` (three MAB kernels, the tail
+  prefetches after the last WMMA of the iteration) and about 66 `vm_vsrc` at 0 or 1. Counting
+  non-WMMA ops cannot remove a `va_vdst` wait, only weaken it: a CSMACC producer is hidden by
+  matrix ops (`xdlHideCsmacc`), and other VALU followers only raise the count.

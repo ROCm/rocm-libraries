@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "harness/Benchmark.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -131,6 +132,9 @@ struct HarnessPolicy
     std::string arch;
     std::string platform;
     std::size_t deviceVramMb = 0;
+
+    /// Set by --benchmark: time each verified graph with these settings.
+    std::optional<BenchmarkSettings> benchmark;
 
     bool useDevice() const
     {

@@ -312,8 +312,8 @@ void testing_spmm_bell(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_bufferSize(
         handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, &bufferSize));
 
-    void* dbuffer;
-    CHECK_HIP_ERROR(hipMalloc(&dbuffer, bufferSize));
+    auto  dbuffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* dbuffer         = dbuffer_managed.get();
 
     if(argus.call_preprocess)
     {
@@ -441,7 +441,6 @@ void testing_spmm_bell(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(dbuffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }

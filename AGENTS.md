@@ -115,6 +115,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | MIOpen provider | [`dnn-providers/miopen-provider/docs/ai-rules.md`](dnn-providers/miopen-provider/docs/ai-rules.md) |
 | rocKE | [`dnn-providers/hip-kernel-provider/rocke/AGENTS.md`](dnn-providers/hip-kernel-provider/rocke/AGENTS.md) |
 | rocRoller | [`shared/rocroller/docs/ai-rules.md`](shared/rocroller/docs/ai-rules.md) |
+| StinkyTofu DAG scheduler | [`shared/stinkytofu/src/transforms/asm/dag/AGENTS.md`](shared/stinkytofu/src/transforms/asm/dag/AGENTS.md) |
 | rocBLAS | [`projects/rocblas/.github/copilot-instructions.md`](projects/rocblas/.github/copilot-instructions.md) and `projects/rocblas/.cursor/rules/` |
 
 ### Copilot review instructions

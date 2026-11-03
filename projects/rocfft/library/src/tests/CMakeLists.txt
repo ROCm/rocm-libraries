@@ -25,8 +25,15 @@ add_executable( rocfft-internal-test
   function_pool_test.cpp
   internal_test_main.cpp
   rtc_test.cpp
+  solution_map_test.cpp
   ../data_layout.cpp
+  ../enum_printer.cpp
   ../rocfft_stub.cpp
+)
+
+# solution_map_test reads the solution maps that ship with the library.
+target_compile_definitions( rocfft-internal-test PRIVATE
+  ROCFFT_TEST_SOLUTION_MAP_DIR="${ROCFFT_SOLUTION_MAP_DIR}"
 )
 
 target_include_directories( rocfft-internal-test PRIVATE
@@ -53,6 +60,7 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-gen
   rocfft-rtc-launch
   rocfft-rtc-subprocess
+  rocfft-solution-map
   generator
   hip::host
   ${ROCFFT_SQLITE_LIB}

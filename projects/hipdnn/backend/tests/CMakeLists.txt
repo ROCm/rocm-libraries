@@ -104,6 +104,7 @@ add_executable(
     descriptors/TestNodeFactory.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
+    TestBackendExecuteDeviceCheck.cpp
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
     TestGraphAndPlanSerializationApi.cpp

@@ -2,10 +2,37 @@
 
 Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
-## (Unreleased) rocALUTION 4.2.0
+## (Unreleased) rocALUTION
 
 ### Added
 * Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+
+### Changed
+* `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.
+* The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
+* ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
+* GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
+
+### Removed
+* Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
+
+### Resolved issues
+* Fixed the HIP backend ignoring the errors returned by rocPRIM calls, such as too small temporary storage, which could lead to allocations of undefined size and to undefined scan, reduction, sort and nonzero count results.
+* Fixed the HIP backend ignoring the errors returned by HIP runtime calls for allocations, frees, memsets, copies, synchronizations and device queries, and not checking several kernel launches for errors.
+* Fixed the ILU0 factorization and the triangular solve analysis of CSR and BCSR matrices on the accelerator ignoring errors from the rocSPARSE buffer size queries.
+* Fixed `info_rocalution()` printing uninitialized memory when the rocBLAS or rocSPARSE version query fails.
+* Fixed `LocalMatrix::ReadFileRSIO()` not checking the element size query when the index or value type of the file differs from the type of the matrix, and leaking temporary buffers when a read fails.
+* Fixed `LocalMatrix::WriteFileRSIO()` reporting success when closing the file fails, for example on a full disk, leaving an incomplete file.
+* Fixed `LocalMatrix::ExtractDiagonal()` and `LocalMatrix::ExtractInverseDiagonal()` aborting on CSR matrices with more rows than columns.
+* Fixed `LocalMatrix::DiagonalMatrixMultL()` rejecting a vector with one entry per row on non-square CSR matrices, and reading out of bounds on CSR matrices with more rows than columns.
+* Fixed `init_rocalution()` reporting an accelerator after `stop_rocalution()` when the accelerator was disabled with `disable_accelerator_rocalution()`.
+* Fixed a HIP stream leak in `init_rocalution()` in multi-node builds when creating the HIP streams fails.
+* Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
+* Fixed `LocalVector::Amax()` on the accelerator returning the index and value of the entry after the largest one, and reading past the end of the vector when the largest entry is the last one. This also affected the Linf residual norm and `GetAmaxResidualIndex()` of the iterative solvers on the accelerator.
+* Fixed wrong results of the iterative triangular solves on the accelerator when both `LocalMatrix::ItLAnalyse()` and `LocalMatrix::ItUAnalyse()` are called on the same matrix, as the SGS preconditioner does with `TriSolverAlg_Iterative`.
+* Fixed `ItILU0::GetConvergenceHistory()` on the accelerator returning an unwritten history and an undefined iteration count when rocSPARSE rejects the history query. The history is now empty in this case. Also fixed a memory leak when building ItILU0 with a convergence history in single precision.
+* Fixed `ItILU0Algorithm::SyncSplit` on the accelerator stopping after the first sweep and returning zero factors, so the preconditioner is the identity, when `ItILU0Option::StoppingCriteria` or `ItILU0Option::ConvergenceHistory` is set without a norm option. `ItILU0Algorithm::AsyncSplit` failed with an illegal memory access in that case. The residual norm is now computed whenever the stopping criteria or the convergence history is requested, or when a history buffer is passed to `LocalMatrix::ItILU0Factorize()`. With only `ItILU0Option::ComputeNrmCorrection` set, the SyncSplit stopping test now also takes the residual into account.
 
 ## (Unreleased) rocALUTION 4.1.1
 

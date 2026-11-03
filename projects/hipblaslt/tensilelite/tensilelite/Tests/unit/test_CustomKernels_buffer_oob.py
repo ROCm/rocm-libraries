@@ -141,6 +141,12 @@ NO_BUFFER_OOB_KERNELS = {
     "wvSpltK_bf16_tn_m1": "rocBLAS wvSpltK, global_store only",
     "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",
     "wvSpltK_bf16_tn_m4": "rocBLAS wvSpltK, global_store only",
+    # All compiled from one source.
+    **{
+        name: "vLLM wvSplitK, global_store only"
+        for name in custom_kernel_names()
+        if name.startswith("wvSplitK_vllm_")
+    },
 }
 # HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
 # mask against the free size taken at entry.

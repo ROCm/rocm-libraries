@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  Dense matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalDnMat
@@ -46,9 +46,7 @@ public:
             = hipsparseCreateDnMat(&descr, rows, cols, ld, values, valueType, order);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateDnMat failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateDnMat", status);
         }
     }
 
@@ -59,7 +57,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroyDnMat(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalDnMat destructor");
+                log_hipsparse_error("hipsparseDestroyDnMat", status);
             }
         }
     }

@@ -12,14 +12,15 @@
  *   is_valid_spec(spec, arch)         rocke_mx_gemm_is_valid_spec(...)
  *   build_mx_gemm(spec, arch)         rocke_build_mx_gemm(...)
  *   mx_gemm_grid(spec)                rocke_mx_gemm_grid(...)
+ *   mx_gemm_element_format(dt, arch)  rocke_mx_gemm_element_format(...)
  *   (+ convenience: init-from-spec)   rocke_build_mx_gemm_new(...)
  *   (+ convenience: build -> lower)   rocke_mx_gemm_lower_to_llvm(...)
  *
  * The MX GEMM uses the OCP MX-spec shared-exponent format: each 32-element
  * mantissa block carries one 8-bit biased E8M0 scale (bias 127). v1 ships fp8e4m3 /
  * bf8e5m2 mantissa, group_k=32, 16x16 tiles, wave64, f32 output. The body
- * uses the fp8/bf8 16x16x32 MFMA atom plus an explicit per-group E8M0 decode +
- * scale-apply chain (decode_mx_scale_e8m0).
+ * uses the fp8/bf8 16x16x32 MFMA atom plus an explicit per-group E8M0
+ * scale-apply step (fma_with_mx_scale_pair).
  *
  * SPEC AS AN EXPLICIT C STRUCT. The Python dataclass is a frozen value type with
  * defaults. In C the caller fills a rocke_mx_gemm_spec_t;
@@ -36,6 +37,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "rocke/helper_rocke.helpers.mx_scale.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 
@@ -113,6 +115,16 @@ rocke_status_t rocke_mx_gemm_lower_to_llvm(const rocke_mx_gemm_spec_t* spec,
                                            char** out_ll,
                                            char* err,
                                            size_t err_cap);
+
+/* mx_gemm_element_format(mantissa_dtype, arch): the element format the
+ * arch's MFMA reads for mantissa_dtype (the FNUZ encodings on gfx942, the OCP
+ * ones on gfx950), from which the build derives its scale split. Returns a
+ * pointer to a static format, or NULL with the Python-matching message in err
+ * (capacity err_cap, may be NULL). */
+const rocke_mx_element_format_t* rocke_mx_gemm_element_format(const char* mantissa_dtype,
+                                                              const char* arch,
+                                                              char* err,
+                                                              size_t err_cap);
 
 /* mx_gemm_grid(spec) -> (n_tiles, m_tiles, 1). Any out-param may be NULL. */
 void rocke_mx_gemm_grid(const rocke_mx_gemm_spec_t* spec, int* out_gx, int* out_gy, int* out_gz);
