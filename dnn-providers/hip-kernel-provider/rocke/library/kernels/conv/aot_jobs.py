@@ -608,11 +608,17 @@ def _dgrad_pbx8_twins(sets):
     no pzs) also with pbx=8 -- the makespan-planned records (conv_dgrad_box_plan);
     same binary code, host-side plan."""
     out = list(sets)
+    # ROCKE_AOT_DGRAD_PBX8_PBC=456,684,912: each pbx=8 twin also at those CU
+    # budgets (pbc; the planner may pick multi-round plans there).
+    pbcs = [int(t) for t in _os.environ.get("ROCKE_AOT_DGRAD_PBX8_PBC", "").split(",") if t.strip()]
     for kv in sets:
         d = dict(kv)
         if d.get("pbx") in (7, 77) and not d.get("pzs"):
             d["pbx"] = 8
             out.append(tuple(sorted(d.items())))
+            if d.get("sk", 1) > 1:
+                for c in pbcs:
+                    out.append(tuple(sorted(dict(d, pbc=c).items())))
     return tuple(dict.fromkeys(out))
 
 
