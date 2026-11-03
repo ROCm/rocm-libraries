@@ -666,8 +666,9 @@ if(ROCKE_INSTALL_TESTS)
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
-    # host-side SDPA sequence-length and padding-mask adapters/specs, and the
-    # fmha_mfma free-stride ABI and layout contracts.
+    # gfx950 additive-bias route and cohort-knob pins, the host-side SDPA
+    # sequence-length and padding-mask adapters/specs, and the fmha_mfma
+    # free-stride ABI and layout contracts.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -679,6 +680,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_attention_additive_bias_routes.py"
         "tests/library/tests/test_sdpa_seqlen.py"
         "tests/library/tests/test_sdpa_padding_mask.py"
         "tests/library/tests/test_fmha_mfma_free_stride.py"
@@ -871,9 +873,11 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 1800)\n")
 
     # gfx950 additive-bias numeric lane. Its own entry (selected by name, like the
-    # one above) so its runtime does not eat into that entry's timeout.
+    # one above) so its runtime does not eat into that entry's timeout. The torch
+    # file skips where torch is missing (this CI lane); the device_numeric file
+    # runs one case per path there without torch.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs --rocke-exit-77-if-gpu-skipped)\n")
+           "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_device_numeric.py\" -v -rs --rocke-exit-77-if-gpu-skipped)\n")
     # Without a gfx950 GPU every gpu-marked case skips; report the entry as
     # skipped (77) rather than Passed on the host-only checks alone.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

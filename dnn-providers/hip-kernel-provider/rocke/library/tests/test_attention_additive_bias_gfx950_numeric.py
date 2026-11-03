@@ -12,8 +12,9 @@ paths: short prefill (16x16) and long prefill (max_seqlen_q > 256, multi- and
 single-batch), which selects the transposed 32x32 path, plus a multi-batch
 group past max_seqlen_q=512 that compiles through hipcc. Softcap and
 sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
-covers the transposed 32x32 combo stack. Every 2D group asserts its score path
-and compile backend so the coverage cannot silently drift. A dispatcher group
+covers the transposed 32x32 combo stack. The score path and compile backend of
+every 2D group, and the bias knobs of the combo and fp8 cohorts, are pinned
+without a GPU in ``test_attention_additive_bias_routes.py``. A dispatcher group
 launches an ``AttentionRequest(use_attn_bias=True)`` through the gfx950 tuning
 candidates' binding with ``tensors["attn_bias"]``.
 
@@ -27,7 +28,9 @@ are a graceful skip on a CPU CI box. The host-side argument-validation tests at
 the bottom need torch for real CPU tensors (``_validate_additive_bias`` checks
 a torch-specific dtype string), so they are gated with ``requires_torch`` and
 skip, rather than erroring the whole module, on an image with no torch (e.g.
-TheRock's gfx94X CI). Run standalone:
+TheRock's gfx94X CI). The CI GPU lane has no torch either, so it skips this
+file; ``test_attention_additive_bias_gfx950_device_numeric.py`` runs one case
+per path there. Run standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
 """
@@ -102,33 +105,6 @@ _EXTRA_BIAS_MODES = ("full_padded_sq", "bcast_hsq")
 # fast paged-KV descriptor). With bias its mask-once / mask-limit opts stay off.
 _COMBO_SEQ_LENS = [(512, 512), (300, 420)]
 _COMBO_HEADS = {"gqa8_h32": (32, 4), "gqa8_h64": (64, 8)}
-_COMBO_KNOBS = {
-    "use_transposed_scalar_state": True,
-    "use_mfma32_skip_legacy_qreg": True,
-    "use_transposed_mask_once": False,
-}
-
-# Pinned 2D routing so coverage cannot silently drift:
-# case -> {dtype: (score path, compile backend)}.
-_ROUTES = {
-    "tiled": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
-    "tiled_long": {"fp16": ("transposed32", "llvm"), "bf16": ("transposed32", "llvm")},
-    "tiled_long_1seq": {
-        "fp16": ("transposed32", "llvm"),
-        "bf16": ("transposed32", "llvm"),
-    },
-    "tiled_long_hipcc": {
-        "fp16": ("transposed32", "hipcc"),
-        "bf16": ("transposed32", "hipcc"),
-    },
-    "tiled_softcap": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
-    "tiled_window": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
-    "tiled_window_1seq": {
-        "fp16": ("transposed32", "llvm"),
-        "bf16": ("transposed32", "llvm"),
-    },
-    "tiled_combo": {"bf16": ("transposed32", "llvm")},
-}
 
 # bias layouts: name -> (broadcast batch, broadcast head, broadcast Sq,
 # extra Sk padding). ``bcast_hsq`` is the [B, 1, 1, Sk] key-padding shape.
@@ -217,6 +193,9 @@ def _reference(
 
     ``bias_inside_softcap`` computes the other order, ``softcap(QK*scale +
     bias)``, only to show a softcap case can tell the two apart.
+
+    A row whose every logit is -inf after the bias and the mask (a key-padding
+    bias can do this) also outputs 0 with LSE -inf.
     """
     hq, hkv = q.shape[1], k.shape[2]
     block_size, head_size = k.shape[1], k.shape[3]
@@ -246,38 +225,21 @@ def _reference(
         if sliding_window > 0:
             mask |= (diag - k_pos) >= sliding_window
         s = s.masked_fill(mask, float("-inf"))
-        empty = mask.all(dim=-1)
+        # A row with no usable key, from the mask or from -inf bias entries.
+        empty = torch.isneginf(s).all(dim=-1)
         lses.append(torch.logsumexp(s, dim=-1).transpose(0, 1))
         if sinks is not None:
             sink = sinks.float()[:, None, None].expand(hq, q_len, 1)
             p = torch.softmax(torch.cat((s, sink), dim=-1), dim=-1)[..., :-1]
         else:
             p = torch.softmax(s, dim=-1)
-        p = p.masked_fill(empty[None, :, None], 0.0)
+        p = p.masked_fill(empty[:, :, None], 0.0)
         outs.append(torch.einsum("hqk,khd->qhd", p, vs))
         start += q_len
     out = torch.cat(outs, dim=0)
     if return_lse:
         return out, torch.cat(lses, dim=0).unsqueeze(-1)
     return out
-
-
-def _2d_route(problem):
-    from kernels.common.attention_unified import (
-        _select_2d_compile_backend,
-        _tiled_spec_from_problem,
-    )
-
-    spec = _tiled_spec_from_problem(problem, "gfx950")
-    assert spec.use_additive_bias
-    if spec.use_mfma_32x32 and spec.use_transposed_qk_32x32:
-        assert spec.block_m_per_warp == 32
-        path = "transposed32"
-    elif spec.use_mfma_32x32:
-        path = "32x32"
-    else:
-        path = "16x16"
-    return path, _select_2d_compile_backend(problem, "gfx950"), spec
 
 
 def _check_case(
@@ -290,7 +252,6 @@ def _check_case(
     heads,
     head_size=_HEAD_SIZE,
     block_size=_BLOCK_SIZE,
-    spec_knobs=None,
 ):
     hq, hkv = {**_HEADS, **_COMBO_HEADS}[heads]
     softcap = float(features.get("softcap", 0.0))
@@ -320,15 +281,6 @@ def _check_case(
         use_additive_bias=True,
         num_kv_blocks=int(k.shape[0]),
     )
-    if backend == "tiled":
-        *route, spec = _2d_route(problem)
-        route = tuple(route)
-        for knob, want in (spec_knobs or {}).items():
-            assert getattr(spec, knob) == want, f"{case}/{dtype}/{heads}: {knob}"
-        assert route == _ROUTES[case][dtype], (
-            f"{case}/{dtype}/{heads}: expected (path, compile backend) "
-            f"{_ROUTES[case][dtype]}, got {route}"
-        )
     out = torch.empty_like(q)
     run_unified_attention_torch(
         problem=problem,
@@ -407,7 +359,6 @@ def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
         heads,
         head_size=64,
         block_size=32,
-        spec_knobs=_COMBO_KNOBS,
     )
 
 
@@ -544,6 +495,118 @@ def test_additive_bias_with_more_features_matches_reference(
     feature, path, dtype, bias_mode, heads
 ):
     _check_feature_case(feature, path, dtype, bias_mode, heads)
+
+
+# -inf bias entries: whole key columns, one fully masked query row, and on 3D
+# one whole split-KV segment. case -> (backend, seq_lens, emit_lse).
+_NEG_INF_CASES = {
+    "2d": ("tiled", [(37, 101), (64, 64), (5, 130)], False),
+    "2d_transposed32": ("tiled", [(300, 420), (512, 512)], False),
+    "2d_lse": ("tiled", [(37, 101), (64, 64), (5, 130)], True),
+    "3d": ("3d", [(1, 300), (3, 517), (1, 64)], False),
+    "3d_lse": ("3d", [(1, 300), (3, 517), (1, 64)], True),
+}
+
+
+def _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k):
+    """A full-layout bias with -inf entries; returns (bias, masked segment).
+
+    The segment is ``(seq, first key, end key)`` of split-KV segment 1 of the
+    longest sequence on 3D (segments cover ``cdiv(kv_len, num_segments * T)``
+    tiles of ``T`` keys), else None."""
+    bias = torch.randn(
+        len(seq_lens), hq, max_q, max_k, dtype=torch.float32, device="cuda"
+    )
+    bias[:, :, :, [0, 7]] = float("-inf")
+    bias[0, :, 0, :] = float("-inf")
+    if backend != "3d":
+        return bias, None
+    from kernels.common.attention_unified import _tiled_3d_spec_from_problem
+
+    spec = _tiled_3d_spec_from_problem(problem, "gfx950")
+    seq = max(range(len(seq_lens)), key=lambda i: seq_lens[i][1])
+    kv_len = seq_lens[seq][1]
+    seg_keys = -(-kv_len // (spec.num_segments * spec.tile_size)) * spec.tile_size
+    assert 2 * seg_keys <= kv_len, (seg_keys, kv_len)
+    bias[seq, :, :, seg_keys : 2 * seg_keys] = float("-inf")
+    return bias, (seq, seg_keys, 2 * seg_keys)
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("case", list(_NEG_INF_CASES))
+def test_neg_inf_bias_masks_rows_and_segments(case, dtype):
+    backend, seq_lens, emit_lse = _NEG_INF_CASES[case]
+    hq, hkv = _HEADS["gqa"]
+    q, k, v, block_table, cu_q, seqused_k = _make_inputs(seq_lens, hq, hkv, dtype)
+    max_q = max(s[0] for s in seq_lens)
+    max_k = max(s[1] for s in seq_lens)
+    scale = _HEAD_SIZE**-0.5
+    problem = UnifiedAttentionProblem(
+        total_q=q.shape[0],
+        num_seqs=len(seq_lens),
+        num_query_heads=hq,
+        num_kv_heads=hkv,
+        head_size=_HEAD_SIZE,
+        block_size=_BLOCK_SIZE,
+        max_seqlen_q=max_q,
+        max_seqlen_k=max_k,
+        dtype=dtype,
+        use_additive_bias=True,
+        num_kv_blocks=int(k.shape[0]),
+        emit_lse=emit_lse,
+    )
+    bias, segment = _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k)
+    lse = (
+        torch.full((q.shape[0], hq, 1), float("nan"), device="cuda")
+        if emit_lse
+        else None
+    )
+    out = torch.empty_like(q)
+    run_unified_attention_torch(
+        problem=problem,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=cu_q,
+        seqused_k=seqused_k,
+        softmax_scale=scale,
+        block_table=block_table,
+        softcap=0.0,
+        additive_bias=bias,
+        additive_bias_batch_stride=hq * max_q * max_k,
+        additive_bias_head_stride=max_q * max_k,
+        additive_bias_sq_stride=max_k,
+        backend=backend,
+        lse=lse,
+    )
+    torch.cuda.synchronize()
+
+    ref, ref_lse = _reference(
+        q, k, v, block_table, seq_lens, scale, bias, return_lse=True
+    )
+    empty = torch.isneginf(ref_lse[..., 0])
+    label = f"{case}/{dtype}"
+    assert empty.any(), f"{label}: no fully masked row"
+    assert not torch.isnan(out).any(), f"{label}: NaN in the output"
+    got = out.float()
+    assert torch.equal(got[empty], torch.zeros_like(got[empty])), label
+    max_abs = (ref - got)[~empty].abs().max().item()
+    assert max_abs < _TOL[dtype], f"{label}: max_abs={max_abs:.3e}"
+    if segment is not None:
+        # The masked segment is a whole one, yet the sequence's rows still see
+        # keys elsewhere, so the reduce must drop that segment, not the rows.
+        seq, _, _ = segment
+        start = sum(s[0] for s in seq_lens[:seq])
+        rows = slice(start, start + seq_lens[seq][0])
+        assert not empty[rows].any(), f"{label}: masked segment emptied a row"
+    if lse is not None:
+        assert not torch.isnan(lse).any(), f"{label}: NaN in the LSE"
+        assert torch.equal(torch.isneginf(lse[..., 0]), empty), label
+        lse_err = (lse[..., 0] - ref_lse[..., 0])[~empty].abs().max().item()
+        assert lse_err < _TOL[dtype], f"{label}: LSE max_abs={lse_err:.3e}"
 
 
 @requires_gfx950_gpu
