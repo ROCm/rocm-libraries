@@ -780,30 +780,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void noteBarrierPairIssue(const DAGNode* node);
 
     // True when decidePromote() / pickOne() may consider issuing this barrier
-    // now. No-op when clusterBarrier is off (see sccChainBlocks()).
+    // now. A prefetch group does not hold a barrier: the barrier level is above prefetch.
     bool isBarrierEligibleNow(const DAGNode* node) const {
-        return !barrierPairBlocks(node) && !sccChainBlocks(node) &&
-               !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
-    }
-    // Single-stage loop: the stage barrier waits for its released prefetch group, so the group
-    // issues right before it (in the tensor_load's window).
-    bool stageBarrierAwaitsPrefetch(const DAGNode* barrier) const {
-        if (regionDag_ == nullptr) return false;
-        bool pending = false;
-        for (const auto& [pf, bar] : prefetchStageBarrier_) {
-            if (bar != barrier->inst || prefetchIssued_.count(pf)) continue;
-            auto pid = regionDag_->instToId.find(const_cast<StinkyInstruction*>(pf));
-            if (pid == regionDag_->instToId.end()) continue;
-            const DAGNode& p = regionDag_->nodes[pid->second];
-            // Only a fully ready group, within its load window, holds the barrier; otherwise
-            // the load must not slip.
-            if (p.inDegree != 0 || prefetchHeldForLead(&p)) return false;
-            auto e = prefetchEarliestWmma_.find(pf);
-            if (e != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ > e->second)
-                return false;
-            pending = true;
-        }
-        return pending;
+        return !barrierPairBlocks(node) && !sccChainBlocks(node);
     }
 
     // kRule3CrossLoop false: no-op (earliestClock unset).
@@ -837,10 +816,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int blockPrefetchLead_ = 0;
     // Earliest WMMA count at which each prefetch may issue (blockPrefetchLead_).
     std::unordered_map<const StinkyInstruction*, int> prefetchEarliestWmma_;
-    // The topmost barrier (the signal) of the group above the tensor_load each prefetch
-    // precedes.
-    std::unordered_map<const StinkyInstruction*, StinkyInstruction*> prefetchStageBarrier_;
-    std::unordered_set<const StinkyInstruction*> prefetchIssued_;
     // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
     bool singleStageLoop() const {
         const int lead = blockPrefetchLead_;
@@ -856,8 +831,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         if (it != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ < it->second)
             return true;
         // Single-stage loop: the group waits until its address VALUs' va_vdst is hidden, as
-        // develop's hazard gate did. A group not ready by the stage barrier then lands after its
-        // tensor_load (the barrier no longer waits for it); a ready one still goes before it.
+        // develop's hazard gate did. This hold does not delay the stage barrier.
         return singleStageLoop() && isGlobalPrefetch(*node->inst) &&
                needsMoreInstsBeforeIssue(node);
     }
@@ -1288,7 +1262,6 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         fillsThisWindow_++;  // a prefetch issued from otherQueue (no lead) still takes a slot
         if (!isGlobalPrefetch(*node->inst)) fillersIssuedThisRegion_++;  // as regionFillerCount
     }
-    if (isGlobalPrefetch(*node->inst)) prefetchIssued_.insert(node->inst);
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
@@ -3609,8 +3582,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // so the barrier's planned WMMA window stands in for the load's. A prefetch whose load
     // or barrier is not in this region is left free.
     prefetchEarliestWmma_.clear();
-    prefetchStageBarrier_.clear();
-    prefetchIssued_.clear();
     barrierWaitWindows_.clear();
     for (const auto& [barrier, window] : barrierWmmaThresholds_)
         if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);
@@ -3622,9 +3593,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (IRList::iterator it = regionStart; it != regionEnd; ++it)
             if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) order.push_back(inst);
         // Group prefetches by the tensor_load that follows them, scanning backwards.
-        int loadWindow = -1;                    // -2: saw a tensor_load, waiting for its barrier
-        StinkyInstruction* groupTop = nullptr;  // topmost barrier of the group above the load
-        bool inGroup = false;
+        int loadWindow = -1;  // -2: saw a tensor_load, waiting for its barrier
         std::map<int, std::vector<StinkyInstruction*>> byLoad;  // load window -> prefetches
         std::vector<StinkyInstruction*> pendingLoads;
         for (auto it = order.rbegin(); it != order.rend(); ++it) {
@@ -3632,27 +3601,15 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             if (isTensorLoad(*inst)) {
                 pendingLoads.push_back(inst);
                 loadWindow = -2;
-                groupTop = nullptr;
-                inGroup = false;
             } else if (loadWindow == -2) {
                 auto th = barrierWmmaThresholds_.find(inst);
                 if (th != barrierWmmaThresholds_.end()) {
                     loadWindow = th->second;
                     for (StinkyInstruction* tl : pendingLoads) loadPlannedWindow[tl] = loadWindow;
                     pendingLoads.clear();
-                    groupTop = inst;
-                    inGroup = true;
                 }
-            } else if (inGroup) {
-                if (isBarrier(*inst))
-                    groupTop = inst;  // climb to the group's signal
-                else
-                    inGroup = false;
             }
-            if (isGlobalPrefetch(*inst) && loadWindow >= 0) {
-                byLoad[loadWindow].push_back(inst);
-                if (groupTop) prefetchStageBarrier_[inst] = groupTop;
-            }
+            if (isGlobalPrefetch(*inst) && loadWindow >= 0) byLoad[loadWindow].push_back(inst);
         }
         for (auto& [window, prefetches] : byLoad) {
             std::reverse(prefetches.begin(), prefetches.end());  // back to original order
