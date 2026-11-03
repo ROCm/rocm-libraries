@@ -205,6 +205,18 @@ typedef enum rocsolver_cholqr_shift_
     rocsolver_cholqr_shift_provided = 313, /**< Sigma must be provided by the user. */
 } rocsolver_cholqr_shift;
 
+/*! \brief Used by LAQGE, LAQSY and LAQHE to report the equilibration that was applied.
+ ********************************************************************************/
+typedef enum rocsolver_equilibration_
+{
+    rocsolver_equilibration_none = 361, /**< No equilibration. */
+    rocsolver_equilibration_row = 362, /**< Row equilibration: A was replaced by diag(R) A. */
+    rocsolver_equilibration_column = 363, /**< Column equilibration: A was replaced by A diag(C). */
+    rocsolver_equilibration_both
+    = 364, /**< Row and column equilibration (diag(R) A diag(C)), or symmetric equilibration
+               (diag(S) A diag(S)). */
+} rocsolver_equilibration;
+
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/
 typedef enum rocsolver_function_

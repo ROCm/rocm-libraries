@@ -2169,6 +2169,501 @@ inline rocblas_status rocsolver_gecon(rocblas_handle handle,
 }
 /*****************************************************/
 
+/******************** GEEQU_GEEQUB ********************/
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             float* A,
+                                             rocblas_int lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_sgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_sgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             double* A,
+                                             rocblas_int lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_dgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_dgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_cgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_cgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             rocblas_double_complex* A,
+                                             rocblas_int lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_zgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_zgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             float* A,
+                                             int64_t lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_sgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_sgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             double* A,
+                                             int64_t lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_dgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_dgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             rocblas_float_complex* A,
+                                             int64_t lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_cgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_cgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             rocblas_double_complex* A,
+                                             int64_t lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_zgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_zgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+/*****************************************************/
+
+/******************** POEQU_POEQUB ********************/
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int n,
+                                             float* A,
+                                             rocblas_int lda,
+                                             float* S,
+                                             float* scond,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_spoequb(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_spoequ(handle, n, A, lda, S, scond, amax, info);
+}
+
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int n,
+                                             double* A,
+                                             rocblas_int lda,
+                                             double* S,
+                                             double* scond,
+                                             double* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_dpoequb(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_dpoequ(handle, n, A, lda, S, scond, amax, info);
+}
+
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* S,
+                                             float* scond,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_cpoequb(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_cpoequ(handle, n, A, lda, S, scond, amax, info);
+}
+
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int n,
+                                             rocblas_double_complex* A,
+                                             rocblas_int lda,
+                                             double* S,
+                                             double* scond,
+                                             double* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_zpoequb(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_zpoequ(handle, n, A, lda, S, scond, amax, info);
+}
+
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t n,
+                                             float* A,
+                                             int64_t lda,
+                                             float* S,
+                                             float* scond,
+                                             float* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_spoequb_64(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_spoequ_64(handle, n, A, lda, S, scond, amax, info);
+}
+
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t n,
+                                             double* A,
+                                             int64_t lda,
+                                             double* S,
+                                             double* scond,
+                                             double* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_dpoequb_64(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_dpoequ_64(handle, n, A, lda, S, scond, amax, info);
+}
+
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t n,
+                                             rocblas_float_complex* A,
+                                             int64_t lda,
+                                             float* S,
+                                             float* scond,
+                                             float* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_cpoequb_64(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_cpoequ_64(handle, n, A, lda, S, scond, amax, info);
+}
+
+inline rocblas_status rocsolver_poequ_poequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t n,
+                                             rocblas_double_complex* A,
+                                             int64_t lda,
+                                             double* S,
+                                             double* scond,
+                                             double* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_zpoequb_64(handle, n, A, lda, S, scond, amax, info)
+                : rocsolver_zpoequ_64(handle, n, A, lda, S, scond, amax, info);
+}
+
+/*****************************************************/
+
+/******************** LAQGE ********************/
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      float* A,
+                                      rocblas_int lda,
+                                      const float* R,
+                                      const float* C,
+                                      const float* rowcnd,
+                                      const float* colcnd,
+                                      const float* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_slaqge(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      double* A,
+                                      rocblas_int lda,
+                                      const double* R,
+                                      const double* C,
+                                      const double* rowcnd,
+                                      const double* colcnd,
+                                      const double* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_dlaqge(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      const float* R,
+                                      const float* C,
+                                      const float* rowcnd,
+                                      const float* colcnd,
+                                      const float* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_claqge(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_double_complex* A,
+                                      rocblas_int lda,
+                                      const double* R,
+                                      const double* C,
+                                      const double* rowcnd,
+                                      const double* colcnd,
+                                      const double* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_zlaqge(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      int64_t m,
+                                      int64_t n,
+                                      float* A,
+                                      int64_t lda,
+                                      const float* R,
+                                      const float* C,
+                                      const float* rowcnd,
+                                      const float* colcnd,
+                                      const float* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_slaqge_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      int64_t m,
+                                      int64_t n,
+                                      double* A,
+                                      int64_t lda,
+                                      const double* R,
+                                      const double* C,
+                                      const double* rowcnd,
+                                      const double* colcnd,
+                                      const double* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_dlaqge_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      int64_t m,
+                                      int64_t n,
+                                      rocblas_float_complex* A,
+                                      int64_t lda,
+                                      const float* R,
+                                      const float* C,
+                                      const float* rowcnd,
+                                      const float* colcnd,
+                                      const float* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_claqge_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqge(rocblas_handle handle,
+                                      int64_t m,
+                                      int64_t n,
+                                      rocblas_double_complex* A,
+                                      int64_t lda,
+                                      const double* R,
+                                      const double* C,
+                                      const double* rowcnd,
+                                      const double* colcnd,
+                                      const double* amax,
+                                      rocsolver_equilibration* equed)
+{
+    return rocsolver_zlaqge_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, equed);
+}
+
+/*****************************************************/
+
+/******************** LAQSY_LAQHE ********************/
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            rocblas_int n,
+                                            float* A,
+                                            rocblas_int lda,
+                                            const float* S,
+                                            const float* scond,
+                                            const float* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return rocsolver_slaqsy(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            rocblas_int n,
+                                            double* A,
+                                            rocblas_int lda,
+                                            const double* S,
+                                            const double* scond,
+                                            const double* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return rocsolver_dlaqsy(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            rocblas_int n,
+                                            rocblas_float_complex* A,
+                                            rocblas_int lda,
+                                            const float* S,
+                                            const float* scond,
+                                            const float* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return HERM ? rocsolver_claqhe(handle, uplo, n, A, lda, S, scond, amax, equed)
+                : rocsolver_claqsy(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            rocblas_int n,
+                                            rocblas_double_complex* A,
+                                            rocblas_int lda,
+                                            const double* S,
+                                            const double* scond,
+                                            const double* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return HERM ? rocsolver_zlaqhe(handle, uplo, n, A, lda, S, scond, amax, equed)
+                : rocsolver_zlaqsy(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            int64_t n,
+                                            float* A,
+                                            int64_t lda,
+                                            const float* S,
+                                            const float* scond,
+                                            const float* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return rocsolver_slaqsy_64(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            int64_t n,
+                                            double* A,
+                                            int64_t lda,
+                                            const double* S,
+                                            const double* scond,
+                                            const double* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return rocsolver_dlaqsy_64(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            int64_t n,
+                                            rocblas_float_complex* A,
+                                            int64_t lda,
+                                            const float* S,
+                                            const float* scond,
+                                            const float* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return HERM ? rocsolver_claqhe_64(handle, uplo, n, A, lda, S, scond, amax, equed)
+                : rocsolver_claqsy_64(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+inline rocblas_status rocsolver_laqsy_laqhe(bool HERM,
+                                            rocblas_handle handle,
+                                            rocblas_fill uplo,
+                                            int64_t n,
+                                            rocblas_double_complex* A,
+                                            int64_t lda,
+                                            const double* S,
+                                            const double* scond,
+                                            const double* amax,
+                                            rocsolver_equilibration* equed)
+{
+    return HERM ? rocsolver_zlaqhe_64(handle, uplo, n, A, lda, S, scond, amax, equed)
+                : rocsolver_zlaqsy_64(handle, uplo, n, A, lda, S, scond, amax, equed);
+}
+
+/*****************************************************/
 /******************** LACGV ********************/
 inline rocblas_status
     rocsolver_lacgv(rocblas_handle handle, rocblas_int n, rocblas_float_complex* x, rocblas_int incx)
