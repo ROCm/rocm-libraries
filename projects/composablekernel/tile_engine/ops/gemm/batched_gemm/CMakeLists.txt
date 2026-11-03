@@ -68,6 +68,7 @@ function(create_individual_batched_gemm_target datatype layout trait tile_config
     add_dependencies(benchmark_batched_gemm_${datatype}_${layout} ${target_name})
 
     ck_tile_gemm_split_trait("${trait}" pipeline epilogue scheduler)
+    ck_tile_gemm_pipeline_group("${pipeline}" pipeline)
 
     # The trait splitter is shared with gemm_universal and knows pipelines
     # batched_gemm does not build. Fail with the actionable cause rather than
