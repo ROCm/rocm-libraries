@@ -686,7 +686,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_sdpa_free_stride_layouts.py"
         "tests/library/tests/test_attention_dense_gfx942.py"
         "tests/library/tests/test_attention_combo_sweep_fp8.py"
-        "tests/library/tests/dispatch/attention/test_review_followups.py")
+        "tests/library/tests/dispatch/attention/test_review_followups.py"
+        # One node id, not the file: the rest of test_attention_builds.py
+        # disassembles HSACO, so it needs the compiler tools this lane does not
+        # inject, and its budget sentinel turns a missing-tool skip into a
+        # failure. This test is pure host-side signature/params mirroring.
+        "tests/library/tests/test_attention_builds.py::TestAttentionHelpers::test_gfx950_signature_matches_the_built_kernels_params")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS

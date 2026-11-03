@@ -1608,6 +1608,7 @@ class TestAttentionHelpers(unittest.TestCase):
             "persistent": AttentionDenseSpec(
                 **base, persistent=True, num_persistent=256
             ),
+            "fp8-kv": AttentionDenseSpec(**base, kv_storage_dtype="fp8e4m3"),
         }
         for arm, spec in arms.items():
             with self.subTest(arm=arm):
@@ -1627,6 +1628,18 @@ class TestAttentionHelpers(unittest.TestCase):
                 for a in ("runtime-shape", "sliding-window", "bottom-right")
             ],
             [True, False, False],
+        )
+        # The mirror above only catches signature/params DISAGREEING, so dropping
+        # the fp8 scales from both sides would still pass it. Pin that the fp8 arm
+        # carries them as f32 and that a non-fp8 arm does not.
+        fp8_sig = attention_dense_signature(arms["fp8-kv"])
+        self.assertEqual(
+            [a["type"] for a in fp8_sig if a["name"] in ("k_scale", "v_scale")],
+            ["f32", "f32"],
+        )
+        self.assertNotIn(
+            "k_scale",
+            [a["name"] for a in attention_dense_signature(arms["runtime-shape"])],
         )
 
     def test_persist_decodes_build_with_distinct_names_on_both_arches(self):

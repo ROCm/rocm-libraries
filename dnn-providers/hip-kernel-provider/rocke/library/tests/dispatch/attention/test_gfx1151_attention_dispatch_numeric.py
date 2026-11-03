@@ -2555,14 +2555,15 @@ class TestMetadataSafety:
             )
 
     def test_requires_k_scale_v_scale_for_fp8_kv(self, kind):
+        # Shares _resolve_fp8_scale with the dense and unified bindings, so the
+        # refusal names the one scale that is missing rather than both at once.
         k = _fake_tensor((2, 32, 2, 64), dtype="float8_e4m3fn")
-        with pytest.raises(ValueError, match=r"k_scale.*v_scale"):
-            _bind(
-                kind,
-                _dense_request(use_fp8=True),
-                _meta_spec(kind, kv_dtype="fp8e4m3"),
-                {**_dense_tensors(), "k": k, "v": k},
-            )
+        tensors = {**_dense_tensors(), "k": k, "v": k}
+        spec = _meta_spec(kind, kv_dtype="fp8e4m3")
+        with pytest.raises(ValueError, match=r"requires 'k_scale'"):
+            _bind(kind, _dense_request(use_fp8=True), spec, tensors)
+        with pytest.raises(ValueError, match=r"requires 'v_scale'"):
+            _bind(kind, _dense_request(use_fp8=True), spec, tensors, k_scale=0.5)
 
     def test_softcap_objects_require_a_positive_cap(self, kind):
         spec = _meta_spec(kind, softcap=True)
