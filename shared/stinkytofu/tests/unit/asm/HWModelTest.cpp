@@ -201,8 +201,10 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
         for (size_t j = i + 1; j < hw.waitHide.forms.size(); ++j) {
             const auto& a = hw.waitHide.forms[i];
             const auto& b = hw.waitHide.forms[j];
-            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs)
-                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs;
+            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs &&
+                         a.scaled == b.scaled)
+                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs << " scaled "
+                << a.scaled;
         }
     }
 
@@ -216,6 +218,12 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
         EXPECT_EQ(v0.waitHide.forms[i].dstVgprs, hw.waitHide.forms[i].dstVgprs);
         EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
         EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
+        EXPECT_EQ(v0.waitHide.forms[i].xdlMixLead, hw.waitHide.forms[i].xdlMixLead);
+        EXPECT_EQ(v0.waitHide.forms[i].xdlMixTail, hw.waitHide.forms[i].xdlMixTail);
+        EXPECT_EQ(v0.waitHide.forms[i].csmaccMixLead, hw.waitHide.forms[i].csmaccMixLead);
+        EXPECT_EQ(v0.waitHide.forms[i].csmaccMixTail, hw.waitHide.forms[i].csmaccMixTail);
+        EXPECT_EQ(v0.waitHide.forms[i].scaled, hw.waitHide.forms[i].scaled);
+        EXPECT_EQ(v0.waitHide.forms[i].mixTailWmmaSlots, hw.waitHide.forms[i].mixTailWmmaSlots);
     }
 }
 

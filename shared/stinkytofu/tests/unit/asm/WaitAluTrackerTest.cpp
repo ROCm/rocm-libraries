@@ -213,4 +213,42 @@ TEST_F(WaitAluTrackerTest, UntilFreeUsesFormWmma) {
     EXPECT_EQ(t.requiredGap(*insts[1], *insts[2], WaitAluHideOp::Wmma, insts[1]), -1);
 }
 
+// Mixed hide of the latency-8 / 8-VGPR form (lead 5, tail 7): VALUs count only once 5 matrix
+// ops issued, then each one fills a tail slot.
+TEST_F(WaitAluTrackerTest, MixedHideCountsValusAfterLead) {
+    // Each one accumulates into its own 8 VGPRs, so none re-stamps the producer's v[0:7].
+    auto wmma = [](int i) {
+        const std::string r = "v[" + std::to_string(8 * i) + ":" + std::to_string(8 * i + 7) + "]";
+        return "  " + r + R"( = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], )" + r +
+               R"() { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } })" +
+               "\n";
+    };
+    std::string body;
+    for (int i = 0; i <= 5; ++i) body += wmma(i);
+    for (int i = 0; i < 7; ++i)
+        body += "  v" + std::to_string(200 + i) + " = \"st.v_add_f32\"(v250, v251) " +
+                "{ issueCycles = 1, latencyCycles = 5 }\n";
+    body += "  v260 = \"st.ds_load_b32\"(v0) " + std::string(kDsAttrs) + "\n";
+    const std::vector<StinkyInstruction*> insts = parse(body);
+    ASSERT_EQ(insts.size(), 14u);
+    const StinkyInstruction& ds = *insts.back();
+    WaitAluTracker t = makeTracker();
+    t.commit(*insts[0]);
+    // Matrix ops alone: the lead plus a tail of matrix ops, the form's matrix count.
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Wmma), 12);
+    EXPECT_EQ(t.requiredGap(*insts[0], ds, WaitAluHideOp::Wmma), 12);
+    // One VALU per WMMA window: the tail after windows 5..8 is 1, 3, 5, 7. Four per window: 4, 9.
+    EXPECT_EQ(t.requiredGap(*insts[0], ds, WaitAluHideOp::Wmma, nullptr, 1), 8);
+    EXPECT_EQ(t.requiredGap(*insts[0], ds, WaitAluHideOp::Wmma, nullptr, 4), 6);
+    // Before the lead a VALU fills nothing.
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Valu), -1);
+    for (int i = 1; i <= 4; ++i) t.commit(*insts[i]);
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Valu), -1);
+    t.commit(*insts[5]);
+    // Lead met: 7 VALUs or 7 matrix ops, one slot each.
+    EXPECT_EQ(t.untilFree(ds, WaitAluHideOp::Wmma), 7);
+    std::vector<StinkyInstruction*> valus(insts.begin() + 6, insts.begin() + 13);
+    expectCountsDown(t, ds, WaitAluHideOp::Valu, valus, /*vm=*/false);
+}
+
 }  // namespace

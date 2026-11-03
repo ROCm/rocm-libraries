@@ -117,14 +117,27 @@ struct HWModel {
     /// so that wait is always sent.
     struct WaitHide {
         /// Matrix ops that satisfy a pending va_vdst, for one form. Keyed by the
-        /// instruction's own resolved cost latency and destination width.
+        /// instruction's own resolved cost latency, destination width and whether it is a
+        /// scaled (MX, LD_SCALE + WMMA pair) op. A scaled op with no scaled row uses the
+        /// unscaled one.
         struct Form {
             int costLatency;
             int dstVgprs;
+            bool scaled = false;
             /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
             int xdlVaVdst;
             /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
             int csmaccVaVdst;
+            /// Mixed hide, an alternative to the counts above: after the producer, `MixLead`
+            /// matrix ops first, then `MixTail` more ops that are matrix ops or CSMACC VALUs in
+            /// any order. A VALU before the lead co-issues into a matrix op's slot and pushes
+            /// nothing out, so it does not count. 0 leaves the mixed hide off for that producer.
+            int xdlMixLead = 0;
+            int xdlMixTail = 0;
+            int csmaccMixLead = 0;
+            int csmaccMixTail = 0;
+            /// Tail slots one matrix op fills (a VALU fills one).
+            int mixTailWmmaSlots = 1;
         };
         /// One row per form the arch issues. A form with no row never satisfies a
         /// va_vdst wait, so its producers are always waited on.

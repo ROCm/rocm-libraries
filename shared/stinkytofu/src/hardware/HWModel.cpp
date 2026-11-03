@@ -22,8 +22,37 @@ namespace {
 // Other arches omit .waitHide.
 constexpr HWModel::WaitHide::Form kGfx1250WaitHideForms[] = {
     {.costLatency = 4, .dstVgprs = 8, .xdlVaVdst = 13, .csmaccVaVdst = 13},
-    {.costLatency = 8, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
+    {.costLatency = 8,
+     .dstVgprs = 8,
+     .xdlVaVdst = 12,
+     .csmaccVaVdst = 12,
+     .xdlMixLead = 5,
+     .xdlMixTail = 7,
+     .csmaccMixLead = 5,
+     .csmaccMixTail = 7},
     {.costLatency = 8, .dstVgprs = 16, .xdlVaVdst = 11, .csmaccVaVdst = 11},
+    // Scaled (MX) 8-pass forms. Mixed hide: the lead in matrix ops, then 6 tail slots, where a
+    // matrix op fills 2 and a VALU 1.
+    {.costLatency = 8,
+     .dstVgprs = 8,
+     .scaled = true,
+     .xdlVaVdst = 7,
+     .csmaccVaVdst = 7,
+     .xdlMixLead = 4,
+     .xdlMixTail = 6,
+     .csmaccMixLead = 4,
+     .csmaccMixTail = 6,
+     .mixTailWmmaSlots = 2},
+    {.costLatency = 8,
+     .dstVgprs = 16,
+     .scaled = true,
+     .xdlVaVdst = 6,
+     .csmaccVaVdst = 6,
+     .xdlMixLead = 3,
+     .xdlMixTail = 6,
+     .csmaccMixLead = 3,
+     .csmaccMixTail = 6,
+     .mixTailWmmaSlots = 2},
     {.costLatency = 16, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
 };
 

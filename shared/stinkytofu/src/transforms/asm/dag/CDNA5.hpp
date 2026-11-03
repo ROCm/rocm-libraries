@@ -3761,7 +3761,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);
     };
     // WMMAs the scoreboard needs between a filler and the placed op it feeds for the op to need no
-    // va_vdst; 0 when no count of WMMAs hides it.
+    // va_vdst; 0 when no count of WMMAs hides it. A form with a mixed hide also counts the
+    // VALUs between them: an estimate, each window taken to carry the filler quota, at most the
+    // co-issue slots one WMMA window has for them.
+    const int valusPerWindow = std::min(fillQuotaPerWindow_, regionCoIssueSlots_);
     std::unordered_map<uint64_t, int> gapCache;
     auto gapWmmas = [&](unsigned id, unsigned succ) {
         if (!waitAlu_) return 0;
@@ -3769,7 +3772,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         if (fresh)
             it->second = std::max(
                 0, waitAlu_->requiredGap(*deps.dag.nodes[id].inst, *deps.dag.nodes[succ].inst,
-                                         WaitAluHideOp::Wmma, formWmma_));
+                                         WaitAluHideOp::Wmma, formWmma_, valusPerWindow));
         return it->second;
     };
     // Latest window per filler: the planned window of the nearest placed op it feeds, less `gap`

@@ -191,19 +191,38 @@ inline bool waitHideSatisfied(unsigned count, unsigned step, int required) {
     return count >= static_cast<unsigned>(required) * step;
 }
 
-// Row matching a form's cost latency and destination width, or nullptr if none.
+// Mixed hide: `lead` matrix ops first, then `tail` slots, each matrix op filling `wmmaSlots` and
+// each VALU one. `since` counts matrix-op ordinals (step each), `valuAfterLead` the VALUs issued
+// once the lead was met.
+inline bool mixHideSatisfied(unsigned since, unsigned valuAfterLead, unsigned step, int lead,
+                             int tail, int wmmaSlots) {
+    if (lead <= 0 || tail <= 0) return false;
+    const unsigned leadOrd = static_cast<unsigned>(lead) * step;
+    if (since < leadOrd) return false;
+    return (since - leadOrd) / step * static_cast<unsigned>(wmmaSlots) + valuAfterLead >=
+           static_cast<unsigned>(tail);
+}
+
+// Row matching a form's cost latency, destination width and scaling, or nullptr if none. A
+// scaled op with no scaled row takes the unscaled one.
 inline const HWModel::WaitHide::Form* waitHideForm(const HWModel::WaitHide& wh, int costLatency,
-                                                   int dstVgprs) {
-    for (const auto& form : wh.forms)
-        if (form.costLatency == costLatency && form.dstVgprs == dstVgprs) return &form;
-    return nullptr;
+                                                   int dstVgprs, bool scaled) {
+    const HWModel::WaitHide::Form* unscaled = nullptr;
+    for (const auto& form : wh.forms) {
+        if (form.costLatency != costLatency || form.dstVgprs != dstVgprs) continue;
+        if (form.scaled == scaled) return &form;
+        if (!form.scaled) unscaled = &form;
+    }
+    return scaled ? unscaled : nullptr;
 }
 
 // Largest value xdlSince is compared against, at the largest step it can take.
 inline unsigned computeXdlSinceCap(const HWModel::WaitHide& wh) {
     int maxHide = 0;
     for (const auto& form : wh.forms)
-        maxHide = std::max({maxHide, form.csmaccVaVdst, form.xdlVaVdst});
+        maxHide =
+            std::max({maxHide, form.csmaccVaVdst, form.xdlVaVdst, form.xdlMixLead + form.xdlMixTail,
+                      form.csmaccMixLead + form.csmaccMixTail});
     return 2 * static_cast<unsigned>(maxHide);
 }
 
@@ -370,6 +389,10 @@ struct VgprStamp {
     // Matrix-op steps since this producer stamped, saturating at xdlSinceCap. An age, not
     // a position: a merge rebases positions, and an age survives that.
     unsigned xdlSince = 0;
+    // VALUs issued after this producer once xdlSince met the XDL / CSMACC mixed-hide lead,
+    // saturating at xdlSinceCap. Ages too, joined like xdlSince.
+    unsigned valuAfterXdlLead = 0;
+    unsigned valuAfterCsmaccLead = 0;
     // An op outside the modeled set issued after this producer stamped, which breaks the hide
     // below. Monotone, so a join can only ever set it.
     bool unmodeledSince = false;
@@ -393,26 +416,42 @@ class WaitcntBrackets {
         return scores.size();
     }
 
+    // Hide counts of one form, as latched from its WaitHide row.
+    struct HideCounts {
+        int xdl = 0;
+        int csmacc = 0;
+        int xdlMixLead = 0;
+        int xdlMixTail = 0;
+        int csmaccMixLead = 0;
+        int csmaccMixTail = 0;
+        int mixTailWmmaSlots = 1;
+        bool operator==(const HideCounts&) const = default;
+        bool anyMix() const {
+            return xdlMixTail > 0 || csmaccMixTail > 0;
+        }
+    };
+
     // Whether these counts are the form already latched.
-    bool sameXdlForm(unsigned inc, int hideXdl, int hideCsmacc) const {
-        return inc == xdlInc && hideXdl == xdlHideXdl && hideCsmacc == xdlHideCsmacc;
+    bool sameXdlForm(unsigned inc, const HideCounts& h) const {
+        return inc == xdlInc && h == hide;
     }
 
     // Latch this matrix op's hide counts, or note a second form so the rules switch off.
     void latchXdlForm(const StinkyInstruction& inst, unsigned inc) {
-        const auto* form =
-            ctx->waitHide == nullptr
-                ? nullptr
-                : waitHideForm(*ctx->waitHide, inst.latencyCycles, wmmaDstVgprs(inst));
-        const int hideXdl = form != nullptr ? form->xdlVaVdst : 0;
-        const int hideCsmacc = form != nullptr ? form->csmaccVaVdst : 0;
+        const auto* form = ctx->waitHide == nullptr
+                               ? nullptr
+                               : waitHideForm(*ctx->waitHide, inst.latencyCycles,
+                                              wmmaDstVgprs(inst), hasMatrixScalePair(inst));
+        HideCounts h;
+        if (form != nullptr)
+            h = {form->xdlVaVdst,     form->csmaccVaVdst,  form->xdlMixLead,      form->xdlMixTail,
+                 form->csmaccMixLead, form->csmaccMixTail, form->mixTailWmmaSlots};
         if (!xdlIncSeen) {
             // One kernel issues one form, so the first op's counts stand for the kernel.
             xdlInc = inc;
-            xdlHideXdl = hideXdl;
-            xdlHideCsmacc = hideCsmacc;
+            hide = h;
             xdlIncSeen = true;
-        } else if (!sameXdlForm(inc, hideXdl, hideCsmacc)) {
+        } else if (!sameXdlForm(inc, h)) {
             // A second form: disable both rules rather than pick one.
             xdlFormMixed = true;
         }
@@ -464,9 +503,13 @@ class WaitcntBrackets {
         // A path with no VA producer carries no age.
         if (!oVa) return;
         if (!myVa) {
-            if (s.xdlSince != o->xdlSince || s.unmodeledSince != o->unmodeledSince)
+            if (s.xdlSince != o->xdlSince || s.unmodeledSince != o->unmodeledSince ||
+                s.valuAfterXdlLead != o->valuAfterXdlLead ||
+                s.valuAfterCsmaccLead != o->valuAfterCsmaccLead)
                 strictDom = true;
             s.xdlSince = o->xdlSince;
+            s.valuAfterXdlLead = o->valuAfterXdlLead;
+            s.valuAfterCsmaccLead = o->valuAfterCsmaccLead;
             s.unmodeledSince = o->unmodeledSince;
             return;
         }
@@ -480,6 +523,14 @@ class WaitcntBrackets {
             s.xdlSince = o->xdlSince;
             strictDom = true;
         }
+        // The mixed hide only grows with either count, so the fewer of each is a safe join.
+        for (auto [mine, theirs] : {std::pair{&s.valuAfterXdlLead, o->valuAfterXdlLead},
+                                    std::pair{&s.valuAfterCsmaccLead, o->valuAfterCsmaccLead}}) {
+            if (theirs < *mine) {
+                *mine = theirs;
+                strictDom = true;
+            }
+        }
     }
 
     // Join the latched form; paths that disagree are a mixed kernel.
@@ -488,12 +539,10 @@ class WaitcntBrackets {
         const bool wasMixed = xdlFormMixed;
         const bool wasSeen = xdlIncSeen;
         xdlFormMixed = xdlFormMixed || other.xdlFormMixed ||
-                       (xdlIncSeen && other.xdlIncSeen &&
-                        !sameXdlForm(other.xdlInc, other.xdlHideXdl, other.xdlHideCsmacc));
+                       (xdlIncSeen && other.xdlIncSeen && !sameXdlForm(other.xdlInc, other.hide));
         if (!xdlIncSeen && other.xdlIncSeen) {
             xdlInc = other.xdlInc;
-            xdlHideXdl = other.xdlHideXdl;
-            xdlHideCsmacc = other.xdlHideCsmacc;
+            hide = other.hide;
         }
         xdlIncSeen = xdlIncSeen || other.xdlIncSeen;
         if (xdlFormMixed != wasMixed || xdlIncSeen != wasSeen) strictDom = true;
@@ -502,6 +551,10 @@ class WaitcntBrackets {
     // Record this op against every stamp already written. This op is not its own follower,
     // so the stamps it writes are reset to zero below, after this.
     void noteIssue(VaPipe pipe, unsigned inc) {
+        if (pipe == PIPE_CSMACC) {
+            noteMixValu();
+            return;
+        }
         if (pipe != PIPE_XDL && pipe != PIPE_DPMACC && pipe != PIPE_TRANS) return;
         for (auto& [k, s] : scores) {
             if (pipe == PIPE_XDL)
@@ -511,6 +564,20 @@ class WaitcntBrackets {
                 s.unmodeledSince = true;
             // vaUB counts this op, so vaUB - inc is the ticket before it. First anchor wins.
             if (isAnchorPipe(pipe) && s.nextAnchorShared == 0) s.nextAnchorShared = vaUB - inc;
+        }
+    }
+
+    // A CSMACC VALU fills a mixed-hide tail slot of every producer whose lead is already met.
+    // One before the lead co-issues into a matrix op's slot, so it counts for nothing.
+    void noteMixValu() {
+        if (!hide.anyMix()) return;
+        const unsigned xdlLead = static_cast<unsigned>(hide.xdlMixLead) * xdlInc;
+        const unsigned csmaccLead = static_cast<unsigned>(hide.csmaccMixLead) * xdlInc;
+        for (auto& [k, s] : scores) {
+            if (hide.xdlMixTail > 0 && s.xdlSince >= xdlLead)
+                s.valuAfterXdlLead = std::min(ctx->xdlSinceCap, s.valuAfterXdlLead + 1);
+            if (hide.csmaccMixTail > 0 && s.xdlSince >= csmaccLead)
+                s.valuAfterCsmaccLead = std::min(ctx->xdlSinceCap, s.valuAfterCsmaccLead + 1);
         }
     }
 
@@ -556,6 +623,8 @@ class WaitcntBrackets {
                 s.vaOrd[pipe] = ord;
                 s.vaOrdShared = vaUB;
                 s.xdlSince = 0;
+                s.valuAfterXdlLead = 0;
+                s.valuAfterCsmaccLead = 0;
                 s.nextAnchorShared = 0;
                 s.unmodeledSince = false;
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
@@ -737,10 +806,16 @@ class WaitcntBrackets {
         unsigned followers = vaPipeUB[p] - s.vaOrd[p];
         if (ctx->waitHide == nullptr || xdlFormMixed) return followers;
         if (p == PIPE_XDL) {
-            if (waitHideSatisfied(followers, xdlInc, xdlHideXdl)) {
-                PASS_DEBUG(std::cerr
-                           << "[InsertWaitAlu]     skip va_vdst [XDL followers=" << followers
-                           << " >= " << xdlHideXdl << "*" << xdlInc << "]\n");
+            if (waitHideSatisfied(followers, xdlInc, hide.xdl)) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [XDL followers="
+                                     << followers << " >= " << hide.xdl << "*" << xdlInc << "]\n");
+                return ~0u;
+            }
+            if (mixHideSatisfied(s.xdlSince, s.valuAfterXdlLead, xdlInc, hide.xdlMixLead,
+                                 hide.xdlMixTail, hide.mixTailWmmaSlots)) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [XDL mixed matrix-ops="
+                                     << s.xdlSince << " valus=" << s.valuAfterXdlLead << " lead="
+                                     << hide.xdlMixLead << " tail=" << hide.xdlMixTail << "]\n");
                 return ~0u;
             }
             // Ops from the anchor onward are ordered behind this producer; live keeps it in frame.
@@ -754,9 +829,13 @@ class WaitcntBrackets {
         }
         if (p == PIPE_CSMACC) {
             const unsigned since = s.xdlSince;
+            const bool hidByMatrix = waitHideSatisfied(since, xdlInc, hide.csmacc);
+            const bool hidByMix =
+                mixHideSatisfied(since, s.valuAfterCsmaccLead, xdlInc, hide.csmaccMixLead,
+                                 hide.csmaccMixTail, hide.mixTailWmmaSlots);
             // Count from the producer's own ticket in the shared order.
             if (ctx->opts.sharedOrderCountFollowers && sharedCountApplies(s) &&
-                s.vaOrdShared != 0 && !waitHideSatisfied(since, xdlInc, xdlHideCsmacc)) {
+                s.vaOrdShared != 0 && !hidByMatrix && !hidByMix) {
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from shared order ["
                                      << (vaUB - s.vaOrdShared) << " vs per-pipe " << followers
                                      << "]\n");
@@ -766,9 +845,15 @@ class WaitcntBrackets {
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-skip va_vdst (other "
                                         "units outstanding) [CSMACC matrix-ops="
                                      << since << "]\n");
-            } else if (waitHideSatisfied(since, xdlInc, xdlHideCsmacc)) {
+            } else if (hidByMatrix) {
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [CSMACC matrix-ops="
-                                     << since << " >= " << xdlHideCsmacc << "*" << xdlInc << "]\n");
+                                     << since << " >= " << hide.csmacc << "*" << xdlInc << "]\n");
+                return ~0u;
+            } else if (hidByMix) {
+                PASS_DEBUG(std::cerr
+                           << "[InsertWaitAlu]     skip va_vdst [CSMACC mixed matrix-ops=" << since
+                           << " valus=" << s.valuAfterCsmaccLead << " lead=" << hide.csmaccMixLead
+                           << " tail=" << hide.csmaccMixTail << "]\n");
                 return ~0u;
             }
         }
@@ -990,6 +1075,8 @@ class WaitcntBrackets {
         }
         if (s) {
             out += " [since=" + std::to_string(s->xdlSince);
+            out += " valus=" + std::to_string(s->valuAfterXdlLead) + "/" +
+                   std::to_string(s->valuAfterCsmaccLead);
             out += " unmodeled=" + std::to_string(s->unmodeledSince) + "]";
         }
         return out;
@@ -1026,6 +1113,12 @@ class WaitcntBrackets {
             noteIssue(PIPE_XDL, xdlInc);
             return;
         }
+        if (op == WaitAluHideOp::Valu) {
+            ++vaPipeUB[PIPE_CSMACC];
+            ++vaUB;
+            noteIssue(PIPE_CSMACC, 1);
+            return;
+        }
         ++vmUB;
         if (op != WaitAluHideOp::Tex) ++vmFifoUB[FIFO_LDS];
         if (op != WaitAluHideOp::Lds) ++vmFifoUB[FIFO_TEX];
@@ -1034,13 +1127,16 @@ class WaitcntBrackets {
     // Take `o`'s latched WMMA form, if it has one.
     void copyFormFrom(const WaitcntBrackets& o) {
         xdlInc = o.xdlInc;
-        xdlHideXdl = o.xdlHideXdl;
-        xdlHideCsmacc = o.xdlHideCsmacc;
+        hide = o.hide;
         xdlIncSeen = o.xdlIncSeen;
         xdlFormMixed = o.xdlFormMixed;
     }
     bool formLatched() const {
         return xdlIncSeen;
+    }
+    // The latched form has a mixed hide that VALUs can fill.
+    bool hasMixHide() const {
+        return xdlIncSeen && !xdlFormMixed && hide.anyMix();
     }
 
    private:
@@ -1088,8 +1184,7 @@ class WaitcntBrackets {
     std::array<unsigned, NUM_VA_PIPE> vaPipeUB = {};
     std::array<unsigned, NUM_VA_PIPE> vaPipeLB = {};
     // Hide counts of this kernel's form, latched on the first XDL op.
-    int xdlHideXdl = 0;
-    int xdlHideCsmacc = 0;
+    HideCounts hide;
     // Ordinal step of the latched form, for scaling both hide thresholds.
     unsigned xdlInc = 1;
     bool xdlIncSeen = false;
@@ -1609,6 +1704,11 @@ static int maxHideOps(const WaitAluContext& ctx, WaitAluHideOp op) {
         for (const auto& form : wh.forms) n = std::max({n, form.xdlVaVdst, form.csmaccVaVdst});
         return n;
     }
+    if (op == WaitAluHideOp::Valu) {
+        int n = 0;
+        for (const auto& form : wh.forms) n = std::max({n, form.xdlMixTail, form.csmaccMixTail});
+        return n;
+    }
     const int lds = op == WaitAluHideOp::Tex ? 0 : wh.vmVsrcLds;
     const int tex = op == WaitAluHideOp::Lds ? 0 : wh.vmVsrcTex;
     return std::max({lds, tex, 0});
@@ -1622,18 +1722,22 @@ static void latchFormIfUnset(WaitcntBrackets& sb, const StinkyInstruction* formW
 }
 
 // Bare ops of `op`'s kind issued on a copy of `start` until `inst` no longer needs the counter
-// they hide; -1 past the arch's largest hide count. `formWmma` as in latchFormIfUnset.
+// they hide; -1 past the arch's largest hide count. `formWmma` as in latchFormIfUnset. Each
+// counted op is followed by `valusPerOp` bare VALUs when the form has a mixed hide.
 static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction& inst,
                           const WaitAluContext& ctx, const VGPRHalfKeyer& keyer, WaitAluHideOp op,
-                          const StinkyInstruction* formWmma) {
+                          const StinkyInstruction* formWmma, int valusPerOp = 0) {
     if (isPseudoInst(&inst) || isWaitAluInst(inst) || isCall(inst)) return 0;
-    const CounterType c = op == WaitAluHideOp::Wmma ? CT_VA_VDST : CT_VM_VSRC;
+    const CounterType c =
+        op == WaitAluHideOp::Wmma || op == WaitAluHideOp::Valu ? CT_VA_VDST : CT_VM_VSRC;
     if (isNoWait(computeWaitForInst(inst, start, keyer), c)) return 0;
     WaitcntBrackets sb = start;
     latchFormIfUnset(sb, formWmma);
     const int maxOps = maxHideOps(ctx, op);
+    const int valus = sb.hasMixHide() ? valusPerOp : 0;
     for (int n = 1; n <= maxOps; ++n) {
         sb.countBareOp(op);
+        for (int v = 0; v < valus; ++v) sb.countBareOp(WaitAluHideOp::Valu);
         if (isNoWait(computeWaitForInst(inst, sb, keyer), c)) return n;
     }
     return -1;
@@ -1646,12 +1750,13 @@ int WaitAluTracker::untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
 
 int WaitAluTracker::requiredGap(const StinkyInstruction& producer,
                                 const StinkyInstruction& consumer, WaitAluHideOp op,
-                                const StinkyInstruction* formWmma) const {
+                                const StinkyInstruction* formWmma, int valusPerWmma) const {
     WaitcntBrackets sb(impl_->ctx);
     if (impl_->sb.formLatched()) sb.copyFormFrom(impl_->sb);
     latchFormIfUnset(sb, formWmma);
     stepInstruction(sb, producer, impl_->keyer);
-    return countUntilFree(sb, consumer, impl_->ctx, impl_->keyer, op, nullptr);
+    return countUntilFree(sb, consumer, impl_->ctx, impl_->keyer, op, nullptr,
+                          op == WaitAluHideOp::Wmma ? valusPerWmma : 0);
 }
 
 void WaitAluTracker::commit(const StinkyInstruction& inst) {
