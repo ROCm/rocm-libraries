@@ -216,9 +216,14 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
     if(spec->sched_strategy && b->kernel != NULL)
     {
-        static const char* const strategies[6]
-            = {"", "max-ilp", "max-memory-clause", "iterative-ilp", "iterative-minreg", "iterative-maxocc"};
-        rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", strategies[spec->sched_strategy]);
+        static const char* const strategies[6] = {"",
+                                                  "max-ilp",
+                                                  "max-memory-clause",
+                                                  "iterative-ilp",
+                                                  "iterative-minreg",
+                                                  "iterative-maxocc"};
+        rocke_attr_set_str(
+            b, &b->kernel->attrs, "scheduler_strategy", strategies[spec->sched_strategy]);
     }
     if(spec->no_agpr && b->kernel != NULL)
         rocke_attr_set_str(b, &b->kernel->attrs, "agpr_alloc", "0,0");
@@ -368,6 +373,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->fwd_p_ks_count = rocke_b_param(b, "ks_count", rocke_i32(), NULL);
         if(spec->split_tail)
             ctx->fwd_p_full_tiles = rocke_b_param(b, "full_tiles", rocke_i32(), NULL);
+        if(spec->split_flag_store || spec->split_zero_first)
+        {
+            rocke_param_opts_t fo;
+            memset(&fo, 0, sizeof(fo));
+            fo.noalias = true;
+            fo.noalias_set = true;
+            ctx->fwd_p_sk_flags
+                = rocke_b_param(b, "sk_flags", rocke_ptr_type(b, rocke_i32(), "global"), &fo);
+        }
         if(spec->split_det)
         {
             rocke_param_opts_t fo;
@@ -399,6 +413,33 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             const int64_t dims[3] = {1, 1, spec->split_k_cluster};
             rocke_attr_set_int_list(b, &b->kernel->attrs, "cluster_dims", dims, 3);
         }
+    }
+
+    if(ctx->fwd_asplit && spec->split_tail && spec->split_tail_compact)
+    {
+        /* Compact split_tail grid: decode the flat workgroup id into the
+         * (x, y, z) the default launch would have given this (tile, slice),
+         * and serve every later block_id_* from it. */
+        rocke_value_t* w = rocke_b_block_id_x(b);
+        rocke_value_t* g = rocke_b_block_id_z(b);
+        rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+        rocke_value_t* tl = rocke_b_sub(b, tiles, ctx->fwd_p_full_tiles);
+        rocke_value_t* tail = rocke_b_smax(b, tl, rocke_b_const_i32(b, 1));
+        rocke_value_t* rr = rocke_b_sub(b, w, ctx->fwd_p_full_tiles);
+        rocke_value_t* r = rocke_b_smax(b, rr, rocke_b_const_i32(b, 0));
+        rocke_value_t* is_full = rocke_b_cmp_lt(b, w, ctx->fwd_p_full_tiles);
+        rocke_value_t* z0 = rocke_b_const_i32(b, 0);
+        rocke_value_t* sl = rocke_b_select(b, is_full, z0, rocke_b_div(b, r, tail));
+        rocke_value_t* rm = rocke_b_mod(b, r, tail);
+        rocke_value_t* ft = rocke_b_add(b, ctx->fwd_p_full_tiles, rm);
+        rocke_value_t* tile = rocke_b_select(b, is_full, w, ft);
+        rocke_value_t* vx = rocke_b_to_sgpr_u32(b, rocke_b_mod(b, tile, ctx->p_num_pid_n));
+        rocke_value_t* vy = rocke_b_to_sgpr_u32(b, rocke_b_div(b, tile, ctx->p_num_pid_n));
+        rocke_value_t* gk = rocke_b_mul(b, g, ctx->fwd_p_ks_count);
+        rocke_value_t* vz = rocke_b_to_sgpr_u32(b, rocke_b_add(b, gk, sl));
+        b->block_id_override[0] = vx;
+        b->block_id_override[1] = vy;
+        b->block_id_override[2] = vz;
     }
 
     /* ---- resolve op + atom + frag widths ---- (811-815) */
@@ -1352,6 +1393,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      *                                  affects schedule hints inside mfma)
      *   else (async)  -> kloop_async  (SoftwarePipeline.run_ping_pong over
      *                                  AsyncTileLoader; no scf.for_iter) */
+    ctx.fwd_szf_idx = NULL;
+    if(ctx.fwd_asplit && spec->split_zero_first)
+        rocke_conv_emit_fwd_szf_zero(&ctx);
     if(spec->uniform_k_decode || spec->reg_prefetch)
     {
         /* The reg_prefetch K loops (Python _emit_fwd_kloops). */

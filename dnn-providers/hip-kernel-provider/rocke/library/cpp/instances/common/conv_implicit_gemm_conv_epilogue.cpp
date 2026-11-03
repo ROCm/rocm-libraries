@@ -474,6 +474,91 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    if(!spec->split_det && spec->split_zero_first)
+    {
+        /* The tile was zeroed by its slice 0 at kernel start: wait for that,
+         * add, and the last adder resets the flag pair. */
+        rocke_value_t* c0 = ctx->c0;
+        rocke_value_t* c_1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* f_idx = ctx->fwd_szf_idx;
+        {
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_b_global_flag_wait_eq_ord(b, ctx->fwd_p_sk_flags, f_idx, c_1, NULL, "monotonic");
+            rocke_b_fence(b, "agent", "acquire");
+            rocke_b_region_leave(b);
+        }
+        rocke_b_sync(b);
+        rocke_cshuffle_epilogue_atomic_store_ex(
+            b, epi, accs, num_accs, D, row_pitch, bound_m, bound_n, col_offset);
+        {
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_value_t* n_idx = rocke_b_add(b, f_idx, c_1);
+            rocke_value_t* old
+                = rocke_b_global_atomic_add(b, ctx->fwd_p_sk_flags, n_idx, c_1, NULL);
+            rocke_value_t* last = rocke_b_cmp_eq(b, old, rocke_b_sub(b, ctx->fwd_p_ks_count, c_1));
+            rocke_if_t t1 = rocke_b_scf_if(b, last);
+            rocke_b_region_enter(b, t1.then_region);
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, n_idx, c0, NULL, "monotonic");
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, f_idx, c0, NULL, "monotonic");
+            rocke_b_region_leave(b);
+            rocke_b_region_leave(b);
+        }
+        return;
+    }
+    if(!spec->split_det && spec->split_flag_store)
+    {
+        /* Slice 0 stores and raises the flag; the rest wait, add. */
+        rocke_value_t* c0 = ctx->c0;
+        rocke_value_t* c_1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* mt = rocke_b_div(b, ctx->block_m_off_v, rocke_b_const_i32(b, ctx->block_m));
+        rocke_value_t* mtn = rocke_b_mul(b, mt, ctx->p_num_pid_n);
+        rocke_value_t* nt = rocke_b_div(b, ctx->block_n_off_v, rocke_b_const_i32(b, ctx->block_n));
+        rocke_value_t* t_lin = rocke_b_add(b, mtn, nt);
+        if(ctx->group_idx != NULL)
+        {
+            rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+            t_lin = rocke_b_add(b, t_lin, rocke_b_mul(b, ctx->group_idx, tiles));
+        }
+        rocke_value_t* f_idx
+            = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, t_lin, rocke_b_const_i32(b, 2)));
+        rocke_value_t* n_idx = rocke_b_add(b, f_idx, c_1);
+        rocke_if_else_t ie = rocke_b_scf_if_else(b, rocke_b_cmp_eq(b, ctx->fwd_slice_id, c0));
+        rocke_b_region_enter(b, ie.then_region);
+        {
+            rocke_cshuffle_epilogue_store(
+                b, epi, accs, num_accs, rocke_conv_d_addr, (void*)dctx, d_rsrc, bound_m, bound_n);
+            rocke_b_fence(b, "agent", "release");
+            rocke_b_sync(b);
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, f_idx, c_1, "agent", "release");
+            rocke_b_region_leave(b);
+        }
+        rocke_b_region_leave(b);
+        rocke_b_region_enter(b, ie.else_region);
+        {
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_b_global_flag_wait_eq_ord(b, ctx->fwd_p_sk_flags, f_idx, c_1, NULL, "monotonic");
+            rocke_b_fence(b, "agent", "acquire");
+            rocke_value_t* old
+                = rocke_b_global_atomic_add(b, ctx->fwd_p_sk_flags, n_idx, c_1, NULL);
+            rocke_value_t* k2 = rocke_b_sub(b, ctx->fwd_p_ks_count, rocke_b_const_i32(b, 2));
+            rocke_if_t t1 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, old, k2));
+            rocke_b_region_enter(b, t1.then_region);
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, n_idx, c0, NULL, "monotonic");
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, f_idx, c0, NULL, "monotonic");
+            rocke_b_region_leave(b);
+            rocke_b_region_leave(b);
+            rocke_b_sync(b);
+            rocke_cshuffle_epilogue_atomic_store_ex(
+                b, epi, accs, num_accs, D, row_pitch, bound_m, bound_n, col_offset);
+        }
+        rocke_b_region_leave(b);
+        return;
+    }
     if(!spec->split_det)
     {
         /* Each K slice adds its partial tile into the zeroed D. */
@@ -698,6 +783,74 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
                                       d_rsrc,
                                       bound_m,
                                       bound_n);
+    }
+    rocke_b_region_leave(b);
+}
+
+/* split_zero_first (Python _szf_idx block, before the K loops): slice 0 of a
+ * split tile zeroes the tile's D (bounds-checked wide stores), releases it
+ * and raises the flag the slices' atomic stores wait for. */
+void rocke_conv_emit_fwd_szf_zero(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* mt = rocke_b_div(b, ctx->block_m_off_v, rocke_b_const_i32(b, ctx->block_m));
+    rocke_value_t* mtn = rocke_b_mul(b, mt, ctx->p_num_pid_n);
+    rocke_value_t* nt = rocke_b_div(b, ctx->block_n_off_v, rocke_b_const_i32(b, ctx->block_n));
+    rocke_value_t* t_lin = rocke_b_add(b, mtn, nt);
+    if(ctx->group_idx != NULL)
+    {
+        rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+        t_lin = rocke_b_add(b, t_lin, rocke_b_mul(b, ctx->group_idx, tiles));
+    }
+    ctx->fwd_szf_idx = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, t_lin, rocke_b_const_i32(b, 2)));
+    rocke_value_t* zc = rocke_b_cmp_eq(b, ctx->fwd_slice_id, c0);
+    if(spec->split_tail)
+        zc = rocke_b_land(b, zc, rocke_b_lnot(b, ctx->fwd_is_full));
+    rocke_if_t zi = rocke_b_scf_if(b, zc);
+    rocke_b_region_enter(b, zi.then_region);
+    {
+        const int zsv = 8;
+        const int zvpr = ctx->block_n / zsv;
+        const int zthreads = ctx->threads;
+        rocke_value_t* zbf = rocke_b_vec_trunc_f32_to_bf16(b, rocke_b_zero_vec_f32(b, zsv));
+        rocke_value_t* c_eb = rocke_b_const_i32(b, 2);
+        rocke_value_t* oob = rocke_b_const_i32(b, 0x7FFFFFFF);
+        rocke_value_t* c_nb = ctx->merged ? ctx->c_gm : ctx->p_kpg;
+        rocke_conv_d_addr_ctx_t dctx;
+        dctx.D_desc = ctx->D_desc;
+        dctx.k_out_group_base = ctx->d_k_out_group_base;
+        dctx.slab_base = NULL;
+        const int ne = (ctx->block_m * zvpr + zthreads - 1) / zthreads;
+        for(int e = 0; e < ne; ++e)
+        {
+            rocke_value_t* vidx = rocke_b_add(b, rocke_b_const_i32(b, e * zthreads), ctx->tid);
+            rocke_value_t* row = rocke_b_div(b, vidx, rocke_b_const_i32(b, zvpr));
+            rocke_value_t* cm = rocke_b_mod(b, vidx, rocke_b_const_i32(b, zvpr));
+            rocke_value_t* col = rocke_b_mul(b, cm, rocke_b_const_i32(b, zsv));
+            rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
+            rocke_value_t* n_val = rocke_b_add(b, ctx->block_n_off_v, col);
+            rocke_value_t* r_ok = rocke_b_cmp_lt(b, row, rocke_b_const_i32(b, ctx->block_m));
+            rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->p_M);
+            rocke_value_t* rm = rocke_b_land(b, r_ok, m_ok);
+            rocke_value_t* nz = rocke_b_add(b, n_val, rocke_b_const_i32(b, zsv));
+            rocke_value_t* n_ok = rocke_b_cmp_le(b, nz, c_nb);
+            rocke_value_t* ok = rocke_b_land(b, rm, n_ok);
+            rocke_value_t* valid = NULL;
+            rocke_value_t* off = rocke_conv_d_addr(b, m_val, n_val, &valid, &dctx);
+            if(valid != NULL)
+                ok = rocke_b_land(b, ok, valid);
+            rocke_value_t* safe = rocke_b_select(b, ok, rocke_b_mul(b, off, c_eb), oob);
+            rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe, c0, zbf, zsv / 2);
+        }
+        rocke_b_fence(b, "agent", "release");
+        rocke_b_sync(b);
+        rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+        rocke_b_region_enter(b, t0.then_region);
+        rocke_b_global_flag_store(
+            b, ctx->fwd_p_sk_flags, ctx->fwd_szf_idx, rocke_b_const_i32(b, 1), "agent", "release");
+        rocke_b_region_leave(b);
     }
     rocke_b_region_leave(b);
 }

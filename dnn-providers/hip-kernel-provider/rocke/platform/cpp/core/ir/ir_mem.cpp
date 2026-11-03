@@ -40,14 +40,20 @@ static rocke_value_t* rocke_i_block_id_axis(rocke_ir_builder_t* b, const char* a
 
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b)
 {
+    if(b != NULL && b->block_id_override[0] != NULL)
+        return b->block_id_override[0];
     return rocke_i_block_id_axis(b, "x");
 }
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b)
 {
+    if(b != NULL && b->block_id_override[1] != NULL)
+        return b->block_id_override[1];
     return rocke_i_block_id_axis(b, "y");
 }
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b)
 {
+    if(b != NULL && b->block_id_override[2] != NULL)
+        return b->block_id_override[2];
     return rocke_i_block_id_axis(b, "z");
 }
 

@@ -1125,6 +1125,31 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->defer_mfma = idx == 125 ? 2 : 0;
         spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
         return 0;
+    case 142:
+    case 143:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_tail = true;
+        spec->split_tail_compact = true;
+        spec->split_zero_first = idx == 143;
+        return 0;
+    case 138:
+    case 139:
+    case 140:
+    case 141:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_flag_store = idx == 138 || idx == 141;
+        spec->split_zero_first = idx == 139 || idx == 140;
+        spec->split_tail = idx == 140;
+        if(idx == 141)
+        {
+            spec->reg_prefetch = 1;
+            spec->split_atomic_pairs = true;
+        }
+        return 0;
     case 136:
     case 137:
         if(make_cfg_3d_base(55, spec, arch) != 0)

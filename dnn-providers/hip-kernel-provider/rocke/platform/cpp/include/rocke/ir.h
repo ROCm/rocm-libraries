@@ -654,6 +654,12 @@ typedef struct rocke_ir_builder
     /* Sticky error state. */
     rocke_status_t status;
     char err[ROCKE_ERR_MSG_CAP];
+
+    /* block_id_{x,y,z} overrides (NULL = the hardware id): a kernel that
+     * decodes its own grid (Python rebinds b.block_id_* for the rest of the
+     * build, e.g. the fwd split_tail_compact grid) serves every later
+     * rocke_b_block_id_* from these. Zeroed by rocke_ir_builder_init. */
+    rocke_value_t* block_id_override[3];
 } rocke_ir_builder_t;
 
 /* For-loop handle: the C analog of the _ForBuilder context manager. The caller

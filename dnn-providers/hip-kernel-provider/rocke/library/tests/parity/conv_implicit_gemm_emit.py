@@ -1022,6 +1022,8 @@ _GFX942_3D_OFFSET = 32
 #  128-130: 55 + the plain uk_xhalo loop (defer_mfma, lds_ahead, chunk groups)
 #  131-132: 55 + the plain uk_xhalo loop with xh_stride_m
 #  133-134: 55 + split_k 2 with split_atomic_agent (+ split_atomic_pairs)
+#  135-141: 55 + split_atomic_fast, epi_store_fast, split_flag_store / split_zero_first
+#  142-143: 55 + split_tail_compact (+ split_zero_first)
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1395,6 +1397,24 @@ def _gfx942_3d_spec(idx: int):
     knobs[137] = (
         55,
         dict(reg_prefetch=1, epi_store_fast=True, split_k=2, split_atomic_pairs=True),
+    )
+    # 138-141: split_flag_store / split_zero_first (no zeroed D), with
+    # split_tail and with pair lanes.
+    knobs[138] = (55, dict(split_k=2, split_flag_store=True))
+    knobs[139] = (55, dict(split_k=2, split_zero_first=True))
+    knobs[140] = (55, dict(split_k=2, split_zero_first=True, split_tail=True))
+    knobs[141] = (
+        55,
+        dict(reg_prefetch=1, split_k=2, split_flag_store=True, split_atomic_pairs=True),
+    )
+    # 142-143: split_tail_compact (the flat grid decoded into block ids),
+    # plain and with split_zero_first.
+    knobs[142] = (55, dict(split_k=2, split_tail=True, split_tail_compact=True))
+    knobs[143] = (
+        55,
+        dict(
+            split_k=2, split_tail=True, split_tail_compact=True, split_zero_first=True
+        ),
     )
     # 131-132: the plain uk_xhalo loop with xh_stride_m (the A store's _xa
     # map, each tap's fragments shifted from the previous tap's).

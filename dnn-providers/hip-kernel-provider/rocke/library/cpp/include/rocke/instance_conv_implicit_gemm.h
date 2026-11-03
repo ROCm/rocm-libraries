@@ -313,6 +313,16 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* epi_store_fast: the unchunked bf16 cshuffle store walks a packed,
      * in-bounds tile at a constant row step (tag esf). */
     bool epi_store_fast; /* default false */
+    /* split_flag_store: slice 0 stores its tile plainly and raises the tile's
+     * flag, the other slices wait and atomic-add; no zeroed D (tag sfs). */
+    bool split_flag_store; /* default false */
+    /* split_zero_first: slice 0 zeroes its D tile before its K loop and raises
+     * the flag every slice's atomic store waits for (tag szf). Both append the
+     * sk_flags kernarg. */
+    bool split_zero_first; /* default false */
+    /* split_tail_compact (split_tail): one flat grid -- full tiles, then the
+     * tail slice-major -- decoded into the default launch's (x, y, z) (tag stc). */
+    bool split_tail_compact; /* default false */
     /* split_det (1, 2): deterministic split: every non-owner slice stores its
      * f32 partial tile into its slot of sk_partials and counts in; the owner
      * (last slice) folds them in slot order and stores D once. 2 moves the

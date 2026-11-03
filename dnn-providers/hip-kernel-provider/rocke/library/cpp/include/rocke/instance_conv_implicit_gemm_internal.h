@@ -372,6 +372,7 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* fwd_p_full_tiles; /* split_tail kernarg              */
     rocke_value_t* fwd_is_full; /* split_tail: tile runs unsplit         */
     rocke_value_t* fwd_p_sk_flags; /* split_det counters                */
+    rocke_value_t* fwd_szf_idx; /* split_zero_first: the tile's flag word (NULL off) */
     rocke_value_t* fwd_p_sk_partials; /* split_det f32 partial slots    */
     rocke_value_t* fwd_skx_slice; /* split_xcd_remap: the remapped slice  */
     /* split_streamk / split_hybrid segment loop (open across the K loop and
@@ -1037,6 +1038,10 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
 
 /* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc, ir_d_pitch_pw): LDS-staged
  * cshuffle store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
+/* split_zero_first: slice 0 zeroes its D tile and raises the tile's flag
+ * (Python _szf_idx block, emitted before the K loops). */
+void rocke_conv_emit_fwd_szf_zero(rocke_conv_build_ctx_t* ctx);
+
 void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_implicit_gemm_conv_spec_t* spec,
                                        rocke_value_t* const* accs,

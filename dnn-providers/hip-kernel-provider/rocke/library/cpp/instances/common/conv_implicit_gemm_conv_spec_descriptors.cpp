@@ -489,13 +489,15 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->epi_store_fast, "esf");
     ROCKE_FLAG(s->split_xcd_remap > 0, "skx%d", s->split_xcd_remap);
     ROCKE_FLAG(s->split_streamk, "fsk");
-    /* (sfs, szf, xsub, ppfd: Python-only knobs, off.) */
+    ROCKE_FLAG(s->split_flag_store, "sfs");
+    ROCKE_FLAG(s->split_zero_first, "szf");
+    /* (xsub, ppfd: Python-only knobs, off.) */
     ROCKE_FLAG(s->fb_skip_empty, "fbse");
     /* (ppeg: Python-only, off.) */
     ROCKE_FLAG(s->epi_lds_barriers, "elb");
     ROCKE_FLAG(s->split_hybrid > 0, "shy%d", s->split_hybrid);
     ROCKE_FLAG(s->sched_strategy > 0, "mss%d", s->sched_strategy);
-    /* (stc: Python-only, off.) */
+    ROCKE_FLAG(s->split_tail_compact, "stc");
     ROCKE_FLAG(s->split_det > 0, "sdet%d", s->split_det);
     ROCKE_FLAG(s->pp_split_fetch > 0, "psf%d", s->pp_split_fetch);
     ROCKE_FLAG(s->no_agpr, "nag");
@@ -1150,11 +1152,13 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                        size_t reason_cap)
 {
     const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_atomic_agent
-                       || s->split_atomic_fast || s->split_det || s->split_xcd_remap
+                       || s->split_atomic_fast || s->split_flag_store || s->split_zero_first
+                       || s->split_tail_compact || s->split_det || s->split_xcd_remap
                        || s->split_streamk || s->split_hybrid;
     if(s->split_k == 1)
     {
-        if(s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid)
+        if(s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid
+           || s->split_flag_store || s->split_zero_first)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "split_xcd_remap / split_streamk / split_flag_store need the split-K "
@@ -1174,6 +1178,8 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
            || s->dtype_d == NULL || strcmp(s->dtype_d, "bf16") != 0 || s->wave_size != 64))
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "epi_store_fast: the unchunked bf16 wave64 cshuffle store only");
+    if(s->split_tail_compact && !s->split_tail)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "split_tail_compact is a split_tail launch");
     if(s->split_atomic_fast && (!s->split_atomic_pairs || s->cshuffle_m_chunks > 1))
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "split_atomic_fast is the unchunked split_atomic_pairs store");
@@ -1187,7 +1193,8 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     {
         const char* d = s->dtype_d ? s->dtype_d : "fp16";
         if(s->split_det
-           && (s->split_streamk || strcmp(d, "bf16") != 0 || s->split_det < 1 || s->split_det > 3))
+           && (s->split_streamk || s->split_flag_store || s->split_zero_first
+               || strcmp(d, "bf16") != 0 || s->split_det < 1 || s->split_det > 3))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
@@ -1197,6 +1204,13 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
                             "split store");
+        if((s->split_flag_store || s->split_zero_first)
+           && (s->split_streamk || s->split_xcd_remap
+               || (s->split_flag_store && s->split_zero_first)))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_flag_store / split_zero_first: the plain split grid (slice = "
+                            "z), one of them");
         if(s->split_hybrid && (s->split_streamk || s->split_hybrid < 0))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
