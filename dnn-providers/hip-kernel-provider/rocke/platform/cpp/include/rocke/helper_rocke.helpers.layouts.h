@@ -109,8 +109,10 @@ rocke_value_t* rocke_bound_transpose_lds_reader_row(rocke_ir_builder_t* b,
  * tile origin (no add emitted), for callers that address a flat LDS buffer.
  * Emits, in this exact order: const 16, const 8, lane % 16, / 8, * 8,
  * [mn_base +], lane / 16, const n, *, lane % 8, +, [k_base +].
- * The only copy of the map in the C++ engine: rocke_conv_tr_frag and the
- * direct wgrad builders call it. Mirrors
+ * rocke_conv_tr_frag and the direct wgrad builders call it. The wave32 dgrad
+ * WMMA builders still compute the same map inline: conv_direct_dgrad_wmma.cpp,
+ * and instance_conv_dgrad_stem_wmma_internal.hpp for the patch and small-C
+ * stem builders. Mirrors
  * ConvKOuterFragmentReader.wave32_lane_offsets in rocke/helpers/layouts.py. */
 void rocke_conv_tr_lane_offsets32(rocke_ir_builder_t* b,
                                   rocke_value_t* lane,

@@ -363,8 +363,10 @@ class ConvKOuterFragmentReader:
         fragment length (16 for a WMMA 16x16x32 operand). Without ``mn_base``
         / ``k_base`` the offsets come back relative to the tile origin, for
         callers that address a flat LDS buffer (``row0 * pitch + col``)
-        instead of a ``[row][col]`` one. This is the only copy of the map: the
-        fragment reader and the direct wgrad builders both call it. Mirrors
+        instead of a ``[row][col]`` one. The fragment reader and the direct
+        wgrad builders call it. The wave32 dgrad WMMA builders
+        (``conv_direct_dgrad_wmma``, ``conv_dgrad_patch_wmma``,
+        ``conv_dgrad_smallc_wmma``) still compute the same map inline. Mirrors
         ``rocke_conv_tr_lane_offsets32`` in the C++ engine.
         """
         c16 = b.const_i32(16)

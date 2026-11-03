@@ -1,13 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""CPU-only: the wave32 transpose-read lane map has one copy, and it is right.
+"""CPU-only: the wave32 transpose-read lane map the conv readers share is right.
 
 ``ConvKOuterFragmentReader.wave32_lane_offsets`` is the ``ds_load_tr16_b128``
 lane map of a K-outer conv LDS tile. The implicit-GEMM fragment reader and the
 three gfx1250 direct wgrad builders (dense, image-per-block, small_c) all take
-it from there, so a fix to the map reaches every kernel that reads that way.
-The C++ engine mirrors it in ``rocke_conv_tr_lane_offsets32``; the
-byte-identity gate keeps the two in step.
+it from there, so a fix to the map reaches each of them. The wave32 dgrad WMMA
+builders (``conv_direct_dgrad_wmma``, ``conv_dgrad_patch_wmma``,
+``conv_dgrad_smallc_wmma``) still compute the same map inline. The C++ engine
+mirrors the helper in ``rocke_conv_tr_lane_offsets32``; the byte-identity gate
+keeps the two in step.
 """
 
 from __future__ import annotations
