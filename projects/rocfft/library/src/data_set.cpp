@@ -338,26 +338,48 @@ data_set_t data_set_t::make_contiguous_intersection_of(const data_set_t& first,
 std::vector<data_set_t>
     data_set_t::compress_batch_axes_consistently_in(std::vector<data_set_t> data_sets)
 {
+    return compress_axes_consistently_in(std::move(data_sets), false);
+}
+
+std::vector<data_set_t>
+    data_set_t::compress_length_axes_consistently_in(std::vector<data_set_t> data_sets)
+{
+    return compress_axes_consistently_in(std::move(data_sets), true);
+}
+
+std::vector<data_set_t> data_set_t::compress_axes_consistently_in(std::vector<data_set_t> data_sets,
+                                                                  bool length_axes)
+{
+    const auto axes = length_axes ? &data_set_t::len_axes : &data_set_t::batch_axes;
+    // flattened index of the first axis of the group being compressed
+    const auto first = [&](const data_set_t& d) { return length_axes ? 0 : d.get_len_rank(); };
+
     for(const auto& d : data_sets)
     {
         if(!d.is_dimensionally_consistent_with(data_sets.front()))
             throw std::invalid_argument("Dimensionally-inconsistent arguments for "
                                         + ROCFFT_CURRENT_FUNCTION);
-        for(size_t i = 0; i < d.get_batch_rank(); i++)
+        // length axes may differ in span (e.g., real vs. complex data); such axes are
+        // simply not merged (see `mergeable` below)
+        for(size_t i = 0; !length_axes && i < d.get_batch_rank(); i++)
             if(d.batch_axes[i].logical_span() != data_sets.front().batch_axes[i].logical_span())
                 throw std::invalid_argument("Different batch spans for arguments of "
                                             + ROCFFT_CURRENT_FUNCTION);
     }
 
-    // true iff batch axis `outer` may be merged over batch axis `inner` in `d`
-    auto mergeable = [](const data_set_t& d, size_t outer, size_t inner) {
-        const auto& o = d.batch_axes[outer];
-        const auto& i = d.batch_axes[inner];
+    // true iff axis `outer` may be merged over axis `inner` (of the group) in `d`, with
+    // the same spans as in the first data set
+    auto mergeable = [&](const data_set_t& d, size_t outer, size_t inner) {
+        const auto& o = (d.*axes)[outer];
+        const auto& i = (d.*axes)[inner];
+        if(o.logical_span() != (data_sets.front().*axes)[outer].logical_span()
+           || i.logical_span() != (data_sets.front().*axes)[inner].logical_span())
+            return false;
         if(d.embedding)
         {
             const auto& e = *d.embedding;
-            if(std::find(e.begin(), e.end(), d.get_len_rank() + outer) != e.end()
-               || std::find(e.begin(), e.end(), d.get_len_rank() + inner) != e.end())
+            if(std::find(e.begin(), e.end(), first(d) + outer) != e.end()
+               || std::find(e.begin(), e.end(), first(d) + inner) != e.end())
                 return false;
         }
         return o.inbuffer_stride == i.inbuffer_stride * i.logical_span()
@@ -368,7 +390,7 @@ std::vector<data_set_t>
     while(merged && !data_sets.empty())
     {
         merged         = false;
-        const auto num = data_sets.front().get_batch_rank();
+        const auto num = (data_sets.front().*axes).size();
         for(size_t outer = 0; !merged && outer < num; outer++)
         {
             for(size_t inner = 0; !merged && inner < num; inner++)
@@ -382,16 +404,18 @@ std::vector<data_set_t>
                 const auto del  = std::min(outer, inner);
                 for(auto& d : data_sets)
                 {
-                    const auto o      = d.batch_axes[outer];
-                    const auto i      = d.batch_axes[inner];
-                    auto&      k      = d.batch_axes[keep];
+                    auto&      group  = d.*axes;
+                    const auto o      = group[outer];
+                    const auto i      = group[inner];
+                    auto&      k      = group[keep];
                     k.lower           = i.lower + i.logical_span() * o.lower;
                     k.upper           = k.lower + i.logical_span() * o.logical_span();
                     k.inbuffer_stride = i.inbuffer_stride;
-                    d.batch_axes.erase(d.batch_axes.begin() + del);
+                    const auto erased = first(d) + del;
+                    group.erase(group.begin() + del);
                     if(d.embedding)
                         for(auto& axis_idx : *d.embedding)
-                            if(axis_idx > d.get_len_rank() + del)
+                            if(axis_idx > erased)
                                 axis_idx--;
                 }
                 merged = true;

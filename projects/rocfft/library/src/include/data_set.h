@@ -332,6 +332,29 @@ struct data_set_t
         compress_batch_axes_consistently_in(std::vector<data_set_t> data_sets);
 
     /**
+     * @brief Merges length axes of all `data_sets` simultaneously, as long as some
+     * pair of length axes can be merged into one in every data set.
+     *
+     * Same as `compress_batch_axes_consistently_in` with the roles of length and
+     * batch axes swapped: only length axes are merged (with the same rules) and
+     * batch axes are never modified. Unlike batch axes, length axes may have
+     * different spans across `data_sets` (e.g., real vs. complex data): a pair of
+     * length axes is merged only if both have the same spans in every data set.
+     * Length axes of an embedded data set are length axes of its embedding data
+     * set, so they are never merged.
+     *
+     * @param[in] data_sets data sets that must all be dimensionally consistent
+     * with one another.
+     * @return The compressed data sets, in the order of `data_sets` (empty if
+     * `data_sets` is empty).
+     *
+     * @throw An `std::invalid_argument` is thrown if `data_sets` are not dimensionally
+     * consistent with one another.
+     */
+    static std::vector<data_set_t>
+        compress_length_axes_consistently_in(std::vector<data_set_t> data_sets);
+
+    /**
      * @param[in] other data set against which ranks are to be compared
      * @return `true` if this data set is dimensionally consistent with `other` 
      */
@@ -494,6 +517,10 @@ private:
     std::optional<std::vector<size_t>> embedding;
 
     inline bool has_consistent_embedding() const;
+
+    // Shared implementation of compress_{length,batch}_axes_consistently_in.
+    static std::vector<data_set_t> compress_axes_consistently_in(std::vector<data_set_t> data_sets,
+                                                                 bool length_axes);
 
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch

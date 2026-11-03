@@ -523,6 +523,11 @@ namespace
         return data_set_t::compress_batch_axes_consistently_in(ds);
     }
 
+    std::vector<data_set_t> compress_lengths(const std::vector<data_set_t>& ds)
+    {
+        return data_set_t::compress_length_axes_consistently_in(ds);
+    }
+
     void expect_same(const std::vector<data_set_t>& actual, const std::vector<data_set_t>& expected)
     {
         ASSERT_EQ(actual.size(), expected.size());
@@ -679,6 +684,49 @@ TEST_F(data_set_test, compress_batch_axes_rejects_bad_input)
     const data_set_t other_span({0, 0, 0}, {4, 8, 2}, {1, 4, 32}, 2);
     EXPECT_THROW(compress({two_batch, other_span}), std::invalid_argument);
     EXPECT_THROW(compress({two_batch, two_batch, other_span}), std::invalid_argument);
+}
+
+TEST_F(data_set_test, compress_length_axes)
+{
+    // contiguous lengths in input and output: merged; contiguous batch axes are left alone
+    const data_set_t in({0, 0, 0, 0}, {4, 8, 3, 5}, {1, 4, 32, 96}, 2);
+    const data_set_t out({0, 0, 0, 0}, {4, 8, 3, 5}, {1, 4, 40, 120}, 2);
+    expect_same(compress_lengths({in, out}),
+                {data_set_t({0, 0, 0}, {32, 3, 5}, {1, 32, 96}, 2),
+                 data_set_t({0, 0, 0}, {32, 3, 5}, {1, 40, 120}, 2)});
+
+    // contiguous in input only: refused
+    const data_set_t out_gap({0, 0, 0, 0}, {4, 8, 3, 5}, {1, 5, 40, 120}, 2);
+    expect_same(compress_lengths({in, out_gap}), {in, out_gap});
+
+    // only the contiguous pair merges, the padded outermost length stays
+    const data_set_t padded({0, 0, 0, 0}, {4, 8, 2, 3}, {1, 4, 64, 128}, 1);
+    expect_same(compress_lengths({padded}), {data_set_t({0, 0, 0}, {32, 2, 3}, {1, 64, 128}, 1)});
+
+    // partial range: [0, 4) x [2, 6) of strides 1 and 4 becomes [8, 24) of stride 1
+    const data_set_t partial({0, 2, 0}, {4, 6, 3}, {1, 4, 16}, 1);
+    expect_same(compress_lengths({partial}), {data_set_t({8, 0}, {24, 3}, {1, 16}, 1)});
+
+    // a single length axis: nothing to merge
+    const auto one_len = data_set_t::default_full_range({64}, 3);
+    expect_same(compress_lengths({one_len}), {one_len});
+
+    // length axes of an embedded data set are length axes of its embedding: kept
+    const auto sub
+        = data_set_t::default_full_range({4, 8, 2}, {3}).get_data_set_for_len_axes({0, 1});
+    expect_same(compress_lengths({sub}), {sub});
+
+    // real input vs. complex output (8 reals, 5 complex numbers along the fastest
+    // axis): that axis is not merged, the higher ones still are
+    const data_set_t real_in({0, 0, 0, 0}, {8, 4, 2, 3}, {1, 8, 32, 64}, 1);
+    const data_set_t cmplx_out({0, 0, 0, 0}, {5, 4, 2, 3}, {1, 5, 20, 40}, 1);
+    expect_same(compress_lengths({real_in, cmplx_out}),
+                {data_set_t({0, 0, 0}, {8, 8, 3}, {1, 8, 64}, 1),
+                 data_set_t({0, 0, 0}, {5, 8, 3}, {1, 5, 40}, 1)});
+
+    // different ranks: rejected
+    EXPECT_THROW(compress_lengths({real_in, data_set_t({0, 0, 0}, {8, 4, 3}, {1, 8, 32}, 1)}),
+                 std::invalid_argument);
 }
 
 TEST_F(data_set_test, compress_batch_axes_preserves_locations)
