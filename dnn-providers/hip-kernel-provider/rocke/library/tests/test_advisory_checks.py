@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -53,6 +55,10 @@ def adv():
         (("platform", "_deps", "x", "a.py"), True),
         (("library", ".venv-gfx942", "lib", "a.py"), True),
         (("library", "venv", "lib", "a.py"), True),
+        (("library", "build", "lib", "a.py"), True),
+        (("platform", "_build", "a.py"), True),
+        (("tools", "scratch", "a.py"), True),
+        (("library", "logs", "a.py"), True),
     ],
 )
 def test_artifact_dirs_are_skipped(adv, parts, skipped):
@@ -62,6 +68,28 @@ def test_artifact_dirs_are_skipped(adv, parts, skipped):
 def test_whole_run_spans_every_tree(adv):
     top = {p.relative_to(adv.ROCKE).parts[0] for p in adv._all_files()}
     assert top == set(adv.TREES)
+
+
+def test_whole_run_prunes_artifacts_before_descending(adv, monkeypatch, tmp_path):
+    monkeypatch.setattr(adv, "ROCKE", tmp_path)
+    library = tmp_path / "library"
+    library.mkdir()
+    source = library / "venv_probe.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+    for name in (*adv.SKIP_DIRS, ".venv-gfx942", "venv-test", "pkg.egg-info"):
+        nested = library / name / "nested"
+        nested.mkdir(parents=True)
+        (nested / "stale.py").write_text("x = 2\n", encoding="utf-8")
+    scandir = os.scandir
+    visited = []
+
+    def record_scandir(path):
+        visited.append(Path(path))
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", record_scandir)
+    assert adv._all_files() == [source]
+    assert not any(p.is_relative_to(library) and p != library for p in visited)
 
 
 def test_requested_files_are_limited_to_python_inside_rocke(adv, tmp_path):
@@ -97,7 +125,8 @@ def test_no_tracked_python_lives_outside_the_covered_trees(adv):
     )
 
 
-def test_pyright_includes_the_same_trees(adv):
+@pytest.fixture
+def pyright_config(adv):
     config = adv.ROCKE / "pyrightconfig.json"
     if not config.is_file():
         pytest.skip("pyrightconfig.json is not part of this layout")
@@ -107,7 +136,48 @@ def test_pyright_includes_the_same_trees(adv):
         for line in config.read_text().splitlines()
         if not line.lstrip().startswith("//")
     )
-    assert json.loads(text)["include"] == list(adv.TREES)
+    return json.loads(text)
+
+
+def test_pyright_includes_the_same_trees(adv, pyright_config):
+    assert pyright_config["include"] == list(adv.TREES)
+
+
+def test_pyright_whole_run_excludes_artifacts_not_source_names(
+    adv, pyright_config, tmp_path, monkeypatch, capsys
+):
+    pytest.importorskip("pyright")
+    monkeypatch.setattr(adv, "ROCKE", tmp_path)
+    (tmp_path / "pyrightconfig.json").write_text(
+        json.dumps(pyright_config), encoding="utf-8"
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+    for name in (
+        "node_modules",
+        "__pycache__",
+        ".hidden",
+        ".venv-gfx942",
+        "venv",
+        "venv-test",
+        "build",
+        "_build",
+        "scratch",
+        "logs",
+        "_deps",
+        "pkg.egg-info",
+    ):
+        artifact = library / name
+        artifact.mkdir()
+        (artifact / "stale.py").write_text("stale: int = 'bad'\n", encoding="utf-8")
+    for name in ("source.py", "venv_probe.py"):
+        (library / name).write_text("source: int = 'bad'\n", encoding="utf-8")
+    adv.run_pyright([], whole=True)
+    out = capsys.readouterr().out
+    assert "source.py:1: error:" in out
+    assert "venv_probe.py:1: error:" in out
+    assert "stale.py" not in out
+    assert "pyright: 2 error(s), 0 warning(s)" in out
 
 
 def test_pyright_gets_names_no_longer_than_pre_commit_passed(adv, monkeypatch):
@@ -127,6 +197,117 @@ def test_pyright_gets_names_no_longer_than_pre_commit_passed(adv, monkeypatch):
     adv.run_pyright([_SCRIPT], whole=False)
     assert seen["cmd"][-1] == str(Path("tools", "advisory_checks.py"))
     assert seen["cwd"] == adv.ROCKE
+
+
+def test_pyright_reports_ranged_and_rangeless_diagnostics(adv, monkeypatch, capsys):
+    report = {
+        "generalDiagnostics": [
+            {"file": str(_SCRIPT), "severity": "warning", "message": "No range"},
+            {
+                "file": str(_SCRIPT),
+                "severity": "error",
+                "message": "First line\nMore detail",
+                "rule": "reportArgumentType",
+                "range": {"start": {"line": 6, "character": 0}},
+            },
+        ],
+        "summary": {"errorCount": 1, "warningCount": 1},
+    }
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 1, json.dumps(report), ""
+        ),
+    )
+    adv.run_pyright([_SCRIPT], whole=False)
+    out = capsys.readouterr().out
+    assert f"{adv._show(_SCRIPT)}: warning: No range (warning)" in out
+    assert f"{adv._show(_SCRIPT)}:7: error: First line (reportArgumentType)" in out
+    assert "More detail" not in out
+    assert "pyright: 1 error(s), 1 warning(s)" in out
+    assert "      1  warning" in out
+    assert "      1  reportArgumentType" in out
+
+
+def test_pyright_non_json_failure_is_advisory(adv, monkeypatch, capsys):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 1, "startup failed\n", "No module named pyright\n"
+        ),
+    )
+    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "pyright", str(_SCRIPT)])
+    assert adv.main() == 0
+    out = capsys.readouterr().out
+    assert "startup failed\nNo module named pyright\n" in out
+    assert "error(s)" not in out
+
+
+@pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
+def test_system_hook_with_cold_cache_and_missing_tools(adv, tmp_path, tool):
+    pytest.importorskip("pre_commit")
+    import yaml
+
+    config_path = _ROCKE.parents[2] / ".pre-commit-config.yaml"
+    if not config_path.is_file():
+        pytest.skip("repository hook config is not part of this layout")
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    hook = next(
+        h
+        for repo in config["repos"]
+        if repo["repo"] == "local"
+        for h in repo["hooks"]
+        if h["id"] == f"rocke-{tool}"
+    )
+    assert hook["language"] == "system"
+    assert not hook.get("additional_dependencies")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script = Path("dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py")
+    (repo / script).parent.mkdir(parents=True)
+    shutil.copyfile(_SCRIPT, repo / script)
+    (repo / ".pre-commit-config.yaml").write_text(
+        yaml.safe_dump({"repos": [{"repo": "local", "hooks": [hook]}]}),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    empty_env = tmp_path / "empty-env"
+    venv.EnvBuilder(with_pip=False).create(empty_env)
+    bin_dir = empty_env / ("Scripts" if os.name == "nt" else "bin")
+    env = {
+        **os.environ,
+        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+        "VIRTUAL_ENV": str(empty_env),
+        "PRE_COMMIT_HOME": str(tmp_path / "cold-cache"),
+        "PIP_NO_INDEX": "1",
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+    }
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pre_commit",
+            "run",
+            hook["id"],
+            "--hook-stage",
+            "pre-push",
+            "--all-files",
+        ],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "[advisory, non-blocking]" in out
+    assert "not installed" in out or "No module named pyright" in out
+    assert "Installing environment" not in out
 
 
 @pytest.mark.parametrize(
@@ -196,6 +377,20 @@ def test_vulture_counts_uses_across_trees_and_tests(adv, mini_rocke, capsys):
         "orphan_in_library",
         "orphan_in_platform",
     ]
+    assert "vulture: 2 finding(s)" in out
+
+
+@pytest.mark.parametrize("directory", ["build", "_build", "scratch", "logs"])
+def test_vulture_artifacts_cannot_hide_unused_code(adv, mini_rocke, capsys, directory):
+    artifact = mini_rocke / "library" / directory / "lib"
+    artifact.mkdir(parents=True)
+    stale = artifact / "stale.py"
+    stale.write_text("orphan_in_library()\norphan_in_platform()\n", encoding="utf-8")
+    assert adv._rocke_files([str(stale)]) == []
+    adv.run_vulture(adv._all_files(), whole=True)
+    out = capsys.readouterr().out
+    assert "orphan_in_library" in out
+    assert "orphan_in_platform" in out
     assert "vulture: 2 finding(s)" in out
 
 

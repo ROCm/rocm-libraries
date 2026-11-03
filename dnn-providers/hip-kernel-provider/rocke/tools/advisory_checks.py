@@ -11,15 +11,15 @@
 #
 # ALWAYS exits 0: findings are reported, never enforced -- even if a tool is
 # missing or crashes. Wired as pre-push hooks (rocke-pyright / rocke-radon /
-# rocke-vulture) in the repo-root .pre-commit-config.yaml, which installs each
-# tool into its own env. pyright settings live in rocke/pyrightconfig.json; the
-# radon and vulture settings are below.
+# rocke-vulture) in the repo-root .pre-commit-config.yaml, using the active Python
+# environment without installing tools. pyright settings live in
+# rocke/pyrightconfig.json; the radon and vulture settings are below.
 #
 # Paths outside rocke are ignored; no paths = all of rocke.
 #
 # What the reports mean and what to act on: rocke/docs/static-analysis.md.
 #
-# Usage (pre-commit manages the tool installs):
+# Usage (install optional tools separately; see the guide):
 #   pre-commit install --hook-type pre-push          # one-time: run on `git push`
 #   pre-commit run rocke-radon --hook-stage pre-push --files <paths>
 #   pre-commit run rocke-vulture --hook-stage pre-push --all-files
@@ -44,7 +44,17 @@ GUIDE = ROCKE / "docs" / "static-analysis.md"
 # Python trees under rocke; anything else (docs, style, ...) holds no code.
 TREES = ("library", "platform", "tools", "cmake")
 # Untracked artifact dirs, mirroring rocke/.gitignore.
-SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", "_deps", "kernel_cache"}
+SKIP_DIRS = {
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "_deps",
+    "kernel_cache",
+    "build",
+    "_build",
+    "scratch",
+    "logs",
+}
 
 TOOLS = ("pyright", "radon", "vulture")
 
@@ -63,25 +73,33 @@ def _show(p: Path) -> str:
     return os.path.relpath(p, Path.cwd())
 
 
-def _skipped(p: Path) -> bool:
-    # Directory parts only: a FILE called venv_probe.py is code, not a virtualenv.
-    return any(
+def _skip_dir(part: str) -> bool:
+    return (
         part in SKIP_DIRS
         or part.endswith(".egg-info")
         or part.startswith((".venv", "venv"))
-        for part in p.relative_to(ROCKE).parts[:-1]
     )
+
+
+def _skipped(p: Path) -> bool:
+    # Directory parts only: a FILE called venv_probe.py is code, not a virtualenv.
+    return any(_skip_dir(part) for part in p.relative_to(ROCKE).parts[:-1])
 
 
 def _all_files() -> list[Path]:
     # is_file() drops dangling symlinks such as Emacs's `.#<name>.py` lock files:
     # vulture exits on a path that does not exist, and radon cannot read one.
-    return sorted(
-        p
-        for tree in TREES
-        for p in (ROCKE / tree).rglob("*.py")
-        if p.is_file() and not _skipped(p)
-    )
+    files = []
+    for tree in TREES:
+        for root, dirs, names in os.walk(ROCKE / tree):
+            dirs[:] = [d for d in dirs if not _skip_dir(d)]
+            files.extend(
+                p
+                for name in names
+                if name.endswith(".py")
+                if (p := Path(root) / name).is_file()
+            )
+    return sorted(files)
 
 
 def _rocke_files(paths: list[str]) -> list[Path]:
@@ -119,9 +137,11 @@ def run_pyright(files: list[Path], whole: bool) -> None:
     for d in report["generalDiagnostics"]:
         rule = d.get("rule", d["severity"])
         by_rule[rule] += 1
-        line = d["range"]["start"]["line"] + 1
+        location = _show(Path(d["file"]))
+        if d.get("range") is not None:
+            location += f":{d['range']['start']['line'] + 1}"
         msg = d["message"].splitlines()[0]
-        print(f"{_show(Path(d['file']))}:{line}: {d['severity']}: {msg} ({rule})")
+        print(f"{location}: {d['severity']}: {msg} ({rule})")
     s = report["summary"]
     print(
         f"pyright: {s['errorCount']} error(s), {s['warningCount']} warning(s)"

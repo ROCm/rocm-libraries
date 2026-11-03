@@ -528,6 +528,16 @@ their presence in the source tree nor their installation makes them gated.
 Coverage gaps in [§7](#7-current-state-vs-target-the-gap-registry-wip) therefore
 need to be checked against both registration and the selected CI tier.
 
+**Advisory-wrapper source tests.** The root `pre-commit.yml` workflow runs
+`python -m pytest --noconftest -q dnn-providers/hip-kernel-provider/rocke/library/tests/test_advisory_checks.py`
+from a source checkout when rocKE, the root hook config, or that workflow changes.
+It installs pytest, pre-commit, Pyright, radon, and vulture to exercise the wrappers,
+including tree coverage and non-blocking failure handling. `--noconftest` isolates
+these standalone tooling tests from kernel/GPU fixture setup. Test failures fail
+that CI job; this does not run the advisory hooks on PR code or enforce analyzer
+findings. The local pre-push hooks remain optional and non-blocking. These tests
+are not part of installed-artifact CTest.
+
 Installed library GPU selection includes attention tests, but their Torch and
 architecture gates can still skip all numeric execution. The pinned SDPA lane
 uses an independently qualified bundle to run its enrolled cases without Torch.
