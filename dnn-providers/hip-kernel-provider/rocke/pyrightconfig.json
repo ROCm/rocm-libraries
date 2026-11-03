@@ -6,11 +6,18 @@
 {
   "include": ["library", "platform", "tools", "cmake"],
   "exclude": [
+    "**/node_modules",
     "**/__pycache__",
+    "**/.*",
+    "**/venv*/*",
     "**/.pytest_cache",
     "**/*.egg-info",
     "**/_deps",
-    "**/kernel_cache"
+    "**/kernel_cache",
+    "**/build",
+    "**/_build",
+    "**/scratch",
+    "**/logs"
   ],
   "pythonVersion": "3.10",
   "typeCheckingMode": "basic",

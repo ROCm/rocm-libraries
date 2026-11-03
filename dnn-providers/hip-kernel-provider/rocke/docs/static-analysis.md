@@ -16,8 +16,7 @@ what to do about the most common findings. The examples are real output for
 
 They run as pre-push hooks from the repo-root `.pre-commit-config.yaml`
 (`rocke-radon`, `rocke-pyright`, `rocke-vulture`) on the rocke `.py` files a
-push changes. CI runs only the pre-commit stage, so it never runs them. Enable
-once per clone:
+push changes. CI does not run these hooks. Enable once per clone:
 
 ```bash
 pre-commit install --hook-type pre-push
@@ -25,11 +24,23 @@ pre-commit install --hook-type pre-push
 
 Two things to know before you do:
 
-- The first push after enabling installs the three tool environments, which
-  needs network access once.
+- Hooks use `python` from `PATH` (Python 3.10 or newer) and never install anything.
+  Missing or broken analyzers print a message and do not fail the hook.
 - The config sets no default stages, so this also runs the repo's other hooks
   (black, the whitespace fixers, bandit and so on) on the pushed files at push
   time, and those *can* fail a push. The three rocke checks cannot.
+
+Optionally install the analyzers ahead of time in your development environment,
+then keep that environment active when pushing:
+
+```bash
+python -m pip install pyright==1.1.414 radon==6.0.1 vulture==2.16
+python -m pyright --version
+```
+
+The version check also prepares Pyright's runtime before a push. Installing these
+tools is optional and separate from the hooks, so setup failures cannot block a
+push. Pyright uses packages already available in your environment for import types.
 
 Run them by hand on any files, or on all of rocke (radon and pyright take tens of
 seconds there, vulture a few):
@@ -50,7 +61,7 @@ pre-commit run --hook-stage pre-push --from-ref origin/develop --to-ref HEAD
 |---|---|
 | pyright rules and import roots | `rocke/pyrightconfig.json` |
 | radon report thresholds, vulture confidence | top of `rocke/tools/advisory_checks.py` |
-| Tool versions | `additional_dependencies` in `.pre-commit-config.yaml` |
+| Suggested tool versions | Optional installation command above |
 
 Absolute numbers on existing code are mostly a map of where complexity lives.
 What matters in a PR is whether *your change* made a number worse. Run the
@@ -169,7 +180,8 @@ pyright: 81 error(s), 0 warning(s)
       5  reportGeneralTypeIssues
 ```
 
-Each line is `file:line: severity: first line of the message (rule)`. The tally
+Each line is `file:line: severity: first line of the message (rule)` (or just
+`file: severity: ...` when Pyright supplies no source range). The tally
 at the end groups by rule: a large count under one rule is usually a single
 recurring pattern, not many separate bugs. The kernel code and the tests have
 different dominant patterns, so there are two lists.
@@ -210,7 +222,7 @@ correct at runtime, but pyright cannot connect the two `if`s (67 false positives
 in this kernel alone).
 
 **`reportMissingImports` warnings:** `torch`, `aiter`, `pandas`, `matplotlib`
-and the compiled `rocke_engine` module are not installed in the hook
+and the compiled `rocke_engine` module may not be installed in your active
 environment, so their types are unknown and checks on them are skipped. A
 missing *rocke* module usually means a file adds a directory to `sys.path` at
 runtime; add that directory to `extraPaths` in `pyrightconfig.json`.
