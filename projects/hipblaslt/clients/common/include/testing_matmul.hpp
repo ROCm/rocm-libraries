@@ -2705,6 +2705,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             pin(size_scaleAlphaVec[i] * sizeAlpha);
             pin(size_scaleAVec[i] * num_batches[i] * sizeAlpha);
             pin(size_scaleBVec[i] * num_batches[i] * sizeAlpha);
+            // The temporary host copies a swizzled A or B is built in before it is uploaded.
+            if(do_swizzle_a)
+                pin(size_dA[i] * realDataTypeSize(TiA));
+            if(do_swizzle_b)
+                pin(size_dB[i] * realDataTypeSize(TiB));
             hostBytes += pinned * copies;
             if(host_reference)
                 referenceBytes = std::max(referenceBytes,
