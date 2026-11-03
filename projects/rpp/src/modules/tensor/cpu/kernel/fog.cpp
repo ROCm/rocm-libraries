@@ -51,10 +51,10 @@ inline void compute_fog_48_host(__m256* p, __m256* pFogAlphaMask, __m256* pFogIn
     pGray[0] = _mm256_mul_ps(pGray[0], pGrayFactor);
     pGray[1] = _mm256_mul_ps(pGray[1], pGrayFactor);
     p[0] = _mm256_fmadd_ps(p[0], pOneMinusGrayFactor, pGray[0]);
-    p[1] = _mm256_fmadd_ps(p[1], pOneMinusGrayFactor, pGray[0]);
+    p[1] = _mm256_fmadd_ps(p[1], pOneMinusGrayFactor, pGray[1]);
     p[2] = _mm256_fmadd_ps(p[2], pOneMinusGrayFactor, pGray[0]);
     p[3] = _mm256_fmadd_ps(p[3], pOneMinusGrayFactor, pGray[1]);
-    p[4] = _mm256_fmadd_ps(p[4], pOneMinusGrayFactor, pGray[1]);
+    p[4] = _mm256_fmadd_ps(p[4], pOneMinusGrayFactor, pGray[0]);
     p[5] = _mm256_fmadd_ps(p[5], pOneMinusGrayFactor, pGray[1]);
     pAlphaMaskFactor[0] = _mm256_sub_ps(avx_p1, pFogFactor[0]);
     pAlphaMaskFactor[1] = _mm256_sub_ps(avx_p1, pFogFactor[1]);
@@ -462,9 +462,12 @@ RppStatus fog_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* ds
                 fogIntensityMaskPtrRow += srcDescPtr->w;
             }
         }
-        // Fog without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
             alignedLength = (bufferLength & ~15);
 
             Rpp8u *srcPtrRow, *dstPtrRow;
@@ -885,9 +888,12 @@ RppStatus fog_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f
                 fogIntensityMaskPtrRow += srcDescPtr->w;
             }
         }
-        // Fog without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
 #if __AVX2__
             alignedLength = bufferLength & ~7;
 #endif
@@ -1311,9 +1317,12 @@ RppStatus fog_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
                 fogIntensityMaskPtrRow += srcDescPtr->w;
             }
         }
-        // Fog without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
             alignedLength = bufferLength & ~7;
 
             Rpp32f *srcPtrRow, *dstPtrRow;
@@ -1728,9 +1737,12 @@ RppStatus fog_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* ds
             }
         }
 
-        // Fog without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
+        // Fog for 1-channel tensors, NCHW or NHWC on either side (c = 1: they share a memory order)
+        else if ((srcDescPtr->c == 1) && (dstDescPtr->c == 1) &&
+                 ((srcDescPtr->layout == RpptLayout::NCHW) ||
+                  (srcDescPtr->layout == RpptLayout::NHWC)) &&
+                 ((dstDescPtr->layout == RpptLayout::NCHW) ||
+                  (dstDescPtr->layout == RpptLayout::NHWC))) {
             alignedLength = (bufferLength & ~15);
 
             Rpp8s *srcPtrRow, *dstPtrRow;
