@@ -281,10 +281,6 @@ try
     ROCSPARSE_CHECKARG_POINTER(2, source);
     ROCSPARSE_CHECKARG_POINTER(3, target);
     ROCSPARSE_CHECKARG_ENUM(4, stage);
-    ROCSPARSE_CHECKARG(5,
-                       buffer_size_in_bytes,
-                       (buffer_size_in_bytes == 0 && buffer != nullptr),
-                       rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(6,
                        buffer,
                        (buffer == nullptr && buffer_size_in_bytes > 0),

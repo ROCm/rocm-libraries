@@ -393,7 +393,7 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
                 handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir) + 1, nullptr),
             rocsparse_status_invalid_size);
 
-        // The algorithm has not been set yet.
+        // The algorithm defaults to rocsparse_spsort_alg_default. COO still needs a direction.
         size_t buffer_size;
         EXPECT_ROCSPARSE_STATUS(
             rocsparse_spsort_buffer_size(
@@ -403,6 +403,10 @@ void testing_spsort_coo_bad_arg(const Arguments& arg)
             rocsparse_spsort(
                 handle, descr, mat, mat, rocsparse_spsort_stage_analysis, 0, nullptr, nullptr),
             rocsparse_status_invalid_value);
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_set_input(
+            handle, descr, rocsparse_spsort_input_direction, &dir, sizeof(dir), nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(
+            handle, descr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, nullptr));
 
         // Invalid algorithm value, which is only rejected once the descriptor is used.
         const rocsparse_spsort_alg invalid_alg = (rocsparse_spsort_alg)-1;

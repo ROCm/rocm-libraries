@@ -75,7 +75,7 @@ _rocsparse_spsort_descr::~_rocsparse_spsort_descr() {}
 
 _rocsparse_spsort_descr::_rocsparse_spsort_descr()
     : m_stage((rocsparse_spsort_stage)-1)
-    , m_alg((rocsparse_spsort_alg)-1)
+    , m_alg(rocsparse_spsort_alg_default)
     , m_dir((rocsparse_direction)-1)
 {
 }

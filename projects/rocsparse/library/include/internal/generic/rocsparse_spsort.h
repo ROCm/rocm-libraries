@@ -60,7 +60,10 @@ extern "C" {
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p descr, \p source, \p target, or \p buffer_size_in_bytes pointer is invalid.
 *  \retval rocsparse_status_invalid_size \p source and \p target do not have the same dimensions or number of non-zeros, or the batch strides make the batches overlap.
-*  \retval rocsparse_status_invalid_value \p source and \p target do not have the same format, index types, data type or index base, the data type is \ref rocsparse_datatype_u8_r, \ref rocsparse_datatype_i32_r or \ref rocsparse_datatype_u32_r, which are not supported, the batch count of \p source is neither the batch count of \p target nor one with a batch stride of zero, or \p source is in COO format and the direction is not set.
+*  \retval rocsparse_status_invalid_value \p source and \p target do not have the same format, index types, data type or index base, the data type is 
+*          \ref rocsparse_datatype_u8_r, \ref rocsparse_datatype_i32_r or \ref rocsparse_datatype_u32_r, which are not supported, the batch count of \p source is 
+*          neither the batch count of \p target nor one with a batch stride of zero, the algorithm is not a \ref rocsparse_spsort_alg value, or \p source is in COO 
+*          format and the direction is not set.
 *  \retval rocsparse_status_not_implemented \p source is not in COO, CSR or CSC format.
 */
 ROCSPARSE_EXPORT
@@ -94,6 +97,11 @@ rocsparse_status rocsparse_spsort_buffer_size(rocsparse_handle            handle
 *
 *  The direction is only used by the COO format. It does not need to be set for the CSR and
 *  CSC formats, and is ignored if it is.
+*
+*  A newly created descriptor uses \ref rocsparse_spsort_alg_default. The algorithm can be
+*  changed with \ref rocsparse_spsort_set_input and \ref rocsparse_spsort_input_alg before the
+*  analysis stage. \ref rocsparse_spsort_alg_default and \ref rocsparse_spsort_alg_radix_sort
+*  both select radix sort.
 *
 *  Uniform strided batched matrices are supported. They are set up with
 *  \ref rocsparse_coo_set_strided_batch, \ref rocsparse_csr_set_strided_batch or
@@ -131,15 +139,21 @@ rocsparse_status rocsparse_spsort_buffer_size(rocsparse_handle            handle
 *  buffer_size_in_bytes  size in bytes of the temporary storage buffer. \p buffer_size_in_bytes is
 *               determined by calling \ref rocsparse_spsort_buffer_size.
 *  @param[in]
-*  buffer       temporary storage buffer allocated by the user.
+*  buffer       temporary storage buffer allocated by the user. When \p buffer_size_in_bytes is
+*               zero the buffer is not accessed, and \p buffer may be null or non-null. When
+*               \p buffer_size_in_bytes is greater than zero, \p buffer must not be null.
 *  @param[out]
 *  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p descr, \p source, \p target, or \p buffer pointer is invalid.
-*  \retval rocsparse_status_invalid_size \p source and \p target do not have the same dimensions or number of non-zeros, or the batch strides make the batches overlap.
-*  \retval rocsparse_status_invalid_value \p source and \p target do not have the same format, index types, data type or index base, the data type is \ref rocsparse_datatype_u8_r, \ref rocsparse_datatype_i32_r or \ref rocsparse_datatype_u32_r, which are not supported, the batch count of \p source is neither the batch count of \p target nor one with a batch stride of zero, or \p source is in COO format and the direction is not set.
+*  \retval rocsparse_status_invalid_pointer \p descr, \p source, or \p target pointer is invalid, or \p buffer is null while \p buffer_size_in_bytes is greater than zero.
+*  \retval rocsparse_status_invalid_size \p source and \p target do not have the same dimensions or number of non-zeros, the batch strides make the batches overlap, or 
+*          \p buffer_size_in_bytes is smaller than the size returned by \ref rocsparse_spsort_buffer_size.
+*  \retval rocsparse_status_invalid_value \p source and \p target do not have the same format, index types, data type or index base, the data type is 
+*          \ref rocsparse_datatype_u8_r, \ref rocsparse_datatype_i32_r or \ref rocsparse_datatype_u32_r, which are not supported, the batch count of \p source is 
+*          neither the batch count of \p target nor one with a batch stride of zero, the algorithm is not a \ref rocsparse_spsort_alg value, or \p source is in COO 
+*          format and the direction is not set.
 *  \retval rocsparse_status_not_implemented \p source is not in COO, CSR or CSC format.
 *
 *  \par Example
