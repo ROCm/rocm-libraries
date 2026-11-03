@@ -8,8 +8,9 @@ Documentation for hipFFT is available at
 ### Resolved issues
 
 * `hipfftXtMemcpy` with `HIPFFT_COPY_DEVICE_TO_DEVICE` no longer returns
-  `HIPFFT_INTERNAL_ERROR` when direct peer access is unavailable. The copy
-  still uses `hipMemcpyPeerAsync`, which stages through host memory in that case.
+  `HIPFFT_INTERNAL_ERROR` when direct peer access is unavailable, and no longer
+  calls `hipDeviceEnablePeerAccess`. The copy uses `hipMemcpyPeerAsync`. The
+  runtime stages through host memory when the devices cannot access each other.
 
 ## hipFFT 1.0.27 for ROCm 10.2
 
