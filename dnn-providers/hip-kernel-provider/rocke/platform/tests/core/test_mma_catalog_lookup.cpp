@@ -11,6 +11,7 @@
 #include <atomic>
 #include <initializer_list>
 #include <thread>
+#include <vector>
 
 #include "mma_family_index.h"
 #include "rocke/abi.h"
@@ -154,14 +155,237 @@ static int test_wmma_attention_accumulator_source_width()
     return 0;
 }
 
-static int test_gfx942_catalog_keeps_fp64_rows_before_fp16()
+/* Independent native sequences, not derived from current catalog rows.
+ * Native gfx950/gfx1250 ordering differs from Python; preserve each contract. */
+static const char* const order_gfx90a[] = {
+    "mfma_f32_16x16x16_f16",
+    "mfma_f32_32x32x8_f16",
+    "mfma_f32_16x16x16_bf16",
+    "mfma_f32_32x32x8_bf16",
+};
+static const char* const order_gfx942[] = {
+    "mfma_f32_16x16x8_xf32",
+    "mfma_f32_32x32x4_xf32",
+    "mfma_f32_16x16x4_f32",
+    "mfma_f32_32x32x2_f32",
+    "mfma_f64_16x16x4_f64",
+    "mfma_f64_4x4x4_f64",
+    "mfma_f32_16x16x16_f16",
+    "mfma_f32_32x32x8_f16",
+    "mfma_f32_16x16x16_bf16",
+    "mfma_f32_32x32x8_bf16",
+    "mfma_f32_16x16x32_fp8",
+    "mfma_f32_32x32x16_fp8",
+    "mfma_f32_16x16x32_bf8",
+    "mfma_f32_32x32x16_bf8",
+};
+static const char* const order_gfx950[] = {
+    "mfma_gfx950_f32_32x32x64_fp8_fp8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp8_bf8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp8_fp6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp8_bf6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp8_fp4_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf8_fp8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf8_bf8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf8_fp6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf8_bf6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf8_fp4_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp6_fp8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp6_bf8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp6_fp6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp6_bf6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp6_fp4_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf6_fp8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf6_bf8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf6_fp6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf6_bf6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_bf6_fp4_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp4_fp8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp4_bf8_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp4_fp6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp4_bf6_scale_e8m0_e8m0_k32",
+    "mfma_gfx950_f32_32x32x64_fp4_fp4_scale_e8m0_e8m0_k32",
+    "mfma_f32_16x16x4_f32",
+    "mfma_f32_32x32x2_f32",
+    "mfma_f32_16x16x16_f16",
+    "mfma_f32_16x16x32_f16",
+    "mfma_f32_32x32x8_f16",
+    "mfma_f32_32x32x16_f16",
+    "mfma_f32_16x16x16_bf16",
+    "mfma_f32_16x16x32_bf16",
+    "mfma_f32_32x32x8_bf16",
+    "mfma_f32_32x32x16_bf16",
+    "mfma_f32_16x16x32_fp8",
+    "mfma_f32_32x32x16_fp8",
+    "mfma_f32_16x16x32_bf8",
+    "mfma_f32_32x32x16_bf8",
+    "mfma_f32_16x16x32_xf32",
+    "mfma_f32_32x32x16_xf32",
+};
+static const char* const order_gfx1151[] = {
+    "wmma_f32_16x16x16_f16",
+    "wmma_f32_16x16x16_bf16",
+    "wmma_i32_16x16x16_iu8",
+    "wmma_i32_16x16x16_iu4",
+};
+static const char* const order_gfx1201[] = {
+    "wmma_gfx12_f32_16x16x16_f16",
+    "wmma_gfx12_f32_16x16x16_bf16",
+};
+static const char* const order_gfx1250[] = {
+    "wmma_gfx1250_f32_16x16x4_f32",
+    "wmma_gfx1250_f32_16x16x32_f16",
+    "wmma_gfx1250_f32_16x16x32_bf16",
+    "wmma_gfx1250_f32_16x16x64_fp8_fp8",
+    "wmma_gfx1250_f32_16x16x64_fp8_bf8",
+    "wmma_gfx1250_f32_16x16x64_bf8_fp8",
+    "wmma_gfx1250_f32_16x16x64_bf8_bf8",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp8_bf8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp8_bf6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf8_bf6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp6_bf8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp6_bf6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf6_bf8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e8m0_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp8_bf8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp8_bf6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf8_bf6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp6_bf8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp6_bf6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf6_bf8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e8m0_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e5m3_k32",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e4m3_k32",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e5m3_k32",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e4m3_k32",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e5m3_k32",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e4m3_k32",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e5m3_k32",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e4m3_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e5m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e4m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e5m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e4m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e5m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e4m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e5m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e4m3_e8m0_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e5m3_e5m3_k32",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k32",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e5m3_k16",
+    "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e4m3_k16",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e5m3_k16",
+    "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e4m3_k16",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e5m3_k16",
+    "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e4m3_k16",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e5m3_k16",
+    "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e4m3_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e5m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e4m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e5m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e4m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e5m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e4m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e5m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e4m3_e8m0_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e5m3_e5m3_k16",
+    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16",
+};
+
+static bool catalog_order_matches(const rocke_mma_catalog_t* catalog,
+                                  const char* const* expected,
+                                  size_t count)
 {
-    const auto* arch = rocke_arch_target_from_gfx("gfx942");
-    CHECK(arch && arch->mma.num_ops >= 7);
-    const char* expected[]
-        = {"mfma_f64_16x16x4_f64", "mfma_f64_4x4x4_f64", "mfma_f32_16x16x16_f16"};
-    for(int i = 0; i < 3; ++i)
-        CHECK(strcmp(arch->mma.ops[4 + i].op_id, expected[i]) == 0);
+    if((size_t)catalog->num_ops != count)
+        return false;
+    for(size_t i = 0; i < count; ++i)
+        if(strcmp(catalog->ops[i].op_id, expected[i]) != 0)
+            return false;
+    return true;
+}
+
+static int test_catalog_keeps_established_order()
+{
+    struct expected_catalog
+    {
+        const char* gfx;
+        const char* const* ids;
+        size_t count;
+    };
+#define ORDER(gfx, ids)                        \
+    {                                          \
+        gfx, ids, sizeof(ids) / sizeof(ids[0]) \
+    }
+    const expected_catalog expected[] = {
+        ORDER("gfx90a", order_gfx90a),
+        ORDER("gfx942", order_gfx942),
+        ORDER("gfx950", order_gfx950),
+        ORDER("gfx1151", order_gfx1151),
+        ORDER("gfx1201", order_gfx1201),
+        ORDER("gfx1250", order_gfx1250),
+        ORDER("gfx11-generic", order_gfx1151),
+        ORDER("gfx12-generic", order_gfx1201),
+    };
+#undef ORDER
+    for(const auto& row : expected)
+    {
+        const auto* arch = rocke_arch_target_from_gfx(row.gfx);
+        if(arch && !catalog_order_matches(&arch->mma, row.ids, row.count))
+        {
+            fprintf(stderr,
+                    "%s: expected %zu catalog rows, got %d\n",
+                    row.gfx,
+                    row.count,
+                    arch->mma.num_ops);
+            for(int i = 0; i < arch->mma.num_ops; ++i)
+                fprintf(stderr, "  %d: %s\n", i, arch->mma.ops[i].op_id);
+        }
+        CHECK(arch && catalog_order_matches(&arch->mma, row.ids, row.count));
+        CHECK(row.count >= 2);
+        std::vector<rocke_mma_op_t> swapped(arch->mma.ops, arch->mma.ops + arch->mma.num_ops);
+        const auto first = swapped[0];
+        swapped[0] = swapped[1];
+        swapped[1] = first;
+        auto catalog = arch->mma;
+        catalog.ops = swapped.data();
+        CHECK(!catalog_order_matches(&catalog, row.ids, row.count));
+    }
     return 0;
 }
 
@@ -1317,8 +1541,7 @@ int main()
        || test_scaled_source_values() || test_unscaled_wmma_values()
        || test_scaled_wmma_supported_combinations() || test_emulated_rows_mirror_physical()
        || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom()
-       || test_rdna_integer_wmma_rows_name_i8_and_i4()
-       || test_gfx942_catalog_keeps_fp64_rows_before_fp16()
+       || test_rdna_integer_wmma_rows_name_i8_and_i4() || test_catalog_keeps_established_order()
        || test_wmma_attention_accumulator_source_width())
         return 1;
     int checked = 0;

@@ -107,14 +107,199 @@ def test_gemm_zero_accumulator_uses_source_width():
     assert b.mma(atom, acc, acc, acc).type.count == 7
 
 
-def test_gfx942_catalog_keeps_fp64_rows_before_fp16():
-    # Catalog enumeration preserves the established ordering across dtypes.
-    ids = [op.op_id for op in ArchTarget.from_gfx("gfx942").mma.ops]
-    assert ids[4:7] == [
+# Independent established sequences, including generated scaled rows. Never
+# derive these expectations from the catalog being checked.
+_CATALOG_ORDER = {
+    "gfx90a": (
+        "mfma_f32_16x16x16_f16",
+        "mfma_f32_32x32x8_f16",
+        "mfma_f32_16x16x16_bf16",
+        "mfma_f32_32x32x8_bf16",
+    ),
+    "gfx942": (
+        "mfma_f32_16x16x8_xf32",
+        "mfma_f32_32x32x4_xf32",
+        "mfma_f32_16x16x4_f32",
+        "mfma_f32_32x32x2_f32",
         "mfma_f64_16x16x4_f64",
         "mfma_f64_4x4x4_f64",
         "mfma_f32_16x16x16_f16",
-    ]
+        "mfma_f32_32x32x8_f16",
+        "mfma_f32_16x16x16_bf16",
+        "mfma_f32_32x32x8_bf16",
+        "mfma_f32_16x16x32_fp8",
+        "mfma_f32_32x32x16_fp8",
+        "mfma_f32_16x16x32_bf8",
+        "mfma_f32_32x32x16_bf8",
+    ),
+    "gfx950": (
+        "mfma_f32_16x16x4_f32",
+        "mfma_f32_32x32x2_f32",
+        "mfma_f32_16x16x16_f16",
+        "mfma_f32_16x16x32_f16",
+        "mfma_f32_32x32x8_f16",
+        "mfma_f32_32x32x16_f16",
+        "mfma_f32_16x16x16_bf16",
+        "mfma_f32_16x16x32_bf16",
+        "mfma_f32_32x32x8_bf16",
+        "mfma_f32_32x32x16_bf16",
+        "mfma_f32_16x16x32_fp8",
+        "mfma_f32_32x32x16_fp8",
+        "mfma_f32_16x16x32_bf8",
+        "mfma_f32_32x32x16_bf8",
+        "mfma_gfx950_f32_32x32x64_fp8_fp8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp8_bf8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp8_fp6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp8_bf6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp8_fp4_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf8_fp8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf8_bf8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf8_fp6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf8_bf6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf8_fp4_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp6_fp8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp6_bf8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp6_fp6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp6_bf6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp6_fp4_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf6_fp8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf6_bf8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf6_fp6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf6_bf6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_bf6_fp4_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp4_fp8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp4_bf8_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp4_fp6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp4_bf6_scale_e8m0_e8m0_k32",
+        "mfma_gfx950_f32_32x32x64_fp4_fp4_scale_e8m0_e8m0_k32",
+        "mfma_f32_16x16x32_xf32",
+        "mfma_f32_32x32x16_xf32",
+    ),
+    "gfx1151": (
+        "wmma_f32_16x16x16_f16",
+        "wmma_f32_16x16x16_bf16",
+        "wmma_i32_16x16x16_iu8",
+        "wmma_i32_16x16x16_iu4",
+    ),
+    "gfx1201": (
+        "wmma_gfx12_f32_16x16x16_f16",
+        "wmma_gfx12_f32_16x16x16_bf16",
+    ),
+    "gfx1250": (
+        "wmma_gfx1250_f32_16x16x4_f32",
+        "wmma_gfx1250_f32_16x16x32_f16",
+        "wmma_gfx1250_f32_16x16x32_bf16",
+        "wmma_gfx1250_f32_16x16x64_fp8_fp8",
+        "wmma_gfx1250_f32_16x16x64_fp8_bf8",
+        "wmma_gfx1250_f32_16x16x64_bf8_fp8",
+        "wmma_gfx1250_f32_16x16x64_bf8_bf8",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp8_bf8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp8_bf6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf8_bf6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp6_bf8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp6_bf6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf6_bf8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e8m0_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp8_bf8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp8_bf6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf8_bf6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp6_bf8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp6_bf6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf6_bf8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e8m0_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e5m3_k32",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e4m3_k32",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e5m3_k32",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e4m3_k32",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e5m3_k32",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e4m3_k32",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e5m3_k32",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e4m3_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e5m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e4m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e5m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e4m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e5m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e4m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e5m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e4m3_e8m0_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e5m3_e5m3_k32",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k32",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e5m3_k16",
+        "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e4m3_k16",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e5m3_k16",
+        "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e4m3_k16",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e5m3_k16",
+        "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e4m3_k16",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e5m3_k16",
+        "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e4m3_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e5m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e4m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e5m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e4m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e5m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e4m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e5m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e4m3_e8m0_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e5m3_e5m3_k16",
+        "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16",
+    ),
+}
+_CATALOG_ORDER["gfx11-generic"] = _CATALOG_ORDER["gfx1151"]
+_CATALOG_ORDER["gfx12-generic"] = _CATALOG_ORDER["gfx1201"]
+
+
+def _assert_catalog_order(gfx, ops):
+    assert tuple(op.op_id for op in ops) == _CATALOG_ORDER[gfx]
+
+
+@pytest.mark.parametrize("gfx", _CATALOG_ORDER)
+def test_catalog_keeps_established_order(gfx):
+    _assert_catalog_order(gfx, ArchTarget.from_gfx(gfx).mma.ops)
+
+
+@pytest.mark.parametrize("gfx", _CATALOG_ORDER)
+def test_catalog_order_guard_detects_permuted_rows(gfx):
+    ops = list(ArchTarget.from_gfx(gfx).mma.ops)
+    ops[0], ops[1] = ops[1], ops[0]
+    with pytest.raises(AssertionError):
+        _assert_catalog_order(gfx, ops)
 
 
 def test_filtered_catalog_preserves_supported_order_and_fields():

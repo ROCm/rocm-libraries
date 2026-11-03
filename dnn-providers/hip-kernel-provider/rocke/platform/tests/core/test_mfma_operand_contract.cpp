@@ -9,6 +9,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/mfma_internal.h"
 #include "rocke/tf32_internal.h"
 
 #define CHECK(expr)                                            \
@@ -281,6 +282,89 @@ static int check_packed_carriers()
     return 0;
 }
 
+static int check_unsupported_packed_carriers()
+{
+    const char* elements[] = {"fp4e2m1", "fp6e2m3", "fp6e3m2"};
+    const int counts[] = {64, 43, 43};
+    int checked = 0;
+    for(const auto& spec : cases)
+    {
+        if(!spec.packed_bits)
+            continue;
+        for(int element = 0; element < 3; ++element)
+            for(int role = 0; role < 2; ++role)
+            {
+                rocke_ir_builder_t builder;
+                CHECK(rocke_ir_builder_init(&builder, "unsupported_carrier") == ROCKE_OK);
+                const auto* source = rocke_vector_type(&builder, rocke_i32(), 8);
+                const auto* acc_type = rocke_vector_type(&builder, rocke_f32(), 4);
+                auto* a = rocke_b_param(&builder, "a", source, NULL);
+                auto* b = rocke_b_param(&builder, "b", source, NULL);
+                auto* c = rocke_b_param(&builder, "c", acc_type, NULL);
+                auto* scale = rocke_b_param(&builder, "scale", rocke_i32(), NULL);
+                rocke_value_t* operands[] = {a, b, c, scale, scale};
+                rocke_attr_map_t attrs = {};
+                rocke_attr_set_str(&builder, &attrs, "op_id", spec.id);
+                const rocke_type_t* results[] = {acc_type};
+                auto* op = rocke_b_op(&builder,
+                                      ROCKE_OP_TILE_MMA,
+                                      operands,
+                                      spec.scaled ? 5 : 3,
+                                      results,
+                                      1,
+                                      &attrs,
+                                      NULL,
+                                      0,
+                                      "acc",
+                                      NULL);
+                const auto* scalar = rocke_scalar_by_name(elements[element]);
+                CHECK(op && scalar);
+                const auto* actual = rocke_vector_type(&builder, scalar, counts[element]);
+                op->operands[role]->type = actual;
+                char message[256], expected[256];
+                snprintf(expected,
+                         sizeof(expected),
+                         "MFMA unsupported packed carrier - src%d=%s, expected a supported %d-bit "
+                         "register carrier",
+                         role,
+                         actual->name,
+                         spec.packed_bits);
+                const char* error = rocke_mfma_operand_error(op,
+                                                             NULL,
+                                                             "vec<f32x4>",
+                                                             "vec<f32x4>",
+                                                             256,
+                                                             spec.scaled,
+                                                             message,
+                                                             sizeof(message));
+                CHECK(error && strcmp(error, expected) == 0);
+                // A malformed shape must not be mislabeled as an unsupported element.
+                const int malformed_counts[] = {0, -1};
+                for(int count : malformed_counts)
+                {
+                    rocke_type_t malformed = *actual;
+                    malformed.count = count;
+                    op->operands[role]->type = &malformed;
+                    error = rocke_mfma_operand_error(op,
+                                                     NULL,
+                                                     "vec<f32x4>",
+                                                     "vec<f32x4>",
+                                                     256,
+                                                     spec.scaled,
+                                                     message,
+                                                     sizeof(message));
+                    CHECK(error
+                          && strcmp(error, "MFMA requires src0 and src1 to have 256 bits") == 0);
+                }
+                op->operands[role]->type = actual;
+                ++checked;
+                rocke_ir_builder_free(&builder);
+            }
+    }
+    CHECK(checked == 18);
+    return 0;
+}
+
 int main()
 {
     for(const auto& spec : cases)
@@ -288,6 +372,7 @@ int main()
             for(int variant = 0; variant <= (spec.scaled ? 10 : 8); ++variant)
                 CHECK(check_case(&spec, variant, generic) == 0);
     CHECK(check_packed_carriers() == 0);
+    CHECK(check_unsupported_packed_carriers() == 0);
     for(int index = 13; index <= 16; ++index)
         for(int generic = 0; generic < 2; ++generic)
             for(int variant = 13; variant <= 14; ++variant)

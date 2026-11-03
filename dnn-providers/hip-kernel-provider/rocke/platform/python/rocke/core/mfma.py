@@ -91,8 +91,25 @@ def validate_mfma(op: Op) -> None:
         raise ValueError(f"MFMA expects {arity} operands and 1 result")
     bits = _PACKED_BITS.get(op_id)
     if bits is not None:
-        if any(_carrier_bits(v.type) != bits for v in op.operands[:2]):
-            raise ValueError(f"MFMA requires src0 and src1 to have {bits} bits")
+        for role, value in enumerate(op.operands[:2]):
+            actual = value.type
+            element = actual.elem if isinstance(actual, VectorType) else actual
+            valid_shape = type(actual) is Type or (
+                isinstance(actual, VectorType)
+                and type(actual.count) is int
+                and actual.count > 0
+            )
+            if (
+                valid_shape
+                and type(element) is Type
+                and element.name not in _CARRIER_BITS
+            ):
+                raise ValueError(
+                    f"MFMA unsupported packed carrier - src{role}={actual.name}, "
+                    f"expected a supported {bits}-bit register carrier"
+                )
+            if _carrier_bits(actual) != bits:
+                raise ValueError(f"MFMA requires src0 and src1 to have {bits} bits")
     else:
         source = _SOURCES[op_id]
         byte_source = isinstance(source, VectorType) and source.elem in (

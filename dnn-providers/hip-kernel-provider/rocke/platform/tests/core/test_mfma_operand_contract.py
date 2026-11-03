@@ -14,6 +14,9 @@ from rocke.core.ir import (
     F16,
     F32,
     F64,
+    FP4E2M1,
+    FP6E2M3,
+    FP6E3M2,
     FP8E4M3,
     I8,
     I16,
@@ -313,6 +316,45 @@ PACKED_CARRIERS = [
         VectorType(F32, 8),
     )
 ]
+
+
+@pytest.mark.parametrize("case", PACKED_CASES, ids=[c[1] for c in PACKED_CASES])
+@pytest.mark.parametrize("role", [0, 1])
+@pytest.mark.parametrize(
+    "carrier",
+    [VectorType(FP4E2M1, 64), VectorType(FP6E2M3, 43), VectorType(FP6E3M2, 43)],
+)
+@pytest.mark.parametrize("engine", ["guard", "python"])
+def test_mfma_unsupported_packed_carrier_names_type(case, role, carrier, engine):
+    from rocke.core.mfma import validate_mfma
+
+    kernel, op = _kernel(case, concrete=True)
+    op.operands[role].type = carrier
+    expected = (
+        f"MFMA unsupported packed carrier - src{role}={carrier.name}, "
+        f"expected a supported {case[4]}-bit register carrier"
+    )
+    lowerer = _Lowerer(kernel, arch=case[0], llvm_flavor="llvm23")
+    with pytest.raises(ValueError) as caught:
+        if engine == "guard":
+            validate_mfma(op)
+        else:
+            lowerer.lower_op(op)
+    assert str(caught.value) == expected
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
+@pytest.mark.parametrize("role", [0, 1])
+@pytest.mark.parametrize("count", [64.0, True, 0, -1, None])
+def test_mfma_malformed_count_is_not_an_unsupported_element(role, count):
+    from rocke.core.mfma import validate_mfma
+
+    _, op = _kernel(COMBINED_CASE)
+    op.operands[role].type = VectorType(FP4E2M1, count)
+    with pytest.raises(ValueError) as caught:
+        validate_mfma(op)
+    assert str(caught.value) == "MFMA requires src0 and src1 to have 256 bits"
 
 
 @pytest.mark.parametrize("case,carrier", PACKED_CARRIERS)

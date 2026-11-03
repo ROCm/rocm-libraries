@@ -185,7 +185,7 @@ def _emulated_kernel(atom) -> KernelDef:
     )
     a = b.bitcast(a, VectorType(TF32, atom.a_frag_len))
     bv = b.bitcast(bv, VectorType(TF32, atom.b_frag_len))
-    c = b.vector_splat(b.const_f32(0.0), atom.c_frag_len)
+    c = b.vector_splat(b.const_f32(0.0), atom.srcs[2].frag_len)
     _store_accumulator(b, b.mma(atom, a, bv, c), out_ptr, tid, atom.c_frag_len)
     b.ret()
     return b.kernel
@@ -214,7 +214,7 @@ def _handwritten_kernel(phys, terms) -> KernelDef:
         )
         for name, ptr in ptrs.items()
     }
-    acc = b.vector_splat(b.const_f32(0.0), phys.c_frag_len)
+    acc = b.vector_splat(b.const_f32(0.0), phys.srcs[2].frag_len)
     for a_name, b_name in terms:
         acc = b.mma(phys, loaded[a_name], loaded[b_name], acc)
     _store_accumulator(b, acc, out_ptr, tid, phys.c_frag_len)

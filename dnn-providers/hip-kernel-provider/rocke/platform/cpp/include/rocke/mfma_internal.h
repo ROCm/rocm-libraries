@@ -137,8 +137,28 @@ static inline const char* rocke_mfma_operand_error(const rocke_op_t* op,
                     type->name,
                     source_type);
             else if(packed_bits)
-                snprintf(
-                    message, capacity, "MFMA requires src0 and src1 to have %d bits", packed_bits);
+            {
+                const rocke_type_t* element
+                    = type && type->kind == ROCKE_TYPE_VECTOR ? type->elem : type;
+                const int valid_shape
+                    = type
+                      && (type->kind == ROCKE_TYPE_SCALAR
+                          || (type->kind == ROCKE_TYPE_VECTOR && type->count > 0));
+                if(valid_shape && element && element->kind == ROCKE_TYPE_SCALAR
+                   && !rocke_mfma_carrier_bits(element))
+                    snprintf(message,
+                             capacity,
+                             "MFMA unsupported packed carrier - src%d=%s, expected a supported "
+                             "%d-bit register carrier",
+                             role,
+                             type->name,
+                             packed_bits);
+                else
+                    snprintf(message,
+                             capacity,
+                             "MFMA requires src0 and src1 to have %d bits",
+                             packed_bits);
+            }
             else
                 snprintf(message,
                          capacity,
