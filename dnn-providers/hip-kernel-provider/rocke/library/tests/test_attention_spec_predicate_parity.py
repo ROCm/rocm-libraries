@@ -324,20 +324,22 @@ def test_reduce_predicate_admits_the_segment_kernel_arches(arch):
 
 @pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
 def test_reduce_segment_bound_is_the_arch_lds_capacity(arch):
-    """The bound is ``ArchTarget.lds_capacity_bytes`` over one f32 per segment, not a
+    """The bound is ``ArchTarget.lds_capacity_bytes`` over the reduce's LDS size, not a
     literal: the last count that fits is admitted and the next one refused."""
     from rocke.core.arch.target import ArchTarget
 
+    from kernels.common.attention_split_kv_reduce import split_kv_reduce_lds_bytes
     from kernels.gfx950.attention_tiled_3d import (
         UnifiedAttentionReduceTiledSpec,
-        reduce_lds_bytes,
         reduce_max_segments,
         supports_tiled_reduce_spec,
     )
 
     cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     limit = reduce_max_segments(arch)
-    assert reduce_lds_bytes(limit) <= cap < reduce_lds_bytes(limit + 1)
+    assert (
+        split_kv_reduce_lds_bytes(limit) <= cap < split_kv_reduce_lds_bytes(limit + 1)
+    )
 
     def spec(n):
         return UnifiedAttentionReduceTiledSpec(

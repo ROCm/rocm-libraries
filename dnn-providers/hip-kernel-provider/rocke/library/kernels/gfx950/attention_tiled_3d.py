@@ -41,7 +41,11 @@ from kernels.common._attention_strided_kv import (
 )
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
-from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
+from kernels.common.attention_split_kv_reduce import (
+    split_kv_reduce_lds_bytes,
+    split_kv_reduce_max_segments,
+    split_kv_reduce_spec,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -1713,19 +1717,8 @@ def supports_tiled_3d_spec(
     )
 
 
-# Two bounds the reduce builder relies on without checking: one wave64 owns
-# ``head_size // 64`` output dims per thread, and the per-segment factor is cached in
-# an LDS array of ``num_segments`` floats (``seg_factor``, its only LDS allocation).
+# The reduce builder assumes one wave64 owns ``head_size // 64`` output dims per thread.
 _REDUCE_THREADS = 64
-_REDUCE_LDS_BYTES_PER_SEGMENT = 4  # one f32 factor
-
-
-def reduce_lds_bytes(num_segments: int) -> int:
-    """The reduce kernel's LDS: its ``seg_factor`` array of ``num_segments`` f32s.
-
-    ``test_attention_tiled_3d_reduce_lds`` holds this to the compiled code object's
-    ``group_segment_fixed_size``."""
-    return num_segments * _REDUCE_LDS_BYTES_PER_SEGMENT
 
 
 def reduce_max_segments(arch: str) -> int:
@@ -1734,7 +1727,7 @@ def reduce_max_segments(arch: str) -> int:
     ``GFX950_UNIFIED_3D_MAX_SEGMENTS``."""
     from rocke.core.arch.target import ArchTarget
 
-    return ArchTarget.from_gfx(arch).lds_capacity_bytes // _REDUCE_LDS_BYTES_PER_SEGMENT
+    return split_kv_reduce_max_segments(ArchTarget.from_gfx(arch).lds_capacity_bytes)
 
 
 def supports_tiled_reduce_spec(
@@ -1781,7 +1774,7 @@ def supports_tiled_reduce_spec(
         )
     # ``arch`` passed validate_tiled_attention_arch, so it has a catalog row.
     target = ArchTarget.from_gfx(arch)
-    lds_bytes = reduce_lds_bytes(spec.num_segments)
+    lds_bytes = split_kv_reduce_lds_bytes(spec.num_segments)
     if not target.fits_lds(lds_bytes):
         return (
             False,

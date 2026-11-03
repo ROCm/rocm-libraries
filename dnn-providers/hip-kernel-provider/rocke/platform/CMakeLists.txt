@@ -405,6 +405,17 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
 
+      # test_attention_tiled_3d_reduce_lds.py holds the provider's C++ mirror of
+      # the split-KV reduce's segment bound to the Python gate; it reads these
+      # headers from tests/hkp_packs in an installed tree.
+      set(_ROCKE_HKP_PACKS_DIR
+          "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engines/kernel_ingestor_engine/packs")
+      if(EXISTS "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp")
+        install(FILES "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionDenseGeometry.hpp"
+                      "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp"
+                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/hkp_packs")
+      endif()
+
       # The SDPA contract tests cross-check from_hipdnn against hipDNN's SDPA
       # graph template and every SdpaFwd golden graph. Those live outside rocke,
       # so install a copy beside the tests (tests/sdpa/hipdnn_assets.py reads it)
