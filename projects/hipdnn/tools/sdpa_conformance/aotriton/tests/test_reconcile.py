@@ -247,6 +247,31 @@ def test_engines_csv_names_the_engine_of_a_crash_with_its_kernel_and_stage(tmp_p
     )
 
 
+def test_a_forward_side_fail_of_a_backward_case_is_counted_and_listed_against_its_forward(
+    tmp_path,
+):
+    # The forward failed AOTriton's check, so the backward never ran and its column is empty.
+    write_pass(
+        tmp_path, "", {},
+        [row(BWD_T, "fail", fwd="hipdnn:F", fail_side="fwd", stage="execute", reason="NaN")],
+        [BWD_T],
+    )  # fmt: skip
+    (r,) = table(tmp_path)
+    assert (r["direction"], r["engine"], r["source"], r["outcome"]) == (
+        "fwd",
+        "F",
+        "heuristic",
+        "fail",
+    )
+    (f,) = reconcile.failure_rows(tmp_path)
+    assert (f["nodeid"], f["direction"], f["engine"], f["fail_side"]) == (
+        BWD_T,
+        "fwd",
+        "F",
+        "fwd",
+    )
+
+
 def test_pair_and_refwd_passes_get_engine_rows_and_a_mismatch_is_declined(tmp_path):
     pair = {"kind": "pair", "direction": "bwd", "pin_fwd": "A", "pin_bwd": "X"}
     write_pass(

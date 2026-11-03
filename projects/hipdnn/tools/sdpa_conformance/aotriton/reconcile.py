@@ -331,7 +331,9 @@ def _pass_engine_rows(d, meta, expected):
         crashed = row["fail_side"] if outcome == "crash" else ""
         failed = row["fail_side"] if outcome == "fail" else ""
         if kind == HEURISTIC:
-            direction = crashed or direction_of(nodeid)
+            # A side that failed or crashed names the engine; a forward that failed AOTriton's
+            # check leaves the backward column of a backward case empty.
+            direction = crashed or failed or direction_of(nodeid)
             for engine in sorted(served_engines(row[direction])):
                 add(nodeid, direction, engine, outcome, reason, row)
         elif kind == "discovery":
