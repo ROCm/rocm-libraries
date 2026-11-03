@@ -70,8 +70,8 @@ function(create_individual_batched_gemm_target datatype layout trait tile_config
     ck_tile_gemm_split_trait("${trait}" pipeline epilogue scheduler)
 
     # The trait splitter is shared with gemm_universal and knows pipelines
-    # batched_gemm does not build (comp_tdm_pc). Fail with the actionable
-    # cause rather than CMake's "non-existent target" for an internal name.
+    # batched_gemm does not build. Fail with the actionable cause rather than
+    # CMake's "non-existent target" for an internal name.
     if(NOT TARGET benchmark_batched_gemm_${pipeline}_pipeline)
         message(FATAL_ERROR
             "Trait '${trait}' uses pipeline '${pipeline}', which is not in "
@@ -224,10 +224,10 @@ else()
     set(BATCHED_GEMM_SCHEDULERS "intrawave;interwave")
     if(BATCHED_GEMM_GPU_TARGETS MATCHES "gfx1250")
         # gfx1250 pipelines: non-MX comp_async (cshuffle epilogue) and the TDM
-        # pipelines comp_tdm / comp_tdm_v2 (tdm epilogue). The weight-preshuffle
-        # pipelines are not built: the batched kernel's per-batch B offset
-        # assumes an unshuffled B.
-        list(APPEND BATCHED_GEMM_PIPELINES "comp_async;comp_tdm;comp_tdm_v2")
+        # pipelines comp_tdm / comp_tdm_v2 / comp_tdm_pc (tdm epilogue). The
+        # weight-preshuffle pipelines are not built: the batched kernel's
+        # per-batch B offset assumes an unshuffled B.
+        list(APPEND BATCHED_GEMM_PIPELINES "comp_async;comp_tdm;comp_tdm_v2;comp_tdm_pc")
         list(APPEND BATCHED_GEMM_EPILOGUES "tdm")
     endif()
 
