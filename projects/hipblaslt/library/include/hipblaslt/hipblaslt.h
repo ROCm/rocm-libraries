@@ -255,7 +255,10 @@ typedef enum {
    * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW`` for A
    * and B; see ``hipblasLtOrder_t`` for the limits. The ``hipblaslt_ext`` ``Gemm`` and
    * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
-   * ``HIPBLASLT_ORDER_ROW``. Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
+   * ``HIPBLASLT_ORDER_ROW``. Swizzled orders apply to A and B only: those APIs,
+   * ``hipblasLtMatmul``, and ``hipblasLtMatmulAlgoGetHeuristic`` return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
    * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
    *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.

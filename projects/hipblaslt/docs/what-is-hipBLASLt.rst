@@ -121,6 +121,7 @@ keeps that idea and adds three more:
   data is pre-arranged into the exact pattern the kernel reads. That saves the kernel from
   rearranging values itself. However, a swizzled order is valid only for particular type, transpose,
   and architecture combinations, which the :doc:`API reference <./reference/api-reference>` lists.
+  Swizzled orders apply to A and B only; C and D must be ``HIPBLASLT_ORDER_COL``.
   ``hipblaslt-bench`` exposes it as ``--swizzleA`` and ``--swizzleB``.
 * An **offset** (``HIPBLASLT_MATRIX_LAYOUT_OFFSET``), measured in elements, so a layout can point at
   a sub-matrix inside a larger allocation. :doc:`Use general batched GEMM
