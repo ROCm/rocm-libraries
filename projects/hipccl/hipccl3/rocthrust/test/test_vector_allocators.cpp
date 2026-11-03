@@ -24,14 +24,10 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
-
 template <typename BaseAlloc, bool PropagateOnSwap>
 class stateful_allocator : public BaseAlloc
 {
-  using base_traits = thrust::detail::allocator_traits<BaseAlloc>;
+  using base_traits = _THRUST_STD::allocator_traits<BaseAlloc>;
 
 public:
   stateful_allocator(int i)
@@ -70,8 +66,8 @@ public:
 
   using pointer         = typename base_traits::pointer;
   using const_pointer   = typename base_traits::const_pointer;
-  using reference       = typename base_traits::reference;
-  using const_reference = typename base_traits::const_reference;
+  using reference       = typename _THRUST_STD::iterator_traits<pointer>::reference;
+  using const_reference = typename _THRUST_STD::iterator_traits<const_pointer>::reference;
 
   pointer allocate(std::size_t size)
   {
@@ -202,7 +198,7 @@ template <typename Vector>
 void TestVectorAllocatorPropagateOnCopyAssignment()
 {
   ASSERT_EQ(
-    thrust::detail::allocator_traits<typename Vector::allocator_type>::propagate_on_container_copy_assignment::value,
+    _THRUST_STD::allocator_traits<typename Vector::allocator_type>::propagate_on_container_copy_assignment::value,
     true);
 
   using Alloc = typename Vector::allocator_type;
@@ -238,7 +234,7 @@ void TestVectorAllocatorPropagateOnMoveAssignment()
 {
   using Alloc = typename Vector::allocator_type;
   ASSERT_EQ(
-    thrust::detail::allocator_traits<typename Vector::allocator_type>::propagate_on_container_copy_assignment::value,
+    _THRUST_STD::allocator_traits<typename Vector::allocator_type>::propagate_on_container_copy_assignment::value,
     true);
 
   using Alloc = typename Vector::allocator_type;

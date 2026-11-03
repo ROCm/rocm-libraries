@@ -27,7 +27,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/allocator/tagged_allocator.h>
 #include <thrust/detail/allocator/temporary_allocator.h>
 #include <thrust/detail/execution_policy.h>
@@ -35,6 +34,7 @@
 #include <thrust/memory.h>
 #include <thrust/system/detail/bad_alloc.h>
 
+#include _THRUST_STD_INCLUDE(__memory/allocator_traits.h)
 #include _THRUST_STD_INCLUDE(__utility/pair.h)
 #include _THRUST_STD_INCLUDE(cassert)
 

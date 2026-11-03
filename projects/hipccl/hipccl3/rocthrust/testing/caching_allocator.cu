@@ -24,7 +24,7 @@
 template <typename Allocator>
 void test_implementation(Allocator alloc)
 {
-  using Traits = typename thrust::detail::allocator_traits<Allocator>;
+  using Traits = typename _THRUST_STD::allocator_traits<Allocator>;
   using Ptr    = typename Allocator::pointer;
 
   Ptr p = Traits::allocate(alloc, 123);
