@@ -28,6 +28,7 @@ def _props(target_id: str | None) -> hip_module.HipDevicePropR0600:
         ("gfx1101-strict:unknown+", "gfx11-generic"),
         ("gfx1250-strict", "gfx1250"),
         ("gfx942:sramecc+:xnack-", "gfx942"),
+        ("gfx950:sramecc+:xnack-", "gfx950"),
         (None, None),
     ],
 )
@@ -44,6 +45,7 @@ def test_device_target_id_and_base_arch_are_separate(
     [
         ("gfx1250-strict", "gfx1250", "gfx1250", 0),
         ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-", 1),
+        ("gfx950:sramecc+:xnack-", "gfx950", "gfx950:sramecc+:xnack-", 1),
         ("gfx1101", "gfx11-generic", "gfx1101", 0),
         ("gfx1101-strict:unknown+", "gfx11-generic", "gfx1101:unknown+", 0),
         (None, None, None, 0),
@@ -83,9 +85,10 @@ def test_device_properties_require_matching_function_version() -> None:
     assert bind.call_args.args[0] == "hipGetDevicePropertiesR0600"
 
 
-def test_target_id_is_read_from_its_field() -> None:
+@pytest.mark.parametrize("name", [b"gfx942", b"gfx950"])
+def test_target_id_is_read_from_its_field(name: bytes) -> None:
     props = _props("gfx90a:sramecc+:xnack-")
-    props.name = b"gfx942"
+    props.name = name
     with mock.patch.object(hip_module, "_device_props", return_value=props):
         assert hip_module.get_device_target_id() == "gfx90a:sramecc+:xnack-"
 
@@ -134,11 +137,14 @@ def test_device_info_queries_again_after_failure_or_success(
     assert available.call_count == 2
 
 
-def test_device_info_owns_snapshot_with_read_only_properties() -> None:
+@pytest.mark.parametrize("later_arch", [b"gfx942", b"gfx950"])
+def test_device_info_owns_snapshot_with_read_only_properties(
+    later_arch: bytes,
+) -> None:
     props = _props("gfx90a:sramecc+:xnack-")
     props.asicRevision = 1
     info = device_info.DeviceInfo(props)
-    props.gcnArchName = b"gfx942"
+    props.gcnArchName = later_arch
     props.asicRevision = 0
     assert info.target_id == "gfx90a:sramecc+:xnack-"
     assert info.asic_revision == 1

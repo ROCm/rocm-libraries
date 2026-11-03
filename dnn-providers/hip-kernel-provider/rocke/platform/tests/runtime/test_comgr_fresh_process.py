@@ -59,12 +59,13 @@ def _fake_child(rc: int, *, payload: bytes | None = b"HSACO", stderr: bytes = b"
     return run, calls
 
 
-def test_fresh_process_round_trip(no_lib: None) -> None:
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_fresh_process_round_trip(no_lib: None, arch: str) -> None:
     run, calls = _fake_child(0)
     with mock.patch.object(subprocess, "run", run):
         hsaco, t = comgr.build_hsaco_from_llvm_ir(
             "IR TEXT",
-            isa="amdgcn-amd-amdhsa--gfx942",
+            isa=f"amdgcn-amd-amdhsa--{arch}",
             options=["-O3", "-x"],
             fresh_process=True,
         )
@@ -74,7 +75,7 @@ def test_fresh_process_round_trip(no_lib: None) -> None:
     assert call.cmd == [sys.executable, "-m", "rocke.runtime._comgr_fresh_process"]
     head, _, body = call.input.partition(b"\n")
     header = json.loads(head)
-    assert header["isa"] == "amdgcn-amd-amdhsa--gfx942"
+    assert header["isa"] == f"amdgcn-amd-amdhsa--{arch}"
     assert header["options"] == ["-O3", "-x"]
     assert body == b"IR TEXT"
     # the child loads this process's library and imports this rocke package
@@ -84,7 +85,8 @@ def test_fresh_process_round_trip(no_lib: None) -> None:
     assert call.env["PYTHONPATH"].split(os.pathsep)[0] == PKG_ROOT
 
 
-def test_in_process_compile_is_the_default(no_lib: None) -> None:
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_in_process_compile_is_the_default(no_lib: None, arch: str) -> None:
     with (
         mock.patch.object(subprocess, "run", side_effect=AssertionError("spawned")),
         mock.patch.object(comgr, "_destroy_data_set"),
@@ -93,7 +95,7 @@ def test_in_process_compile_is_the_default(no_lib: None) -> None:
         ),
     ):
         with pytest.raises(RuntimeError, match="in-process"):
-            comgr.build_hsaco_from_llvm_ir("IR", isa="amdgcn-amd-amdhsa--gfx942")
+            comgr.build_hsaco_from_llvm_ir("IR", isa=f"amdgcn-amd-amdhsa--{arch}")
 
 
 @pytest.mark.parametrize(
@@ -133,7 +135,10 @@ def _stdin(header: dict, body: bytes) -> SimpleNamespace:
     )
 
 
-def test_child_writes_the_protocol(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_child_writes_the_protocol(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, arch: str
+) -> None:
     out = tmp_path / "out.bin"
     seen = {}
 
@@ -144,13 +149,13 @@ def test_child_writes_the_protocol(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
         )
 
     monkeypatch.setattr(comgr, "build_hsaco_from_llvm_ir", build)
-    hdr = {"isa": "amdgcn-amd-amdhsa--gfx950", "options": ["-O3"], "out": str(out)}
+    hdr = {"isa": f"amdgcn-amd-amdhsa--{arch}", "options": ["-O3"], "out": str(out)}
     monkeypatch.setattr(sys, "stdin", _stdin(hdr, "ü IR".encode()))
     assert child.main() == 0
     # the child compiles in its own process: it never asks for another one
     assert seen == {
         "ir": "ü IR",
-        "isa": "amdgcn-amd-amdhsa--gfx950",
+        "isa": f"amdgcn-amd-amdhsa--{arch}",
         "options": ["-O3"],
     }
     head, _, blob = out.read_bytes().partition(b"\n")
@@ -175,8 +180,9 @@ def test_child_reports_a_compile_error(tmp_path, monkeypatch, capsys) -> None:
     assert not (tmp_path / "o").exists()
 
 
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("marked", [False, True])
-def test_compile_kernel_follows_the_kernel_attribute(marked: bool) -> None:
+def test_compile_kernel_follows_the_kernel_attribute(marked: bool, arch: str) -> None:
     kernel = KernelDef("fresh_contract", [], Region("entry"))
     if marked:
         kernel.attrs[compile_module.COMGR_FRESH_PROCESS_ATTR] = True
@@ -188,11 +194,12 @@ def test_compile_kernel_follows_the_kernel_attribute(marked: bool) -> None:
             return_value=(b"hsaco", comgr.ComgrTimings()),
         ) as build,
     ):
-        compile_module.compile_kernel(kernel, arch="gfx942")
+        compile_module.compile_kernel(kernel, arch=arch)
     assert build.call_args.kwargs["fresh_process"] is marked
 
 
-def test_fresh_process_builds_the_in_process_object() -> None:
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_fresh_process_builds_the_in_process_object(arch: str) -> None:
     """With a loadable comgr: a trivial kernel compiles to the same bytes in
     this process and in a fresh one (the child really runs)."""
     try:
@@ -200,8 +207,8 @@ def test_fresh_process_builds_the_in_process_object() -> None:
     except comgr.ComgrError as ex:
         pytest.skip(f"no comgr: {ex}")
     kernel = KernelDef("fresh_process_probe", [], Region("entry"))
-    here = compile_module.compile_kernel(kernel, arch="gfx942", backend="python")
+    here = compile_module.compile_kernel(kernel, arch=arch, backend="python")
     kernel.attrs[compile_module.COMGR_FRESH_PROCESS_ATTR] = True
-    fresh = compile_module.compile_kernel(kernel, arch="gfx942", backend="python")
+    fresh = compile_module.compile_kernel(kernel, arch=arch, backend="python")
     assert fresh.llvm_text == here.llvm_text
     assert fresh.hsaco == here.hsaco and fresh.hsaco[:4] == b"\x7fELF"

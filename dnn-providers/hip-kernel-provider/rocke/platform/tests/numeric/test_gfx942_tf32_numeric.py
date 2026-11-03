@@ -4,9 +4,14 @@ import importlib.util
 import os
 import pytest
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.arch_marks import arch_specific
 from rocke.examples.gfx942.tf32_numerics import run
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="gfx942 has native xf32 MFMA atoms; gfx950 emulates xf32 with bf16x3",
+)
 def test_gfx942_tf32_numeric(tmp_path):
     arch = get_device_arch()
     if not arch or arch.split(":")[0] != "gfx942":
