@@ -31,6 +31,8 @@
 
 #include <cstdint>
 
+#include "hip_device.hpp"
+
 namespace
 {
     using namespace rocwmma;
@@ -72,15 +74,9 @@ namespace
 
 TEST(Int8MmaOverflow, Wraps)
 {
-    int  count  = 0;
-    auto status = hipGetDeviceCount(&count);
-    if(status == hipErrorNoDevice || (status == hipSuccess && count == 0))
-        GTEST_SKIP() << "No ROCm-capable device available";
-    ASSERT_EQ(status, hipSuccess);
-    int             device = 0;
-    hipDeviceProp_t props{};
-    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
-    ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+    auto& device = rocwmma::HipDevice::instance();
+    if(device->getGcnArch() == rocwmma::HipDevice::UNSUPPORTED_ARCH)
+        GTEST_SKIP() << "unsupported host device";
 
     int8_t*  a = nullptr;
     int8_t*  b = nullptr;
@@ -98,7 +94,7 @@ TEST(Int8MmaOverflow, Wraps)
         for(uint32_t j = 0; j < 16; ++j)
             c[i * 16 + j] = valueC(i, j);
 
-    hipLaunchKernelGGL(int8Mma, dim3(1), dim3(props.warpSize), 0, 0, a, b, c);
+    hipLaunchKernelGGL(int8Mma, dim3(1), dim3(device->warpSize()), 0, 0, a, b, c);
     EXPECT_EQ(hipGetLastError(), hipSuccess);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 
