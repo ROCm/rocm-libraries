@@ -803,7 +803,6 @@ TYPED_TEST(multigrid, zero_coarse_residual_gives_zero_coarse_correction)
         SCOPED_TRACE("V");
         expect(options(rocalution::Vcycle, 1, 1, true));
     }
-    KNOWN_BUG("the K-cycle divides by (x, Ax) = 0 for a zero coarse residual and returns NaN");
     for(bool full : {true, false})
     {
         SCOPED_TRACE(full ? "K, all levels" : "K, level 1 only");

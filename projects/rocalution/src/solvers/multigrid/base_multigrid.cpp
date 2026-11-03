@@ -971,8 +971,16 @@ namespace rocalution
             // q = Ax
             op->Apply(*x, q);
 
+            // (x,Ax) is zero for a zero rhs, which has the zero correction x
+            ValueType xq = x->DotNonConj(*q);
+
+            if(xq == static_cast<ValueType>(0))
+            {
+                return;
+            }
+
             // alpha = rho / (x,q)
-            alpha = rho / x->DotNonConj(*q);
+            alpha = rho / xq;
 
             // r = r - alpha * q
             r->AddScale(*q, -alpha);
