@@ -25,8 +25,9 @@ struct Arguments;
 // so the library default applies. streamk_tile_scheduling_mode_str() holds the raw
 // CLI token (off|on|auto or 0|1|2) before client.cpp resolves it.
 //
-// uniform_summation_order maps to HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT
-// as {0=off, 1=on} and follows the same convention.
+// uniform_summation_order sets the handle request as {0=off, 1=on}, so both
+// descriptor and C++ APIs inherit it. A YAML case overrides the CLI value;
+// leaving both unset keeps the library default.
 //
 // verification_failures counts the -v checks of D that failed: one per gemm, per solution,
 // for each of the norm and allclose checks, plus one per solution whose post_bench_verify_iters
