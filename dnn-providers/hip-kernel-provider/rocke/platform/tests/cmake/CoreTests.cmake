@@ -202,6 +202,25 @@ if(BUILD_TESTING)
                  rocke_qk_scale_spec_validate)
   endif()
 
+  # The buffer address space of the C++ tensor view: the Python error kind and
+  # message for each refused call (tests/core/test_tensor_view_buffer_errors.py
+  # pins the Python side).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tensor_view_buffer_errors.cpp")
+    add_executable(rocke_tensor_view_buffer_errors core/test_tensor_view_buffer_errors.cpp)
+    target_link_libraries(rocke_tensor_view_buffer_errors PRIVATE rocke_core)
+    add_test(NAME rocke_tensor_view_buffer_errors
+             COMMAND rocke_tensor_view_buffer_errors)
+    set_tests_properties(rocke_tensor_view_buffer_errors
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_tensor_view_buffer_errors)
+    set_target_properties(rocke_tensor_view_buffer_errors
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_tensor_view_buffer_errors
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_tensor_view_buffer_errors)
+  endif()
+
   # temporal_hint (rocke_mem_opts_t) on global_load_vN/global_store_vN and the
   # io helpers, through the C++ builders and HIP/LLVM lowerers.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")

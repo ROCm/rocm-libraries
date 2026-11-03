@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 import unittest
 
 from rocke.tests.arch_marks import ARCH_SPECIFIC_ATTR, arch_specific
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 
 class TestArchSpecific(unittest.TestCase):
@@ -66,7 +69,12 @@ class TestArchSpecific(unittest.TestCase):
     def test_import_does_not_load_torch(self):
         code = "import sys, rocke.tests.arch_marks; sys.exit('torch' in sys.modules)"
         self.assertEqual(
-            subprocess.run([sys.executable, "-c", code], check=False).returncode, 0
+            subprocess.run(
+                rocke_python_command("-c", code),
+                check=False,
+                env=rocke_subprocess_env(),
+            ).returncode,
+            0,
         )
 
 
