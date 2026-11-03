@@ -9000,6 +9000,14 @@ namespace rocalution
                         // COVERAGE_EXCL_NO_MPI_STOP
                     }
 
+                    // Without couplings to distribute a_ik through, it is lumped into the
+                    // diagonal
+                    if(sum_l == zero)
+                    {
+                        sum_n += val_ik;
+                        continue;
+                    }
+
                     // Update sum over l with a_ik
                     sum_l = val_ik / sum_l;
 
@@ -9203,6 +9211,14 @@ namespace rocalution
                             }
                         }
 
+                        // Without couplings to distribute a_ik through, it is lumped into the
+                        // diagonal
+                        if(sum_l == zero)
+                        {
+                            sum_n += val_ik;
+                            continue;
+                        }
+
                         // Store a_ki, if present
                         ValueType val_ki = zero;
 
@@ -9287,8 +9303,10 @@ namespace rocalution
                 // COVERAGE_EXCL_NO_MPI_STOP
             }
 
-            // Precompute a_ii_tilde
-            ValueType a_ii_tilde = static_cast<ValueType>(-1) / (sum_n + sum_k + val_ii);
+            // Precompute a_ii_tilde. A zero diagonal, for example after lumping a_ik into it,
+            // leaves the row without interpolation
+            ValueType diagonal   = sum_n + sum_k + val_ii;
+            ValueType a_ii_tilde = diagonal == zero ? zero : static_cast<ValueType>(-1) / diagonal;
 
             // Entry point into P (interior)
             PtrType int_idx = cast_pi->mat_.row_offset[row];
