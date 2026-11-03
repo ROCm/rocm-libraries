@@ -129,19 +129,26 @@ Run fp32 GEMM with validation
 
 `-v` (`--verify`) compares the GPU result D with a CPU reference computed from the same inputs, and adds three columns to the output.
 
-- `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
+- `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value. When the problem also has E, a bias gradient or amaxD, their errors are added in too, so a large `norm_error` does not by itself mean that D is wrong; the failure lines below name the output.
 - `atol` and `rtol` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest `atol` first, and reports the first pair under which every element satisfies `|reference - result| <= atol + rtol * |result|`. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. `failed` means at least one element is outside even `atol 0.1 + rtol 0.1 * |result|`.
 
 The norm check of D fails when any one batch's norm_error reaches the same limit `hipblaslt-test` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with `c_f32_fast_bf16_r` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The bench and `hipblaslt-test` apply this limit per batch; `norm_error` still reports the sum. When a check fails, the bench prints one line per failing gemm to stderr, then a line naming the solution:
 ```
-norm check failed for D of gemm 0: batch 2 has norm_error 0.408248, at or above the GEMM limit of 1e-05
+norm check failed for D of gemm 0: batch 2 has norm_error 0.408248, at or above the limit of 1e-05
 allclose check failed for D of gemm 0: 1 of 96 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 5, column 0: result 7, reference 2
 the failed checks above are for solution 3 of 12 (library index 8805, kernel <kernel name>)
 ```
 
 If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check.
 
-By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. It checks D only: the checks of E, the bias gradient and amaxD, and `--ulp`, don't affect the exit code. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+The norm checks of E, the bias gradient and amaxD also apply their limit to each batch. E uses the same kind of limit as D; the bias gradient and amaxD use the tolerance of their own type. A failing one prints a line like D's, and the line naming the solution follows. These outputs are reported the same way when their type can't be compared.
+```
+norm check failed for the bias gradient of gemm 0: batch 0 has norm_error 2.44902, at or above the limit of 1e-05
+```
+
+With `norm_check_assert`, which YAML input enables by default and the command line and `--verify_strict` disable, the first failing norm check of D, E, the bias gradient or amaxD prints its line and then ends the run with exit code 1, before the line naming the solution.
+
+By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. It counts the checks of D only: the checks of E, the bias gradient and amaxD, and `--ulp`, don't affect this exit code. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
 
 Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of `--algo_method all` sweeps.
 
