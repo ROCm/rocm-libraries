@@ -151,19 +151,31 @@ namespace rocalution
         assert(this->build_ == true);
         assert(this->op_ != NULL);
 
+        // Create coarse operator, on the backend of its transfer operators
         this->op_level_[0]->Clear();
-        this->op_level_[0]->CloneBackend(*this->op_);
+        this->op_level_[0]->CloneBackend(*this->restrict_op_level_[0]);
         this->op_level_[0]->ConvertToCSR();
 
-        this->trans_level_[0]->CloneBackend(*this->op_);
+        // If all coarse levels are on the host, coarsen a host copy of the operator
+        const OperatorType* op = this->op_;
+        OperatorType        op_host;
 
-        this->op_->CoarsenOperator(this->op_level_[0],
-                                   this->dim_level_[0],
-                                   this->dim_level_[0],
-                                   *this->trans_level_[0],
-                                   this->Gsize_level_[0],
-                                   this->rG_level_[0],
-                                   this->rGsize_level_[0]);
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            op_host.CloneFrom(*this->op_);
+            op_host.CloneBackend(*this->restrict_op_level_[0]);
+            op = &op_host;
+        }
+
+        this->trans_level_[0]->CloneBackend(*op);
+
+        op->CoarsenOperator(this->op_level_[0],
+                            this->dim_level_[0],
+                            this->dim_level_[0],
+                            *this->trans_level_[0],
+                            this->Gsize_level_[0],
+                            this->rG_level_[0],
+                            this->rGsize_level_[0]);
 
         for(int i = 1; i < this->levels_ - 1; ++i)
         {

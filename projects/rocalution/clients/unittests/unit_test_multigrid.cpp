@@ -2239,31 +2239,42 @@ TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
                     tol<T>());
     }
 
-    // The coarse operators are recomputed on the accelerator, from transfer operators on
-    // the host
-    KNOWN_BUG("ReBuildNumeric with host levels clones the coarse operators to the backend of "
-              "the finest operator, so SA, UA and RS fail the backend assert of "
-              "TripleMatrixProduct, and pairwise that of CoarsenOperator when all coarse levels "
-              "are on the host");
+    // One host level, and all coarse levels on the host, where the finest operator is not
     for(const AmgCase<T>& c : amg_classes<T>())
     {
-        SCOPED_TRACE(c.name);
-        for(int host_levels : {1, 2})
+        for(bool all : {false, true})
         {
-            SCOPED_TRACE(std::to_string(host_levels) + " host levels");
-            EXPECT_EXIT(
-                {
-                    ManualAmg<T> m(Backend::Accelerator, ref, c, 4);
-                    m.amg->Build();
-                    m.amg->SetHostLevels(host_levels);
-                    Vec<T> val = csr_values(next);
-                    m.A->UpdateValuesCSR(val.data());
-                    m.amg->ReBuildNumeric();
-                    solve(*m.amg, *m.A, rhs<T>(ref.n), initial_guess<T>(ref.n), 1);
-                    std::exit(0);
-                },
-                testing::ExitedWithCode(0),
-                "");
+            SCOPED_TRACE(c.name + (all ? ", all coarse levels on the host" : ", one host level"));
+            ManualAmg<T> m(Backend::Accelerator, ref, c, 4);
+            m.amg->Build();
+            const int levels = m.amg->GetNumLevels();
+            ASSERT_IN_LOOP(levels >= 3);
+            const int host_levels = all ? levels - 1 : 1;
+            m.amg->SetHostLevels(host_levels);
+            const Hierarchy<T> before = hierarchy_of(*m.amg, ref);
+
+            Vec<T> val = csr_values(next);
+            m.A->UpdateValuesCSR(val.data());
+            m.amg->ReBuildNumeric();
+
+            std::vector<bool> host(levels - 1, false);
+            for(int l = levels - 1 - host_levels; l < levels - 1; ++l)
+            {
+                host[l] = true;
+            }
+            EXPECT_EQ(coarse_on_host(*m.amg), host);
+            const Hierarchy<T> expected = with_finest(before, next);
+            const Hierarchy<T> after    = hierarchy_of(*m.amg, next);
+            for(int l = 1; l < levels; ++l)
+            {
+                SCOPED_TRACE("level " + std::to_string(l));
+                expect_dense_near(after.A[l], expected.A[l], tol<T>());
+            }
+            const Vec<T> b  = rhs<T>(ref.n);
+            const Vec<T> x0 = initial_guess<T>(ref.n);
+            expect_near(solve(*m.amg, *m.A, b, x0, 1),
+                        cycled(DenseCycle<T>(expected, c.cycle), b, x0, 1),
+                        tol<T>());
         }
     }
 }
