@@ -3179,7 +3179,7 @@ namespace rocalution
             HostMatrixCSR<ValueType> tmp(this->local_backend_);
             tmp.CopyFrom(*this);
 
-            for(int i = 0; i < p; ++i)
+            for(int i = 1; i < p; ++i)
             {
                 this->SymbolicMatMatMult(tmp);
             }

@@ -1215,11 +1215,6 @@ TYPED_TEST(matrix_csr, symbolic_power)
     {
         SCOPED_TRACE("power " + std::to_string(p));
 
-        if(p > 8 && TypeParam::backend == Backend::Host)
-        {
-            KNOWN_BUG("above 8 it gives the pattern of A^(p+1)");
-        }
-
         auto A = this->make(ref);
         ASSERT_IN_LOOP(A != nullptr);
 

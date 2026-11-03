@@ -41,6 +41,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::SymbolicPower()` computing the pattern of A^(p+1) instead of A^p for p above 8. FSAI with a matrix power above 8 and ILU(p) without level control for p of 8 or more got larger patterns than requested, and multi-colored ILU was colored from the larger pattern for q above 8, which `MultiColoredILU::Set(p)` uses for p of 8 or more.
 
 ## (Unreleased) rocALUTION 4.1.1
 
