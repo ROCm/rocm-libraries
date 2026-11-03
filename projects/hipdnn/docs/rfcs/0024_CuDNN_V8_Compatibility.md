@@ -417,7 +417,7 @@ runs no heuristics and needs no GPU.
 | `hipdnn_frontend` internals change | Same tree and version; GPU-free lowering tests catch breakage |
 | Maintenance of ~7.7k ported lines and ~7k of core and type mapping | Same owner as the RFC 0012 compatibility layer |
 | PyTorch's v0.x consumers stop compiling against the compatibility layer | Not covered by CI yet: building PyTorch against the compatibility layer is planned for TheRock's PyTorch CI. This repository pins the PyTorch-facing surface with compile-only unit tests (`TestCudnnCompatibilityV8Tu`, also as C++20 in `hipdnn_frontend_cudnn_v8_tu_cpp20`) |
-| Corpus failures surface only in TheRock CI | TheRock builds hipDNN with the compatibility layer on and runs the v9 and legacy corpus on its test families; the superbuild CI does not run the corpus |
+| Corpus failures surface only in TheRock CI | TheRock builds hipDNN with the compatibility layer on and runs the v9 and legacy corpus on its test families for every change to `projects/hipdnn` (the selector is added in ROCm/TheRock#9611; until then only nightly and run-all runs select it); the superbuild CI does not run the corpus |
 
 ## 6. Execution Plan
 
