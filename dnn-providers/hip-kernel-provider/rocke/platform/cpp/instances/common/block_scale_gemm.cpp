@@ -716,11 +716,7 @@ rocke_kernel_def_t* rocke_build_block_scale_gemm(rocke_ir_builder_t* b,
         rocke_value_t* row;
         rocke_value_t* row_group;
 
-        if(!rocke_mfma_atom_lane_to_output(
-               b, atom, lane_decode.lane, i, &row_in_atom, &col_in_atom))
-        {
-            return NULL;
-        }
+        rocke_mfma_atom_lane_to_output(b, atom, lane_decode.lane, i, &row_in_atom, &col_in_atom);
         row = rocke_b_add(b, m_tile_base, row_in_atom);
         row_group = rocke_b_div(b, row, rocke_b_const_i32(b, gm));
         a_scale_row_offsets[i]

@@ -35,12 +35,11 @@
  *     rocke/helper_rocke.core.arch.h (ArchTarget.from_gfx, max_threads_per_block,
  *     target.mma.has_shape).
  *
- * ATOM METHODS. The Python helper calls three MfmaAtom methods that the atoms.h
- * port does not expose (they are out of scope there): atom.emit(),
- * atom.zero_acc(), atom.lane_to_output(). The first two are a single builder
- * call each, reproduced inline inside rocke_mfma_k_loop /
- * rocke_store_acc_to_global, byte-for-byte; lane_to_output is
- * rocke_mfma_atom_lane_to_output below:
+ * ATOM METHODS. The Python helper calls three MfmaAtom methods. lane_to_output
+ * is rocke_mfma_atom_lane_to_output (atoms.h). The atoms.h port does not expose
+ * the other two, atom.emit() and atom.zero_acc(); each is a single builder call,
+ * reproduced inline inside rocke_mfma_k_loop / rocke_store_acc_to_global,
+ * byte-for-byte:
  *     emit          -> rocke_b_mma(b, atom->name, a, b, c)
  *     zero_acc      -> rocke_b_zero_vec_f32(b, atom->c_per_lane)
  *
@@ -276,18 +275,6 @@ rocke_status_t rocke_store_acc_to_global(rocke_ir_builder_t* b,
                                          bool atomic_add,
                                          rocke_mfma_epilogue_fn epilogue,
                                          void* epilogue_user);
-
-/* MfmaAtom.lane_to_output(b, lane, i): the (row, column) within the atom of
- * accumulator slot i of `lane`, written to *out_row / *out_col; the f32
- * accumulator layouts of the 16x16, 32x32 and 4x4 atoms (atoms.py). Returns
- * false and sets the builder's sticky error (ROCKE_ERR_NOTIMPL, the Python
- * NotImplementedError) for another atom shape. */
-bool rocke_mfma_atom_lane_to_output(rocke_ir_builder_t* b,
-                                    const rocke_mfma_atom_t* atom,
-                                    rocke_value_t* lane,
-                                    int i,
-                                    rocke_value_t** out_row,
-                                    rocke_value_t** out_col);
 
 /* -------------------------------------------------- validate_arch_and_block_size *
  *
