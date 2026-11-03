@@ -113,6 +113,9 @@ std::shared_ptr<SolutionParameters>
     // Check if the workgroup tile K dimension is 256
     bool isWorkgroupTileK256 = solutionIndexParameters.workgroupTile.k == 256;
 
+    // rocRoller's SwizzleScale transform only supports TN (transA=T, transB=N).
+    bool swizzleScaleSupported = kernelType.transA && !kernelType.transB;
+
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
     if(kernelType.scaleTypeA.mode != rocRoller::Operations::ScaleMode::Separate
@@ -123,7 +126,7 @@ std::shared_ptr<SolutionParameters>
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
-    else if(isWorkgroupTileK256)
+    else if(isWorkgroupTileK256 && swizzleScaleSupported)
     {
         // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
         gemm->swizzleScale   = true;
@@ -143,8 +146,8 @@ std::shared_ptr<SolutionParameters>
             gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
         }
     }
-    else if(solutionIndexParameters.workgroupTile.m >= 128
-        && solutionIndexParameters.workgroupTile.n >= 128)
+    else if(swizzleScaleSupported && solutionIndexParameters.workgroupTile.m >= 128
+            && solutionIndexParameters.workgroupTile.n >= 128)
     {
         gemm->swizzleScale = true;
         // Use BufferToVGPR for swizzle scale (matches rocRoller client --loadScale_A BufferToVGPR)
