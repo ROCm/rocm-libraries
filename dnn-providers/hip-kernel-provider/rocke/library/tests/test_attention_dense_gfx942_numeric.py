@@ -1810,7 +1810,8 @@ class TestDenseLseNumericGfx942:
 
         # Keyed-only twin: the width-1/2 keyless-row mask must leave every keyed row
         # exactly as the LSE-off kernel writes it.
-        keyed = lse_spec(256)
+        # The same compiled kernel: seqlen is a runtime argument, so only the seed moves.
+        keyed = dataclasses.replace(spec, seqlen_kv=256)
         assert keyed.o_store_width == width
         k256 = torch.randn(1, 256, 1, 128, device=q.device, dtype=q.dtype)
         v256 = torch.randn_like(k256)

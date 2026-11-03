@@ -6,8 +6,9 @@ must already be in the provider's clang-format form. Otherwise the copy reformat
 the live file and an addition-only change shows unrelated hunks.
 
 Each shipped bundle's config (tests.helpers.shipped_bundles) regenerates the
-provider's live census test byte-for-byte (no clang-format needed). When a clang-format binary is named, every shipped config's
-census test must also be a clang-format fixed point under the provider's style.
+provider's live census test byte-for-byte (no clang-format needed). When a
+clang-format binary is named, every shipped config's census test must also be a
+clang-format fixed point under the provider's style.
 """
 
 from __future__ import annotations
