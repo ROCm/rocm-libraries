@@ -77,6 +77,8 @@ built by the same workflow, and
 builds a fixed version of rocjitsu. It attempts every sample and uploads reports
 even after a failure. A failure marks that nightly run as failed, but the job is
 not part of the Multi-Arch summary, so it gates nothing.
+The job sends no notifications; its owner, James Newling (@newling), checks the
+nightly results.
 
 The same job can be dispatched manually with the ID of a completed Multi-Arch
 run. It then tests that run's artifacts for the requested artifact group and
