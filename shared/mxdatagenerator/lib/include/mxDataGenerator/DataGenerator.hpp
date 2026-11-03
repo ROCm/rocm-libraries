@@ -16,7 +16,6 @@
 #include <type_traits>
 #include <variant>
 #include <algorithm>
-#include <bitset>
 
 // `<bit>` provides std::endian (C++20). Used by read_data_bits_le's
 // little-endian static_assert. Guarded so this header still compiles
@@ -223,38 +222,37 @@ namespace DGen
         }
     };
 
-    // MAF2.0 block-scaled data, as ROCm/mblas-bench composes it from
-    // `--scale_init pow2_binomial_<n>_<center> --mx_init uniform_native`:
-    // each block scale is 2^(k - (n+1) + center) with k ~ Binomial(2n+1, 0.5),
-    // rounded to the scale format with round-to-nearest-even and saturation;
-    // each element is drawn uniformly from the type's finite encodings (both
-    // zeros included, NaN/Inf excluded), independently of the scale.
-    // With normalScale (`--scale_init normal_float_<mean>_<std>`, the FP4 rows),
-    // each block scale is |x| for x ~ N(scaleMean, scaleStdDev) drawn in double and
-    // rounded once to the scale format (see maf2_0NormalScaleByte) instead.
-    // With unitScaleNormalData (the FP4 non-scaled row, mblas `--mx_init normal_float_0_1
-    // --scale_init constant`), every block scale is 1.0 and each element is N(0, 1) drawn in
-    // double and rounded once to the element format (nearest even, saturating, sign kept), as
-    // the non-scaled maf2_0 types are.
+    // MAF2.0 block-scaled data, as the CUTLASS GEMM performance methodology fills
+    // matrices (uniform distribution, data in [-1, 1], unsigned scale factors in [0, 1];
+    // CUTLASS `reference::host::TensorFillRandomUniform` with no integer rounding):
+    // each element is x ~ U[dataMin, dataMax] drawn in double and rounded once to the
+    // element format at a scale of one (nearest even, saturating, sign kept), so values are
+    // uniform and encodings are not. Each block scale is drawn independently of the data:
+    // E8M0 scales take 2^e with the integer e uniform over
+    // [round(log2(max(scaleMin, smallest scale))), round(log2(scaleMax))], as CUTLASS's
+    // `RandomUniformFunc<float_ue8m0_t>` does ([0, 1] gives 2^-127 .. 2^0); the other scale
+    // formats take x ~ U[scaleMin, scaleMax] rounded to the nearest finite scale (ties to
+    // even, saturating, so small draws can give a zero scale).
+    // With unitScale (the FP4 non-scaled row), every block scale is 1.0 and only the data
+    // is drawn.
     // Scaled DTYPEs only; min/max, clampToF32, includeNaN/Inf, forceDenorm and
     // scaleInitMode are ignored.
     struct Maf2_0
     {
-        int    n                   = 10;
-        int    center              = 0;
-        bool   normalScale         = false;
-        double scaleMean           = 0.34375;
-        double scaleStdDev         = 0.08;
-        bool   unitScaleNormalData = false;
+        double dataMin   = -1.0;
+        double dataMax   = 1.0;
+        double scaleMin  = 0.0;
+        double scaleMax  = 1.0;
+        bool   unitScale = false;
 
         std::string toString() const
         {
-            if(unitScaleNormalData)
-                return "Maf2_0(unit scale, N(0, 1))";
-            if(normalScale)
-                return "Maf2_0(normal " + std::to_string(scaleMean) + ", "
-                       + std::to_string(scaleStdDev) + ")";
-            return "Maf2_0(" + std::to_string(n) + ", " + std::to_string(center) + ")";
+            std::string s = "Maf2_0(data U[" + std::to_string(dataMin) + ", "
+                            + std::to_string(dataMax) + "], ";
+            if(unitScale)
+                return s + "unit scale)";
+            return s + "scale U[" + std::to_string(scaleMin) + ", " + std::to_string(scaleMax)
+                   + "])";
         }
     };
 
@@ -643,19 +641,6 @@ namespace DGen
         return candidates;
     }
 
-    // Binomial(trials, 0.5) as the number of set bits in `trials` fair random
-    // bits (mblas-bench `binomial_half`): one engine draw per 32 trials.
-    inline int binomialHalf(std::mt19937& gen, int trials)
-    {
-        int count = 0;
-        for(; trials >= 32; trials -= 32)
-            count += static_cast<int>(std::bitset<32>(gen()).count());
-        if(trials > 0)
-            count += static_cast<int>(
-                std::bitset<32>(gen() & ((uint32_t(1) << trials) - 1u)).count());
-        return count;
-    }
-
     // Finite scale values of DTYPE in ascending order with their bytes, for
     // round-to-nearest lookups.
     template <typename DTYPE>
@@ -688,47 +673,25 @@ namespace DGen
         return (lo->second & 1) ? hi->second : lo->second;
     }
 
-    // Scale byte for each Maf2_0 binomial outcome k = 0..2n+1: 2^(k - (n+1) + center)
-    // rounded to the nearest finite scale value (ties to the even encoding), so
-    // values beyond the format's range saturate. E8M0 is exact for exponents in
-    // [-127, 127]; E4M3 maps 2^-10 and below to zero and 2^9 and above to 448.
-    template <typename DTYPE>
-    inline std::vector<uint8_t> maf2_0ScaleBytes(int n, int center)
+    // Scale bytes a Maf2_0 power-of-two (E8M0) scale is drawn from, uniformly: 2^e for every
+    // integer e from round(log2(max(lo, smallest scale))) to round(log2(hi)), clamped to the
+    // format's exponents, as CUTLASS's RandomUniformFunc<float_ue8m0_t> picks them (round to
+    // nearest, so [0, 1] gives 2^-127 .. 2^0 for E8M0). `scales` is sortedFiniteScales<DTYPE>().
+    inline std::vector<uint8_t> maf2_0PowerOfTwoScaleBytes(
+        double lo, double hi, std::vector<std::pair<double, uint8_t>> const& scales)
     {
-        static_assert(isScaled<DTYPE>(), "Maf2_0 needs a block-scaled data type");
-        const auto           scales = sortedFiniteScales<DTYPE>();
-        const int            trials = 2 * n + 1;
-        std::vector<uint8_t> table(trials + 1);
-        for(int k = 0; k <= trials; k++)
-            table[k] = nearestScaleByteRne(scales, std::ldexp(1.0, k - (n + 1) + center));
+        const int formatMin = static_cast<int>(std::log2(scales.front().first));
+        const int formatMax = static_cast<int>(std::log2(scales.back().first));
+        auto      exponent  = [&](double v) {
+            const int e = static_cast<int>(std::nearbyint(std::log2(v)));
+            return std::clamp(e, formatMin, formatMax);
+        };
+        const int            eMin = exponent(std::max(lo, scales.front().first));
+        const int            eMax = std::max(eMin, exponent(hi));
+        std::vector<uint8_t> table;
+        for(int e = eMin; e <= eMax; e++)
+            table.push_back(nearestScaleByteRne(scales, std::ldexp(1.0, e)));
         return table;
-    }
-
-    // Scale byte for a Maf2_0 normal draw x, as mblas-bench converts its float
-    // scales: the sign is dropped, then E8M0 takes the nearest power of two
-    // (`float_to_ue8m0`: midpoint 1.5 * 2^e, ties to the even biased exponent,
-    // saturating at 0xFE, below 2^-126 -> 0x00) and the other formats round to
-    // the nearest finite value with ties to even and saturation.
-    template <typename DTYPE>
-    inline uint8_t maf2_0NormalScaleByte(double                                          x,
-                                         std::vector<std::pair<double, uint8_t>> const& scales)
-    {
-        const double a = std::abs(x);
-        if constexpr(scale_info_t<DTYPE>::mantissaBits == 0)
-        {
-            if(!(a >= std::ldexp(1.0, -126)))
-                return 0x00;
-            int          e;
-            const double m      = 2.0 * std::frexp(a, &e); // a = m * 2^(e-1), m in [1, 2)
-            int          biased = e - 1 + 127;
-            if(m > 1.5 || (m == 1.5 && (biased & 1)))
-                biased++;
-            return static_cast<uint8_t>(std::min(biased, 0xFE));
-        }
-        else
-        {
-            return nearestScaleByteRne(scales, a);
-        }
     }
 
     // Non-negative finite element encodings of DTYPE under a scale of one, as (value, code)
@@ -2000,55 +1963,48 @@ namespace DGen
         }
         else
         {
-            if(!mode.normalScale && !mode.unitScaleNormalData
-               && (mode.n < 0 || mode.n > (1 << 20)))
-                throw std::invalid_argument(
-                    "DataGenerator::generate_data_maf2_0: n must be in [0, 2^20]");
-            if(mode.normalScale && !(mode.scaleStdDev > 0.0))
-                throw std::invalid_argument(
-                    "DataGenerator::generate_data_maf2_0: scaleStdDev must be positive");
+            if(!std::isfinite(mode.dataMin) || !std::isfinite(mode.dataMax)
+               || !(mode.dataMin < mode.dataMax))
+                throw std::invalid_argument("DataGenerator::generate_data_maf2_0: dataMin and "
+                                            "dataMax must be finite with dataMin < dataMax");
+            if(!mode.unitScale
+               && (!std::isfinite(mode.scaleMax) || !(mode.scaleMin >= 0.0)
+                   || !(mode.scaleMin < mode.scaleMax)))
+                throw std::invalid_argument("DataGenerator::generate_data_maf2_0: scaleMin and "
+                                            "scaleMax must be finite with 0 <= scaleMin < "
+                                            "scaleMax");
 
-            const int  trials     = 2 * mode.n + 1;
-            const auto scaleForK  = (mode.normalScale || mode.unitScaleNormalData)
-                                        ? std::vector<uint8_t>{}
-                                        : maf2_0ScaleBytes<DTYPE>(mode.n, mode.center);
-            const auto scales     = sortedFiniteScales<DTYPE>();
+            constexpr bool powerOfTwoScale = scale_info_t<DTYPE>::mantissaBits == 0;
+            const auto     scales          = sortedFiniteScales<DTYPE>();
+            const auto     pow2Scales
+                = powerOfTwoScale ? maf2_0PowerOfTwoScaleBytes(mode.scaleMin, mode.scaleMax, scales)
+                                  : std::vector<uint8_t>{};
             const auto block_size = m_options.blockScaling;
             const auto numBlocks  = numScaleBlocks(block_size);
 
-            // Finite data encodings: decode every code under a scale of one.
+            // Element magnitudes under a scale of one, for rounding each draw.
             std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
             std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
             setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
-            const auto codes
-                = enumerateDataBytesForScale<DTYPE>(s_one[0],
-                                                    -std::numeric_limits<double>::infinity(),
-                                                    std::numeric_limits<double>::infinity(),
-                                                    /*requireNonzero=*/false);
-
-            // Unit-scale data: N(0, 1) elements rounded to the element format.
             const uint8_t signBit = static_cast<uint8_t>(
                 1u << (DTYPE::dataInfo.exponentBits + DTYPE::dataInfo.mantissaBits));
             const auto magnitudes = sortedNonNegativeCodes<DTYPE>(s_one[0], signBit);
 
-            // One normal distribution per thread: libstdc++ caches a spare draw in it.
-            std::vector<std::normal_distribution<double>> normal_dist(
-                m_num_threads,
-                mode.unitScaleNormalData
-                    ? std::normal_distribution<double>(0.0, 1.0)
-                    : std::normal_distribution<double>(mode.scaleMean, mode.scaleStdDev));
+            std::uniform_real_distribution<double> data_dist(mode.dataMin, mode.dataMax);
+            std::uniform_real_distribution<double> scale_dist(mode.scaleMin, mode.scaleMax);
+            std::uniform_int_distribution<size_t>  pow2_dist(
+                0, pow2Scales.empty() ? 0 : pow2Scales.size() - 1);
 
-            // Per block: the scale draw, then the block's elements in order.
-            std::uniform_int_distribution<size_t> code_dist(0, codes.size() - 1);
-#pragma omp parallel for num_threads(m_num_threads)
+            // Per block: the scale draw, then the block's elements in order; each thread draws
+            // from its own copy of the distributions.
+#pragma omp parallel for num_threads(m_num_threads) firstprivate(data_dist, scale_dist, pow2_dist)
             for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
             {
                 const auto    tid   = omp_get_thread_num();
-                const uint8_t scale = mode.unitScaleNormalData ? s_one[0]
-                                      : mode.normalScale
-                                          ? maf2_0NormalScaleByte<DTYPE>(
-                                              normal_dist[tid](m_gen[tid]), scales)
-                                          : scaleForK[binomialHalf(m_gen[tid], trials)];
+                const uint8_t scale = mode.unitScale ? s_one[0]
+                                      : powerOfTwoScale
+                                          ? pow2Scales[pow2_dist(m_gen[tid])]
+                                          : nearestScaleByteRne(scales, scale_dist(m_gen[tid]));
                 std::memcpy(
                     &m_scaleBytes[scale_i * m_scaleDesc.byte_size], &scale, m_scaleDesc.byte_size);
 
@@ -2057,9 +2013,7 @@ namespace DGen
                 {
                     const auto    data_i = dataIndex(scale_i, block_i, block_size);
                     const uint8_t code
-                        = mode.unitScaleNormalData
-                              ? maf2_0ElementCode(normal_dist[tid](m_gen[tid]), magnitudes, signBit)
-                              : codes[code_dist(m_gen[tid])];
+                        = maf2_0ElementCode(data_dist(m_gen[tid]), magnitudes, signBit);
                     std::memcpy(
                         &m_dataBytes[data_i * m_dataDesc.byte_size], &code, m_dataDesc.byte_size);
                 }

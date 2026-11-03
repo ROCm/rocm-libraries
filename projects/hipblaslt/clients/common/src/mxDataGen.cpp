@@ -128,17 +128,16 @@ namespace
         }
         else if(initMethod == "maf2_0_unit_scale")
         {
-            // MAF2.0 FP4 non-scaled row: every block scale 1.0, N(0,1) data.
+            // MAF2.0 FP4 non-scaled row: every block scale 1.0, data U[-1, 1] rounded to FP4.
             Maf2_0 mode;
-            mode.unitScaleNormalData = true;
-            opt.initMode             = DataInitMode(mode);
+            mode.unitScale = true;
+            opt.initMode   = DataInitMode(mode);
         }
         else if(initMethod == "maf2_0")
         {
-            // MAF2.0: FP8/FP6 blocks take 2^Binomial scales, FP4 blocks N(0.34375, 0.08) scales.
-            Maf2_0 mode;
-            mode.normalScale = static_cast<int>(dataType) == static_cast<int>(HIP_R_4F_E2M1);
-            opt.initMode     = DataInitMode(mode);
+            // MAF2.0, CUTLASS-style: data U[-1, 1] rounded to the element format; E8M0 scales
+            // 2^e with e uniform over [-127, 0], E4M3/E5M3 scales U[0, 1] rounded.
+            opt.initMode = DataInitMode(Maf2_0{});
         }
         else if(initMethod == "maf1_0")
         {

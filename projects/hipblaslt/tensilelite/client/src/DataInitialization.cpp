@@ -2023,11 +2023,12 @@ namespace TensileLite
             // exponent range.
             case InitMode::UniformLowPrecision:
                 return "uniform_low_precision";
-            // Maf2_0 block-scaled data (mxDataGenerator Maf2_0): FP8/FP6 binomial power-of-two
-            // scales, FP4 N(0.34375, 0.08) scales; data uniform over the finite encodings.
+            // Maf2_0 block-scaled data (mxDataGenerator Maf2_0, CUTLASS-style): data U[-1, 1]
+            // rounded to the element format; E8M0 scales 2^e with e uniform over [-127, 0],
+            // E4M3/E5M3 scales U[0, 1] rounded.
             case InitMode::Maf2_0:
                 return "maf2_0";
-            // MAF2.0 FP4 non-scaled row: unit block scales, N(0,1) data.
+            // MAF2.0 FP4 non-scaled row: unit block scales, U[-1, 1] data.
             case InitMode::Maf2_0UnitScale:
                 return "maf2_0_unit_scale";
             // MAF1.0 block-scaled data (mxDataGenerator Maf1_0): every block scale 0.5, data

@@ -2584,7 +2584,7 @@ Tests:
   unit_check: 1
   gpu_arch: '1250'
 
-# maf2_0: N(0,1) FP64 data; Gaussian inputs are not bit-exact, so validate with norm_check.
+# maf2_0: U[-1,1] FP64 data; random inputs are not bit-exact, so validate with norm_check.
 # batch_mode [0, 1] covers both the strided and the pointer-array (per-batch seed) fills.
 - name: matmul_one_double_maf2_0
   category: quick
@@ -2618,7 +2618,7 @@ Tests:
   unit_check: 0
   gpu_arch: '1250'
 
-# FP32 Gaussian data: skip the M=N=1 sizes, where a single cancelling dot product can exceed the
+# FP32 random data: skip the M=N=1 sizes, where a single cancelling dot product can exceed the
 # FP32 norm_check tolerance (1e-5) even against an exact result; larger outputs average it out.
 - name: matmul_one_float_maf2_0
   category: quick
@@ -2711,9 +2711,9 @@ Tests:
   unit_check: 0
   gpu_arch: '1250'
 
-# MXFP8 maf2_0 (E8M0 block 32, the gfx1250 MX kernels are TN): block scales 2^(k - 11) with
-# k ~ Binomial(21, 0.5) and data uniform over the finite FP8 encodings, seeded per matrix and batch.
-# Outputs reach ~1e7 (E4M3) to ~1e12 (E5M2), so FP16 outputs would overflow; BF16 and FP32 only.
+# MXFP8 maf2_0 (E8M0 block 32, the gfx1250 MX kernels are TN): block scales 2^e with e uniform
+# over [-127, 0] and data U[-1,1] rounded to FP8 (CUTLASS-style), seeded per matrix and batch.
+# BF16 and FP32 outputs.
 # No bf8 x bf8 -> bf16: the gfx1250 library has no MX kernel for it.
 - name: matmul_one_mxfp8_maf2_0
   category: quick
@@ -2741,9 +2741,10 @@ Tests:
   unit_check: 0
   gpu_arch: '1250'
 
-# MXFP4 maf2_0 (MAF2.0 row F4F4BF16BF16; the gfx1250 MX kernels are TN): block scales |x| for
-# x ~ N(0.34375, 0.08) rounded to the scale format, data uniform over the 16 FP4 codes, seeded per
-# matrix and batch. Scale formats: 3 = E8M0 block 32, 6 = UE4M3 block 16, 8 = UE5M3 block 16.
+# MXFP4 maf2_0 (MAF2.0 row F4F4BF16BF16; the gfx1250 MX kernels are TN): E8M0 block scales 2^e
+# with e uniform over [-127, 0], UE4M3/UE5M3 block scales U[0,1] rounded, data U[-1,1] rounded to
+# FP4 (CUTLASS-style), seeded per matrix and batch. Scale formats: 3 = E8M0 block 32,
+# 6 = UE4M3 block 16, 8 = UE5M3 block 16.
 # FP32 output too where the library has it (3 and 6).
 - name: matmul_one_mxfp4_maf2_0
   category: quick
@@ -2771,7 +2772,7 @@ Tests:
   gpu_arch: '1250'
 
 # MXFP4 maf2_0_unit_scale (MAF2.0 row FP4 non-scaled F4F4BF16BF16): every block scale is 1.0
-# and the data is N(0,1) rounded to FP4. Scale formats: 3 = E8M0 block 32, 6 = UE4M3 block 16,
+# and the data is U[-1,1] rounded to FP4. Scale formats: 3 = E8M0 block 32, 6 = UE4M3 block 16,
 # 8 = UE5M3 block 16. FP32 output too where the library has it (3 and 6).
 - name: matmul_one_mxfp4_maf2_0_unit_scale
   category: quick

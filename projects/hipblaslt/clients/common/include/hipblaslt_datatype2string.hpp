@@ -55,13 +55,14 @@ enum class hipblaslt_initialization
     norm_dist_one_special = 894,
     // Uniform random in [-6.0, 6.0] (full FP4 E2M1 range); ~4% zeros vs ~50% for hpl
     uniform_low_precision  = 999,
-    // MAF2.0 data init: N(0,1) for the non-scaled types (FP64, FP32, FP16, BF16, FP8); for
-    // block-scaled (MX) operands, mxDataGenerator Maf2_0 (FP8/FP6: 2^Binomial scales, FP4:
-    // N(0.34375, 0.08) scales, data uniform over the encodings); deterministic,
+    // MAF2.0 data init, as the CUTLASS GEMM performance methodology fills: U[-1,1] for the
+    // non-scaled types (FP64, FP32, FP16, BF16, FP8); for block-scaled (MX) operands,
+    // mxDataGenerator Maf2_0 (data U[-1,1] rounded to the element format; E8M0 scales 2^e, e
+    // uniform over [-127, 0]; E4M3/E5M3 scales U[0,1] rounded); deterministic,
     // mxDataGenerator-style seeding
     maf2_0 = 1000,
     // MAF2.0 FP4 non-scaled row: block-scaled (MX) FP4 operands get every block scale 1.0 and
-    // N(0,1) data rounded to FP4; other operands are filled as maf2_0
+    // U[-1,1] data rounded to FP4; other operands are filled as maf2_0
     maf2_0_unit_scale = 1001,
     // MAF1.0 data init: A = sin(idx), B and C = cos(idx), idx = i + j * rows + batch * rows * cols
     // of the stored matrix, rounded once from double; block-scaled (MX) operands get every block

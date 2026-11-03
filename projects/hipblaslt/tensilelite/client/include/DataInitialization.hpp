@@ -86,13 +86,14 @@ namespace TensileLite
         //   the maximum representable value of the target type. Only supported for
         //   low-precision packed types (FP4, FP6, BF6). Produces significantly fewer
         //   zeros than Random by covering the full representable range uniformly.
-        // Maf2_0 (28): MAF2.0 data init. N(0,1) for the non-scaled types (Double, Float,
-        //   Half, BFloat16, FP8); block-scaled (MX) sides use mxDataGenerator Maf2_0 (FP8/FP6:
-        //   2^Binomial scales, FP4: N(0.34375, 0.08) scales; data uniform over the encodings).
+        // Maf2_0 (28): MAF2.0 data init, as the CUTLASS GEMM performance methodology fills.
+        //   U[-1,1] for the non-scaled types (Double, Float, Half, BFloat16, FP8); block-scaled
+        //   (MX) sides use mxDataGenerator Maf2_0 (data U[-1,1] rounded to the element format;
+        //   E8M0 scales 2^e, e uniform over [-127, 0]; E4M3/E5M3 scales U[0,1] rounded).
         //   Deterministic with mxDataGenerator-style seeding; problem-dependent so each
         //   problem's data does not depend on the other problems in the run.
         // Maf2_0UnitScale (29): the MAF2.0 FP4 non-scaled row: MX FP4 sides get every block scale
-        //   1.0 and N(0,1) data; every other tensor is filled as Maf2_0.
+        //   1.0 and U[-1,1] data; every other tensor is filled as Maf2_0.
         // Maf1_0 (30): MAF1.0 (MAF 2025) data init, no RNG. A = sin(idx), every other tensor
         //   cos(idx), with idx = i + j*rows + b*rows*cols over the tensor's logical (unpadded)
         //   layout, rounded once from double to nearest even. ScaleA/ScaleB are filled with
@@ -829,10 +830,10 @@ namespace TensileLite
             template <typename T>
             void initArrayMaf2_0(T* array, size_t elements, size_t tensorIndex)
             {
-                // Draws in double; Float, Half and the FP8 types round each draw to nearest even
-                // (Half and FP8 directly from double, FP8 saturating finite values to the largest
-                // finite one). BFloat16's constructor casts to float, then rounds to BF16, like the
-                // other double-based modes.
+                // Draws U[-1, 1] in double (the CUTLASS GEMM performance fill); Float, Half and the
+                // FP8 types round each draw to nearest even (Half and FP8 directly from double, FP8
+                // saturating finite values to the largest finite one). BFloat16's constructor casts
+                // to float, then rounds to BF16, like the other double-based modes.
                 if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
                              || std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>
                              || std::is_same_v<T, Float8> || std::is_same_v<T, BFloat8>
@@ -846,7 +847,7 @@ namespace TensileLite
 #pragma omp parallel num_threads(numThreads)
                     {
                         std::mt19937 gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
-                        std::normal_distribution<double> dist(0.0, 1.0);
+                        std::uniform_real_distribution<double> dist(-1.0, 1.0);
 #pragma omp for schedule(static)
                         for(size_t i = 0; i < elements; i++)
                             array[i] = static_cast<T>(dist(gen));

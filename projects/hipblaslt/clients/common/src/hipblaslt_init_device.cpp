@@ -180,12 +180,13 @@ static uint32_t maf2_0_seed(ABC_dims abc, size_t batch_index)
 // Fills every element up to the last one used, ld padding between columns and batches included:
 // M + lda*(N-1), plus (batch_count-1)*stride when stride >= lda (stride 0 broadcasts one matrix).
 // For those strides this is the extent TensileLite fills, so both projects draw the same data.
-// Values are N(0, 1) drawn in double precision on the host, then copied to the device.
+// Values are U[-1, 1] (the CUTLASS GEMM performance fill) drawn in double precision on the host,
+// then copied to the device.
 // T(double) rounds to nearest even (FP16 and FP8 directly from double, FP8 saturating finite values
 // to the largest finite value); hip_bfloat16 has no double constructor, so it rounds to float
 // first, then to BF16, like the other double-based init modes.
 template <typename T>
-static void maf2_0_fill_normal(
+static void maf2_0_fill_uniform(
     T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, uint32_t seed)
 {
     if(batch_count == 0 || M == 0 || N == 0)
@@ -196,8 +197,8 @@ static void maf2_0_fill_normal(
     const int      num_threads = std::min(kMaf2_0MaxThreads, omp_get_max_threads());
 #pragma omp parallel num_threads(num_threads)
     {
-        std::mt19937                     gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
-        std::normal_distribution<double> dist(0.0, 1.0);
+        std::mt19937 gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
+        std::uniform_real_distribution<double> dist(-1.0, 1.0);
 #pragma omp for schedule(static)
         for(size_t i = 0; i < size_64; i++)
             h[i] = T(dist(gen));
@@ -246,7 +247,7 @@ static void maf1_0_fill_trig(T*       A,
 {
     if(batch_count == 0 || M == 0 || N == 0)
         return;
-    // Same extent as maf2_0_fill_normal: later batches only when stride >= lda (stride 0
+    // Same extent as maf2_0_fill_uniform: later batches only when stride >= lda (stride 0
     // broadcasts one matrix). Overlapping batches are written in order, so the last one wins.
     const size_t   batches = stride >= lda ? batch_count : 1;
     const size_t   extent  = M + lda * (N - 1);
@@ -1148,7 +1149,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                          || std::is_same_v<T, hipblaslt_bf8_fnuz>
 #endif
                          )
-                maf2_0_fill_normal(
+                maf2_0_fill_uniform(
                     A, M, N, lda, stride, batch_count, maf2_0_seed(abc, batch_index));
             else
                 throw std::invalid_argument(

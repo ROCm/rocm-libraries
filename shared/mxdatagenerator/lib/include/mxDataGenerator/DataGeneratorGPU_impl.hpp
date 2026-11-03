@@ -329,8 +329,9 @@ namespace DGen
         //     the scale-byte derivation is undefined for NaN inputs and
         //     `__amd_cvt_*_scale` doesn't expose a way to pick a specific
         //     NaN payload or the Inf encoding.
-        //   * Maf2_0 draws scale bytes and data encodings directly, with
-        //     no float value per element to quantise.
+        //   * Maf2_0 draws each block scale independently of the data and
+        //     rounds each element at a scale of one, not to a
+        //     block-max-derived scale.
         //   * Maf1_0 fixes every scale byte and rounds each element at a
         //     scale of one, not to a block-max-derived scale.
         // Route those through the host CPU `DataGenerator<DTYPE>` and

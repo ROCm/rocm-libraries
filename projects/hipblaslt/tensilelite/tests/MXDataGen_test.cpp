@@ -725,7 +725,8 @@ class MXDataGenMaf2_0 : public ::testing::TestWithParam<hipDataType>
 {
 };
 
-TEST_P(MXDataGenMaf2_0, E8M0ScalesAreBinomialPowersOfTwoAndDataIsFinite)
+// maf2_0 (CUTLASS-style): E8M0 scales 2^e with e uniform over [-127, 0], data U[-1, 1] rounded.
+TEST_P(MXDataGenMaf2_0, E8M0ScalesAreUniformPowersOfTwoAndDataInUnitRange)
 {
     const hipDataType dt   = GetParam();
     const bool        e4m3 = dt == HIP_R_8F_E4M3;
@@ -733,16 +734,13 @@ TEST_P(MXDataGenMaf2_0, E8M0ScalesAreBinomialPowersOfTwoAndDataIsFinite)
 
     std::set<uint8_t> scales(out.scale.begin(), out.scale.begin() + (256 / 32) * 64);
     for(uint8_t s : scales)
-    {
-        EXPECT_GE(s, 127 - 11) << "scale exponent below 2^-11";
-        EXPECT_LE(s, 127 + 10) << "scale exponent above 2^10";
-    }
-    EXPECT_GT(scales.size(), 5u) << "binomial scales should vary";
+        EXPECT_LE(s, 127) << "scale above 2^0";
+    EXPECT_GT(scales.size(), 100u) << "512 draws over 128 exponents should cover most of them";
 
     for(size_t i = 0; i < out.data.size(); ++i)
     {
         const double v = decodeOcpFp8(out.data[i], e4m3);
-        ASSERT_TRUE(std::isfinite(v)) << "i=" << i << " code=" << int(out.data[i]);
+        ASSERT_LE(std::abs(v), 1.0) << "i=" << i << " code=" << int(out.data[i]);
         const double expected = v * std::ldexp(1.0, int(out.scale[i / 32]) - 127);
         EXPECT_EQ(out.ref[i], static_cast<float>(expected)) << "i=" << i;
     }
@@ -800,7 +798,7 @@ class MXDataGenMaf2_0Fp6 : public ::testing::TestWithParam<hipDataType>
 {
 };
 
-TEST_P(MXDataGenMaf2_0Fp6, E8M0ScalesAreBinomialPowersOfTwo)
+TEST_P(MXDataGenMaf2_0Fp6, E8M0ScalesAreUniformPowersOfTwo)
 {
     const hipDataType dt   = GetParam();
     const bool        e2m3 = dt == static_cast<hipDataType>(HIP_R_6F_E2M3);
@@ -808,9 +806,10 @@ TEST_P(MXDataGenMaf2_0Fp6, E8M0ScalesAreBinomialPowersOfTwo)
     for(size_t i = 0; i < out.ref.size(); ++i)
     {
         const uint8_t s = out.scale[i / 32];
-        ASSERT_GE(s, 127 - 11);
-        ASSERT_LE(s, 127 + 10);
-        const double expected = decodeOcpFp6(fp6At(out.data, i), e2m3) * std::ldexp(1.0, s - 127);
+        ASSERT_LE(s, 127);
+        const double v = decodeOcpFp6(fp6At(out.data, i), e2m3);
+        ASSERT_LE(std::abs(v), 1.0) << "i=" << i;
+        const double expected = v * std::ldexp(1.0, s - 127);
         ASSERT_EQ(out.ref[i], static_cast<float>(expected)) << "i=" << i;
     }
     const auto b = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0", 1);
@@ -859,9 +858,9 @@ class MXDataGenMaf2_0Fp4 : public ::testing::TestWithParam<Fp4ScaleCase>
 {
 };
 
-// FP4 maf2_0 blocks take |N(0.34375, 0.08)| scales rounded to the scale format, and data
-// uniform over the 16 FP4 codes.
-TEST_P(MXDataGenMaf2_0Fp4, NormalScalesAndDecodedReference)
+// FP4 maf2_0 blocks take E8M0 scales 2^e with e uniform over [-127, 0], or E4M3/E5M3 scales
+// U[0, 1] rounded, and data U[-1, 1] rounded to FP4 (0, ±0.5, ±1).
+TEST_P(MXDataGenMaf2_0Fp4, UniformScalesAndDecodedReference)
 {
     const auto        c   = GetParam();
     const hipDataType f4  = static_cast<hipDataType>(HIP_R_4F_E2M1);
@@ -876,22 +875,25 @@ TEST_P(MXDataGenMaf2_0Fp4, NormalScalesAndDecodedReference)
     };
 
     const size_t blocks = out.ref.size() / c.mxBlock;
-    double       sum = 0, quarter = 0;
+    double       sum = 0, sumByte = 0;
     for(size_t b = 0; b < blocks; ++b)
     {
         const double v = scaleValue(out.scale[b]);
         ASSERT_TRUE(std::isfinite(v)) << "block " << b;
+        ASSERT_LE(v, 1.0) << "block " << b;
         sum += v;
-        quarter += v == 0.25;
+        sumByte += out.scale[b];
     }
     if(c.scaleType == HIP_R_8F_UE8M0)
-        EXPECT_NEAR(quarter / blocks, 0.627, 0.1) << "E8M0 rounds most draws to 0.25";
+        EXPECT_NEAR(sumByte / blocks, 63.5, 8.0) << "mean E8M0 byte (uniform over 0..127)";
     else
-        EXPECT_NEAR(sum / blocks, 0.3435, 0.015) << "mean scale";
+        EXPECT_NEAR(sum / blocks, 0.5, 0.04) << "mean scale";
 
     for(size_t i = 0; i < out.ref.size(); ++i)
     {
-        const double expected = decodeFp4At(out.data, i) * scaleValue(out.scale[i / c.mxBlock]);
+        const double v = decodeFp4At(out.data, i);
+        ASSERT_LE(std::abs(v), 1.0) << "i=" << i;
+        const double expected = v * scaleValue(out.scale[i / c.mxBlock]);
         ASSERT_EQ(out.ref[i], static_cast<float>(expected)) << "i=" << i;
     }
 
@@ -910,8 +912,8 @@ class MXDataGenMaf2_0UnitScale : public ::testing::TestWithParam<Fp4ScaleCase>
 {
 };
 
-// The FP4 non-scaled row: every block scale is 1.0 and the data is N(0, 1) rounded to FP4.
-TEST_P(MXDataGenMaf2_0UnitScale, UnitScalesAndRoundedNormalData)
+// The FP4 non-scaled row: every block scale is 1.0 and the data is U[-1, 1] rounded to FP4.
+TEST_P(MXDataGenMaf2_0UnitScale, UnitScalesAndRoundedUniformData)
 {
     const auto        c   = GetParam();
     const hipDataType f4  = static_cast<hipDataType>(HIP_R_4F_E2M1);
@@ -924,17 +926,18 @@ TEST_P(MXDataGenMaf2_0UnitScale, UnitScalesAndRoundedNormalData)
     for(size_t b = 0; b < blocks; ++b)
         ASSERT_EQ(out.scale[b], one) << "block " << b;
 
-    double zeros = 0, small = 0;
+    double zeros = 0, halves = 0;
     for(size_t i = 0; i < out.ref.size(); ++i)
     {
         const double v = decodeFp4At(out.data, i);
         ASSERT_EQ(out.ref[i], static_cast<float>(v)) << "i=" << i;
+        ASSERT_LE(std::abs(v), 1.0) << "i=" << i;
         zeros += v == 0.0;
-        small += std::abs(v) <= 1.0;
+        halves += std::abs(v) == 0.5;
     }
-    // P(|x| < 0.25) = 0.197 and P(|x| < 1.25) = 0.789 for x ~ N(0, 1).
-    EXPECT_NEAR(zeros / out.ref.size(), 0.197, 0.02);
-    EXPECT_NEAR(small / out.ref.size(), 0.789, 0.02);
+    // For x ~ U[-1, 1]: P(|x| < 0.25) = 0.25, P(0.25 <= |x| < 0.75) = 0.5, the rest rounds to ±1.
+    EXPECT_NEAR(zeros / out.ref.size(), 0.25, 0.02);
+    EXPECT_NEAR(halves / out.ref.size(), 0.5, 0.02);
 
     const auto b = runFp8MX(f4, c.scaleType, "maf2_0_unit_scale", 1, c.mxBlock);
     EXPECT_NE(out.data, b.data) << "A and B must differ";
