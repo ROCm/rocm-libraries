@@ -403,6 +403,58 @@ remap is a bijection of the launch grid, so correctness never depends on the
 decision. `xcd_tile_order=False` (name tag `_noxcd`) builds the launch-order
 kernel for an A/B comparison; the AOT grid does not sweep it.
 
+## Interior-only dX (`dx_interior`, `dx_interior_axes`) and the x-halo W mask (`xh_dx_wmask`)
+
+A *halo-form* problem (pad 0, stride 1, dilation 1, odd filter: the input is
+the output grown by `(F-1)/2` voxels per side) computes dX over the halo shell
+too. When the caller discards the shell's gradient (the shell came from a pad
+or a zero halo with no neighbour), `KernelIdentity.dx_interior` launches the
+same binary on the interior only. It is a **launch-time** identity field (no
+binary change, like `pp_box_cus`), default 0:
+
+| Value | Shell voxels | Name tag |
+|---|---|---|
+| `1` | not written (skip) | `dxi1` |
+| `2` | written as zeros by a small zero-fill kernel after the main launch(es) | `dxi2` |
+
+`dx_interior_axes` (bit mask 1 W, 2 H, 4 D; 0 = all; tag `dxa<n>`) limits the
+skipped shell to some axes, e.g. `3` keeps the D shell (a run split along D
+must compute its internal D faces' halo dX).
+
+The interior of the halo problem is itself a dgrad: voxel `(d+hd, h+hh, w+hw)`
+reads the dY pixels voxel `(d, h, w)` of the padded same-size problem reads
+(pads `(hd, hh, hw)`, input extents = output extents, same dY and W). Launch
+forms (`kernels/common/conv_dgrad_interior.py`):
+
+- `pp_boxes` kernels keep the halo problem and get records over the interior
+  only (`pp_box_sub_gemms(..., interior=mask)`): their box epilogue stores
+  dense NDHWC, so it cannot be pointed at a strided view.
+- every other tap-outer kernel runs that **view problem** with its dX pointer
+  at the interior origin and the full tensor's dX strides (kernargs). The
+  x-halo loop serves `pW == 0` only, so its view keeps whole W rows: the two w
+  shell columns of interior rows are computed and stored (exact values) unless
+  the binary has `xh_dx_wmask`.
+- `pp_box_det` stage 2 stores by dense pixel index; under a view launch its
+  rows are mapped to full-tensor pixels (`pp_box_det_pack(pix_map=...)`).
+
+`xh_dx_wmask` (spec + identity field, tag `xwm`, default off; changes the
+binary): the x-halo cshuffle epilogue (`xh_epi >= 1`, 3-D) stores only
+`(X-1)/2 <= wi < Wi-(X-1)/2`, and with `xh_epi_lin` its linear store offset
+takes row and plane gaps (`m*sw + row*(sh - Wi*sw) + plane*(sd - Hi*sh)`).
+With `dx_interior` it makes the x-halo skip exact; without it the binary
+serves `pW == (X-1)/2` problems (the padded production form) through their
+W-extended `pW = 0` view, whose dX origin sits one column before dX's.
+
+`identity_supports_problem` enforces: `dx_interior` needs a tap-outer kernel,
+split-K only as `pp_box_det`, no stream-K, a halo-form problem on the masked
+axes, and the base identity serving the launch problem; an `xh_dx_wmask`
+binary without `dx_interior` serves `pW == (X-1)/2` problems only. The verify
+of the benchmark (`_verify_interior`) pre-fills dX with a sentinel and checks
+the computed voxels against the reference and the shell untouched / zero.
+AOT: `ROCKE_AOT_DGRAD_DXI` (modes) / `_DXI_SCOPE` / `ROCKE_AOT_DGRAD_DXA`
+(masks) add twins of the x-halo / tap-outer jobs; `xwm=1` in a
+`ROCKE_AOT_DGRAD_XHK` set builds the masked x-halo binary.
+
 ## Key Files
 
 | File | Purpose |
