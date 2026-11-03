@@ -11,6 +11,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed out-of-bounds stores in CK Tile multi-reduction kernels when the output row count is not a multiple of the block tile size.
 * Fixed padded-row output updates in the global-atomic path of CK Tile multiblock reduction, including float outputs on gfx11.
 * Fixed partial-vector direct reduction stores and scalar atomic output tails, and rejected incomplete packed atomic output vectors.
+* Fixed CK Tile FMHA bf16 accuracy in builds that compile `generate.py` output with their own build system (such as PyTorch). Generated FMHA sources now default to the round-to-nearest-even float-to-bf16 conversion that the FMHA CMake targets use (backward on all targets, forward on gfx11 and gfx12) instead of truncation.
 
 ### Added
 
