@@ -347,13 +347,16 @@ lanes follow:
 
 ### The project's own binaries use a catch-all
 
-`dnn-providers/integration-tests/test_categories.yaml` (for
-`hipdnn_gpu_ref_tests`, the harness unit tests and `hipdnn_golden_data_tests`)
-writes its quick tier as an exclusion: `*` minus `Standard*`,
-`Comprehensive*` and `Full*`. Therefore, in this file, any test without a tier
+`dnn-providers/integration-tests/test_categories.yaml` (for the harness unit
+tests and `hipdnn_golden_data_tests`) and `test_categories_gpu_ref.yaml` (for
+`hipdnn_gpu_ref_tests`) write their quick tier as an exclusion: `*` minus
+`Standard*`, `Comprehensive*` and `Full*`. Therefore any test without a tier
 prefix goes into quick. If the quick tier starts to time out, look for a large
-shape that has no prefix. In GTest filter syntax, only the first `-` starts the
-negative list. A `:-` between patterns does not negate.
+shape that has no prefix. `test_categories_gpu_ref.yaml` also moves the
+reduced-precision and mixed-type comparison cases to standard by name pattern
+(the list is in that file), so its quick tier holds the fp32 comparison cases.
+In GTest filter syntax, only the first `-` starts the negative list. A `:-`
+between patterns does not negate.
 
 ## What decides whether a test runs
 

@@ -25,7 +25,8 @@ dnn-providers/integration-tests/
         support.json                        #   support-claim sidecar    (required)
         golden/{CaseId}/tensors.dvc         #   golden-data pointer      (optional, per case)
         golden/{CaseId}/tensor<uid>.bin     #   golden tensors, via DVC  (not in git)
-  test_categories.yaml                      # CTest tiers for this project's own binaries
+  test_categories.yaml                      # CTest tiers for the harness unit tests and golden-data binaries
+  test_categories_gpu_ref.yaml              # CTest tiers for hipdnn_gpu_ref_tests
   test_categories_external.yaml             # CTest tiers for pre-registered, non-GTest tests
 
 dnn-providers/<provider>/
@@ -495,12 +496,13 @@ refreshes a claim on a skipped case on that arch.
 
 These files map GTest name patterns to CTest labels and timeouts.
 `shared/ctest/parse_test_categories.py` parses them at configure time.
-`shared/ctest/README.md` is the reference for the format. There are three scopes.
+`shared/ctest/README.md` is the reference for the format. There are four scopes.
 Do not confuse them:
 
 | File | Governs |
 |---|---|
-| `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries (`hipdnn_integration_tests_unit_tests`, `hipdnn_gpu_ref_tests`, `hipdnn_golden_data_tests`) |
+| `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries `hipdnn_integration_tests_unit_tests` and `hipdnn_golden_data_tests` |
+| `dnn-providers/integration-tests/test_categories_gpu_ref.yaml` | `hipdnn_gpu_ref_tests`. Quick is an fp32 smoke run; reduced-precision and mixed-type cases are in standard |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
 | `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950AttentionDense_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
