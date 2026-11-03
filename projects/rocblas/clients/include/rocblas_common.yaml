@@ -566,6 +566,7 @@ Arguments:
   - math_mode: c_uint32
   - flush_batch_count: c_uint64
   - flush_memory_size: c_uint64
+  - use_hipblaslt: c_int32
   - threads: c_uint16
   - streams: c_uint16
   - devices: c_uint8
@@ -586,7 +587,6 @@ Arguments:
   - graph_test: c_bool
   - repeatability_check: c_bool
   - alpha_beta_stride: c_bool
-  - use_hipblaslt: c_int32
   - cleanup: c_bool
   - size_query: c_bool
 

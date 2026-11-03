@@ -253,6 +253,7 @@ struct Arguments
     OPER(math_mode) SEP              \
     OPER(flush_batch_count) SEP      \
     OPER(flush_memory_size) SEP      \
+    OPER(use_hipblaslt) SEP          \
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \
@@ -273,7 +274,6 @@ struct Arguments
     OPER(graph_test) SEP             \
     OPER(repeatability_check) SEP    \
     OPER(alpha_beta_stride) SEP      \
-    OPER(use_hipblaslt) SEP          \
     OPER(cleanup) SEP                \
     OPER(size_query)
     // clang-format on
