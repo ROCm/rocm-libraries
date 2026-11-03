@@ -730,6 +730,39 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      "number of k atoms per tile");
             return false;
         }
+        if(s->tapk_pp_epi < 0 || s->tapk_pp_epi > 2
+           || (s->tapk_pp_epi
+               && !(s->tapk_pingpong && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0
+                    && s->split_k == 1 && s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->dtype_d
+                    && strcmp(s->dtype_d, "bf16") == 0)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tapk_pp_epi 1/2 needs tapk_pingpong, the cshuffle epilogue, split_k 1, 16x16 "
+                     "atoms, bf16 dX");
+            return false;
+        }
+        if(s->tapk_pingpong >= 4)
+        {
+            const rocke_conv_problem_t* pp_ = &s->problem;
+            int mf = pp_->Y > pp_->X ? pp_->Y : pp_->X;
+            if(pp_->is_3d && pp_->Z > mf)
+                mf = pp_->Z;
+            if(mf > 3)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "tapk_pingpong 4/5 builds its tap mask for filters of up to 3 per axis");
+                return false;
+            }
+            if(!s->tapk_pp_sched)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "tapk_pingpong 4/5 needs tapk_pp_sched (the two-tiles-ahead loop)");
+                return false;
+            }
+        }
         if(s->tapk_pingpong >= 3 && !s->b_kpack)
         {
             snprintf(reason, reason_cap, "tapk_pingpong 3/4 (n-fast kpack B loads) needs b_kpack");
