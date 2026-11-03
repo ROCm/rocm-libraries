@@ -101,6 +101,7 @@ namespace rocalution
 
         if(this->rec_ == true)
         {
+            this->residual_history_.clear();
             this->residual_history_.push_back(res);
         }
 
@@ -267,27 +268,30 @@ namespace rocalution
             return true;
         }
 
-        if(std::abs(res) <= this->absolute_tol_)
+        if(this->iteration_ >= this->minimum_iter_)
         {
-            this->reached_ = 1;
-            return true;
-        }
+            if(std::abs(res) <= this->absolute_tol_)
+            {
+                this->reached_ = 1;
+                return true;
+            }
 
-        if(res / this->initial_residual_ <= this->relative_tol_)
-        {
-            this->reached_ = 2;
-            return true;
+            if(res / this->initial_residual_ <= this->relative_tol_)
+            {
+                this->reached_ = 2;
+                return true;
+            }
+
+            if(this->iteration_ >= this->maximum_iter_)
+            {
+                this->reached_ = 4;
+                return true;
+            }
         }
 
         if(res / this->initial_residual_ >= this->divergence_tol_)
         {
             this->reached_ = 3;
-            return true;
-        }
-
-        if(this->iteration_ >= this->maximum_iter_)
-        {
-            this->reached_ = 4;
             return true;
         }
 
@@ -338,7 +342,7 @@ namespace rocalution
 
         file.setf(std::ios::scientific);
 
-        for(int n = 0; n < this->iteration_; n++)
+        for(size_t n = 0; n < this->residual_history_.size(); n++)
         {
             file << this->residual_history_[n] << std::endl;
         }

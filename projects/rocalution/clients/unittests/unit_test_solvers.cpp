@@ -1756,7 +1756,6 @@ TYPED_TEST(solvers, minimum_iteration_count_delays_convergence)
                     loose_tol<T>(1e-10));
     }
 
-    KNOWN_BUG("the checks at a restart and in the BiCG part ignore the minimum iteration count");
     for(const Case& c : {Case{with_basis<GMRES<T>>("GMRES", 2), restarted_gmres(2)},
                          Case{with_basis<FGMRES<T>>("FGMRES", 2), restarted_gmres(2)},
                          Case{bicgstabl<T>(2), Vec<T>()}})
@@ -1896,8 +1895,6 @@ TYPED_TEST(solvers, residual_history_file_holds_the_residuals_of_the_last_solve)
     std::remove(file.c_str());
     ASSERT_GE(second.size(), 1u);
 
-    KNOWN_BUG("the file gets the first iteration-count entries of every recorded residual: the "
-              "last residual is missing, and a second solve writes the residuals of the first");
     EXPECT_EQ(written.size(), 4u);
     EXPECT_NEAR(second[0], s.res[2], tolerance * s.res[2]);
     EXPECT_EQ(second.size(), 2u);
