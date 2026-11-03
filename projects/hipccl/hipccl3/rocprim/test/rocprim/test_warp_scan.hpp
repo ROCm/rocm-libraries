@@ -164,7 +164,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Broadcast)
 
     using T = typename TestFixture::params::type;
 
-    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
+    // logical warp size for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size_input = TestFixture::params::warp_size;
     static constexpr size_t logical_warp_size
         = !rocprim::detail::is_power_of_two(logical_warp_size_input)
@@ -277,7 +277,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
     using T         = common::custom_type<base_type, base_type, true>;
     using acc_type  = typename test_utils::select_plus_operator_host<base_type>::acc_type;
 
-    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
+    // logical warp size for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
