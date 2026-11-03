@@ -1655,7 +1655,7 @@ level_labels:
     - {id: X8b, why: "bias format regression pin (#13474)", changes: {bias: present, bias_broadcast: none, bias_dtype: fp16}}
     - {id: X8c, why: "bias format regression pin (#13474)", changes: {bias: present, bias_broadcast: none, bias_dtype: bf16}}
     - {id: X9, why: "fp8 descales that are not 1.0, with GQA", changes: {dtype_q: fp8_e4m3_fnuz, dtype_o: bf16, descale_q: present, descale_k: present, descale_v: present, k_head_sharing: gqa, v_head_sharing: gqa}}
-    - {id: X10, why: "fp8 byte strides near the 32-bit limit (K/V batch stride = 2^31 bytes)", tier: X, sizes: {B: 2, H_q: 128, S: 131072},
+    - {id: X10, why: "fp8 K/V byte offsets past 2^31 (two batches, batch stride 1.5 * 2^30 bytes)", tier: X, sizes: {B: 2, H_q: 96, S: 131072},
        changes: {dtype_q: fp8_e4m3_fnuz, dtype_o: bf16, descale_q: present, descale_k: present, descale_v: present, seq_q: one, seq_q_vs_seq_kv: shorter}}
 
   # Real-world configurations, each from a public model configuration.
