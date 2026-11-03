@@ -4,8 +4,8 @@
  * param_facts.cpp -- the rules a kernel parameter's declaration may state, and
  * how its facts print.
  *
- * Mirrors the "parameter facts" section of python/rocke/core/ir.py and the
- * relation readers of python/rocke/core/intexpr.py: the same rules in the same
+ * Mirrors python/rocke/core/param_facts.py and the relation readers of
+ * python/rocke/core/intexpr.py: the same rules in the same
  * order, with byte-identical texts, because rocke_b_param raises the first
  * message and both verifiers report all of them.
  *

@@ -955,10 +955,15 @@ rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 /* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
  * values. */
 rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
-/* Python IRBuilder.gpu_checked_value: always emitted; a false fact traps the
- * kernel. Checks `v` against the facts' ge / gt / le / lt (an int or one Value
- * with stated facts) and multiple_of on the GPU (compare, scf.if, tile.trap) and
- * returns `v` marked with them (by = "gpu_checked_value"). eq and relations are
+/* Python IRBuilder.gpu_checked_value: always emitted, and it does not trap.
+ * Checks `v` against the facts' ge / gt / le / lt (an int or one Value with
+ * stated facts) and multiple_of on the GPU (compare, scf.if,
+ * tile.gpu_check_failed) and returns `v` marked with them (by =
+ * "gpu_checked_value"). A lane whose value breaks a fact stores 1 to the
+ * kernel's GPU-check word and returns from the kernel, so the launch completes
+ * and every output of it is undefined. Only a host that reads the word after
+ * the launch sees the failure (rocke.runtime does); recipe launch plans refuse
+ * such a kernel for that reason. eq and relations are
  * refused, as are a value the host already checks and arithmetic on an
  * unchecked load before the check, with the Python texts. */
 rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
