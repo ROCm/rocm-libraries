@@ -149,16 +149,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         # tree around the archive. Binary-relative for the reason the defines above are.
         HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
-    # The shipped (product) descriptor tree, the same binary-relative offset
-    # integration_tests uses. Read only by TestGfx942AttentionUnified3dDispatch, which loads
-    # the shipped set itself: main() above points discovery at the unit set, and adding the
-    # product tree to discovery would widen it for every unit test.
-    target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
-    if(TARGET hkp_packaging_product)
-        add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
-    endif()
-
     # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
     # the shared main() resolves its root identically in both. The archive cases that read
     # the kpack reldir stay in the ordinary binary, and a define no source here consumes

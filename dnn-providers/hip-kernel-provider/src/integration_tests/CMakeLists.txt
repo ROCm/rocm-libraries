@@ -93,6 +93,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # The gfx942 unified 3D (split-KV decode) knob suite: forced block_size/num_segments
+    # select one shipped kernel, launched on a gfx942 device against the CPU reference.
+    # Gated like the census and the engine's external integration target, so a build that
+    # does not ship the engine compiles no case for it; it GTEST_SKIPs on other devices.
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_unified_3d_suite)
+    if(_hkp_gfx942_unified_3d_suite AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx942 unified 3D knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_gfx942_unified_3d_suite)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified3dKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp

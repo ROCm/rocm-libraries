@@ -33,16 +33,6 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestSerializableSourceKind.cpp
 )
 
-# The gfx942 unified 3D dispatch suite loads the shipped product tree and fails when it
-# holds no set for its engine, so it is compiled only when the product offers that engine
-# (rocKE on and its descriptors present). Gated like the gfx950 knobs suite: a host source
-# that pins an engine reads hkp_product_offers_engine(), never GPU_TARGETS.
-hkp_product_offers_engine(_hkp_offers_gfx942_unified_3d "hipkernel:Gfx942AttentionUnified3d")
-if(_hkp_offers_gfx942_unified_3d)
-    target_sources(hip_kernel_provider_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dDispatch.cpp)
-endif()
-
 # The gfx942 unified 3D host tests check the engine's C++ restatements of rocKE rules
 # (admission, split rule, kernel arguments, K/V cache policy) against tables rocKE itself
 # answers. Each table is generated here, in the build tree, from the rocKE source tree and
