@@ -1,7 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU raw-bit uniform-probability checks for the shipped gfx942 dense kernel."""
+"""On-GPU raw-bit uniform-probability checks for the shipped gfx942 dense kernel.
+
+Inputs are encoded exactly into raw FP16/BF16 bits, uploaded into HIP device
+buffers and launched through the production pointer entry; outputs come back as
+raw bits. Only numpy and the rocKE HIP runtime are needed, no tensor framework.
+
+The only skip is a processor that is not gfx942. On gfx942 a missing calibration
+entry, a calibration scope mismatch, or an observation with no legal coordinate
+fails the test, so a dispatch change cannot silently remove the gate.
+"""
 
 from __future__ import annotations
 
@@ -15,15 +24,15 @@ from rocke.runtime.hip_module import get_device_arch
 
 from ._analytical import (
     UNIFORM_BASIS_OFFSETS,
-    UNIFORM_CALIBRATION,
-    UNIFORM_CAUSAL_FP16,
-    UNIFORM_WINDOW_BF16,
+    UNIFORM_QUICK_CASES,
     UniformCase,
     UniformMutation,
     UniformObservation,
     UniformResult,
     analyze_uniform_policy,
+    encode_bits,
     format_uniform_result,
+    require_calibration,
     uniform_inputs,
     uniform_inputs_folded,
 )
@@ -33,45 +42,35 @@ from ._gfx942_subject import (
     run_dense_case,
 )
 
-torch = pytest.importorskip(
-    "torch", reason="ROCm torch is required for the gfx942 uniform-probability check"
-)
+_ARCH = get_device_arch()
 
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
-        get_device_arch() != "gfx942", reason="requires a HIP-visible gfx942 GPU"
+        _ARCH != "gfx942",
+        reason=f"requires a HIP-visible gfx942 GPU; HIP reports {_ARCH!r}",
     ),
 ]
-
-
-def _torch_dtype(case: UniformCase):
-    return {"fp16": torch.float16, "bf16": torch.bfloat16}[case.dtype]
-
-
-def _raw_output_bits(out) -> np.ndarray:
-    """Copy raw storage bits without normalizing signed zero or NaN payloads."""
-    return out.view(torch.int16).cpu().numpy().view(np.uint16).copy()
 
 
 def _run_exposures(
     case: UniformCase, subject: ResolvedDenseSubject
 ) -> UniformObservation:
-    device = torch.device("cuda", torch.cuda.current_device())
-    dtype = _torch_dtype(case)
     outputs: list[tuple[str, np.ndarray]] = []
     profiles = [
         (f"basis@{offset}", uniform_inputs(case, offset))
         for offset in UNIFORM_BASIS_OFFSETS
     ]
     profiles.append(("folded", uniform_inputs_folded(case)))
-    for name, (q_numpy, k_numpy, v_numpy) in profiles:
-        q = torch.from_numpy(q_numpy).to(device=device, dtype=dtype)
-        k = torch.from_numpy(k_numpy).to(device=device, dtype=dtype)
-        v = torch.from_numpy(v_numpy).to(device=device, dtype=dtype)
-        out = torch.full(case.output_shape, float("nan"), device=device, dtype=dtype)
-        run_dense_case(case, q, k, v, out, subject=subject)
-        outputs.append((name, _raw_output_bits(out)))
+    for name, (q_values, k_values, v_values) in profiles:
+        out = run_dense_case(
+            case,
+            encode_bits(q_values, case.dtype),
+            encode_bits(k_values, case.dtype),
+            encode_bits(v_values, case.dtype),
+            subject=subject,
+        )
+        outputs.append((name, out))
     return UniformObservation(tuple(outputs))
 
 
@@ -132,15 +131,12 @@ def _capture_calibration(
                     stream.write(json.dumps(record, sort_keys=True) + "\n")
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        pytest.param(UNIFORM_CAUSAL_FP16, id="fp16-causal"),
-        pytest.param(UNIFORM_WINDOW_BF16, id="bf16-window64"),
-    ],
-)
+@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
 def test_uniform_masked_probabilities(case: UniformCase) -> None:
-    """Gate a ratified dense case and always self-test mutation sensitivity."""
+    """Gate a ratified dense case and always self-test mutation sensitivity.
+
+    Mutation self-checks and calibration capture run before the gate, so an
+    uncalibrated or rescoped case still records what re-ratification needs."""
     subject = resolve_dense_subject(case)
     observation = _run_exposures(case, subject)
     control = analyze_uniform_policy(case, observation, budget=0)
@@ -155,20 +151,17 @@ def test_uniform_masked_probabilities(case: UniformCase) -> None:
 
     _capture_calibration(case, subject, results)
 
-    arch = get_device_arch()
-    key = (arch, subject.candidate_name, case.dtype)
-    entry = UNIFORM_CALIBRATION.get(key)
-    if entry is None:
-        pytest.skip(
-            f"uniform-probability policy uncalibrated for {key}; "
-            f"{format_uniform_result(control)}"
-        )
-    if not entry.covers(case, subject.fingerprint):
-        pytest.skip(
-            f"uniform-probability policy scope mismatch for {key}, "
-            f"case={case.case_id}; {format_uniform_result(control)}"
-        )
-
+    require_calibration(
+        _ARCH,
+        subject.candidate_name,
+        case,
+        subject.fingerprint,
+        detail=format_uniform_result(control),
+    )
+    assert control.compared_count > 0, (
+        f"{_case_label(case)}: no legal coordinate compared; "
+        f"{format_uniform_result(control)}"
+    )
     assert (
         not control.violations
     ), f"{_case_label(case)}: {format_uniform_result(control)}"

@@ -710,6 +710,7 @@ __all__ = [
     "attention_dense_block",
     "attention_dense_signature",
     "gfx942_kernel_name",
+    "launch_attention_dense",
     "run_attention_dense_torch",
 ]
 
@@ -2852,6 +2853,92 @@ def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
 _DENSE_LAUNCHER_CACHE: dict = {}
 
 
+def launch_attention_dense(
+    *,
+    spec: AttentionDenseSpec,
+    q,
+    k,
+    v,
+    out,
+    scale: float,
+    stream: int = 0,
+    arch: str = "gfx942",
+    sinks=None,
+    lse=None,
+    segment_workspace=None,
+) -> None:
+    """Torch-free compile (cached) + launch of the gfx942 dense prefill kernel.
+
+    The pointer-level core of :func:`run_attention_dense_torch`, which validates its
+    torch tensors and delegates here. ``q``/``k``/``v``/``out`` (and ``sinks``,
+    ``lse`` and the ``segment_workspace`` values) are anything the launcher packs as
+    a device pointer: an ``int`` address, a :class:`rocke.runtime.DeviceMem`, or an
+    object exposing ``data_ptr()``. The layout contract is the torch entry's; this
+    layer checks only spec legality and that each spec-required buffer is present,
+    so shape, dtype, placement and aliasing are the caller's to guarantee.
+
+    ``spec.kv_segments > 1`` needs ``segment_workspace``, a mapping with one FP32
+    buffer per :data:`SEGMENT_PARAMS` name; the caller then runs
+    :func:`launch_segment_combine`. The launch is fenced (``LaunchConfig`` default),
+    so ``out`` is complete on return."""
+    spec = _as_gfx942_spec(spec)
+    ok, why = supports_attention_dense(spec, arch=arch)
+    if not ok:
+        raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    for name, value, required in (
+        ("sinks", sinks, spec.use_sinks),
+        ("lse", lse, spec.emit_lse),
+        ("segment_workspace", segment_workspace, spec.kv_segments > 1),
+    ):
+        if required and value is None:
+            raise ValueError(f"the spec requires {name}, got None")
+        if not required and value is not None:
+            raise ValueError(f"{name} provided but the spec does not use it")
+    if segment_workspace is not None and set(segment_workspace) != set(SEGMENT_PARAMS):
+        raise ValueError(
+            f"segment_workspace keys {sorted(segment_workspace)} != "
+            f"{sorted(SEGMENT_PARAMS)}"
+        )
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime import KernelLauncher, LaunchConfig
+
+    key = attention_dense_cache_key(spec, arch=arch)
+    launcher = _DENSE_LAUNCHER_CACHE.get(key)
+    if launcher is None:
+        art = compile_kernel(
+            build_attention_dense(spec, arch=arch),
+            arch=arch,
+            backend="python",
+            capture_ir_text=False,
+        )
+        assert art.kernel_name == spec.kernel_name(), (
+            art.kernel_name,
+            spec.kernel_name(),
+        )
+        launcher = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=attention_dense_signature(spec),
+        )
+        _DENSE_LAUNCHER_CACHE[key] = launcher
+    vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    vals.update(attention_dense_runtime_args(spec))
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
+    if spec.emit_lse:
+        vals["lse_ptr"] = lse
+    if segment_workspace is not None:
+        vals.update(segment_workspace)
+    launcher(
+        vals,
+        config=LaunchConfig(
+            grid=attention_dense_grid(spec),
+            block=attention_dense_block(spec),
+            stream=int(stream),
+        ),
+    )
+
+
 def run_attention_dense_torch(
     *,
     spec: AttentionDenseSpec,
@@ -2875,6 +2962,9 @@ def run_attention_dense_torch(
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
     torch-free at import time. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
+    Validates the torch tensors, owns the split-KV workspace and combine, and
+    delegates the compile and launch to :func:`launch_attention_dense`, the entry
+    for callers that hold raw device buffers instead of tensors.
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
     the launcher cache by ``attention_dense_cache_key``. On the runtime-shape path
@@ -2919,45 +3009,22 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
     validate_dense_lse(spec, q, k, v, out, lse, sinks=sinks)
-    from rocke.helpers.compile import compile_kernel
-    from rocke.runtime import KernelLauncher, LaunchConfig
-
-    key = attention_dense_cache_key(spec, arch=arch)
-    launcher = _DENSE_LAUNCHER_CACHE.get(key)
-    if launcher is None:
-        art = compile_kernel(
-            build_attention_dense(spec, arch=arch),
-            arch=arch,
-            backend="python",
-            capture_ir_text=False,
-        )
-        assert art.kernel_name == spec.kernel_name(), (
-            art.kernel_name,
-            spec.kernel_name(),
-        )
-        launcher = KernelLauncher(
-            hsaco=art.hsaco,
-            kernel_name=art.kernel_name,
-            signature=attention_dense_signature(spec),
-        )
-        _DENSE_LAUNCHER_CACHE[key] = launcher
-    vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
-    vals.update(attention_dense_runtime_args(spec))
-    if spec.use_sinks:
-        vals["sink_ptr"] = sinks
-    if spec.emit_lse:
-        vals["lse_ptr"] = lse
-    if spec.kv_segments > 1:
-        workspace = allocate_segment_workspace(spec, q.device)
-        vals.update(workspace)
-    launcher(
-        vals,
-        config=LaunchConfig(
-            grid=attention_dense_grid(spec),
-            block=attention_dense_block(spec),
-            stream=int(stream),
-        ),
+    workspace = (
+        allocate_segment_workspace(spec, q.device) if spec.kv_segments > 1 else None
     )
-    if spec.kv_segments > 1:
+    launch_attention_dense(
+        spec=spec,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        scale=scale,
+        stream=stream,
+        arch=arch,
+        sinks=sinks,
+        lse=lse,
+        segment_workspace=workspace,
+    )
+    if workspace is not None:
         launch_segment_combine(spec, arch, out, workspace, stream)
     return out
