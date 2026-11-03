@@ -49,6 +49,12 @@ constexpr int kTileW          = 128;
 constexpr int kTileC          = 8;
 constexpr int kBlockSize      = 256;
 constexpr std::size_t kLdsMax = 64 * 1024;
+// Below this many output channels per group most of the 64-wide channel tile idles, and Find
+// does not pick the solver; skip it rather than compile and benchmark it.
+constexpr std::size_t kMinOutChannelsPerGroup = 16;
+// Per-dimension HSA grid limits, in work-items.
+constexpr std::size_t kMaxGridX  = 0x7fffffff;
+constexpr std::size_t kMaxGridYZ = 0xffff;
 
 std::size_t LdsBytes(int r, int stride, int dil)
 {
@@ -106,8 +112,19 @@ bool ConvHipDirectConv1dFwd::IsApplicable(const ExecutionContext& ctx,
     const int dil    = problem.GetDilationW();
     if(r < 1 || stride < 1 || dil < 1)
         return false;
+    if(LdsBytes(r, stride, dil) > kLdsMax)
+        return false;
 
-    return LdsBytes(r, stride, dil) <= kLdsMax;
+    const std::size_t groups  = problem.GetGroupCount();
+    const std::size_t k_per_g = problem.GetOutChannels() / groups;
+    if(k_per_g < kMinOutChannelsPerGroup)
+        return false;
+
+    // Grid: x = width tiles * block, y = groups * channel tiles, z = batch.
+    const std::size_t wo = problem.GetOutWidth();
+    return ((wo + kTileW - 1) / kTileW) * kBlockSize <= kMaxGridX &&
+           groups * ((k_per_g + kTileK - 1) / kTileK) <= kMaxGridYZ &&
+           problem.GetBatchSize() <= kMaxGridYZ;
 }
 
 ConvSolution
@@ -124,6 +141,10 @@ ConvHipDirectConv1dFwd::GetSolution(const ExecutionContext&,
     const int dil    = problem.GetDilationW();
     const int pad    = problem.GetPadW();
     const int groups = problem.GetGroupCount();
+    const int c      = static_cast<int>(problem.GetInChannels());
+    const int wi     = static_cast<int>(problem.GetInWidth());
+    const int k      = static_cast<int>(problem.GetOutChannels());
+    const int wo_arg = static_cast<int>(problem.GetOutWidth());
 
     const std::size_t n       = problem.GetBatchSize();
     const std::size_t k_per_g = problem.GetOutChannels() / groups;
@@ -136,23 +157,14 @@ ConvHipDirectConv1dFwd::GetSolution(const ExecutionContext&,
     kernel.comp_options = " -DKR=" + std::to_string(r) + " -DSTRIDE=" + std::to_string(stride) +
                           " -DDIL=" + std::to_string(dil);
 
-    result.invoker_factory = [pad, groups](const std::vector<Kernel>& kernels) {
+    // The grid above and these arguments both come from the problem; the binary itself only
+    // depends on the compile options (filter width, stride, dilation).
+    result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
-        return [kern, pad, groups](const Handle& handle,
-                                   const AnyInvokeParams& primitive_parameters) {
-            const auto& data_ctx = primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
-            const auto& tensors  = data_ctx.tensors;
-            const auto& in_len   = tensors.inDesc.GetLengths();
-            const auto& out_len  = tensors.outDesc.GetLengths();
-            handle.Run(kern)(tensors.in,
-                             tensors.w,
-                             tensors.out,
-                             static_cast<int>(in_len[1]),
-                             static_cast<int>(in_len[3]),
-                             static_cast<int>(out_len[1]),
-                             static_cast<int>(out_len[3]),
-                             pad,
-                             groups);
+        return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
+            const auto& tensors =
+                primitive_parameters.CastTo<miopen::conv::DataInvokeParams>().tensors;
+            handle.Run(kern)(tensors.in, tensors.w, tensors.out, c, wi, k, wo_arg, pad, groups);
         };
     };
     result.construction_params.push_back(kernel);
