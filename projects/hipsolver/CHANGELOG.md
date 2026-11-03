@@ -3,6 +3,12 @@
 Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/index.html).
 
 
+## (Unreleased) hipSOLVER 3.9.0
+
+### Resolved issues
+
+* Fixed hipsolverDnXpotrs not setting info, which kept the value it had before the call.
+
 ## hipSOLVER 3.8.0 for ROCm 10.2.0
 
 ### Added
