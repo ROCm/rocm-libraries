@@ -874,8 +874,63 @@ TEST(TestSdpaPlanUtils, IsSupportedAttnScaleRequiresFinitePositiveNormalFloat)
     {
         EXPECT_TRUE(plan_utils::isSupportedAttnScale(scale)) << name;
     }
-    // The bound is inclusive: the smallest normal float is supported.
-    EXPECT_TRUE(plan_utils::isSupportedAttnScale(std::numeric_limits<float>::min()));
+}
+
+TEST(TestSdpaPlanUtils, AttnScaleTextDistinguishesNormalBoundary)
+{
+    const float smallestNormal = std::numeric_limits<float>::min();
+    EXPECT_NE(plan_utils::attnScaleToString(smallestNormal),
+              plan_utils::attnScaleToString(std::nextafter(smallestNormal, 0.0F)));
+}
+
+// Exercise the DOUBLE tensor read in both baked forms, plus the pure runtime
+// read. The next double above FLT_MAX must decline even if a cast rounds it down.
+TEST(TestSdpaPlanUtils, DoubleAttnScaleChecksRangeBeforeNarrowing)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto scaleOf = [](double scale, bool runtimeWithDefault) {
+        const auto builder = withDoubleScaleTensor(createSdpaFwdGraph(), scale, runtimeWithDefault);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        return plan_utils::attnScaleBeforeExecute(
+            graphWrapper.nodeWrappers().front()->attributesAs<SdpaAttributes>(),
+            graphWrapper.getTensorMap());
+    };
+
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        SCOPED_TRACE(name);
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            const auto narrowed = scaleOf(scale, runtimeWithDefault);
+            ASSERT_TRUE(narrowed.has_value());
+            EXPECT_FALSE(plan_utils::isSupportedAttnScale(*narrowed));
+        }
+    }
+
+    // Ordinary values and both float endpoints remain usable as DOUBLE tensors.
+    // A double just below FLT_MIN rounds to FLT_MIN: the lower bound applies to
+    // the actual float kernarg, not the original double.
+    std::vector<std::pair<double, float>> accepted;
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        accepted.emplace_back(static_cast<double>(scale), scale);
+    }
+    accepted.emplace_back(
+        std::nextafter(static_cast<double>(std::numeric_limits<float>::min()), 0.0),
+        std::numeric_limits<float>::min());
+    for(const auto& [scale, expected] : accepted)
+    {
+        SCOPED_TRACE(scale);
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            EXPECT_EQ(scaleOf(scale, runtimeWithDefault), expected);
+        }
+        double hostScale = scale;
+        const hipdnnPluginDeviceBuffer_t buffer{1, &hostScale};
+        const hipdnn_plugin_sdk::ScalarOperand operand{1, DataType::DOUBLE, true, 0.0};
+        EXPECT_EQ(plan_utils::resolveSupportedAttnScale(operand, &buffer, 1, "test"), expected);
+    }
 }
 
 // The scale isApplicable checks is the one execute will pass to the kernel.
@@ -928,6 +983,15 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsUnsupportedAttnScale)
                                       attnScaleCaseName(scaleName, sourceName));
         }
     }
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            declineTests.emplace_back(
+                withDoubleScaleTensor(createSdpaFwdGraph(), scale, runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
     declineTests.emplace_back(withUnreadableScaleTensor(createSdpaFwdGraph()),
                               "FP8_E4M3 constant scale tensor");
 
@@ -960,6 +1024,16 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
                                      attnScaleCaseName(scaleName, sourceName));
         }
     }
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            acceptTests.emplace_back(
+                withDoubleScaleTensor(
+                    createSdpaFwdGraph(), static_cast<double>(scale), runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
     acceptTests.emplace_back(createSdpaFwdGraphWithRuntimePbvScale(), "pure runtime scale tensor");
 
     for(const auto& test : acceptTests)
@@ -969,12 +1043,13 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
 }
 
 // A forward plan for a [1, 1, 128, 128] bf16 problem, with no loaded kernel, whose
-// scale is a pure runtime pass-by-value FLOAT tensor. Launching it fails with
+// scale is a pure runtime pass-by-value tensor. Launching it fails with
 // INTERNAL_ERROR, so BAD_PARAM shows that execute threw before the launch.
 constexpr int64_t K_FWD_RUNTIME_SCALE_UID = 5;
 const std::vector<int64_t> K_FWD_TENSOR_UIDS = {1, 2, 3, 4};
 
-SdpaFwdPlan createFwdPlanWithRuntimeScale()
+SdpaFwdPlan createFwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType scaleType
+                                          = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     constexpr unsigned int K_ROW = 128;
     constexpr unsigned int K_HEAD = 128 * 128;
@@ -1007,8 +1082,8 @@ SdpaFwdPlan createFwdPlanWithRuntimeScale()
     params.tileSizeQo = 128;
     params.archString = "gfx942";
     params.maskType = plan_utils::MaskType::NO_MASK;
-    params.attnScale = hipdnn_plugin_sdk::ScalarOperand{
-        K_FWD_RUNTIME_SCALE_UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, true, 0.0};
+    params.attnScale
+        = hipdnn_plugin_sdk::ScalarOperand{K_FWD_RUNTIME_SCALE_UID, scaleType, true, 0.0};
     return {std::make_shared<HipModuleGuard>(), params};
 }
 
@@ -1022,6 +1097,15 @@ TEST(TestSdpaFwdPlanExecute, RejectsUnsupportedRuntimeAttnScale)
         EXPECT_EQ(
             executeWithRuntimeScale(plan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
             HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+    const SdpaFwdPlan doublePlan
+        = createFwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        EXPECT_EQ(executeWithRuntimeScale(
+                      doublePlan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+                  HIPDNN_PLUGIN_STATUS_BAD_PARAM)
             << name;
     }
 }

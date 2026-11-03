@@ -447,6 +447,15 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsUnsupportedAttnScale)
                                       attnScaleCaseName(scaleName, sourceName));
         }
     }
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            declineTests.emplace_back(
+                withDoubleScaleTensor(createSdpaBwdGraph(), scale, runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
     declineTests.emplace_back(withUnreadableScaleTensor(createSdpaBwdGraph()),
                               "FP8_E4M3 constant scale tensor");
 
@@ -477,6 +486,16 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
                                      attnScaleCaseName(scaleName, sourceName));
         }
     }
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        for(const bool runtimeWithDefault : {false, true})
+        {
+            acceptTests.emplace_back(
+                withDoubleScaleTensor(
+                    createSdpaBwdGraph(), static_cast<double>(scale), runtimeWithDefault),
+                name + (runtimeWithDefault ? " as runtime default DOUBLE" : " as constant DOUBLE"));
+        }
+    }
     acceptTests.emplace_back(createSdpaBwdGraphWithRuntimePbvScale(), "pure runtime scale tensor");
 
     for(const auto& test : acceptTests)
@@ -486,12 +505,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
 }
 
 // A backward A32 plan for a [1, 1, 128, 128] bf16 problem, with no loaded kernels,
-// whose scale is a pure runtime pass-by-value FLOAT tensor. Launching it fails with
+// whose scale is a pure runtime pass-by-value tensor. Launching it fails with
 // INTERNAL_ERROR, so BAD_PARAM shows that execute threw before the first launch.
 constexpr int64_t K_BWD_RUNTIME_SCALE_UID = 10;
 const std::vector<int64_t> K_BWD_TENSOR_UIDS = {1, 2, 3, 4, 5, 6, 7, 8, 9};
 
-SdpaBwdPlan createBwdPlanWithRuntimeScale()
+SdpaBwdPlan createBwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType scaleType
+                                          = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     constexpr unsigned int K_ROW = 128;
     constexpr unsigned int K_HEAD = 128 * 128;
@@ -549,8 +569,8 @@ SdpaBwdPlan createBwdPlanWithRuntimeScale()
     params.dqdkdvTiles.ts = 192;
     params.dqConvertTiles.ts = 64;
     params.accumulatorType = AccumulatorType::A32;
-    params.attnScale = hipdnn_plugin_sdk::ScalarOperand{
-        K_BWD_RUNTIME_SCALE_UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, true, 0.0};
+    params.attnScale
+        = hipdnn_plugin_sdk::ScalarOperand{K_BWD_RUNTIME_SCALE_UID, scaleType, true, 0.0};
     return {std::make_shared<HipModuleGuard>(),
             std::make_shared<HipModuleGuard>(),
             std::make_shared<HipModuleGuard>(),
@@ -567,6 +587,15 @@ TEST(TestSdpaBwdPlanExecute, RejectsUnsupportedRuntimeAttnScale)
     {
         EXPECT_EQ(executeWithRuntimeScale(
                       plan, K_BWD_TENSOR_UIDS, K_BWD_RUNTIME_SCALE_UID, scale, workspaceSize),
+                  HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+    const SdpaBwdPlan doublePlan
+        = createBwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
+    for(const auto& [scale, name] : unsupportedDoubleAttnScales())
+    {
+        EXPECT_EQ(executeWithRuntimeScale(
+                      doublePlan, K_BWD_TENSOR_UIDS, K_BWD_RUNTIME_SCALE_UID, scale, workspaceSize),
                   HIPDNN_PLUGIN_STATUS_BAD_PARAM)
             << name;
     }

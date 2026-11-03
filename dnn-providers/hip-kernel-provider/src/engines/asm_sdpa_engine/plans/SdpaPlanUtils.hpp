@@ -4,7 +4,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <exception>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -14,6 +16,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <initializer_list>
+#include <iomanip>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -324,7 +327,7 @@ float attnScaleOrDefault(const SdpaAttrsT& attrs)
 // overflow, or for -0.0 are NaN (-0 * +inf). 32-bit denormals are flushed, so a
 // subnormal scale acts as 0.
 //
-// Large scales are not checked, because the limit depends on the input. With
+// Large scales are tracked by ALMIOPEN-3137, because the limit depends on the input. With
 // c = scale * log2(e), the forward computes each exp2 input as
 // fma(score, c, -(c * row max)), with the product rounded. For the row's max score
 // only the rounding residue is left, up to half an ulp of the product, so exp2 can
@@ -346,11 +349,31 @@ inline bool isSupportedAttnScale(float scale)
     return scale >= std::numeric_limits<float>::min() && scale <= std::numeric_limits<float>::max();
 }
 
+// Avoid an out-of-range double-to-float conversion. Infinities and finite values
+// outside the float range become infinities, which isSupportedAttnScale rejects.
+// Values within the range retain the usual rounding to the kernel's float type.
+inline float narrowAttnScale(double scale)
+{
+    if(std::isnan(scale))
+    {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+    if(scale > static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        return std::numeric_limits<float>::infinity();
+    }
+    if(scale < -static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        return -std::numeric_limits<float>::infinity();
+    }
+    return static_cast<float>(scale);
+}
+
 // An attention scale as text, for decline reasons and errors.
 inline std::string attnScaleToString(float scale)
 {
     std::ostringstream text;
-    text << scale;
+    text << std::setprecision(std::numeric_limits<float>::max_digits10) << scale;
     return text.str();
 }
 
@@ -378,7 +401,40 @@ std::optional<float> attnScaleBeforeExecute(
     {
         return std::nullopt;
     }
-    return static_cast<float>(hipdnn_plugin_sdk::toDouble(operand.bakedDefault));
+    return narrowAttnScale(hipdnn_plugin_sdk::toDouble(operand.bakedDefault));
+}
+
+// Check a scale known before execute; pure runtime pass-by-value scales are
+// checked at execute instead. Share the policy and decline diagnostics between
+// the forward and backward applicability predicates.
+template <typename SdpaAttrsT>
+bool isAttnScaleApplicable(
+    const SdpaAttrsT& attrs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const char* logPrefix)
+{
+    std::optional<float> attnScale;
+    try
+    {
+        attnScale = attnScaleBeforeExecute(attrs, tensorMap);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(std::string{logPrefix}
+                               + "scale tensor value cannot be read: " + e.what());
+        return false;
+    }
+    if(attnScale.has_value() && !isSupportedAttnScale(*attnScale))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(
+            std::string{logPrefix}
+            + "attention scale must be a finite, positive, normal float (Actual value: "
+            + attnScaleToString(*attnScale) + ")");
+        return false;
+    }
+    return true;
 }
 
 // Resolves the attention scale into the f32 kernarg at execute. Throws
@@ -391,7 +447,7 @@ inline float resolveSupportedAttnScale(const hipdnn_plugin_sdk::ScalarOperand& a
                                        uint32_t numDeviceBuffers,
                                        const char* caller)
 {
-    const auto scale = static_cast<float>(hipdnn_plugin_sdk::toDouble(
+    const auto scale = narrowAttnScale(hipdnn_plugin_sdk::toDouble(
         hipdnn_plugin_sdk::resolveScalarOperand(attnScale, deviceBuffers, numDeviceBuffers)));
     if(!isSupportedAttnScale(scale))
     {
