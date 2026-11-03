@@ -1247,14 +1247,24 @@ TYPED_TEST(preconditioners, reset_operator_switches_to_another_matrix)
     ilu.Build();
     expect_near(apply(ilu, *B, r), lu_solve(ilu_levels(changed, 0), r), scaled_tol<T>(1e-13));
 
-    rocalution::Jacobi<Matrix<T>, Vector<T>, T> p;
-    p.SetOperator(*A);
-    p.Build();
-    p.ResetOperator(*B);
-    const std::vector<T> z = apply(p, *B, r);
+    rocalution::Jacobi<Matrix<T>, Vector<T>, T> jacobi_p;
+    rocalution::GS<Matrix<T>, Vector<T>, T>     gs_p;
+    rocalution::SGS<Matrix<T>, Vector<T>, T>    sgs_p;
 
-    KNOWN_BUG("Jacobi, GS and SGS ResetOperator rebuild from the old operator");
-    expect_near(z, jacobi(changed, r), scaled_tol<T>(1e-14));
+    const std::vector<std::tuple<std::string, Solver<T>*, Reference<T>>> cases = {
+        {"Jacobi", &jacobi_p, jacobi<T>},
+        {"GS", &gs_p, gauss_seidel<T>},
+        {"SGS", &sgs_p, symmetric_gauss_seidel<T>},
+    };
+
+    for(const auto& [name, p, reference] : cases)
+    {
+        SCOPED_TRACE(name);
+        p->SetOperator(*A);
+        p->Build();
+        p->ResetOperator(*B);
+        expect_near(apply(*p, *B, r), reference(changed, r), scaled_tol<T>(1e-14));
+    }
 }
 
 TYPED_TEST(preconditioners, ilu0_of_a_tridiagonal_matrix_solves_exactly)

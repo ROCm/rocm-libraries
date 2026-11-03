@@ -119,7 +119,7 @@ namespace rocalution
     {
         log_debug(this, "Jacobi::ResetOperator()", this->build_, (const void*&)op);
 
-        assert(this->op_ != NULL);
+        this->op_ = &op;
 
         this->inv_diag_entries_.Clear();
         this->inv_diag_entries_.CloneBackend(*this->op_);
@@ -230,7 +230,7 @@ namespace rocalution
     {
         log_debug(this, "GS::ResetOperator()", this->build_, (const void*&)op);
 
-        assert(this->op_ != NULL);
+        this->op_ = &op;
 
         this->GS_.Clear();
         this->GS_.CloneFrom(*this->op_);
@@ -335,7 +335,7 @@ namespace rocalution
     {
         log_debug(this, "SGS::ResetOperator()", this->build_, (const void*&)op);
 
-        assert(this->op_ != NULL);
+        this->op_ = &op;
 
         this->SGS_.Clear();
         this->SGS_.CloneFrom(*this->op_);
