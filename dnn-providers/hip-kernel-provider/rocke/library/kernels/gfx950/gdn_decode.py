@@ -1298,18 +1298,13 @@ class _Lane:
         # (half-row) holds that quad's (half-row's) sum, so both pairings
         # add the same two values.
         #
-        # This split is NOT applied at the four sibling sites that make the
-        # same choice -- they are all still on plain warp_shuffle_xor, and
-        # each would take the same win for masks 1 and 2:
-        #   helpers/reduction.py `_warp_xor_reduce` (the generic form of
-        #     this loop, in a module this kernel already imports)
-        #   cpp/helpers/attention.cpp `rocke_warp_xor_reduce_sum` (its twin)
-        #   kernels/gfx950/kda_chunkwise.py `_reduce16_fadd`
-        #   attention_tiled_2d.py + its gfx950 twin, register transpose
-        # Sweeping them touches two engines and three families, so it is
-        # deliberately not done here; see the follow-up ticket. Anyone
-        # editing this loop should consider whether the sibling is still
-        # waiting.
+        # The sibling reductions route masks 1 and 2 through
+        # warp_shuffle_xor_dpp and take the same mask 7 / 15 pairing for xor 4
+        # / 8 unconditionally (no knob): helpers/reduction.py
+        # `_warp_xor_reduce` and helpers/attention.py `warp_xor_reduce_sum`
+        # (with their C++ twins), and kernels/gfx950/kda_chunkwise.py
+        # `_reduce16_fadd`. The attention_tiled_2d.py register transpose (and
+        # its gfx950 twin) uses masks 1 and 2 only.
         b, dpp = self.b, self.spec.dpp_reduce_on
         shfl = [1 << i for i in range(self.t.WTK.bit_length() - 1)]  # [1,2,4]: WTK=8
         for off in shfl:

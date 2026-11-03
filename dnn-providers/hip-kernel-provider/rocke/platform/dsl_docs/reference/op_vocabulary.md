@@ -193,13 +193,20 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
-| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`); HIP `__builtin_trap()` |
+| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`; gfx11: simulated trap); HIP `__builtin_trap()` |
 
-`trap()` ends the kernel with a hardware exception. What the host sees depends on the HIP runtime:
-the launch reports an error, or the runtime aborts the process. Either way the process cannot use the
-GPU afterwards, so a trap is a last resort: put it under an `scf_if` on a condition the host already
-checks before the launch, to stop a launch that slipped past that check before it reaches a memory
-access.
+`trap()` ends the wave at a trap instruction. The AMDGPU backend emits `s_trap 2`; on gfx11 it emits
+its simulated trap instead (`s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop). What the host
+sees depends on the platform:
+
+- Linux (ROCr): the queue reports an error and the runtime aborts the process.
+- Windows: the HIP runtime never turns the trap into an error; the launch never returns.
+- Under a debugger: the wave stops at the trap.
+
+None of these lets the process carry on, so a trap is a last resort: put it under an `scf_if` on a
+condition the host already checks before the launch, to stop a launch that slipped past that check
+before it reaches a memory access. A check the process must survive belongs on the host, before the
+launch.
 
 A loop cannot carry a buffer descriptor (`buffer_rsrc`), as an iter_arg's initial value or as a yielded value: it is `<4 x i32>` in the IR but an opaque `ptr addrspace(8)` (HIP `rsrc_t`) once lowered, which neither a phi nor a variable can hold. The builder, the verifier and every lowering refuse it; build the descriptor before the loop and advance the offset, or rebuild it inside the loop body.
 
