@@ -37,6 +37,8 @@ from kernels.gfx950.attention_tiled_2d import (
 )
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
+from ._attn_tiled_2d_gfx950_qk_paths import FP8_K_IN_LDS, QK_PATHS
+
 _BASE = dict(
     head_size=64,
     block_size=32,
@@ -48,17 +50,6 @@ _BASE = dict(
     has_softcap=False,
     tile_size=64,
 )
-
-_FP8_K_IN_LDS = dict(kv_storage_dtype="fp8e4m3", use_fp8_mfma_qk=True)
-
-# One spec per QK path that can hold fp8 K in LDS.
-_QK_PATHS = {
-    "16x16": dict(),
-    "32x32 non-transposed": dict(use_mfma_32x32=True, block_m_per_warp=32),
-    "32x32 transposed": dict(
-        use_mfma_32x32=True, use_transposed_qk_32x32=True, block_m_per_warp=32
-    ),
-}
 
 
 def _walk(ops):
@@ -87,10 +78,10 @@ def _build(**knobs):
     return build_unified_attention_2d_tiled(spec, arch="gfx950")
 
 
-@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+@pytest.mark.parametrize("path", sorted(QK_PATHS))
 @pytest.mark.parametrize("fp8_k_in_lds", [False, True], ids=["bf16_k", "fp8_k"])
 def test_lds_loads_read_the_buffer_element_type(path, fp8_k_in_lds):
-    knobs = dict(_QK_PATHS[path], **(_FP8_K_IN_LDS if fp8_k_in_lds else {}))
+    knobs = dict(QK_PATHS[path], **(FP8_K_IN_LDS if fp8_k_in_lds else {}))
     loads = _lds_loads(_build(**knobs))
     assert loads, "expected LDS loads in the kernel"
     wrong = sorted(
@@ -103,10 +94,10 @@ def test_lds_loads_read_the_buffer_element_type(path, fp8_k_in_lds):
     assert not wrong, f"{path}: LDS loads that reinterpret the buffer: {wrong}"
 
 
-@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+@pytest.mark.parametrize("path", sorted(QK_PATHS))
 def test_every_qk_path_reads_fp8_k_as_fp8(path):
     # The 32x32 non-transposed path used to read the fp8 K buffer as bf16.
-    kernel = _build(**_QK_PATHS[path], **_FP8_K_IN_LDS)
+    kernel = _build(**QK_PATHS[path], **FP8_K_IN_LDS)
     k_reads = [
         read
         for buffer, stored, read in _lds_loads(kernel)
@@ -116,12 +107,12 @@ def test_every_qk_path_reads_fp8_k_as_fp8(path):
     assert set(k_reads) == {"fp8e4m3"}
 
 
-@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+@pytest.mark.parametrize("path", sorted(QK_PATHS))
 def test_fp8_k_lds_loads_claim_their_byte_width(path):
     # Lanes 32-63 of a 32x32 K read start 8 bytes into a 16-byte line, so an
     # <8 x i8> load may claim only 8 bytes of alignment; a 16-byte claim is
     # undefined behaviour in LLVM.
-    spec = UnifiedAttention2DTiledSpec(**_BASE, **_QK_PATHS[path], **_FP8_K_IN_LDS)
+    spec = UnifiedAttention2DTiledSpec(**_BASE, **QK_PATHS[path], **FP8_K_IN_LDS)
     text = _lower_kernel_to_llvm_python(
         build_unified_attention_2d_tiled(spec, arch="gfx950"), arch="gfx950"
     )
@@ -160,12 +151,12 @@ def _forward(starts, users, stop):
     return reached
 
 
-@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+@pytest.mark.parametrize("path", sorted(QK_PATHS))
 def test_fp8_k_is_scaled_by_k_scale_before_the_mfma(path):
     # Reading the fp8 bytes as fp8 is not enough: each value has to be
     # multiplied by k_scale before it reaches the MFMA, or the scores are off
     # by that factor.
-    kernel = _build(**_QK_PATHS[path], **_FP8_K_IN_LDS)
+    kernel = _build(**QK_PATHS[path], **FP8_K_IN_LDS)
     assert "k_scale" in [param.name for param in kernel.params]
     users = _users(kernel)
 
@@ -201,12 +192,12 @@ _LAID_OUT_K_PAD = dict(
 )
 
 
-@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+@pytest.mark.parametrize("path", sorted(QK_PATHS))
 def test_laid_out_k_pad_refuses_q_staged_in_the_k_slot(path):
     # Q staged in the single K slot is written and read unpadded, which does
     # not match a laid-out K slab pad.
     with pytest.raises(ValueError, match="cannot hold aliased Q - use_q_reread=False"):
-        UnifiedAttention2DTiledSpec(**_BASE, **_QK_PATHS[path], **_LAID_OUT_K_PAD)
+        UnifiedAttention2DTiledSpec(**_BASE, **QK_PATHS[path], **_LAID_OUT_K_PAD)
 
 
 def _defining(value, name):
@@ -227,7 +218,7 @@ def test_laid_out_k_pad_reads_k_through_the_padded_slabs(q_source):
     head, tile, pad = _BASE["head_size"], _BASE["tile_size"], 8
     slab_rows = 64 * 16 // 2 // head  # one wave's 1024-B async-DMA slab of bf16
     spec = UnifiedAttention2DTiledSpec(
-        **_BASE, **_QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, **{q_source: True}
+        **_BASE, **QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, **{q_source: True}
     )
     assert spec.kq_lds_pad_slab_rows == slab_rows
     kernel = build_unified_attention_2d_tiled(spec, arch="gfx950")
@@ -299,12 +290,12 @@ def test_negative_k_pad_width_is_refused():
         UnifiedAttention2DTiledSpec(**_BASE, use_kq_lds_pad=True, kq_lds_pad_halves=-8)
 
 
-_TRANSPOSED = _QK_PATHS["32x32 transposed"]
+_TRANSPOSED = QK_PATHS["32x32 transposed"]
 
 # (knobs, whether the spec stages Q in K_lds)
 _Q_STAGING = {
     "16x16 bf16 K": ({}, True),
-    "16x16 fp8 K": (_FP8_K_IN_LDS, False),
+    "16x16 fp8 K": (FP8_K_IN_LDS, False),
     "Q larger than both K slots": (
         {"num_warps": 8, "tile_size": 32, "head_size": 128},
         False,
@@ -328,13 +319,13 @@ def test_kernel_stages_q_where_the_spec_says(case):
     assert has_q_slab is not (staged or spec.use_q_direct_reg)
 
 
-@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+@pytest.mark.parametrize("path", sorted(QK_PATHS))
 def test_cpp_engine_emits_the_same_llvm_ir(path):
     # The C++ builder serves these kernels without Python; it must read and
     # scale fp8 K exactly as the Python builder does. Developer builds only:
     # CI does not build the rocke_engine binding.
     engine = pytest.importorskip("rocke_engine")
-    spec = UnifiedAttention2DTiledSpec(**_BASE, **_QK_PATHS[path], **_FP8_K_IN_LDS)
+    spec = UnifiedAttention2DTiledSpec(**_BASE, **QK_PATHS[path], **FP8_K_IN_LDS)
     expected = _lower_kernel_to_llvm_python(
         build_unified_attention_2d_tiled(spec, arch="gfx950"), arch="gfx950"
     )
@@ -348,7 +339,7 @@ def test_cpp_engine_refuses_the_python_only_k_pad():
     # lower an unpadded K read. Developer builds only (see the module note).
     engine = pytest.importorskip("rocke_engine")
     spec = UnifiedAttention2DTiledSpec(
-        **_BASE, **_QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, use_q_reread=True
+        **_BASE, **QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, use_q_reread=True
     )
     with pytest.raises(
         NotImplementedError,
