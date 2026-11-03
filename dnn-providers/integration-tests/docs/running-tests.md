@@ -405,6 +405,16 @@ that tensor
 ([details](file-formats.md#per-engine-test-config--configengine_nametoml)). The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
 
+**SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a
+forward graph with `dropout_probability` is verified through its `rng_dump` output
+([SEM-015](../../../projects/hipdnn/docs/SdpaSemanticsRegister.md)). An engine that
+claims Philox dropout must write its keep mask (FLOAT, 1 = keep, 0 = drop) to
+`rng_dump`. The harness checks that every value is 0 or 1 and that the keep rate is
+within a 6-sigma binomial bound of `1 − p`. It then copies the mask into the reference
+run, which applies it as an explicit dropout mask, and compares every output except
+`rng_dump`. Without `rng_dump` the references decline the graph. Golden data cannot
+verify Philox dropout.
+
 The `enforcement_level` metadata of a bundle can stop verification early on
 purpose. `applicability` passes after the engine accepts the graph. `buildable`
 passes after its plans compile.
@@ -539,16 +549,14 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
 
 ## In CI
 
-- `.github/workflows/hipdnn-superbuild-ci.yml` configures with
+- `.github/workflows/hipdnn-superbuild-ci.yml` runs `dvc pull --recursive` on
+  the bundle tree before configuring (Linux and Windows lanes) and fails the lane
+  when the pull produces no golden blob. It then configures with
   `-DROCM_LIBS_ENABLE_ROOT_CTEST=ON` and runs `ctest --test-dir build
-  --output-on-failure`. This runs every registered lane and enforces claims. It
-  does not run `dvc pull`, so golden comparisons there fall back to references and
-  `hipdnn_golden_data_tests` registers nothing.
-- No TheRock CI lane currently runs `dvc pull` on Linux. `therock-ci-linux.yml`
-  used to, but it was gated off on 2026-09-01 when Multi-Arch CI became the
-  default and was removed once it had gone unused; TheRock's multi-arch Linux
-  workflows have no `dvc pull` step. Golden comparisons therefore fall back to
-  references in every CI lane today.
+  --output-on-failure`, which runs every registered lane and enforces claims.
+- TheRock Multi-Arch CI fetches the rocm-libraries DVC data while fetching
+  sources (`--dvc-projects`), and the fetch fails when a blob is missing, so its
+  test jobs run `hipdnn_golden_data_tests` with golden data.
 
 ## Troubleshooting
 

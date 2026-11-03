@@ -47,6 +47,17 @@ def observe(candidates, table: dict | None = None) -> dict:
     return table
 
 
+def for_slot(table: dict, slot: str) -> dict:
+    """The table of one slot's knobs, named by field: a slotted engine pins `<slot>.<field>`,
+    and the slot's ranker knows the field as `$kernel.<field>`."""
+    prefix = slot + "."
+    return {
+        name[len(prefix) :]: entry
+        for name, entry in table.items()
+        if name.startswith(prefix)
+    }
+
+
 def is_ordinal(table: dict, name: str) -> bool:
     """True when the knob addresses by index rather than by its own value: as the runtime
     decides it, by type -- any value that is not an integer (a bool, float, string or tuple)

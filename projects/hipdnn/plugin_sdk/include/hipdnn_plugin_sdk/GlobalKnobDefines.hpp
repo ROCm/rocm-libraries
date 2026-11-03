@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include <charconv>
 #include <cstddef>
-#include <limits>
 #include <optional>
 #include <string>
 
@@ -83,23 +83,10 @@ inline std::optional<size_t> ingestorCandidateLimitFromEnv()
     }
 
     size_t limit = 0;
-    bool valid = true;
-    for(const char character : normalized)
-    {
-        if(character < '0' || character > '9')
-        {
-            valid = false;
-            break;
-        }
-        const auto digit = static_cast<size_t>(character - '0');
-        if(limit > (std::numeric_limits<size_t>::max() - digit) / 10)
-        {
-            valid = false;
-            break;
-        }
-        limit = limit * 10 + digit;
-    }
-    if(valid && limit > 0)
+    const auto* begin = normalized.data();
+    const auto* end = begin + normalized.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, limit);
+    if(ec == std::errc{} && ptr == end && limit > 0)
     {
         return limit;
     }
