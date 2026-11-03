@@ -227,6 +227,12 @@ from kernels.common.attention_dense_kv_split import (
     launch_segment_combine,
     segment_tile_range,
 )
+from kernels.common._attention_alibi import (
+    alibi_lse_shift,
+    alibi_slope_log2,
+    alibi_tile_bias,
+    check_alibi_slopes,
+)
 from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
@@ -1566,6 +1572,16 @@ def _build_attention_dense_single_buffer(
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
         )
+    ALIBI = spec.use_alibi
+    alibi_slopes = None
+    if spec.use_alibi:
+        alibi_slopes = b.param(
+            "alibi_slopes_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
 
     # The baked branch emits each stride constant in place, at its use: the IR
     # builder is side-effecting, so sharing one const node would renumber every SSA
@@ -1850,6 +1866,27 @@ def _build_attention_dense_single_buffer(
             hkv = b.div(hq, gqa_p if spec.runtime_shape else b.const_i32(gqa))
         diag_off = _diag_off() if BR else None
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+        if ALIBI:
+            alibi_slope = alibi_slope_log2(
+                b,
+                hq,
+                num_heads=hq_p if spec.runtime_shape else Hq,
+                slopes=alibi_slopes,
+            )
+            # The bias seeds the QK accumulator, so it is in raw (unscaled) units.
+            alibi_slope_raw = b.fdiv(alibi_slope, qk_scale)
+            # Per-row anchor: the row's last visible key (see _attention_alibi).
+            alibi_query = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+            if not causal:
+                alibi_anchor = b.sub(
+                    seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv),
+                    b.const_i32(1),
+                )
+            elif BR:
+                alibi_anchor = b.add(alibi_query, diag_off)
+            else:
+                alibi_anchor = alibi_query
+            alibi_lane_key = b.mul(lane_h, b.const_i32(4))
         # NOT hoisted into a local shared with o_base below: the IR builder is
         # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
         # written. Hoisting moves that node earlier and lets the second use CSE
@@ -2028,11 +2065,21 @@ def _build_attention_dense_single_buffer(
                 values.append((b.bitcast(x0, I32), b.bitcast(x1, I32)))
             return values
 
-        def do_qk(kbuf=None):
+        def do_qk(tile_idx, kbuf=None):
             """S^T = K@Q^T via the 32x32x8 atom (K-doubled)."""
             s_reg = []
+            if ALIBI:
+                bias = alibi_tile_bias(
+                    b,
+                    alibi_slope_raw,
+                    b.mul(tile_idx, b.const_i32(BN)),
+                    alibi_lane_key,
+                    alibi_anchor,
+                    N_SUB,
+                )
             for nsub in range(N_SUB):
-                acc = b.zero_vec_f32(16)
+                # ALiBi seeds the accumulator, so the MFMA adds the bias for free.
+                acc = b.vec_pack(bias[nsub], F32) if ALIBI else b.zero_vec_f32(16)
                 krow = b.add(b.const_i32(nsub * 32), lane_m)
                 if KPAD_D64:
                     # 2-row-group padded K_lds[1, BN//2, 2*D+pad]: decompose the
@@ -2260,7 +2307,7 @@ def _build_attention_dense_single_buffer(
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
-            s = do_qk()
+            s = do_qk(j)
             m_new, l_new, o_acc = softmax_pv(s, j, m_i, l_i, o_acc, masked)
             return (m_new, l_new, *o_acc)
 
@@ -2418,7 +2465,7 @@ def _build_attention_dense_single_buffer(
                 # or the preceding iteration. With one K slot, do not overwrite
                 # it until *all* waves have completed current-tile LDS reads.
                 kbuf = b.mod(j, b.const_i32(K_BUFS))
-                s = do_qk(kbuf)
+                s = do_qk(j, kbuf)
                 next_j = b.add(j, b.const_i32(1))
                 next_kbuf = b.mod(next_j, b.const_i32(K_BUFS))
                 if USE_KDB:
@@ -2501,7 +2548,7 @@ def _build_attention_dense_single_buffer(
             l_i = loop_res[1]
             o_acc = list(loop_res[2 : 2 + D_TILES])
             last_kbuf = b.mod(last_j, b.const_i32(K_BUFS))
-            s = do_qk(last_kbuf)
+            s = do_qk(last_j, last_kbuf)
             m_i, l_i, o_acc = softmax_pv(s, last_j, m_i, l_i, o_acc, True)
             b.sync_lds_only()
 
@@ -2680,8 +2727,13 @@ def _build_attention_dense_single_buffer(
                 else row_has_key
             )
             # Both half-waves hold the same query row; one of them writes its LSE.
+            m_lse = m_i
+            if ALIBI and not causal:
+                m_lse = b.fadd(
+                    m_i, alibi_lse_shift(b, alibi_slope, alibi_anchor, alibi_query)
+                )
             with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
-                lse_store(b, lse, lse_index, m_i, l_i, row_has_mass=row_has_mass)
+                lse_store(b, lse, lse_index, m_lse, l_i, row_has_mass=row_has_mass)
         _emit_o_store(
             b,
             o,
@@ -2801,7 +2853,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     ``spec.runtime_kernarg_fields`` entry: the shape (batch, seqlen_q, seqlen_kv,
     num_query_heads, num_kv_heads), then on the persistent grid a magic/shift pair
     per work-decode divisor. Then a ``sink_ptr`` ([Hq], q dtype) when
-    ``spec.use_sinks`` and an f32 ``lse_ptr`` when ``spec.emit_lse``, in that order.
+    ``spec.use_sinks``, an f32 ``alibi_slopes_ptr`` ([Hq], null for the
+    built-in slopes) when ``spec.use_alibi``, and an f32 ``lse_ptr`` when ``spec.emit_lse``,
+    in that order.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -2829,6 +2883,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if spec.use_sinks:
         # Mirrors the sink_ptr param declared after the runtime kernarg fields.
         sig = sig.ptr("sink_ptr", spec.dtype)
+    if spec.use_alibi:
+        sig = sig.ptr("alibi_slopes_ptr", "f32")
     if _as_gfx942_spec(spec).emit_lse:
         sig = sig.ptr("lse_ptr", "f32")
     if _as_gfx942_spec(spec).kv_segments > 1:
@@ -2866,12 +2922,14 @@ def run_attention_dense_torch(
     cu_seqlens_kv=None,
     sinks=None,
     lse=None,
+    alibi_slopes=None,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
     ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)).
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
-    ``spec.use_sinks``.
+    ``spec.use_sinks``. ``alibi_slopes`` is the optional fp32 per-query-head ALiBi
+    slope ``[Hq]`` (``spec.use_alibi`` only); ``None`` selects hipDNN's built-in slopes.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
     torch-free at import time. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
@@ -2918,6 +2976,7 @@ def run_attention_dense_torch(
             raise ValueError("sinks must be contiguous")
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
+    check_alibi_slopes(spec, alibi_slopes)
     validate_dense_lse(spec, q, k, v, out, lse, sinks=sinks)
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
@@ -2945,6 +3004,8 @@ def run_attention_dense_torch(
     vals.update(attention_dense_runtime_args(spec))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
+    if spec.use_alibi:
+        vals["alibi_slopes_ptr"] = alibi_slopes if alibi_slopes is not None else 0
     if spec.emit_lse:
         vals["lse_ptr"] = lse
     if spec.kv_segments > 1:

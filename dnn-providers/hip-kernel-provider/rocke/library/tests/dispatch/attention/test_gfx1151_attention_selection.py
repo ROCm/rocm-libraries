@@ -457,6 +457,7 @@ class TestRdnaAttentionSelection(unittest.TestCase):
             use_softcap=True,
             use_sinks=True,
             use_alibi=True,
+            use_alibi_external_slopes=True,
             use_qq_bias=True,
             use_fp8=True,
             mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,

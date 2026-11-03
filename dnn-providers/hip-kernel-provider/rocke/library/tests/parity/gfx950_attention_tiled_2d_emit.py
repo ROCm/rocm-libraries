@@ -1085,6 +1085,39 @@ _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 
+# --- idx68-71: ALiBi at the slope sites idx16/17 miss: per-row hoist (68, GQA with 24 heads so the slope formula's
+#     tail heads appear), and the transposed 32x32 per-iter (69, mask-once),
+#     hoisted (70) and inline (71) per-lane slopes.
+_CONFIGS[68] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=24,
+    num_kv_heads=6,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+)
+_TRANSPOSED_ALIBI = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    block_m_per_warp=32,
+    tile_size=64,
+)
+_CONFIGS[69] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
+_CONFIGS[70] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
+_CONFIGS[71] = dict(_TRANSPOSED_ALIBI)
+
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:

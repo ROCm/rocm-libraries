@@ -54,6 +54,8 @@ import numpy as np
 
 __all__ = [
     "SdpaBwdResult",
+    "alibi_bias",
+    "alibi_slopes",
     "keep",
     "resolve_diagonal_band",
     "as_index",
@@ -221,6 +223,28 @@ def _band_mask(s_q, s_kv, top_left, left, right):
     if left >= 0:
         m &= ki >= qi + offset - left
     return m
+
+
+def alibi_slopes(num_heads):
+    """ALiBi slopes for ``num_heads`` query heads as derived by hipDNN
+    (Press et al.; hipDNN ``SdpaSemanticsRegister`` SEM-021), float64 ``[H]``."""
+    num_heads = as_index(num_heads, "num_heads")
+    if num_heads <= 0:
+        raise ValueError(f"num_heads must be positive, got {num_heads}")
+    n = 1 << (num_heads.bit_length() - 1)
+    h = np.arange(num_heads, dtype=np.float64)
+    return np.where(
+        h < n, 2.0 ** (-8.0 * (h + 1) / n), 2.0 ** (-8.0 * (h - n + 0.5) / n)
+    )
+
+
+def alibi_bias(slopes, s_q, s_kv):
+    """ALiBi as an additive bias ``slope[h] * (k - q)``, shape ``[1, H, s_q, s_kv]``,
+    for the ``bias`` argument of :func:`sdpa_reference`. ``q`` and ``k`` are the
+    in-batch positions, whatever the mask alignment."""
+    slopes = np.asarray(slopes, dtype=np.float64).reshape(-1)
+    dist = np.arange(s_kv)[None, :] - np.arange(s_q)[:, None]
+    return (slopes[:, None, None] * dist[None])[None]
 
 
 def _expand_bias(bias, B, H, Sq, Skv):

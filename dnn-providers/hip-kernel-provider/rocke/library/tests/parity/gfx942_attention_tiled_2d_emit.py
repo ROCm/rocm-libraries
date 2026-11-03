@@ -294,6 +294,36 @@ _CONFIGS = {
         use_q_major_grid=True,
         emit_lse=True,
     ),
+    # ALiBi: per-row hoist (GQA, 24 heads so the built-in slope formula's
+    # tail heads appear), then the transposed x8 per-iter slope (mask-once).
+    18: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=24,
+        num_kv_heads=6,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_alibi=True,
+    ),
+    19: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_alibi=True,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_mask_once=True,
+    ),
 }
 
 

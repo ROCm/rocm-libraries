@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 import os
 from typing import Optional, Tuple
 
+from kernels.common._attention_alibi import alibi_slope
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
@@ -171,6 +172,8 @@ class UnifiedAttention2DTiledSpec:
     use_sinks: bool
     sliding_window: int
     has_softcap: bool
+    # ALiBi (hipDNN SEM-021): ``alibi_slopes_ptr`` gives the per-query-head slopes;
+    # a null pointer selects hipDNN's built-in slopes from num_query_heads.
     use_alibi: bool = False
     use_qq_bias: bool = False
     num_seqs: int = 0
@@ -1568,6 +1571,7 @@ def build_unified_attention_2d_tiled(
     alibi_slopes_ptr = b.param(
         "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4
     )
+    # Declared either way (fixed ABI); with use_alibi, null selects the built-in slopes.
     qq_bias_ptr = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
     cu_q = b.param(
         "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
@@ -3984,10 +3988,8 @@ def build_unified_attention_2d_tiled(
     if USE_ALIBI:
         hoist_alibi = []
         for reg in range(REGS_PER_LANE):
-            qh_r = hoist_qh_r[reg]
-            qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-            slope = b.masked_global_load(
-                alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
+            slope = alibi_slope(
+                b, hoist_qh_r[reg], num_heads=NUM_QH, slopes=alibi_slopes_ptr
             )
             hoist_alibi.append(slope)
     else:
@@ -4028,9 +4030,8 @@ def build_unified_attention_2d_tiled(
         and TRANSPOSED_QK_32X32
         and TRANSPOSED_INVARIANT_HOIST
     ):
-        st_qh_ok = b.cmp_lt(st_qh, b.const_i32(NUM_QH))
-        st_alibi_slope = b.masked_global_load(
-            alibi_slopes_ptr, st_qh, st_qh_ok, b.const_f32(0.0), dtype=F32, align=4
+        st_alibi_slope = alibi_slope(
+            b, st_qh, num_heads=NUM_QH, slopes=alibi_slopes_ptr
         )
     else:
         st_alibi_slope = None
@@ -4102,14 +4103,8 @@ def build_unified_attention_2d_tiled(
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
             if USE_ALIBI:
-                st_qh_iter_ok = b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH))
-                st_alibi_slope_iter = b.masked_global_load(
-                    alibi_slopes_ptr,
-                    st_qh_iter,
-                    st_qh_iter_ok,
-                    b.const_f32(0.0),
-                    dtype=F32,
-                    align=4,
+                st_alibi_slope_iter = alibi_slope(
+                    b, st_qh_iter, num_heads=NUM_QH, slopes=alibi_slopes_ptr
                 )
             else:
                 st_alibi_slope_iter = None
@@ -4422,13 +4417,11 @@ def build_unified_attention_2d_tiled(
                             b.mul(kv_head_idx, b.const_i32(NQK)),
                             b.mod(q_row_t_alibi, b.const_i32(NQK)),
                         )
-                        slope_for_lane = b.masked_global_load(
-                            alibi_slopes_ptr,
+                        slope_for_lane = alibi_slope(
+                            b,
                             qh_t_alibi,
-                            b.cmp_lt(qh_t_alibi, b.const_i32(NUM_QH)),
-                            b.const_f32(0.0),
-                            dtype=F32,
-                            align=4,
+                            num_heads=NUM_QH,
+                            slopes=alibi_slopes_ptr,
                         )
                 else:
                     slope_for_lane = None
@@ -4514,9 +4507,9 @@ def build_unified_attention_2d_tiled(
                                 else b.select(m_ok, s_scaled, neg_inf)
                             )
                             if USE_ALIBI:
-                                # ``slope * (key_pos - context_len) * RCP_LN2``;
-                                # mirrors AITER ``unified_attention.py:317``.
-                                pos_off = b.sub(col_abs, context_len)
+                                # ``slope * (key_pos - causal_lim) * RCP_LN2``: measured
+                                # from the query's diagonal (hipDNN on top-left).
+                                pos_off = b.sub(col_abs, causal_lim)
                                 pos_f = b.sitofp_f32(pos_off)
                                 add_term = b.fmul(
                                     b.fmul(slope_for_lane, pos_f), rcp_ln2
@@ -4727,7 +4720,7 @@ def build_unified_attention_2d_tiled(
                         )
                     score = b.select(m_ok, s_scaled, neg_inf)
                     if USE_ALIBI:
-                        pos_off = b.sub(col_abs, context_len)
+                        pos_off = b.sub(col_abs, causal_lim)
                         pos_f = b.sitofp_f32(pos_off)
                         add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
                         score = b.fadd(score, add_term)
@@ -4807,7 +4800,7 @@ def build_unified_attention_2d_tiled(
                         # Triton order: mask first, then add ALiBi. For invalid
                         # cells this is `-inf + finite == -inf`, avoiding any
                         # pre-mask finite arithmetic from leaking into reductions.
-                        pos_off = b.sub(col_abs, context_len)
+                        pos_off = b.sub(col_abs, causal_lim)
                         pos_f = b.sitofp_f32(pos_off)
                         add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
                         score = b.fadd(score, add_term)

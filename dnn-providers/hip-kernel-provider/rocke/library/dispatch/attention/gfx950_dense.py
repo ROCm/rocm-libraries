@@ -51,6 +51,8 @@ _WINDOW_TILE_MAX_CTAS_PER_CU = 8
 _FEATURES = frozenset(
     {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
 )
+# Served by the grid body only (the persistent body refuses ALiBi).
+_GRID_FEATURES = _FEATURES | {"causal_bottom_right", "alibi", "alibi_external_slopes"}
 
 
 @dataclass(frozen=True)
@@ -80,7 +82,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        features=_GRID_FEATURES,
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches.
@@ -89,7 +91,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        features=_GRID_FEATURES,
         nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
@@ -280,6 +282,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
         kv_segments=kv_segments,
+        use_alibi=bool(req.use_alibi),
     )
 
 
@@ -305,9 +308,10 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     bm, bn = int(geometry["block_m"]), int(geometry["block_n"])
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
-    persistent = not moving_bottom_right and work_items >= _DEFAULT_NUM_PERSISTENT
+    grid_only = moving_bottom_right or bool(req.use_alibi)
+    persistent = not grid_only and work_items >= _DEFAULT_NUM_PERSISTENT
     wide_ok = (
-        not moving_bottom_right
+        not grid_only
         and int(req.hdim_q) == int(req.hdim_v) == 128
         and causal
         and not int(req.sliding_window)

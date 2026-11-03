@@ -36,7 +36,7 @@ from tests.sdpa.request_cases import (
 )
 
 NOT_IMPLEMENTED = {
-    "alibi": "alibi",
+    "alibi_bottom_right": "alibi off the top-left causal band",
     "dropout": "dropout",
     "paged": "paged",
     "block_mask": "block_mask",
@@ -101,6 +101,17 @@ def loop_reference(req, tensors):
         else req.scale
     )
     bias = None if req.bias is None else np.asarray(tensors["bias"], np.float64)
+    if req.alibi:
+        # hipDNN alibiSlope, transliterated: n is the largest power of two <= h_q.
+        n = 1 << (h_q.bit_length() - 1)
+        slopes = [
+            (
+                2.0 ** (-8.0 * (h + 1) / n)
+                if h < n
+                else 2.0 ** (-4.0 * (2 * (h - n) + 1) / n)
+            )
+            for h in range(h_q)
+        ]
 
     def descale(name, b, kv_head, heads):
         if req.fp8 is None or getattr(req.fp8, name) is None:
@@ -126,6 +137,8 @@ def loop_reference(req, tensors):
                         dims = bias.shape
                         idx = (b, h, i, j)[4 - len(dims) :]
                         s += bias[tuple(0 if n == 1 else x for n, x in zip(dims, idx))]
+                    if req.alibi:
+                        s += (j - i) * slopes[h]
                     if not hipdnn_keep(
                         i, j, sq, skv, req.diagonal, req.left_bound, req.right_bound
                     ):

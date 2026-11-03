@@ -45,6 +45,8 @@ from .common import (
     _problem,
     _request_errors,
     _selector_matches,
+    UNIFIED_ALIBI_ARCHES,
+    unified_coverage_problem,
 )
 
 # The unified paths are portable, so they declare every known target rather than
@@ -70,12 +72,13 @@ _UNIFIED_CAPABILITY = Capability(
     # between each sequence's KV and query lengths (bottom-right); top-left
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
     # the scalar kernel elsewhere (tiled gates reject it off gfx950).
-    supports_features=ATTENTION_FEATURES,
+    supports_features=ATTENTION_FEATURES | {"alibi", "alibi_external_slopes"},
 )
 # Both unified paths write the optional LSE output; each path's own gate (in
 # ``support`` below) still refuses it on arches/features that cannot.
 _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
-    _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
+    _UNIFIED_CAPABILITY,
+    supports_features=_UNIFIED_CAPABILITY.supports_features | {"lse"},
 )
 
 
@@ -92,14 +95,12 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        # The scalar gate is the coverage check; it refuses LSE (the scalar
-        # kernel writes none), so ask it about the LSE-off problem and let the
-        # path's own gate rule on LSE below.
-        coverage = (
-            dataclasses.replace(problem, emit_lse=False)
-            if problem.emit_lse
-            else problem
-        )
+        if problem.use_alibi and req.arch not in UNIFIED_ALIBI_ARCHES:
+            return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
+        # The scalar gate is the coverage check; it refuses LSE and ALiBi (the
+        # scalar kernel has neither), so ask it about the problem without them
+        # and let the path's own gate rule on them below.
+        coverage = unified_coverage_problem(problem)
         ok, why = supports_native_unified_attention(coverage, arch=req.arch)
         if not ok:
             return False, why
@@ -112,8 +113,9 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             return False, (
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
-        if problem.emit_lse:
-            # The path's own gate owns which arches and features can write LSE.
+        if coverage is not problem:
+            # The path's own gate owns which arches and features can write LSE
+            # or apply ALiBi.
             gate = (
                 supports_native_unified_attention_3d_tiled
                 if path == "3d"

@@ -814,6 +814,22 @@ class TestMaskGates(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("causal masks", why)
 
+    def test_alibi_lse_and_sinks_need_the_top_left_diagonal(self):
+        for over in (dict(emit_lse=True), dict(use_sinks=True)):
+            with self.subTest(**over):
+                problem = au.UnifiedAttentionProblem(
+                    **_problem_kw(right_bound=0, use_alibi=True, **over)
+                )
+                ok, why = au._reject_mask_semantics(problem)
+                self.assertFalse(ok)
+                self.assertIn("top-left", why)
+                top_left = au.UnifiedAttentionProblem(
+                    **_problem_kw(
+                        right_bound=0, causal_top_left=True, use_alibi=True, **over
+                    )
+                )
+                self.assertIsNone(au._reject_mask_semantics(top_left))
+
     def test_a_window_with_any_right_bound_is_valid(self):
         for right in (-1, 0, 8):
             problem = au.UnifiedAttentionProblem(
@@ -910,6 +926,33 @@ class TestBandOffGfx950(unittest.TestCase):
         self.assertFalse(cand.admits(req)[0])
         with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
             self.assertIn("bottom-right", cand._supports(req)[1])
+
+
+class TestUnifiedAlibiRouting(unittest.TestCase):
+    """ALiBi reaches the tiled unified paths on gfx942 / gfx950 only."""
+
+    def test_both_slope_modes_route_to_the_tiled_paths(self):
+        for arch in ("gfx942", "gfx950"):
+            for external in (False, True):
+                for spec_id, kw in (_CASES["unified_2d"], _CASES["unified_3d"]):
+                    req = _req(
+                        arch=arch,
+                        mask_type=BOTTOM_RIGHT,
+                        use_alibi=True,
+                        use_alibi_external_slopes=external,
+                        **kw,
+                    )
+                    with self.subTest(arch=arch, external=external, path=spec_id):
+                        self.assertEqual(
+                            dispatch_attention(req).candidate.spec_id, spec_id
+                        )
+
+    def test_lse_off_the_top_left_diagonal_is_refused(self):
+        req = _req(mask_type=BOTTOM_RIGHT, use_alibi=True, emit_lse=True)
+        with self.assertRaises(ValueError):
+            dispatch_attention(req)
+        top_left = _req(mask_type=TOP_LEFT, use_alibi=True, emit_lse=True)
+        self.assertTrue(dispatch_attention(top_left).spec.causal_top_left)
 
 
 if __name__ == "__main__":

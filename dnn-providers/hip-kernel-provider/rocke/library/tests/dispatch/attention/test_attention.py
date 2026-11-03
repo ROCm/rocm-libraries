@@ -36,7 +36,11 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
-_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {
+    "causal_bottom_right",
+    "alibi",
+    "alibi_external_slopes",
+}
 _RDNA_WMMA_FEATURES = {
     "causal",
     "causal_bottom_right",
@@ -47,7 +51,7 @@ _RDNA_WMMA_FEATURES = {
     "sinks",
     "fp8",
     "softcap",
-    "alibi",
+    "alibi_external_slopes",
     "qq_bias",
     "window_right",
     "attn_bias",
@@ -72,6 +76,8 @@ EXPECTED_FEATURES = {
         "layout_dense",
         "lse",
         "sinks",
+        "alibi",
+        "alibi_external_slopes",
         "sliding_window",
     },
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
@@ -104,6 +110,8 @@ EXPECTED_FEATURES = {
         "sinks",
         "sliding_window",
         "lse",
+        "alibi",
+        "alibi_external_slopes",
     },
     "attention_unified_3d": {
         "band",
@@ -115,6 +123,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
         # Both unified paths write LSE (tiled 2D and split-KV).
         "lse",
+        "alibi",
+        "alibi_external_slopes",
     },
 }
 
@@ -399,10 +409,13 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
-            # Every unified geometry writes LSE except the gfx942 4-warp GQA one.
+            # Every unified geometry writes LSE except the gfx942 4-warp GQA one;
+            # the gfx942 / gfx950 ones also apply ALiBi.
             expected = set(ATTENTION_FEATURES) | (
                 set() if "_u2d_gfx942_4warp_" in candidate.name else {"lse"}
             )
+            if candidate.capability.arches[0] in ("gfx942", "gfx950"):
+                expected |= {"alibi", "alibi_external_slopes"}
             with self.subTest(candidate=candidate.name):
                 self.assertEqual(set(candidate.capability.supports_features), expected)
 

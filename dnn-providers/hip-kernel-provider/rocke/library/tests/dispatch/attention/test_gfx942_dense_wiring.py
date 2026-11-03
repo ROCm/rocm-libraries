@@ -1017,5 +1017,23 @@ class TestGfx942SinksBinding(unittest.TestCase):
             self._launch()
 
 
+class TestGfx942Alibi(unittest.TestCase):
+    """ALiBi (built-in or external slopes) passes through to the dense spec."""
+
+    def test_both_slope_sources_in_supports_features(self):
+        features = _candidate().capability.supports_features
+        self.assertIn("alibi", features)
+        self.assertIn("alibi_external_slopes", features)
+
+    def test_flags_pass_through_to_spec(self):
+        with _Gfx942Arch():
+            self.assertFalse(_spec(_req()).use_alibi)
+            builtin = _spec(_req(use_alibi=True))
+            self.assertTrue(builtin.use_alibi)
+            # Caller slopes only change the bound tensor, not the kernel.
+            external = _spec(_req(use_alibi=True, use_alibi_external_slopes=True))
+            self.assertEqual(external, builtin)
+
+
 if __name__ == "__main__":
     unittest.main()
