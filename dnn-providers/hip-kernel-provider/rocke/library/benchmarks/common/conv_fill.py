@@ -15,6 +15,9 @@ denominator at 1, which is what makes it a relative error on U(-1, 1) data. Smal
 needs a floor near zero, or every output would pass; ``ref_floor`` gives the floor for the mode.
 """
 
+# DIRECTIONS: the directions a kernel label starts with (KernelIdentity.label()).
+from kernels.conv.kernel_identity import DIRECTIONS
+
 FILL_CHOICES = ("uniform", "miopen")
 _MODE = "uniform"
 
@@ -72,10 +75,6 @@ def add_argument(parser) -> None:
         help="forward input data: uniform = U(-1,1) (default); miopen = MIOpenDriver's "
         "x ~ U(0,0.01), w ~ 0.01*U(-1/3,1/2) (fp16) / 0.01*U(-1/2,1/2)",
     )
-
-
-# The direction a kernel label starts with (``KernelIdentity.label()``).
-DIRECTIONS = ("fwd", "dgrad", "wgrad")
 
 
 def _labels(label: str) -> tuple:

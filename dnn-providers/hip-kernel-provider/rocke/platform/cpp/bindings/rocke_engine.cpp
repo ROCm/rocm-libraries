@@ -1964,9 +1964,6 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
 
 /* ===================== conv_direct_fwd_small{c,k}_wmma ===================== */
 
-/* Wave32 WMMA forward of tiny channel counts (gfx1250). The dicts mirror
- * FwdSmallcWmmaSpec / FwdSmallkWmmaSpec with the problem nested; `sched` may
- * be None. */
 /* The nested problem dict and the optional "name" of a direct-conv spec. */
 void direct_spec_fill_problem(rocke_direct_conv_problem_t* problem,
                               const char** name,
@@ -2004,8 +2001,13 @@ void direct_spec_fill_problem(rocke_direct_conv_problem_t* problem,
     }
 }
 
+/* direct_spec_fill_problem plus the optional "sched" (None: no strategy) of
+ * the WMMA forward specs that carry one. */
 template <typename Spec>
-void fsw_fill_problem(Spec* s, const py::dict& d, std::deque<std::string>& store, const char* who)
+void direct_spec_fill_problem_sched(Spec* s,
+                                    const py::dict& d,
+                                    std::deque<std::string>& store,
+                                    const char* who)
 {
     direct_spec_fill_problem(&s->problem, &s->name, d, store, who);
     if(d.contains("sched") && !d["sched"].is_none())
@@ -2015,10 +2017,13 @@ void fsw_fill_problem(Spec* s, const py::dict& d, std::deque<std::string>& store
     }
 }
 
+/* Wave32 WMMA forward of tiny channel counts (gfx1250). The dicts mirror
+ * FwdSmallcWmmaSpec / FwdSmallkWmmaSpec with the problem nested; `sched` may
+ * be None. */
 rocke_fwd_smallc_wmma_spec_t fscw_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     rocke_fwd_smallc_wmma_spec_t s = rocke_fwd_smallc_wmma_spec_default();
-    fsw_fill_problem(&s, d, store, "FwdSmallcWmmaSpec");
+    direct_spec_fill_problem_sched(&s, d, store, "FwdSmallcWmmaSpec");
     s.waves_k = dict_int(d, "waves_k", s.waves_k);
     s.waves_p = dict_int(d, "waves_p", s.waves_p);
     s.tiles_k = dict_int(d, "tiles_k", s.tiles_k);
@@ -2034,7 +2039,7 @@ rocke_fwd_smallc_wmma_spec_t fscw_build_spec(const py::dict& d, std::deque<std::
 rocke_fwd_smallk_wmma_spec_t fskw_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     rocke_fwd_smallk_wmma_spec_t s = rocke_fwd_smallk_wmma_spec_default();
-    fsw_fill_problem(&s, d, store, "FwdSmallkWmmaSpec");
+    direct_spec_fill_problem_sched(&s, d, store, "FwdSmallkWmmaSpec");
     s.waves_c = dict_int(d, "waves_c", s.waves_c);
     s.waves_p = dict_int(d, "waves_p", s.waves_p);
     s.tiles_c = dict_int(d, "tiles_c", s.tiles_c);
@@ -2228,7 +2233,7 @@ py::tuple conv_direct_dw_fwd_wmma_describe(const py::dict& d, const std::string&
 rocke_fwd_gstream_wmma_spec_t fgs_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     rocke_fwd_gstream_wmma_spec_t s = rocke_fwd_gstream_wmma_spec_default();
-    fsw_fill_problem(&s, d, store, "FwdGstreamWmmaSpec");
+    direct_spec_fill_problem_sched(&s, d, store, "FwdGstreamWmmaSpec");
     s.waves_k = dict_int(d, "waves_k", s.waves_k);
     s.waves_p = dict_int(d, "waves_p", s.waves_p);
     s.tiles_k = dict_int(d, "tiles_k", s.tiles_k);
@@ -2303,7 +2308,7 @@ py::tuple conv_direct_fwd_gstream_wmma_describe(const py::dict& d, const std::st
 rocke_fwd_tapouter_wmma_spec_t fto_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     rocke_fwd_tapouter_wmma_spec_t s = rocke_fwd_tapouter_wmma_spec_default();
-    fsw_fill_problem(&s, d, store, "DirectFwdTapOuterSpec");
+    direct_spec_fill_problem_sched(&s, d, store, "DirectFwdTapOuterSpec");
     s.waves_k = dict_int(d, "waves_k", s.waves_k);
     s.waves_p = dict_int(d, "waves_p", s.waves_p);
     s.tiles_k = dict_int(d, "tiles_k", s.tiles_k);

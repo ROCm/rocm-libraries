@@ -48,7 +48,7 @@ from kernels.conv.direct_variants import (
     select_direct_kernel_builder as _build_kernel,
     validate_direct_spec as validate_spec,
 )
-from kernels.conv.kernel_identity import KernelIdentity
+from kernels.conv.kernel_identity import DIRECTIONS, KernelIdentity
 
 # Direction name of the forward helper kernels (shape-independent passes like
 # the split-C reduction) -- found by exact identity, not by capability match.
@@ -61,8 +61,8 @@ _FWD_HELPER = "direct_fwd_helper"
 # (the 4c atom is fp16-only) are dropped by their spec validators.
 DIRECT_DTYPES = ("fp16", "bf16")
 DIRECT_DTYPE = "fp16"  # the default dtype
-# Convolution directions the direct cache holds kernels for.
-DIRECT_DIRECTIONS = ("fwd", "dgrad", "wgrad")
+# Convolution directions the direct cache holds kernels for: all of them.
+DIRECT_DIRECTIONS = DIRECTIONS
 
 # ---------------------------------------------------------------------------
 # Tuning grids -- shared with benchmark_direct_conv's JIT sweep so the cache
