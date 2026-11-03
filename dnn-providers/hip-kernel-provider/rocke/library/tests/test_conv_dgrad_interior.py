@@ -186,5 +186,56 @@ class XhWmask(unittest.TestCase):
             self.assertTrue(identity_supports_problem(dataclasses.replace(xwm, dx_interior=v), halo)[0])
 
 
+class Axes(unittest.TestCase):
+    """dx_interior_axes: the shell skipped on some axes only (3 = H and W)."""
+
+    def test_view_and_records(self):
+        from kernels.common.conv_dgrad_box_det import _record_pixels
+        from kernels.common.conv_implicit_gemm_dgrad import pp_box_sub_gemms
+
+        p = _halo()
+        rng = np.random.default_rng(1)
+        dy = rng.standard_normal((p.N, p.Do, p.Ho, p.Wo, p.K))
+        w = rng.standard_normal((p.K, 3, 3, 3, p.C))
+        full = _dgrad_np(dy, w, p).reshape(-1)
+        for keep_w in (False, True):
+            v = interior_view_problem(p, keep_w, 3)
+            self.assertEqual((v.Di, v.pD), (p.Di, 0))
+            sub = _dgrad_np(dy, w, v).reshape(-1, p.C)
+            f = view_pixel_map(p, keep_w, 3)
+            for pix in range(sub.shape[0]):
+                np.testing.assert_allclose(full[f(pix) * p.C:(f(pix) + 1) * p.C], sub[pix], atol=1e-12)
+        want = set(np.flatnonzero(interior_mask_np(p, 3).reshape(-1)).tolist())
+        self.assertEqual(len(want), p.Di * p.Ho * p.Wo)
+        p = _halo(D=9, H=10, W=12, C=64, K=64)
+        want = set(np.flatnonzero(interior_mask_np(p, 3).reshape(-1)).tolist())
+        for nclass in (5, 7, 77):
+            sgs = pp_box_sub_gemms(p, 64, 64, nclass, tile_k=32, max_split=4, cus=64, interior=3)
+            got = [q for sg in sgs for q in _record_pixels(sg, p)]
+            self.assertEqual(sorted(got), sorted(want), nclass)
+
+    def test_zero_sections(self):
+        p = _halo(C=16)
+        u = halo_zero_units(p, 2, 3)
+        self.assertEqual(u["u1"], 0)
+        self.assertEqual(u["Do"], p.Di)
+        self.assertEqual(u["u1"] + u["u2"] + u["u3"], int((~interior_mask_np(p, 3)).sum()) * 2)
+
+    def test_identity(self):
+        from kernels.conv.kernel_identity import identity_supports_problem
+        from kernels.conv.kernel_label import decode
+
+        t = dataclasses.replace(decode(Identity.LAB), dx_interior=1, dx_interior_axes=3)
+        self.assertIn("-dxa3-", t.label())
+        self.assertEqual(decode(t.label()), t)
+        halo = ConvProblem(N=1, Hi=10, Wi=10, C=1024, K=1024, Y=3, X=3, Di=18, Z=3, sD=1, pD=0, dD=1)
+        self.assertTrue(identity_supports_problem(t, halo)[0])
+        # D at pad 1 (not halo form there) is fine when D is not skipped
+        self.assertTrue(identity_supports_problem(t, dataclasses.replace(halo, Di=16, pD=1))[0])
+        x = dataclasses.replace(decode(XhWmask.XH), xh_dx_wmask=True, dx_interior=1, dx_interior_axes=6)
+        hx = ConvProblem(N=1, Hi=130, Wi=130, C=64, K=64, Y=3, X=3, Di=258, Z=3, sD=1, pD=0, dD=1)
+        self.assertFalse(identity_supports_problem(x, hx)[0])
+
+
 if __name__ == "__main__":
     unittest.main()

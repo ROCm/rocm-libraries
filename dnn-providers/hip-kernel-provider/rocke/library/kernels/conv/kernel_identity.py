@@ -457,6 +457,10 @@ class KernelIdentity:
     # is not written, 2 = it is zero-filled). The binary is the base
     # identity's. Left out of the hash at 0.
     dx_interior: int = 0
+    # Dgrad only, with dx_interior: the axes whose shell is skipped, a bit
+    # mask (1 W, 2 H, 4 D; 0 = all). E.g. 3 = H and W only (a run split along
+    # D needs the D halo's dX). Left out of the hash at 0.
+    dx_interior_axes: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -633,7 +637,7 @@ class KernelIdentity:
         ):
             if not fields[name]:
                 del fields[name]
-        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det", "dx_interior"):
+        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det", "dx_interior", "dx_interior_axes"):
             if not fields[name]:
                 del fields[name]
         if not fields["split_k_cluster"]:
@@ -721,7 +725,10 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
             tile_k=identity.tile_k,
             max_split=max(1, identity.split_k),
             cus=getattr(identity, "pp_box_cus", 0),
-            interior=bool(getattr(identity, "dx_interior", 0)),
+            interior=(
+                (int(getattr(identity, "dx_interior_axes", 0) or 0) or 7)
+                if getattr(identity, "dx_interior", 0) else 0
+            ),
         )
     if identity.patch:
         return patch_sub_gemms(
@@ -1175,7 +1182,12 @@ def identity_supports_problem(
             return False, "dx_interior: split-K only as pp_box_det (no dX zeroing)"
         if identity.pp_streamk or getattr(identity, "tapk_pp_persist", 0) == 2:
             return False, "dx_interior: no stream-K (it zeroes dX)"
-        ok, why = dx_interior_problem_ok(problem)
+        _ax = int(getattr(identity, "dx_interior_axes", 0) or 0)
+        if _ax < 0 or _ax > 7:
+            return False, "dx_interior_axes is a bit mask 0..7"
+        if getattr(identity, "xh_dx_wmask", False) and _ax and not _ax & 1:
+            return False, "xh_dx_wmask skips the W shell: dx_interior_axes must include W"
+        ok, why = dx_interior_problem_ok(problem, _ax or 7)
         if not ok:
             return False, why
         if identity.pp_boxes:
@@ -1186,7 +1198,9 @@ def identity_supports_problem(
             )
         base = dataclasses.replace(identity, dx_interior=0, xh_dx_wmask=False)
         return identity_supports_problem(
-            base, interior_view_problem(problem, dx_interior_keeps_w(identity)), llvm_flavor
+            base,
+            interior_view_problem(problem, dx_interior_keeps_w(identity), _ax or 7),
+            llvm_flavor,
         )
 
     # Implicit-GEMM dgrad dispatches CTAs with a binary search whose trip
@@ -1391,6 +1405,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "pp_box_cus",
     "pp_box_det",
     "dx_interior",
+    "dx_interior_axes",
     "split_addr_k_decode",
     "uk_nopad",
     "xwin",

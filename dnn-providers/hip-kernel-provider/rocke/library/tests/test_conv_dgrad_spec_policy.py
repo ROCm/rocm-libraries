@@ -496,7 +496,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
                      "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring",
                      "xh_dlds", "xh_epi_lin", "xh_tap_rsrc"):  # fwd K-loop / x-halo / split-store knobs, off
             del fields[name]
-        for name in ("pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det", "dx_interior", "xh_dx_wmask"):  # dgrad pp knobs, off
+        for name in ("pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det", "dx_interior", "dx_interior_axes", "xh_dx_wmask"):  # dgrad pp knobs, off
             del fields[name]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()

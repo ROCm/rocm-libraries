@@ -638,6 +638,11 @@ CACHE_DGRAD_DXI: Tuple[int, ...] = tuple(
     int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_DXI", "").split(",") if v.strip()
 )
 CACHE_DGRAD_DXI_SCOPE = _os.environ.get("ROCKE_AOT_DGRAD_DXI_SCOPE", "")
+# The dx_interior_axes values of those twins (ROCKE_AOT_DGRAD_DXA, bit masks
+# 1 W / 2 H / 4 D; unset = 0, all axes), e.g. "0,3" adds H/W-only twins too.
+CACHE_DGRAD_DXA: Tuple[int, ...] = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_DXA", "0").split(",") if v.strip()
+)
 
 
 def _dxi_applies(ident) -> bool:
@@ -3617,9 +3622,11 @@ def _dgrad_jobs(
                     # dx_interior twins (ROCKE_AOT_DGRAD_DXI): the same
                     # binary under a launch-time identity field.
                     if CACHE_DGRAD_DXI and _dxi_applies(ident):
-                        for _v in CACHE_DGRAD_DXI:
+                        for _v, _a in itertools.product(CACHE_DGRAD_DXI, CACHE_DGRAD_DXA):
+                            if _a and ident.xh_dx_wmask and not _a & 1:
+                                continue
                             yield BuildJob(
-                                identity=_dc_replace(ident, dx_interior=_v),
+                                identity=_dc_replace(ident, dx_interior=_v, dx_interior_axes=_a),
                                 direction="dgrad",
                                 spec_kwargs=jcfg,
                                 caps={**job_caps, "xhalo": True} if _ppx else job_caps,

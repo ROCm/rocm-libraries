@@ -624,6 +624,7 @@ def _verify_interior(*, rt, run, ident, problem, out_dev, out_t, ref_out, label,
 
     from kernels.common.conv_dgrad_interior import (
         DXI_ZERO,
+        dx_interior_axes,
         dx_interior_writes_w,
         interior_mask_np,
         written_mask_np,
@@ -638,7 +639,10 @@ def _verify_interior(*, rt, run, ident, problem, out_dev, out_t, ref_out, label,
     ref = ref_out.float().cpu()
     keep_w = dx_interior_writes_w(ident)
     zero = ident.dx_interior == DXI_ZERO
-    comp = torch.from_numpy(interior_mask_np(problem) if zero else written_mask_np(problem, keep_w))
+    ax = dx_interior_axes(ident)
+    comp = torch.from_numpy(
+        interior_mask_np(problem, ax) if zero else written_mask_np(problem, keep_w, ax)
+    )
     halo = ~comp
     ref_scale = ref.abs().max().clamp(min=1.0)
     diff = (out - ref).abs()[comp]
@@ -7055,6 +7059,7 @@ def _cached_bind_interior(
     from kernels.common.conv_dgrad_interior import (
         DXI_ZERO,
         DgradHaloZeroSpec,
+        dx_interior_axes,
         build_dgrad_halo_zero,
         dgrad_halo_zero_signature,
         halo_zero_launch,
@@ -7102,7 +7107,9 @@ def _cached_bind_interior(
                 hsaco=art.hsaco, kernel_name=art.kernel_name,
                 signature=dgrad_halo_zero_signature(zspec),
             )
-        zv, zgrid, zblock = halo_zero_launch(problem, eb, ptrs[2], sizes[2], zspec)
+        zv, zgrid, zblock = halo_zero_launch(
+            problem, eb, ptrs[2], sizes[2], zspec, dx_interior_axes(ident)
+        )
         run_z = stage2_kernels[key].bind(zv, config=LaunchConfig(grid=zgrid, block=zblock, stream=0))
         _main = run
 

@@ -54,6 +54,14 @@ from rocke.helpers.tensor_view import make_buffer_resource
 DXI_SKIP = 1
 DXI_ZERO = 2
 DXI_MODES = (DXI_SKIP, DXI_ZERO)
+# dx_interior_axes bits (0 = all): which axes' halo shells are skipped.
+DXA_W, DXA_H, DXA_D = 1, 2, 4
+DXA_ALL = DXA_W | DXA_H | DXA_D
+
+
+def dx_interior_axes(identity) -> int:
+    """The axes ``identity``'s interior launch drops the shell of (bit mask)."""
+    return int(getattr(identity, "dx_interior_axes", 0) or 0) or DXA_ALL
 
 
 def dx_interior_uses_view(identity) -> bool:
@@ -64,7 +72,10 @@ def dx_interior_uses_view(identity) -> bool:
 
 def dx_interior_keeps_w(identity) -> bool:
     """Does ``identity``'s interior launch write the full W rows of interior
-    (d, h) rows? (The x-halo loop serves pW == 0 only, so its view keeps them.)"""
+    (d, h) rows? (The x-halo loop serves pW == 0 only, so its view keeps them;
+    so does any launch whose axes leave W out.)"""
+    if not dx_interior_axes(identity) & DXA_W:
+        return dx_interior_uses_view(identity)
     return dx_interior_uses_view(identity) and bool(
         getattr(identity, "tapk_xhalo", False) or getattr(identity, "tapk_pp_xhalo", 0)
     )
@@ -97,28 +108,35 @@ def launch_view(identity, p):
         if not dx_interior_uses_view(identity):
             return p, 0, {}, None
         keep_w = dx_interior_keeps_w(identity)
-        off, vals = interior_view_dx(p, keep_w)
-        return interior_view_problem(p, keep_w), off, vals, view_pixel_map(p, keep_w)
+        ax = dx_interior_axes(identity)
+        off, vals = interior_view_dx(p, keep_w, ax)
+        return interior_view_problem(p, keep_w, ax), off, vals, view_pixel_map(p, keep_w, ax)
     if getattr(identity, "xh_dx_wmask", False):
         v, off, vals = wmask_view(p)
         return v, off, vals, None
     return p, 0, {}, None
 
 
-def halo_widths(p) -> Tuple[int, int, int]:
-    """``(hd, hh, hw)``: the halo shell's width per axis ((F - 1) / 2; hd = 0 in 2-D)."""
-    hd = (int(p.Z) - 1) // 2 if p.is_3d else 0
-    return hd, (int(p.Y) - 1) // 2, (int(p.X) - 1) // 2
+def halo_widths(p, axes: int = DXA_ALL) -> Tuple[int, int, int]:
+    """``(hd, hh, hw)``: the halo shell's width per axis ((F - 1) / 2; hd = 0 in
+    2-D); 0 on an axis ``axes`` leaves out."""
+    hd = (int(p.Z) - 1) // 2 if (p.is_3d and axes & DXA_D) else 0
+    hh = (int(p.Y) - 1) // 2 if axes & DXA_H else 0
+    hw = (int(p.X) - 1) // 2 if axes & DXA_W else 0
+    return hd, hh, hw
 
 
-def dx_interior_problem_ok(p) -> Tuple[bool, str]:
-    """Is ``p`` a halo-form problem (pad 0, stride 1, dilation 1, odd filter)?"""
-    axes = [("Y", "sH", "pH", "dH"), ("X", "sW", "pW", "dW")]
+def dx_interior_problem_ok(p, mask: int = DXA_ALL) -> Tuple[bool, str]:
+    """Is ``p`` a halo-form problem (pad 0, stride 1, dilation 1, odd filter)
+    on the axes of ``mask``, stride 1 / dilation 1 on all?"""
+    axes = [("Y", "sH", "pH", "dH", DXA_H), ("X", "sW", "pW", "dW", DXA_W)]
     if p.is_3d:
-        axes.append(("Z", "sD", "pD", "dD"))
-    for f, s, pad, dil in axes:
+        axes.append(("Z", "sD", "pD", "dD", DXA_D))
+    for f, s, pad, dil, bit in axes:
         if int(getattr(p, s)) != 1 or int(getattr(p, dil)) != 1:
             return False, "dx_interior serves stride 1 / dilation 1 only"
+        if not mask & bit:
+            continue
         if int(getattr(p, pad)) != 0:
             return False, "dx_interior serves the halo form (pad 0) only"
         if int(getattr(p, f)) % 2 == 0:
@@ -130,14 +148,16 @@ def dx_interior_problem_ok(p) -> Tuple[bool, str]:
     return True, "ok"
 
 
-def interior_view_problem(p, keep_w: bool):
-    """The same-size (padded) problem whose dX is the halo problem's interior."""
-    hd, hh, hw = halo_widths(p)
-    kw = dict(Hi=p.Ho, pH=hh)
-    if not keep_w:
-        kw.update(Wi=p.Wo, pW=hw)
-    if p.is_3d:
-        kw.update(Di=p.Do, pD=hd)
+def interior_view_problem(p, keep_w: bool, axes: int = DXA_ALL):
+    """The (padded) problem whose dX is the halo problem's interior along ``axes``."""
+    hd, hh, hw = halo_widths(p, axes)
+    kw = {}
+    if hh:
+        kw.update(Hi=int(p.Hi) - 2 * hh, pH=hh)
+    if hw and not keep_w:
+        kw.update(Wi=int(p.Wi) - 2 * hw, pW=hw)
+    if hd:
+        kw.update(Di=int(p.Di) - 2 * hd, pD=hd)
     return dc_replace(p, **kw)
 
 
@@ -149,9 +169,9 @@ def _full_strides(p) -> Dict[str, int]:
     return {"n": sn, "di": sd, "hi": sh, "wi": sw}
 
 
-def interior_view_dx(p, keep_w: bool) -> Tuple[int, Dict[str, int]]:
+def interior_view_dx(p, keep_w: bool, axes: int = DXA_ALL) -> Tuple[int, Dict[str, int]]:
     """``(element offset of the view's origin in dX, dX stride kernargs)``."""
-    hd, hh, hw = halo_widths(p)
+    hd, hh, hw = halo_widths(p, axes)
     s = _full_strides(p)
     off = hd * s["di"] * (1 if p.is_3d else 0) + hh * s["hi"] + (0 if keep_w else hw) * s["wi"]
     vals = {
@@ -165,15 +185,15 @@ def interior_view_dx(p, keep_w: bool) -> Tuple[int, Dict[str, int]]:
             # One image: its stride is never used; the view's own (Do planes)
             # keeps the n-stride check of the plane-gapped linear store
             # (xh_dx_wmask with xh_epi_lin) true.
-            vals["p_dX_stride_n"] = s["di"] * int(p.Do)
+            vals["p_dX_stride_n"] = s["di"] * (int(p.Di) - 2 * hd)
     return off, vals
 
 
-def view_pixel_map(p, keep_w: bool) -> Callable[[int], int]:
+def view_pixel_map(p, keep_w: bool, axes: int = DXA_ALL) -> Callable[[int], int]:
     """View dX pixel index ``(n*Di' + d)*Hi'*Wi' + h*Wi' + w`` -> the full
     tensor's ``(n*Di + d + hd)*Hi*Wi + (h + hh)*Wi + w + hw``."""
-    v = interior_view_problem(p, keep_w)
-    hd, hh, hw = halo_widths(p)
+    v = interior_view_problem(p, keep_w, axes)
+    hd, hh, hw = halo_widths(p, axes)
     if keep_w:
         hw = 0
     Dv = int(v.Di) if v.is_3d else 1
@@ -189,11 +209,11 @@ def view_pixel_map(p, keep_w: bool) -> Callable[[int], int]:
     return f
 
 
-def interior_mask_np(p):
+def interior_mask_np(p, axes: int = DXA_ALL):
     """Boolean ``N[D]HW`` mask of the interior voxels (numpy)."""
     import numpy as np
 
-    hd, hh, hw = halo_widths(p)
+    hd, hh, hw = halo_widths(p, axes)
     shape = (p.N, p.Di, p.Hi, p.Wi) if p.is_3d else (p.N, p.Hi, p.Wi)
     m = np.zeros(shape, dtype=bool)
     if p.is_3d:
@@ -203,14 +223,14 @@ def interior_mask_np(p):
     return m
 
 
-def written_mask_np(p, keep_w: bool):
+def written_mask_np(p, keep_w: bool, axes: int = DXA_ALL):
     """The voxels an interior launch writes in skip mode: the interior, plus
     (``keep_w``) the w columns of interior rows."""
     import numpy as np
 
-    hd, hh, hw = halo_widths(p)
+    hd, hh, hw = halo_widths(p, axes)
     if not keep_w:
-        return interior_mask_np(p)
+        return interior_mask_np(p, axes)
     shape = (p.N, p.Di, p.Hi, p.Wi) if p.is_3d else (p.N, p.Hi, p.Wi)
     m = np.zeros(shape, dtype=bool)
     if p.is_3d:
@@ -331,26 +351,30 @@ def dgrad_halo_zero_signature(spec: DgradHaloZeroSpec) -> list:
     return sb.build()
 
 
-def halo_zero_units(p, elem_bytes: int) -> Dict[str, int]:
-    """Section sizes (16-byte units) of the shell of ``p``'s dX (see DgradHaloZeroSpec)."""
-    hd, hh, hw = halo_widths(p)
+def halo_zero_units(p, elem_bytes: int, axes: int = DXA_ALL) -> Dict[str, int]:
+    """Section sizes (16-byte units) of the shell of ``p``'s dX along ``axes``
+    (see DgradHaloZeroSpec; ``Do`` / ``Ho`` are the interior plane / row counts)."""
+    hd, hh, hw = halo_widths(p, axes)
     pix = int(p.C) * elem_bytes
     if pix % 16:
         raise ValueError("dx_interior zero-fill needs C * elem_bytes % 16 == 0")
     pu = pix // 16
     N = int(p.N)
     Di = int(p.Di) if p.is_3d else 1
-    Do = int(p.Do) if p.is_3d else 1
-    Hi, Ho, ru = int(p.Hi), int(p.Ho), int(p.Wi) * pu
+    Do = Di - 2 * hd
+    Hi, ru = int(p.Hi), int(p.Wi) * pu
+    Ho = Hi - 2 * hh
     e = hw * pu
     L1, L2, L3 = 2 * hd * Hi * ru, 2 * hh * ru, 2 * e
     return dict(Di=Di, Do=Do, Hi=Hi, Ho=Ho, ru=ru, hd=hd, hh=hh, e=e, L1=L1, L2=L2, L3=L3,
                 u1=N * L1, u2=N * Do * L2, u3=N * Do * Ho * L3)
 
 
-def halo_zero_launch(p, elem_bytes: int, dx_ptr: int, dx_bytes: int, spec: DgradHaloZeroSpec):
+def halo_zero_launch(
+    p, elem_bytes: int, dx_ptr: int, dx_bytes: int, spec: DgradHaloZeroSpec, axes: int = DXA_ALL
+):
     """``(values, grid, block)`` of the shell zero-fill of the full dX at ``dx_ptr``."""
-    u = halo_zero_units(p, elem_bytes)
+    u = halo_zero_units(p, elem_bytes, axes)
     B = spec.block
     b1, b2, b3 = (-(-u[k] // B) for k in ("u1", "u2", "u3"))
     values = {"dx": dx_ptr, "dx_bytes": dx_bytes}

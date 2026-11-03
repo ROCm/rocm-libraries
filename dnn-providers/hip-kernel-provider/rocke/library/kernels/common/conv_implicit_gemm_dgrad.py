@@ -615,7 +615,7 @@ def pp_box_sub_gemms(
     tile_k: int = 32,
     max_split: int = 1,
     cus: int = 0,
-    interior: bool = False,
+    interior=False,
 ) -> List[SubGemmParams]:
     """The sub-GEMM records of a ``pp_boxes`` binary (stride 1, dilation 1).
 
@@ -632,7 +632,8 @@ def pp_box_sub_gemms(
 
     ``interior`` (KernelIdentity.dx_interior, a halo-form problem): the
     records cover only the dX voxels at least (F - 1) / 2 from every border
-    of each axis; the halo shell gets no record.
+    of each axis (True) or of the axes of a bit mask (1 W, 2 H, 4 D); the
+    halo shell gets no record.
     """
 
     def runs(n_in, n_out, pad, filt, nclass, skip=0):
@@ -695,11 +696,14 @@ def pp_box_sub_gemms(
         dc = hc = wc = nclass // 11
     else:
         dc, hc, wc = 1, nclass, nclass
-    _sk = (lambda f: (f - 1) // 2) if interior else (lambda f: 0)
-    hr = runs(p.Hi, p.Ho, p.pH, p.Y, hc, _sk(p.Y))
-    wr = runs(p.Wi, p.Wo, p.pW, p.X, wc, _sk(p.X))
+    _ax = 7 if interior is True else int(interior or 0)
+
+    def _sk(f, bit):
+        return (f - 1) // 2 if _ax & bit else 0
+    hr = runs(p.Hi, p.Ho, p.pH, p.Y, hc, _sk(p.Y, 2))
+    wr = runs(p.Wi, p.Wo, p.pW, p.X, wc, _sk(p.X, 1))
     if p.is_3d:
-        dr = runs(p.Di, p.Do, p.pD, p.Z, dc, _sk(p.Z))
+        dr = runs(p.Di, p.Do, p.pD, p.Z, dc, _sk(p.Z, 4))
     else:
         dr = [(0, 1, 0, 0)]
     boxes = [(d, h, w) for d in dr for h in hr for w in wr]
@@ -849,7 +853,7 @@ def _pp_pixel_list_sub_gemms(
     cus: int,
     axis_runs,
     cheap_tail: bool = False,
-    interior: bool = False,
+    interior=False,
 ) -> List[SubGemmParams]:
     """``pp_boxes`` 7 (77: ``cheap_tail``): records of M tiles of up to ``tile_m`` dX pixels
     that need not form a box (their indices ride in the record's row list),
@@ -864,13 +868,16 @@ def _pp_pixel_list_sub_gemms(
     offsets are the tile's union ranges. Split-K degrees and the order are
     pp_boxes' (longest slice first, within ``cus`` workgroups).
     """
-    _sk = (lambda f: (f - 1) // 2) if interior else (lambda f: 0)
+    _ax = 7 if interior is True else int(interior or 0)
+
+    def _sk(f, bit):
+        return (f - 1) // 2 if _ax & bit else 0
     if p.is_3d:
-        dr = axis_runs(p.Di, p.Do, p.pD, p.Z, 5, _sk(p.Z))
+        dr = axis_runs(p.Di, p.Do, p.pD, p.Z, 5, _sk(p.Z, 4))
     else:
         dr = [(0, 1, 0, 0)]
-    hr = axis_runs(p.Hi, p.Ho, p.pH, p.Y, 5, _sk(p.Y))
-    wr = axis_runs(p.Wi, p.Wo, p.pW, p.X, 5, _sk(p.X))
+    hr = axis_runs(p.Hi, p.Ho, p.pH, p.Y, 5, _sk(p.Y, 2))
+    wr = axis_runs(p.Wi, p.Wo, p.pW, p.X, 5, _sk(p.X, 1))
     Di = p.Di if p.is_3d else 1
     hw = p.Hi * p.Wi
     classes = []  # (pixel list, (zlo, zhi, ylo, yhi, xlo, xhi))
