@@ -51,8 +51,7 @@ end subroutine HIPBLAS_CHECK
 program example_fortran_gemm_ex
     use iso_c_binding
     use hipblas
-    ! HIP_R_32F is a hipDataType: it comes from HIP, not hipBLAS.
-    use hip
+    use hipblas_enums
 
     implicit none
 
@@ -158,8 +157,8 @@ program example_fortran_gemm_ex
     integer(c_int) :: i, element
 
     ! Create hipBLAS handle
-    type(c_ptr) :: handle
-    call HIPBLAS_CHECK(hipblasCreate(handle))
+    type(c_ptr), target :: handle
+    call HIPBLAS_CHECK(hipblasCreate(c_loc(handle)))
 
     ! transA = transB = N
     lda = m
