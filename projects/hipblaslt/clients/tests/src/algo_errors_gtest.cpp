@@ -556,6 +556,21 @@ namespace
                                                                workspace),
                           HIPBLAS_STATUS_NOT_SUPPORTED)
                     << which;
+                hipblasLtMatmulHeuristicResult_t supported      = control;
+                int                              supportedCount = 0;
+                EXPECT_EQ(hipblaslt_ext::isSolutionSupported(&supported,
+                                                             handle,
+                                                             desc,
+                                                             &alpha,
+                                                             mats[0],
+                                                             mats[1],
+                                                             &beta,
+                                                             mats[2],
+                                                             mats[3],
+                                                             nullptr,
+                                                             &supportedCount),
+                          HIPBLAS_STATUS_NOT_SUPPORTED)
+                    << which;
                 EXPECT_EQ(
                     hipblaslt_ext::matmulIsTuned(handle, desc, mats[0], mats[1], mats[2], mats[3]),
                     -1)

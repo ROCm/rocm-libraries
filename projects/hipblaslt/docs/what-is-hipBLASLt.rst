@@ -115,8 +115,12 @@ keeps that idea and adds three more:
 * A **memory order**. ``HIPBLASLT_ORDER_COL`` (column-major) is the default.
   ``HIPBLASLT_ORDER_ROW`` (row-major) is accepted only by ``hipblasLtMatrixTransform``; matmul returns
   ``HIPBLAS_STATUS_NOT_SUPPORTED`` for it. To multiply row-major data, keep column-major layouts and
-  use the identity (A * B)\ :sup:`T` = B\ :sup:`T` * A\ :sup:`T`. Some architectures additionally accept **swizzled**
-  orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
+  use the identity (A * B)\ :sup:`T` = B\ :sup:`T` * A\ :sup:`T`: swap A and B, swap M and N, and
+  describe each matrix as its column-major transpose. The column-major result is
+  (A * B)\ :sup:`T`, which is A * B in row-major order, so the output needs no transpose. Anything
+  applied per row of D, such as a bias or an alpha vector, then applies per column of A * B, and
+  the scale for A becomes the scale for the second operand. Some architectures additionally accept
+  **swizzled** orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
   data is pre-arranged into the exact pattern the kernel reads. That saves the kernel from
   rearranging values itself. However, a swizzled order is valid only for particular type, transpose,
   and architecture combinations, which the :doc:`API reference <./reference/api-reference>` lists.
