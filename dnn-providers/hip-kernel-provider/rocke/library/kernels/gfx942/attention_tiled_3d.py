@@ -147,7 +147,9 @@ class UnifiedAttention3DTiledSpec:
     use_decode_grid: bool = False
     # Cache policy of the K/V copies, one of ``CACHE_POLICY_NAMES`` (as the
     # gfx950 3D and attention 2D ``kv_cache_policy``). The dispatcher sets
-    # "stream" (NT) for all-decode batches, whose K/V bytes are each read once
+    # "stream" (NT) for all-decode batches whose K/V is larger than the
+    # last-level cache, since each K/V byte is read once per call; smaller K/V
+    # keeps "all" so the next call can hit in the cache
     # (``_kv_cache_policy_3d``). The wide loader's only cache control is the
     # non-temporal hint, so it takes "all" or "stream"; the fp8 K/V loader keeps
     # "all".

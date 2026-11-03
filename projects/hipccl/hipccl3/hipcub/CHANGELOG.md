@@ -7,7 +7,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Resolved issues
 
 * Fixed summary issue where `BUILD_CODE_COVERAGE` was reading from `CODE_COVERAGE` instead of `BUILD_CODE_COVERAGE`.
-
+* Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
 
@@ -23,10 +23,6 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Replaced `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `#pragma nounroll` by `_CCCL_PRAGMA_NOUNROLL()`.
 * Updated `WarpExchange` template parameters for CUB compatibility. The third argument, `ARCH`, has been removed.
 * The block merge sort and thread sort algorithms now perform optional loop unrolling via `_CCCL_SORT_MAYBE_UNROLL()`.
-
-### Resolved issues
-
-* Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
 ### Removed
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:
