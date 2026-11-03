@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_csr.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -79,16 +80,12 @@ void testing_sparse_to_dense_csr_bad_arg(const Arguments& argus)
     float*   dcsr_val     = (float*)dcsr_val_managed.get();
     void*    dbuf         = (void*)dbuf_managed.get();
 
-    // Matrix structures
-    hipsparseDnVecDescr_t matB;
-
     size_t bsize;
 
     // Create matrix structures
     hipsparseLocalCsr matA(
         m, n, nnz, dcsr_row_ptr, dcsr_col_ind, dcsr_val, iType, jType, idxBase, dataType);
-    verify_hipsparse_status_success(
-        hipsparseCreateDnMat(&matB, m, n, ld, ddense_val, dataType, order), "success");
+    hipsparseLocalDnMat matB(m, n, ld, ddense_val, dataType, order);
 
     // SparseToDense buffer size
     verify_hipsparse_status_invalid_handle(
@@ -111,9 +108,6 @@ void testing_sparse_to_dense_csr_bad_arg(const Arguments& argus)
         hipsparseSparseToDense(handle, matA, nullptr, alg, dbuf), "Error: matB is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseSparseToDense(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matB), "success");
 #endif
 }
 
@@ -178,15 +172,14 @@ void testing_sparse_to_dense_csr(Arguments argus)
     hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrix
-    hipsparseDnMatDescr_t matB;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matB, m, n, ld, ddense, typeT, order));
+    hipsparseLocalDnMat matB(m, n, ld, ddense, typeT, order);
 
     // Query SparseToDense buffer
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseSparseToDense_bufferSize(handle, matA, matB, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     if(argus.unit_check)
     {
@@ -285,9 +278,6 @@ void testing_sparse_to_dense_csr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matB));
 #endif
 }
 

@@ -32,6 +32,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
 #include "hipsparse_local_csc.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -83,17 +84,12 @@ void testing_sddmm_csc_bad_arg(const Arguments& argus)
     float*   dA   = (float*)dA_managed.get();
     void*    dbuf = (void*)dbuf_managed.get();
 
-    // SDDMM structures
-    hipsparseDnMatDescr_t A, B;
-
     size_t bsize;
 
     // Create SDDMM structures
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&A, m, k, m, dA, dataType, orderA),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&B, k, n, k, dB, dataType, orderB),
-                                    "success");
-    hipsparseLocalCsc C(m, n, nnz, dptr, dcol, dval, idxTypeI, idxTypeJ, idxBase, dataType);
+    hipsparseLocalCsc   C(m, n, nnz, dptr, dcol, dval, idxTypeI, idxTypeJ, idxBase, dataType);
+    hipsparseLocalDnMat A(m, k, m, dA, dataType, orderA);
+    hipsparseLocalDnMat B(k, n, k, dB, dataType, orderB);
 
     // SDDMM buffer
     verify_hipsparse_status_invalid_handle(hipsparseSDDMM_bufferSize(
@@ -173,10 +169,6 @@ void testing_sddmm_csc_bad_arg(const Arguments& argus)
         hipsparseSDDMM(
             handle, transA, transB, &alpha, A, B, &beta, nullptr, dataType, alg, nullptr),
         "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
 
 #endif
 }
@@ -299,17 +291,16 @@ void testing_sddmm_csc(Arguments argus)
     hipsparseLocalCsc C2(C_m, C_n, nnz, dptr, dind, dval2, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrices
-    hipsparseDnMatDescr_t A, B;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&A, A_m, A_n, lda, dA, typeT, orderA));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
+    hipsparseLocalDnMat A(A_m, A_n, lda, dA, typeT, orderA);
+    hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
 
     // Query SDDMM buffer
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -419,11 +410,6 @@ void testing_sddmm_csc(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    // free.
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 
 #endif
 }

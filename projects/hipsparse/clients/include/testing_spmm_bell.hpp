@@ -32,6 +32,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
 #include "hipsparse_local_blocked_ell.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -78,18 +79,13 @@ void testing_spmm_bell_bad_arg(const Arguments& argus)
     float*   dC   = (float*)dC_managed.get();
     void*    dbuf = (void*)dbuf_managed.get();
 
-    // SpMM structures
-    hipsparseDnMatDescr_t matB, matC;
-
     size_t bsize;
 
     // Create SpMM structures
     hipsparseLocalBlockedEll matA(
         m, k, ellBlockSize, ell_cols, dind, dval, idxType, idxBase, dataType);
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&matB, k, n, k, dB, dataType, order),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&matC, m, n, m, dC, dataType, order),
-                                    "success");
+    hipsparseLocalDnMat matB(k, n, k, dB, dataType, order);
+    hipsparseLocalDnMat matC(m, n, m, dC, dataType, order);
 
     // SpMM buffer
     verify_hipsparse_status_invalid_handle(hipsparseSpMM_bufferSize(
@@ -174,10 +170,6 @@ void testing_spmm_bell_bad_arg(const Arguments& argus)
         hipsparseSpMM(
             handle, transA, transB, &alpha, matA, matB, &beta, nullptr, dataType, alg, nullptr),
         "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matB), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matC), "success");
 #endif
 }
 
@@ -303,18 +295,17 @@ void testing_spmm_bell(Arguments argus)
         m, k, ellBlockSize, ellCols, dbell_col_ind, dbell_val, typeI, idxBase, typeT);
 
     // Create dense matrices.
-    hipsparseDnMatDescr_t matB, matC1, matC2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matB, B_m, B_n, ldb, dB, typeT, orderB));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matC1, C_m, C_n, ldc, dC_1, typeT, orderC));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matC2, C_m, C_n, ldc, dC_2, typeT, orderC));
+    hipsparseLocalDnMat matB(B_m, B_n, ldb, dB, typeT, orderB);
+    hipsparseLocalDnMat matC1(C_m, C_n, ldc, dC_1, typeT, orderC);
+    hipsparseLocalDnMat matC2(C_m, C_n, ldc, dC_2, typeT, orderC);
 
     // Query SpMM buffer size.
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_bufferSize(
         handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, &bufferSize));
 
-    void* dbuffer;
-    CHECK_HIP_ERROR(hipMalloc(&dbuffer, bufferSize));
+    auto  dbuffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* dbuffer         = dbuffer_managed.get();
 
     if(argus.call_preprocess)
     {
@@ -441,11 +432,6 @@ void testing_spmm_bell(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(dbuffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matB));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matC1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matC2));
 #endif
 }
 #endif // TESTING_SPMM_BELL_HPP

@@ -31,8 +31,22 @@ static const case_t CASES[] = {
     {"f32", 4},
     {"i32", 1},
     {"i32", 4},
-    /* rejected */
+    {"i8", 1},
+    {"i8", 2},
+    {"i8", 4},
+    {"i8", 8},
+    {"i8", 16},
+    {"fp8e4m3", 4},
+    {"bf8e5m2", 16},
     {"f16", 1},
+    {"bf16", 1},
+    {"i16", 1},
+    {"i16", 8},
+    {"i32", 2},
+    {"f64", 1},
+    {"f64", 2},
+    {"fp8e4m3", 1},
+    /* rejected */
     {"f16", 3},
     {"f16", 5},
     {"f16", 6},
@@ -41,21 +55,33 @@ static const case_t CASES[] = {
     {"f32", 3},
     {"f32", 8},
     {"f32", 0},
-    {"i8", 4},
+    {"f64", 3},
 };
 static const int NUM_CASES = sizeof(CASES) / sizeof(CASES[0]);
 
 static const rocke_type_t* type_by_name(const char* name)
 {
-    if(strcmp(name, "f16") == 0)
-        return rocke_f16();
-    if(strcmp(name, "bf16") == 0)
-        return rocke_bf16();
-    if(strcmp(name, "f32") == 0)
-        return rocke_f32();
-    if(strcmp(name, "i32") == 0)
-        return rocke_i32();
-    return rocke_i8();
+    static const struct
+    {
+        const char* name;
+        const rocke_type_t* (*type)(void);
+    } types[] = {
+        {"i8", rocke_i8},
+        {"fp8e4m3", rocke_fp8e4m3},
+        {"bf8e5m2", rocke_bf8e5m2},
+        {"i16", rocke_i16},
+        {"f16", rocke_f16},
+        {"bf16", rocke_bf16},
+        {"f32", rocke_f32},
+        {"i32", rocke_i32},
+        {"f64", rocke_f64},
+    };
+    for(size_t i = 0; i < sizeof(types) / sizeof(types[0]); ++i)
+    {
+        if(strcmp(name, types[i].name) == 0)
+            return types[i].type();
+    }
+    return NULL;
 }
 
 static void build_buffer_load_vN(rocke_ir_builder_t* b, const case_t* c)
