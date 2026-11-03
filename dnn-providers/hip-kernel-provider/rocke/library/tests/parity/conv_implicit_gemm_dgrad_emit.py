@@ -1435,6 +1435,42 @@ _GFX942_3D = {
 }
 
 
+# 71-76: the ping-pong / box record kernels (tapk_pingpong 4 over pp_boxes 7 /
+# 77 records, split-K with pp_box_det 1, tapk_pp_epi 2, cshuffle_m_chunks) on
+# the 3-D grouped problem; keep in lockstep with make_cfg_3d_pp() in
+# conv_implicit_gemm_dgrad_emit.c.
+_PP_COMMON = dict(
+    warp_tile_m=16, warp_tile_n=16, warp_tile_k=16, vector_size_a=8, vector_size_b=8,
+    vector_size_c=8, lds_k_pad=0, pipeline="mem", epilogue="cshuffle", tap_outer_k=True,
+    tapk_prefetch=1, b_kpack=4, tapk_pingpong=4, lds_xor=True, xcd_remap=6,
+)
+_T256 = dict(tile_m=256, tile_n=256, tile_k=32, warp_m=4, warp_n=2)
+_T128 = dict(tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4)
+_GFX942_3D_PP = {
+    71: dict(_T256, tapk_pp_sched=5, tapk_pp_bslab=3, cshuffle_m_chunks=2, split_k=8,
+             pp_boxes=7, pp_box_order=2, pp_box_det=1),
+    72: dict(_T256, tapk_pp_sched=5, cshuffle_m_chunks=4, split_k=8, pp_boxes=7,
+             pp_box_order=2, pp_box_det=1),
+    73: dict(_T128, tapk_pp_sched=2, tapk_pp_epi=2, tapk_pp_bslab=3, pp_boxes=77,
+             pp_box_order=2, epi_lds_barriers=True),
+    74: dict(_T256, tapk_pp_sched=12, tapk_pp_bslab=3, cshuffle_m_chunks=2, split_k=3,
+             pp_boxes=77, pp_box_det=1),
+    75: dict(_T128, tapk_pp_sched=5, split_k=4, pp_boxes=77, pp_box_order=3, pp_box_det=1),
+    76: dict(_T128, tapk_pp_sched=2, split_k=8, pp_boxes=7, pp_box_order=1, pp_box_det=1),
+}
+
+
+def _gfx942_3d_pp_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    p = ConvProblem(
+        N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
+        sD=1, sH=1, sW=1, pD=1, pH=1, pW=1, dD=1, dH=1, dW=1, groups=2,
+    )
+    data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+    return DgradConvSpec(problem=p, data=data, **_PP_COMMON, **_GFX942_3D_PP[idx]), "gfx942"
+
+
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1470,6 +1506,8 @@ def _gfx942_3d_any(idx: int):
     """The gfx942 3-D configs below by their own number (from 57)."""
     if idx in _GFX942_3D:
         return _gfx942_3d_spec(idx)
+    if idx in _GFX942_3D_PP:
+        return _gfx942_3d_pp_spec(idx)
     raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
 
 

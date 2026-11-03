@@ -218,10 +218,54 @@ static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch
     return 0;
 }
 
+/* 71-76: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
+ * Python emitter (the table is there). */
+static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    make_cfg_3d(57, spec, arch);
+    spec->tapk_prefetch = 1;
+    spec->b_kpack = 4;
+    spec->tapk_pingpong = 4;
+    spec->lds_xor = true;
+    spec->xcd_remap = 6;
+    const bool t256 = idx == 71 || idx == 72 || idx == 74;
+    if(t256)
+    {
+        spec->tile_m = 256;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_m = 4;
+        spec->warp_n = 2;
+    }
+    static const int pps[6] = {5, 5, 2, 12, 5, 2};
+    static const int pbs[6] = {3, 0, 3, 3, 0, 0};
+    static const int mch[6] = {2, 4, 1, 2, 1, 1};
+    static const int sk[6] = {8, 8, 1, 3, 4, 8};
+    static const int pbx[6] = {7, 7, 77, 77, 77, 7};
+    static const int pbo[6] = {2, 2, 2, 0, 3, 1};
+    static const int pbd[6] = {1, 1, 0, 1, 1, 1};
+    const int i = idx - 71;
+    spec->tapk_pp_sched = pps[i];
+    spec->tapk_pp_bslab = pbs[i];
+    spec->cshuffle_m_chunks = mch[i];
+    spec->split_k = sk[i];
+    spec->pp_boxes = pbx[i];
+    spec->pp_box_order = pbo[i];
+    spec->pp_box_det = pbd[i];
+    if(idx == 73)
+    {
+        spec->tapk_pp_epi = 2;
+        spec->epi_lds_barriers = true;
+    }
+    return 0;
+}
+
 /* The gfx942 3-D configs by their own number (from 57); mirrors
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx >= 71 && idx <= 76)
+        return make_cfg_3d_pp(idx, spec, arch);
     if(idx >= 57 && idx <= 70)
         return make_cfg_3d(idx, spec, arch);
     return -1;
