@@ -32,6 +32,7 @@
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
 #include "d_vector.hpp"
+#include "hipblaslt_bench_options.hpp"
 #include "utility.hpp"
 #include <atomic>
 #include <chrono>
@@ -302,6 +303,18 @@ static void portable_setenv(const char* name, const char* value)
 hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
     : hipblaslt_local_handle()
 {
+    // C++ setProblem inherits the handle request without using the bench descriptors.
+    // A per-case value wins over the CLI; leaving both unset keeps the library default.
+    const int32_t uso = arg.uniform_summation_order >= 0
+                            ? arg.uniform_summation_order
+                            : hipblaslt_bench_options::uniform_summation_order();
+    if(uso >= 0)
+    {
+        const auto status = hipblasLtSetUniformSummationOrder(m_handle, uso);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            throw std::runtime_error(hipblas_status_to_string(status));
+    }
+
     if(arg.tensile_solution_selection_method >= 0)
     {
         auto sol_selec_env = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
