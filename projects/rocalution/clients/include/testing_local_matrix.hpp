@@ -1111,9 +1111,10 @@ void testing_local_move_to_host_async()
     EXPECT_EQ(matrix.GetN(), 2);
 }
 
-// LocalMatrix that reports the backend it currently lives on. If both is_host_() and is_accel_()
-// are true, the matrix has lost both backend objects and any further access (including its
-// destructor) dereferences NULL.
+// LocalMatrix that reports which backend object it currently points to. It does not show whether
+// the other backend object was freed, because matrix_host_ and matrix_accel_ are private. If both
+// is_host_() and is_accel_() are true, the matrix has lost both backend objects and any further
+// access (including its destructor) dereferences NULL.
 template <typename T>
 class local_matrix_location : public LocalMatrix<T>
 {
