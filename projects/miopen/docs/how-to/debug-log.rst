@@ -148,6 +148,7 @@ Some of the solutions have individual controls, which affect both find and immed
   * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD11X11`` -- ``ConvHipDirectFwd11x11``
   * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD`` -- ``ConvHipDirectFwd``
   * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53`` -- ``ConvHipBwdWrW53``
+  * ``MIOPEN_DEBUG_CONV_DIRECT_HIP_CONV1D_FWD`` -- ``ConvHipDirectConv1dFwd``
 
 * Winograd solutions:
 
