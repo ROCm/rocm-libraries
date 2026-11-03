@@ -4015,7 +4015,6 @@ namespace rocalution
         int next   = 0;
         int head   = 0;
         int tmp    = 0;
-        int test   = 1;
         int maxdeg = 0;
 
         int* nd         = NULL;
@@ -4033,7 +4032,16 @@ namespace rocalution
         for(int k = 0; k < this->nrow_; ++k)
         {
             marker[k] = 0;
-            nd[k] = static_cast<int>(this->mat_.row_offset[k + 1] - this->mat_.row_offset[k] - 1);
+            nd[k]     = 0;
+
+            // A row need not store its diagonal, so only the other entries count
+            for(PtrType j = this->mat_.row_offset[k]; j < this->mat_.row_offset[k + 1]; ++j)
+            {
+                if(this->mat_.col[j] != k)
+                {
+                    ++nd[k];
+                }
+            }
 
             if(nd[k] > maxdeg)
             {
@@ -4047,13 +4055,20 @@ namespace rocalution
         ++next;
         marker[head] = 1;
 
+        // Every node before restart is numbered
+        int restart = 0;
+
         while(next < this->nrow_)
         {
             int position = 0;
 
+            // The nodes of the level are in the order of their numbers. Each one numbers its
+            // unnumbered neighbours by increasing degree
             for(int h = 0; h < qlength; ++h)
             {
                 head = levset[h];
+
+                int first = position;
 
                 for(PtrType k = this->mat_.row_offset[head]; k < this->mat_.row_offset[head + 1];
                     ++k)
@@ -4064,30 +4079,42 @@ namespace rocalution
                     {
                         nextlevset[position] = tmp;
                         marker[tmp]          = 1;
-                        cast_perm->vec_[tmp] = next;
-                        ++next;
                         ++position;
                     }
+                }
+
+                // std::stable_sort allocates a buffer on every call, so short lists are sorted
+                // in place
+                if(position - first > 16)
+                {
+                    std::stable_sort(nextlevset + first, nextlevset + position, [&](int a, int b) {
+                        return nd[a] < nd[b];
+                    });
+                }
+                else
+                {
+                    for(int j = first + 1; j < position; ++j)
+                    {
+                        int node = nextlevset[j];
+                        int i    = j;
+
+                        for(; i > first && nd[nextlevset[i - 1]] > nd[node]; --i)
+                        {
+                            nextlevset[i] = nextlevset[i - 1];
+                        }
+
+                        nextlevset[i] = node;
+                    }
+                }
+
+                for(int j = first; j < position; ++j)
+                {
+                    cast_perm->vec_[nextlevset[j]] = next;
+                    ++next;
                 }
             }
 
             qlength = position;
-
-            while(test == 1)
-            {
-                test = 0;
-
-                for(int j = position - 1; j > 0; --j)
-                {
-                    if(nd[nextlevset[j]] < nd[nextlevset[j - 1]])
-                    {
-                        tmp               = nextlevset[j];
-                        nextlevset[j]     = nextlevset[j - 1];
-                        nextlevset[j - 1] = tmp;
-                        test              = 1;
-                    }
-                }
-            }
 
             for(int i = 0; i < position; ++i)
             {
@@ -4096,15 +4123,16 @@ namespace rocalution
 
             if(qlength == 0)
             {
-                for(int i = 0; i < this->nrow_; ++i)
+                for(; restart < this->nrow_; ++restart)
                 {
-                    if(marker[i] == 0)
+                    if(marker[restart] == 0)
                     {
-                        levset[0]          = i;
-                        qlength            = 1;
-                        cast_perm->vec_[i] = next;
-                        marker[i]          = 1;
+                        levset[0]                = restart;
+                        qlength                  = 1;
+                        cast_perm->vec_[restart] = next;
+                        marker[restart]          = 1;
                         ++next;
+                        break;
                     }
                 }
             }
