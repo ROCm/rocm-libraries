@@ -46,6 +46,31 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_entry_guards.cp
                rocke_tiled_attention_entry_guards)
 endif()
 
+# The gfx942 tiled 2D builder's direct-from-HBM K and V knobs: the spec
+# refusals and the kernel-name token. The byte-identity gate only compares
+# specs both engines accept, so a refusal (or a knob dropped silently) is
+# invisible to it.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942_attention_tiled_2d_hbm_knobs.cpp")
+  add_executable(rocke_gfx942_attention_tiled_2d_hbm_knobs
+                 instances/gfx942_attention_tiled_2d_hbm_knobs.cpp)
+  target_link_libraries(rocke_gfx942_attention_tiled_2d_hbm_knobs PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_gfx942_attention_tiled_2d_hbm_knobs PRIVATE m)
+  endif()
+  add_test(NAME rocke_gfx942_attention_tiled_2d_hbm_knobs
+           COMMAND rocke_gfx942_attention_tiled_2d_hbm_knobs)
+  set_tests_properties(rocke_gfx942_attention_tiled_2d_hbm_knobs
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                                rocke_gfx942_attention_tiled_2d_hbm_knobs)
+  set_target_properties(rocke_gfx942_attention_tiled_2d_hbm_knobs
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_gfx942_attention_tiled_2d_hbm_knobs
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_gfx942_attention_tiled_2d_hbm_knobs)
+endif()
+
 # The three scalar-attention _lower_to_llvm wrappers take no target, so they
 # lower for a fixed one while the lowerer itself rejects a NULL arch. Nothing
 # else calls them, so this is the only thing that notices when they stop

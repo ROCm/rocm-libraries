@@ -175,6 +175,12 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_iglp_opt; /* False */
     bool use_qk_pv_sched_group_barrier; /* False */
     bool use_q_direct_global; /* False */
+    /* Read V straight from global memory instead of V_lds. The gfx942 C twin
+     * does not emit it yet and rejects it (mirrors the Python field). */
+    bool use_v_hbm_direct; /* False */
+    /* Read the QK operand K straight from global memory; K_lds shrinks to a
+     * one-element stub, so Q is read straight from global memory too. */
+    bool use_k_hbm_direct; /* False */
     const char* kv_cache_policy; /* "stream" */
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
