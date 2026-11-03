@@ -31,23 +31,22 @@ Checks:
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
-import os
 import re
-import struct
 
 import numpy as np
 import pytest
-
 from rocke.core.backend import lower_block_scale_gemm
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers import compile_kernel
 from rocke.instances.common.block_scale_gemm import (
     BlockScaleGemmSpec,
     block_scale_gemm_grid,
+    block_scale_gemm_signature,
     build_block_scale_gemm,
 )
+from rocke.tests.engines import all_engines_backend
+from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
+from rocke.tests.llvm_ir import KernelIR
 
 _GPU_ARCHS = ("gfx942", "gfx950")
 _MANTISSAS = ("fp8e4m3", "bf8e5m2")
@@ -64,7 +63,7 @@ def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
     spec with its own builder and lowers it, and the two texts must be the
     same byte for byte (``BackendMismatch`` otherwise); without it, the
     Python engine's text."""
-    if importlib.util.find_spec("rocke_engine"):
+    if all_engines_backend() == "both":
         return lower_block_scale_gemm(spec, arch=arch, backend="both").llvm_text
     return lower_kernel_to_llvm(build_block_scale_gemm(spec, arch=arch), arch=arch)
 
@@ -78,87 +77,23 @@ def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
 # scale changes what it checks.
 # ---------------------------------------------------------------------------
 
-_DEFINITION = re.compile(r"^\s*(%[\w.]+) = (.*)$")
-_CALLEE = re.compile(r"@([\w.]+)\((.*)\)")
-_INCOMING = re.compile(r"\[\s*([^,\]]+?)\s*,\s*(%[\w.]+)\s*\]")
 _STORE = re.compile(r"^\s*store \w+ (%[\w.]+), ptr addrspace\(1\) (%[\w.]+)")
 _BUFFER_LOAD = "llvm.amdgcn.raw.ptr.buffer.load"
 _BUFFER_RESOURCE = "llvm.amdgcn.make.buffer.rsrc"
-_LABEL = re.compile(r"^([\w.]+):")
 _LOOP_BOUND = re.compile(r"icmp slt i32 (%[\w.]+), (\d+)$")
 
 
-class _KernelIR:
-    """The SSA definitions of the one kernel in an LLVM IR text, by name."""
-
-    def __init__(self, llvm_text: str):
-        self.lines = llvm_text.splitlines()
-        self.definitions = {}
-        self.block_of = {}
-        block = "entry"
-        for line in self.lines:
-            label = _LABEL.match(line)
-            if label:
-                block = label.group(1)
-            match = _DEFINITION.match(line)
-            if match:
-                self.definitions[match.group(1)] = match.group(2)
-                self.block_of[match.group(1)] = block
-
-    def opcode(self, name: str) -> str:
-        """The instruction (``fmul``, ``add``, ...) or, for a call, the callee
-        without its type suffix (``llvm.fma``, ``mfma``, ...)."""
-        text = self.definitions[name]
-        if text.startswith("call "):
-            callee = _CALLEE.search(text).group(1)
-            if callee.startswith("llvm.amdgcn.mfma."):
-                return "mfma"
-            return callee.rsplit(".", 1)[0]
-        return text.split()[0]
-
-    def operands(self, name: str) -> list:
-        """The operand values, in order: an SSA name (``%x``) or a literal."""
-        text = self.definitions[name]
-        if text.startswith("call "):
-            text = _CALLEE.search(text).group(2)
-        else:
-            text = text.split(None, 1)[1]
-        values = []
-        for item in text.split(","):
-            item = item.split(" to ")[0]  # a cast: ``sext i32 %x to i64``
-            values.append(item.split()[-1])
-        return values
+class _KernelIR(KernelIR):
+    """The block-scaled GEMM's LLVM IR, with the queries this check makes of
+    it."""
 
     def call_named(self, callee: str) -> str:
         """The value defined by the one call of ``callee``."""
         (name,) = [
             n
             for n, text in self.definitions.items()
-            if text.startswith("call ") and _CALLEE.search(text).group(1) == callee
+            if text.startswith("call ") and self.callee(text) == callee
         ]
-        return name
-
-    def carried(self, phi: str) -> str:
-        """The value a loop phi carries round the loop, copies (a ``bitcast``
-        to the same type, as the lowering emits) followed to their source."""
-        assert self.definitions[phi].startswith("phi "), self.definitions[phi]
-        (_, entry), (carried, latch) = _INCOMING.findall(self.definitions[phi])
-        assert entry != latch, self.definitions[phi]
-        while self.opcode(carried) == "bitcast":
-            (carried,) = self.operands(carried)
-        return carried
-
-    def entry_value(self, phi: str) -> str:
-        """The value a loop phi starts with, copies followed to their
-        source."""
-        (entry, _), _ = _INCOMING.findall(self.definitions[phi])
-        return self.source(entry)
-
-    def source(self, name: str) -> str:
-        """``name`` with copies (a ``bitcast``, as the lowering emits)
-        followed to their source."""
-        while name.startswith("%") and self.opcode(name) == "bitcast":
-            (name,) = self.operands(name)
         return name
 
     def loop_counter(self, phi: str) -> tuple:
@@ -171,7 +106,7 @@ class _KernelIR:
             for n, text in self.definitions.items()
             if self.block_of[n] == header and text.startswith("phi i32 ")
         ]
-        (first, _), _ = _INCOMING.findall(self.definitions[counter])
+        first, _ = self.incoming(counter)
         (end,) = [
             int(m.group(2))
             for m in map(_LOOP_BOUND.search, self.definitions.values())
@@ -184,11 +119,11 @@ class _KernelIR:
         loop phi it starts from; return (that phi, the terms in the order
         they are added)."""
         terms = []
-        value = self.source(value)
+        value = self.copied(value)
         while self.opcode(value) == "fadd":
             value, term = self.operands(value)
             terms.append(term)
-            value = self.source(value)
+            value = self.copied(value)
         assert self.opcode(value) == "phi", self.definitions[value]
         return value, terms[::-1]
 
@@ -224,7 +159,7 @@ class _KernelIR:
         """(buffer load, element index) when ``name`` extracts a constant
         element of a vector buffer load; ``None`` otherwise."""
         vector, index = self.operands(name)
-        vector = self.source(vector)
+        vector = self.copied(vector)
         if self.opcode(vector) == _BUFFER_LOAD and index.isdigit():
             return vector, int(index)
         return None
@@ -349,9 +284,10 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group
         # Walk the K-group loops back from the stored accumulator: each
         # loop's accumulator phi starts from the previous loop's result.
         groups_seen = []
-        acc = ir.source(final_acc)
+        acc = ir.copied(final_acc)
         while ir.opcode(acc) == "phi":
-            phi, terms = ir.accumulated_terms(ir.carried(acc))
+            initial, carried = ir.incoming(acc)
+            phi, terms = ir.accumulated_terms(carried)
             assert phi == acc, (phi, acc)
             counter, first, end = ir.loop_counter(phi)
             inputs = dict(work_items)
@@ -378,7 +314,7 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group
                         err_msg=f"element {element}, {what}",
                     )
                 groups_seen.append(np.broadcast_to(a_kg, shape))
-            acc = ir.entry_value(phi)
+            acc = ir.copied(initial)
         np.testing.assert_array_equal(
             np.sort(np.concatenate(groups_seen, axis=-1), axis=-1),
             np.broadcast_to(np.arange(groups), groups_seen[0].shape[:-1] + (groups,)),
@@ -393,24 +329,10 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group
 
 @pytest.fixture(scope="module")
 def gpu_arch():
-    """The arch of HIP device 0 if the block-scaled GEMM supports it; skip
-    otherwise, or fail when ``ROCKE_REQUIRE_<ARCH>=1`` names an arch the
-    device is not (``ROCKE_REQUIRE_GFX950=1`` or ``ROCKE_REQUIRE_GFX942=1``)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        arch = get_device_arch(0)
-    except Exception as exc:  # no HIP runtime on this host
-        arch = f"no GPU ({exc})"
-    for required in _GPU_ARCHS:
-        if (
-            os.environ.get(f"ROCKE_REQUIRE_{required.upper()}") == "1"
-            and arch != required
-        ):
-            pytest.fail(f"requires a {required} GPU; found {arch}")
-    if arch not in _GPU_ARCHS:
-        pytest.skip(f"requires a gfx942 or gfx950 GPU; found {arch}")
-    return arch
+    """The current GPU's arch if the block-scaled GEMM supports it; skip
+    otherwise, or fail when ``ROCKE_REQUIRE_<ARCH>=1`` names an arch the GPU
+    is not (``ROCKE_REQUIRE_GFX950=1`` or ``ROCKE_REQUIRE_GFX942=1``)."""
+    return current_device_arch_in(_GPU_ARCHS, subject="the block-scaled GEMM")
 
 
 # (exponent bias, mantissa bits) of the fp8 / bf8 format each arch's MFMA
@@ -449,8 +371,6 @@ def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
     (M, N) f32 array. The kernel run is the one :func:`_lowered_llvm`
     returns. ``a`` (M, K) and ``b`` (K, N) are element bytes, ``a_scale``
     (M / gm, K / gk) and ``b_scale`` (K / gk, N / gn) f32, all row-major."""
-    from rocke.runtime.hip_module import Runtime
-
     artifact = compile_kernel(build_block_scale_gemm(spec, arch=arch), arch=arch)
     assert artifact.llvm_text == _lowered_llvm(spec, arch)
     host = {
@@ -460,41 +380,15 @@ def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
         "BScale": np.ascontiguousarray(b_scale, dtype=np.float32),
         "C": np.zeros((spec.M, spec.N), dtype=np.float32),
     }
-    rt = Runtime()
-    module = rt.load_module(artifact.hsaco)
-    dev = {name: rt.alloc(array.nbytes) for name, array in host.items()}
-    try:
-        for name, array in host.items():
-            rt.memcpy_h2d(
-                dev[name],
-                (ctypes.c_uint8 * array.nbytes).from_buffer_copy(array.tobytes()),
-                array.nbytes,
-            )
-        args = struct.pack(
-            "<QQQQQiii",
-            dev["A"],
-            dev["B"],
-            dev["AScale"],
-            dev["BScale"],
-            dev["C"],
-            spec.M,
-            spec.N,
-            spec.K,
-        )
-        rt.launch(
-            module.get_function(artifact.kernel_name),
-            block_scale_gemm_grid(spec),
-            (spec.block_size, 1, 1),
-            args,
-        )
-        rt.sync()
-        out = (ctypes.c_uint8 * host["C"].nbytes)()
-        rt.memcpy_d2h(out, dev["C"], host["C"].nbytes)
-        return np.frombuffer(bytes(out), dtype=np.float32).reshape(spec.M, spec.N)
-    finally:
-        for ptr in dev.values():
-            rt.free(ptr)
-        module.unload()
+    launch_with_buffers(
+        artifact,
+        block_scale_gemm_signature(spec),
+        host,
+        grid=block_scale_gemm_grid(spec),
+        block=(spec.block_size, 1, 1),
+        scalars={"M": spec.M, "N": spec.N, "K": spec.K},
+    )
+    return host["C"]
 
 
 def _reference(spec, a_values, a_scale, b_values, b_scale) -> np.ndarray:
