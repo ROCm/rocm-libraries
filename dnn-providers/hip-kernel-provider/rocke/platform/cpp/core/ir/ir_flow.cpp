@@ -2308,8 +2308,8 @@ static bool flow_enclosing_loop_value_named(const rocke_ir_builder_t* b, const c
  * one is taken by a value of a loop the builder is emitting inside, or by an
  * earlier name in `names`. The serialized IR refers to a value by its name, so
  * a reused name inside a nested body is ambiguous and the two engines would
- * read different values. Returns false (builder failed) on a refusal. */
-static bool flow_refuse_taken_loop_names(rocke_ir_builder_t* b, const char* const* names, int count)
+ * read different values. A refusal raises a ValueError (rocke_i_set_err). */
+static void flow_refuse_taken_loop_names(rocke_ir_builder_t* b, const char* const* names, int count)
 {
     for(int i = 0; i < count; ++i)
     {
@@ -2323,10 +2323,8 @@ static bool flow_refuse_taken_loop_names(rocke_ir_builder_t* b, const char* cons
                             ROCKE_ERR_VALUE,
                             "%s",
                             rocke_i_reused_loop_name_message(names[i], msg, sizeof msg));
-            return false;
         }
     }
-    return true;
 }
 
 /* scf.for: build the op directly (with a "body" region) and a fresh induction
@@ -2364,8 +2362,7 @@ rocke_for_t rocke_b_scf_for(rocke_ir_builder_t* b,
     snprintf(iv_full, sizeof(iv_full), "%%%s", nm);
     {
         const char* names[1] = {iv_full};
-        if(!flow_refuse_taken_loop_names(b, names, 1))
-            return out;
+        flow_refuse_taken_loop_names(b, names, 1);
     }
 
     body = rocke_i_new_region(b, "body");
@@ -2467,8 +2464,7 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
                 return out;
             }
         }
-        if(!flow_refuse_taken_loop_names(b, names, 1 + num_iter_args))
-            return out;
+        flow_refuse_taken_loop_names(b, names, 1 + num_iter_args);
     }
 
     body = rocke_i_new_region(b, "body");

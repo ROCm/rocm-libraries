@@ -1711,23 +1711,12 @@ typedef struct ll_rename
 struct ll_rename_scope
 {
     rocke_lower_t* L;
-    ll_rename_t* renames;
-    int count;
-    int capacity;
+    ROCKE_VEC(ll_rename_t) renames;
 
-    /* Room for `capacity` renames, from L->arena. */
-    ll_rename_scope(rocke_lower_t* lowerer, int capacity_)
+    explicit ll_rename_scope(rocke_lower_t* lowerer)
         : L(lowerer)
-        , renames(NULL)
-        , count(0)
-        , capacity(capacity_)
     {
-        renames = (ll_rename_t*)rocke_arena_alloc(
-            &L->arena, sizeof(ll_rename_t) * (size_t)(capacity > 0 ? capacity : 1));
-        if(!renames)
-        {
-            rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
-        }
+        rocke_vec_init(&renames);
     }
     ~ll_rename_scope()
     {
@@ -1736,27 +1725,28 @@ struct ll_rename_scope
     ll_rename_scope(const ll_rename_scope&) = delete;
     ll_rename_scope& operator=(const ll_rename_scope&) = delete;
 
-    /* Save `value`'s name and give it `name`. */
+    /* Save `value`'s name and give it `name`. The record is kept before the
+     * name changes, so a failed save leaves the value as it was. */
     void rename(rocke_value_t* value, const char* name)
     {
-        if(count >= capacity)
+        const ll_rename_t record = {value, value->name};
+        int rc = 0;
+        rocke_vec_push(&L->arena, &renames, record, rc);
+        if(rc != 0)
         {
-            rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for: more renames than reserved");
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
         }
-        renames[count].val = value;
-        renames[count].saved = value->name;
-        count++;
         value->name = name;
     }
 
     /* Give every renamed value its saved name back. */
     void restore()
     {
-        for(int k = 0; k < count; k++)
+        for(size_t k = 0; k < renames.len; k++)
         {
-            renames[k].val->name = renames[k].saved;
+            renames.data[k].val->name = renames.data[k].saved;
         }
-        count = 0;
+        renames.len = 0;
     }
 };
 
@@ -2053,7 +2043,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
     }
     const int n_carried = ll_loop_block_values(L, op, num_iter, &iv_value, carried_values);
-    ll_rename_scope block_renames(L, suffix[0] ? 1 + n_carried : 0);
+    ll_rename_scope block_renames(L);
     if(suffix[0])
     {
         if(iv_value)
@@ -2242,12 +2232,7 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_emitf(L, "  %s = add %s 0, %lld", iv_const_name, iv_ty, (long long)iv_value);
 
         /* This trip's names; restored after the trip. */
-        int max_renames = 1 + iter_value_count;
-        for(int bi = 0; bi < n_body_ops; bi++)
-        {
-            max_renames += body_ops[bi]->num_results;
-        }
-        ll_rename_scope trip_renames(L, max_renames);
+        ll_rename_scope trip_renames(L);
 
         if(iv_value_obj)
         {

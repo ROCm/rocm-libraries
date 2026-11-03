@@ -1527,8 +1527,8 @@ static rocke_region_t* parse_region(rocke_ir_builder_t* b, line_reader_t* lr, va
  * already: one of an enclosing loop, whose body this loop is in, or an earlier
  * one of this loop. Rebinding it would make the inner body's reads of the
  * name read this value, and retiring this loop's values would unbind the
- * outer one. Returns false (builder failed) on a refusal or OOM. */
-static bool bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value_t* v)
+ * outer one. A refusal raises a ValueError (rocke_i_set_err). */
+static void bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value_t* v)
 {
     const rocke_value_t* bound = vt_get(vt, v->name);
     if(bound && bound->op && bound->op->opcode == ROCKE_OP_SCF_FOR)
@@ -1545,15 +1545,12 @@ static bool bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value
                             ROCKE_ERR_VALUE,
                             "%s",
                             rocke_i_reused_loop_name_message(v->name, msg, sizeof msg));
-            return false;
         }
     }
     if(vt_put(vt, v->name, v) != 0)
     {
         rocke_i_set_err(b, ROCKE_ERR_OOM, "value table OOM");
-        return false;
     }
-    return true;
 }
 
 /* Register block-defined SSA values for an scf.for op (iv + iter-args), so the
@@ -1591,10 +1588,7 @@ static void register_block_values(
             if(v)
             {
                 v->op = op;
-                if(!bind_block_value(b, vt, v))
-                {
-                    return;
-                }
+                bind_block_value(b, vt, v);
                 added[na++] = v->name;
             }
         }
@@ -1615,10 +1609,7 @@ static void register_block_values(
                     if(v)
                     {
                         v->op = op;
-                        if(!bind_block_value(b, vt, v))
-                        {
-                            return;
-                        }
+                        bind_block_value(b, vt, v);
                         added[na++] = v->name;
                     }
                 }
