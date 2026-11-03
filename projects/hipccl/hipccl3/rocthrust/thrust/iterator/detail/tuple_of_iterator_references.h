@@ -29,7 +29,6 @@
 
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/reference_forward_declaration.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
 #include _THRUST_STD_INCLUDE(__utility/move.h)
@@ -53,24 +52,24 @@ struct maybe_unwrap_nested
 };
 
 template <class... Us, class... Ts>
-struct maybe_unwrap_nested<tuple<Us...>, tuple_of_iterator_references<Ts...>>
+struct maybe_unwrap_nested<_THRUST_STD::tuple<Us...>, tuple_of_iterator_references<Ts...>>
 {
-  THRUST_HOST_DEVICE tuple<Us...> operator()(const tuple_of_iterator_references<Ts...>& t) const
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<Us...> operator()(const tuple_of_iterator_references<Ts...>& t) const
   {
     return t.template __to_tuple<Us...>(typename _THRUST_STD::__make_tuple_indices<sizeof...(Ts)>::type{});
   }
 };
 
 template <typename... Ts>
-class tuple_of_iterator_references : public tuple<Ts...>
+class tuple_of_iterator_references : public _THRUST_STD::tuple<Ts...>
 {
 public:
-  using super_t = tuple<Ts...>;
+  using super_t = _THRUST_STD::tuple<Ts...>;
   using super_t::super_t;
 
   tuple_of_iterator_references() = default;
 
-  // allow implicit construction from tuple<refs>
+  // allow implicit construction from _THRUST_STD::tuple<refs>
   THRUST_HOST_DEVICE tuple_of_iterator_references(const super_t& other)
       : super_t(other)
   {}
@@ -83,7 +82,7 @@ public:
   // XXX might be worthwhile to guard this with an enable_if is_assignable
   THRUST_EXEC_CHECK_DISABLE
   template <typename... Us>
-  THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const tuple<Us...>& other)
+  THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const _THRUST_STD::tuple<Us...>& other)
   {
     super_t::operator=(other);
     return *this;
@@ -103,9 +102,10 @@ public:
   // XXX perhaps we should generalize to reference<T> we could captures reference<pair> this way
   THRUST_EXEC_CHECK_DISABLE
   template <typename Pointer, typename Derived, typename... Us>
-  THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const reference<tuple<Us...>, Pointer, Derived>& other)
+  THRUST_HOST_DEVICE tuple_of_iterator_references&
+  operator=(const reference<_THRUST_STD::tuple<Us...>, Pointer, Derived>& other)
   {
-    using tuple_type = tuple<Us...>;
+    using tuple_type = _THRUST_STD::tuple<Us...>;
 
     // XXX perhaps this could be accelerated
     super_t::operator=(tuple_type{other});
@@ -113,7 +113,7 @@ public:
   }
 
   template <class... Us, _THRUST_STD::enable_if_t<sizeof...(Us) == sizeof...(Ts), int> = 0>
-  THRUST_HOST_DEVICE constexpr operator tuple<Us...>() const
+  THRUST_HOST_DEVICE constexpr operator _THRUST_STD::tuple<Us...>() const
   {
     return __to_tuple<Us...>(typename _THRUST_STD::__make_tuple_indices<sizeof...(Ts)>::type{});
   }
@@ -127,9 +127,9 @@ public:
   }
 
   template <class... Us, size_t... Id>
-  THRUST_HOST_DEVICE constexpr tuple<Us...> __to_tuple(_THRUST_STD::__tuple_indices<Id...>) const
+  THRUST_HOST_DEVICE constexpr _THRUST_STD::tuple<Us...> __to_tuple(_THRUST_STD::__tuple_indices<Id...>) const
   {
-    return {maybe_unwrap_nested<Us, Ts>{}(get<Id>(*this))...};
+    return {maybe_unwrap_nested<Us, Ts>{}(_THRUST_STD::get<Id>(*this))...};
   }
 };
 } // namespace detail

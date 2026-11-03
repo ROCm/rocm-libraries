@@ -38,10 +38,6 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
-#endif
-
 #if _CCCL_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
@@ -195,8 +191,8 @@ TEST(CopyTests, TestCopyToDiscardIteratorZipped)
   thrust::device_vector<T> d_output(5);
   thrust::discard_iterator<> reference(5);
 
-  using Tuple1 = thrust::tuple<thrust::discard_iterator<>, thrust::host_vector<T>::iterator>;
-  using Tuple2 = thrust::tuple<thrust::discard_iterator<>, thrust::device_vector<T>::iterator>;
+  using Tuple1 = _THRUST_STD::tuple<thrust::discard_iterator<>, thrust::host_vector<T>::iterator>;
+  using Tuple2 = _THRUST_STD::tuple<thrust::discard_iterator<>, thrust::device_vector<T>::iterator>;
 
   using ZipIterator1 = thrust::zip_iterator<Tuple1>;
   using ZipIterator2 = thrust::zip_iterator<Tuple2>;
@@ -215,8 +211,8 @@ TEST(CopyTests, TestCopyToDiscardIteratorZipped)
 
   ASSERT_EQ(h_output, h_input);
   ASSERT_EQ(d_output, d_input);
-  ASSERT_EQ_QUIET(reference, thrust::get<0>(h_result.get_iterator_tuple()));
-  ASSERT_EQ_QUIET(reference, thrust::get<0>(d_result.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(reference, _THRUST_STD::get<0>(h_result.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(reference, _THRUST_STD::get<0>(d_result.get_iterator_tuple()));
 }
 
 TYPED_TEST(CopyTests, TestCopyMatchingTypes)
@@ -802,8 +798,8 @@ TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
   Vector v1(3, T(0));
   Vector v2(3, T(0));
 
-  thrust::copy(thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
-               thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)) + v1.size(),
+  thrust::copy(thrust::make_constant_iterator(_THRUST_STD::tuple<T, T>(4, 7)),
+               thrust::make_constant_iterator(_THRUST_STD::tuple<T, T>(4, 7)) + v1.size(),
                thrust::make_zip_iterator(v1.begin(), v2.begin()));
 
   Vector ref1{4, 4, 4};
@@ -992,7 +988,6 @@ struct iterator_traits<only_set_when_expected_it>
 };
 } // namespace std
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_STD_NAMESPACE_BEGIN
 template <>
 struct iterator_traits<only_set_when_expected_it>
@@ -1003,7 +998,6 @@ struct iterator_traits<only_set_when_expected_it>
   using difference_type   = _THRUST_STD::ptrdiff_t;
 };
 _THRUST_STD_NAMESPACE_END
-#  endif
 
 void TestCopyWithBigIndexesHelper(int magnitude)
 {

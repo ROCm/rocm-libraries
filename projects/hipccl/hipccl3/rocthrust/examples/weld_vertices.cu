@@ -55,7 +55,7 @@
  */
 
 // define a 2d float vector
-using vec2 = thrust::tuple<float, float>;
+using vec2 = _THRUST_STD::tuple<float, float>;
 
 int main(void)
 {
@@ -93,7 +93,8 @@ int main(void)
   for (size_t i = 0; i < vertices.size(); i++)
   {
     vec2 v = vertices[i];
-    std::cout << " vertices[" << i << "] = (" << thrust::get<0>(v) << "," << thrust::get<1>(v) << ")" << std::endl;
+    std::cout
+      << " vertices[" << i << "] = (" << _THRUST_STD::get<0>(v) << "," << _THRUST_STD::get<1>(v) << ")" << std::endl;
   }
   for (size_t i = 0; i < indices.size(); i++)
   {

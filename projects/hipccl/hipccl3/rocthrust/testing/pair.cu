@@ -21,10 +21,6 @@
 
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
-
 template <typename T>
 struct TestPairManipulation
 {
@@ -253,8 +249,8 @@ struct TestPairGet
 
     thrust::pair<T, T> p(data[0], data[1]);
 
-    ASSERT_EQUAL(data[0], thrust::get<0>(p));
-    ASSERT_EQUAL(data[1], thrust::get<1>(p));
+    ASSERT_EQUAL(data[0], _THRUST_STD::get<0>(p));
+    ASSERT_EQUAL(data[1], _THRUST_STD::get<1>(p));
   }
 };
 SimpleUnitTest<TestPairGet, BuiltinNumericTypes> TestPairGetInstance;

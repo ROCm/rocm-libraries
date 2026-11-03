@@ -104,7 +104,7 @@ struct binary_search_functor
   template <typename Tuple>
   THRUST_HOST_DEVICE void operator()(Tuple t)
   {
-    thrust::get<1>(t) = func(begin, end, thrust::get<0>(t), comp);
+    _THRUST_STD::get<1>(t) = func(begin, end, _THRUST_STD::get<0>(t), comp);
   }
 }; // binary_search_functor
 

@@ -33,8 +33,8 @@ struct Functor
   template <class Tuple>
   __host__ __device__ float operator()(const Tuple& tuple) const
   {
-    const float x = thrust::get<0>(tuple);
-    const float y = thrust::get<1>(tuple);
+    const float x = _THRUST_STD::get<0>(tuple);
+    const float y = _THRUST_STD::get<1>(tuple);
     return x * y * 2.0f / 3.0f;
   }
 };

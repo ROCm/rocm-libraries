@@ -51,7 +51,7 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<InputIterator1, InputIterator2> mismatch(
   BinaryPredicate pred)
 {
   // Contributed by Erich Elsen
-  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2>;
+  using IteratorTuple = _THRUST_STD::tuple<InputIterator1, InputIterator2>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_first = thrust::make_zip_iterator(first1, first2);
@@ -60,7 +60,8 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<InputIterator1, InputIterator2> mismatch(
   ZipIterator result =
     thrust::find_if_not(exec, zipped_first, zipped_last, thrust::detail::tuple_binary_predicate<BinaryPredicate>{pred});
 
-  return _THRUST_STD::make_pair(thrust::get<0>(result.get_iterator_tuple()), thrust::get<1>(result.get_iterator_tuple()));
+  return _THRUST_STD::make_pair(
+    _THRUST_STD::get<0>(result.get_iterator_tuple()), _THRUST_STD::get<1>(result.get_iterator_tuple()));
 } // end mismatch()
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

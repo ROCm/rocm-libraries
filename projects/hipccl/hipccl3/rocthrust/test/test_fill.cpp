@@ -277,7 +277,7 @@ TYPED_TEST(FillTests, TestFillZipIterator)
 
   thrust::fill(thrust::make_zip_iterator(v1.begin(), v2.begin(), v3.begin()),
                thrust::make_zip_iterator(v1.end(), v2.end(), v3.end()),
-               thrust::tuple<T, T, T>(4, 7, 13));
+               _THRUST_STD::tuple<T, T, T>(4, 7, 13));
 
   Vector ref1{4, 4, 4};
   ASSERT_EQ(ref1, v1);
@@ -292,7 +292,7 @@ TYPED_TEST(FillTests, TestFillZipIterator)
 TYPED_TEST(FillPrimitiveTests, TestFillTuple)
 {
   using T     = typename TestFixture::input_type;
-  using Tuple = thrust::tuple<T, T>;
+  using Tuple = _THRUST_STD::tuple<T, T>;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
