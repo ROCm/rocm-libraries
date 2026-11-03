@@ -875,6 +875,11 @@ _TENSILE_HINT = (
     "kernel writer."
 )
 
+def _declaresRocRollerStreamK(custom_kernel):
+    """A CustomKernel block that uses rocRoller's Stream-K workspace or grid."""
+    grid = custom_kernel.get("grid") or []
+    return custom_kernel.get("workspaceType") == "RocRollerStreamK" or "RocRollerStreamK" in grid
+
 def _requiredFieldsMissing(config, fields):
     return [field for field in fields if field not in config]
 
@@ -950,6 +955,9 @@ def validateCustomKernelMetadata(name, directory=None):
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
             if not isinstance(custom_kernel.get("uniformSummationOrder", False), bool):
                 missing.append("CustomKernel.uniformSummationOrder (true or false)")
+            elif custom_kernel.get("uniformSummationOrder", False) and _declaresRocRollerStreamK(custom_kernel):
+                # hipBLASLt refuses these under uniform summation order anyway.
+                missing.append("CustomKernel.uniformSummationOrder (not allowed on a RocRollerStreamK kernel)")
 
     if missing:
         kind = "External" if is_external else "TensileLite"

@@ -1604,6 +1604,42 @@ namespace
             << "a handwritten custom kernel that declares uniform summation order must be admitted";
     }
 
+    // rocRoller's Stream-K splits each tile's K range by grid and tile index, so
+    // its rows are not summed in one order. The declaration cannot admit it,
+    // whether the kernel is recognised by its partials workspace or by its grid.
+    TEST(RowUniformityStreamKRejection_pre_checkin,
+         HandwrittenRocRollerStreamKDeclaringUniformOrder)
+    {
+        const auto hardware = probeHardware();
+
+        auto declaring = [] {
+            auto solution = probeSolution();
+            solution->sizeMapping.tileProcessingStrategy
+                = TensileLite::TileProcessingStrategy::None;
+            solution->customKernel.name                  = "DummyRocRollerStreamKKernel";
+            solution->customKernel.generated             = false;
+            solution->customKernel.macrotile             = TensileLite::dim3(128, 64, 128);
+            solution->customKernel.uniformSummationOrder = true;
+            return solution;
+        };
+
+        auto byWorkspace = declaring();
+        byWorkspace->customKernel.workspaceType
+            = TensileLite::CustomWorkspaceType::RocRollerStreamK;
+        EXPECT_FALSE(admitsUniformSummationOrder(*byWorkspace, hardware))
+            << "a rocRoller Stream-K workspace kernel must be refused even when it declares "
+               "uniform summation order";
+
+        auto byGrid                 = declaring();
+        byGrid->customKernel.grid.x = TensileLite::CustomGridSize::RocRollerStreamKGrid;
+        EXPECT_FALSE(admitsUniformSummationOrder(*byGrid, hardware))
+            << "a rocRoller Stream-K grid kernel must be refused even when it declares "
+               "uniform summation order";
+
+        EXPECT_TRUE(admitsUniformSummationOrder(*declaring(), hardware))
+            << "control: the same kernel without Stream-K must be admitted";
+    }
+
     // SupportCustomStaggerU: False does not mean the kernel found its stagger
     // somewhere the clamp cannot reach. It means only that the host declines to
     // write the packed StaggerU field, which leaves it 0, and a generated

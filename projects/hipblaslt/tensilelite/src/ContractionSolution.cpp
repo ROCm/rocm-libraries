@@ -7419,6 +7419,15 @@ namespace TensileLite
                           "custom kernel " + customKernel.name
                               + " is not supported under uniform summation order");
 
+        // rocRoller's Stream-K decomposition cuts each tile's K range where the
+        // grid and the tile index put it, so two rows in different tiles can be
+        // summed in different orders whatever the kernel declares.
+        if(handwrittenCustomKernel() && rocRollerStreamKCustomKernel(customKernel))
+            return refuse("CustomKernelStreamK",
+                          "custom kernel " + customKernel.name
+                              + " uses rocRoller's Stream-K decomposition, which is not "
+                                "row-uniform");
+
         if(sizeMapping.isStreamK())
         {
             // The statically-knowable obstacles (atomic fixup,

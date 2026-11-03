@@ -135,6 +135,36 @@ def test_validate_uniform_summation_order_must_be_bool(tmp_path, value, ok):
         assert "CustomKernel.uniformSummationOrder" in msg
 
 
+@pytest.mark.parametrize("streamk", [
+    "grid: [RocRollerStreamK, One, One]",
+    "grid: [TilesX, TilesY, Batch]\n            workspaceType: RocRollerStreamK",
+])
+def test_validate_uniform_summation_order_refused_on_rocroller_streamk(tmp_path, streamk):
+    """rocRoller's Stream-K cuts each tile's K range by grid and tile, so no such
+    kernel can keep uniform summation order; declaring it is an error."""
+    write_kernel(tmp_path / "external.s", f"""\
+          Source:
+            Origin: rocroller
+          Version: 1.0.0
+          Features: {{}}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 128, 1]
+          CustomKernel:
+            args: []
+            macrotile: [128, 64, 128]
+            threads: [256, 1, 1]
+            {streamk}
+            uniformSummationOrder: true
+        """)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert not valid
+    assert "not allowed on a RocRollerStreamK kernel" in msg
+
+
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
     """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""

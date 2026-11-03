@@ -307,7 +307,16 @@ namespace TensileLite
         // Uniform summation order refuses hand-written kernels without it.
         bool uniformSummationOrder = false;
     };
-  
+
+    // A rocRoller Stream-K kernel: partials workspace or rocRoller's own grid.
+    inline bool rocRollerStreamKCustomKernel(CustomKernel const& kernel)
+    {
+        return kernel.workspaceType == CustomWorkspaceType::RocRollerStreamK
+               || kernel.grid.x == CustomGridSize::RocRollerStreamKGrid
+               || kernel.grid.y == CustomGridSize::RocRollerStreamKGrid
+               || kernel.grid.z == CustomGridSize::RocRollerStreamKGrid;
+    }
+
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
     // synchronizerSizePerWG * numTiles * batch, tens of thousands on the shapes
     // MBSK is selected for. A grouped GEMM is handed the slot at its problem

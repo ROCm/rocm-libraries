@@ -7850,11 +7850,13 @@ static rocblaslt_status
     // layout, size multiples, batch count and buffer-addressing extent a kernel
     // was captured under live in its predicates. Hardware and problem only:
     // taskPredicate needs a Task, which needs the workspace size that is checked
-    // separately.
+    // separately. Under uniform summation order, only a kernel that declares it
+    // and can keep it for this problem is eligible, as on the Tensile path.
     auto accepts = [&](const TensileLite::ContractionSolution& solution) {
         if(solution.hardwarePredicate && !(*solution.hardwarePredicate)(*hardware))
             return false;
-        return !solution.problemPredicate || (*solution.problemPredicate)(tensileProblem);
+        return (!solution.problemPredicate || (*solution.problemPredicate)(tensileProblem))
+               && solution.uniformSummationOrderSupported(tensileProblem, *hardware);
     };
     // Heuristic conversion reports workspace requirements but does not filter
     // them, so reject kernels that exceed the caller's budget here.
