@@ -229,7 +229,20 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
                  "ring schedule (not yet ported)");
         return false;
     }
+    /* Reading V straight from global memory is carried in the spec but not
+     * emitted by this engine: the PV body here always reads V_lds. Reject it
+     * under the same contract as the sliced-K ring above. */
+    if(spec->use_v_hbm_direct)
+    {
+        b->status = ROCKE_ERR_NOTIMPL;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "use_v_hbm_direct: the gfx942 C twin does not emit the direct "
+                 "V reads (not yet ported)");
+        return false;
+    }
     ctx->K_SLICED_RING = K_SLICED_RING;
+    ctx->K_HBM_DIRECT = spec->use_k_hbm_direct;
     ctx->K_SLICED_LDSSEQ = spec->use_k_sliced_ldsseq;
     ctx->USE_IGLP_OPT = spec->use_iglp_opt;
     ctx->USE_GLOBAL_LOAD_LDS_K = spec->use_global_load_lds_k;
@@ -493,10 +506,21 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     /* The shape K_lds is allocated with. It is the one source for the slot byte
      * stride and for where Q is staged, so both follow the buffer that actually
      * exists rather than the logical K tile: the sliced-K ring holds only a
-     * head-dim slice per row. (The Python builder's use_k_hbm_direct K stub has
-     * no counterpart here: this engine does not build that knob.) */
-    const int K_LDS_SHAPE[3] = {K_BUFS, T, K_SLICED_ACTIVE ? K_SLICE_HD : HD};
-    const char* K_LDS_NAME = K_SLICED_ACTIVE ? "KldsS" : "Klds";
+     * head-dim slice per row, and use_k_hbm_direct allocates a one-element stub
+     * per buffer. */
+    int K_LDS_SHAPE[3] = {K_BUFS, T, HD};
+    const char* K_LDS_NAME = "Klds";
+    if(K_SLICED_ACTIVE)
+    {
+        K_LDS_SHAPE[2] = K_SLICE_HD;
+        K_LDS_NAME = "KldsS";
+    }
+    else if(ctx->K_HBM_DIRECT)
+    {
+        K_LDS_SHAPE[1] = 1;
+        K_LDS_SHAPE[2] = 1;
+        K_LDS_NAME = "KldsStub";
+    }
     const int K_LDS_ROWS = K_LDS_SHAPE[1];
     const int K_LDS_ROW_ELEMS = K_LDS_SHAPE[2];
     /* Bytes of one K_lds slot. */
@@ -507,9 +531,10 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->K_BUF_BYTES = K_BUF_BYTES;
 
     /* Q is staged through K_lds only when every slot holds full [T, HD] K rows.
-     * A K_lds without them (the sliced-K ring) reads Q straight from global
-     * memory rather than falling back to a Q_lds slab. Q can alias K_lds when
-     * the dtypes match and the K_lds rows of all slots hold the BLOCK_M Q rows. */
+     * A K_lds without them (the sliced-K ring, the K stub) reads Q straight from
+     * global memory rather than falling back to a Q_lds slab. Q can alias K_lds
+     * when the dtypes match and the K_lds rows of all slots hold the BLOCK_M Q
+     * rows. */
     const bool K_LDS_HAS_FULL_ROWS = (K_LDS_ROWS == T) && (K_LDS_ROW_ELEMS == HD);
     const bool Q_DIRECT_GLOBAL = spec->use_q_direct_global || !K_LDS_HAS_FULL_ROWS;
     const bool Q_ALIAS_K = (!Q_DIRECT_GLOBAL) && rocke_type_eq(K_LDS_DTYPE, dtype)

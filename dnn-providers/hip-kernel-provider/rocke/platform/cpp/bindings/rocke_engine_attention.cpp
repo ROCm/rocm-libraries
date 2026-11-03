@@ -850,6 +850,8 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_k_sliced_ldsseq = a_bool(d, "use_k_sliced_ldsseq", s.use_k_sliced_ldsseq);
     s.use_k_sliced_ring = a_bool(d, "use_k_sliced_ring", s.use_k_sliced_ring);
     s.use_q_direct_global = a_bool(d, "use_q_direct_global", s.use_q_direct_global);
+    s.use_v_hbm_direct = a_bool(d, "use_v_hbm_direct", s.use_v_hbm_direct);
+    s.use_k_hbm_direct = a_bool(d, "use_k_hbm_direct", s.use_k_hbm_direct);
     s.use_qk_pv_sched_group_barrier
         = a_bool(d, "use_qk_pv_sched_group_barrier", s.use_qk_pv_sched_group_barrier);
     s.k_slice_hd = a_int(d, "k_slice_hd", s.k_slice_hd);
