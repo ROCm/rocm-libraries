@@ -13,6 +13,7 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--default-comgr", default="")
+    parser.add_argument("--needs-llvm-flavor", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -21,12 +22,10 @@ def main():
     env = dict(os.environ)
     if not env.get("ROCKE_COMGR_LIB") and args.default_comgr:
         env["ROCKE_COMGR_LIB"] = args.default_comgr
-    # Native IR consumers receive this owner's evidence; they never load COMGR.
-    # Python test commands own their own session and must not inherit a forced
-    # flavor that would hide their AUTO/failed-loader regression cases.
-    if Path(command[0]).resolve() != Path(sys.executable).resolve() and not env.get(
-        "ROCKE_LLVM_FLAVOR"
-    ):
+    # Only explicitly marked native AUTO-lowering tests need owner evidence.
+    # Host-only binaries and Python tests keep their own compiler-free/session
+    # contracts; command filenames are not a resource-policy classifier.
+    if args.needs_llvm_flavor and not env.get("ROCKE_LLVM_FLAVOR"):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
         from rocke.runtime.comgr import _require_compiler_info
         from rocke.core.llvm_profile import _flavor_for_llvm

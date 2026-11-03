@@ -147,6 +147,37 @@ def test_runner_passes_registered_fixture_to_both_backends(
     assert any("^rocke_storage$" in cmd for cmd, _ in calls) is not override
 
 
+@pytest.mark.parametrize("built", [False, True])
+def test_wrapped_ctest_exposes_real_binary_and_readiness(
+    runner, monkeypatch, tmp_path, built
+):
+    (tmp_path / "CTestTestfile.cmake").touch()
+    (tmp_path / "CMakeCache.txt").touch()
+    binary = tmp_path / "native_test"
+    if built:
+        binary.touch()
+    prefix = [
+        sys.executable,
+        str(runner.TOOLS / "run_with_comgr.py"),
+        "--needs-llvm-flavor",
+        "--default-comgr",
+        "selected",
+        "--",
+    ]
+    listing = {"tests": [{"name": "rocke_storage", "command": prefix + [str(binary)]}]}
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(listing)
+        ),
+    )
+    assert runner._native_executable(
+        {}, tmp_path, "Release", "unused", "rocke_storage"
+    ) == str(binary)
+    assert runner.ctest_ready(tmp_path, "Release") is built
+
+
 @pytest.mark.parametrize("built", ["none", "partial", "all"])
 @pytest.mark.parametrize("ctest_rc", [0, 8])
 def test_ctest_readiness_and_failure_propagation(

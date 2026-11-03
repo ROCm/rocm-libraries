@@ -33,6 +33,8 @@ if(NOT _ROCKE_BUILD_COMGR_DEFAULT)
   endif()
 endif()
 rocke_comgr_test_launcher(_ROCKE_TEST_LAUNCH "${_ROCKE_BUILD_COMGR_DEFAULT}")
+rocke_comgr_test_launcher(_ROCKE_LLVM_TEST_LAUNCH "${_ROCKE_BUILD_COMGR_DEFAULT}"
+                         NEEDS_LLVM_FLAVOR)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

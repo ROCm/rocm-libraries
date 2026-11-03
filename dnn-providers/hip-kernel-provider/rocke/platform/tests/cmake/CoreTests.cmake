@@ -33,7 +33,7 @@ if(BUILD_TESTING)
   if(Python3_Interpreter_FOUND)
     add_test(
       NAME rocke_arch_domain_reproducibility
-      COMMAND ${_ROCKE_TEST_LAUNCH} "${Python3_EXECUTABLE}" -u
+      COMMAND "${Python3_EXECUTABLE}" -u
               "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
               --check --unvalidated-exit-code 77)
     set_tests_properties(
@@ -66,7 +66,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_tf32 core/test_tf32.cpp)
   target_link_libraries(rocke_tf32 PRIVATE rocke_core)
-  add_test(NAME rocke_tf32 COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_tf32>)
+  add_test(NAME rocke_tf32 COMMAND ${_ROCKE_LLVM_TEST_LAUNCH} $<TARGET_FILE:rocke_tf32>)
   set_tests_properties(rocke_tf32 PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_tf32)
   set_target_properties(rocke_tf32 PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
@@ -152,7 +152,7 @@ if(BUILD_TESTING)
       target_link_libraries(rocke_ir_serialize_roundtrip PRIVATE m)
     endif()
     add_test(NAME rocke_ir_serialize_roundtrip
-             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_ir_serialize_roundtrip>)
+             COMMAND ${_ROCKE_LLVM_TEST_LAUNCH} $<TARGET_FILE:rocke_ir_serialize_roundtrip>)
     set_tests_properties(rocke_ir_serialize_roundtrip
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_serialize_roundtrip)
@@ -169,7 +169,7 @@ if(BUILD_TESTING)
     add_executable(rocke_future_intrinsic_lowering core/future_intrinsic_lowering.cpp)
     target_link_libraries(rocke_future_intrinsic_lowering PRIVATE rocke_core)
     add_test(NAME rocke_future_intrinsic_lowering
-             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_future_intrinsic_lowering>)
+             COMMAND ${_ROCKE_LLVM_TEST_LAUNCH} $<TARGET_FILE:rocke_future_intrinsic_lowering>)
     set_tests_properties(rocke_future_intrinsic_lowering
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_future_intrinsic_lowering)
@@ -239,7 +239,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
     add_executable(rocke_nontemporal_hip core/test_nontemporal_hip.cpp)
     target_link_libraries(rocke_nontemporal_hip PRIVATE rocke_core)
-    add_test(NAME rocke_nontemporal_hip COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_nontemporal_hip>)
+    add_test(NAME rocke_nontemporal_hip COMMAND ${_ROCKE_LLVM_TEST_LAUNCH} $<TARGET_FILE:rocke_nontemporal_hip>)
     set_tests_properties(rocke_nontemporal_hip PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_nontemporal_hip)
     set_target_properties(rocke_nontemporal_hip

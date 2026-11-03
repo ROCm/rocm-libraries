@@ -130,6 +130,24 @@ def ctest_tests(
 _CTEST_READINESS_EXEMPT = frozenset({"rocke_arch_domain_reproducibility"})
 
 
+def native_ctest_command(command: list[str]) -> list[str]:
+    """Read the target command behind our explicit source-test launcher."""
+    if (
+        len(command) > 1
+        and Path(command[1]).resolve() == (TOOLS / "run_with_comgr.py").resolve()
+    ):
+        try:
+            separator = command.index("--")
+        except ValueError as error:
+            raise ValueError(
+                "compiler test launcher has no command separator"
+            ) from error
+        command = command[separator + 1 :]
+        if not command:
+            raise ValueError("compiler test launcher has no target command")
+    return command
+
+
 def ctest_ready(build_root: Path, config: str) -> bool:
     if not (build_root / "CTestTestfile.cmake").is_file():
         print("\n== ctest: SKIPPED (no configured test build) ==")
@@ -138,7 +156,7 @@ def ctest_ready(build_root: Path, config: str) -> bool:
     # mean the registered native suite was built. Preserve run_all's contract:
     # only launch the entire CTest suite once at least one build product exists.
     commands = [
-        test.get("command", [])
+        native_ctest_command(test.get("command", []))
         for test in ctest_tests(build_root, config)
         if test.get("name") not in _CTEST_READINESS_EXEMPT
     ]
@@ -194,7 +212,7 @@ def _native_executable(
         ]
         if len(commands) != 1 or not commands[0]:
             raise ValueError(f"CTest did not resolve the built {ctest_name} executable")
-        executable = commands[0][0]
+        executable = native_ctest_command(commands[0])[0]
     return executable
 
 
