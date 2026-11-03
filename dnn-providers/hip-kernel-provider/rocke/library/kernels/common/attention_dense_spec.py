@@ -574,6 +574,32 @@ class AttentionDenseSpec:
         return kernel_name_join(*parts)
 
 
+#: The one dtype an fp8 KV loader decodes. The K/V pointers are declared OCP
+#: fp8e4m3, so a bf16 or FNUZ tensor is read as OCP and silently produces wrong
+#: output. Compared by name so no torch import is needed, which also rejects
+#: ``torch.float8_e4m3fnuz``.
+OCP_FP8_KV_DTYPE = "torch.float8_e4m3fn"
+
+
+def require_ocp_fp8_kv(named_tensors) -> None:
+    """Raise unless every ``(name, tensor)`` is OCP fp8 K/V.
+
+    The single home of the fp8 K/V dtype rule. It lives beside
+    :attr:`AttentionDenseSpec.kv_elem_bytes`, which is what makes the rule
+    load-bearing, so the dispatch binding and the runner enforce one wording
+    instead of two. ``kernels`` may not import ``dispatch``, so a checker that
+    both layers share has to live here.
+    """
+    for name, tensor in named_tensors:
+        dtype = getattr(tensor, "dtype", None)
+        if str(dtype) != OCP_FP8_KV_DTYPE:
+            raise ValueError(
+                f"fp8 dense expects OCP fp8 {name} ({OCP_FP8_KV_DTYPE}), got "
+                f"{dtype!r}; a bf16 or FNUZ tensor is read as OCP fp8 and "
+                "silently produces wrong output"
+            )
+
+
 def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
     """Cache identity: the arch, the concrete spec type, and every spec field
     that affects codegen.

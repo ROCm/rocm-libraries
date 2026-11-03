@@ -100,6 +100,7 @@ from kernels.common.attention_dense_spec import (
     attention_dense_cache_key,
     check_dense_scale,
     check_dense_spec_preflight,
+    require_ocp_fp8_kv,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -749,11 +750,10 @@ def supports_attention_dense(
     if not ok:
         return False, why
     if spec.kv_storage_dtype is not None:
-        # The fp8 loaders stream KV in flat groups of 8 elems per thread, so the
+        # The fp8 loader streams KV in flat groups of 8 elems per thread, so the
         # tile element count must divide evenly by threads*8. Without this gate
-        # the sync loader asserts at codegen (BN*D % (THREADS*8)) and the
-        # two-phase loader silently truncates its dequant loop -- emitting no
-        # Phase-2 dequant and reading uninitialized LDS. threads = num_waves*64.
+        # the loader asserts at codegen (BN*D % (THREADS*8)). threads =
+        # num_waves*64.
         threads = spec.num_waves * 64
         if (spec.block_n * spec.head_size) % (threads * 8) != 0:
             return False, (
@@ -3322,19 +3322,10 @@ def run_attention_dense_torch(
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
     check_dense_scale(scale)
     if spec.kv_storage_dtype == "fp8e4m3":
-        # The K/V pointers are declared OCP fp8e4m3, so the loader decodes the bytes
-        # as OCP. A bf16 or FNUZ tensor would be misread and silently produce wrong
-        # output. Validate here too, not only in the dispatch binding: direct callers
-        # of this runner bypass that guard. (kernels cannot import the dispatch
-        # helper -- that would invert the layering -- so the dtype is compared by
-        # name, which needs no torch import and rejects float8_e4m3fnuz too.)
-        for name, t in (("k", k), ("v", v)):
-            if str(getattr(t, "dtype", None)) != "torch.float8_e4m3fn":
-                raise ValueError(
-                    f"fp8 dense expects OCP fp8 {name} (torch.float8_e4m3fn), got "
-                    f"{getattr(t, 'dtype', None)!r}; a bf16 or FNUZ tensor is read as "
-                    "OCP fp8 and silently produces wrong output"
-                )
+        # Validate here too, not only in the dispatch binding: direct callers of
+        # this runner bypass that guard. Both call the same checker, so the two
+        # entry points cannot drift apart.
+        require_ocp_fp8_kv((("k", k), ("v", v)))
         # Require the per-tensor dequant scales for fp8 rather than defaulting to
         # 1.0: a direct caller that forgets them would silently dequantize at unit
         # scale and get wrong output. Pass k_scale=v_scale=1.0 for unit-scale KV.

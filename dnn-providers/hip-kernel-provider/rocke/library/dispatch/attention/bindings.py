@@ -298,21 +298,24 @@ def _dense_runner(arch: str):
     return run_attention_dense_torch
 
 
-def _resolve_fp8_scale(
-    name: str, kwargs: Mapping[str, Any], tensors: Mapping[str, Any], label: str
-) -> float:
+def _resolve_fp8_scale(name: str, kwargs: Mapping[str, Any], label: str) -> float:
     """One per-tensor fp8 dequant scale, resolved to a float at bind time.
+
+    Every fp8 binding reads its scales through here, so one rule holds at every
+    entry point: a scale is a bind kwarg. It is a scalar, not an input tensor,
+    so it is not sourced from the ``tensors`` mapping even where that mapping
+    happens to carry the name.
 
     Resolving at bind time host-syncs a device-tensor scale once, not on every
     launch, which keeps graph capture intact. A missing scale raises rather than
     silently dequantizing at unit scale; pass ``1.0`` explicitly for unit-scale KV.
     """
-    value = kwargs.get(name, tensors.get(name))
+    value = kwargs.get(name)
     if value is None:
         raise ValueError(
             f"{label} requires {name!r} (per-tensor dequant scale); none was "
-            f"supplied via bind kwarg or tensors[{name!r}]. Pass {name}=1.0 "
-            f"explicitly for unit-scale KV."
+            f"supplied as a bind kwarg. Pass {name}=1.0 explicitly for "
+            "unit-scale KV."
         )
     return float(value)
 
@@ -329,22 +332,17 @@ def bind_dense_attention_torch(
     run = _dense_runner(str(getattr(request, "arch", "")))
     spec = tuning_spec.kernel_spec
     if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
-        # The loader decodes OCP fp8 (float8_e4m3fn) KV. Reject a bf16 K/V read as
-        # fp8 (silently wrong) and the FNUZ variant (gfx950 is OCP-only, ~2x off).
-        for name in ("k", "v"):
-            kind = _dtype_kind(tensors[name], name)
-            if kind != "fp8":
-                raise ValueError(
-                    f"fp8 dense expects OCP fp8 {name!r} (float8_e4m3fn), got {kind}"
-                )
+        from kernels.common.attention_dense_spec import require_ocp_fp8_kv
+
+        require_ocp_fp8_kv((name, tensors[name]) for name in ("k", "v"))
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
     bind_k_scale = bind_v_scale = None
     if getattr(spec, "kv_storage_dtype", None) is not None:
-        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, tensors, "fp8 dense")
-        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, tensors, "fp8 dense")
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 dense")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 dense")
 
     def launch(**_kw):
         call = {
@@ -469,8 +467,8 @@ def bind_tuning_attention_torch(
     bind_k_scale = float(kwargs.get("k_scale", 1.0))
     bind_v_scale = float(kwargs.get("v_scale", 1.0))
     if bool(getattr(problem, "use_fp8", False)):
-        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, tensors, "fp8 attention")
-        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, tensors, "fp8 attention")
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 attention")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 attention")
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
@@ -1256,12 +1254,12 @@ def _rdna_scalars(view: _RdnaView, head_q: int, kwargs: Mapping[str, Any]):
         softcap = float(softcap)
         if not math.isfinite(softcap) or softcap <= 0:
             raise ValueError("softcap must be finite and positive")
-    if view.kv_fp8 and ("k_scale" not in kwargs or "v_scale" not in kwargs):
-        raise ValueError(
-            "FP8 K/V objects require explicit kwargs['k_scale'] and kwargs['v_scale']"
-        )
-    k_scale = float(kwargs.get("k_scale", 1.0))
-    v_scale = float(kwargs.get("v_scale", 1.0))
+    if view.kv_fp8:
+        k_scale = _resolve_fp8_scale("k_scale", kwargs, "RDNA WMMA fp8 attention")
+        v_scale = _resolve_fp8_scale("v_scale", kwargs, "RDNA WMMA fp8 attention")
+    else:
+        k_scale = float(kwargs.get("k_scale", 1.0))
+        v_scale = float(kwargs.get("v_scale", 1.0))
     stream_default = kwargs.get("stream", 0)
     fence_default = bool(kwargs.get("fence", True))
 
