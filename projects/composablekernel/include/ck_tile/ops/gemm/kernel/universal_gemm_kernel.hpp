@@ -522,8 +522,10 @@ struct UniversalGemmKernel
     ///          alignof(T), because buffer_view holds the pointer as a T* and offsets it in
     ///          elements of T. That is the element size for 1-, 2-, 4- and 8-byte scalars; a
     ///          12-byte 6-bit pack has a 1-byte unit, so its 4 comes from alignof(T) alone.
-    ///          IsSupportedArgument returns true for TDM pipelines, so each hosting kernel calls
-    ///          this (and IsTdmDeviceSupported) instead.
+    ///          IsSupportedArgument ends with this check for TDM pipelines, after its k_batch
+    ///          guards, but checks the device only for named-barrier pipelines. The MultiD GEMM,
+    ///          grouped GEMM, batched contraction and MX GEMM kernels therefore call this and
+    ///          IsTdmDeviceSupported themselves.
     CK_TILE_HOST static bool IsTdmArgumentSupported(const char* op_name,
                                                     index_t k_batch,
                                                     index_t K,
@@ -716,7 +718,7 @@ struct UniversalGemmKernel
         // same reason the large-tensor check above does. Behind it they would report "supported"
         // for a k_batch beyond the K-step count, where SplitKBatchOffset yields a negative
         // splitted_k and the A/B descriptor extents underflow, and for an epilogue with no split-K
-        // store path at all -- a wrong C with no fault and no hang.
+        // store path at all, where RunGemm can only trap.
         if constexpr(!EpilogueSupportsSplitK)
         {
             if(kargs.k_batch != 1)
@@ -1550,8 +1552,9 @@ struct UniversalGemmKernel
             // IsSupportedArgument rejects k_batch != 1 whenever EpilogueSupportsSplitK is false,
             // ahead of the skipCheckValidLaunchParams short-circuit, so no pipeline can opt out of
             // that rejection. This cannot be a static_assert -- it is a runtime `if` on k_batch, so
-            // both arms are compiled for every epilogue, including a TDM epilogue whose
-            // GetVectorSizeC() is 1 and which is correct and fully supported at k_batch == 1.
+            // both arms are compiled for every epilogue, including a TDM epilogue, which cannot
+            // accumulate (SupportsSplitK == false) yet is correct and fully supported at
+            // k_batch == 1.
             if constexpr(EpilogueSupportsSplitK)
             {
                 RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {

@@ -470,6 +470,10 @@ struct GroupedConvolutionBackwardWeightKernel
     static constexpr bool IsStreamK           = is_streamk_partitioner<TilePartitioner>::value;
     static constexpr bool IsComputeV6Pipeline = is_compute_v6_pipeline<GemmPipeline>::value;
 
+    // The GEMM that CallExplicitGemm runs; naming it here does not instantiate it.
+    using ExplicitBatchedGemmKernel =
+        BatchedGemmKernel<TilePartitioner, GemmPipeline, EpiloguePipeline>;
+
     /**
      * @brief Whether this epilogue can accumulate the weight tile across k_batch splits.
      *
@@ -482,10 +486,7 @@ struct GroupedConvolutionBackwardWeightKernel
      */
     static constexpr bool EpilogueSupportsSplitK = [] {
         if constexpr(GroupedConvTraitsType_::ExplicitGemm)
-            // CallExplicitGemm dispatches through UniversalGemmKernel::RunGemm, whose own constant
-            // selects the device arm; read the same constant so host and device cannot drift.
-            return BatchedGemmKernel<TilePartitioner, GemmPipeline, EpiloguePipeline>::
-                UniversalGemmKernel::EpilogueSupportsSplitK;
+            return ExplicitBatchedGemmKernel::UniversalGemmKernel::EpilogueSupportsSplitK;
         else
             return epilogue_can_accumulate_v<EpiloguePipeline> &&
                    !(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
@@ -1147,8 +1148,6 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_DEVICE void CallExplicitGemm(GroupedConvBwdWeightKernelArgsSpecialized& kargs) const
     {
         static_assert(NumDTensor == 0, "Not supported!");
-        using ExplicitBatchedGemmKernel =
-            BatchedGemmKernel<TilePartitioner, GemmPipeline, EpiloguePipeline>;
         const auto batched_gemm_kargs = typename ExplicitBatchedGemmKernel::BatchedGemmKernelArgs{
             {{kargs.out_ptr},
              {kargs.in_ptr},

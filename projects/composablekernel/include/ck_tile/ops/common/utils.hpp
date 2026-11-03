@@ -92,8 +92,8 @@ struct epilogue_can_accumulate<Epilogue, std::void_t<decltype(Epilogue::Supports
  * TdmEpilogue); one that does not declare it is assumed able to accumulate. Kernels with a
  * split-K arm read this so that the host rejection and the device dispatch agree.
  *
- * Note: MxGemmKernel uses the opt-in marker kAtomicAddRequiresEvenVectorSize (absent => cannot
- * accumulate). An epilogue that sets SupportsSplitK = false must not declare that marker.
+ * @note MxGemmKernel reads this trait and additionally requires the opt-in marker
+ * kAtomicAddRequiresEvenVectorSize; an epilogue without that marker cannot accumulate there.
  */
 template <typename Epilogue>
 inline constexpr bool epilogue_can_accumulate_v = impl::epilogue_can_accumulate<Epilogue>::value;
