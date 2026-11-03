@@ -41,12 +41,11 @@ from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _gfx942_4warp_route,
     _tiled_spec_from_problem,
-    run_unified_attention_torch,
 )
-from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.runtime.hip_module import get_device_arch
 
-from ._attention_device_array import DeviceArray
+from ._attention_paged_reference import paged_attention_reference, round_to_half
+from ._attention_tiled_launch import launch_tiled_one_sequence
 
 _ARCH = get_device_arch()
 pytestmark = [
@@ -99,16 +98,6 @@ def rt():
     from rocke.runtime.hip_module import Runtime
 
     return Runtime()
-
-
-def _encode(x, dtype):
-    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
-    x = np.asarray(x, dtype=np.float32)
-    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
-
-
-def _decode(x, dtype):
-    return x.astype(np.float32) if dtype == "fp16" else bf16_to_f32(x)
 
 
 def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
@@ -173,53 +162,13 @@ def _rows_with_masked_leading_tile(kernel_spec, q_len):
     return rows
 
 
-def _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs):
+def _reference(q, k_cache, v_cache, kv_len, block_table, scale):
     """FP32 O for one sequence, bottom-right causal + sliding window, from
     float32 arrays of the uploaded values."""
-    q_len, _, d = q.shape
-    nblk = (kv_len + bs - 1) // bs
-    blocks = block_table[0, :nblk]
-    k = k_cache[blocks].reshape(-1, _HKV, d)[:kv_len]
-    v = v_cache[blocks].reshape(-1, _HKV, d)[:kv_len]
-    k = np.repeat(k.transpose(1, 0, 2), _HQ // _HKV, axis=0)
-    v = np.repeat(v.transpose(1, 0, 2), _HQ // _HKV, axis=0)
-    s = np.matmul(q.transpose(1, 0, 2), k.transpose(0, 2, 1)) * np.float32(scale)
-    p = np.arange(q_len).reshape(-1, 1)
-    kk = np.arange(kv_len).reshape(1, -1)
-    diag = p + (kv_len - q_len)
-    visible = (kk <= diag) & (diag - kk < _WINDOW)
-    # Every row sees at least its diagonal key, so no row is all -inf.
-    s = np.where(visible, s, -np.inf)
-    e = np.exp(s - s.max(axis=-1, keepdims=True))
-    probs = e / e.sum(axis=-1, keepdims=True)
-    return np.matmul(probs, v).transpose(1, 0, 2)
-
-
-def _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype):
-    """Run the tiled 2D path on one sequence; ``q``/``k_cache``/``v_cache`` are
-    float32 arrays of values exact in ``dtype``. Returns O as float32."""
-    q_len, kv_len = problem.total_q, problem.max_seqlen_k
-    host_q = _encode(q, dtype)
-    # Every byte 0xFF is NaN in fp16 and bf16: an element the kernel skips
-    # fails the checks instead of passing on stale memory.
-    out_host = np.empty_like(host_q)
-    out_host.view(np.uint8)[...] = 0xFF
-    out = DeviceArray(rt, out_host)
-    run_unified_attention_torch(
-        problem=problem,
-        q=DeviceArray(rt, host_q),
-        k=DeviceArray(rt, _encode(k_cache, dtype)),
-        v=DeviceArray(rt, _encode(v_cache, dtype)),
-        out=out,
-        cu_seqlens_q=DeviceArray(rt, np.array([0, q_len], dtype=np.int32)),
-        seqused_k=DeviceArray(rt, np.array([kv_len], dtype=np.int32)),
-        softmax_scale=scale,
-        block_table=DeviceArray(rt, block_table),
-        softcap=0.0,
-        backend="tiled",
-        tuning_spec=spec,
+    out, _has_key = paged_attention_reference(
+        q, k_cache, v_cache, kv_len, block_table[0], scale, sliding_window=_WINDOW
     )
-    return _decode(out.read(), dtype)
+    return out
 
 
 def _paged_cache(rng, kv_len, bs, head_size, dtype, k_value=None):
@@ -229,10 +178,10 @@ def _paged_cache(rng, kv_len, bs, head_size, dtype, k_value=None):
     num_blocks = max_blocks + 3
     shape = (num_blocks, bs, _HKV, head_size)
     if k_value is None:
-        k_cache = _decode(_encode(rng.standard_normal(shape), dtype), dtype)
+        k_cache = round_to_half(rng.standard_normal(shape), dtype)
     else:
         k_cache = np.full(shape, k_value, dtype=np.float32)
-    v_cache = _decode(_encode(rng.standard_normal(shape), dtype), dtype)
+    v_cache = round_to_half(rng.standard_normal(shape), dtype)
     perm = rng.permutation(num_blocks)[:max_blocks]
     block_table = perm.reshape(1, max_blocks).astype(np.int32)
     return k_cache, v_cache, block_table, num_blocks
@@ -250,7 +199,7 @@ def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
     # Every visible score equals `score`: q = a, k = b with a * b * D * scale = score.
     a = 1.0 if dtype == "fp16" else 4.0
     # Rounded to ``dtype``, the value the kernel reads.
-    b = _decode(_encode([score / (a * head_size * scale)], dtype), dtype)[0]
+    b = round_to_half([score / (a * head_size * scale)], dtype)[0]
     q = np.full((q_len, _HQ, head_size), a, dtype=np.float32)
     k_cache, v_cache, block_table, num_blocks = _paged_cache(
         rng, kv_len, bs, head_size, dtype, k_value=b
@@ -266,8 +215,10 @@ def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
     assert _rows_with_masked_leading_tile(
         kernel_spec, q_len
     ), "geometry no longer gives any row a fully masked leading tile"
-    out = _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype)
-    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
+    out = launch_tiled_one_sequence(
+        rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype
+    )
+    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale)
 
     assert np.isfinite(out).all(), "non-finite O"
     # Every row sees at least one key, so a collapsed row has |O| ~ 0 while the
@@ -323,7 +274,7 @@ def test_nan_query_row_reaches_output(rt, branch, dtype):
     q_len = kv_len = 256
     rng = np.random.default_rng(0)
     scale = 1.0 / math.sqrt(head_size)
-    q = _decode(_encode(rng.standard_normal((q_len, _HQ, head_size)), dtype), dtype)
+    q = round_to_half(rng.standard_normal((q_len, _HQ, head_size)), dtype)
     q[_NAN_ROW, _NAN_HEAD] = np.nan
     k_cache, v_cache, block_table, num_blocks = _paged_cache(
         rng, kv_len, bs, head_size, dtype
@@ -331,8 +282,10 @@ def test_nan_query_row_reaches_output(rt, branch, dtype):
 
     problem = _problem(dtype, q_len, kv_len, num_blocks, bs, head_size)
     spec = _branch_spec(problem, branch, bs, _ARCH)
-    out = _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype)
-    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
+    out = launch_tiled_one_sequence(
+        rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype
+    )
+    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale)
 
     assert np.isnan(out[_NAN_ROW, _NAN_HEAD]).all(), "NaN row was hidden"
     nan_slot = np.zeros((q_len, _HQ), dtype=bool)
