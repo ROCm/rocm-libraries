@@ -2358,7 +2358,6 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.status = ROCKE_OK;
     L.err = (char*)rocke_arena_calloc(&L.arena, ROCKE_ERR_MSG_CAP);
     L.unroll_elide_sync_op = NULL;
-    L.unroll_suffix = "";
     L.needs_fp_atomic_md = false;
     L.needs_av_scope_md = false;
     L.needs_nontemporal_md = false;
@@ -2371,6 +2370,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.smem_offsets);
     rocke_vec_init(&L.smem_sizes);
     rocke_vec_init(&L.lds_prov);
+    rocke_vec_init(&L.loop_header_names);
     L.lds_aa = rocke_attr_get_bool(&kernel->attrs, "lds_alias_scopes", false);
     L.lds_aa_used = false;
     L.smem_pool_size = 0;

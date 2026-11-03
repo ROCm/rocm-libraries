@@ -333,6 +333,24 @@ if(BUILD_TESTING)
                  rocke_scf_for_name_reuse)
   endif()
 
+  # A failed LLVM lowering gives the values of an scf.for body their names back.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_scf_for_lowering_restores_names.cpp")
+    add_executable(rocke_scf_for_lowering_restores_names
+                   core/test_scf_for_lowering_restores_names.cpp)
+    target_link_libraries(rocke_scf_for_lowering_restores_names PRIVATE rocke_core)
+    add_test(NAME rocke_scf_for_lowering_restores_names
+             COMMAND rocke_scf_for_lowering_restores_names)
+    set_tests_properties(rocke_scf_for_lowering_restores_names
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_scf_for_lowering_restores_names)
+    set_target_properties(rocke_scf_for_lowering_restores_names
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_scf_for_lowering_restores_names
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_scf_for_lowering_restores_names)
+  endif()
+
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)

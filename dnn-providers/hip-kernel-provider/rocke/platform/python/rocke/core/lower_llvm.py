@@ -35,8 +35,9 @@ from __future__ import annotations
 import enum
 import os
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, List, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 from .arch import MmaEmulationRecipe
 from .codegen_policy import codegen_policy_for_kernel
@@ -1256,7 +1257,7 @@ def _ops_in_region(region: Region) -> Iterator[Op]:
             yield from _ops_in_region(nested)
 
 
-def _loop_block_values(loop: Op) -> Tuple[Optional[Value], List[Value]]:
+def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
     """Return the induction variable and the carried values of the ``scf.for``
     ``loop`` that its body reads, nested regions included.
 
@@ -1266,8 +1267,8 @@ def _loop_block_values(loop: Op) -> Tuple[Optional[Value], List[Value]]:
     """
     iv_name = loop.attrs["iv"]
     carried_names = {meta["name"] for meta in loop.attrs.get("iter_args", [])}
-    iv: Optional[Value] = None
-    carried: List[Value] = []
+    iv: Value | None = None
+    carried: list[Value] = []
     for body_op in _ops_in_region(loop.regions[0]):
         for operand in body_op.operands:
             if operand.op is not loop:
@@ -1793,10 +1794,9 @@ class _Lowerer:
         # For scf.for nesting we record the body-region's recorded
         # yield-operand stack so the latch block can read it back.
         self._yield_stack: List[List[str]] = []
-        # Inside a trip of an unrolled scf.for: the trip's name suffix (one
-        # ".unrollN" per enclosing unrolled loop), which a rolled scf.for
-        # nested in that trip adds to the names its header defines.
-        self._unroll_suffix = ""
+        # The names the headers of the rolled scf.for loops lowered so far
+        # define (see _claim_loop_header_names).
+        self._loop_header_names: set[str] = set()
 
     # ----- helpers -----
 
@@ -7001,21 +7001,38 @@ class _Lowerer:
         else:
             self._lower_normal_for(op)
 
+    def _claim_loop_header_names(self, op: Op, header_label: str) -> str:
+        """Return the suffix the rolled ``scf.for`` ``op`` adds to the names its
+        header defines (its induction variable and carried values), and record
+        the names it defines.
+
+        A loop names these values itself, so two loops of one kernel may share
+        a name: loops side by side, or a loop lowered once per trip of an
+        unrolled loop around it. LLVM needs every name defined once, so the
+        first loop to define a name keeps it, and a loop that would define a
+        name again adds ``.<header_label>`` (unique in the kernel) to all of
+        its names.
+        """
+        names = [op.attrs["iv"]] + [
+            meta["name"] for meta in op.attrs.get("iter_args", [])
+        ]
+        suffix = "" if self._loop_header_names.isdisjoint(names) else f".{header_label}"
+        self._loop_header_names.update(name + suffix for name in names)
+        return suffix
+
     def _lower_normal_for(self, op: Op) -> None:
         """Lower scf.for to normal LLVM loop (header, body, latch, exit).
 
-        Inside a trip of an unrolled loop, the header's induction variable and
-        carried values take the trip's name suffix, so each trip defines its
-        own; the body's reads of them are renamed to match while it lowers.
+        When an earlier loop already defined one of this loop's names, the
+        header's induction variable and carried values take a suffix (see
+        :meth:`_claim_loop_header_names`); the body's reads of them are renamed
+        to match while it lowers.
         """
         num_iter = int(op.attrs.get("num_iter_args", 0))
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
-        suffix = self._unroll_suffix
-        iv_name = op.attrs["iv"] + suffix
-        iter_names = [meta["name"] + suffix for meta in iter_meta]
         iv_ty = _llvm_type(lower.type)
 
         # Capture the predecessor block (for the from-entry edge of phis).
@@ -7025,6 +7042,10 @@ class _Lowerer:
         header = self._new_block("for.header")
         self._blocks[-2].emit(f"  br label %{header.label}")
         self._blocks[-2].terminated = True
+
+        suffix = self._claim_loop_header_names(op, header.label)
+        iv_name = op.attrs["iv"] + suffix
+        iter_names = [meta["name"] + suffix for meta in iter_meta]
 
         # Emit phi nodes in header (filled in for the latch edge after the
         # body region is lowered).
@@ -7054,9 +7075,9 @@ class _Lowerer:
         # its reads of the header's values renamed to the names defined above.
         iv_value, carried_values = _loop_block_values(op)
         block_values = ([iv_value] if iv_value is not None else []) + carried_values
-        saved_names = [(value, value.name) for value in block_values]
-        for value in block_values:
-            value.name += suffix
+        saved_names = [(value, value.name) for value in block_values] if suffix else []
+        for value, name in saved_names:
+            value.name = name + suffix
         self._yield_stack.append([])
         try:
             self.lower_region(op.regions[0])
@@ -7111,7 +7132,9 @@ class _Lowerer:
 
         The renaming reaches every region nested in the body (an ``scf.if``
         body, an if/else branch, an inner loop), so a trip reads its own
-        values and defines its own names there too.
+        values and defines its own names there too. A shared-memory allocation
+        keeps its name: it is one module-level buffer that every trip shares,
+        found by that name (see :meth:`_collect_smem`).
         """
         # Extract loop parameters
         num_iter = int(op.attrs.get("num_iter_args", 0))
@@ -7139,6 +7162,7 @@ class _Lowerer:
         body_results = [
             result
             for body_op in _ops_in_region(op.regions[0])
+            if body_op.name != "tile.smem_alloc"
             for result in body_op.results
         ]
 
@@ -7181,8 +7205,8 @@ class _Lowerer:
                         val_obj.name = current_iter_values[meta["name"]]
                         break
 
-            # Rename all op results in the body, nested regions included, to
-            # have unique names
+            # Rename the op results in the body, nested regions included, to
+            # have unique names (shared-memory allocations keep theirs)
             for result in body_results:
                 values_to_rename.append((result, result.name))
                 base_name = result.name.lstrip("%")
@@ -7201,13 +7225,10 @@ class _Lowerer:
                 self._unroll_elide_sync_op = None
 
             # Lower the body region - it will now produce unique LLVM SSA names
-            outer_suffix = self._unroll_suffix
-            self._unroll_suffix = outer_suffix + iteration_suffix
             self._yield_stack.append([])
             try:
                 self.lower_region(op.regions[0])
             finally:
-                self._unroll_suffix = outer_suffix
                 # Restore all original names
                 for val_obj, saved_name in values_to_rename:
                     val_obj.name = saved_name

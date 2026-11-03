@@ -168,6 +168,55 @@ def _rolled_loop_in_unrolled_loop_expected(lane):
     return np.zeros_like(lane), TRIPS * lane + triangle
 
 
+def _rolled_loops_side_by_side_in_unrolled_loop():
+    """Two rolled ``scf.for`` loops one after the other in the unrolled body,
+    both naming their values ``j`` and ``s``: trip ``k`` adds ``j`` over
+    ``0 <= j <= k`` twice. Every trip lowers both loops, so the kernel holds
+    ``2 * TRIPS`` loops of the same names."""
+    b, y, z, lane = _kernel("unroll_rolled_loops_side_by_side")
+    loop = _unrolled(b, lane)
+    with loop as (k, (acc,)):
+        carried = acc
+        for _ in range(2):
+            inner = b.scf_for_iter(
+                b.const_i32(0),
+                b.add(k, b.const_i32(1)),
+                b.const_i32(1),
+                [("s", carried)],
+                iv_name="j",
+            )
+            with inner as (j, (s,)):
+                b.scf_yield(b.add(s, j))
+            carried = inner.results[0]
+        b.scf_yield(carried)
+    b.global_store(z, lane, loop.results[0])
+    b.ret()
+    return b.kernel
+
+
+def _rolled_loops_side_by_side_in_unrolled_loop_expected(lane):
+    triangle = sum(k * (k + 1) // 2 for k in range(TRIPS))
+    return np.zeros_like(lane), lane + 2 * triangle
+
+
+def _shared_memory_in_nested_if():
+    """Inside an ``scf.if`` in each trip, lanes below ``SPLIT`` allocate shared
+    memory, store ``100 * k + lane`` to it and copy it back to ``Y[lane]``.
+    The allocation names one buffer of the kernel, which every trip shares."""
+    b, y, z, lane = _kernel("unroll_shared_memory_in_nested_if")
+    loop = _unrolled(b, b.const_i32(0))
+    with loop as (k, (acc,)):
+        with b.scf_if(b.cmp_lt(lane, b.const_i32(SPLIT))):
+            lds = b.smem_alloc(I32, [LANES], name_hint="lds")
+            b.smem_store_vN(lds, [lane], b.add(b.mul(k, b.const_i32(100)), lane), 1)
+            stored = b.smem_load_vN(lds, lane, dtype=I32, n=1)
+            b.global_store(y, lane, b.vec_extract(stored, 0))
+        b.scf_yield(b.add(acc, k))
+    b.global_store(z, lane, loop.results[0])
+    b.ret()
+    return b.kernel
+
+
 def _unrolled_loop_in_unrolled_loop():
     """An unrolled ``scf.for`` of three trips inside the unrolled body; its body
     reads the outer induction variable and defines a value."""
@@ -211,7 +260,38 @@ CASES = {
         _unrolled_loop_in_unrolled_loop,
         _unrolled_loop_in_unrolled_loop_expected,
     ),
+    "rolled_loops_side_by_side_in_unrolled_loop": (
+        _rolled_loops_side_by_side_in_unrolled_loop,
+        _rolled_loops_side_by_side_in_unrolled_loop_expected,
+    ),
+    # The allocation copies one lane's value per trip, as the nested if does.
+    "shared_memory_in_nested_if": (
+        _shared_memory_in_nested_if,
+        _result_defined_in_nested_if_expected,
+    ),
 }
+
+
+def _names_defined_more_than_once(text):
+    """The SSA names the LLVM IR ``text`` defines more than once, sorted."""
+    defined = [
+        line.split("=", 1)[0].strip()
+        for line in text.splitlines()
+        if line.startswith("  %") and "=" in line
+    ]
+    return sorted(name for name in set(defined) if defined.count(name) > 1)
+
+
+def _compile(kernel, arch):
+    """Compile ``kernel`` for ``arch``; skip when COMGR cannot be loaded."""
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime import comgr
+
+    try:
+        comgr._resolve_lib()
+    except comgr.ComgrError as error:
+        pytest.skip(f"COMGR not loadable: {str(error)[:200]}")
+    return compile_kernel(kernel, arch=arch).hsaco
 
 
 def _reuse_message(name):
@@ -339,9 +419,15 @@ def test_one_loop_may_not_name_two_of_its_values_alike():
 def test_loops_side_by_side_may_share_names():
     """Names are only taken inside the loop that defines them: two loops one
     after the other may use the same names, and so may each loop nested in
-    them."""
+    them. The kernel still defines each name once and compiles."""
     b, y, z, lane = _kernel("names_side_by_side")
-    first = _unrolled(b, lane)
+    start = lane
+    for _ in range(2):
+        rolled = _inner_loop(b, "j", "s", start, unroll=False)
+        with rolled as (j, (s,)):
+            b.scf_yield(b.add(s, j))
+        start = rolled.results[0]
+    first = _unrolled(b, start)
     with first as (k, (acc,)):
         inner = _inner_loop(b, "j", "s", acc, unroll=False)
         with inner as (j, (s,)):
@@ -355,7 +441,10 @@ def test_loops_side_by_side_may_share_names():
         b.scf_yield(inner.results[0])
     b.global_store(z, lane, second.results[0])
     b.ret()
-    lower_with_both_engines(b.kernel, "gfx942")
+    assert (
+        _names_defined_more_than_once(lower_with_both_engines(b.kernel, "gfx942")) == []
+    )
+    assert _compile(b.kernel, "gfx942")
 
 
 @pytest.mark.parametrize("flavor", FLAVORS)
@@ -368,21 +457,12 @@ def test_both_engines_emit_the_same_text(case, flavor):
 def test_each_trip_defines_its_own_values(case):
     """Every SSA name is defined once."""
     text = lower_with_both_engines(CASES[case][0](), "gfx942")
-    defined = [
-        line.split("=", 1)[0].strip()
-        for line in text.splitlines()
-        if line.startswith("  %") and "=" in line
-    ]
-    assert len(defined) == len(set(defined)), sorted(
-        name for name in set(defined) if defined.count(name) > 1
-    )
+    assert _names_defined_more_than_once(text) == []
 
 
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_kernel_compiles(case):
-    from rocke.helpers.compile import compile_kernel
-
-    assert compile_kernel(CASES[case][0](), arch="gfx942").hsaco
+    assert _compile(CASES[case][0](), "gfx942")
 
 
 def _gpu_arch():
@@ -433,11 +513,9 @@ def test_gpu_every_lane_matches_the_host(case):
         pytest.skip("no GPU")
     if arch not in GPU_ARCHES_RUN_ON:
         pytest.skip(f"has not run on {arch} hardware yet; enable once it has")
-    from rocke.helpers.compile import compile_kernel
-
     build, expected = CASES[case]
     kernel = build()
-    y, z = _run(compile_kernel(kernel, arch=arch).hsaco, kernel.name)
+    y, z = _run(_compile(kernel, arch), kernel.name)
     expected_y, expected_z = expected(np.arange(LANES, dtype=np.int32))
     np.testing.assert_array_equal(y, expected_y)
     np.testing.assert_array_equal(z, expected_z)
