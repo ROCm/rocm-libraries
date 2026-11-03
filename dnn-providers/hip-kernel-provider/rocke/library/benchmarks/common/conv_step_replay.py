@@ -381,7 +381,13 @@ def main(argv=None) -> int:
     for k in need:
         problem, _, _ = B.parse_miopen_cmd(pins[k]["cmd"])
         p = problem
-        max_bytes = max(max_bytes, 2 * p.N * max(p.Di * p.Hi * p.Wi * p.C, p.Do * p.Ho * p.Wo * p.K))
+        # every operand the host data is copied into: activations and the filter
+        # (the filter dominates the deep layers, e.g. s10: 57 MB vs 3.7 MB of dX)
+        max_bytes = max(
+            max_bytes,
+            2 * p.N * max(p.Di * p.Hi * p.Wi * p.C, p.Do * p.Ho * p.Wo * p.K),
+            2 * p.K * p.Z * p.Y * p.X * p.cpg,
+        )
     host_bits = _bf16_random(max_bytes // 2, 42)
     stage2 = {}
     t0 = time.time()
