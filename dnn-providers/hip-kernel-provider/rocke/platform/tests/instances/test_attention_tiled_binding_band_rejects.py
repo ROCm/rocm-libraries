@@ -9,7 +9,10 @@ ignored either field would build the plain causal kernel without saying so, so
 each entry point must raise instead. The default spec must still lower.
 
 CPU only. Needs the ``rocke_engine`` extension (``-DROCKE_BUILD_PYBIND=ON``,
-build dir on ``PYTHONPATH``); skipped when it is not importable.
+build dir on ``PYTHONPATH``); skipped when it is not importable. The gfx950
+``causal_top_left`` refusals are also asserted on the C entry points, without
+the extension, by the ``rocke_attention_tiled_band_rejects`` CTest
+(``platform/tests/instances/attention_tiled_band_rejects.cpp``).
 """
 
 from __future__ import annotations

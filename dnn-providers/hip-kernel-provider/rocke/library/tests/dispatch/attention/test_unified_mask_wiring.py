@@ -1057,5 +1057,136 @@ class TestBandOnGfx1250(unittest.TestCase):
                     self.assertIn("does not implement", why)
 
 
+def _lens_problem(q_lens, kv_lens, **kw):
+    """A gfx942 bf16 D128 GQA-16/2 problem over the given per-sequence lengths."""
+    base = dict(
+        total_q=int(sum(q_lens)),
+        num_seqs=len(q_lens),
+        num_query_heads=16,
+        num_kv_heads=2,
+        head_size=128,
+        block_size=16,
+        max_seqlen_q=int(max(q_lens)),
+        max_seqlen_k=int(max(kv_lens)),
+        dtype="bf16",
+    )
+    base.update(kw)
+    return au.UnifiedAttentionProblem(**base)
+
+
+# Each lands on a different gfx942 2D spec branch of ``_tiled_spec_from_problem``.
+_GFX942_SPEC_ROWS = [
+    ("bf16_d128", dict(dtype="bf16")),
+    ("fp16_d128", dict(dtype="fp16")),
+    ("bf16_d256_4warp", dict(dtype="bf16", head_size=256)),
+    ("bf16_d128_swa", dict(dtype="bf16", sliding_window=128)),
+]
+# (causal_top_left, right_bound, expected name tokens)
+_GFX942_NAME_MASKS = [
+    (True, 0, {"tl"}),
+    (False, -1, {"rbu"}),
+    (False, 16, {"rb16"}),
+    (True, 16, {"tl", "rb16"}),
+]
+
+
+class TestGfx942KernelIdentity(unittest.TestCase):
+    """The band reaches the gfx942 tiled 2D / 3D spec builders: kernel names, cache
+    keys and support gates. The GPU numerics are in
+    ``test_attention_unified_mask_gfx942_numeric.py``."""
+
+    def test_2d_spec_name_carries_mask_tokens(self):
+        for label, kw in _GFX942_SPEC_ROWS:
+            for tl, rb, tokens in _GFX942_NAME_MASKS:
+                with self.subTest(spec=label, tl=tl, rb=rb), _GfxArch("gfx942"):
+                    off = au._tiled_spec_from_problem(
+                        _lens_problem([256], [1024], **kw), "gfx942"
+                    )
+                    on = au._tiled_spec_from_problem(
+                        _lens_problem(
+                            [256], [1024], causal_top_left=tl, right_bound=rb, **kw
+                        ),
+                        "gfx942",
+                    )
+                    self.assertIs(on.causal_top_left, tl)
+                    self.assertEqual(on.right_bound, rb)
+                    parts = on.kernel_name().split("_")
+                    for t in tokens:
+                        self.assertIn(t, parts, on.kernel_name())
+                    off_parts = off.kernel_name().split("_")
+                    for t in ("tl", "rbu", "rb16"):
+                        self.assertNotIn(t, off_parts, off.kernel_name())
+                    self.assertNotEqual(on.kernel_name(), off.kernel_name())
+
+    def test_3d_spec_name_carries_mask_tokens(self):
+        for d in (128, 256):
+            for tl, rb, tokens in _GFX942_NAME_MASKS:
+                with self.subTest(d=d, tl=tl, rb=rb), _GfxArch("gfx942"):
+                    off = au._tiled_3d_spec_from_problem(
+                        _lens_problem([1] * 4, [1024] * 4, head_size=d), "gfx942"
+                    )
+                    on = au._tiled_3d_spec_from_problem(
+                        _lens_problem(
+                            [1] * 4,
+                            [1024] * 4,
+                            head_size=d,
+                            causal_top_left=tl,
+                            right_bound=rb,
+                        ),
+                        "gfx942",
+                    )
+                    parts = on.kernel_name().split("_")
+                    for t in tokens:
+                        self.assertIn(t, parts, on.kernel_name())
+                    self.assertNotEqual(on.kernel_name(), off.kernel_name())
+
+    def test_mask_fields_default_to_bottom_right_causal(self):
+        from dataclasses import fields
+
+        from kernels.gfx942.attention_tiled_2d import UnifiedAttention2DTiledSpec
+        from kernels.gfx942.attention_tiled_3d import UnifiedAttention3DTiledSpec
+
+        for cls in (UnifiedAttention2DTiledSpec, UnifiedAttention3DTiledSpec):
+            with self.subTest(spec=cls.__name__):
+                by_name = {f.name: f for f in fields(cls)}
+                self.assertIs(by_name["causal_top_left"].default, False)
+                self.assertEqual(by_name["right_bound"].default, 0)
+
+    def test_cache_keys_split_on_mask(self):
+        for tl, rb in ((True, 0), (False, -1), (True, 16)):
+            with self.subTest(tl=tl, rb=rb), _GfxArch("gfx942"):
+                on = _lens_problem([256], [1024], causal_top_left=tl, right_bound=rb)
+                off = _lens_problem([256], [1024])
+                for key in (au._tiled_cache_key, au._tiled_3d_cache_key, au._cache_key):
+                    self.assertNotEqual(key(on, "gfx942"), key(off, "gfx942"))
+
+    def test_gfx942_supports_the_band(self):
+        gates = {
+            "tiled": au.supports_native_unified_attention_tiled,
+            "3d": au.supports_native_unified_attention_3d_tiled,
+        }
+        for name, gate in gates.items():
+            q_lens, kv_lens = ([1] * 4, [1024] * 4) if name == "3d" else ([256], [1024])
+            for tl, rb, sw in ((True, 0, 0), (False, -1, 0), (True, 32, 128)):
+                with self.subTest(gate=name, tl=tl, rb=rb, sw=sw), _GfxArch("gfx942"):
+                    p = _lens_problem(
+                        q_lens,
+                        kv_lens,
+                        causal_top_left=tl,
+                        right_bound=rb,
+                        sliding_window=sw,
+                    )
+                    ok, why = gate(p, "gfx942")
+                    self.assertTrue(ok, why)
+
+    def test_right_bound_rejected_with_bias(self):
+        for bias in ("use_alibi", "use_qq_bias"):
+            with self.subTest(bias=bias), _GfxArch("gfx942"):
+                p = _lens_problem([256], [1024], right_bound=16, **{bias: True})
+                ok, why = au.supports_native_unified_attention_tiled(p, "gfx942")
+                self.assertFalse(ok)
+                self.assertIn("ALiBi", why)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -692,7 +692,8 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-    # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
+    # dense block-order decodes, the gfx942 dense spec/IR suite and its IR golden,
+    # spec-wrapper parity gate, the 3D decode split rule
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
@@ -703,6 +704,8 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_gfx942.py"
+        "tests/library/tests/test_attention_dense_gfx942_golden.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"

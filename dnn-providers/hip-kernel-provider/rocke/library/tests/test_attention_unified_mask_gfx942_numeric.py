@@ -15,9 +15,10 @@ the cuDNN band ``(left = sliding_window, right = right_bound)`` around the diago
 
 A row whose band holds no key outputs exactly 0.
 
-The oracle is ``builders.gfx942...parity_unified_attention.ref_paged_attn``. The
-GPU classes are ``gpu``-marked and self-skip off a gfx942 device; the CPU class pins
-the arch and checks kernel identity only. Rows aimed at one specific gfx942 body
+The oracle is ``builders.gfx942...parity_unified_attention.ref_paged_attn``. Every
+class is ``gpu``-marked and self-skips off a gfx942 device; the CPU kernel-identity
+checks live in ``tests/dispatch/attention/test_unified_mask_wiring.py``
+(``TestGfx942KernelIdentity``), which needs no torch. Rows aimed at one specific gfx942 body
 assert its routing predicate first, so a routing change cannot silently move a row
 off the body it is meant to cover.
 
@@ -79,21 +80,6 @@ def _scenarios():
 
 def _scenario(name):
     return next(s for s in _scenarios() if s.name == name)
-
-
-class _PinArch:
-    """Pin ``_RESOLVED_ATTENTION_ARCH`` (memoized process-wide) to ``arch``."""
-
-    def __init__(self, arch: str):
-        self.arch = arch
-
-    def __enter__(self):
-        self._old = au._RESOLVED_ATTENTION_ARCH
-        au._RESOLVED_ATTENTION_ARCH = self.arch
-        return self
-
-    def __exit__(self, *_):
-        au._RESOLVED_ATTENTION_ARCH = self._old
 
 
 _ARCH = "gfx942"
@@ -987,125 +973,6 @@ class TestMask2DLevers:
         assert not torch.isnan(out).any(), "NaN in kernel output"
         err = _max_abs(out, ref)
         assert err < _tol(s.dtype), f"{mask}/{variant}: max_abs={err:.3e}"
-
-
-# ---------------------------------------------------------------------------
-# CPU: kernel identity on the gfx942 spec builders
-# ---------------------------------------------------------------------------
-
-
-def _problem(q_lens, kv_lens, **kw):
-    base = dict(
-        total_q=int(sum(q_lens)),
-        num_seqs=len(q_lens),
-        num_query_heads=16,
-        num_kv_heads=2,
-        head_size=128,
-        block_size=16,
-        max_seqlen_q=int(max(q_lens)),
-        max_seqlen_k=int(max(kv_lens)),
-        dtype="bf16",
-    )
-    base.update(kw)
-    return au.UnifiedAttentionProblem(**base)
-
-
-# Each lands on a different gfx942 2D spec branch of ``_tiled_spec_from_problem``.
-_SPEC_ROWS = [
-    ("bf16_d128", dict(dtype="bf16")),
-    ("fp16_d128", dict(dtype="fp16")),
-    ("bf16_d256_4warp", dict(dtype="bf16", head_size=256)),
-    ("bf16_d128_swa", dict(dtype="bf16", sliding_window=128)),
-]
-# (causal_top_left, right_bound, expected name tokens)
-_NAME_MASKS = [
-    (True, 0, {"tl"}),
-    (False, -1, {"rbu"}),
-    (False, 16, {"rb16"}),
-    (True, 16, {"tl", "rb16"}),
-]
-
-
-class TestKernelIdentity:
-    @pytest.mark.parametrize("tl,rb,tokens", _NAME_MASKS)
-    @pytest.mark.parametrize("label,kw", _SPEC_ROWS, ids=[r[0] for r in _SPEC_ROWS])
-    def test_2d_spec_name_carries_mask_tokens(self, label, kw, tl, rb, tokens):
-        with _PinArch("gfx942"):
-            off = au._tiled_spec_from_problem(_problem([256], [1024], **kw), _ARCH)
-            on = au._tiled_spec_from_problem(
-                _problem([256], [1024], causal_top_left=tl, right_bound=rb, **kw),
-                _ARCH,
-            )
-        assert on.causal_top_left is tl and on.right_bound == rb, label
-        parts = on.kernel_name().split("_")
-        for t in tokens:
-            assert t in parts, (t, on.kernel_name())
-        for t in ("tl", "rbu", "rb16"):
-            assert t not in off.kernel_name().split("_"), off.kernel_name()
-        assert on.kernel_name() != off.kernel_name()
-
-    @pytest.mark.parametrize("tl,rb,tokens", _NAME_MASKS)
-    @pytest.mark.parametrize("d", [128, 256])
-    def test_3d_spec_name_carries_mask_tokens(self, d, tl, rb, tokens):
-        with _PinArch("gfx942"):
-            off = au._tiled_3d_spec_from_problem(
-                _problem([1] * 4, [1024] * 4, head_size=d), _ARCH
-            )
-            on = au._tiled_3d_spec_from_problem(
-                _problem(
-                    [1] * 4, [1024] * 4, head_size=d, causal_top_left=tl, right_bound=rb
-                ),
-                _ARCH,
-            )
-        parts = on.kernel_name().split("_")
-        for t in tokens:
-            assert t in parts, (t, on.kernel_name())
-        assert on.kernel_name() != off.kernel_name()
-
-    def test_mask_fields_default_to_bottom_right_causal(self):
-        from kernels.gfx942.attention_tiled_2d import UnifiedAttention2DTiledSpec
-        from kernels.gfx942.attention_tiled_3d import UnifiedAttention3DTiledSpec
-
-        for cls in (UnifiedAttention2DTiledSpec, UnifiedAttention3DTiledSpec):
-            fields = {f.name: f for f in dataclasses.fields(cls)}
-            assert fields["causal_top_left"].default is False, cls.__name__
-            assert fields["right_bound"].default == 0, cls.__name__
-
-    @pytest.mark.parametrize("tl,rb", [(True, 0), (False, -1), (True, 16)])
-    def test_cache_keys_split_on_mask(self, tl, rb):
-        with _PinArch("gfx942"):
-            on = _problem([256], [1024], causal_top_left=tl, right_bound=rb)
-            off = _problem([256], [1024])
-            assert au._tiled_cache_key(on, _ARCH) != au._tiled_cache_key(off, _ARCH)
-            assert au._tiled_3d_cache_key(on, _ARCH) != au._tiled_3d_cache_key(
-                off, _ARCH
-            )
-            assert au._cache_key(on, _ARCH) != au._cache_key(off, _ARCH)
-
-    @pytest.mark.parametrize("fn", ["tiled", "3d"])
-    def test_gfx942_supports_the_band(self, fn):
-        f = {
-            "tiled": au.supports_native_unified_attention_tiled,
-            "3d": au.supports_native_unified_attention_3d_tiled,
-        }[fn]
-        with _PinArch("gfx942"):
-            for tl, rb, sw in [(True, 0, 0), (False, -1, 0), (True, 32, 128)]:
-                p = _problem(
-                    [1] * 4 if fn == "3d" else [256],
-                    [1024] * 4 if fn == "3d" else [1024],
-                    causal_top_left=tl,
-                    right_bound=rb,
-                    sliding_window=sw,
-                )
-                ok, why = f(p, _ARCH)
-                assert ok, (tl, rb, sw, why)
-
-    @pytest.mark.parametrize("bias", ["use_alibi", "use_qq_bias"])
-    def test_right_bound_rejected_with_bias(self, bias):
-        with _PinArch("gfx942"):
-            p = _problem([256], [1024], right_bound=16, **{bias: True})
-            ok, why = au.supports_native_unified_attention_tiled(p, _ARCH)
-        assert not ok and "ALiBi" in why, why
 
 
 if __name__ == "__main__":
