@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
-# Usage, from projects/rocrand/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
+# AMD ROCm toolchain (amdflang). The recommended default: amdflang is the LLVM-based Fortran compiler shipped with ROCm.
+# Usage, from bindings/fortran/rocrand:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
 
-set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER amdflang CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       amdclang CACHE FILEPATH "C compiler")

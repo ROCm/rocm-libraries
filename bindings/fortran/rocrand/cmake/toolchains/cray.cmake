@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Classic Intel toolchain (ifort). Deprecated by Intel in favour of ifx; kept for sites still pinned to it.
-# Usage, from projects/rocrand/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-classic.cmake
+# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
+# Usage, from bindings/fortran/rocrand:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
 
-set(CMAKE_Fortran_COMPILER ifort CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")

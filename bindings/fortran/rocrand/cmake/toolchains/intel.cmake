@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# NVIDIA HPC SDK toolchain (nvfortran).
-# Usage, from projects/rocrand/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/nvhpc.cmake
+# Intel oneAPI toolchain (ifx, the LLVM-based compiler).
+# Usage, from bindings/fortran/rocrand:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
 
-set(CMAKE_Fortran_COMPILER nvfortran CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       nvc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")

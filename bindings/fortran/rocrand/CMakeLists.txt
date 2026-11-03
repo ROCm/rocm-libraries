@@ -292,8 +292,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocrand-fortran-config.cmake"
 # From this tree's root, not rocrand_VERSION, which standalone is the INSTALLED
 # rocRAND.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _rocrand_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocrand/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocrand/CMakeLists.txt" _rocrand_root)
   string(REGEX MATCH "rocm_setup_version\\([ \t]*VERSION[ \t]+\"?([0-9]+\\.[0-9]+\\.[0-9]+)"
          _m "${_rocrand_root}")
   if(CMAKE_MATCH_1)
