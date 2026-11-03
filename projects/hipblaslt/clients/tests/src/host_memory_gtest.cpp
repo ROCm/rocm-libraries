@@ -116,6 +116,9 @@ namespace
         EXPECT_EQ(failed[0].buf(), nullptr);
         EXPECT_EQ(failed[0].memcheck(), hipErrorOutOfMemory);
 
+        EXPECT_EQ(host_allocation_failure(ok[0]), "");
+        EXPECT_EQ(host_allocation_failure(failed[0]),
+                  "could not allocate 1.07e+09 GiB of pinned host memory");
         EXPECT_EQ(host_allocation_failure({&ok}), "");
         std::string why = host_allocation_failure({&ok, &failed});
         EXPECT_NE(why.find("could not allocate 1.07e+09 GiB of pinned host memory"),

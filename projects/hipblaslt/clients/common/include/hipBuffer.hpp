@@ -212,6 +212,18 @@ private:
     h_memory    buffer;
 };
 
+// Describes the failed allocation of `b`, or returns an empty string when it succeeded.
+inline std::string host_allocation_failure(const HipHostBuffer& b)
+{
+    if(b.memcheck() == hipSuccess)
+        return {};
+    std::ostringstream s;
+    s.precision(3);
+    s << "could not allocate " << double(b.getRequestedBytes()) / double(1 << 30)
+      << " GiB of pinned host memory";
+    return s.str();
+}
+
 // Describes the first host buffer in `groups` whose allocation failed, or returns an empty
 // string when every allocation succeeded.
 inline std::string
@@ -219,14 +231,8 @@ inline std::string
 {
     for(const auto* group : groups)
         for(const auto& b : *group)
-            if(b.memcheck() != hipSuccess)
-            {
-                std::ostringstream s;
-                s.precision(3);
-                s << "could not allocate " << double(b.getRequestedBytes()) / double(1 << 30)
-                  << " GiB of pinned host memory";
-                return s.str();
-            }
+            if(std::string why = host_allocation_failure(b); !why.empty())
+                return why;
     return {};
 }
 
