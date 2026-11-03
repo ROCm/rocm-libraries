@@ -20,6 +20,13 @@ Tests:
   os_flags: [ LINUX ]
   gpu_arch: [ '120?' ] # expected backend for LAYER=8
 
+- name: logging_write_error
+  category: quick
+  function: logging_write_error
+  precision: *single_precision
+  api: C
+  os_flags: [ LINUX ]
+
 - name: logging_kernel_select
   category: quick
   function:

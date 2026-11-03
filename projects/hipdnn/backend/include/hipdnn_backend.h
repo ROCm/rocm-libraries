@@ -438,6 +438,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * contain a hipDNN FlatBuffer envelope with routing metadata, plan tensor UIDs, and opaque
  * plugin-specific execution context bytes.
  *
+ * A plan created by hipdnnBackendCreateAndDeserializeExecutionPlan_ext() is not serialized again:
+ * the call returns the plan bytes it was deserialized from, unchanged, and does not call the
+ * plugin. When those bytes came from a graph-and-plan container, only the embedded plan is
+ * returned. The returned bytes keep their original envelope version, plugin payload and kernel,
+ * so upgrading a plugin does not change them; build a new plan to pick up a newer kernel.
+ *
  * @param [in]  descriptor        A finalized execution plan descriptor.
  * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
  *                                Ignored when @p serializedPlan is @c nullptr.
@@ -459,7 +465,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * extracted and deserialized. A container that carries no execution plan is rejected with
  * HIPDNN_STATUS_BAD_PARAM. A bare execution-plan blob (as produced by
  * hipdnnBackendGetSerializedExecutionPlan_ext()) is deserialized directly. The returned execution
- * plan descriptor is finalized in both cases.
+ * plan descriptor is finalized in both cases. It keeps a copy of the plan bytes, which can include
+ * GPU code objects, for its lifetime; hipdnnBackendGetSerializedExecutionPlan_ext() returns them.
  *
  * The returned plan is bound to the device of @p handle's stream and executes only on handles
  * whose stream is on that device (see hipdnnBackendExecute()). To move a plan to another device,
