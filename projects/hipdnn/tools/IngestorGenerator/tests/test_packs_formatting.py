@@ -25,13 +25,17 @@ from codegen.generator import IngestorGenerator
 _ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _PROVIDER = _REPO_ROOT / "dnn-providers" / "hip-kernel-provider"
-_LIVE_PACKS = (
-    _PROVIDER
-    / "src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp"
-)
+_LIVE_PACKS_DIR = _PROVIDER / "src/tests/engines/kernel_ingestor_engine/packs"
+_LIVE_PACKS = {
+    "gfx950_attention_dense.yaml": _LIVE_PACKS_DIR
+    / "TestGfx950AttentionDensePacks.cpp",
+    "gfx942_attention_dense.yaml": _LIVE_PACKS_DIR
+    / "TestGfx942AttentionDensePacks.cpp",
+}
 _SHIPPED_CONFIGS = (
     "axes_example.yaml",
     "binary_ops.yaml",
+    "gfx942_attention_dense.yaml",
     "gfx950_attention_dense.yaml",
     "scale_add.yaml",
     "variants_example.yaml",
@@ -45,10 +49,13 @@ def _render_packs_test(config_name: str, out: Path) -> str:
     return packs.read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(not _LIVE_PACKS.is_file(), reason="provider tree not checked out")
-def test_gfx950_census_test_regenerates_the_live_file(tmp_path):
-    rendered = _render_packs_test("gfx950_attention_dense.yaml", tmp_path)
-    assert rendered == _LIVE_PACKS.read_text(encoding="utf-8")
+@pytest.mark.skipif(
+    not _LIVE_PACKS_DIR.is_dir(), reason="provider tree not checked out"
+)
+@pytest.mark.parametrize("config_name", sorted(_LIVE_PACKS))
+def test_census_test_regenerates_the_live_file(tmp_path, config_name):
+    rendered = _render_packs_test(config_name, tmp_path)
+    assert rendered == _LIVE_PACKS[config_name].read_text(encoding="utf-8")
 
 
 def _clang_format() -> str | None:

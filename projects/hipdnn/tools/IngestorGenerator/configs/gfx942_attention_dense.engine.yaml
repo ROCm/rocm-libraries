@@ -2,7 +2,8 @@
 #
 # Everything about the engine that rocKE does not know: identity, KMD schema,
 # metadata mapping, the registry space its kernels are drawn from, and how that
-# space is reduced. The shipped kernel set is configs/gfx942_attention_dense.yaml.
+# space is reduced. The shipped kernel set is configs/gfx942_attention_dense.yaml;
+# tests/test_registry_regeneration.py gates it against this manifest.
 #
 #     python tools/registry_enumerator.py --manifest configs/gfx942_attention_dense.engine.yaml --out <scratch>/config.yaml
 #
@@ -138,8 +139,9 @@ enumerate:
   request: dispatch.attention.common:AttentionRequest
   # gfx942_dense_qbminor is the dense candidate whose default spec is the grid the
   # native dispatch launches: one CTA per (query block, query head, batch) at the
-  # qb_minor block order, one KV segment. persistent, nonpersist_decode and
-  # kv_segments are knobs of it, held at that default by reduction.fields.ignored.
+  # qb_minor block order, one KV segment. Its knob space scopes persistent,
+  # nonpersist_decode and kv_segments out (dense_rules.py), so no enumerated spec
+  # leaves that grid kind; reduction.fields.ignored lists them too, as a second guard.
   pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
   # Request fields every cell shares. Batch, sequence lengths and head counts are
   # runtime kernel params on gfx942, so they only seed the build-time spec.
