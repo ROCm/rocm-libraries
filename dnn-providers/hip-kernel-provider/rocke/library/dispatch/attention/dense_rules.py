@@ -130,7 +130,13 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
     "gfx942": _DenseTuningArch(
         # persistent is itself an axis here, so the persistent-only knobs stay
         # and the per-spec duplicate check drops them on non-persistent specs.
+        # A variant that pins the block order (qbminor) pins the grid kind with
+        # it: no persistence, no other order, no KV split, so every spec it
+        # offers launches the same kind of grid as its default (block_m stays a
+        # knob and sizes it).
         scope={
+            "persistent": lambda s: s.nonpersist_decode == "auto",
+            "nonpersist_decode": lambda s: s.nonpersist_decode == "auto",
             "interleave": lambda s: bool(s.causal),
             "lds_row_pad": lambda s: int(s.head_size) == 128,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
@@ -142,7 +148,9 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "causal_diag_split": lambda s: (
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
-            "kv_segments": lambda s: _kv_segments_in_scope(s),
+            "kv_segments": lambda s: (
+                _kv_segments_in_scope(s) and s.nonpersist_decode == "auto"
+            ),
             "window_wave_skip": lambda s: bool(s.causal) and int(s.sliding_window) > 0,
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),

@@ -37,9 +37,10 @@ from .common import (
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
 
-# The dense selectors. gfx942 has one candidate whose space covers both bodies;
-# on gfx950 the grid and persistent bodies serve different features, so each
-# is its own algorithm (wide DMA is a second candidate of the persistent one).
+# The dense selectors. gfx942's tuned candidate has a space covering both bodies
+# (its qbminor candidate fixes the grid one); on gfx950 the grid and persistent
+# bodies serve different features, so each is its own algorithm (wide DMA is a
+# second candidate of the persistent one, qbminor a second of the grid one).
 DENSE_ALGORITHM = "attention_dense"
 DENSE_GRID_ALGORITHM = "attention_dense_grid"
 DENSE_PERSIST_ALGORITHM = "attention_dense_persist"

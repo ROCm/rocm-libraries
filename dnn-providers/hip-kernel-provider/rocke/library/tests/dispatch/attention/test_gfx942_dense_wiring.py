@@ -353,6 +353,39 @@ class TestGfx942DenseQbMinor(unittest.TestCase):
                     self.assertFalse(spec.window_wave_skip)
                     self.assertEqual(spec.block_m, 256)
 
+    def test_knob_space_never_leaves_the_grid(self):
+        """Every spec the variant offers launches its default's kind of grid:
+        persistence, the block order and the KV split are scoped out, not merely
+        ignored downstream (block_m stays a knob and sizes the grid)."""
+        with _Gfx942Arch():
+            for kw in (
+                dict(nhead_q=8, nhead_k=8, seqlen_q=512, seqlen_k=512),
+                dict(hdim_q=64, hdim_v=64),
+                dict(sliding_window=512),
+            ):
+                req = _req(spec_id="gfx942_dense_qbminor", **kw)
+                for level in ("production", "full"):
+                    with self.subTest(level=level, **kw):
+                        specs = [
+                            spec.kernel_spec
+                            for candidate, spec in islice(
+                                iter_registered_attention_combos(
+                                    req,
+                                    candidate_prefix="attention_gfx942_dense_qbminor",
+                                    sweep_level=level,
+                                ),
+                                400,
+                            )
+                        ]
+                        self.assertTrue(specs)
+                        self.assertEqual(
+                            {
+                                (s.persistent, s.nonpersist_decode, s.kv_segments)
+                                for s in specs
+                            },
+                            {(False, "qb_minor", 1)},
+                        )
+
 
 class TestGfx942DenseWavesPerEu(unittest.TestCase):
     def test_shipped_policy_and_knob_override(self):
