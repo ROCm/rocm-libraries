@@ -16,6 +16,12 @@
 # kernel is identified by dtype, head size, mask, window and tuning alone. The head
 # counts therefore sit in enumerate.fixed rather than in a cell axis: every head
 # configuration lands on the same kernels.
+#
+# emit_lse is a compile-time variant: an emit_lse kernel also writes the softmax
+# log-sum-exp (the graph's stats output) through one trailing lse_ptr argument. It is a
+# cell axis, a KMD field and a name slot, so an LSE kernel and its non-LSE twin with the
+# same knobs never share a catalog key, and every non-LSE kernel keeps its spec and code
+# object (emit_lse=False emits no new IR).
 
 dialect: packaged
 authored_subpath: rocKE/gfx942_attention_dense
@@ -48,6 +54,11 @@ kmd_fields:
   type: int
   default_value: 0
 - name: sliding_window
+  type: int
+  default_value: 0
+# 1: the kernel writes LSE through a trailing lse_ptr and serves only graphs that bind a
+# stats output; 0: neither. A record omitting it completes to the non-LSE kernel.
+- name: emit_lse
   type: int
   default_value: 0
 - name: batch
@@ -84,6 +95,7 @@ specialization:
   - causal
   - ragged
   - sliding_window
+  - emit_lse
   - batch
   - seqlen_q
   - seqlen_kv
@@ -111,6 +123,8 @@ specialization:
       field: ragged
     sliding_window:
       field: sliding_window
+    emit_lse:
+      field: emit_lse
     batch:
       field: batch
     seqlen_q:
@@ -133,7 +147,7 @@ arch: gfx942
 provider_root: dnn-providers/hip-kernel-provider
 source: kernels/gfx942/attention_dense.py
 builder: build_attention_dense
-kernel_name_template: attention_dense.{dtype}_d{head_size}_c{causal}_swa{sliding_window}_bm{block_m}_bn{block_n}.gfx942
+kernel_name_template: attention_dense.{dtype}_d{head_size}_c{causal}_swa{sliding_window}_lse{emit_lse}_bm{block_m}_bn{block_n}.gfx942
 
 # The registry space the selection is drawn from (see registry_enumerator.py).
 enumerate:
@@ -167,6 +181,10 @@ enumerate:
         - [TOP_LEFT_CAUSAL, 512]
         - [TOP_LEFT_CAUSAL, 1024]
         - [TOP_LEFT_CAUSAL, 2048]
+    # Innermost: each kernel's LSE twin follows it. The twin differs only in the trailing
+    # lse_ptr store, so it shares the cell's knob space.
+    - fields: [emit_lse]
+      values: [false, true]
   sweep_level: production
   # Every production-sweep spec sharing a cell's feature fields; the knobs it keeps
   # are reduction.fields.performance, every other varying field is held at default.
@@ -181,7 +199,7 @@ enumerate:
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, ragged, batch, seqlen_q, seqlen_kv]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -212,7 +230,8 @@ launch_surface:
       that is not a positive multiple of 32 within a 1024-thread CTA, and for
       non-positive seqlen_q, num_query_heads or batch. Grid is
       (ceil(Sq/block_m), Hq, B) from the candidate's own block_m and the graph's
-      shape; every shipped variant is non-persistent.
+      shape; every shipped variant is non-persistent, and emit_lse does not change
+      the grid.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
 
   - name: block
@@ -240,7 +259,14 @@ launch_surface:
       counts, batch and sequence lengths are runtime kernel arguments and are never
       compared (matchesHeadCounts is false for gfx942). graph_match maps a causal
       band of left_bound L to sliding_window L, declines every non-causal band, and
-      declines a window that leaves query rows no key (seqlen_q - seqlen_kv >= W).
+      declines a window that leaves query rows no key (seqlen_q - seqlen_kv >= W),
+      with or without stats. It binds the stats output when stats_tensor_uid is
+      set and generate_stats is not false (stats_flag declines the uid with false
+      and true without a uid), and declines Max, Sum_exp and the RNG dump
+      (stats_rowstats), a stats tensor that is not FLOAT (stats_dtype), and one
+      that is not rank-4 [B,Hq,Sq,1] with packed strides [Hq*Sq,Sq,1,*],
+      non-virtual, non-ragged, not pass-by-value, with a non-negative uid
+      (stats_layout). gfx950 binds no stats and declines them all as 'stats'.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   - name: kernargs
@@ -248,14 +274,31 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
     kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch]
     guard: >
-      kernelSignature(RUNTIME_HEAD_COUNTS), the ABI of gfx942's one launch contract
-      (hipkernel.gfx942_attention_dense.dispatch.v1), is the 10-arg form
-      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads). Every
-      variant is non-persistent (no fast-division kernargs), use_sinks=False and
-      emit_lse=False. Validated at prepare() time by
-      buildIngestorKernelCode(..., expectedSignature), and at restore by
-      restoreIngestorLaunch() before any saved value is read.
+      kernelSignature(RUNTIME_HEAD_COUNTS, writesLse), the ABI of gfx942's one
+      launch contract (hipkernel.gfx942_attention_dense.dispatch.v1), is the 10-arg
+      form (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) for
+      an emit_lse=0 kernel, and the 11-arg form with lse_ptr last (offset 56) for an
+      emit_lse=1 kernel, chosen by whether the graph binds a stats output. Every
+      variant is non-persistent (no fast-division kernargs) and use_sinks=False.
+      Validated at prepare() time by buildIngestorKernelCode(..., expectedSignature),
+      and at restore by restoreIngestorLaunch() before any saved value is read; the
+      restore selects the form from the saved stats.uid first.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseSignature.cpp
+
+  # emit_lse is baked into the kernel (one trailing lse_ptr store of the natural-log LSE
+  # at element (b*Hq + h)*Sq + s, no stride arguments), so it selects candidates rather
+  # than ranking them.
+  - name: lse
+    python_source: kernels/common/_lse_store.py:validate_dense_lse
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [emit_lse]
+    guard: >
+      candidateWritesLse() reads emit_lse as 0 or 1 and answers nullopt for a
+      missing or other value, which kernelMatches() declines. kernelMatches()
+      admits a candidate only when emit_lse == (the graph binds a stats output),
+      and graph_match binds only the contiguous FP32 [B,Hq,Sq,1] stats tensor
+      validate_dense_lse requires; prepare() re-checks it and throws BAD_PARAM.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   # The cold ranking reads the two LDS/scheduling knobs to order arms; they do not
   # enter the launch.

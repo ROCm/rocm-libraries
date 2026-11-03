@@ -38,7 +38,9 @@
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -58,9 +60,12 @@ using namespace hip_kernel_provider::test_utilities;
  *        tile, that kernel launches with its own geometry and computes what the CPU
  *        reference computes, and a knob pair no kernel has is refused before any plan.
  *
- * The case table is generated so it runs every (head size, dtype, mask, window, tile)
+ * The case table is generated so it runs every (head size, dtype, mask, window, LSE, tile)
  * class the catalog compiles, at a shape the tile divides; a coverage case asserts the
- * table and the installed catalog agree. Head counts vary across rows because the body
+ * table and the installed catalog agree. An LSE row binds the frontend's stats output
+ * (generate_stats, a packed [B, Hq, Sq, 1] FLOAT tensor), selects the class's emit_lse
+ * twin, and grades the LSE against the CPU reference at the default FLOAT SDPA
+ * tolerance, printing its largest error as `LSE_ERROR <case> max_abs=.. max_rel=..`. Head counts vary across rows because the body
  * reads them at runtime. Window rows run Sq = Skv = 2W, so the window really excludes
  * keys, and spell the graph's left_bound as W (the reference keeps left_bound keys,
  * diagonal included). Hand-written rows add cold selection, B > 1, Sq != Skv, both alignments, the
@@ -70,8 +75,9 @@ using namespace hip_kernel_provider::test_utilities;
  * one kernel of the class whose lds_row_pad and pv_priority are the policy arms, which
  * the engine's score ranks first among the arms sharing a tile.
  *
- * A saved plan of one case is loaded with a new handle in both save forms and must compute
- * the original graph's CPU reference without selecting a kernel again.
+ * A saved plan of one case, and of its LSE twin, is loaded with a new handle in both save
+ * forms and must compute the original graph's CPU reference without selecting a kernel
+ * again.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -101,10 +107,18 @@ constexpr size_t KERNEL_ID_LENGTH = 36;
 // loaded plan that applies the default scale 1.0 fails the comparison.
 constexpr const char* SAVE_LOAD_CASE = "Shape_WindowTopLeftCrossLength";
 
+/// The same case binding the stats output: its plan saves the stats uid and restores the
+/// 11-argument kernel.
+constexpr const char* SAVE_LOAD_LSE_CASE = "Shape_WindowTopLeftCrossLength_Lse";
+
+/// The suffix of an LSE row's name.
+constexpr const char* LSE_SUFFIX = "_Lse";
+
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
+constexpr int64_t STATS_UID = 5;
 
 /// Every spelling of the masks the engine serves.
 enum class Mask
@@ -133,6 +147,8 @@ struct GraphShape
     /// Leaves attn_scale_value unset, so the engine must apply 1.0 (no scaling).
     bool omitScale = false;
     std::optional<float> scaleOverride = std::nullopt;
+    /// Binds the stats (LSE) output, so the emit_lse twin serves the graph.
+    bool withStats = false;
 };
 
 struct Tile
@@ -220,7 +236,16 @@ std::string tileName(const Tile& tile)
     return "Bm" + std::to_string(tile.blockM) + "Bn" + std::to_string(tile.blockN);
 }
 
-/// Every catalog class once, forced to its tile, then the hand-written cases.
+/// @p knobCase's twin that binds the stats output, named with LSE_SUFFIX.
+KnobCase lseTwin(KnobCase knobCase)
+{
+    knobCase.name += LSE_SUFFIX;
+    knobCase.shape.withStats = true;
+    return knobCase;
+}
+
+/// Every catalog class once, forced to its tile, each followed by its LSE twin, then the
+/// hand-written cases.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -232,6 +257,11 @@ std::vector<KnobCase> knobCases()
     const std::array<std::pair<int64_t, int64_t>, 4> heads{{{8, 8}, {16, 2}, {8, 1}, {4, 4}}};
 
     std::vector<KnobCase> cases;
+    // A class row and its LSE twin: the same shape, so the two differ only in the output.
+    const auto addClass = [&cases](KnobCase knobCase) {
+        cases.push_back(knobCase);
+        cases.push_back(lseTwin(std::move(knobCase)));
+    };
     std::size_t row = 0;
     for(const int64_t headSize : {int64_t{64}, int64_t{128}})
     {
@@ -242,7 +272,7 @@ std::vector<KnobCase> knobCases()
             for(const auto& tile : tilesFor(headSize, dataType, true, 0))
             {
                 const auto& [hq, hkv] = heads[row++ % std::size(heads)];
-                cases.push_back(
+                addClass(
                     {prefix + "Causal_" + tileName(tile),
                      makeShape(dataType, headSize, hq, hkv, Mask::BOUNDS_TOP_LEFT, 0, 1, 512, 512),
                      FORCED,
@@ -251,18 +281,17 @@ std::vector<KnobCase> knobCases()
             for(const auto& tile : tilesFor(headSize, dataType, false, 0))
             {
                 const auto& [hq, hkv] = heads[row++ % std::size(heads)];
-                cases.push_back(
-                    {prefix + "NoMask_" + tileName(tile),
-                     makeShape(dataType, headSize, hq, hkv, Mask::NO_MASK, 0, 1, 512, 512),
-                     FORCED,
-                     tile});
+                addClass({prefix + "NoMask_" + tileName(tile),
+                          makeShape(dataType, headSize, hq, hkv, Mask::NO_MASK, 0, 1, 512, 512),
+                          FORCED,
+                          tile});
             }
             for(const int64_t window : catalogWindows())
             {
                 const int64_t seq = std::max<int64_t>(512, 2 * window);
                 for(const auto& tile : tilesFor(headSize, dataType, true, window))
                 {
-                    cases.push_back(
+                    addClass(
                         {prefix + "Window" + std::to_string(window) + "_" + tileName(tile),
                          makeShape(
                              dataType, headSize, 1, 1, Mask::WINDOW_TOP_LEFT, window, 1, seq, seq),
@@ -305,6 +334,17 @@ std::vector<KnobCase> knobCases()
                      makeShape(FP16, 64, 4, 1, Mask::WINDOW_TOP_LEFT, 512, 2, 1024, 1536),
                      FORCED,
                      Tile{256, 64}});
+    // The LSE index (b * Hq + h) * Sq + s at B > 1, grouped heads and Sq != Skv, and the
+    // cold ranking over the LSE twins.
+    cases.push_back(lseTwin(cases.back()));
+    cases.push_back(lseTwin({"Shape_Batch3CrossLength",
+                             makeShape(FP16, 128, 16, 2, Mask::NO_MASK, 0, 3, 256, 768),
+                             FORCED,
+                             Tile{256, 64}}));
+    cases.push_back(lseTwin({"Cold_Causal",
+                             makeShape(BF16, 128, 32, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024),
+                             COLD,
+                             Tile{256, 64}}));
     // The scale: absent means 1.0; a non-default value must reach the kernel.
     auto noScale = makeShape(BF16, 128, 8, 8, Mask::BOUNDS_TOP_LEFT, 0, 1, 256, 256);
     noScale.omitScale = true;
@@ -353,10 +393,13 @@ struct SdpaGraph
 {
     std::shared_ptr<Graph> graph;
     std::shared_ptr<TensorAttributes> output;
+    /// The stats (LSE) output, or nullptr for a graph that binds none.
+    std::shared_ptr<TensorAttributes> stats;
 };
 
 /// A single SDPA-forward node with BSHD Q/K/V/O. O is laid out explicitly: the frontend's
-/// default for an unset output is packed BHSD, which the engine declines.
+/// default for an unset output is packed BHSD, which the engine declines. A shape with
+/// stats binds the stats output as the frontend does, FLOAT [B, Hq, Sq, 1], packed.
 SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
 {
     auto graph = std::make_shared<Graph>();
@@ -407,6 +450,10 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
     default:
         throw std::invalid_argument("buildSdpaGraph: unhandled Mask value");
     }
+    if(shape.withStats)
+    {
+        attributes.set_generate_stats(true);
+    }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
     auto o = outputs[0];
@@ -417,7 +464,17 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
         .set_dim({shape.batch, shape.queryHeads, shape.seqQ, shape.headSize})
         .set_stride(bshdStrides(shape.queryHeads, shape.seqQ, shape.headSize));
 
-    return {graph, o};
+    auto stats = outputs[1];
+    if(stats != nullptr)
+    {
+        stats->set_uid(STATS_UID)
+            .set_name("Stats")
+            .set_output(true)
+            .set_data_type(DataType::FLOAT)
+            .set_dim({shape.batch, shape.queryHeads, shape.seqQ, 1})
+            .set_stride({shape.queryHeads * shape.seqQ, shape.seqQ, 1, 1});
+    }
+    return {graph, o, stats};
 }
 
 /// The forward SDPA tolerance every SdpaFwd bundle of this engine is graded at
@@ -429,6 +486,53 @@ float sdpaForwardTolerance(DataType dataType)
                : hipdnn_test_sdk::utilities::sdpa::getToleranceFwd<
                      hipdnn_data_sdk::types::bfloat16>();
 }
+
+/// The FLOAT SDPA forward tolerance every stats output is graded at (the bundles' default;
+/// config/hipkernel_Gfx942AttentionDense.toml names no override).
+constexpr float LSE_TOLERANCE = hipdnn_test_sdk::utilities::sdpa::getToleranceFwd<float>();
+
+/// Grades the LSE as the default FLOAT validator does, and prints its largest absolute and
+/// relative error against the CPU reference as `LSE_ERROR <case> max_abs=.. max_rel=..`, so
+/// a run records how far inside LSE_TOLERANCE the kernel lands.
+class RecordingLseValidator : public hipdnn_test_sdk::utilities::IReferenceValidation
+{
+public:
+    explicit RecordingLseValidator(std::string caseName)
+        : _caseName(std::move(caseName))
+        , _validator(hipdnn_test_sdk::utilities::createAllCloseValidator(
+              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, LSE_TOLERANCE, LSE_TOLERANCE))
+    {
+    }
+
+    bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
+                  hipdnn_data_sdk::utilities::ITensor& implementation) const override
+    {
+        // Both are the packed host copies of one tensor, so they compare element by element.
+        if(reference.dims() == implementation.dims()
+           && reference.strides() == implementation.strides()
+           && reference.elementSpace() == reference.elementCount())
+        {
+            const auto* expected = static_cast<const float*>(reference.rawHostData());
+            const auto* actual = static_cast<const float*>(implementation.rawHostData());
+            double maxAbs = 0.0;
+            double maxRel = 0.0;
+            for(std::size_t i = 0; i < reference.elementCount(); ++i)
+            {
+                const auto want = static_cast<double>(expected[i]);
+                const double error = std::fabs(static_cast<double>(actual[i]) - want);
+                maxAbs = std::max(maxAbs, error);
+                maxRel = std::max(maxRel, error / std::max(std::fabs(want), 1e-30));
+            }
+            std::cout << "LSE_ERROR " << _caseName << " max_abs=" << maxAbs << " max_rel=" << maxRel
+                      << " tolerance=" << static_cast<double>(LSE_TOLERANCE) << '\n';
+        }
+        return _validator->allClose(reference, implementation);
+    }
+
+private:
+    std::string _caseName;
+    std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> _validator;
+};
 
 std::vector<KnobSetting> knobSettingsFor(const Tile& tile)
 {
@@ -526,6 +630,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         {"block_n", tile.blockN},
         {"lds_row_pad", POLICY_LDS_ROW_PAD},
         {"pv_priority", POLICY_PV_PRIORITY},
+        {"emit_lse", int64_t{shape.withStats ? 1 : 0}},
     };
 
     std::vector<std::string> ids;
@@ -683,7 +788,7 @@ using IntegrationGpuGfx942AttentionDenseKnobCoverage
     = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head
-/// size, dtype, causal flag, window and tile. The table must run every such class the
+/// size, dtype, causal flag, window, LSE and tile. The table must run every such class the
 /// catalog carries at its policy arms, and nothing the catalog lacks.
 TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelClass)
 {
@@ -691,7 +796,8 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
            "read the catalog's kernel classes from";
 
-    using KernelClass = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t, int64_t>;
+    using KernelClass
+        = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t, int64_t, int64_t>;
 
     std::set<KernelClass> tableClasses;
     for(const auto& knobCase : knobCases())
@@ -700,6 +806,7 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                              catalogDtypeName(knobCase.shape.dataType),
                              catalogCausal(knobCase.shape.mask),
                              knobCase.shape.window,
+                             int64_t{knobCase.shape.withStats ? 1 : 0},
                              knobCase.tile.blockM,
                              knobCase.tile.blockN);
     }
@@ -717,17 +824,18 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         const auto* headSize = intField("head_size");
         const auto* causal = intField("causal");
         const auto* window = intField("sliding_window");
+        const auto* emitLse = intField("emit_lse");
         const auto* blockM = intField("block_m");
         const auto* blockN = intField("block_n");
         if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || window == nullptr
-           || blockM == nullptr || blockN == nullptr)
+           || emitLse == nullptr || blockM == nullptr || blockN == nullptr)
         {
             ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
                           << " carries no string dtype and integer head_size, causal, "
-                             "sliding_window, block_m and block_n";
+                             "sliding_window, emit_lse, block_m and block_n";
             return;
         }
-        catalogClasses.emplace(*headSize, *dtypeName, *causal, *window, *blockM, *blockN);
+        catalogClasses.emplace(*headSize, *dtypeName, *causal, *window, *emitLse, *blockM, *blockN);
     });
 
     const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
@@ -736,10 +844,12 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         {
             if(other.count(kernelClass) == 0)
             {
-                const auto& [headSize, dtype, causal, window, blockM, blockN] = kernelClass;
+                const auto& [headSize, dtype, causal, window, emitLse, blockM, blockN]
+                    = kernelClass;
                 text += " (D" + std::to_string(headSize) + ", " + dtype + ", causal "
-                        + std::to_string(causal) + ", window " + std::to_string(window) + ", "
-                        + std::to_string(blockM) + "/" + std::to_string(blockN) + ")";
+                        + std::to_string(causal) + ", window " + std::to_string(window)
+                        + ", emit_lse " + std::to_string(emitLse) + ", " + std::to_string(blockM)
+                        + "/" + std::to_string(blockN) + ")";
             }
         }
         return text.empty() ? std::string(" none") : text;
@@ -797,6 +907,12 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     GraphVerificationContext context(*sdpa.graph);
     const float tolerance = sdpaForwardTolerance(testCase.shape.dataType);
     registerValidator(context, sdpa.output, tolerance, tolerance);
+    ASSERT_EQ(sdpa.stats != nullptr, testCase.shape.withStats);
+    if(sdpa.stats != nullptr)
+    {
+        registerValidator(
+            context, sdpa.stats, std::make_unique<RecordingLseValidator>(testCase.name));
+    }
     verifyBuiltGraph(context, /*seed=*/0);
 }
 
@@ -846,17 +962,18 @@ class IntegrationGpuGfx942AttentionDenseSaveLoad
     : public IntegrationGpuGfx942AttentionDenseBase<KnobCase>
 {
 protected:
-    // Builds the forced-tile graph of the save and load knob case, validates one run and saves
-    // the plan in form. Then it destroys the graph, loads the plan with a new handle and
+    // Builds the forced-tile graph of the knob case named caseName, validates one run and
+    // saves the plan in form. Then it destroys the graph, loads the plan with a new handle and
     // validates two runs of the loaded plan. Every run uses the CPU reference of the original
-    // graph.
-    void roundTripInAFreshHandle(SaveForm form)
+    // graph, for O and, where the case binds one, the stats output.
+    void roundTripInAFreshHandle(SaveForm form, const std::string& caseName)
     {
         const auto cases = knobCases();
-        const auto found = std::find_if(cases.begin(), cases.end(), [](const KnobCase& candidate) {
-            return candidate.name == SAVE_LOAD_CASE;
-        });
-        ASSERT_NE(found, cases.end()) << "no knob case is named " << SAVE_LOAD_CASE;
+        const auto found
+            = std::find_if(cases.begin(), cases.end(), [&caseName](const KnobCase& candidate) {
+                  return candidate.name == caseName;
+              });
+        ASSERT_NE(found, cases.end()) << "no knob case is named " << caseName;
         ASSERT_TRUE(found->forced);
         const KnobCase& knobCase = *found;
 
@@ -899,6 +1016,12 @@ protected:
             const float tolerance = sdpaForwardTolerance(knobCase.shape.dataType);
             ASSERT_NO_FATAL_FAILURE(
                 this->registerValidator(context, sdpa.output, tolerance, tolerance));
+            ASSERT_EQ(sdpa.stats != nullptr, knobCase.shape.withStats);
+            if(sdpa.stats != nullptr)
+            {
+                ASSERT_NO_FATAL_FAILURE(this->registerValidator(
+                    context, sdpa.stats, std::make_unique<RecordingLseValidator>(caseName)));
+            }
             ASSERT_NO_FATAL_FAILURE(this->prepareVerification(context, /*seed=*/0, run));
         }
         ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, *sdpa.graph, this->_handle));
@@ -961,12 +1084,24 @@ protected:
 
 TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresGraphAndPlanInAFreshHandle)
 {
-    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN);
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, SAVE_LOAD_CASE);
 }
 
 TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresPlanOnlyInAFreshHandle)
 {
-    roundTripInAFreshHandle(SaveForm::PLAN_ONLY);
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY, SAVE_LOAD_CASE);
+}
+
+// The saved stats uid selects the 11-argument kernel on load, and the loaded plan writes the
+// LSE to the same output.
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAnLseGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, SAVE_LOAD_LSE_CASE);
+}
+
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAnLsePlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY, SAVE_LOAD_LSE_CASE);
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick,

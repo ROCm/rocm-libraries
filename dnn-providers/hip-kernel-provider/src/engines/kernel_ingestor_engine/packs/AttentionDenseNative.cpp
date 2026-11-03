@@ -325,6 +325,43 @@ bool qoFitElementOffsets(const AttentionDenseProblem& problem)
     return qElements.has_value() && *qElements < OFFSET_LIMIT;
 }
 
+/// The stats tensor's trailing unit axis: [B, H, S_q, 1].
+constexpr uint32_t STATS_UNIT_AXIS = 3;
+
+/**
+ * @brief Is this the stats tensor the kernel writes: rank 4 with dims [B, Hq, Sq, 1] and
+ *        packed strides [Hq * Sq, Sq, 1, any], not virtual, ragged or pass-by-value?
+ *
+ * The kernel writes row (b, h, s) at element (b * Hq + h) * Sq + s of a FLOAT buffer and
+ * takes no stride arguments, so any other layout is written as if it were this one. As in
+ * hasBshdStrides, a unit-extent axis is exempt: its stride multiplies an index that is
+ * always 0. The data type is checked separately.
+ */
+bool isServableStatsTensor(const data_objects::TensorAttributes& stats,
+                           const AttentionDenseProblem& problem)
+{
+    const auto* dims = stats.dims();
+    const auto* strides = stats.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
+       || strides->size() != SDPA_RANK || stats.virtual_()
+       || stats.ragged_offset_tensor_uid().has_value()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats))
+    {
+        return false;
+    }
+    if(dims->Get(BATCH_AXIS) != problem.batch || dims->Get(HEAD_AXIS) != problem.numQueryHeads
+       || dims->Get(SEQ_AXIS) != problem.seqLenQ || dims->Get(STATS_UNIT_AXIS) != 1)
+    {
+        return false;
+    }
+
+    const auto axisOk = [&](uint32_t axis, std::optional<int64_t> expected) {
+        return dims->Get(axis) == 1 || (expected.has_value() && strides->Get(axis) == *expected);
+    };
+    return axisOk(BATCH_AXIS, checkedProduct({problem.numQueryHeads, problem.seqLenQ}))
+           && axisOk(HEAD_AXIS, problem.seqLenQ) && axisOk(SEQ_AXIS, 1);
+}
+
 /// The mask the kernel is built for: causal or not, and the window in keys (0 = none).
 struct AttentionDenseMask
 {
@@ -354,8 +391,10 @@ struct AttentionDenseMask
  * band: its catalog carries no non-zero sliding_window.
  *
  * A top-left window that leaves the last query rows no key (windowLeavesRowsWithoutKeys)
- * is declined. This restates supports_attention_dense's row rule; its sink and LSE
- * exemptions do not arise here, since both packs decline both.
+ * is declined. This restates supports_attention_dense's row rule without its sink and LSE
+ * exemptions: both packs decline sinks, and a graph that binds stats is declined here too,
+ * because the rows such a window leaves keyless are graded only against an infinite LSE,
+ * which no device-site validator compares.
  */
 std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& attributes,
                                           const AttentionDenseProblem& problem,
@@ -444,6 +483,85 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
     }
 }
 
+/**
+ * @brief The stats output the graph binds -- its uid, or ATTENTION_DENSE_NO_STATS for
+ *        none -- or nullopt for a stats request the kernel cannot honour, logged.
+ *
+ * For an arch that serves stats. The rule is the FlyDSL packs': a stats_tensor_uid is
+ * served unless generate_stats is explicitly false, because the references write the LSE
+ * whenever the uid is set; generate_stats true without a uid names no tensor to write and
+ * is declined (stats_flag). The tensor must be FLOAT (stats_dtype) and laid out as
+ * isServableStatsTensor describes (stats_layout). Max, Sum_exp and the dropout RNG dump
+ * are outputs the kernel cannot write (stats_rowstats).
+ */
+std::optional<int64_t> statsFor(const MatchContext& context,
+                                const data_objects::SdpaAttributes& attributes,
+                                const AttentionDenseProblem& problem,
+                                const AttentionDenseArch& arch)
+{
+    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value()
+       || attributes.rng_dump_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats_rowstats")
+                               << "the Max, Sum_exp and dropout RNG dump outputs are not "
+                                  "supported; the kernel writes the LSE (stats) only");
+        return std::nullopt;
+    }
+
+    const auto generateStats = attributes.generate_stats();
+    if(!attributes.stats_tensor_uid().has_value())
+    {
+        if(generateStats.has_value() && generateStats.value())
+        {
+            HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats_flag")
+                                   << "generate_stats is true, but the node names no stats "
+                                      "tensor to write the LSE to");
+            return std::nullopt;
+        }
+        return ATTENTION_DENSE_NO_STATS;
+    }
+
+    const int64_t statsUid = attributes.stats_tensor_uid().value();
+    if(generateStats.has_value() && !generateStats.value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats_flag")
+                               << "the node names stats tensor uid " << statsUid
+                               << " but sets generate_stats to false");
+        return std::nullopt;
+    }
+    // A negative uid would read back as ATTENTION_DENSE_NO_STATS, or be refused on restore.
+    const auto* stats = statsUid < 0 ? nullptr : findTensor(context, statsUid);
+    if(stats == nullptr)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats_layout")
+                               << "the node names stats tensor uid " << statsUid
+                               << ", which is negative or names no tensor of the graph");
+        return std::nullopt;
+    }
+    if(stats->data_type() != data_objects::DataType::FLOAT)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats_dtype")
+                               << describeOperand("stats", *stats) << " is " << stats->data_type()
+                               << "; the kernel writes the LSE as FLOAT (a stats tensor whose "
+                                  "data type is left unset takes the graph's io data type)");
+        return std::nullopt;
+    }
+    if(!isServableStatsTensor(*stats, problem))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats_layout")
+                               << describeOperand("stats", *stats)
+                               << " is not the tensor the kernel writes: rank 4, dims [B, Hq, "
+                                  "Sq, 1] = ["
+                               << problem.batch << ", " << problem.numQueryHeads << ", "
+                               << problem.seqLenQ
+                               << ", 1], packed strides [Hq * Sq, Sq, 1, any] (unit-extent "
+                                  "axes exempt), not virtual, ragged or pass-by-value; the "
+                                  "kernel takes no stride arguments");
+        return std::nullopt;
+    }
+    return statsUid;
+}
+
 } // namespace
 
 /**
@@ -451,7 +569,8 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
  * any other graph declines silently. The message is built inside the logging macro, so
  * with INFO off a decline costs the check and nothing more. Both arches run the same
  * checks in the same order, so a graph with several problems reports the same first
- * cause on either.
+ * cause on either, except that a stats output is a decline only on an arch that does
+ * not serve stats (gfx950), which reports it where gfx942 binds it.
  */
 std::optional<BoundTokens> graphMatches(const MatchContext& context, const AttentionDenseArch& arch)
 {
@@ -680,11 +799,23 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                   "supported");
         return std::nullopt;
     }
-    // Auxiliary softmax outputs. generate_stats is optional<bool>; explicit false is fine.
-    if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
-       || attributes.sum_exp_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value()
-       || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
+    // Auxiliary softmax outputs. An arch that serves stats binds the LSE output (statsFor
+    // logs its own declines); any other declines every one of them. For the latter,
+    // generate_stats is optional<bool> and an explicit false with no stats uid is fine.
+    int64_t statsUid = ATTENTION_DENSE_NO_STATS;
+    if(arch.servesStats())
+    {
+        const auto stats = statsFor(context, attributes, problem, arch);
+        if(!stats.has_value())
+        {
+            return std::nullopt;
+        }
+        statsUid = *stats;
+    }
+    else if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
+            || attributes.sum_exp_tensor_uid().has_value()
+            || attributes.rng_dump_tensor_uid().has_value()
+            || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats")
                                << "softmax statistics outputs (stats, max, sum_exp, rng_dump or "
@@ -748,6 +879,10 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(arch.tokens.scaleBits)] = static_cast<int64_t>(scaleBits);
+    if(arch.servesStats())
+    {
+        bound[std::string(arch.tokens.stats)] = statsUid;
+    }
     return bound;
 }
 
@@ -780,6 +915,10 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound,
 
     const auto scaleBits = static_cast<int32_t>(read(arch.tokens.scaleBits));
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));
+    if(arch.servesStats())
+    {
+        binding.stats = read(arch.tokens.stats);
+    }
     return binding;
 }
 
@@ -834,6 +973,10 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
  * So is the sliding-window zero-trip guard of an arch that serves windows, which reads the
  * same tile.
+ *
+ * On an arch that serves stats, LSE is baked at compile time: a candidate that writes it
+ * takes a trailing lse_ptr and serves exactly the graphs that bind a stats output, and
+ * one that does not serves exactly the graphs that bind none.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -904,6 +1047,17 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    if(arch.servesStats())
+    {
+        const auto stats = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.tokens.stats);
+        const auto writesLse = arch.candidateWritesLse(kernel);
+        if(!stats.has_value() || !writesLse.has_value()
+           || *writesLse != (*stats != ATTENTION_DENSE_NO_STATS))
+        {
+            return false;
+        }
+    }
+
     return tileDivides(*tile, problem)
            && (!arch.servesSlidingWindow()
                || arch.windowReachesKeys(
@@ -917,12 +1071,24 @@ namespace
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The kernel signature a contract's launch passes.
+/// The saved stats uid as restore's selector reads it, before any value is checked. An
+/// absent or non-integer value selects the argument list without lse_ptr; the reader
+/// refuses it afterwards.
+int64_t savedStatsUidSelector(const SavedLaunchInputs& inputs)
+{
+    const auto found = inputs.values.find(std::string(STATS_UID_VALUE));
+    const auto* uid = found == inputs.values.end() ? nullptr : std::get_if<int64_t>(&found->second);
+    return uid == nullptr ? ATTENTION_DENSE_NO_STATS : *uid;
+}
+
+/// The kernel signature a contract's launch passes, for a kernel that writes LSE
+/// (@p writesLse) or not.
 ///
-/// Every shipped variant is non-persistent, so no fast-division kernargs follow the shape;
-/// use_sinks=False and emit_lse=False, so no sink_ptr or lse_ptr slot. RUNTIME_HEAD_COUNTS
-/// is the form every kernel in both catalogs takes; BAKED_HEAD_COUNTS is the 8-argument
-/// form of kernels built before the head counts became runtime arguments.
+/// Every shipped variant is non-persistent, so no fast-division kernargs follow the shape,
+/// and use_sinks=False, so no sink_ptr slot. RUNTIME_HEAD_COUNTS is the form every kernel
+/// in both catalogs takes; BAKED_HEAD_COUNTS is the 8-argument form of kernels built before
+/// the head counts became runtime arguments. An emit_lse kernel (gfx942 only) takes one
+/// more argument, lse_ptr, last: the 11-argument form.
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one. Kind and size alone cannot tell the four pointers
@@ -936,7 +1102,7 @@ namespace
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
 /// mismatch diagnostic prints the real layout beside the recorded one instead of ten
 /// zeroes that read as data.
-std::vector<KernelArgument> kernelSignature(AttentionDenseAbi abi)
+std::vector<KernelArgument> kernelSignature(AttentionDenseAbi abi, bool writesLse)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
@@ -954,6 +1120,13 @@ std::vector<KernelArgument> kernelSignature(AttentionDenseAbi abi)
     {
         signature.push_back(KernelArgument{"by_value", I32, 48, "num_query_heads"});
         signature.push_back(KernelArgument{"by_value", I32, 52, "num_kv_heads"});
+    }
+    if(writesLse)
+    {
+        // At the next pointer-aligned offset: 56 after num_kv_heads.
+        const uint32_t end = signature.back().offset + signature.back().size;
+        signature.push_back(
+            KernelArgument{"global_buffer", PTR, (end + PTR - 1) / PTR * PTR, "lse_ptr"});
     }
     return signature;
 }
@@ -1077,12 +1250,29 @@ public:
                     + "' declares no supported block_m/block_n tile");
         }
 
-        auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, kernelSignature(_contract.abi));
-
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
         const auto problem = problemFor(*q, *k);
+
+        // The same defence in depth for the stats output: graph_match binds only one the
+        // kernel can write, and the kernel takes no stride arguments for it.
+        const bool writesLse = binding.stats != ATTENTION_DENSE_NO_STATS;
+        if(writesLse)
+        {
+            const auto* stats = findTensor(context, binding.stats);
+            if(stats == nullptr || stats->data_type() != data_objects::DataType::FLOAT
+               || !isServableStatsTensor(*stats, problem))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string(_arch.label)
+                        + " attention_dense: the stats tensor is not the packed [B, Hq, Sq, 1] "
+                          "FLOAT tensor the kernel writes the LSE to");
+            }
+        }
+
+        auto code = buildIngestorKernelCode(
+            _kpackLoader, context, kernel, kernelSignature(_contract.abi, writesLse));
 
         return makePreparedAttentionDense(
             std::move(code),
@@ -1103,12 +1293,18 @@ public:
             requireLaunchContract(saved, _contract.symbol);
             return readLaunchInputs(saved, _arch);
         };
-        auto restored
-            = restoreIngestorLaunch<AttentionDenseLaunchInputs>(inputs,
-                                                                std::move(code),
-                                                                kernelSignature(_contract.abi),
-                                                                readThisContract,
-                                                                deviceOrdinal);
+        // Which of the contract's argument lists the saved kernel must take is selected by
+        // the saved stats uid, read before restoreIngestorLaunch checks anything. A kernel
+        // whose arguments disagree with the uid -- an LSE kernel saved without a stats
+        // output, or the reverse -- is then refused by the signature check.
+        const bool writesLse
+            = _arch.servesStats() && savedStatsUidSelector(inputs) != ATTENTION_DENSE_NO_STATS;
+        auto restored = restoreIngestorLaunch<AttentionDenseLaunchInputs>(
+            inputs,
+            std::move(code),
+            kernelSignature(_contract.abi, writesLse),
+            readThisContract,
+            deviceOrdinal);
         return makePreparedAttentionDense(
             std::move(restored.code), restored.launch, kernelName, _arch, _contract);
     }
@@ -1118,8 +1314,9 @@ public:
     {
         const auto& preparedDense = dynamic_cast<const PreparedAttentionDense&>(prepared);
         const auto& launch = preparedDense.launchInputs();
-        return SavedLaunchInputs{std::string(preparedDense.contract().symbol),
-                                 launchValues(launch.binding, launch.problem, launch.blockM)};
+        return SavedLaunchInputs{
+            std::string(preparedDense.contract().symbol),
+            launchValues(launch.binding, launch.problem, launch.blockM, _arch)};
     }
 
     bool supportsSaving() const override
@@ -1149,7 +1346,8 @@ public:
         auto& kernel = preparedDense.kernelForStream(handle.getStream());
         // Exactly the arguments the code object was checked against: a BAKED_HEAD_COUNTS
         // code object bakes the head counts, a RUNTIME_HEAD_COUNTS one reads them as the
-        // two trailing arguments.
+        // two trailing arguments, and one that writes LSE takes lse_ptr after them. Only
+        // gfx950 has a BAKED_HEAD_COUNTS contract, and it binds no stats output.
         if(preparedDense.contract().abi == AttentionDenseAbi::BAKED_HEAD_COUNTS)
         {
             kernel.launch(handle.getStream(),
@@ -1161,6 +1359,24 @@ public:
                           static_cast<int32_t>(p.batch),
                           static_cast<int32_t>(p.seqLenQ),
                           static_cast<int32_t>(p.seqLenKv));
+            return;
+        }
+        if(binding.stats != ATTENTION_DENSE_NO_STATS)
+        {
+            const auto lse = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.stats, deviceBuffers, numDeviceBuffers);
+            kernel.launch(handle.getStream(),
+                          q.ptr,
+                          k.ptr,
+                          v.ptr,
+                          o.ptr,
+                          binding.scale,
+                          static_cast<int32_t>(p.batch),
+                          static_cast<int32_t>(p.seqLenQ),
+                          static_cast<int32_t>(p.seqLenKv),
+                          static_cast<int32_t>(p.numQueryHeads),
+                          static_cast<int32_t>(p.numKvHeads),
+                          lse.ptr);
             return;
         }
         kernel.launch(handle.getStream(),
@@ -1296,25 +1512,31 @@ std::unique_ptr<IKernelDispatchHandler<Handle>>
 
 MetadataValues launchValues(const AttentionDenseBinding& binding,
                             const AttentionDenseProblem& problem,
-                            int64_t blockM)
+                            int64_t blockM,
+                            const AttentionDenseArch& arch)
 {
-    return {{std::string(Q_UID_VALUE), binding.q},
-            {std::string(K_UID_VALUE), binding.k},
-            {std::string(V_UID_VALUE), binding.v},
-            {std::string(O_UID_VALUE), binding.o},
-            {std::string(CAUSAL_VALUE), binding.causal},
-            {std::string(SLIDING_WINDOW_VALUE), binding.slidingWindow},
-            {std::string(BATCH_VALUE), problem.batch},
-            {std::string(SEQLEN_Q_VALUE), problem.seqLenQ},
-            {std::string(SEQLEN_KV_VALUE), problem.seqLenKv},
-            {std::string(NUM_QUERY_HEADS_VALUE), problem.numQueryHeads},
-            {std::string(NUM_KV_HEADS_VALUE), problem.numKvHeads},
-            {std::string(HEAD_SIZE_VALUE), problem.headSize},
-            {std::string(BLOCK_M_VALUE), blockM},
-            {std::string(SCALE_VALUE), static_cast<double>(binding.scale)},
-            {std::string(DATA_TYPE_VALUE),
-             std::string(data_objects::EnumNameDataType(problem.dataType))},
-            {std::string(STRIDE_LAYOUT_VALUE), std::string(BSHD_LAYOUT)}};
+    MetadataValues values{{std::string(Q_UID_VALUE), binding.q},
+                          {std::string(K_UID_VALUE), binding.k},
+                          {std::string(V_UID_VALUE), binding.v},
+                          {std::string(O_UID_VALUE), binding.o},
+                          {std::string(CAUSAL_VALUE), binding.causal},
+                          {std::string(SLIDING_WINDOW_VALUE), binding.slidingWindow},
+                          {std::string(BATCH_VALUE), problem.batch},
+                          {std::string(SEQLEN_Q_VALUE), problem.seqLenQ},
+                          {std::string(SEQLEN_KV_VALUE), problem.seqLenKv},
+                          {std::string(NUM_QUERY_HEADS_VALUE), problem.numQueryHeads},
+                          {std::string(NUM_KV_HEADS_VALUE), problem.numKvHeads},
+                          {std::string(HEAD_SIZE_VALUE), problem.headSize},
+                          {std::string(BLOCK_M_VALUE), blockM},
+                          {std::string(SCALE_VALUE), static_cast<double>(binding.scale)},
+                          {std::string(DATA_TYPE_VALUE),
+                           std::string(data_objects::EnumNameDataType(problem.dataType))},
+                          {std::string(STRIDE_LAYOUT_VALUE), std::string(BSHD_LAYOUT)}};
+    if(arch.servesStats())
+    {
+        values.emplace(std::string(STATS_UID_VALUE), binding.stats);
+    }
+    return values;
 }
 
 AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
@@ -1326,23 +1548,29 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
                         && inputs.dispatchSymbol == arch.legacyContract.symbol;
     requireLaunchContract(inputs,
                           legacy ? arch.legacyContract.symbol : arch.currentContract.symbol);
-    requireOnlyLaunchValues(inputs,
-                            {Q_UID_VALUE,
-                             K_UID_VALUE,
-                             V_UID_VALUE,
-                             O_UID_VALUE,
-                             CAUSAL_VALUE,
-                             SLIDING_WINDOW_VALUE,
-                             BATCH_VALUE,
-                             SEQLEN_Q_VALUE,
-                             SEQLEN_KV_VALUE,
-                             NUM_QUERY_HEADS_VALUE,
-                             NUM_KV_HEADS_VALUE,
-                             HEAD_SIZE_VALUE,
-                             BLOCK_M_VALUE,
-                             SCALE_VALUE,
-                             DATA_TYPE_VALUE,
-                             STRIDE_LAYOUT_VALUE});
+    // The sixteen values both arches share; an arch that serves stats also saves the
+    // stats uid.
+    std::vector<std::string_view> names{Q_UID_VALUE,
+                                        K_UID_VALUE,
+                                        V_UID_VALUE,
+                                        O_UID_VALUE,
+                                        CAUSAL_VALUE,
+                                        SLIDING_WINDOW_VALUE,
+                                        BATCH_VALUE,
+                                        SEQLEN_Q_VALUE,
+                                        SEQLEN_KV_VALUE,
+                                        NUM_QUERY_HEADS_VALUE,
+                                        NUM_KV_HEADS_VALUE,
+                                        HEAD_SIZE_VALUE,
+                                        BLOCK_M_VALUE,
+                                        SCALE_VALUE,
+                                        DATA_TYPE_VALUE,
+                                        STRIDE_LAYOUT_VALUE};
+    if(arch.servesStats())
+    {
+        names.push_back(STATS_UID_VALUE);
+    }
+    requireOnlyLaunchValues(inputs, names);
 
     constexpr int64_t INT32_LIMIT = std::numeric_limits<int32_t>::max();
 
@@ -1355,6 +1583,11 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
     binding.o = requireLaunchInt(inputs, O_UID_VALUE);
     binding.causal = requireLaunchInt(inputs, CAUSAL_VALUE);
     binding.slidingWindow = requireLaunchInt(inputs, SLIDING_WINDOW_VALUE);
+    // A uid, or ATTENTION_DENSE_NO_STATS: graph_match binds no negative uid.
+    if(arch.servesStats())
+    {
+        binding.stats = requireLaunchInt(inputs, STATS_UID_VALUE, ATTENTION_DENSE_NO_STATS);
+    }
 
     // The kernel takes these three as int32_t arguments.
     problem.batch = requireLaunchInt(inputs, BATCH_VALUE, 1, INT32_LIMIT);

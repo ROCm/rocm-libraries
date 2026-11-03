@@ -78,9 +78,25 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 {% endfor %}
              },
              {
+{# A name line past ColumnLimit 100 would be split by clang-format into adjacent
+   literals, so such a list is fenced off and stays one name per line; a list that fits
+   is emitted as clang-format lays it out, unfenced. #}
+{% set fence = namespace(needed=false) %}
+{% for name in entry.descriptor_names %}
+{% if ('                 "' ~ (name | cpp_escape) ~ '",') | length > 100 %}
+{% set fence.needed = true %}
+{% endif %}
+{% endfor %}
+{% if fence.needed %}
+                 // Kernel names longer than the column limit stay whole.
+                 // clang-format off
+{% endif %}
 {% for name in entry.descriptor_names %}
                  "{{ name | cpp_escape }}",
 {% endfor %}
+{% if fence.needed %}
+                 // clang-format on
+{% endif %}
              },
          }},
 {% endfor %}

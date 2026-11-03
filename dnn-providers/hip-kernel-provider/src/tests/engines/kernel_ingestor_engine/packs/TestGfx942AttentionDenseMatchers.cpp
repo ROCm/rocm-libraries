@@ -24,7 +24,9 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -38,6 +40,8 @@
  *   - a causal sliding window of graph left_bound L (L keys, diagonal included) is the
  *     kernel's sliding_window L, and every other band is declined;
  *   - the sliding-window zero-trip guard and tile divisibility are per candidate;
+ *   - the stats (LSE) output is bound, and served only by a candidate built with
+ *     emit_lse, while the gfx950 twin still declines every stats output;
  *   - the cold ranking orders every knob combination, policy arms first.
  *
  * Matcher-only: no device, no compile, no launch.
@@ -59,12 +63,19 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx942_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_dense.score";
 constexpr std::string_view CAUSAL_TOKEN = "gfx942_attention_dense.causal";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx942_attention_dense.sliding_window";
+constexpr std::string_view STATS_TOKEN = "gfx942_attention_dense.stats.uid";
+constexpr std::string_view GFX950_GRAPH_MATCHER_SYMBOL
+    = "hipkernel.gfx950_attention_dense.graph_match";
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
+constexpr int64_t STATS_UID = 5;
 constexpr int64_t EXTRA_UID = 99;
+
+/// The stats uid of a graph that binds no stats output.
+constexpr int64_t NO_STATS = -1;
 
 constexpr float SCALE = 0.08838834764831843F;
 
@@ -87,6 +98,18 @@ std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSi
     return {heads * sequence * headSize, sequence * headSize, headSize, 1};
 }
 
+/// The stats tensor a graph carries.
+struct StatsTensorSpec
+{
+    int64_t uid = STATS_UID;
+    /// Empty: [B, Hq, Sq, 1], the tensor the kernel writes.
+    std::vector<int64_t> dims;
+    /// Empty: packed row-major over the dims, the frontend's default.
+    std::vector<int64_t> strides;
+    data_objects::DataType dataType = data_objects::DataType::FLOAT;
+    bool isVirtual = false;
+};
+
 /// Base graph: bf16, D128, B=2, Hq=32, Hkv=8, Sq=Skv=1024, top-left causal.
 struct GraphSpec
 {
@@ -106,6 +129,11 @@ struct GraphSpec
     std::optional<float> attnScaleValue = SCALE;
     std::optional<int64_t> sinkTokenUid;
     std::optional<int64_t> statsUid;
+    std::optional<bool> generateStats;
+    std::optional<StatsTensorSpec> statsTensor;
+    std::optional<int64_t> maxUid;
+    std::optional<int64_t> sumExpUid;
+    std::optional<int64_t> rngDumpUid;
     std::optional<int64_t> attnMaskUid;
     std::optional<int64_t> seqLenQUid;
     // The one operand that names a ragged offset tensor (packed sequences).
@@ -140,12 +168,31 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                   spec.raggedUid == uid ? ::flatbuffers::Optional<int64_t>(EXTRA_UID)
                                         : ::flatbuffers::Optional<int64_t>());
           };
-    const std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
         operand(Q_UID, qStrides, qDims),
         operand(K_UID, kvStrides, kvDims),
         operand(V_UID, kvStrides, kvDims),
         operand(O_UID, oStrides, qDims),
     };
+    if(spec.statsTensor.has_value())
+    {
+        const auto& stats = *spec.statsTensor;
+        const std::vector<int64_t> dims
+            = stats.dims.empty()
+                  ? std::vector<int64_t>{spec.batch, spec.numQueryHeads, spec.seqLenQ, 1}
+                  : stats.dims;
+        std::vector<int64_t> strides = stats.strides;
+        if(strides.empty())
+        {
+            strides.assign(dims.size(), 1);
+            for(std::size_t axis = dims.size() - 1; axis > 0; --axis)
+            {
+                strides[axis - 1] = strides[axis] * dims[axis];
+            }
+        }
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(
+            builder, stats.uid, nullptr, stats.dataType, &strides, &dims, stats.isVirtual));
+    }
 
     data_objects::SdpaAttributesBuilder attributesBuilder(builder);
     attributesBuilder.add_q_tensor_uid(Q_UID);
@@ -174,6 +221,22 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     if(spec.statsUid.has_value())
     {
         attributesBuilder.add_stats_tensor_uid(*spec.statsUid);
+    }
+    if(spec.generateStats.has_value())
+    {
+        attributesBuilder.add_generate_stats(*spec.generateStats);
+    }
+    if(spec.maxUid.has_value())
+    {
+        attributesBuilder.add_max_tensor_uid(*spec.maxUid);
+    }
+    if(spec.sumExpUid.has_value())
+    {
+        attributesBuilder.add_sum_exp_tensor_uid(*spec.sumExpUid);
+    }
+    if(spec.rngDumpUid.has_value())
+    {
+        attributesBuilder.add_rng_dump_tensor_uid(*spec.rngDumpUid);
     }
     if(spec.attnMaskUid.has_value())
     {
@@ -232,11 +295,54 @@ private:
     MatchContext _context;
 };
 
-std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
+std::optional<BoundTokens> matchGraph(const GraphSpec& spec,
+                                      std::string_view matcherSymbol = GRAPH_MATCHER_SYMBOL)
 {
     const Graph graph(spec);
-    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(GRAPH_MATCHER_SYMBOL))(graph.context());
+    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(std::string(matcherSymbol))(
+        graph.context());
+}
+
+/// The base graph with the stats output the frontend builds: a stats uid, generate_stats
+/// true, and a packed [B, Hq, Sq, 1] FLOAT tensor.
+GraphSpec statsGraph()
+{
+    GraphSpec spec;
+    spec.statsUid = STATS_UID;
+    spec.generateStats = true;
+    spec.statsTensor = StatsTensorSpec{};
+    return spec;
+}
+
+/// The cause key and the text after it, of the decline an engine logged at INFO.
+struct LoggedDecline
+{
+    std::string cause;
+    std::string detail;
+};
+
+/// The decline @p engineName's graph match logged for @p spec, or an empty cause when it
+/// logged none.
+LoggedDecline loggedDecline(const GraphSpec& spec,
+                            std::string_view matcherSymbol = GRAPH_MATCHER_SYMBOL,
+                            std::string_view engineName = GFX942_ATTENTION_DENSE_ENGINE_NAME)
+{
+    const std::string marker = std::string(engineName) + " declined the graph [";
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_FALSE(matchGraph(spec, matcherSymbol).has_value());
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        const auto at = log.message.find(marker);
+        const auto causeEnd
+            = at == std::string::npos ? at : log.message.find(']', at + marker.size());
+        if(log.severity == HIPDNN_SEV_INFO && causeEnd != std::string::npos)
+        {
+            return {log.message.substr(at + marker.size(), causeEnd - at - marker.size()),
+                    log.message.substr(causeEnd + 1)};
+        }
+    }
+    return {};
 }
 
 /// The fields this engine's KMD declares, as a completed record carries them. The head
@@ -252,6 +358,7 @@ struct KernelSpec
     int64_t blockN = 64;
     int64_t ldsRowPad = 8;
     int64_t pvPriority = 0;
+    int64_t emitLse = 0;
 };
 
 KernelDefinition makeKernel(const KernelSpec& spec)
@@ -274,12 +381,13 @@ KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("block_n"), spec.blockN},
         {std::string("lds_row_pad"), spec.ldsRowPad},
         {std::string("pv_priority"), spec.pvPriority},
+        {std::string("emit_lse"), spec.emitLse},
     };
     return kernel;
 }
 
 /// graph_match then kernel_match, as a catalog build runs them.
-bool matches(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
+bool matches(const GraphSpec& graphSpec, const KernelDefinition& kernel)
 {
     const Graph graph(graphSpec);
     const auto bound = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
@@ -290,7 +398,12 @@ bool matches(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
         return false;
     }
     return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
-        std::string(KERNEL_MATCHER_SYMBOL))(graph.context(), *bound, makeKernel(kernelSpec));
+        std::string(KERNEL_MATCHER_SYMBOL))(graph.context(), *bound, kernel);
+}
+
+bool matches(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
+{
+    return matches(graphSpec, makeKernel(kernelSpec));
 }
 
 double scoreOf(const KernelSpec& kernelSpec)
@@ -453,7 +566,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey
     }
 }
 
-TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksStatsMaskTensorAndVarlen)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksADanglingStatsUidMaskTensorAndVarlen)
 {
     GraphSpec sinks;
     sinks.sinkTokenUid = EXTRA_UID;
@@ -470,6 +583,199 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksStatsMaskTensorAndVarlen)
     GraphSpec varlen;
     varlen.seqLenQUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(varlen).has_value());
+}
+
+// =============================================================================
+// graph_match: the stats (LSE) output
+// =============================================================================
+
+// The FlyDSL rule: a stats uid is served unless generate_stats is explicitly false, since
+// both references write the LSE whenever the uid is set; generate_stats true without a uid
+// names no tensor to write. A graph without either binds no stats.
+TEST(TestGfx942AttentionDenseGraphMatch, BindsStatsByTheUidUnlessGenerateStatsIsFalse)
+{
+    struct Case
+    {
+        const char* name;
+        bool withUid;
+        std::optional<bool> generateStats;
+        std::optional<int64_t> bound;
+    };
+    for(const auto& testCase : {Case{"uid, flag unset", true, std::nullopt, STATS_UID},
+                                Case{"uid, flag true", true, true, STATS_UID},
+                                Case{"uid, flag false", true, false, std::nullopt},
+                                Case{"no uid, flag true", false, true, std::nullopt},
+                                Case{"no uid, flag unset", false, std::nullopt, NO_STATS},
+                                Case{"no uid, flag false", false, false, NO_STATS}})
+    {
+        SCOPED_TRACE(testCase.name);
+        auto spec = statsGraph();
+        spec.generateStats = testCase.generateStats;
+        if(!testCase.withUid)
+        {
+            spec.statsUid.reset();
+            spec.statsTensor.reset();
+        }
+        const auto bound = matchGraph(spec);
+        ASSERT_EQ(bound.has_value(), testCase.bound.has_value());
+        if(bound.has_value())
+        {
+            EXPECT_EQ(tryGetBoundInt(*bound, STATS_TOKEN), testCase.bound);
+        }
+        else
+        {
+            EXPECT_EQ(loggedDecline(spec).cause, "stats_flag");
+        }
+    }
+}
+
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAStatsTensorThatIsNotFloat)
+{
+    for(const auto dataType : {data_objects::DataType::BFLOAT16,
+                               data_objects::DataType::HALF,
+                               data_objects::DataType::DOUBLE})
+    {
+        SCOPED_TRACE(static_cast<int>(dataType));
+        auto spec = statsGraph();
+        spec.statsTensor->dataType = dataType;
+        const auto decline = loggedDecline(spec);
+        EXPECT_EQ(decline.cause, "stats_dtype");
+        EXPECT_NE(decline.detail.find("stats (uid 5)"), std::string::npos) << decline.detail;
+    }
+}
+
+// The kernel writes row (b, h, s) at element (b * Hq + h) * Sq + s and takes no stride
+// arguments, so only packed [B, Hq, Sq, 1] is served.
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAStatsTensorTheKernelDoesNotWrite)
+{
+    // B = 2, Hq = 32, Sq = 1024.
+    struct Case
+    {
+        const char* name;
+        StatsTensorSpec tensor;
+    };
+    StatsTensorSpec bshdOrdered;
+    bshdOrdered.strides = {int64_t{1024} * 32, 1, 32, 1};
+    StatsTensorSpec rank3;
+    rank3.dims = {2, 32, 1024};
+    StatsTensorSpec kvHeads;
+    kvHeads.dims = {2, 8, 1024, 1};
+    StatsTensorSpec wideRow;
+    wideRow.dims = {2, 32, 1024, 2};
+    StatsTensorSpec paddedBatch;
+    paddedBatch.strides = {int64_t{32} * 1024 + 64, 1024, 1, 1};
+    StatsTensorSpec virtualStats;
+    virtualStats.isVirtual = true;
+    for(const auto& testCase : {Case{"BSHD-ordered strides", bshdOrdered},
+                                Case{"rank 3", rank3},
+                                Case{"kv heads", kvHeads},
+                                Case{"two columns", wideRow},
+                                Case{"padded batch stride", paddedBatch},
+                                Case{"virtual", virtualStats}})
+    {
+        SCOPED_TRACE(testCase.name);
+        auto spec = statsGraph();
+        spec.statsTensor = testCase.tensor;
+        EXPECT_EQ(loggedDecline(spec).cause, "stats_layout");
+    }
+
+    // A uid that names no tensor, and a negative one, which would read back as no stats.
+    for(const int64_t uid : {EXTRA_UID, int64_t{-1}, int64_t{-7}})
+    {
+        SCOPED_TRACE(uid);
+        auto spec = statsGraph();
+        spec.statsUid = uid;
+        spec.statsTensor->uid = uid == EXTRA_UID ? STATS_UID : uid;
+        EXPECT_EQ(loggedDecline(spec).cause, "stats_layout");
+    }
+}
+
+// A unit-extent axis's stride multiplies an index that is always 0.
+TEST(TestGfx942AttentionDenseGraphMatch, ServesPackedStatsWithUnitExtentAxesExempt)
+{
+    auto oneBatch = statsGraph();
+    oneBatch.batch = 1;
+    oneBatch.statsTensor->strides = {7, 1024, 1, 3};
+    EXPECT_TRUE(matchGraph(oneBatch).has_value());
+
+    auto oneHead = statsGraph();
+    oneHead.numQueryHeads = 1;
+    oneHead.numKvHeads = 1;
+    oneHead.statsTensor->strides = {1024, 5, 1, 1};
+    EXPECT_TRUE(matchGraph(oneHead).has_value());
+
+    // The trailing axis is always unit-extent.
+    auto anyTrailing = statsGraph();
+    anyTrailing.statsTensor->strides = {int64_t{32} * 1024, 1024, 1, 1024};
+    const auto bound = matchGraph(anyTrailing);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, STATS_TOKEN), STATS_UID);
+}
+
+// Max, Sum_exp and the dropout RNG dump are outputs the kernel cannot write, with or
+// without the LSE beside them.
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesTheRowStatsOutputs)
+{
+    for(const bool withStats : {true, false})
+    {
+        SCOPED_TRACE(withStats ? "with stats" : "without stats");
+        auto max = withStats ? statsGraph() : GraphSpec{};
+        max.maxUid = EXTRA_UID;
+        EXPECT_EQ(loggedDecline(max).cause, "stats_rowstats");
+
+        auto sumExp = withStats ? statsGraph() : GraphSpec{};
+        sumExp.sumExpUid = EXTRA_UID;
+        EXPECT_EQ(loggedDecline(sumExp).cause, "stats_rowstats");
+
+        auto rngDump = withStats ? statsGraph() : GraphSpec{};
+        rngDump.rngDumpUid = EXTRA_UID;
+        EXPECT_EQ(loggedDecline(rngDump).cause, "stats_rowstats");
+    }
+}
+
+// The rows such a window leaves keyless are graded only against an infinite LSE, so the
+// empty-row decline stands for a graph that binds stats too.
+TEST(TestGfx942AttentionDenseGraphMatch, KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats)
+{
+    auto spec = statsGraph();
+    spec.leftBound = 128;
+    spec.seqLenQ = 512;
+    spec.seqLenKv = 384;
+    EXPECT_EQ(loggedDecline(spec).cause, "mask");
+
+    spec.seqLenKv = 385;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+}
+
+// The gfx950 twin has no LSE kernel: every stats output still declines there, under its
+// one 'stats' cause, while gfx942 binds the same graph.
+TEST(TestGfx942AttentionDenseGraphMatch, LeavesTheGfx950TwinDecliningEveryStatsOutput)
+{
+    ASSERT_TRUE(matchGraph(GraphSpec{}, GFX950_GRAPH_MATCHER_SYMBOL).has_value())
+        << "gfx950 must serve the base graph, or the declines below prove nothing";
+    ASSERT_TRUE(matchGraph(statsGraph()).has_value());
+
+    auto flagOnly = GraphSpec{};
+    flagOnly.generateStats = true;
+    auto uidOnly = statsGraph();
+    uidOnly.generateStats.reset();
+    auto max = GraphSpec{};
+    max.maxUid = EXTRA_UID;
+    for(const auto& spec : {statsGraph(), uidOnly, flagOnly, max})
+    {
+        const auto decline
+            = loggedDecline(spec, GFX950_GRAPH_MATCHER_SYMBOL, GFX950_ATTENTION_DENSE_ENGINE_NAME);
+        EXPECT_EQ(decline.cause, "stats");
+        EXPECT_EQ(decline.detail,
+                  ": softmax statistics outputs (stats, max, sum_exp, rng_dump or "
+                  "generate_stats) are not supported");
+    }
+
+    auto disabled = GraphSpec{};
+    disabled.generateStats = false;
+    const auto bound = matchGraph(disabled, GFX950_GRAPH_MATCHER_SYMBOL);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(bound->count("gfx950_attention_dense.stats.uid"), 0U);
 }
 
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAnUnsupportedOperandOrLayout)
@@ -588,6 +894,47 @@ TEST(TestGfx942AttentionDenseKernelMatch, RefusesARaggedOrUnlaunchableCandidate)
     badTile.blockM = 64;
     badTile.blockN = 128;
     EXPECT_FALSE(matches(GraphSpec{}, badTile));
+}
+
+// LSE is baked at compile time: an emit_lse candidate takes the trailing lse_ptr and
+// serves exactly the graphs that bind a stats output.
+TEST(TestGfx942AttentionDenseKernelMatch, ServesAStatsGraphOnlyFromAnLseCandidate)
+{
+    KernelSpec lse;
+    lse.emitLse = 1;
+
+    EXPECT_TRUE(matches(statsGraph(), lse));
+    EXPECT_FALSE(matches(statsGraph(), KernelSpec{}));
+    EXPECT_TRUE(matches(GraphSpec{}, KernelSpec{}));
+    EXPECT_FALSE(matches(GraphSpec{}, lse));
+
+    // A uid with generate_stats unset is a stats graph too.
+    auto uidOnly = statsGraph();
+    uidOnly.generateStats.reset();
+    EXPECT_TRUE(matches(uidOnly, lse));
+    EXPECT_FALSE(matches(uidOnly, KernelSpec{}));
+}
+
+// A completed record always carries emit_lse (the KMD default is 0), so an absent,
+// mistyped or out-of-range value is a malformed record, declined for either graph.
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateWithoutAValidEmitLse)
+{
+    auto absent = makeKernel(KernelSpec{});
+    absent.metadata.erase("emit_lse");
+    auto mistyped = makeKernel(KernelSpec{});
+    mistyped.metadata[std::string("emit_lse")] = std::string("0");
+    KernelSpec two;
+    two.emitLse = 2;
+    KernelSpec negative;
+    negative.emitLse = -1;
+
+    for(const auto& graph : {GraphSpec{}, statsGraph()})
+    {
+        EXPECT_FALSE(matches(graph, absent));
+        EXPECT_FALSE(matches(graph, mistyped));
+        EXPECT_FALSE(matches(graph, two));
+        EXPECT_FALSE(matches(graph, negative));
+    }
 }
 
 // =============================================================================

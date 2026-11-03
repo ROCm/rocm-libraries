@@ -39,6 +39,7 @@ namespace
 {
 
 using hipdnn_plugin_sdk::ingestor::MetadataType;
+using hipdnn_plugin_sdk::ingestor::MetadataValue;
 using hipdnn_plugin_sdk::ingestor::MetadataValues;
 using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 using hipdnn_plugin_sdk::ingestor::toString;
@@ -436,10 +437,11 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAStringValueOfAnotherType)
 // ---------------------------------------------------------------------------
 // gfx942 dense attention
 //
-// One contract, v1, with gfx950's value set. Its reader holds the restore to what the
-// gfx942 graph and kernel match bind: any finite scale, a block_m gfx942 builds, causal 0
-// or 1, a causal window that leaves no query row without a key, grouped heads, head_size
-// 64 or 128, operands within 32-bit offsets, and seqlen_q a multiple of block_m.
+// One contract, v1, with gfx950's value set plus stats.uid. Its reader holds the restore to
+// what the gfx942 graph and kernel match bind: any finite scale, a block_m gfx942 builds,
+// causal 0 or 1, a causal window that leaves no query row without a key, grouped heads,
+// head_size 64 or 128, operands within 32-bit offsets, seqlen_q a multiple of block_m,
+// and a stats uid that is -1 (none) or non-negative.
 // ---------------------------------------------------------------------------
 
 // A shape the gfx942 match serves, with distinct values. seqlen_q 1536 is a multiple of
@@ -494,10 +496,19 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseValuesMatchTheV1Contract)
                                   {"block_m", int64_t{96}},
                                   {"scale", static_cast<double>(0.1F)},
                                   {"data_type", std::string("HALF")},
-                                  {"stride_layout", std::string("bshd")}};
+                                  {"stride_layout", std::string("bshd")},
+                                  {"stats.uid", int64_t{-1}}};
     EXPECT_EQ(values, expected);
     EXPECT_EQ(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
               "hipkernel.gfx942_attention_dense.dispatch.v1");
+
+    // A plan whose graph binds a stats output saves that output's uid.
+    auto withStats = launch;
+    withStats.binding.stats = 65;
+    const MetadataValues statsValues
+        = gfx942AttentionDenseLaunchValues(withStats.binding, withStats.problem, withStats.blockM);
+    EXPECT_EQ(statsValues.at("stats.uid"), MetadataValue{int64_t{65}});
+    EXPECT_EQ(statsValues.size(), expected.size());
 }
 
 TEST(TestPackLaunchValues, Gfx942AttentionDenseInputsRoundTripThroughTheirValues)
@@ -525,6 +536,68 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseInputsRoundTripThroughTheirValues
     EXPECT_EQ(read.problem.headSize, expected.problem.headSize);
     EXPECT_EQ(read.problem.dataType, expected.problem.dataType);
     EXPECT_EQ(read.blockM, expected.blockM);
+    EXPECT_EQ(read.binding.stats, ATTENTION_DENSE_NO_STATS);
+
+    // The stats uid of a plan that writes the LSE reads back as itself.
+    auto withStats = expected;
+    withStats.binding.stats = 65;
+    const SavedLaunchInputs saved{
+        std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+        gfx942AttentionDenseLaunchValues(withStats.binding, withStats.problem, withStats.blockM)};
+    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(saved).binding.stats, 65);
+}
+
+// stats.uid is -1 for a plan without a stats output, or the output's uid. graph_match binds
+// no negative uid, so anything below -1 is not a saved plan. Whether the restored kernel
+// writes the LSE is checked against it by the restore's signature comparison
+// (TestIngestorPlanRestoreChecks), which this reader does not see.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsAStatsUidOfNoneOrAUid)
+{
+    const auto valid = savedGfx942AttentionDense();
+
+    for(const int64_t uid : {int64_t{-1}, int64_t{0}, int64_t{65}, int64_t{1} << 40})
+    {
+        SCOPED_TRACE(uid);
+        SavedLaunchInputs saved = valid;
+        saved.values["stats.uid"] = uid;
+        EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(saved).binding.stats, uid);
+    }
+
+    for(const int64_t uid : {int64_t{-2}, std::numeric_limits<int64_t>::min()})
+    {
+        SCOPED_TRACE(uid);
+        SavedLaunchInputs belowNone = valid;
+        belowNone.values["stats.uid"] = uid;
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, belowNone, "launch value 'stats.uid'");
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, belowNone, "must be int in [-1, ");
+    }
+
+    expectCommonReadRefusals(&readGfx942AttentionDenseLaunchInputs,
+                             valid,
+                             "hipkernel.gfx942_attention_dense.dispatch",
+                             "stats.uid");
+}
+
+// gfx950 has no LSE kernel: neither of its contracts saves or reads a stats uid.
+TEST(TestPackLaunchValues, Gfx950AttentionDenseSavesAndReadsNoStatsUid)
+{
+    const auto launch = gfx950AttentionDenseInputs();
+    EXPECT_EQ(gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)
+                  .count("stats.uid"),
+              0U);
+
+    for(const char* contract : {"hipkernel.gfx950_attention_dense.dispatch.v1",
+                                "hipkernel.gfx950_attention_dense.dispatch.v2"})
+    {
+        SCOPED_TRACE(contract);
+        SavedLaunchInputs withStats = savedGfx950AttentionDense();
+        withStats.dispatchSymbol = contract;
+        withStats.values["stats.uid"] = int64_t{-1};
+        expectReadRefusal(&readGfx950AttentionDenseLaunchInputs,
+                          withStats,
+                          "launch value 'stats.uid' is not part of the contract");
+    }
 }
 
 // gfx942 has one contract. gfx950's version names, and its values under them, are not it.

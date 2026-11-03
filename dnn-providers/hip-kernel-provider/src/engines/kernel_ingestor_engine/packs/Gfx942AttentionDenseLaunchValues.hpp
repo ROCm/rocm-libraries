@@ -34,14 +34,16 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /// Contract v1: the launch passes 10 kernel arguments (q, k, v, o, scale, batch, seqlen_q,
-/// seqlen_kv, num_query_heads, num_kv_heads). New plans are saved under it. Versions are
-/// per dispatch name, so this is gfx942's first contract, not gfx950's v1.
+/// seqlen_kv, num_query_heads, num_kv_heads), and to a kernel that writes LSE an 11th,
+/// lse_ptr, the stats output. New plans are saved under it. Versions are per dispatch
+/// name, so this is gfx942's first contract, not gfx950's v1.
 inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
     = "hipkernel.gfx942_attention_dense.dispatch.v1";
 
 /// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract
-/// (attention_dense::launchValues). `scale` is stored as a double, which holds every float
-/// exactly. `data_type` is the DataType enumerator name.
+/// (attention_dense::launchValues): the sixteen gfx950's v2 saves, and `stats.uid`, the
+/// stats output's uid or ATTENTION_DENSE_NO_STATS. `scale` is stored as a double, which
+/// holds every float exactly. `data_type` is the DataType enumerator name.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx942AttentionDenseLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
 
@@ -60,6 +62,9 @@ using Gfx942AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 /// kernel match require, `num_query_heads` must be a multiple of `num_kv_heads`,
 /// `head_size` 64 or 128, K/V below 2^31 bytes, Q/O below 2^31 elements, and `seqlen_q` a
 /// multiple of `block_m`: the kernel addresses Q and O without a bounds check.
+/// `stats.uid` must be ATTENTION_DENSE_NO_STATS (-1) or a non-negative uid. Restore selects
+/// the 10- or 11-argument form from it before this reader runs, so its signature check
+/// refuses a kernel that writes LSE under a plan without a stats output, and the reverse.
 ///
 /// @throws HipdnnPluginException with a load refusal when the dispatch name is not the
 ///         contract, or when a value is missing, extra, of another type or out of range.

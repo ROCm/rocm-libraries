@@ -47,6 +47,9 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
+/// The stats uid of a graph that binds no stats (LSE) output.
+inline constexpr int64_t ATTENTION_DENSE_NO_STATS = -1;
+
 /// The tensor uids and derived scalars a matched dense-attention graph binds.
 struct AttentionDenseBinding
 {
@@ -57,6 +60,9 @@ struct AttentionDenseBinding
     int64_t causal = 0;
     int64_t slidingWindow = 0;
     float scale = 0.0F;
+    /// The stats output the kernel writes the LSE to, or ATTENTION_DENSE_NO_STATS. Only an
+    /// arch that serves stats (AttentionDenseArch::servesStats) ever binds one.
+    int64_t stats = ATTENTION_DENSE_NO_STATS;
 };
 
 /// The graph facts the matcher and prepare() both need, derived once from the tensors.
@@ -100,6 +106,9 @@ inline constexpr std::string_view BLOCK_M_VALUE = "block_m";
 inline constexpr std::string_view SCALE_VALUE = "scale";
 inline constexpr std::string_view DATA_TYPE_VALUE = "data_type";
 inline constexpr std::string_view STRIDE_LAYOUT_VALUE = "stride_layout";
+/// The stats output's uid, or ATTENTION_DENSE_NO_STATS. Saved only by an arch that serves
+/// stats; it also selects the kernel arguments a restored plan launches.
+inline constexpr std::string_view STATS_UID_VALUE = "stats.uid";
 
 /// The one stride layout the kernels support. prepare() refuses every other layout.
 inline constexpr std::string_view BSHD_LAYOUT = "bshd";
@@ -135,6 +144,9 @@ struct AttentionDenseTokens
     std::string_view slidingWindow;
     /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
     std::string_view scaleBits;
+    /// The stats output's uid, or ATTENTION_DENSE_NO_STATS. Bound only by an arch that
+    /// serves stats; empty for one that does not.
+    std::string_view stats;
 };
 
 /// The grid and block a variant must launch with.
@@ -183,6 +195,14 @@ struct AttentionDenseArch
     bool (*windowReachesKeys)(
         int64_t blockM, int64_t blockN, int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
         = nullptr;
+    /// Whether a candidate writes the softmax statistics (LSE) through a trailing lse_ptr,
+    /// read from a KMD field only that arch's manifest declares; nullopt for a record
+    /// without a valid value. nullptr for an arch whose catalog has no LSE kernel: its
+    /// graph match declines every stats output under the one cause 'stats', binds no stats
+    /// token, and its launch values carry no stats uid.
+    std::optional<bool> (*candidateWritesLse)(
+        const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+        = nullptr;
     /// Whether restore refuses saved values the graph and kernel match never bind: causal
     /// outside {0, 1}, a negative window, a window without causal, or one that leaves query
     /// rows no key; num_query_heads not a multiple of num_kv_heads, a head_size other than
@@ -198,6 +218,11 @@ struct AttentionDenseArch
     bool servesSlidingWindow() const
     {
         return windowReachesKeys != nullptr;
+    }
+
+    bool servesStats() const
+    {
+        return candidateWritesLse != nullptr;
     }
 };
 
@@ -256,10 +281,12 @@ std::unique_ptr<hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>>
                         const AttentionDenseArch& arch,
                         const AttentionDenseContract& contract);
 
-/// The launch values both engines save, one value set for every contract.
+/// The launch values @p arch saves, one value set for every contract of the arch: the
+/// sixteen both engines save, and `stats.uid` where the arch serves stats.
 hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBinding& binding,
                                                          const AttentionDenseProblem& problem,
-                                                         int64_t blockM);
+                                                         int64_t blockM,
+                                                         const AttentionDenseArch& arch);
 
 /**
  * @brief Reads @p arch's launch values back into the launch state.
@@ -271,7 +298,10 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
  * must convert to a float and back without change and be a scale the arch supports.
  * `data_type` must be a type the kernel is built for, and `stride_layout` must be `bshd`.
  * An arch with refusesUnservedSavedValues also refuses a mask or shape the graph and kernel
- * match never bind.
+ * match never bind. An arch that serves stats also reads `stats.uid`, which must be
+ * ATTENTION_DENSE_NO_STATS or a uid (non-negative); whether the restored kernel writes LSE
+ * is checked against it by the restore's signature comparison, which this reader does not
+ * see.
  *
  * @throws HipdnnPluginException with a load refusal when the dispatch name is neither
  *         contract, or when a value is missing, extra, of another type or out of range.

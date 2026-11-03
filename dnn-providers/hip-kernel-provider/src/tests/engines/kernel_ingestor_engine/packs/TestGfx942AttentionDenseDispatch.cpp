@@ -84,13 +84,20 @@ constexpr std::string_view O_TOKEN = "gfx942_attention_dense.o.uid";
 constexpr std::string_view CAUSAL_TOKEN = "gfx942_attention_dense.causal";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx942_attention_dense.sliding_window";
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_dense.scale_bits";
+constexpr std::string_view STATS_TOKEN = "gfx942_attention_dense.stats.uid";
 
 /// Every token the dispatch reads, in one place, so the case that removes them one at a
 /// time cannot quietly stop covering one.
 const std::vector<std::string_view>& allTokens()
 {
-    static const std::vector<std::string_view> s_tokens{
-        Q_TOKEN, K_TOKEN, V_TOKEN, O_TOKEN, CAUSAL_TOKEN, SLIDING_WINDOW_TOKEN, SCALE_BITS_TOKEN};
+    static const std::vector<std::string_view> s_tokens{Q_TOKEN,
+                                                        K_TOKEN,
+                                                        V_TOKEN,
+                                                        O_TOKEN,
+                                                        CAUSAL_TOKEN,
+                                                        SLIDING_WINDOW_TOKEN,
+                                                        SCALE_BITS_TOKEN,
+                                                        STATS_TOKEN};
     return s_tokens;
 }
 
@@ -108,6 +115,16 @@ constexpr int64_t O_UID = 44;
 /// A fifth tensor, BHSD rather than BSHD, that no node references. It exists only so a
 /// bound O token can be made to name a real but wrongly-strided tensor.
 constexpr int64_t BHSD_UID = 55;
+
+/// The stats output of a graph that binds one: FLOAT, [B, H, S, 1], packed.
+constexpr int64_t STATS_UID = 66;
+
+/// A FLOAT [B, H, S, 1] tensor no node references, strided token-major rather than packed,
+/// so a bound stats token can be made to name a real tensor the kernel does not write.
+constexpr int64_t TOKEN_MAJOR_STATS_UID = 77;
+
+/// The stats token of a graph that binds no stats output.
+constexpr int64_t NO_STATS = -1;
 
 constexpr int64_t ABSENT_UID = 99;
 
@@ -134,11 +151,20 @@ flatbuffers::Offset<data_objects::TensorAttributes>
     addTensor(flatbuffers::FlatBufferBuilder& builder,
               int64_t uid,
               const std::vector<int64_t>& strides,
-              const std::vector<int64_t>& dims)
+              const std::vector<int64_t>& dims,
+              data_objects::DataType dataType = data_objects::DataType::BFLOAT16)
 {
     return data_objects::CreateTensorAttributesDirect(
-        builder, uid, nullptr, data_objects::DataType::BFLOAT16, &strides, &dims, false);
+        builder, uid, nullptr, dataType, &strides, &dims, false);
 }
+
+/// Whether the graph binds a stats output.
+enum class Stats
+{
+    NONE,
+    /// stats uid STATS_UID and generate_stats true, the frontend's spelling.
+    BOUND
+};
 
 enum class Mask
 {
@@ -150,13 +176,16 @@ enum class Mask
 
 /// The graph only has to be one the engine matches, so the tokens it binds can be read;
 /// the applicability rules are TestGfx942AttentionDenseMatchers.cpp's subject.
-flatbuffers::FlatBufferBuilder buildGraph(float scale, Mask mask, bool withBhsdTensor)
+flatbuffers::FlatBufferBuilder buildGraph(float scale, Mask mask, bool withBhsdTensor, Stats stats)
 {
     flatbuffers::FlatBufferBuilder builder;
 
     const std::vector<int64_t> dims{BATCH, HEADS, SEQ, HEAD_SIZE};
     const std::vector<int64_t> strides = bshdStrides();
     const std::vector<int64_t> wrongStrides = bhsdStrides();
+    const std::vector<int64_t> statsDims{BATCH, HEADS, SEQ, 1};
+    const std::vector<int64_t> statsStrides{HEADS * SEQ, SEQ, 1, 1};
+    const std::vector<int64_t> tokenMajorStatsStrides{SEQ * HEADS, 1, HEADS, 1};
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
@@ -166,6 +195,16 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale, Mask mask, bool withBhsdT
     if(withBhsdTensor)
     {
         tensors.push_back(addTensor(builder, BHSD_UID, wrongStrides, dims));
+        tensors.push_back(addTensor(builder,
+                                    TOKEN_MAJOR_STATS_UID,
+                                    tokenMajorStatsStrides,
+                                    statsDims,
+                                    data_objects::DataType::FLOAT));
+    }
+    if(stats == Stats::BOUND)
+    {
+        tensors.push_back(
+            addTensor(builder, STATS_UID, statsStrides, statsDims, data_objects::DataType::FLOAT));
     }
 
     data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -182,6 +221,11 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale, Mask mask, bool withBhsdT
     attributesBuilder.add_causal_mask(false);
     attributesBuilder.add_causal_mask_bottom_right(false);
     attributesBuilder.add_attn_scale_value(scale);
+    if(stats == Stats::BOUND)
+    {
+        attributesBuilder.add_stats_tensor_uid(STATS_UID);
+        attributesBuilder.add_generate_stats(true);
+    }
     attributesBuilder.add_alibi_mask(false);
     attributesBuilder.add_padding_mask(false);
     attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
@@ -215,8 +259,9 @@ class AttentionGraph
 public:
     explicit AttentionGraph(float scale = 0.125F,
                             Mask mask = Mask::TOP_LEFT_CAUSAL,
-                            bool withBhsdTensor = false)
-        : _builder(buildGraph(scale, mask, withBhsdTensor))
+                            bool withBhsdTensor = false,
+                            Stats stats = Stats::NONE)
+        : _builder(buildGraph(scale, mask, withBhsdTensor, stats))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
     {
         _properties.gcnArchName = "gfx942";
@@ -291,22 +336,29 @@ int64_t ieee754Bits(float value)
 
 /// The ABI the rocKE builder declares, named as hkp_pack records it, so the signature
 /// comparison agrees and the failure below is the archive's rather than a mismatch;
-/// TestGfx942AttentionDenseSignature.cpp owns that comparison.
-std::vector<KernelArgument> recordedSignature()
+/// TestGfx942AttentionDenseSignature.cpp owns that comparison. An emit_lse kernel takes
+/// lse_ptr last.
+std::vector<KernelArgument> recordedSignature(bool writesLse = false)
 {
     constexpr uint32_t POINTER_BYTES = 8;
     constexpr uint32_t SCALAR_BYTES = 4;
 
-    return {KernelArgument{"global_buffer", POINTER_BYTES, 0, "q_ptr"},
-            KernelArgument{"global_buffer", POINTER_BYTES, 0, "k_ptr"},
-            KernelArgument{"global_buffer", POINTER_BYTES, 0, "v_ptr"},
-            KernelArgument{"global_buffer", POINTER_BYTES, 0, "o_ptr"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
+    std::vector<KernelArgument> signature{
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "q_ptr"},
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "k_ptr"},
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "v_ptr"},
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "o_ptr"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
+    if(writesLse)
+    {
+        signature.push_back(KernelArgument{"global_buffer", POINTER_BYTES, 0, "lse_ptr"});
+    }
+    return signature;
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, carrying the
@@ -315,7 +367,7 @@ std::vector<KernelArgument> recordedSignature()
 /// That absence is the point: every check prepare() performs BEFORE the loader runs is
 /// reached, and when they all pass the loader reports the missing file. No device, no
 /// compile, no launch.
-KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64)
+KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64, bool writesLse = false)
 {
     KernelDefinition kernel;
     kernel.kernelId
@@ -329,7 +381,7 @@ KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64)
     kernel.source.library = "there-is-no-archive-here.kpack";
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_dense";
-    kernel.source.signature = recordedSignature();
+    kernel.source.signature = recordedSignature(writesLse);
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
     kernel.metadata = {
@@ -372,6 +424,12 @@ constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
 
 /// The fragment only the tile refusal carries.
 constexpr const char* TILE_MARKER = "no supported block_m/block_n tile";
+
+/// The fragment only the stats-tensor refusal carries.
+constexpr const char* STATS_MARKER = "the stats tensor is not the packed";
+
+/// The fragment only the signature refusal carries.
+constexpr const char* SIGNATURE_MARKER = "is packaged with arguments";
 
 } // namespace
 
@@ -477,6 +535,18 @@ TEST(TestGfx942AttentionDenseDispatch, BindsTheDerivedMaskAndAZeroSlidingWindow)
     EXPECT_EQ(tokenValue(unmaskedBound, SLIDING_WINDOW_TOKEN), 0);
 }
 
+/// The stats output the launch writes the LSE to, or NO_STATS: kernelMatches compares it
+/// against the candidate's emit_lse, and launch() resolves it with findDeviceBuffer as the
+/// trailing lse_ptr. NO_STATS is distinct from NOT_BOUND, so a dropped token cannot read
+/// as a graph without stats.
+TEST(TestGfx942AttentionDenseDispatch, BindsTheStatsOutputOrNoStats)
+{
+    EXPECT_EQ(tokenValue(bindingsFor(AttentionGraph()), STATS_TOKEN), NO_STATS);
+
+    const AttentionGraph withStats(0.125F, Mask::TOP_LEFT_CAUSAL, false, Stats::BOUND);
+    EXPECT_EQ(tokenValue(bindingsFor(withStats), STATS_TOKEN), STATS_UID);
+}
+
 // =============================================================================
 // What prepare() does with them
 // =============================================================================
@@ -568,6 +638,48 @@ TEST(TestGfx942AttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesAN
     const std::string failure = prepareFailure(graph, tampered);
     ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
     EXPECT_NE(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
+}
+
+/// A graph that binds stats prepares the 11-argument form: an emit_lse candidate's
+/// recorded signature passes the comparison and only the absent archive stops it, while
+/// the 10-argument form is refused for it, and the 11-argument form for a graph without
+/// stats.
+TEST(TestGfx942AttentionDenseDispatch, PreparesTheLseFormExactlyForAGraphThatBindsStats)
+{
+    const AttentionGraph withStats(0.125F, Mask::TOP_LEFT_CAUSAL, false, Stats::BOUND);
+    const auto statsBound = bindingsFor(withStats);
+
+    const std::string lseFailure
+        = prepareFailure(withStats, statsBound, makeKernel(256, 64, /*writesLse=*/true));
+    ASSERT_FALSE(lseFailure.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_NE(lseFailure.find("does not exist"), std::string::npos) << lseFailure;
+
+    const std::string plainFailure = prepareFailure(withStats, statsBound, makeKernel());
+    EXPECT_NE(plainFailure.find(SIGNATURE_MARKER), std::string::npos) << plainFailure;
+
+    const AttentionGraph withoutStats;
+    const std::string extraFailure = prepareFailure(
+        withoutStats, bindingsFor(withoutStats), makeKernel(256, 64, /*writesLse=*/true));
+    EXPECT_NE(extraFailure.find(SIGNATURE_MARKER), std::string::npos) << extraFailure;
+}
+
+/// graph_match binds only a stats tensor the kernel can write, so prepare() re-checks the
+/// one the token names before it builds anything: a uid with no tensor, a token-major
+/// FLOAT tensor, and a tensor that is not FLOAT (Q) are each refused by name.
+TEST(TestGfx942AttentionDenseDispatch, RefusesToPrepareWhenTheStatsTokenNamesATensorItCannotWrite)
+{
+    const AttentionGraph graph(0.125F, Mask::TOP_LEFT_CAUSAL, /*withBhsdTensor=*/true);
+    for(const int64_t uid : {ABSENT_UID, TOKEN_MAJOR_STATS_UID, Q_UID})
+    {
+        SCOPED_TRACE(uid);
+        auto tampered = bindingsFor(graph);
+        tampered[std::string(STATS_TOKEN)] = uid;
+
+        const std::string failure
+            = prepareFailure(graph, tampered, makeKernel(256, 64, /*writesLse=*/true));
+        ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+        EXPECT_NE(failure.find(STATS_MARKER), std::string::npos) << failure;
+    }
 }
 
 /// Every tile a D128 catalog candidate can carry reaches the loader: the tile check is not

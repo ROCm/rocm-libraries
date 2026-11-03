@@ -39,12 +39,14 @@
  * a success status. This is the silent-wrong-answer class the layout and stride gates in
  * the matcher exist to stop, one layer lower down.
  *
- * Every variant in gfx942_attention_dense.kdp.json declares `persistent: false`,
- * `use_sinks: false` and `emit_lse: false`, so the 10-argument form -- four pointers,
- * scale, then batch, seqlen_q, seqlen_kv, num_query_heads and num_kv_heads -- is the only
- * one that ships, and the fast-division / sink / LSE tails of attention_dense_signature
- * are unreachable from this catalog. The persistent form is covered here only as a shape
- * the pack must refuse.
+ * Every variant in gfx942_attention_dense.kdp.json declares `persistent: false` and
+ * `use_sinks: false`, so two forms ship: the 10-argument form -- four pointers, scale,
+ * then batch, seqlen_q, seqlen_kv, num_query_heads and num_kv_heads -- of an
+ * `emit_lse: false` kernel, and the 11-argument form of an `emit_lse: true` kernel, which
+ * takes lse_ptr last. A graph that binds a stats output prepares the 11-argument form and
+ * any other the 10-argument one. The fast-division and sink tails of
+ * attention_dense_signature are unreachable from this catalog; the persistent form is
+ * covered here only as a shape the pack must refuse.
  *
  * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry
  * one. The name comparison is the only one that tells the four pointers apart, or `scale`
@@ -91,6 +93,8 @@ constexpr std::size_t SCALE_INDEX = 4;
 
 constexpr std::size_t LAST_INDEX = 9;
 
+constexpr std::size_t LSE_INDEX = 10;
+
 /// The argument list attention_dense_signature declares, under the names it gives them.
 std::vector<KernelArgument> pythonAbi()
 {
@@ -123,9 +127,24 @@ std::vector<KernelArgument> persistentAbi()
     return signature;
 }
 
+/// The emit_lse form: the same ten arguments, then lse_ptr, the FP32 stats output.
+std::vector<KernelArgument> pythonLseAbi()
+{
+    auto signature = pythonAbi();
+    signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
+    return signature;
+}
+
 std::vector<KernelArgument> withArgument(std::size_t index, const KernelArgument& argument)
 {
     auto signature = pythonAbi();
+    signature.at(index) = argument;
+    return signature;
+}
+
+std::vector<KernelArgument> withLseArgument(std::size_t index, const KernelArgument& argument)
+{
+    auto signature = pythonLseAbi();
     signature.at(index) = argument;
     return signature;
 }
@@ -138,6 +157,7 @@ constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
+constexpr int64_t STATS_UID = 5;
 
 /// The shape is not what these cases are about -- any graph the engine accepts would do,
 /// and TestGfx942AttentionDenseMatchers.cpp owns the applicability rules.
@@ -153,18 +173,37 @@ std::vector<int64_t> bshdStrides()
     return {SEQ * HEADS * HEAD_SIZE, HEAD_SIZE, HEADS * HEAD_SIZE, 1};
 }
 
-flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
+/// Whether the graph binds a stats output, which selects the form prepare() checks.
+enum class Stats
+{
+    NONE,
+    BOUND
+};
+
+flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(Stats stats)
 {
     flatbuffers::FlatBufferBuilder builder;
 
     const std::vector<int64_t> dims{BATCH, HEADS, SEQ, HEAD_SIZE};
     const std::vector<int64_t> strides = bshdStrides();
+    const std::vector<int64_t> statsDims{BATCH, HEADS, SEQ, 1};
+    const std::vector<int64_t> statsStrides{HEADS * SEQ, SEQ, 1, 1};
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
     {
         tensors.push_back(data_objects::CreateTensorAttributesDirect(
             builder, uid, nullptr, data_objects::DataType::BFLOAT16, &strides, &dims, false));
+    }
+    if(stats == Stats::BOUND)
+    {
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                     STATS_UID,
+                                                                     nullptr,
+                                                                     data_objects::DataType::FLOAT,
+                                                                     &statsStrides,
+                                                                     &statsDims,
+                                                                     false));
     }
 
     data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -178,6 +217,11 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
     attributesBuilder.add_causal_mask(false);
     attributesBuilder.add_causal_mask_bottom_right(false);
     attributesBuilder.add_attn_scale_value(SCALE);
+    if(stats == Stats::BOUND)
+    {
+        attributesBuilder.add_stats_tensor_uid(STATS_UID);
+        attributesBuilder.add_generate_stats(true);
+    }
     attributesBuilder.add_alibi_mask(false);
     attributesBuilder.add_padding_mask(false);
     attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
@@ -243,14 +287,14 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
     return kernel;
 }
 
-/// Runs the pack's prepare() over a descriptor recording @p recorded and returns the
-/// message of whatever it throws. Empty means it returned a prepared dispatch, which no
-/// case expects.
-std::string prepareFailure(const std::vector<KernelArgument>& recorded)
+/// Runs the pack's prepare() over a descriptor recording @p recorded, for a graph that
+/// binds @p stats, and returns the message of whatever it throws. Empty means it returned
+/// a prepared dispatch, which no case expects.
+std::string prepareFailure(const std::vector<KernelArgument>& recorded, Stats stats = Stats::NONE)
 {
     registerNativeIngestorSymbols();
 
-    auto builder = buildAcceptedSdpaGraph();
+    auto builder = buildAcceptedSdpaGraph(stats);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -290,9 +334,11 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
 
 /// Asserts the pack refuses @p recorded on signature grounds rather than on any of the
 /// other grounds prepare() can fail for.
-void expectRefused(const std::vector<KernelArgument>& recorded, const char* what)
+void expectRefused(const std::vector<KernelArgument>& recorded,
+                   const char* what,
+                   Stats stats = Stats::NONE)
 {
-    const std::string failure = prepareFailure(recorded);
+    const std::string failure = prepareFailure(recorded, stats);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
         << what << ", but the failure was: " << failure;
@@ -432,6 +478,73 @@ TEST(TestGfx942AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
             expectRefused(exchanged, what.c_str());
         }
     }
+}
+
+// =============================================================================
+// The emit_lse form: lse_ptr last, for a graph that binds a stats output
+// =============================================================================
+
+/// The positive control for the cases below, as AcceptsTheAbiThePythonDeclares is for the
+/// 10-argument form.
+TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseAbiForAGraphThatBindsStats)
+{
+    const std::string failure = prepareFailure(pythonLseAbi(), Stats::BOUND);
+    ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
+                                     "prepare() cannot have succeeded";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the emit_lse argument list the rocKE builder declares: " << failure;
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheTenArgumentFormForAGraphThatBindsStats)
+{
+    // A non-LSE kernel would never write the stats output the graph asked for.
+    expectRefused(pythonAbi(), "a stats graph launches lse_ptr", Stats::BOUND);
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheLseFormForAGraphWithoutStats)
+{
+    // The launch would pass ten arguments, and the kernel would store the LSE through
+    // whatever the eleventh kernarg slot holds.
+    expectRefused(pythonLseAbi(), "a graph without stats launches ten arguments");
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesAnLseSlotThatIsNotAPointer)
+{
+    expectRefused(withLseArgument(LSE_INDEX, KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""}),
+                  "lse_ptr is a global buffer",
+                  Stats::BOUND);
+    expectRefused(withLseArgument(LSE_INDEX, KernelArgument{BUFFER_KIND, SCALAR_BYTES, 0, ""}),
+                  "a device pointer is eight bytes",
+                  Stats::BOUND);
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheLseFormWithAnyPointerRenamedOrExchanged)
+{
+    // lse_ptr is a fifth like slot beside the four operand pointers; only its name keeps
+    // a kernel that writes the LSE over O, or O over the LSE, from passing.
+    const auto abi = pythonLseAbi();
+    auto renamed = abi;
+    renamed.at(LSE_INDEX).name += "_renamed";
+    expectRefused(renamed, "lse_ptr", Stats::BOUND);
+
+    for(std::size_t pointer = 0; pointer < SCALE_INDEX; ++pointer)
+    {
+        auto exchanged = abi;
+        std::swap(exchanged.at(pointer), exchanged.at(LSE_INDEX));
+        const std::string what = abi.at(pointer).name + " <-> lse_ptr";
+        expectRefused(exchanged, what.c_str(), Stats::BOUND);
+    }
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesAnLseFormWithASlotDroppedOrAdded)
+{
+    auto dropped = pythonLseAbi();
+    dropped.erase(dropped.begin() + static_cast<std::ptrdiff_t>(LAST_INDEX));
+    expectRefused(dropped, "num_kv_heads still precedes lse_ptr", Stats::BOUND);
+
+    auto extra = pythonLseAbi();
+    extra.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
+    expectRefused(extra, "lse_ptr is the last argument", Stats::BOUND);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

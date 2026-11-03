@@ -100,6 +100,8 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     // No catalog variant carries a non-zero sliding_window, so a windowed mask has no
     // spelling here.
     arch.windowReachesKeys = nullptr;
+    // No catalog variant writes LSE, so every stats output declines under 'stats'.
+    arch.candidateWritesLse = nullptr;
     // The v1/v2 reader shipped without the saved mask and shape checks, and its contracts
     // are frozen.
     arch.refusesUnservedSavedValues = false;
@@ -172,7 +174,7 @@ MetadataValues gfx950AttentionDenseLaunchValues(const AttentionDenseBinding& bin
                                                 const AttentionDenseProblem& problem,
                                                 int64_t blockM)
 {
-    return attention_dense::launchValues(binding, problem, blockM);
+    return attention_dense::launchValues(binding, problem, blockM, GFX950_ARCH);
 }
 
 Gfx950AttentionDenseLaunchInputs

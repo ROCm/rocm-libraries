@@ -161,11 +161,16 @@ IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
     return payload;
 }
 
-// A gfx942 dense-attention payload under its one contract that passes every check before the
-// module load when `withHeads` is true: gfx942 launches the same ten arguments as gfx950's v2.
-IngestorPlanPayload gfx942AttentionDensePayload(bool withHeads)
+// A gfx942 dense-attention payload under its one contract, saved with stats uid `stats`
+// (ATTENTION_DENSE_NO_STATS for none), that passes every check before the module load when
+// `withHeads` is true and `writesLse` says whether `stats` is bound: gfx942 launches the
+// same ten arguments as gfx950's v2, and lse_ptr after them to a kernel that writes LSE.
+IngestorPlanPayload gfx942AttentionDensePayload(bool withHeads,
+                                                int64_t stats = ATTENTION_DENSE_NO_STATS,
+                                                bool writesLse = false)
 {
-    const AttentionDenseBinding binding{1, 2, 3, 4, 1, 128, 0.125F};
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 128, 0.125F};
+    binding.stats = stats;
     AttentionDenseProblem problem;
     problem.batch = 2;
     problem.seqLenQ = 512;
@@ -180,6 +185,10 @@ IngestorPlanPayload gfx942AttentionDensePayload(bool withHeads)
     payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
+    if(writesLse)
+    {
+        payload.recordedSignature.push_back(KernelArgument{"global_buffer", 8, 56, "lse_ptr"});
+    }
     return payload;
 }
 
@@ -373,6 +382,49 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractAcceptsItsOwnS
     keylessRows.launchValues["sliding_window"] = int64_t{256};
     expectRefusal(
         keylessRows, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'sliding_window'");
+}
+
+// The saved stats uid selects the argument list before anything is checked: a plan with a
+// stats output restores the 11-argument code object that writes the LSE, reaching the
+// launch-value check, which a broken block_m then refuses.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRestoresTheLseFormOfAPlanWithStats)
+{
+    for(const int64_t stats : {int64_t{0}, int64_t{7}})
+    {
+        SCOPED_TRACE(stats);
+        auto payload = gfx942AttentionDensePayload(/*withHeads=*/true, stats, /*writesLse=*/true);
+        payload.launchValues["block_m"] = int64_t{48};
+        expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+    }
+}
+
+// A kernel whose arguments disagree with the saved stats uid is refused by the signature
+// check: an LSE kernel saved without a stats output would store through an argument the
+// launch never passes, and a non-LSE kernel saved with one would never write it.
+TEST_F(TestIngestorPlanRestoreChecks,
+       Gfx942AttentionDenseRefusesAKernelThatDisagreesWithItsStatsUid)
+{
+    expectRefusal(gfx942AttentionDensePayload(/*withHeads=*/true, int64_t{7}, /*writesLse=*/false),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+    expectRefusal(gfx942AttentionDensePayload(
+                      /*withHeads=*/true, ATTENTION_DENSE_NO_STATS, /*writesLse=*/true),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+}
+
+// The selector reads the uid leniently and the reader strictly: a uid below -1 selects the
+// LSE form and is then refused as a value; a missing one selects the plain form and is then
+// refused as missing.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesAStatsUidItNeverSaves)
+{
+    expectRefusal(gfx942AttentionDensePayload(/*withHeads=*/true, int64_t{-2}, /*writesLse=*/true),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "launch value 'stats.uid'");
+
+    auto missing = gfx942AttentionDensePayload(/*withHeads=*/true);
+    missing.launchValues.erase("stats.uid");
+    expectRefusal(missing, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "needs launch value 'stats.uid'");
 }
 
 // The unversioned gfx942 name resolves to the gfx942 handler, which reads only v1.

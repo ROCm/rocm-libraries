@@ -36,7 +36,8 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx942 only. Matching and
  * dispatch are shared with the gfx950 twin (AttentionDenseNative.cpp); what is gfx942's
  * own is bound here: any finite scale, the gfx942 tile rules, the causal sliding window
- * baked per candidate with its zero-trip guard, and the v1 launch contract.
+ * baked per candidate with its zero-trip guard, the stats (LSE) output an emit_lse
+ * candidate writes, and the v1 launch contract.
  *
  * The body reads both head counts at runtime as well as batch and the sequence lengths
  * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Unlike the gfx950 twin, whose
@@ -57,14 +58,16 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx942_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx942_attention_dense.dispatch";
 
-// The KMD fields only this engine's schema carries (14 fields; the shared ones are read in
-// AttentionDenseNative.cpp). The cold ranking reads them to order arms; they do not enter
-// the launch. waves_per_eu/persistent and the other gfx942 levers are absent: every
-// shipped variant holds them at the kernel's own policy. A variant that moved any of them
-// would have to add it to the KMD first, or the candidates collide on the catalog key and
-// the loader drops one.
+// The KMD fields only this engine's schema carries (15 fields; the shared ones are read in
+// AttentionDenseNative.cpp). The cold ranking reads lds_row_pad and pv_priority to order
+// arms; they do not enter the launch. emit_lse selects the candidates of a graph that
+// binds a stats output, and the launch's trailing lse_ptr. waves_per_eu/persistent and the
+// other gfx942 levers are absent: every shipped variant holds them at the kernel's own
+// policy. A variant that moved any of them would have to add it to the KMD first, or the
+// candidates collide on the catalog key and the loader drops one.
 constexpr std::string_view LDS_ROW_PAD_FIELD = "lds_row_pad";
 constexpr std::string_view PV_PRIORITY_FIELD = "pv_priority";
+constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
 
 /// The policy arms cold selection prefers: the 256/64 tile, the spec's default K row pad
 /// (`_DEFAULT_LDS_ROW_PAD`) and the default PV priority.
@@ -79,6 +82,18 @@ constexpr int64_t BASELINE_PV_PRIORITY = 0;
 bool isSupportedAttentionScale(float scale)
 {
     return std::isfinite(scale);
+}
+
+/// Whether a candidate writes LSE: emit_lse 1 or 0. A record without the field reaches here
+/// completed to 0 through the KMD default, so a missing or other value is malformed.
+std::optional<bool> candidateWritesLse(const KernelDefinition& kernel)
+{
+    const auto emitLse = attention_dense::integerMetadata(kernel, EMIT_LSE_FIELD);
+    if(!emitLse.has_value() || (*emitLse != 0 && *emitLse != 1))
+    {
+        return std::nullopt;
+    }
+    return *emitLse == 1;
 }
 
 attention_dense::AttentionDenseGeometry gfx942Geometry(int64_t blockM,
@@ -105,6 +120,7 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.tokens.causal = "gfx942_attention_dense.causal";
     arch.tokens.slidingWindow = "gfx942_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx942_attention_dense.scale_bits";
+    arch.tokens.stats = "gfx942_attention_dense.stats.uid";
     // The head fields of the KMD are canonical build inputs, never compared.
     arch.matchesHeadCounts = false;
     arch.isSupportedScale = &isSupportedAttentionScale;
@@ -112,6 +128,8 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
     arch.geometry = &gfx942Geometry;
     arch.windowReachesKeys = &gfx942AttentionDenseWindowReachesKeys;
+    // An emit_lse candidate writes the stats output; the catalog pairs each kernel with one.
+    arch.candidateWritesLse = &candidateWritesLse;
     arch.refusesUnservedSavedValues = true;
     arch.currentContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
@@ -160,7 +178,9 @@ int64_t armRank(int64_t value, int64_t policy, int64_t step, int64_t span)
  * lexicographic over (tile, lds_row_pad, pv_priority), and each knob places its policy
  * arm first (the 256/64 tile, lds_row_pad 8, pv_priority 0) and its alternatives in
  * ascending order. Every distinct knob combination gets a distinct score, so the
- * selector's descriptor-id tie-break never decides between two arms.
+ * selector's descriptor-id tie-break never decides between two arms. emit_lse is not
+ * ranked: kernelMatches admits the LSE twins of a graph that binds stats and the others
+ * of one that does not, so a twin and its partner never compete.
  */
 double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,
@@ -197,7 +217,7 @@ MetadataValues gfx942AttentionDenseLaunchValues(const AttentionDenseBinding& bin
                                                 const AttentionDenseProblem& problem,
                                                 int64_t blockM)
 {
-    return attention_dense::launchValues(binding, problem, blockM);
+    return attention_dense::launchValues(binding, problem, blockM, GFX942_ARCH);
 }
 
 Gfx942AttentionDenseLaunchInputs
