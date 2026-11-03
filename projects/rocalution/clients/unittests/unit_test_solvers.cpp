@@ -3058,6 +3058,7 @@ TYPED_TEST(solvers, direct_solvers_solve_exactly)
     const Vec<T> x   = dense_solve(dense(ref), b);
 
     for(const DirectCase<T>& c : {direct<LU<T>>("LU", rocalution::CSR),
+                                  direct<LU<T>>("LU", rocalution::DENSE),
                                   direct<QR<T>>("QR", rocalution::CSR),
                                   direct<QR<T>>("QR", rocalution::DENSE),
                                   direct<Inversion<T>>("Inversion", rocalution::CSR),
@@ -3071,17 +3072,6 @@ TYPED_TEST(solvers, direct_solvers_solve_exactly)
         quietly([&] { solver->Build(); });
         expect_near(direct_solve(*solver, *A, b), x, tol<T>());
     }
-
-    KNOWN_BUG("LU::Build calls LUAnalyse, which ends the program for a DENSE matrix");
-    SCOPED_TRACE("LU DENSE");
-    expect_completes([&] {
-        auto  A = make_local_matrix(this->backend(), ref, Format{rocalution::DENSE, 1});
-        LU<T> solver;
-        solver.Verbose(0);
-        solver.SetOperator(*A);
-        solver.Build();
-        return near(direct_solve(solver, *A, b), x, tol<T>());
-    });
 }
 
 TYPED_TEST(solvers, lu_solves_with_the_iterative_triangular_solves)

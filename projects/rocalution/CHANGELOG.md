@@ -50,6 +50,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the residual history file dropping the last residual and, after a second solve, holding the residuals of the first solve.
 * Fixed `ReBuildNumeric()` of the IDR solver clearing its shadow space and of the Chebyshev iteration un-building it, so that the next solve failed.
 * Fixed the IDR solver ending the program at a breakdown. It now stops and returns the last iterate.
+* Fixed the LU solver ending the program for a DENSE operator.
 
 ## (Unreleased) rocALUTION 4.1.1
 

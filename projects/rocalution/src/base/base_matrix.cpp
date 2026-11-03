@@ -535,24 +535,16 @@ namespace rocalution
         return false;
     }
 
+    // Formats without an analysis solve without one, or LUSolve returns false and
+    // LocalMatrix::LUSolve solves on the host
     template <typename ValueType>
     void BaseMatrix<ValueType>::LUAnalyse(void)
     {
-        LOG_INFO("BaseMatrix<ValueType>::LUAnalyse(void)");
-        LOG_INFO("Matrix format=" << _matrix_format_names[this->GetMatFormat()]);
-        this->Info();
-        LOG_INFO("The function is not implemented (yet)!");
-        FATAL_ERROR(__FILE__, __LINE__);
     }
 
     template <typename ValueType>
     void BaseMatrix<ValueType>::LUAnalyseClear(void)
     {
-        LOG_INFO("BaseMatrix<ValueType>::LUAnalyseClear(void)");
-        LOG_INFO("Matrix format=" << _matrix_format_names[this->GetMatFormat()]);
-        this->Info();
-        LOG_INFO("The function is not implemented (yet)!");
-        FATAL_ERROR(__FILE__, __LINE__);
     }
 
     template <typename ValueType>
