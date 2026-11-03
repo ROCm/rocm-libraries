@@ -391,6 +391,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["dy_halo_setprio"], fields["dy_halo_kouter_pad"]
         del fields["split_k_cluster"]  # cluster split-K forward, off
         del fields["streamk"], fields["streamk_reduction"]  # stream-K, off
+        del fields["tapk_prefetch"], fields["tapk_xhalo"], fields["b_kpack"]  # dgrad knobs, off
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
