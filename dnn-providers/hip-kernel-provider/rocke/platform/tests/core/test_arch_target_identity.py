@@ -14,6 +14,7 @@ from rocke.core.arch import (
     arch_from_isa,
     base_arch_from_target_id,
     compiler_target_for_flavor,
+    compiler_target_for_llvm_major,
     compiler_target_from_target_id,
     generic_arch_from_target_id,
     known_arches,
@@ -70,6 +71,31 @@ def test_gfx1154_compiles_as_gfx11_generic(flavor: str) -> None:
         "for 'gfx11-generic' instead, the generic target its arch_specs.json row "
         "points at, whose code objects load on 'gfx1154'"
     ]
+
+
+@pytest.mark.parametrize(
+    ("llvm_major", "target"),
+    [
+        (20, "gfx11-generic:xnack-"),
+        (23, "gfx11-generic:xnack-"),
+        (24, "gfx1154:xnack-"),
+        (25, "gfx1154:xnack-"),
+        (None, "gfx1154:xnack-"),
+    ],
+    ids=["llvm20", "llvm23", "llvm24", "newer_than_every_lane", "unknown"],
+)
+def test_a_compiler_major_routes_through_its_lane_or_keeps_the_processor(
+    llvm_major: int | None, target: str
+) -> None:
+    """A major in a qualified lane routes as that lane's column says (LLVM 20
+    and 23 reject gfx1154, LLVM 24 takes it); a newer or unknown compiler was
+    never measured, so the processor keeps its name, with no warning."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore" if target.startswith("gfx11-") else "error")
+        assert (
+            compiler_target_for_llvm_major("gfx1154-strict:xnack-", llvm_major)
+            == target
+        )
 
 
 def test_a_target_no_compiler_can_take_is_refused() -> None:

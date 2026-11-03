@@ -78,15 +78,13 @@ from ..core.arch import (
     ArchTarget,
     arch_from_isa,
     base_arch_from_target_id,
-    compiler_target_for_flavor,
-    compiler_target_from_target_id,
+    compiler_target_for_llvm_major,
     known_arches,
     target_id_from_isa,
 )
 from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
-from ..core.llvm_profile import _measured_flavor_for_llvm
 from ..core.lower_hip import lower_kernel_to_hip
 from ..core.lower_llvm import _lower_kernel_to_llvm_python
 from ..core.passes import PassStats, optimize_kernel
@@ -153,11 +151,14 @@ def compile_kernel(
     architecture selects rocKE lowering. A processor that the compiler COMGR
     loads was measured not to accept is compiled for the generic target its
     catalog row points at, with a warning, or refused with ``ValueError`` when
-    there is none (see :func:`~rocke.core.arch.compiler_target_for_flavor`).
+    there is none (see :func:`~rocke.core.arch.compiler_target_for_llvm_major`).
     The loaded compiler decides this, not ``ROCKE_LLVM_FLAVOR``, which only
-    chooses the emitted IR's conventions. The resulting
-    COMGR ISA name is passed to `build_hsaco_from_llvm_ir` and recorded in
-    `KernelArtifact.isa`. COMGR checks compiler support when compilation runs.
+    chooses the emitted IR's conventions. A COMGR compiler whose version is
+    unknown or newer than every qualified lane leaves the processor's name
+    unchanged; building then refuses that compiler with COMGR's own error. The
+    resulting COMGR ISA name is passed to `build_hsaco_from_llvm_ir` and
+    recorded in `KernelArtifact.isa`. COMGR checks compiler support when
+    compilation runs.
 
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
@@ -391,26 +392,12 @@ def compile_module(
     )
 
 
-def _compiler_target(target_id: str, llvm_major: int | None) -> str:
-    """The compiler target for ``target_id`` when the compiler that will run is
-    LLVM ``llvm_major``.
-
-    Routed by the arch-domain column of that compiler's qualified lane
-    (:func:`~rocke.core.arch.compiler_target_for_flavor`). A compiler newer
-    than every lane, or one whose version is unknown (``None``), was never
-    measured, so the processor keeps its name
-    (:func:`~rocke.core.arch.compiler_target_from_target_id`) and that compiler
-    has the last word.
-    """
-    flavor = None if llvm_major is None else _measured_flavor_for_llvm(llvm_major)
-    if flavor is None:
-        return compiler_target_from_target_id(target_id)
-    return compiler_target_for_flavor(target_id, llvm_flavor=flavor)
-
-
 def _comgr_llvm_major() -> int | None:
-    """The LLVM major of the compiler COMGR loads, or ``None`` when COMGR cannot
-    be loaded or queried (building then fails with COMGR's own error)."""
+    """The LLVM major of the compiler COMGR loads, else ``None``.
+
+    ``None`` when COMGR cannot be loaded or its compiler cannot be queried;
+    building then refuses with COMGR's own error.
+    """
     info = loaded_compiler_info()
     if info is None or info.llvm_version is None:
         return None
@@ -420,20 +407,21 @@ def _comgr_llvm_major() -> int | None:
 def _resolve_compile_target(arch: Optional[str], isa: str):
     """``(lowering arch, COMGR ISA name)`` for :func:`compile_kernel` inputs.
 
-    The compiler target is chosen by the compiler COMGR loads
-    (:func:`_compiler_target`), whatever flavor the IR is emitted for.
+    The compiler target is chosen for the compiler COMGR loads
+    (:func:`~rocke.core.arch.compiler_target_for_llvm_major`), whatever flavor
+    the IR is emitted for.
     """
     llvm_major = _comgr_llvm_major()
     if arch is not None:
         lower_arch = base_arch_from_target_id(arch)
-        compiler_target = _compiler_target(arch, llvm_major)
+        compiler_target = compiler_target_for_llvm_major(arch, llvm_major)
         base_isa = ArchTarget.from_gfx(lower_arch).isa_triple
         return lower_arch, f"{base_isa[: -len(lower_arch)]}{compiler_target}"
     # Derive both names from the caller's ISA name. Use the base architecture
     # for lowering and preserve compiler features in the COMGR ISA name.
     target_id = target_id_from_isa(isa)
     gfx = arch_from_isa(isa)
-    compiler_target = _compiler_target(target_id, llvm_major)
+    compiler_target = compiler_target_for_llvm_major(target_id, llvm_major)
     isa = f"{isa[: -len(target_id)]}{compiler_target}"
     return (gfx if gfx in known_arches() else None), isa
 
@@ -469,7 +457,9 @@ def lower_kernel_for_comgr(
     Resolves the target the same way and lowers through the same backend, so
     ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options),
     fresh_process=c.fresh_process)`` produces the binary
-    ``compile_kernel(kernel, arch=arch)`` would.
+    ``compile_kernel(kernel, arch=arch)`` would. The ISA name is chosen for the
+    compiler COMGR loads in this process; where COMGR cannot be loaded, the
+    processor keeps its name.
     """
     lower_arch, isa = _resolve_compile_target(arch, isa)
     llvm_text = _lower_llvm_via_backend(
@@ -577,10 +567,11 @@ def compile_kernel_via_hipcc(
     ``arch`` accepts the same target IDs as :func:`compile_kernel`. The base
     architecture is passed to ``lower_kernel_to_hip``; the compiler target
     is passed to hipcc as ``--offload-arch``. Neither is discovered from a GPU.
-    The compiler target is chosen by hipcc's own clang (see
-    :func:`_compiler_target`), as :func:`compile_kernel` does for the compiler
-    COMGR loads: a clang newer than every qualified lane keeps the processor
-    name and decides for itself.
+    The compiler target is chosen for hipcc's own clang
+    (:func:`~rocke.core.arch.compiler_target_for_llvm_major`), as
+    :func:`compile_kernel` does for the compiler COMGR loads: a clang newer
+    than every qualified lane was never measured, so the processor keeps its
+    name and hipcc decides whether to take it.
 
     Requires hipcc on ``PATH`` and a kernel supported by the HIP lowerer.
     An explicit scheduler policy is rejected because this path does not emit
@@ -601,7 +592,7 @@ def compile_kernel_via_hipcc(
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
     lower_arch = base_arch_from_target_id(arch)
-    compiler_target = _compiler_target(arch, _hipcc_llvm_major())
+    compiler_target = compiler_target_for_llvm_major(arch, _hipcc_llvm_major())
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     t2 = time.perf_counter()
     flags = ["-O3"]
@@ -701,7 +692,7 @@ def emit_device_llvm_ir_via_hipcc(
         subprocess.TimeoutExpired: If hipcc exceeds ``timeout_s``.
     """
     lower_arch = base_arch_from_target_id(arch)
-    compiler_target = _compiler_target(arch, _hipcc_llvm_major())
+    compiler_target = compiler_target_for_llvm_major(arch, _hipcc_llvm_major())
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     flags = ["-O3"]
     if extra_flags:

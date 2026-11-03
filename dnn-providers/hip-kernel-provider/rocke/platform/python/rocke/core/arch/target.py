@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Re-export for callers using the original architecture entry point.
 from ..dtypes import normalize_dtype
+from ..llvm_profile import measured_flavor_for_llvm
 from ..storage import MatrixFragmentLayout
 from . import domain as arch_domain
 from .mfma_scale import (
@@ -2311,6 +2312,24 @@ def compiler_target_for_flavor(target_id: str, *, llvm_flavor: str) -> str:
     ).partition(":")
     name = _processor_the_compiler_accepts(processor, llvm_flavor)
     return f"{name}{separator}{features}"
+
+
+def compiler_target_for_llvm_major(target_id: str, llvm_major: int | None) -> str:
+    """The compiler target to pass to the LLVM ``llvm_major`` compiler for ``target_id``.
+
+    Pass the major of the compiler that will run (the one COMGR loads, or
+    hipcc's clang), never an emission override such as ``ROCKE_LLVM_FLAVOR``.
+    A major in a qualified lane routes through that lane's measured processor
+    answers (:func:`compiler_target_for_flavor`). A major newer than every
+    lane, or ``None`` for a compiler whose version is unknown, was never
+    measured: the processor keeps its name
+    (:func:`compiler_target_from_target_id`), and whether that compiler takes
+    it is left to the compiler.
+    """
+    flavor = None if llvm_major is None else measured_flavor_for_llvm(llvm_major)
+    if flavor is None:
+        return compiler_target_from_target_id(target_id)
+    return compiler_target_for_flavor(target_id, llvm_flavor=flavor)
 
 
 def _processor_the_compiler_accepts(processor: str, llvm_flavor: str) -> str:

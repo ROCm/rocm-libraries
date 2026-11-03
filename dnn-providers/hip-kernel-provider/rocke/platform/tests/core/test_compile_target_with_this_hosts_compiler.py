@@ -18,7 +18,7 @@ from unittest import mock
 import pytest
 from rocke.core.arch import domain as arch_domain
 from rocke.core.ir import KernelDef, Region
-from rocke.core.llvm_profile import _measured_flavor_for_llvm
+from rocke.core.llvm_profile import measured_flavor_for_llvm
 from rocke.helpers.compile import compile_kernel, lower_kernel_for_comgr
 from rocke.runtime.comgr import loaded_compiler_info
 
@@ -29,7 +29,7 @@ def _require_a_comgr_that_rejects_gfx1154() -> None:
     info = loaded_compiler_info()
     if info is None or info.llvm_version is None:
         pytest.skip("no queryable COMGR compiler on this host")
-    flavor = _measured_flavor_for_llvm(info.llvm_version[0])
+    flavor = measured_flavor_for_llvm(info.llvm_version[0])
     column = None if flavor is None else arch_domain.load(flavor)
     if column is None or column.accepts_processor("gfx1154") is not False:
         pytest.skip(
