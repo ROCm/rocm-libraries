@@ -58,6 +58,11 @@ if(DEFINED HIPBLAS_BUILD_FORTRAN_BINDINGS)
   set(BUILD_FORTRAN_BINDINGS ${HIPBLAS_BUILD_FORTRAN_BINDINGS})
 endif()
 
+option(BUILD_FORTRAN_CLIENTS "Build the hipBLAS Fortran binding tests" ON)
+if(DEFINED HIPBLAS_BUILD_FORTRAN_CLIENTS)
+  set(BUILD_FORTRAN_CLIENTS ${HIPBLAS_BUILD_FORTRAN_CLIENTS})
+endif()
+
 set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
     "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
@@ -242,6 +247,18 @@ endif()
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(HIPBLAS_HAVE_FORTRAN_BINDINGS TRUE PARENT_SCOPE)
   set(HIPBLAS_FORTRAN_COMPILER_ID "${CMAKE_Fortran_COMPILER_ID}" PARENT_SCOPE)
+endif()
+
+# The uninstrumented Fortran executables cannot link an ASan libhipblas.
+if(BUILD_FORTRAN_CLIENTS AND BUILD_ADDRESS_SANITIZER)
+  message(STATUS
+    "hipBLAS: address sanitizer is enabled, skipping the Fortran binding tests.")
+  set(BUILD_FORTRAN_CLIENTS OFF)
+endif()
+
+if(BUILD_FORTRAN_CLIENTS)
+  enable_testing()
+  add_subdirectory(test)
 endif()
 
 include(CMakePackageConfigHelpers)

@@ -23,32 +23,50 @@
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-! TEMPORARY: delete when ROCm/rocm-systems#11923 ships a HIP Fortran binding.
-! HIP's hipDataType enumerators 0..15 (values from the HIP binding) for the
-! clients' `use hip`. Compiled into hipblas_fortran_client only; never
-! installed, so no second hip.mod reaches a prefix.
+program hip_dnrm2
+  use iso_c_binding
+  use hip
+  use hipblas
 
-module hip
   implicit none
-  public
 
-  enum, bind(c)
-    enumerator :: HIP_R_32F = 0
-    enumerator :: HIP_R_64F = 1
-    enumerator :: HIP_R_16F = 2
-    enumerator :: HIP_R_8I = 3
-    enumerator :: HIP_C_32F = 4
-    enumerator :: HIP_C_64F = 5
-    enumerator :: HIP_C_16F = 6
-    enumerator :: HIP_C_8I = 7
-    enumerator :: HIP_R_8U = 8
-    enumerator :: HIP_C_8U = 9
-    enumerator :: HIP_R_32I = 10
-    enumerator :: HIP_C_32I = 11
-    enumerator :: HIP_R_32U = 12
-    enumerator :: HIP_C_32U = 13
-    enumerator :: HIP_R_16BF = 14
-    enumerator :: HIP_C_16BF = 15
-  end enum
+  ! nrm2(x) with x = 1 over n elements, so the result is sqrt(n).
+  integer, parameter :: n = 1024
+  integer(c_size_t) :: Nbytes
+  real(c_double), allocatable, target, dimension(:) :: hx
+  real(c_double), target :: res
+  real(c_double) :: res_exact, error
+  real(c_double), parameter :: error_max = 10*epsilon(error)
+  type(c_ptr) :: dx = c_null_ptr
+  type(c_ptr) :: handle = c_null_ptr
 
-end module hip
+  write(*,"(a)",advance="no") "-- Running test 'dnrm2' (Fortran 2003 interfaces) - "
+
+  call hipblasCheck(hipblasCreate(handle))
+
+  allocate(hx(n))
+  hx = 1.0
+  res_exact = sqrt(real(n, kind=kind(res_exact)))
+
+  Nbytes = int(n, c_size_t) * 8
+  call hipCheck(hipMalloc(dx, Nbytes))
+  call hipCheck(hipMemcpy(dx, c_loc(hx(1)), Nbytes, hipMemcpyHostToDevice))
+
+  res = 0.0
+  call hipblasCheck(hipblasDnrm2(handle, n, dx, 1, c_loc(res)))
+  call hipCheck(hipDeviceSynchronize())
+
+  error = abs((res_exact - res) / res_exact)
+  if (error > error_max) then
+    write(*,*) "FAILED! error = ", error, " result = ", res
+    call exit(1)
+  end if
+
+  call hipCheck(hipFree(dx))
+  call hipblasCheck(hipblasDestroy(handle))
+
+  deallocate(hx)
+
+  write(*,*) "PASSED!"
+
+end program hip_dnrm2
