@@ -27,7 +27,15 @@ Pure host-side planning: the binary is the ``pp_boxes`` 7 pixel-list kernel.
 
 from __future__ import annotations
 
+import os as _os
 from functools import lru_cache
+
+try:  # the exact assignment (HiGHS MILP); without scipy the greedy twin plans
+    import scipy.optimize as _sco  # noqa: F401
+
+    _SOLVER = _os.environ.get("ROCKE_PBX8_SOLVER", "milp")
+except ImportError:  # pragma: no cover
+    _SOLVER = "greedy"
 from typing import Dict, List, Sequence, Tuple
 
 Box = Tuple[int, int, int, int, int, int]  # (zlo, zhi, ylo, yhi, xlo, xhi)
@@ -102,8 +110,11 @@ def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, in
         A[-1, nx + bi] = cost[b] * n_tiles
     lo[-1], hi[-1] = 0, budget
     res = milp(obj, constraints=LinearConstraint(A, lo, hi), integrality=np.ones(nx + nb),
-               bounds=Bounds(0, np.inf))  # no time limit: a deterministic optimum (<= 125 classes x 216 boxes)
-    if res.x is None or res.status != 0:
+               bounds=Bounds(0, np.inf),
+               # Deterministic work limits only (a time limit would make the plan
+               # depend on the machine's load): a node budget and a relative MIP gap.
+               options={"node_limit": 4000, "mip_rel_gap": 2e-3})
+    if res.x is None:
         return None
     x = np.round(res.x).astype(int)
     plan = []
@@ -113,6 +124,123 @@ def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, in
             continue
         members = [(classes[ci], int(x[k])) for k, (ci, bb) in enumerate(pairs) if bb == bi and x[k]]
         plan.append((b, t, members))
+    return plan
+
+
+def _hull(a: Box, c: Box) -> Box:
+    return (min(a[0], c[0]), max(a[1], c[1]), min(a[2], c[2]), max(a[3], c[3]),
+            min(a[4], c[4]), max(a[5], c[5]))
+
+
+def _solve_greedy(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, int], taps_k: Dict[Box, int],
+                  tile_m: int, n_tiles: int, budget: int):
+    """Pure-Python twin of :func:`_solve_milp` (same result format): every class
+    starts in its own exact box; then (A) the spare rows of a box's last tile take
+    the partial-tile rows of boxes it contains (a whole tile less, nothing more),
+    and (B) while over ``budget``, the two partial tiles whose merge into their hull
+    box saves workgroups at the least K-tile increase are merged. None if the
+    budget cannot be met. Deterministic (fixed orders, exact ties broken by box)."""
+    allowed = set(boxes)
+    groups: Dict[Box, Dict[Box, int]] = {}
+    for c in sorted(counts):
+        if c not in allowed:
+            return None
+        groups.setdefault(c, {})[c] = counts[c]
+
+    def rows(b):
+        return sum(groups.get(b, {}).values())
+
+    def tiles(b):
+        return _ceil_div(rows(b), tile_m)
+
+    def wgs():
+        return sum(tiles(b) * cost[b] for b in groups) * n_tiles
+
+    def move(src, dst, n):
+        """Move n rows of src's group (classes in sorted order, last first) to dst."""
+        g = groups[src]
+        d = groups.setdefault(dst, {})
+        for c in sorted(g, reverse=True):
+            if not n:
+                break
+            k = min(n, g[c])
+            g[c] -= k
+            d[c] = d.get(c, 0) + k
+            n -= k
+            if not g[c]:
+                del g[c]
+        if not g:
+            del groups[src]
+
+    def fill():
+        changed = True
+        while changed:
+            changed = False
+            for B in sorted(groups, key=lambda b: (-cost[b], -taps_k[b], b)):
+                if B not in groups:
+                    continue
+                spare = tiles(B) * tile_m - rows(B)
+                best = None
+                for g in sorted(groups):
+                    if g == B or not _contains(B, g):
+                        continue
+                    r = rows(g) % tile_m
+                    if r and r <= spare:
+                        key = (cost[g], taps_k[g], g)
+                        if best is None or key > best[0]:
+                            best = (key, g, r)
+                if best is not None:
+                    move(best[1], B, best[2])
+                    changed = True
+
+    fill()
+    while wgs() > budget:
+        best = None
+        cur_w = wgs()
+        part = sorted(g for g in groups if rows(g) % tile_m)
+        for i, g1 in enumerate(part):
+            r1 = rows(g1) % tile_m
+            for g2 in part[i + 1:]:
+                r2 = rows(g2) % tile_m
+                U = _hull(g1, g2)
+                if U not in allowed:
+                    continue
+                # tiles after moving both partial tiles into U
+                old = {g1: tiles(g1), g2: tiles(g2)}
+                old_u = tiles(U) if U not in (g1, g2) else None
+                ru = (rows(U) if U not in (g1, g2) else 0) + r1 + r2
+                if U == g1:
+                    ru = rows(g1) + r2
+                elif U == g2:
+                    ru = rows(g2) + r1
+                t1 = _ceil_div(rows(g1) - r1, tile_m) if U != g1 else 0
+                t2 = _ceil_div(rows(g2) - r2, tile_m) if U != g2 else 0
+                tu = _ceil_div(ru, tile_m)
+                dw = (t1 - old[g1]) * cost[g1] + (t2 - old[g2]) * cost[g2] + tu * cost[U]
+                ds = (t1 - old[g1]) * taps_k[g1] + (t2 - old[g2]) * taps_k[g2] + tu * taps_k[U]
+                if old_u is not None:
+                    dw -= old_u * cost[U]
+                    ds -= old_u * taps_k[U]
+                if dw >= 0:
+                    continue
+                key = (ds / -dw, ds, U, g1, g2)
+                if best is None or key < best[0]:
+                    best = (key, g1, g2, r1, r2, U)
+        if best is None:
+            return None
+        _k, g1, g2, r1, r2, U = best
+        if U != g1:
+            move(g1, U, r1)
+        if U != g2:
+            move(g2, U, r2)
+        fill()
+        if wgs() >= cur_w:  # pragma: no cover - a merge always saves workgroups
+            return None
+    plan = []
+    for b in sorted(groups):
+        t = tiles(b)
+        if t:
+            plan.append((b, t, sorted(groups[b].items())))
     return plan
 
 
@@ -156,6 +284,10 @@ def _plan_cached(key) -> Tuple:
     # Candidate slice lengths: those at which some box's slices are exact.
     cands = sorted({_ceil_div(taps_k[b], k) for b in boxes for k in range(1, max_split + 1)})
     cands = [t for t in cands if t >= _ceil_div(need, max_split)]
+    # A problem whose unsplit tiles alone exceed the budget (big grids) runs
+    # several rounds anyway: the budget grows by whole rounds until a plan fits.
+    min_wgs = _ceil_div(sum(counts.values()), tile_m) * n_tiles
+    budget = max(budget, _ceil_div(min_wgs, round_cus) * round_cus)
     best = None
     for T in cands:
         if best is not None and T >= best[0][0]:
@@ -164,7 +296,8 @@ def _plan_cached(key) -> Tuple:
         cand = [b for b in boxes if cost[b] <= max_split]
         if not any(b in cand for b in full):
             continue  # every class needs a home: the full box must be allowed
-        plan = _solve_milp(counts, cand, cost, taps_k, tile_m, n_tiles, budget)
+        solver = _solve_greedy if _SOLVER == "greedy" else _solve_milp
+        plan = solver(counts, cand, cost, taps_k, tile_m, n_tiles, budget)
         if plan is None:
             continue
         mk = _makespan(plan, cost, taps_k, n_tiles, round_cus)
@@ -174,6 +307,28 @@ def _plan_cached(key) -> Tuple:
     if best is not None:
         return best[1], best[2]
     return None
+
+
+def records_makespan(sub_gemms, kpg: int, tile_k: int, cus: int) -> Tuple[int, int]:
+    """``(makespan, K tiles)`` of a pp_boxes record list: the simulated makespan
+    (blocks in order to the CU that frees first, as :func:`_makespan`) and the
+    launch's total MFMA K tiles."""
+    import heapq
+
+    kt = _ceil_div(kpg, tile_k)
+    h = [(0, i) for i in range(cus)]
+    mk = tot = 0
+    for sg in sub_gemms:
+        span = sg.y_dot_slice * sg.x_dot_slice * sg.gemm_k_padded * kt
+        S = max(1, sg.b_x_stride)
+        per = _ceil_div(span, S)
+        for i in range(sg.block_end - sg.block_start):
+            ln = max(0, min(per, span - (i % S) * per))
+            tot += ln
+            t0, c = heapq.heappop(h)
+            heapq.heappush(h, (t0 + ln, c))
+            mk = max(mk, t0 + ln)
+    return mk, tot
 
 
 def plan_boxes(p, tile_m: int, tile_n: int, tile_k: int, max_split: int, cus: int, round_cus: int = 228):

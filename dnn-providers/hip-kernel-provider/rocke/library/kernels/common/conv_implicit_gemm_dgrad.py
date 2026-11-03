@@ -661,12 +661,22 @@ def pp_box_sub_gemms(
         return out
 
     if nclass == 8:
+        from kernels.common.conv_dgrad_box_plan import records_makespan
+
         sgs = _pp_planned_sub_gemms(
             p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus
         )
-        if sgs is not None:
+        old = _pp_pixel_list_sub_gemms(
+            p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
+            axis_runs=runs, cheap_tail=False,
+        )
+        # Never a plan the dispatch model rates worse (makespan, then K tiles)
+        # than pp_boxes 7's.
+        if sgs is not None and records_makespan(
+            sgs, p.kpg, tile_k, PP_BOX_SPLIT_CUS
+        ) < records_makespan(old, p.kpg, tile_k, PP_BOX_SPLIT_CUS):
             return sgs
-        nclass = 7  # no plan (no scipy / infeasible): the pp_boxes 7 packing
+        return old
     if nclass in (7, 77):
         return _pp_pixel_list_sub_gemms(
             p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
