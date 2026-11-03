@@ -6,7 +6,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .target import ArchTarget, MmaOp, MmaScaleDType, _gfx1250_scale_combination_valid
+from .target import (
+    MmaOp,
+    MmaScaleDType,
+    _gfx1250_scale_combination_valid,
+    _mma_op_by_id,
+    _op_id_family,
+)
 from ..dtypes import dtype_info
 from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
 
@@ -97,10 +103,15 @@ class ScaledWmmaOp:
 
 
 def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
-    """Resolve a catalog contract; LLVM selectors are backend details."""
-    atom = ArchTarget.from_gfx("gfx1250").mma.by_op_id(op_id.removeprefix("tile."))
-    if atom is None or atom.family != "wmma_scaled":
+    """Resolve a catalog contract; LLVM selectors are backend details.
+
+    The atom comes from whichever arch's catalog lists ``op_id``; whether a
+    given target may lower it is the lowerer's question.
+    """
+    op_id = op_id.removeprefix("tile.")
+    if _op_id_family().get(op_id) != "wmma_scaled":
         return None
+    atom = _mma_op_by_id(op_id)
     formats = {"fp8e4m3": 0, "bf8e5m2": 1, "fp6e2m3": 2, "fp6e3m2": 3, "fp4e2m1": 4}
     scale_selectors = {
         MmaScaleDType.E8M0: 0,

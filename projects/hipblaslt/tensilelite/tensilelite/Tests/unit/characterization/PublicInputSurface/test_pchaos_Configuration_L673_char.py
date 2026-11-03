@@ -50,7 +50,7 @@ import ast
 
 import pytest
 
-from Tensile.Configuration import ExpressionEvaluator
+from tensilelite.Configuration import ExpressionEvaluator
 
 pytestmark = pytest.mark.unit
 

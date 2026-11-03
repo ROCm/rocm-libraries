@@ -22,8 +22,12 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
+#include <algorithm>
 #include <climits>
 #include <iterator>
+#include <map>
+#include <set>
+#include <unordered_set>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
@@ -309,6 +313,68 @@ static void applyClusterBarrierSccRule(
     }
 }
 
+// VGPR indices of one WMMA input family (A, B, MXSA, or MXSB) so a parent VALU
+// that touches any register of the family can boost every ds_load of that family.
+static void addVgprIdxs(const StinkyRegister& r, std::unordered_set<uint32_t>& out) {
+    if (!r.isRegister() || isPseudoReg(r)) return;
+    if (r.reg.type != RegType::V && r.reg.type != RegType::A && r.reg.type != RegType::AGPR &&
+        r.reg.type != RegType::ACC)
+        return;
+    for (unsigned off = 0; off < r.reg.num; ++off) out.insert(r.reg.idx + off);
+}
+
+static bool instVgprsOverlap(const StinkyInstruction& inst, bool useDest,
+                             const std::unordered_set<uint32_t>& vgprs) {
+    if (vgprs.empty()) return false;
+    const auto& regs = useDest ? inst.getDestRegs() : inst.getSrcRegs();
+    for (const StinkyRegister& r : regs) {
+        if (!r.isRegister() || isPseudoReg(r)) continue;
+        for (unsigned off = 0; off < r.reg.num; ++off) {
+            if (vgprs.count(r.reg.idx + off)) return true;
+        }
+    }
+    return false;
+}
+
+// WMMA input families used to boost ds_loads. Order is the base issue order
+// A → MXSA → MXSB → B (not ISA src order), shared with Tensile global reads
+// (MxScaleLayout.splatFirst).
+enum DsInputKind : unsigned { kDsA = 0, kDsMxsa, kDsMxsb, kDsB, kDsNumKinds };
+
+static int matrixInputKindOfVgprs(const StinkyInstruction& matrix,
+                                  const std::unordered_set<uint32_t>& vgprs) {
+    if (vgprs.empty()) return -1;
+    const auto& srcs = matrix.getSrcRegs();
+    auto overlaps = [&](const StinkyRegister& r) {
+        if (!r.isRegister() || isPseudoReg(r)) return false;
+        for (unsigned off = 0; off < r.reg.num; ++off)
+            if (vgprs.count(r.reg.idx + off)) return true;
+        return false;
+    };
+    // gfx1250 MX WMMA srcs: B, A, C, MXSB, MXSA. Non-MX WMMA: A, B, C.
+    if (isMXWMMA(matrix)) {
+        if (srcs.size() >= 5) {
+            if (overlaps(srcs[4])) return static_cast<int>(kDsMxsa);
+            if (overlaps(srcs[3])) return static_cast<int>(kDsMxsb);
+        }
+        if (srcs.size() >= 2) {
+            if (overlaps(srcs[1])) return static_cast<int>(kDsA);
+            if (overlaps(srcs[0])) return static_cast<int>(kDsB);
+        }
+    } else {
+        if (!srcs.empty() && overlaps(srcs[0])) return static_cast<int>(kDsA);
+        if (srcs.size() >= 2 && overlaps(srcs[1])) return static_cast<int>(kDsB);
+    }
+    return -1;
+}
+
+static int matrixInputKindOfValu(const StinkyInstruction& matrix, const StinkyInstruction& valu) {
+    std::unordered_set<uint32_t> vgprs;
+    for (const StinkyRegister& r : valu.getDestRegs()) addVgprIdxs(r, vgprs);
+    for (const StinkyRegister& r : valu.getSrcRegs()) addVgprIdxs(r, vgprs);
+    return matrixInputKindOfVgprs(matrix, vgprs);
+}
+
 // --- Region scheduler (does NOT move fences) ---
 //
 // Build a DAG within a region and perform a stable topological schedule.
@@ -344,41 +410,126 @@ static void scheduleRegionWithMovableSideEffects(
 
     if (regionSize == 0) return;
 
-    // Prefix sum over the region in original program order: cumCycles[k] = the
-    // estimated absolute cycle at which dagNodes[k] would start, if the unmodified
-    // program order were followed exactly (WMMA -> latencyCycles, its full co-issue
-    // window; otherwise issueCycles). Turns a "must be within N cycles of" requirement
-    // into a plain clock number instead of a node to hop before, which is what both
-    // DAGNode::hazardDeadline and DAGNode::earliestClock are built from. The last entry
-    // is the region's estimated length, i.e. where the terminator that follows it sits.
-    std::vector<int> cumCycles(regionSize + 1, 0);
+    // The region's estimated length in original program order (WMMA -> latencyCycles, its full
+    // co-issue window; otherwise issueCycles): where the terminator that follows it sits, which
+    // DAGNode::earliestClock is built from.
+    int regionCycles = 0;
     for (unsigned k = 0; k < regionSize; ++k) {
-        StinkyInstruction* inst = dagNodes[k].inst;
-        cumCycles[k + 1] =
-            cumCycles[k] + (isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        const StinkyInstruction* inst = dagNodes[k].inst;
+        regionCycles += isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles;
     }
 
     if (readyQueue.clusterBarrierEnabled())
-        applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
+        applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, regionCycles);
 
-    // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
-    // and DsReadOrder config. Lower priority = pick first.
+    // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
+    // CDNA5ReadyQueue holds each behind the WMMA two before its first consumer.
+    // Must run before dsReadPriority: outside ProgramOrder, parent-VALU inputs are the
+    // first DS tier.
+    for (unsigned i = 0; i < regionSize; ++i) {
+        if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
+        for (unsigned succId : dagGraph[i]) {
+            if (isMatrixInstruction(*dagNodes[succId].inst)) {
+                dagNodes[i].feedsWmma = true;
+                break;
+            }
+        }
+    }
+
+    // Pre-scan: assign dsReadPriority. Lower = pick first.
+    // DsReadOrder::ProgramOrder keeps every load in DAG id order. Otherwise a
+    // ds_load read by a feedsWmma VALU is issued first
+    // among loads with the same deadline so splat v_perm can start without
+    // waiting dscnt 0; the parent tier ranks kinds A→MXSA→MXSB→B. Remaining
+    // loads keep DsReadOrder: affinity, then program order, which Tensile
+    // emits as A→MXSA→MXSB→B. So splat-fed kinds go first and the rest keep the
+    // base order, as Tensile global reads do (MxScaleLayout.splatFirst).
     {
         using DsReadOrder = PassFeatureConfig::DsReadOrder;
         const auto dsOrder =
             readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.dsReadOrder;
 
-        // Collect ds_reads with their affinity and operand type (src register).
+        std::unordered_set<uint32_t> kindVgprs[kDsNumKinds];
+        for (unsigned i = 0; i < regionSize; ++i) {
+            const StinkyInstruction& inst = *dagNodes[i].inst;
+            if (!isMatrixInstruction(inst)) continue;
+            const auto& srcs = inst.getSrcRegs();
+            if (isMXWMMA(inst)) {
+                if (srcs.size() >= 2) {
+                    addVgprIdxs(srcs[0], kindVgprs[kDsB]);
+                    addVgprIdxs(srcs[1], kindVgprs[kDsA]);
+                }
+                if (srcs.size() >= 5) {
+                    addVgprIdxs(srcs[3], kindVgprs[kDsMxsb]);
+                    addVgprIdxs(srcs[4], kindVgprs[kDsMxsa]);
+                }
+            } else {
+                if (!srcs.empty()) addVgprIdxs(srcs[0], kindVgprs[kDsA]);
+                if (srcs.size() >= 2) addVgprIdxs(srcs[1], kindVgprs[kDsB]);
+            }
+        }
+
+        PASS_DEBUG({
+            std::cerr << "[DAG schedule] kind sizes A/MXSA/MXSB/B=" << kindVgprs[kDsA].size() << "/"
+                      << kindVgprs[kDsMxsa].size() << "/" << kindVgprs[kDsMxsb].size() << "/"
+                      << kindVgprs[kDsB].size() << "\n";
+            for (unsigned i = 0; i < regionSize; ++i) {
+                if (!isMatrixInstruction(*dagNodes[i].inst)) continue;
+                std::cerr << "  matrix dagId=" << i << " mx=" << isMXWMMA(*dagNodes[i].inst)
+                          << " nsrc=" << dagNodes[i].inst->getSrcRegs().size() << " srcs=";
+                for (const StinkyRegister& s : dagNodes[i].inst->getSrcRegs()) {
+                    if (s.isRegister())
+                        std::cerr << " t" << (int)s.reg.type << ":" << s.reg.idx << "+"
+                                  << s.reg.num;
+                    else
+                        std::cerr << " imm";
+                }
+                std::cerr << "\n";
+            }
+        });
+
         struct DsInfo {
-            unsigned idx, affinity, srcReg;
+            unsigned idx, affinity, srcReg, kindRank, consumer;
         };
-        std::vector<DsInfo> dsReads;
+
+        // DAG id of the earliest in-region matrix op fed by ds_load \p i, directly
+        // or through a parent VALU. UINT_MAX for a next-iteration preload: its
+        // consumers lie in a later trip, so nothing in this region waits on it.
+        auto earliestRegionMatrixConsumer = [&](unsigned i) {
+            unsigned consumer = UINT_MAX;
+            for (unsigned succId : dagGraph[i]) {
+                const DAGNode& succ = dagNodes[succId];
+                if (isMatrixInstruction(*succ.inst)) {
+                    consumer = std::min(consumer, succId);
+                    continue;
+                }
+                if (!succ.feedsWmma) continue;
+                for (unsigned mId : dagGraph[succId])
+                    if (isMatrixInstruction(*dagNodes[mId].inst))
+                        consumer = std::min(consumer, mId);
+            }
+            return consumer;
+        };
+
+        auto dsKindOf = [&](const StinkyInstruction& inst) -> int {
+            for (unsigned k = 0; k < kDsNumKinds; ++k)
+                if (instVgprsOverlap(inst, /*useDest=*/true, kindVgprs[k]))
+                    return static_cast<int>(k);
+            return -1;
+        };
+
+        std::vector<DsInfo> parentFed;
+        std::vector<DsInfo> rest;
 
         for (unsigned i = 0; i < regionSize; ++i) {
             if (!isDSRead(*dagNodes[i].inst)) continue;
 
             unsigned affinity = UINT_MAX;
+            bool userIsParentValu = false;
+            int inferredKind = -1;
             // BFS through users, skip PHIs, find earliest WMMA consumer.
+            // Walk past waitcnt region splits: a ds_load may feed a v_perm that
+            // lives in a later region (e.g. X1 MXS splat after s_wait_dscnt).
             std::vector<StinkyInstruction*> q(dagNodes[i].inst->getUsers().begin(),
                                               dagNodes[i].inst->getUsers().end());
             std::unordered_set<StinkyInstruction*> seen;
@@ -392,6 +543,23 @@ static void scheduleRegionWithMovableSideEffects(
                 }
                 auto it = wmmaIndex.find(u);
                 if (it != wmmaIndex.end()) affinity = std::min(affinity, it->second);
+                auto uit = instToId.find(u);
+                if (uit != instToId.end() && dagNodes[uit->second].feedsWmma &&
+                    !isMatrixInstruction(*u))
+                    userIsParentValu = true;
+                if (isVectorALU(*u) || isTranscendental(*u)) {
+                    if (isMatrixInstruction(*u)) continue;
+                    for (StinkyInstruction* uu : u->getUsers()) {
+                        if (uu->getUnifiedOpcode() == GFX::PHI) {
+                            for (auto* pu : uu->getUsers()) q.push_back(pu);
+                            continue;
+                        }
+                        if (!isMatrixInstruction(*uu)) continue;
+                        userIsParentValu = true;
+                        const int k = matrixInputKindOfValu(*uu, *u);
+                        if (k >= 0 && (inferredKind < 0 || k < inferredKind)) inferredKind = k;
+                    }
+                }
             }
 
             unsigned srcReg = 0;
@@ -401,22 +569,24 @@ static void scheduleRegionWithMovableSideEffects(
                     break;
                 }
 
-            dsReads.push_back({i, affinity, srcReg});
+            const int destKind = dsKindOf(*dagNodes[i].inst);
+            const int kind = destKind >= 0 ? destKind : inferredKind;
+            const unsigned kindRank = kind >= 0 ? static_cast<unsigned>(kind) : kDsNumKinds;
+            DsInfo info{i, affinity, srcReg, kindRank, earliestRegionMatrixConsumer(i)};
+            if (userIsParentValu)
+                parentFed.push_back(info);
+            else
+                rest.push_back(info);
         }
 
-        // Sort by affinity, then by DAG id.
-        std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
-            return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
-        });
-
-        if (dsOrder == DsReadOrder::ProgramOrder) {
-            for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = d.idx;
-        } else {
+        // The look-ahead spans every non-parent load in the region, so the
+        // direction does not depend on how the loads are later grouped.
+        auto mixedGroupAscending = [&](const std::vector<DsInfo>& dsReads) {
             // For AscendingCache: find first single-operand affinity group,
             // then zigzag backward through mixed groups.
             // For Ascending: all groups use ascending order.
             std::map<unsigned, std::set<unsigned>> groupSrcRegs;
-            for (auto& d : dsReads) groupSrcRegs[d.affinity].insert(d.srcReg);
+            for (const DsInfo& d : dsReads) groupSrcRegs[d.affinity].insert(d.srcReg);
 
             // Determine sort direction for mixed groups via look-ahead.
             // Both Ascending and AscendingCache use look-ahead to find the
@@ -449,15 +619,37 @@ static void scheduleRegionWithMovableSideEffects(
                 }
                 // Ascending without anchor: groupAsc empty → default ascending.
             }
+            return groupAsc;
+        };
+
+        auto assignPriorities = [&](std::vector<DsInfo>& dsReads, unsigned& pri, bool parentTier,
+                                    const std::map<unsigned, bool>& groupAsc) {
+            if (dsReads.empty()) return;
+
+            if (parentTier) {
+                // Parent-VALU inputs: A → MXSA → MXSB → B, then affinity / program order.
+                std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
+                    if (a.kindRank != b.kindRank) return a.kindRank < b.kindRank;
+                    if (a.affinity != b.affinity) return a.affinity < b.affinity;
+                    return a.idx < b.idx;
+                });
+                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                return;
+            }
+
+            // Sort by affinity, then by DAG id.
+            std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
+                return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
+            });
 
             // Assign priority. Within each group, sort by DAG id
             // (ascending or descending per groupAsc).
-            unsigned pri = 0;
             unsigned prevAff = UINT_MAX;
             std::vector<DsInfo*> group;
             auto flushGroup = [&]() {
                 if (group.empty()) return;
-                bool asc = groupAsc.contains(prevAff) ? groupAsc[prevAff] : true;
+                const auto it = groupAsc.find(prevAff);
+                const bool asc = it == groupAsc.end() || it->second;
                 if (!asc) {
                     // Reverse operand type order but keep DAG id order within
                     // each type. Sort by (srcReg descending, idx ascending).
@@ -476,117 +668,44 @@ static void scheduleRegionWithMovableSideEffects(
                 group.push_back(&d);
             }
             flushGroup();
+        };
+
+        unsigned pri = 0;
+        const std::map<unsigned, bool> restGroupAsc = mixedGroupAscending(rest);
+        // LDS returns in order, so issuing by deadline (earliest in-region
+        // matrix consumer) keeps a later consumer's load from being waited
+        // out by an earlier one. Loads with no in-region consumer (next-trip
+        // preloads) have no deadline and go last. Within one deadline the
+        // parent tier leads: those loads still need the splat VALU.
+        std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
+        for (const DsInfo& d : parentFed) byDeadline[d.consumer].first.push_back(d);
+        for (const DsInfo& d : rest) byDeadline[d.consumer].second.push_back(d);
+        if (dsOrder == DsReadOrder::ProgramOrder) {
+            // No reorder (AABB): DAG id order; the deadline and parent-tier grouping is skipped.
+            for (const DsInfo& d : parentFed) dagNodes[d.idx].dsReadPriority = d.idx;
+            for (const DsInfo& d : rest) dagNodes[d.idx].dsReadPriority = d.idx;
+        } else {
+            for (auto& [deadline, tiers] : byDeadline) {
+                assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc);
+                assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc);
+            }
         }
+
+        PASS_DEBUG({
+            std::cerr << "[DAG schedule] dsReadPriority parentFed=" << parentFed.size()
+                      << " rest=" << rest.size() << "\n";
+            for (unsigned i = 0; i < regionSize; ++i) {
+                if (!isDSRead(*dagNodes[i].inst) && !dagNodes[i].feedsWmma) continue;
+                std::cerr << "  dagId=" << i << " pri=" << dagNodes[i].dsReadPriority
+                          << " feedsWmma=" << dagNodes[i].feedsWmma << "\n";
+            }
+        });
     }
 
-    // Pre-scan: flag producers feeding a hazarded consumer, per the arch's hazard rule
-    // table (a data-driven table of fixed producer->consumer cycle gaps keyed by register
-    // file — e.g. SALU sgpr -> SMEM/tensor_load/VMEM address, VALU vgpr -> VMEM
-    // address). Detection per rule: BFS the node's users (skipping PHIs); if a
-    // rule.isConsumer user reads a register of rule.regType this node writes, flag it
-    // (dagNodes[i].hazardFlags). This half drives the consumer-side gate
-    // (CDNA5ReadyQueue::hazardGates_), which blocks the consumer for as long as real
-    // intervening instructions are available to pay the wait -- but see
-    // DAGNode::hazardDeadline's comment (ReadyQueue.hpp) for the case where they run
-    // out and the scheduler's pre-existing "pay the wait via advanceTime, then issue
-    // anyway" fallback applies instead.
-    //
-    // Also computes each flagged producer's hazardDeadline: a throughput heuristic
-    // that, when accurate, is what keeps the gate above from ever needing that
-    // fallback. Let X = cumCycles[consumerId], the hazarded consumer's estimated
-    // absolute cycle (per rule; a producer feeding several consumers, or matching
-    // several rules, takes the earliest/tightest deadline over all of them). The
-    // deadline is X - rule.cycles - producerCost: the gate is stamped only after this
-    // producer's own advanceTime has already run (see popNonWmma), so the deadline
-    // must reserve that cost too -- using X - rule.cycles alone would let the
-    // producer start one cost-unit later than it needs to.
-    // CDNA5ReadyQueue::decidePromote() forces the producer once its *live* clock_
-    // reaches this deadline, not once some proxy node happens to become structurally
-    // ready -- clock_ only advances via cycles actually issued, so an unrelated node
-    // becoming ready early can't trigger an early force the way a node-based trigger
-    // could. Still approximate (X is computed from original program order, which real
-    // scheduling may depart from), so it is not a substitute for the gate -- an
-    // inaccurate deadline can leave the gate short of real cycles, same as the
-    // producer-cost bug this fixed.
-    // Same per-arch CDNA5 hazard-rule table the ready queue uses, so the pre-scan's
-    // ruleIdx values line up with CDNA5ReadyQueue::hazardGates_ lanes.
-    const HWModel& hw = readyQueue.getPassContext().getHWModel();
+    // MSB-affinity tiebreak input (see DAGNode::requiredMsb); -1 = no MSB opinion.
     for (unsigned i = 0; i < regionSize; ++i) {
-        StinkyInstruction* prod = dagNodes[i].inst;
-        int bestDeadline = INT_MAX;
-
-        // MSB-affinity tiebreak input (see DAGNode::requiredMsb); -1 = no MSB opinion.
-        auto [msbVal, msbHasVgpr] = computeRequiredMsb(prod);
+        auto [msbVal, msbHasVgpr] = computeRequiredMsb(dagNodes[i].inst);
         dagNodes[i].requiredMsb = msbHasVgpr ? msbVal : -1;
-
-        for (int ruleIdx = 0; ruleIdx < hw.hazards.numRules; ++ruleIdx) {
-            const HazardRule& rule = hw.hazards.rules[ruleIdx];
-            // Def-use discovery only finds write->read pairs; a WAR partner is a later
-            // writer and never appears in getUsers(). Those rules are stamped at issue
-            // time by the ready queue instead.
-            if (rule.dir != HazardDir::WriteThenRead) continue;
-            if (!rule.isProducer(*prod)) continue;
-
-            std::unordered_map<uint32_t, int> defKey;
-            for (const StinkyRegister& d : prod->getDestRegs()) {
-                if (!d.isRegister() || isPseudoReg(d) || d.reg.type != rule.regType) continue;
-                for (uint32_t off = 0; off < d.reg.num; ++off)
-                    defKey[d.reg.idx + off] = regDepKey(d.reg.type, d.reg.idx + off);
-            }
-            if (defKey.empty()) continue;
-
-            std::unordered_set<int> hazardKeys;
-            unsigned ruleConsumerId = UINT_MAX;
-            std::vector<StinkyInstruction*> q(prod->getUsers().begin(), prod->getUsers().end());
-            std::unordered_set<StinkyInstruction*> seen;
-            while (!q.empty()) {
-                StinkyInstruction* u = q.back();
-                q.pop_back();
-                if (!seen.insert(u).second) continue;
-                if (u->getUnifiedOpcode() == GFX::PHI) {
-                    for (auto* pu : u->getUsers()) q.push_back(pu);
-                    continue;
-                }
-                if (!rule.isConsumer(*u)) continue;
-                bool matchedHere = false;
-                for (const StinkyRegister& s : u->getSrcRegs()) {
-                    if (!s.isRegister() || isPseudoReg(s) || s.reg.type != rule.regType) continue;
-                    for (uint32_t off = 0; off < s.reg.num; ++off) {
-                        auto it = defKey.find(s.reg.idx + off);
-                        if (it != defKey.end()) {
-                            hazardKeys.insert(it->second);
-                            matchedHere = true;
-                        }
-                    }
-                }
-                if (matchedHere) {
-                    auto idIt = instToId.find(u);
-                    if (idIt != instToId.end())
-                        ruleConsumerId = std::min(ruleConsumerId, idIt->second);
-                }
-            }
-            if (hazardKeys.empty()) continue;
-            for (int key : hazardKeys) dagNodes[i].hazardFlags.push_back({ruleIdx, key});
-            if (ruleConsumerId != UINT_MAX) {
-                // The gap is measured from this producer's own FINISH, not its start
-                // (matches the gate: hazardGates_ is stamped to rule.cycles only after
-                // updateWMMAStatus has already advanced clock_ by the producer's own
-                // cost). So the deadline for issuing it must also subtract that cost --
-                // otherwise "clock_ >= deadline" would let it start exactly one cycle
-                // too late relative to X.
-                const int producerCost =
-                    isMatrixInstruction(*prod) ? prod->latencyCycles : prod->issueCycles;
-                // rule.cycles == -1: "hoist as far as possible" mode. Force the deadline
-                // to 0 so decidePromote() issues this producer the instant it is free,
-                // maximizing its distance from the consumer instead of targeting a fixed gap.
-                const int deadline = rule.distance < 0
-                                         ? 0
-                                         : cumCycles[ruleConsumerId] - rule.distance - producerCost;
-                bestDeadline = std::min(bestDeadline, deadline);
-            }
-        }
-
-        if (!dagNodes[i].hazardFlags.empty()) dagNodes[i].hazardDeadline = bestDeadline;
     }
 
     // Scheduler-policy ordering requests are merged straight into the register-dependency

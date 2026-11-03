@@ -225,6 +225,13 @@ In a GEMM the row axis is the contraction `K` and `c` is the free dim `m`, which
 under the name *K-stride aliasing*. The mechanism has nothing to do with matrix multiply — it is the tile's
 stride against the bank count.
 
+**Where the row stride lives.** An LDS buffer is flat; its layout is the tensor descriptor the verbs address
+it through (`tiling_api_surface.md` sec 3, "LDS buffers"). The row stride is that descriptor's outer stride,
+so a **pad is a larger outer stride**: a `(rows, cols)` tile padded by `pad` elements per row is
+`make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`, allocated `smem_alloc(dtype, [lds_element_span(td, lds_swizzle)])`
+(the built-in swizzle reaches into the last row's padding).
+Read the stride off the kernel's LDS descriptor, never off an allocation shape.
+
 **The general form — and it applies only under a DIFFERENT lane→address map.** The opening statement covers
 the ordinary case where lanes share a row and differ in `c`. The form below covers the case where **the ROW is
 the axis that steps per lane** (in GEMM terms: the contraction moved to stride-1, so the free dim became the
@@ -314,8 +321,8 @@ Ranked by cost (cheapest first). Apply the cheapest that relieves the binding st
    - **Free relabel / symmetry** that lands the coalesced axis on distinct banks (best — costs nothing).
    - **Contiguity-preserving swizzle:** XOR the block bits *above* the vector's dword span. Keeps the wide
      access; de-aliases partially (floors per §4). rocWMMA/CK's move.
-   - **LDS padding:** pad the row stride by a multiple of the vector's dword width so it stops aliasing banks;
-     costs LDS capacity (occupancy). Also floors per §4.
+   - **LDS padding:** pad the row stride (the LDS descriptor's outer stride, section 3) by a multiple of the
+     vector's dword width so it stops aliasing banks; costs LDS capacity (occupancy). Also floors per section 4.
 2. **Narrowing swizzle (`b64`→`b32`):** removes the contiguity constraint so the swizzle reaches a finer/full
    permutation — but each halving of width **doubles LDS instructions** and can flip the kernel into
    issue-bound. Last resort; **measure**, don't assume lower conflict = faster (it often isn't — §7).
@@ -330,7 +337,8 @@ For the K-aliased coop store, the de-alias function `perm(K) = kk ^ (kk<<2)` wit
 granularity. (Validated: conflict-free at `b32`, and a bijection over the tile → bit-exact.)
 
 ### 5.2 `vw_elems` — how the emit picks the width
-A swizzle is a callable `(builder, positions) -> positions` passed as `lds_swizzle=` to
+A swizzle is a callable `(builder, positions) -> positions` (one position per tensor axis, leading axes
+first) passed as `lds_swizzle=` to
 `store_fragment`/`load_fragment` (`helpers/tiling/emit.py`). It carries a **`vw_elems`** attribute = the
 contiguity it preserves (its block width in elements). The emit resolves the access width as
 `min(vw_elems, natural_contiguous_run)` and **range-checks it to `[1, natural_run]`** (`_swizzle_vw`), so a

@@ -17,6 +17,10 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Updated `WarpExchange` template parameters for CUB compatibility. The third argument, `ARCH`, has been removed.
 * The block merge sort and thread sort algorithms now perform optional loop unrolling via `_CCCL_SORT_MAYBE_UNROLL()`.
 
+### Resolved issues
+
+* Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
+
 ### Removed
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:
   * Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.

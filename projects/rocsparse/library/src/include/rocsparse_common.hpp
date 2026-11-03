@@ -72,6 +72,26 @@ namespace rocsparse
         static constexpr int value = 0;
     };
 
+    // True when a dynamic shared-memory request of nbytes fills
+    // hipDeviceProp_t::sharedMemPerBlockOptin. hipFuncSetAttribute rejects a
+    // request that equals that opt-in limit, so equality counts as too small.
+    inline constexpr bool shared_memory_is_too_small(const size_t nbytes, uint32_t shared_mem_optin)
+    {
+        return (nbytes >= shared_mem_optin);
+    }
+
+    template <typename T>
+    constexpr bool shared_memory_is_too_small(const int32_t nmemb, uint32_t shared_mem_optin)
+    {
+        return shared_memory_is_too_small(sizeof(T) * static_cast<size_t>(nmemb), shared_mem_optin);
+    }
+
+    template <uint32_t SIZE, typename T>
+    constexpr bool shared_memory_is_too_small(uint32_t shared_mem_optin)
+    {
+        return shared_memory_is_too_small(sizeof(T) * static_cast<size_t>(SIZE), shared_mem_optin);
+    }
+
     template <typename T>
     __device__ inline T* batched_pointer(uint32_t index, T* p, int64_t dist)
     {

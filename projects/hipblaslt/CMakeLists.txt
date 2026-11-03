@@ -77,6 +77,11 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_DEVICE)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_DEVICE=ON")
 endif()
 
+option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel registration." OFF)
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
+endif()
+
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
@@ -142,6 +147,36 @@ else()
 endif()
 tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
+
+# Save original targets (with :xnack- suffix) for TensileCreateLibrary.
+#
+# Deliberately a normal variable, not a cache entry: derived from GPU_TARGETS,
+# it has to be re-derived whenever that changes. Cached, it outlived the targets
+# it was derived from, so reconfiguring an existing build directory kept the
+# first configure's value while GPU_TARGETS moved on -- and since the two differ
+# only by a suffix hip::device never sees, nothing looked wrong. `invoke build`
+# reconfigures in place unless --clean is passed, so that was the common path.
+#
+# The condition still defers to a value supplied from outside, whether by
+# -DTENSILELITE_GPU_TARGETS or by an enclosing project: hipSPARSELt sets it from
+# its unstripped list before adding us as a subdirectory, and the GPU_TARGETS we
+# see by then has had the suffix stripped, so overwriting would drop it before
+# hipSPARSELt's own create_device_library() reads it back.
+if(NOT TENSILELITE_GPU_TARGETS)
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}")
+else()
+    # A value from outside never passed the check above, and this is the list
+    # TensileLite builds from -- the one an xnack qualifier still reaches, since
+    # GPU_TARGETS has it stripped by then. Checking it here is what stops an
+    # enclosing project from handing us a target the direct path would refuse,
+    # device ASAN beside xnack- among them.
+    tensilelite_validate_gpu_targets("${TENSILELITE_GPU_TARGETS}")
+endif()
+
+# Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
+# offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
+# hip::device, and xnack_any platforms must use the bare arch.
+tensilelite_normalize_xnack_archs(GPU_TARGETS ${GPU_TARGETS})
 
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
@@ -334,6 +369,15 @@ target_include_directories(hipblaslt-headers
 )
 target_link_libraries(hipblaslt-headers INTERFACE hip::host)
 
+# The measurement engine and candidate search hipblaslt-bench and tune mode share,
+# header-only. Build tree only: nothing outside this project includes it.
+add_library(hipblaslt-benchmark INTERFACE)
+target_include_directories(hipblaslt-benchmark
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/benchmark>
+)
+target_link_libraries(hipblaslt-benchmark INTERFACE hip::host)
+
 # `hipblaslt-version.h` is consumed by `library/include/hipblaslt/hipblaslt.h`
 # (only included when HIPBLASLT_ENABLE_HOST is ON). When HOST is ON, the
 # canonical `configure_file` call in `library/include/CMakeLists.txt`
@@ -451,6 +495,7 @@ if(HIPBLASLT_ENABLE_HOST)
         PRIVATE
             hip::device
             roc::tensilelite-host
+            $<BUILD_INTERFACE:hipblaslt-benchmark>
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
@@ -768,15 +813,17 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
 #   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+#   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
+#   share/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/ — rocisa facade over stinkytofu
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 
-    # Tensile Python package
+    # TensileLite Python package
     install(
         DIRECTORY "${_tensilelite_src}/tensilelite/"
         DESTINATION "${_tensilelite_install_dest}/tensilelite"
@@ -784,6 +831,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+        PATTERN "source_only" EXCLUDE
     )
     install(
         FILES "${_tensilelite_src}/Tensile/__init__.py"
@@ -850,6 +898,37 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
                 )
             endif()
         endif()
+    endif()
+
+    # FFM runs with PYTHONPATH=share/hipblaslt/tensilelite. The lib/hipblaslt
+    # install in rocisa/CMakeLists.txt is a different root, and TheRock's lib
+    # component keeps lib/hipblaslt/rocisa plus every *.so. Put the package
+    # here so gfx1250 codegen can import it. The *.so is claimed by the lib
+    # artifact; these Python files stay in the test artifact; flattening
+    # puts them back next to each other. The target exists for every GPU
+    # family (see STINKYTOFU_BUILD_PYTHON in rocisa/CMakeLists.txt).
+    if(TARGET stinkytofu_python)
+        set(_stinkytofu_py_src "${ROCM_LIBRARIES_ROOT}/shared/stinkytofu")
+        install(TARGETS stinkytofu_python
+            LIBRARY DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+            COMPONENT tests
+        )
+        install(FILES "${_stinkytofu_py_src}/python_module/stinkytofu/__init__.py"
+            DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+            COMPONENT tests
+        )
+        if(TARGET intrinsics_compiled)
+            install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+                DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+                COMPONENT tests
+            )
+        endif()
+        install(DIRECTORY
+            "${_tensilelite_src}/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
+            DESTINATION "${_tensilelite_install_dest}/rocisa_stinkytofu_adaptor"
+            COMPONENT tests
+            FILES_MATCHING PATTERN "*.py"
+        )
     endif()
 
     # rocisa tests

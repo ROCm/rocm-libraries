@@ -167,3 +167,33 @@ TEST(LaunchDimGuard, ClusterLaunchWithOversizedWorkgroupCount_Refused)
 
     EXPECT_EQ(adapter.launchKernel(kernel), hipErrorInvalidValue);
 }
+
+#ifdef HIP_HAS_CLUSTER_LAUNCH
+// AIHPBLAS-5190: validate each axis before kernel lookup; a divisible total
+// workgroup count alone does not guarantee complete clusters.
+TEST(LaunchDimGuard, ClusterDimensionsValidatedBeforeKernelLookup)
+{
+    using namespace TensileLite;
+    const struct
+    {
+        TensileLite::dim3 grid, cluster;
+        bool invalid;
+    } cases[] = {
+        {{86, 1, 1}, {4, 1, 1}, true},
+        {{84, 1, 1}, {4, 1, 1}, false},
+        {{3, 4, 1}, {2, 2, 1}, true},
+        {{4, 3, 1}, {2, 2, 1}, true},
+        {{4, 4, 1}, {2, 2, 1}, false},
+        {{4, 4, 1}, {0, 2, 1}, true},
+        {{4, 4, 1}, {2, 0, 1}, true},
+    };
+    hip::SolutionAdapter adapter;
+    for(auto const& test : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "grid " << test.grid << " cluster " << test.cluster);
+        auto kernel = makeInvocation({128, 1, 1}, test.grid);
+        kernel.clusterDim = test.cluster;
+        EXPECT_EQ(adapter.launchKernel(kernel) == hipErrorInvalidValue, test.invalid);
+    }
+}
+#endif

@@ -190,7 +190,6 @@ void _rocsparse_sptrsm_descr::set_compute_datatype(rocsparse_datatype value)
     this->m_compute_datatype = value;
 }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 rocsparse_solve_mode _rocsparse_sptrsm_descr::get_solve_mode() const
 {
     return this->m_solve_mode;
@@ -210,7 +209,6 @@ void _rocsparse_sptrsm_descr::set_diagonal_modifier(rocsparse_diagonal_modifier 
 {
     this->m_diagonal_modifier = value;
 }
-#endif
 
 void _rocsparse_sptrsm_descr::set_scalar_alpha(const void* value)
 {

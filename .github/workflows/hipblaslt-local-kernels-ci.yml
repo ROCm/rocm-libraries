@@ -1,0 +1,151 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Builds hipBLASLt with the experimental HIPBLASLT_ENABLE_LOCAL_KERNELS option,
+# which no other lane turns on, and runs the local kernel tests on gfx942 and
+# gfx950. The host library is built without a device kernel library.
+name: hipBLASLt Local Kernels CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "projects/hipblaslt/tensilelite/include/Tensile/LocalKernel*.hpp"
+      - "projects/hipblaslt/tensilelite/src/LocalKernel*.cpp"
+      - "projects/hipblaslt/tensilelite/include/Tensile/MasterSolutionLibrary.hpp"
+      - "projects/hipblaslt/tensilelite/include/Tensile/SolutionLibrary.hpp"
+      - "projects/hipblaslt/tensilelite/include/Tensile/ContractionSolution.hpp"
+      - "projects/hipblaslt/tensilelite/src/ContractionSolution.cpp"
+      - "projects/hipblaslt/clients/tests/src/local_kernel*"
+      - "projects/hipblaslt/CMakeLists.txt"
+      - "projects/hipblaslt/tensilelite/CMakeLists.txt"
+      - "projects/hipblaslt/tensilelite/include/CMakeLists.txt"
+      - "projects/hipblaslt/tensilelite/src/CMakeLists.txt"
+      - "projects/hipblaslt/clients/CMakeLists.txt"
+      - "projects/hipblaslt/clients/tests/src/CMakeLists.txt"
+      - "projects/hipblaslt/scripts/local-kernels/**"
+      - ".github/workflows/hipblaslt-local-kernels-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    outputs:
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      baseline_run_id: ${{ steps.ci-env.outputs.baseline-run-id }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+      - id: ci-env
+        uses: ./.github/actions/ci-env
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          path: TheRock
+          sparse-checkout: build_tools
+      - name: Select the artifact family and GPU runner of each architecture
+        id: matrix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          sys.path.insert(0, "TheRock/build_tools/github_actions")
+          from amdgpu_family_matrix import get_all_families_for_trigger_types, select_weighted_label
+          families = get_all_families_for_trigger_types(["presubmit", "postsubmit"])
+          include = []
+          for architecture, key in [("gfx942", "gfx94x"), ("gfx950", "gfx950")]:
+              config = families[key]["linux"]
+              labels = config.get("test-runs-on-labels")
+              runner = select_weighted_label(labels, architecture) if labels else config["test-runs-on"]
+              if not runner:
+                  raise RuntimeError(f"No GPU runner configured for {architecture}")
+              include.append({"architecture": architecture, "family": config["family"], "runs_on": runner})
+          with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
+              stream.write("matrix=" + json.dumps({"include": include}) + "\n")
+          print(json.dumps(include, indent=2))
+          PY
+
+  test:
+    name: Local kernels (${{ matrix.architecture }})
+    needs: setup
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        -e ROCR_VISIBLE_DEVICES
+        -e KUBE_CPU_REQUEST
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      LOCAL_KERNELS_ARCHITECTURE: ${{ matrix.architecture }}
+    steps:
+      - name: Checkout source under test
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Checkout shared SDK installer and GPU cleanup
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ needs.setup.outputs.therock_ref }}
+          path: TheRock
+          sparse-checkout: build_tools
+      - name: Clean stale GPU processes
+        timeout-minutes: 5
+        run: bash TheRock/build_tools/github_actions/cleanup_processes.sh
+      - name: Install build dependencies
+        timeout-minutes: 15
+        run: bash projects/hipblaslt/scripts/local-kernels/install-deps.sh
+      - name: Install only SDK dependency artifacts
+        timeout-minutes: 30
+        env:
+          AMDGPU_FAMILY: ${{ matrix.family }}
+          SDK_RUN_ID: ${{ needs.setup.outputs.baseline_run_id }}
+          # fetch_artifacts.py queries the run through the GitHub API, which
+          # rate limits unauthenticated requests per address.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash projects/hipblaslt/scripts/local-kernels/fetch-sdk.sh
+      - name: Stage header-only hipblas-common from this checkout
+        timeout-minutes: 5
+        run: bash projects/hipblaslt/scripts/local-kernels/stage-hipblas-common.sh
+      - name: Build hipblaslt-test with local kernels
+        timeout-minutes: 45
+        run: bash projects/hipblaslt/scripts/local-kernels/configure-build.sh
+      - name: Run the local kernel tests
+        timeout-minutes: 15
+        run: bash projects/hipblaslt/scripts/local-kernels/run-tests.sh
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: hipblaslt-local-kernels-${{ matrix.architecture }}
+          path: local-kernels-test-logs
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Clean GPU processes
+        if: ${{ always() }}
+        timeout-minutes: 5
+        run: bash TheRock/build_tools/github_actions/cleanup_processes.sh

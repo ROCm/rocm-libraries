@@ -240,7 +240,7 @@ parses it.
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
-| `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. |
+| `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, under its scale, diagonal band and additive mask, so an override for them has no effect. A node whose forward the fill cannot derive (ALiBi, padding, sequence lengths, dropout, ragged tensors, mixed or unsupported data types, a scale tensor that is not a pass-by-value scalar, a Q, K, V or mask computed by the graph) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Shapes the CPU reference rejects, such as stats not shaped `[B, H, Sq, 1]`, keep the override, and the CPU reference then fails the bundle. |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
 A bundle without its metadata is an error. These fields are required:
@@ -430,7 +430,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 version = 1
 
 [[tolerance_overrides]]
-filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
+filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0"]
 atol = 1.19
 rtol = 0.2
 
@@ -441,10 +441,10 @@ validator     = "rms"
 rms_threshold = 1e-4
 
 [[test_skips]]
-archs     = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to match every arch
+archs     = ["gfx90a"]   # optional; omit to match every arch
 platforms = ["windows"]                             # optional; omit to match both
-filters   = ["*ConvFwdBiasActiv*"]
-reason    = "ROCm/rocm-libraries#6979 - no engine has an applicable solution"
+filters   = ["*_SdpaFwd_Default.*_128_bfp16_*"]
+reason    = "no applicable kernel for this shape on this arch"
 ```
 
 | Table | Rules |
@@ -502,7 +502,7 @@ Do not confuse them:
 |---|---|
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries (`hipdnn_integration_tests_unit_tests`, `hipdnn_gpu_ref_tests`, `hipdnn_golden_data_tests`) |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950AttentionDense_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.

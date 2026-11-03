@@ -446,6 +446,21 @@ const char* rocke_arch_mma_op_id_family(const char* op_id)
     return index.lookup(op_id);
 }
 
+const rocke_mma_op_t* rocke_arch_mma_op_by_id(const char* op_id)
+{
+    if(!op_id)
+        return NULL;
+    /* Mirrors target._mma_op_by_id: the registry is in known-arch order. */
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_arch_target_t* t = rocke_ati_arch_registry[i].target;
+        const rocke_mma_op_t* op = t ? rocke_mma_catalog_by_op_id(&t->mma, op_id) : NULL;
+        if(op)
+            return op;
+    }
+    return NULL;
+}
+
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
 {
     int i;

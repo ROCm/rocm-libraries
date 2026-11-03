@@ -63,9 +63,9 @@ def _build_kwa(kernel, *, globalReadIncsUseVgpr: bool, labels=None):
     from rocisa.enum import RegisterType
     from rocisa.register import RegisterPool
 
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriter import KernelWriter, StateValues
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriter import KernelWriter, StateValues
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
 
     ri = _rocisa_mod.rocIsa.getInstance()
 
@@ -208,14 +208,14 @@ _TP_B = {
 
 def _get_gsu_off():
     """Return the GSUOff component instance (matches GSU==0 kernel)."""
-    from Tensile.Components.GSU import GSUOff
+    from tensilelite.Components.GSU import GSUOff
 
     return GSUOff()
 
 
 def _get_gsu_on():
     """Return the GSUOn component instance (matches GSU>0 kernel)."""
-    from Tensile.Components.GSU import GSUOn
+    from tensilelite.Components.GSU import GSUOn
 
     return GSUOn()
 

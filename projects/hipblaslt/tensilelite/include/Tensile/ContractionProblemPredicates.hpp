@@ -2355,8 +2355,8 @@ namespace TensileLite
                 }
             };
 
-            struct UseGateResidualEqual
-                : public Predicate_CRTP<UseGateResidualEqual, ContractionProblemGemm>
+            struct UseGateResidualCheck
+                : public Predicate_CRTP<UseGateResidualCheck, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2365,8 +2365,8 @@ namespace TensileLite
                 };
                 bool value;
 
-                UseGateResidualEqual() = default;
-                UseGateResidualEqual(bool value)
+                UseGateResidualCheck() = default;
+                UseGateResidualCheck(bool value)
                     : value(value)
                 {
                 }
@@ -2378,7 +2378,7 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.useGateResidual() == value;
+                    return !problem.useGateResidual() || value;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -2386,7 +2386,7 @@ namespace TensileLite
                 {
                     bool rv = (*this)(problem);
                     std::ostringstream details;
-                    details << "prob=" << problem.useGateResidual() << ", sol=" << value;
+                    details << "prob=" << problem.useGateResidual() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -3205,6 +3205,185 @@ namespace TensileLite
                 }
             };
 
+            // W4A16 group-scale predicates.
+            struct ScaleBlockSizeA
+                : public Predicate_CRTP<ScaleBlockSizeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                ScaleBlockSizeA() = default;
+                ScaleBlockSizeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleBlockSizeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleBlockSizeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleBlockSizeA(), "==", "sol", value);
+                }
+            };
+
+            struct Int4EncodingA : public Predicate_CRTP<Int4EncodingA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                using Encoding = ContractionProblemGemm::Int4Encoding;
+                Encoding value = Encoding::Signed;
+
+                Int4EncodingA() = default;
+                explicit Int4EncodingA(Encoding value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "Int4EncodingA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.int4EncodingA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        problem.int4EncodingA(),
+                                        "==",
+                                        "sol",
+                                        value);
+                }
+            };
+
+            struct ScaleZeroPointA
+                : public Predicate_CRTP<ScaleZeroPointA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                ScaleZeroPointA() = default;
+                ScaleZeroPointA(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleZeroPointA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleZeroPointA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleZeroPointA(), "==", "sol", value);
+                }
+            };
+
+            // Free-dimension extent of the MX scaling tile. Without these a
+            // 128x128 problem could match a 1x128 solution, since MXBlockA/B only
+            // constrain the K extent.
+            struct MXBlockFreeA
+                : public Predicate_CRTP<MXBlockFreeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeA() = default;
+                MXBlockFreeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeA(), "==", "sol", value);
+                }
+            };
+
+            struct MXBlockFreeB
+                : public Predicate_CRTP<MXBlockFreeB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeB() = default;
+                MXBlockFreeB(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeB(), "==", "sol", value);
+                }
+            };
+
             struct DataTypeMXSA
                 : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
             {
@@ -3279,4 +3458,3 @@ namespace TensileLite
  */
     } // namespace Predicates
 } // namespace TensileLite
-

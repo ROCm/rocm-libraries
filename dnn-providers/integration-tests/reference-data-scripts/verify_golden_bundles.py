@@ -38,6 +38,16 @@ FLAT_OUTPUT_UID_FIELDS: dict[str, tuple[str, ...]] = {
     "ReductionAttributes": ("out_tensor_uid",),
 }
 
+# SDPA stats (LSE) tensors, as (uid map, field) per node type: the forward node's
+# stats output and the backward node's stats input. A padded or fully masked row
+# has LSE = -inf by contract (SEM-010 in projects/hipdnn/docs/SdpaSemanticsRegister.md,
+# and the harness accepts a matching -inf), so -inf is a valid value in these
+# tensors only; NaN and +inf stay defects.
+SDPA_STATS_UID_FIELDS: dict[str, tuple[str, str]] = {
+    "SdpaAttributes": ("outputs", "stats_tensor_uid"),
+    "SdpaBackwardAttributes": ("inputs", "stats_tensor_uid"),
+}
+
 
 DTYPE_BYTE_SIZE = {
     "float": 4,
@@ -229,8 +239,134 @@ def warn_unexpected_top_level_directories(
             result.warning(path, "unexpected top-level directory")
 
 
+# RFC 0011 4.2 ("Forward-Backward Generation Constraint"): a backward bundle's
+# O and LSE come from a forward pass, and if that forward pass is regenerated on
+# its own the backward bundle stays internally consistent with its stale inputs
+# while silently describing a different reference implementation. forward_source
+# is what makes that detectable, so it is mandatory on backward bundles -- the
+# one case where RFC 0011 requires a .meta.json at all rather than allowing the
+# tolerance fallback.
+FORWARD_SOURCE_FIELDS = ("method", "version", "generated_at")
+
+
+def validate_forward_source(
+    metadata: dict,
+    path: Path,
+    result: VerificationResult,
+    prefix: str,
+    base_dir: Path | None,
+) -> None:
+    forward_source = metadata.get("forward_source")
+    if forward_source is None:
+        result.error(
+            path,
+            f"{prefix}forward_source is required on backward bundles "
+            "(RFC 0011 4.2): it names the forward pass whose O and LSE this "
+            "bundle's gradients were computed from",
+        )
+        return
+    if not isinstance(forward_source, dict):
+        result.error(path, f"{prefix}forward_source must be an object")
+        return
+
+    for key in FORWARD_SOURCE_FIELDS:
+        value = forward_source.get(key)
+        if not isinstance(value, str) or not value.strip():
+            result.error(
+                path,
+                f"{prefix}forward_source.{key} is required and must be a "
+                "non-empty string",
+            )
+
+    validate_forward_source_pairing(forward_source, path, result, prefix, base_dir)
+
+
+def validate_forward_source_pairing(
+    forward_source: dict,
+    path: Path,
+    result: VerificationResult,
+    prefix: str,
+    base_dir: Path | None,
+) -> None:
+    """Cross-check forward_source against the forward bundle it names.
+
+    RFC 0011 4.2 asks for this comparison: a difference in method or generation
+    timestamp means the forward bundle was regenerated without its backward
+    partner, which no test would otherwise catch. The version field is required
+    to be present but is not compared.
+
+    The `bundle` field is optional, because RFC 0011's own example omits it; the
+    check is skipped, rather than failed, when it is absent or when the forward
+    bundle is not on disk (a backward bundle can legitimately be verified
+    without its partner pulled).
+    """
+    bundle = forward_source.get("bundle")
+    if bundle is None or base_dir is None:
+        return
+    if not isinstance(bundle, str) or not bundle.strip():
+        result.error(path, f"{prefix}forward_source.bundle must be a non-empty string")
+        return
+
+    forward_graph = (base_dir / bundle).resolve()
+    forward_meta = forward_graph.with_suffix(".meta.json")
+    if forward_graph.suffix != ".json" or forward_graph.name.endswith(".meta.json"):
+        result.error(
+            path,
+            f"{prefix}forward_source.bundle must point at the forward bundle's "
+            f"graph JSON (got '{bundle}')",
+        )
+        return
+    if not forward_meta.is_file():
+        # Verifying one subtree at a time is normal, and a backward bundle's
+        # forward partner is in a sibling directory, so an absent partner is not
+        # itself a defect. The pairing is cross-checked whenever both are in
+        # scope, which is the case for a whole-tree run.
+        return
+
+    try:
+        metadata = json.loads(forward_meta.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        result.error(
+            path, f"{prefix}forward_source bundle metadata is not parseable: {error}"
+        )
+        return
+    if not isinstance(metadata, dict):
+        result.error(path, f"{prefix}forward_source bundle metadata is not an object")
+        return
+
+    if metadata.get("direction") not in (None, "forward"):
+        result.error(
+            path,
+            f"{prefix}forward_source names '{bundle}', which is not a forward "
+            f"bundle (direction '{metadata.get('direction')}')",
+        )
+
+    # The forward bundle records its generation timestamp as generated_at and
+    # the method that produced it as reference_backend; forward_source restates
+    # both. Drift between them is the stale-pairing this check exists to find.
+    for source_key, forward_key in (
+        ("method", "reference_backend"),
+        ("generated_at", "generated_at"),
+    ):
+        expected = metadata.get(forward_key)
+        actual = forward_source.get(source_key)
+        if expected is None or actual is None:
+            continue
+        if expected != actual:
+            result.error(
+                path,
+                f"{prefix}forward_source.{source_key} is '{actual}' but "
+                f"'{bundle}' records {forward_key} '{expected}'; the forward "
+                "bundle was regenerated without its backward partner",
+            )
+
+
 def validate_metadata_fields(
-    metadata: dict, path: Path, result: VerificationResult, prefix: str = ""
+    metadata: dict,
+    path: Path,
+    result: VerificationResult,
+    prefix: str = "",
+    base_dir: Path | None = None,
 ) -> None:
     for key in ("generator", "reference_source"):
         value = metadata.get(key)
@@ -238,6 +374,33 @@ def validate_metadata_fields(
             result.error(
                 path, f"{prefix}{key} is required and must be a non-empty string"
             )
+
+    direction = metadata.get("direction")
+    if direction is not None and direction not in ("forward", "backward"):
+        result.error(
+            path,
+            f"{prefix}direction must be 'forward' or 'backward' when present "
+            f"(got {direction!r})",
+        )
+
+    strategy = metadata.get("reference_strategy")
+    strategy_present = isinstance(strategy, str) and strategy.strip()
+    if direction == "backward":
+        if not strategy_present:
+            # RFC 0011 4.1 lists reference_strategy as mandatory whenever a
+            # .meta.json is present. It is enforced here only for backward
+            # bundles, which RFC 0011 requires to carry metadata at all; making
+            # it a hard error everywhere would reject the forward bundles
+            # migrated from the old test system, which the RFC explicitly
+            # allows to have no metadata.
+            result.error(
+                path,
+                f"{prefix}reference_strategy is required on backward bundles "
+                "(RFC 0011 4.1)",
+            )
+        validate_forward_source(metadata, path, result, prefix, base_dir)
+    elif not strategy_present and strategy is not None:
+        result.error(path, f"{prefix}reference_strategy must be a non-empty string")
 
 
 def validate_metadata(path: Path, result: VerificationResult) -> None:
@@ -251,7 +414,7 @@ def validate_metadata(path: Path, result: VerificationResult) -> None:
         result.error(path, "metadata JSON is not an object")
         return
 
-    validate_metadata_fields(metadata, path, result)
+    validate_metadata_fields(metadata, path, result, base_dir=path.parent)
 
 
 def is_integer(value: object) -> bool:
@@ -339,6 +502,51 @@ def extract_output_tensor_uids(
             output_tensor_uids.add(value)
 
     return output_tensor_uids
+
+
+def extract_sdpa_stats_tensor_uids(nodes: list[object]) -> set[int]:
+    """Uids of the SDPA stats (LSE) tensors, where -inf is allowed (SEM-010)."""
+    stats_tensor_uids: set[int] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        location = SDPA_STATS_UID_FIELDS.get(node.get("type"))
+        if location is None:
+            continue
+        uid_map_name, field_name = location
+        uid_map = node.get(uid_map_name)
+        if not isinstance(uid_map, dict):
+            continue
+        value = uid_map.get(field_name)
+        if is_integer(value):
+            stats_tensor_uids.add(value)
+    return stats_tensor_uids
+
+
+def iter_float_values(dtype_key: str, data: bytes):
+    """Decoded values of a float tensor payload; nothing for other dtypes."""
+    if dtype_key in {"float", "float32", "fp32"}:
+        return (value for (value,) in struct.iter_unpack("<f", data))
+    if dtype_key in {"double", "float64", "fp64"}:
+        return (value for (value,) in struct.iter_unpack("<d", data))
+    if dtype_key in {"half", "float16", "fp16"}:
+        return (value for (value,) in struct.iter_unpack("<e", data))
+    if dtype_key in {"bfloat16", "bf16", "bfp16"}:
+        return (
+            struct.unpack("<f", struct.pack("<I", word << 16))[0]
+            for (word,) in struct.iter_unpack("<H", data)
+        )
+    return iter(())
+
+
+def find_invalid_stats_index(
+    dtype_key: str, data: bytes, allow_nan: bool
+) -> int | None:
+    """First +inf (or NaN, unless allowed) in an SDPA stats tensor; -inf is valid."""
+    for index, value in enumerate(iter_float_values(dtype_key, data)):
+        if value == math.inf or (math.isnan(value) and not allow_nan):
+            return index
+    return None
 
 
 def find_nonfinite_index(dtype_key: str, data: bytes) -> int | None:
@@ -496,7 +704,9 @@ def validate_tensor_payloads(
     output_tensor_uids: set[int],
     report_path: Path,
     result: VerificationResult,
+    stats_tensor_uids: set[int] | None = None,
 ) -> None:
+    stats_tensor_uids = stats_tensor_uids or set()
     for uid, tensor_spec in tensor_specs.items():
         dims = tensor_spec["dims"]
         strides = tensor_spec["strides"]
@@ -564,6 +774,21 @@ def validate_tensor_payloads(
             continue
 
         is_output = uid in output_tensor_uids
+        if uid in stats_tensor_uids:
+            # Padded and fully masked rows carry LSE = -inf (SEM-010); a ragged
+            # stats output may also carry the NaN pad sentinel (RFC 0014 §4.11.4).
+            allow_nan = is_ragged and is_output
+            bad_index = find_invalid_stats_index(dtype_key, data, allow_nan)
+            if bad_index is not None:
+                rejected = "+Inf" if allow_nan else "NaN/+Inf"
+                result.error(
+                    tensor_path,
+                    f"SDPA stats tensor contains {rejected} at element index "
+                    f"{bad_index} (only -inf is allowed, SEM-010)",
+                    uid,
+                )
+            continue
+
         if is_ragged and is_output:
             # Ragged outputs carry the NaN sentinel in in-block pad rows
             # (RFC 0014 §4.11.4), so only Inf is a defect there.
@@ -786,6 +1011,7 @@ def validate_graph_bundle(
         output_tensor_uids,
         path,
         result,
+        extract_sdpa_stats_tensor_uids(nodes),
     )
 
     for output_tensor_uid in output_tensor_uids:
@@ -1030,6 +1256,7 @@ def validate_sweep_case(
     default_tier: str,
     require_data: bool,
     result: VerificationResult,
+    stats_tensor_uids: set[int] | None = None,
 ) -> None:
     if not isinstance(case, dict):
         result.error(sweep_path, f"case {index} is not an object")
@@ -1113,8 +1340,18 @@ def validate_sweep_case(
             f"case '{case_label}' metadata is required and must be an object",
         )
     else:
+        # A sweep case's forward_source path is written relative to the case's
+        # own golden directory, which is where its tensors live.
+        golden_spec = case.get("golden")
+        case_base_dir = None
+        if isinstance(golden_spec, dict) and isinstance(golden_spec.get("path"), str):
+            case_base_dir = (sweep_path.parent / golden_spec["path"]).parent
         validate_metadata_fields(
-            metadata, sweep_path, result, prefix=f"case '{case_label}' metadata "
+            metadata,
+            sweep_path,
+            result,
+            prefix=f"case '{case_label}' metadata ",
+            base_dir=case_base_dir,
         )
 
     golden = case.get("golden")
@@ -1157,6 +1394,7 @@ def validate_sweep_case(
             output_tensor_uids,
             sweep_path,
             result,
+            stats_tensor_uids,
         )
 
 
@@ -1198,6 +1436,7 @@ def validate_sweep_bundle(
         return
 
     output_tensor_uids = extract_output_tensor_uids(nodes, template_path, result)
+    stats_tensor_uids = extract_sdpa_stats_tensor_uids(nodes)
     tensor_placeholder_fields, literal_tensor_specs = parse_template_tensors(
         tensors, template_path, result
     )
@@ -1239,6 +1478,7 @@ def validate_sweep_bundle(
             default_tier,
             require_data,
             result,
+            stats_tensor_uids,
         )
 
 

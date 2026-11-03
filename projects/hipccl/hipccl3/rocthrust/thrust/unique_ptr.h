@@ -18,7 +18,9 @@
 #include <thrust/device_reference.h>
 #include <thrust/for_each.h>
 
-#include <compare>
+#if THRUST_STD_VER >= 2020
+#  include <compare>
+#endif
 #include <functional>
 #include <type_traits>
 #include <utility>

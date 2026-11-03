@@ -153,12 +153,24 @@ DisabledSet ParseDisabledSet(const char* value, ForwardingSet set, std::ostream&
 // effect after each entry point's first call.
 const DisabledSet& GetDisabledSet();
 
-// True when MIOPEN_LOG_LEVEL selects MIOpen's trace level. Read straight from the
-// environment because the wrapper cannot include MIOpen's logging header.
-bool TracingEnabled();
+// Parses MIOPEN_LOG_LEVEL as MIOpen does (strtoull, base 0, trailing text
+// ignored) so both agree on what a value means. Unset or unparsable is 0,
+// MIOpen's default level. The result is not range-limited; the two checks below
+// narrow it to int, as MIOpen does.
+unsigned long long ParseLogLevel(const char* value);
 
-// False when MIOPEN_LOG_LEVEL hides MIOpen's own errors, so forwarded failures
-// stay just as quiet.
+// Level 6 (Info2) and above, not only 7 (Trace): the route lines are Info2
+// detail, and each MIOpen level includes the ones below it.
+bool RouteTraceEnabledFor(unsigned long long level);
+
+// True at 0 (default) and from 3 (Error) up. False at 1 (Quiet), 2 (Fatal) and
+// for a value MIOpen reads as negative, all of which hide MIOpen's errors.
+bool ErrorLoggingEnabledFor(unsigned long long level);
+
+// The same checks on this process's MIOPEN_LOG_LEVEL, read once. The wrapper
+// reads the environment because it cannot reach MIOpen's logging code, so
+// MIOpen's test-only quiet switch does not apply here.
+bool RouteTraceEnabled();
 bool ErrorLoggingEnabled();
 
 // Writes one "[MIOpen] hipDNN routing: ..." line describing the decision.
@@ -166,6 +178,14 @@ void ReportRouteDecision(const char* entryPoint,
                          ForwardingMode mode,
                          RouteDecision decision,
                          std::ostream& diagnostics);
+
+// Writes one "[MIOpen] hipDNN forwarded: <entryPoint>" line.
+void ReportForwardedCall(const char* entryPoint, std::ostream& diagnostics);
+
+// Writes ReportForwardedCall's line to stderr when MIOPEN_ENABLE_LOGGING is on.
+// A forwarded call skips its own _impl function, which is what prints its API
+// call log entry, so without this it would be missing from the log.
+void LogForwardedCall(const char* entryPoint) noexcept;
 
 // Route::Hipdnn only when mode is Enabled AND entryPoint is in the set AND the
 // deny list does not name it. hipdnnAvailable false still routes away from
@@ -230,6 +250,9 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // an extern "C" function, so both sit inside the try. The MIOpen route needs no
 // catch: every _impl function catches its own exceptions.
 //
+// Each route clears the last recorded hipDNN failure before the call, so a
+// callee that records none cannot leave the previous call's failure in place.
+//
 // Requires hipdnn_graph.hpp, for ClearForwardedFailure and
 // RecordCurrentException.
 #define MIOPEN_WRAPPER_FORWARD(fn, expr)                                  \
@@ -240,7 +263,11 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
             static const ::miopen::wrapper::Route miopen_wrapper_route_ = \
                 ::miopen::wrapper::DispatchFromStub(#fn, __func__);       \
             if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn) \
+            {                                                             \
+                ::miopen::wrapper::hipdnn::ClearForwardedFailure();       \
+                ::miopen::wrapper::LogForwardedCall(#fn);                 \
                 return (expr);                                            \
+            }                                                             \
         }                                                                 \
         catch(...)                                                        \
         {                                                                 \

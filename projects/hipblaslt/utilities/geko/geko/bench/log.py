@@ -465,6 +465,7 @@ def summarize(
     bench_freq: bool = False,
     device: int | None = None,
     custom_lib_dir: str | Path | None = None,
+    force_benchmark: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Analyze and summarize GEMM operations from hipBLASLt log file.
 
@@ -496,6 +497,8 @@ def summarize(
             If set, overrides devices.
         custom_lib_dir (str | Path | None, optional): Optional built custom
             library directory used for benchmark-based summarize paths.
+        force_benchmark (bool, optional): If True, forces benchmarking even if 
+            keep_thr is 0. Defaults to False.
 
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: DataFrames with summarized and unique GEMM operations, filtered by threshold
@@ -519,7 +522,8 @@ def summarize(
     data = update(parse(log_file, as_df=False))[0]
     logger.info(f"Working on '{log_file}' with {len(data)} GEMMs...")
 
-    if keep_thr == 0.0: # no need to benchmark if keep_thr=0 (tune all sizes), build summary from log file
+    # no need to benchmark if keep_thr=0 (tune all sizes), build summary from log file
+    if not force_benchmark and keep_thr == 0.0:
         logger.info("keep_thr=0: skipping benchmarks, building summary from log file")
         tmp_df = pd.DataFrame(data).rename(columns={"M": "m", "N": "n", "K": "k"})
         summary_df = tmp_df[[c for c in tmp_df.columns if c in GEMM_FIELDS]].copy()

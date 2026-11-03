@@ -38,7 +38,6 @@ from kernels.common.attention_unified import (
     _enable_combo_2d,
     _enable_early_v_schedule,
     _enable_fp8_mfma_qk,
-    _enable_gfx942_3d_invariant_hoist,
     _enable_gfx942_3d_wide_kv_load,
     _enable_gfx942_bf16_flash,
     _enable_gfx942_flash_k_sliced_ldsseq,
@@ -64,6 +63,9 @@ from kernels.common.attention_unified import (
     _gfx942_flash_use_single_buffer,
     _gfx942_flash_wide_setting,
     _gfx942_3d_tile_size_override,
+    _gfx950_3d_tile_size_override,
+    _kv_cache_policy_3d,
+    _kv_lds_swizzle_3d,
     _kv_storage_dtype,
     _num_segments,
     _select_2d_block_m_per_warp,
@@ -76,6 +78,8 @@ from kernels.common.attention_unified import (
     _select_gfx942_flash_k_slice_hd,
     _tiled_2d_impl,
     _tiled_3d_impl,
+    _use_decode_grid,
+    _wave_page_id_load_3d,
 )
 import builders.common.attention_spec_builder as bld
 
@@ -548,10 +552,23 @@ def _reference_generic_3d(problem):
         num_seqs=problem.num_seqs,
         waves_per_eu=_select_3d_waves_per_eu(problem, _arch),
         kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size_override=_gfx942_3d_tile_size_override(problem, _arch),
-        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem, _arch),
+        tile_size_override=(
+            _gfx950_3d_tile_size_override(problem, _arch)
+            if _arch == "gfx950"
+            else _gfx942_3d_tile_size_override(problem, _arch)
+        ),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, _arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        use_decode_grid=_use_decode_grid(problem, _arch),
+        **(
+            {
+                "kv_cache_policy": _kv_cache_policy_3d(problem, _arch),
+                "use_kv_lds_swizzle": _kv_lds_swizzle_3d(problem, _arch),
+                "use_wave_page_id_load": _wave_page_id_load_3d(problem, _arch),
+            }
+            if _arch in ("gfx942", "gfx950")
+            else {}
+        ),
     )
 
 

@@ -20,7 +20,7 @@ Modules:
                      `canonicalize` / `canonical_equal` for semantic diff.
   - ``verify``     : LLVM-`verify`-style well-formedness pass
                      (`verify(kernel) -> list[Diagnostic]`).
-  - ``lower_llvm`` : `lower_kernel_to_llvm(kernel) -> str` AMDGPU LLVM IR
+  - ``lower_llvm`` : `lower_kernel_to_llvm(kernel, *, arch) -> str` AMDGPU LLVM IR
                      -- the production path, comgr-friendly.
   - ``ir_golden``  : `check_golden(path, run)` all-flavor comparator for
                      flavor-keyed IR sha256 golden fixtures.
@@ -61,6 +61,9 @@ from .ir import (
     E5M3,
     dtype_to_ir_type,
     I1,
+    I4,
+    U4,
+    U8,
     I8,
     I32,
     I64,
@@ -125,6 +128,9 @@ __all__ = [
     "F64",
     "FP8E4M3",
     "I1",
+    "I4",
+    "U4",
+    "U8",
     "I8",
     "I32",
     "I64",

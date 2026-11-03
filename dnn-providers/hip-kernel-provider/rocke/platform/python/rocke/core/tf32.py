@@ -2,7 +2,30 @@
 # SPDX-License-Identifier: MIT
 """Logical TF32 operand contracts, independent of the physical i32 carrier."""
 
+from __future__ import annotations
+
+from .arch import ArchTarget, known_arches
+
 TF32_MMA = {"mfma_f32_16x16x8_xf32": 4, "mfma_f32_32x32x4_xf32": 16}
+
+
+def tf32_mma_target_error(op_id: str | None, arch: ArchTarget) -> str | None:
+    """The error for a TF32 MMA ``op_id`` that ``arch``'s MMA catalog does not list.
+
+    Returns None for any other op_id, and for a TF32 op_id the catalog lists.
+    """
+    if op_id not in TF32_MMA or arch.mma.by_op_id(op_id) is not None:
+        return None
+    listing = [
+        gfx for gfx in known_arches() if ArchTarget.from_gfx(gfx).mma.by_op_id(op_id)
+    ]
+    where = (
+        f"it is listed for {', '.join(listing)}" if listing else "no target lists it"
+    )
+    return (
+        f"no MMA instruction found for {op_id!r} on {arch.gfx!r} -- the target's "
+        f"MMA catalog does not list it; {where}"
+    )
 
 
 def _emulated_tf32_mma_error(op_id, lens, operands, results):

@@ -26,6 +26,8 @@
 
 #include "TimingEvents.hpp"
 
+#include "DeviceContext.hpp"
+
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstddef>
@@ -34,51 +36,44 @@ namespace TensileLite
 {
     namespace Client
     {
-        TimingEvents::TimingEvents(size_t numInvocations, size_t numKernels)
-            : m_events(numInvocations)
+        TimingEvents::TimingEvents(std::vector<std::shared_ptr<DeviceContext>> const& devices,
+                                   size_t numInvocations,
+                                   size_t numKernels)
+            : m_numInvocations(numInvocations)
+            , m_events(devices.size())
         {
-            for(auto& vec : m_events)
+            for(size_t d = 0; d < devices.size(); d++)
             {
-                vec.resize(numKernels, nullptr);
-
-                for(auto& event : vec)
-                    HIP_CHECK_EXC(hipEventCreateWithFlags(&event, hipEventDefault));
+                ScopedDevice device(devices[d]->deviceId);
+                m_events[d].resize(numInvocations);
+                for(auto& vec : m_events[d])
+                {
+                    vec.resize(numKernels, nullptr);
+                    for(auto& event : vec)
+                        HIP_CHECK_EXC(hipEventCreateWithFlags(&event, hipEventDefault));
+                }
             }
         }
 
         TimingEvents::~TimingEvents()
         {
-            for(auto& vec : m_events)
+            for(auto& card : m_events)
             {
-                for(auto& event : vec)
+                for(auto& vec : card)
                 {
-                    if(event)
+                    for(auto& event : vec)
                     {
-                        HIP_CHECK_PRINT(hipEventDestroy(event),
-                            [&](hipError_t error) {
+                        if(event)
+                        {
+                            HIP_CHECK_PRINT(hipEventDestroy(event), [&](hipError_t error) {
                                 std::cerr << "hipEventDestroy failed: " << std::endl
-                                        << " error: " << hipGetErrorString(error) << std::endl;
-                            }
-                        );
-                        event = nullptr;
+                                          << " error: " << hipGetErrorString(error) << std::endl;
+                            });
+                            event = nullptr;
+                        }
                     }
                 }
             }
-        }
-
-        std::vector<hipEvent_t> const& TimingEvents::operator[](size_t index) const
-        {
-            return m_events[index];
-        }
-
-        std::vector<std::vector<hipEvent_t>> const& TimingEvents::operator*() const
-        {
-            return m_events;
-        }
-
-        std::vector<std::vector<hipEvent_t>> const* TimingEvents::operator->() const
-        {
-            return &m_events;
         }
     } // namespace Client
 } // namespace TensileLite

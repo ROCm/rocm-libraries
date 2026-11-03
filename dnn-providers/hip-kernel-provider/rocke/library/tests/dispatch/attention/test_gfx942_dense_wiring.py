@@ -9,8 +9,8 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
   - selection returns an ``AttentionTuningSpec`` (``path="dense"``) whose
     ``tuning_id`` replays; ``auto`` is the default spec
   - routing on gfx942, and rejection of every out-of-scope request
-  - the default spec turns the persistent grid on once there is enough work;
-    ``persistent`` and ``waves_per_eu`` are knobs of the candidate
+  - the default spec turns the persistent grid on at D128; ``persistent`` and
+    ``waves_per_eu`` are knobs of the candidate
   - both gfx942 dense grids read ``batch`` / ``seqlen_q`` / ``seqlen_kv`` and both
     head counts as runtime kernel params, so those fields drop out of
     ``kernel_name()`` and the cache key and the dispatched signature includes them.
@@ -46,7 +46,7 @@ from kernels.gfx942.attention_dense import (
     build_attention_dense,
     supports_attention_dense,
 )
-from rocke.helpers.transforms import calculate_magic_numbers
+from rocke.helpers.magic_division import calculate_magic_numbers
 
 _NAME = "attention_gfx942_dense"
 _SPEC_ID = "gfx942_dense"
@@ -218,19 +218,27 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
 
 
 class TestGfx942BottomRightSafety(unittest.TestCase):
-    def test_moving_bottom_right_declines_at_capability(self):
+    def test_moving_bottom_right_is_admitted_with_a_shifted_diagonal(self):
         for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
             with self.subTest(mask_type=mask_type), _Gfx942Arch():
-                ok, why = _candidate().admits(
-                    _req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type)
-                )
-                self.assertFalse(ok)
-                self.assertIn("capability", why)
-                self.assertIn("causal_bottom_right", why)
-                with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
-                    _spec(_req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type))
+                req = _req(seqlen_q=2048, seqlen_k=4096, mask_type=mask_type)
+                ok, why = _candidate().admits(req)
+                self.assertTrue(ok, why)
+                spec = _spec(req)
+                self.assertTrue(spec.causal)
+                self.assertTrue(spec.causal_bottom_right)
 
-    def test_concrete_support_rejects_shared_bottom_right_spec(self):
+    def test_cross_length_no_mask_still_declines(self):
+        """The band normalizer reads a cross-length NO_MASK request on this arch as
+        the bottom-right causal band; the dense body does not serve it."""
+        with _Gfx942Arch():
+            req = _req(seqlen_q=2048, seqlen_k=4096, mask_type=0)
+            ok, _ = _candidate().admits(req)
+            self.assertFalse(ok)
+            with self.assertRaisesRegex(ValueError, "NO_MASK"):
+                _spec(req)
+
+    def test_concrete_support_rejects_bottom_right_window(self):
         common = dict(
             batch=1,
             seqlen_q=2048,
@@ -242,15 +250,16 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
             causal_bottom_right=True,
             dtype="bf16",
         )
-        spec = AttentionDenseSpec(**common)
-        ok, why = supports_attention_dense(spec, arch="gfx942")
+        ok, why = supports_attention_dense(AttentionDenseSpec(**common), arch="gfx942")
+        self.assertTrue(ok, why)
+        ok, why = supports_attention_dense(
+            AttentionDenseSpec(**common, sliding_window=128), arch="gfx942"
+        )
         self.assertFalse(ok)
         self.assertIn("causal_bottom_right", why)
-        with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
-            Gfx942AttentionDenseSpec(**common)
 
     def test_equal_length_bottom_right_preserves_persistent_policy(self):
-        common = dict(seqlen_q=8192, seqlen_k=8192)
+        common = dict(batch=16, seqlen_q=2048, seqlen_k=2048)
         mask_pairs = (
             (AttentionMaskType.TOP_LEFT_CAUSAL, 2),
             (1, AttentionMaskType.BOTTOM_RIGHT_CAUSAL),
@@ -269,12 +278,13 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
-    def test_default_spec_turns_persistent_on_for_large_sq(self):
-        """The default spec turns the persistent grid-stride variant on once
-        there is enough work to fill the grid -- the large-Sq prefill regime."""
+    def test_default_spec_turns_persistent_on_for_d128(self):
+        """The default spec turns the persistent grid-stride variant on at D128,
+        whatever the Sq and batch, and leaves it off at D64."""
         with _Gfx942Arch():
+            self.assertTrue(_spec(_req()).persistent)
             self.assertTrue(_spec(_req(seqlen_q=8192, seqlen_k=8192)).persistent)
-            self.assertFalse(_spec(_req(nhead_q=8, nhead_k=8)).persistent)
+            self.assertFalse(_spec(_req(hdim_q=64, hdim_v=64)).persistent)
 
     def test_persistent_is_a_knob_of_the_candidate(self):
         """Persistence is reached through the knob space (and its tuning ids),
@@ -283,6 +293,39 @@ class TestGfx942DensePersistent(unittest.TestCase):
             req = _req(nhead_q=8, nhead_k=8)
             self.assertTrue(_spec(req, persistent=True).persistent)
             self.assertFalse(_spec(_req(), persistent=False).persistent)
+
+    def test_large_causal_mha_uses_persistent_swizzled_head_first(self):
+        with _Gfx942Arch():
+            spec = _spec(
+                _req(batch=16, nhead_q=64, nhead_k=64, seqlen_q=4096, seqlen_k=4096)
+            )
+            self.assertTrue(spec.persistent)
+            self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
+
+    def test_nonpersist_decode_is_a_knob_of_the_grid(self):
+        """The non-persistent block order is a knob: kept on the grid unless it
+        restates auto, dropped on the persistent body, which never reads it."""
+        with _Gfx942Arch():
+            req = _req()
+            grid = _spec(req, persistent=False, nonpersist_decode="hq_minor_swz")
+            self.assertFalse(grid.persistent)
+            self.assertEqual(grid.resolved_nonpersist_decode, "hq_minor_swz")
+            self.assertIn("nphqminswz", grid.kernel_name())
+            auto = tuning_spec_with_knobs(req, _SPEC_ID, {"persistent": False})
+            restated = tuning_spec_with_knobs(
+                req,
+                _SPEC_ID,
+                {
+                    "persistent": False,
+                    "nonpersist_decode": auto.kernel_spec.resolved_nonpersist_decode,
+                },
+            )
+            self.assertEqual(restated, auto)
+            persistent = tuning_spec_with_knobs(
+                req, _SPEC_ID, {"persistent": True, "nonpersist_decode": "hq_minor_swz"}
+            )
+            self.assertNotIn("nonpersist_decode", dict(persistent.knobs))
+            self.assertEqual(persistent.kernel_spec.nonpersist_decode, "auto")
 
 
 class TestGfx942DenseWavesPerEu(unittest.TestCase):
@@ -343,7 +386,7 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
         with _Gfx942Arch():
             for persistent, tail in (
                 (False, []),
-                # Every shape here resolves 'auto' to qb_major (asserted below).
+                # Every shape here resolves 'auto' to bt_hkv_minor (asserted below).
                 (
                     True,
                     [
@@ -351,8 +394,6 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                         "batch_shift",
                         "num_query_heads_magic",
                         "num_query_heads_shift",
-                        "gqa_magic",
-                        "gqa_shift",
                     ],
                 ),
             ):
@@ -360,12 +401,16 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                     specs = [_spec(_req(**kw), persistent=persistent) for kw in shapes]
                     self.assertTrue(all(s.persistent == persistent for s in specs))
                     self.assertTrue(all(s.runtime_shape for s in specs))
-                    self.assertEqual(len({s.kernel_name() for s in specs}), 1)
+                    # One binary per query tile: the default tile is a function of
+                    # the work count (_default_block_m), the rest of the shape is not.
+                    n_tiles = len({s.block_m for s in specs})
+                    self.assertEqual(n_tiles, 2)
+                    self.assertEqual(len({s.kernel_name() for s in specs}), n_tiles)
                     self.assertEqual(
                         len(
                             {attention_dense_cache_key(s, arch="gfx942") for s in specs}
                         ),
-                        1,
+                        n_tiles,
                     )
                     name = specs[0].kernel_name()
                     self.assertNotRegex(name, r"_b\d+")
@@ -373,7 +418,8 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                     self.assertNotRegex(name, r"_s[qk]\d+")
                     if persistent:
                         self.assertEqual(
-                            {s.resolved_persist_decode for s in specs}, {"qb_major"}
+                            {s.resolved_persist_decode for s in specs},
+                            {"bt_hkv_minor"},
                         )
                         self.assertIn("persist304", name)
                     names = [p["name"] for p in attention_dense_signature(specs[0])]
@@ -441,7 +487,9 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
 
     # Per resolved decode order, the divisors in kernarg order.
     _DIVISORS = {
+        "bt_hkv_minor": ("batch", "num_query_heads"),
         "hkv_major": ("batch", "gqa", "nqb"),
+        "hq_minor_swz": ("nqb", "num_query_heads", "gqa"),
         "qb_major": ("batch", "num_query_heads", "gqa"),
     }
 
@@ -526,17 +574,23 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
         lands in the same slot as the 'auto' that resolves to it."""
         common = dict(seqlen_q=8192, seqlen_k=8192)
         groups = {
-            # gqa*nqb*B < 2*NP (608), or gqa == 1
-            "qb_major": [
+            # GQA, batch below the XCD count
+            "bt_hkv_minor": [
                 dict(batch=1, nhead_q=128, nhead_k=8),
                 dict(batch=1, nhead_q=40, nhead_k=8),
-                dict(batch=4, nhead_q=32, nhead_k=32),
+                dict(batch=4, nhead_q=32, nhead_k=8),
             ],
-            # gqa > 1 and gqa*nqb*B >= 2*NP
+            # gqa > 1, batch >= the XCD count and gqa*nqb*B >= 2*NP (608)
             "hkv_major": [
-                dict(batch=2, nhead_q=128, nhead_k=8),
-                dict(batch=4, nhead_q=128, nhead_k=8),
-                dict(batch=4, nhead_q=40, nhead_k=8),
+                dict(batch=8, nhead_q=128, nhead_k=8),
+                dict(batch=8, nhead_q=40, nhead_k=8),
+                dict(batch=8, nhead_q=32, nhead_k=8),
+            ],
+            # MHA with more than 8 grid-stride rounds of work
+            "hq_minor_swz": [
+                dict(batch=4, nhead_q=32, nhead_k=32),
+                dict(batch=2, nhead_q=64, nhead_k=64),
+                dict(batch=8, nhead_q=32, nhead_k=32),
             ],
         }
         keys, names = {}, {}
@@ -563,10 +617,16 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
                         keys[decode],
                     )
                     self.assertEqual(explicit.kernel_name(), names[decode])
-            self.assertNotEqual(keys["qb_major"], keys["hkv_major"])
-            self.assertNotEqual(names["qb_major"], names["hkv_major"])
-            self.assertIn("hkvmaj", names["hkv_major"])
-            self.assertNotIn("hkvmaj", names["qb_major"])
+            self.assertEqual(len(set(keys.values())), len(groups))
+            self.assertEqual(len(set(names.values())), len(groups))
+            for decode, tag in (
+                ("bt_hkv_minor", "bthkvmin"),
+                ("hkv_major", "hkvmaj"),
+                ("hq_minor_swz", "hqminswz"),
+            ):
+                self.assertEqual(
+                    [n for n in names.values() if tag in n], [names[decode]]
+                )
 
     def test_work_item_count_at_the_fastdiv_limit_raises(self):
         """The decode's fast division is exact only below 2**30; past it the
@@ -590,6 +650,66 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
             attention_dense_runtime_args(at)
         default_grid = Gfx942AttentionDenseSpec(batch=2**30, persistent=False, **common)
         self.assertEqual(attention_dense_runtime_args(default_grid)["batch"], 2**30)
+
+    def test_under_filled_default_tile_covers_d64_and_sinks(self):
+        """The 128-row tile applies to every head size and to sinks (non-causal
+        sinks on the D128 persistent grid excepted): below the CU count it halves
+        block_m, at or above it the shared tile stays. A sliding window keeps its
+        own geometry."""
+        cases = (
+            # (kwargs, expected block_m): 256-row work = Sq/256 * Hq * B vs 304.
+            (dict(hdim_q=64, hdim_v=64, nhead_q=64, seqlen_q=512, seqlen_k=512), 128),
+            (dict(hdim_q=64, hdim_v=64, nhead_q=64, seqlen_q=2048, seqlen_k=2048), 256),
+            (dict(nhead_q=128, seqlen_q=512, seqlen_k=512, use_sinks=True), 128),
+            (
+                dict(
+                    hdim_q=64,
+                    hdim_v=64,
+                    nhead_q=64,
+                    seqlen_q=512,
+                    seqlen_k=512,
+                    use_sinks=True,
+                ),
+                128,
+            ),
+            (dict(nhead_q=128, seqlen_q=2048, seqlen_k=2048, use_sinks=True), 256),
+            (
+                dict(nhead_q=128, seqlen_q=512, seqlen_k=512, batch=4, use_sinks=True),
+                256,
+            ),
+            (
+                dict(nhead_q=128, seqlen_q=512, seqlen_k=512, batch=4, use_sinks=True),
+                256,
+            ),
+            # Non-causal sinks: D128 (persistent grid) keeps the shared tile, D64
+            # (one CTA per block) takes the 128-row one.
+            (
+                dict(
+                    nhead_q=128, seqlen_q=512, seqlen_k=512, mask_type=0, use_sinks=True
+                ),
+                256,
+            ),
+            (
+                dict(
+                    hdim_q=64,
+                    hdim_v=64,
+                    nhead_q=64,
+                    seqlen_q=512,
+                    seqlen_k=512,
+                    mask_type=0,
+                    use_sinks=True,
+                ),
+                128,
+            ),
+        )
+        with _Gfx942Arch():
+            for kw, block_m in cases:
+                with self.subTest(**kw):
+                    self.assertEqual(_spec(_req(**kw)).block_m, block_m)
+            wide_window = _spec(
+                _req(nhead_q=32, seqlen_q=2048, seqlen_k=2048, sliding_window=4096)
+            )
+            self.assertEqual(wide_window.block_m, 256)
 
 
 class TestGfx942SlidingWindow(unittest.TestCase):
