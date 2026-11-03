@@ -233,11 +233,13 @@ class TestDgradWmmaSpec(unittest.TestCase):
         n_rejected = 0
         for arch in ("gfx1250", "gfx950"):
             for i, spec in enumerate(specs):
-                ok, _, name, grid, lds = eng.conv_direct_dgrad_wmma_describe(
+                ok, why_c, name, grid, lds = eng.conv_direct_dgrad_wmma_describe(
                     conv_direct_dgrad_wmma_spec_to_dict(spec), arch
                 )
                 why = dgrad_wmma_reason(spec, arch)
                 self.assertEqual(ok, why is None, (arch, spec, why))
+                if why is not None:
+                    self.assertEqual(why_c, why, (arch, spec))
                 self.assertEqual(name, spec.kernel_name())
                 self.assertEqual(lds, spec.lds_bytes())
                 if why is None:

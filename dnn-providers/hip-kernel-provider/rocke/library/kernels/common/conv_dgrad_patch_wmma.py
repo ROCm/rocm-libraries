@@ -50,7 +50,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
 
@@ -250,10 +250,9 @@ def dgrad_patch_reason(spec: DgradPatchWmmaSpec, arch: str = "gfx1250") -> str |
     )
     if vgprs > PATCH_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
+    why = scheduler_strategy_reason(spec.sched)
+    if why is not None:
+        return why
     tensor_bytes = (
         2 * p.N * p.Ho * p.Wo * p.total_k,
         2 * p.total_k * p.KH * p.KW * p.cpg,

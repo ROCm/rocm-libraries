@@ -350,12 +350,8 @@ bool rocke_dgrad_patch_wmma_is_valid_spec(const rocke_dgrad_patch_wmma_spec_t* s
         set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-    {
-        snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", spec->sched);
-        set_reason(reason, reason_cap, msg);
+    if(rocke_scheduler_strategy_reason(spec->sched, reason, reason_cap))
         return false;
-    }
     /* Global offsets are i32 bytes. */
     {
         long long total_k = (long long)p->groups * p->kpg;

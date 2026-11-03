@@ -33,7 +33,8 @@
  *     sign) and DirectConvProblem.Ho / Wo, which a too-small input must give
  *     as Python does (floor, not truncation);
  *   - the forward WMMA validator tail's refusal of an unknown scheduler, which
- *     must carry normalize_scheduler_strategy's text, choices included;
+ *     must carry normalize_scheduler_strategy's text, choices included (and
+ *     so must the dgrad WMMA and Winograd GEMM validators);
  *   - the direct wgrad validators' refusal of a dilated problem, which must
  *     carry conv_direct_grouped.dilation_reason's text.
  */
@@ -59,6 +60,7 @@
 #include "rocke/instance_conv_direct_wgrad_gather.h"
 #include "rocke/instance_conv_direct_wgrad_tiled.h"
 #include "rocke/instance_conv_fwd_small_wmma.h"
+#include "rocke/instance_conv_winograd_gemm_wmma.h"
 #include "rocke/lower_llvm.h"
 
 /* Layout canary, as in test_mma_catalog_lookup.cpp: growing
@@ -507,6 +509,51 @@ static void test_fwd_wmma_scheduler_reason(void)
     CHECK(rocke_scheduler_strategy_is_valid(NULL), "NULL strategy refused");
 }
 
+/* `spec` is accepted without a scheduler and refused, with Python's
+ * ValueError text, with the unknown "bogus" one. */
+template <typename Spec, typename Valid>
+static void check_scheduler_reason(const char* kernel, Spec spec, Valid is_valid)
+{
+    char reason[ERR_CAP];
+    spec.sched = NULL;
+    reason[0] = '\0';
+    CHECK(is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s refused: %s", kernel, reason);
+    spec.sched = "bogus";
+    reason[0] = '\0';
+    CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s accepted sched bogus", kernel);
+    CHECK(strcmp(reason,
+                 "unsupported scheduler_strategy 'bogus'; expected one of: iterative-ilp, "
+                 "iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause, or None")
+              == 0,
+          "%s sched bogus: %s",
+          kernel,
+          reason);
+}
+
+/* The dgrad WMMA and Winograd GEMM validators write the full text too (they
+ * wrote only its first clause). */
+static void test_dgrad_wmma_scheduler_reason(void)
+{
+    rocke_direct_dgrad_wmma_spec_t dg = rocke_direct_dgrad_wmma_spec_default();
+    check_scheduler_reason("direct_dgrad_wmma", dg, rocke_direct_dgrad_wmma_is_valid_spec);
+    rocke_dgrad_patch_wmma_spec_t patch = rocke_dgrad_patch_wmma_spec_default();
+    patch.problem = stem_problem(4, 4, 0);
+    patch.waves_c = 3;
+    patch.waves_p = 1;
+    patch.tiles_c = 1;
+    patch.r_blk = 4;
+    check_scheduler_reason("dgrad_patch_wmma", patch, rocke_dgrad_patch_wmma_is_valid_spec);
+    rocke_dgrad_smallc_wmma_spec_t smallc = rocke_dgrad_smallc_wmma_spec_default();
+    smallc.problem = stem_problem(3, 1, 1);
+    smallc.tiles_p = 6;
+    smallc.out_h = 16;
+    smallc.out_w = 16;
+    check_scheduler_reason("dgrad_smallc_wmma", smallc, rocke_dgrad_smallc_wmma_is_valid_spec);
+    check_scheduler_reason("winograd_gemm_wmma",
+                           rocke_winograd_gemm_wmma_spec_default(),
+                           rocke_winograd_gemm_wmma_is_valid_spec);
+}
+
 /* Python: a // b, ceil_div(a, b) = -(-a // b) and align_up(a, b) =
  * ceil_div(a, b) * b, for every sign. */
 static void test_ceil_floor_div(void)
@@ -677,6 +724,7 @@ int main(void)
     test_ceil_floor_div();
     test_problem_output_extents();
     test_fwd_wmma_scheduler_reason();
+    test_dgrad_wmma_scheduler_reason();
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();
     test_stream_refuses_per_axis_padding();

@@ -94,7 +94,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
 
@@ -405,10 +405,9 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
     ) * (2 if spec.prefetch else 1)
     if vgprs > DGRAD_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
+    why = scheduler_strategy_reason(spec.sched)
+    if why is not None:
+        return why
     # Global offsets are i32 bytes and the tile index is a flat block id.
     tensor_bytes = (
         2 * p.N * p.Ho * p.Wo * p.total_k,
