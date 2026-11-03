@@ -106,6 +106,12 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
+A pointer parameter declared `addr_space="constant"` is `ptr addrspace(4)` in the kernel header. The
+three global loads above read through it as `load addrspace(4)`; they refuse a flat or LDS pointer.
+Every other op that addresses global memory through it (the stores, atomics and flag ops above,
+`cooperative_global_store`, `global_load_tr16_b128`, and the copies between global memory and LDS) is
+refused by the LLVM lowering of both engines.
+
 ### Global pointers
 
 | Op name                  | Builder             | LLVM emission                                        | HIP emission |

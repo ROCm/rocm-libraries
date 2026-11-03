@@ -700,12 +700,8 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
             break;
         used += (size_t)n;
     }
-    rocke_ll_fail(L,
-                  ROCKE_ERR_VALUE,
-                  "%s: pointer operand is %s, but the intrinsic accepts only %s",
-                  op,
-                  ty,
-                  list);
+    rocke_ll_fail(
+        L, ROCKE_ERR_VALUE, "%s: pointer operand is %s, but the op accepts only %s", op, ty, list);
 }
 
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem)

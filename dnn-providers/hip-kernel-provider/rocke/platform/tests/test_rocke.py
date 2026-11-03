@@ -4693,7 +4693,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         with self.assertRaisesRegex(
             error_type,
             r"av_load_b128: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
@@ -4798,7 +4798,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         with self.assertRaisesRegex(
             error_type,
             r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
