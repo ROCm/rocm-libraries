@@ -44,6 +44,8 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `MultiGrid` crashing in `Clear` and in its destructor after `Build`, because it deleted transfer maps that only the AMG solvers allocate.
 * Fixed the W-cycle computing the V-cycle. Its second coarse cycle now continues from the first instead of restarting from zero.
 * Fixed the K-cycle returning NaN when a coarse residual is zero. It now returns the zero correction.
+* Fixed `UAAMG` failing an assert at a level without aggregates. Like `SAAMG`, it now stops coarsening at that level.
+* Fixed `UAAMG::ReBuildNumeric` not scaling the coarse operators by the over-interpolation factor.
 
 ## (Unreleased) rocALUTION 4.1.1
 

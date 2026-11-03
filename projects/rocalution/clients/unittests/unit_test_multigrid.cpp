@@ -1808,22 +1808,16 @@ TYPED_TEST(multigrid_amg, unsmoothed_coarsening_stops_at_a_level_without_strong_
     expect_aggregation(ref, in);
     EXPECT_EQ(*std::max_element(in.aggregates.begin(), in.aggregates.end()), 3);
 
-    KNOWN_BUG("UAAMG::Aggregate_ does not stop at a level without aggregates, so the Galerkin "
-              "product of the empty prolongation fails an assert");
-    const Backend backend = TypeParam::backend;
-    EXPECT_EXIT(
-        {
-            auto A   = make_local_matrix(backend, ref);
-            auto amg = make_ua<T>(Greedy, 1.0);
-            amg->SetOperator(*A);
-            amg->SetCoarsestLevel(2);
-            amg->Verbose(0);
-            amg->Build();
-            const Hierarchy<T> h = hierarchy_of(*amg, ref);
-            std::exit(h.levels() == 2 && h.A.back().n == 4 && diagonal(h.A.back()) ? 0 : 2);
-        },
-        testing::ExitedWithCode(0),
-        "");
+    auto A   = make_local_matrix(TypeParam::backend, ref);
+    auto amg = make_ua<T>(Greedy, 1.0);
+    amg->SetOperator(*A);
+    amg->SetCoarsestLevel(2);
+    amg->Verbose(0);
+    amg->Build();
+    const Hierarchy<T> h = hierarchy_of(*amg, ref);
+    EXPECT_EQ(h.levels(), 2);
+    EXPECT_EQ(h.A.back().n, 4);
+    EXPECT_TRUE(diagonal(h.A.back()));
 }
 
 TYPED_TEST(multigrid_amg, cycle_matches_the_dense_cycle_on_the_built_hierarchy)
@@ -2009,8 +2003,6 @@ TYPED_TEST(multigrid_amg, unsmoothed_rebuild_numeric_keeps_the_over_interpolatio
     const Hierarchy<T> built = hierarchy_of(*m.amg, ref);
     expect_galerkin_hierarchy(built, 4, static_cast<T>(1) / static_cast<T>(1.5));
 
-    KNOWN_BUG("UAAMG::ReBuildNumeric does not scale the coarse operators by the "
-              "over-interpolation");
     m.amg->ReBuildNumeric();
     const Hierarchy<T> rebuilt = hierarchy_of(*m.amg, ref);
     for(int l = 1; l < built.levels(); ++l)

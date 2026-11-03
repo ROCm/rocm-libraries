@@ -146,6 +146,11 @@ namespace rocalution
                 *this->restrict_op_level_[0], *this->op_, *this->prolong_op_level_[0]);
         }
 
+        if(this->over_interp_ > static_cast<ValueType>(1))
+        {
+            this->op_level_[0]->Scale(static_cast<ValueType>(1) / this->over_interp_);
+        }
+
         for(int i = 1; i < this->levels_ - 1; ++i)
         {
             this->op_level_[i]->Clear();
@@ -170,6 +175,11 @@ namespace rocalution
             if(i == this->levels_ - this->host_level_ - 1)
             {
                 this->op_level_[i - 1]->CloneBackend(*this->restrict_op_level_[i - 1]);
+            }
+
+            if(this->over_interp_ > static_cast<ValueType>(1))
+            {
+                this->op_level_[i]->Scale(static_cast<ValueType>(1) / this->over_interp_);
             }
         }
 
@@ -244,6 +254,14 @@ namespace rocalution
         connections.Clear();
         aggregates.Clear();
         aggregate_root_nodes.Clear();
+
+        // We need to revert the level creation, if the number of columns of P is zero
+        // because in that case, R will have zero rows and thus the coarse level will be
+        // a 0x0 matrix.
+        if(pro->GetN() == 0)
+        {
+            return false;
+        }
 
         // Transpose P to obtain R
         pro->Transpose(res);
