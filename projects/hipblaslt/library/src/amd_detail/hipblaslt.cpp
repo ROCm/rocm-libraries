@@ -301,15 +301,24 @@ namespace
 
         const bool rowA = matA->order == HIPBLASLT_ORDER_ROW;
         const bool rowB = matB->order == HIPBLASLT_ORDER_ROW;
-        const bool rowC = matC->order == HIPBLASLT_ORDER_ROW;
-        const bool rowD = matD->order == HIPBLASLT_ORDER_ROW;
-        if(!rowA && !rowB && !rowC && !rowD)
+        const bool colC = matC->order == HIPBLASLT_ORDER_COL;
+        const bool colD = matD->order == HIPBLASLT_ORDER_COL;
+        if(!rowA && !rowB && colC && colD)
             return HIPBLAS_STATUS_SUCCESS;
 
         if(desc->op_A == HIPBLASLT_OPERATION_INVALID || desc->op_B == HIPBLASLT_OPERATION_INVALID)
             return HIPBLAS_STATUS_SUCCESS;
-        if(rowC || rowD)
-            return refuse_rewrite(caller, "C and D must be column-major");
+        // The kernels write D, and read C, column-major only. Swizzled orders exist for A and B.
+        if(!colC || !colD)
+        {
+            log_error(caller,
+                      "C and D must be HIPBLASLT_ORDER_COL",
+                      "order_c",
+                      int(matC->order),
+                      "order_d",
+                      int(matD->order));
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
         if(!is_n_or_t(desc->op_A) || !is_n_or_t(desc->op_B))
             return refuse_rewrite(caller,
                                   "only HIPBLAS_OP_N and HIPBLAS_OP_T have a row-major equivalent");
