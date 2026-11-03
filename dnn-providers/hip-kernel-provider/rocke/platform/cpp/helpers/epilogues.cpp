@@ -638,6 +638,9 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
             rocke_value_t* n_val = rocke_b_add(b, grid->block_n_off, col);
             if(atomic)
             {
+                rocke_value_t* m_row = epi->atomic_row_map != NULL
+                                           ? epi->atomic_row_map(b, m_val, epi->atomic_row_map_user)
+                                           : m_val;
                 for(int pr = 0; pr < sv / 2; ++pr)
                 {
                     rocke_value_t* n_even = rocke_b_add(b, n_val, rocke_b_const_i32(b, 2 * pr));
@@ -650,7 +653,7 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                     }
                     rocke_value_t* okp
                         = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
-                    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
+                    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_row, wg_N), n_even);
                     if(col_offset != NULL)
                         c_off = rocke_b_add(b, c_off, col_offset);
                     rocke_value_t* cc = rocke_b_add(b, col, rocke_b_const_i32(b, 2 * pr));
@@ -1517,7 +1520,13 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
                     /* The pair is addressed (and validated) at its even element;
                      * the odd one is offset + 1. */
                     if(addr_fn == NULL)
-                        c_off_even = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
+                    {
+                        rocke_value_t* m_dst
+                            = epi->atomic_row_map != NULL
+                                  ? epi->atomic_row_map(b, m_val, epi->atomic_row_map_user)
+                                  : m_val;
+                        c_off_even = rocke_b_add(b, rocke_b_mul(b, m_dst, wg_N), n_even);
+                    }
                     else
                     {
                         rocke_value_t* a_ok = NULL;

@@ -1236,6 +1236,10 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "uk_nopad drops the bounds checks of the uniform_k_decode loop only");
+    if(s->uk_nopad && s->uk_xhalo)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "uk_nopad is a uniform_k_decode loop variant; the x-halo loop has its own");
     if(s->lds_ahead || s->defer_mfma || s->vmem_interleave || s->defer_mfma_per_write)
     {
         if(s->wave_size != 64 || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0)

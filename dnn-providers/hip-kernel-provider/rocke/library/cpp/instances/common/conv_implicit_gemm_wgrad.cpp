@@ -1005,7 +1005,7 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
             /* Python raises at build when the A store is not the plain row mode. */
         }
     }
-    else if(s->xwin_groups != 1 || s->xwin_pp || s->xwin_gn || s->xwin_pps || s->xwin_rot)
+    else if(s->xwin_groups != 1 || s->xwin_pp)
         BR_REJECT("xwin_rows / xwin_groups / xwin_pp / xwin_mrow need xwin");
     if(s->xcd_remap != 0 && s->xcd_remap != 1
        && (s->xcd_remap < 0 || sk || s->chiplet_swizzle || s->group_merge > 1))

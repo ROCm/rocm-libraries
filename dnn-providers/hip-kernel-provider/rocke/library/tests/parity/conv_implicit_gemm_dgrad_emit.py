@@ -1637,6 +1637,44 @@ _GFX942_3D_PP = {
     # 100: pair lanes).
     99: dict(_T128, tapk_pp_sched=5, split_k=4),
     100: dict(_T128, tapk_pp_sched=2, split_k=3, split_atomic_pairs=True),
+    # 101-105: pp_zskip (plain, split boxes) and the split box stores through
+    # the record's (n, h, w) decode (plain atomics, sapl) and the pixel list.
+    101: dict(_T128, tapk_pp_sched=5, pp_zskip=True),
+    102: dict(
+        _T128,
+        tapk_pp_sched=2,
+        split_k=3,
+        pp_boxes=5,
+        pp_box_order=2,
+        pp_box_det=2,
+        pp_zskip=True,
+    ),
+    103: dict(
+        _T128,
+        tapk_pp_sched=2,
+        split_k=4,
+        pp_boxes=3,
+        pp_box_order=2,
+        epi_lds_barriers=True,
+    ),
+    104: dict(
+        _T128,
+        tapk_pp_sched=7,
+        split_k=8,
+        pp_boxes=113,
+        pp_box_order=1,
+        split_atomic_pairs=True,
+        pp_zskip=True,
+    ),
+    105: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=4,
+        pp_boxes=7,
+        pp_box_order=2,
+    ),
 }
 
 

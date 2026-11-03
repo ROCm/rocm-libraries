@@ -682,6 +682,83 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                  "tapk_pp_persist / xh_persist / pp_boxes / pp_streamk)");
         return false;
     }
+    /* _tapk_pingpong_conflict / _xhalo_knob_conflict: the loop rules C++
+     * shares with Python. */
+    {
+        const bool is3 = s->problem.is_3d;
+        const int zt = s->tapk_ztrim;
+        const bool zt_loop = s->tapk_pingpong >= 4
+                             || (s->tapk_xhalo && (s->tapk_prefetch == 1 || s->tapk_prefetch == 3)
+                                 && !s->tapk_pingpong && !s->xh_persist);
+        if(zt < 0 || zt > 2 || (zt == 2 && (s->tapk_pingpong || !s->tapk_xhalo))
+           || (zt && !(zt_loop && s->split_k == 1 && is3 && !s->tapk_pp_persist)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tapk_ztrim is 0..2 and needs tapk_pingpong 4/5 or the x-halo prefetch loop "
+                     "(tapk_prefetch 1/3, no xh_persist; 2: x-halo only), split_k 1, no "
+                     "tapk_pp_persist and a 3-D problem");
+            return false;
+        }
+        const int pbs = s->tapk_pp_bslab;
+        if(pbs < 0 || pbs > 3
+           || (pbs
+               && !(s->tapk_pingpong >= 3 && s->tapk_pp_sched && s->b_kpack == 4 && !s->lds_k_outer
+                    && !s->tapk_pp_xhalo && !s->tapk_pp_persist && (s->split_k == 1 || s->pp_boxes)
+                    && s->tile_k % 8 == 0 && s->warp_tile_n == 16)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tapk_pp_bslab is 0..3 and needs tapk_pingpong 3-5 with tapk_pp_sched, "
+                     "b_kpack 4, no tapk_pp_xhalo / tapk_pp_persist, split_k 1 (or pp_boxes), "
+                     "16-wide atoms");
+            return false;
+        }
+        if(s->tapk_pingpong
+           && !(s->tap_outer_k && s->tapk_prefetch == 1 && !s->tapk_xhalo && !s->dy_halo
+                && !s->lds_k_outer && s->wave_size == 64
+                && !(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+                && s->warp_m * s->warp_n == 8
+                && (s->warp_tile_k ? (s->tile_k / s->warp_tile_k) % 2 == 0 : false)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tapk_pingpong needs the plain tap-outer loop with tapk_prefetch 1 (no x-halo "
+                     "/ dY halo), 8 waves, the M-outer B tile, the wave64 MFMA path and an even "
+                     "number of k atoms per tile");
+            return false;
+        }
+        if(s->tapk_pingpong >= 3 && !s->b_kpack)
+        {
+            snprintf(reason, reason_cap, "tapk_pingpong 3/4 (n-fast kpack B loads) needs b_kpack");
+            return false;
+        }
+        if(s->cshuffle_m_chunks < 1)
+        {
+            snprintf(reason, reason_cap, "cshuffle_m_chunks must be >= 1");
+            return false;
+        }
+    }
+    /* _pp_streamk_conflict: pp_zskip's rules. */
+    if((s->pp_streamk || s->pp_boxes || s->pp_zskip)
+       && (s->tapk_pp_persist || s->tapk_pp_xhalo || s->tapk_ztrim))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "pp_streamk / pp_boxes / pp_zskip do not combine with tapk_pp_persist / "
+                 "tapk_pp_xhalo / tapk_ztrim");
+        return false;
+    }
+    if(s->pp_zskip && !(s->tapk_pingpong && s->problem.is_3d))
+    {
+        snprintf(reason, reason_cap, "pp_zskip needs tapk_pingpong and a 3-D problem");
+        return false;
+    }
+    if(s->pp_zskip && (s->pp_boxes == 7 || s->pp_boxes == 77))
+    {
+        snprintf(reason, reason_cap, "pp_boxes 7/77 do not take pp_zskip");
+        return false;
+    }
     /* _tapk_pingpong_conflict: the schedule rules. */
     {
         const int pps = s->tapk_pp_sched;
@@ -722,19 +799,17 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || (s->xh_b_wide && !xh_ok) || (s->xh_b_kpad && !xh_ok)
        || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->split_k <= 1))
        || (s->split_atomic_pairs
-           && !(s->tapk_pingpong && (s->pp_boxes == 7 || s->pp_boxes == 77 || !s->pp_boxes)
-                && s->split_k > 1 && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0
-                && s->wave_size == 64))
-       || (s->tapk_pingpong && s->split_k > 1 && s->pp_boxes && !s->pp_box_det
-           && !s->split_atomic_pairs)
+           && !(s->tapk_pingpong && s->split_k > 1 && s->epilogue
+                && strcmp(s->epilogue, "cshuffle") == 0 && s->wave_size == 64))
        || s->tapk_pp_persist || s->tapk_pp_xhalo || (s->tapk_ztrim && !xh_ok && !s->tapk_pingpong)
        || (s->tapk_pp_bslab && !s->tapk_pingpong) || (s->xh_a_k4 && !xh_ok)
        || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok) || (s->xh_fast_a && !xh_ok)
-       || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode || s->pp_zskip
-       || ((s->pp_boxes || s->pp_box_cus || s->pp_box_order) && !s->tapk_pingpong)
+       || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode
+       || ((s->pp_boxes || s->pp_box_order) && !s->tapk_pingpong)
        || (s->pp_box_det
            && !((s->pp_box_det == 1 || s->pp_box_det == 2) && s->pp_boxes && s->split_k > 1))
-       || (s->epi_lds_barriers && !s->pp_boxes && !xh_ok) || (s->no_agpr && !xh_ok)
+       || (s->epi_lds_barriers && !s->pp_boxes && !xh_ok
+           && !(s->tapk_pingpong && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0))
        || (s->cshuffle_m_chunks > 1 && !s->pp_boxes && !xh_ok && !s->tapk_pingpong))
     {
         snprintf(reason,
@@ -1851,6 +1926,8 @@ static void _emit_dgrad_cshuffle_epilogue(rocke_ir_builder_t* b,
     epi.out_dtype = spec->dtype_d;
     if(spec->cshuffle_m_chunks > 1)
         epi.m_chunks = spec->cshuffle_m_chunks;
+    /* epi_lds_barriers (ping-pong): every epilogue barrier LDS-only */
+    epi.lds_barriers = spec->epi_lds_barriers;
 
     /* AOT: the GEMM extents are kernargs. */
     rocke_value_t* bounds_m = params->p_dg_M;
@@ -4792,6 +4869,7 @@ static rocke_kernel_def_t*
             epi.out_dtype = spec->dtype_d;
             if(spec->split_atomic_pairs)
                 epi.atomic_pair_lanes = true;
+            epi.lds_barriers = spec->epi_lds_barriers;
             rocke_cshuffle_epilogue_atomic_store(
                 b, &epi, epi_accs_, n_epi, dX, c_C, rec_gemm_m, c_dg_N);
             return;
@@ -4816,17 +4894,63 @@ static rocke_kernel_def_t*
                 epi.out_dtype = spec->dtype_d;
                 if(spec->cshuffle_m_chunks > 1)
                     epi.m_chunks = spec->cshuffle_m_chunks;
-                epi.atomic_pair_lanes = true;
-                epi.atomic_row_batch = true;
-                epi.lds_barriers = true;
+                if(spec->split_atomic_pairs)
+                {
+                    epi.atomic_pair_lanes = true;
+                    epi.atomic_row_batch = true;
+                    epi.lds_barriers = true;
+                }
+                /* epi_lds_barriers: every epilogue barrier LDS-only */
+                if(spec->epi_lds_barriers)
+                    epi.lds_barriers = true;
+                /* _box_row: the listed pixel (pp_boxes 7/77; with sapl it IS the
+                 * dX row), else the record's (n, h, w) decode. */
                 struct rm_user_t
                 {
                     rocke_value_t* base;
                     rocke_value_t* buf;
-                } rmu = {rm_base, sub_gemm_buf};
+                    bool sapl;
+                    const dgrad_magic_div_t* hw;
+                    const dgrad_magic_div_t* w;
+                    rocke_value_t *ds, *db, *Di, *Hi, *Wi, *ho, *wo;
+                } rmu = {rm_base,
+                         sub_gemm_buf,
+                         spec->split_atomic_pairs,
+                         &hw_div,
+                         &w_div,
+                         is_3d ? rec_a_embed_h_coeff : NULL,
+                         rec_a_embed_w_coeff,
+                         ctx.p_Di,
+                         c_Hi,
+                         c_Wi,
+                         rec_d_h_offset,
+                         rec_d_w_offset};
                 epi.atomic_row_map = [](rocke_ir_builder_t* b_, rocke_value_t* m, void* u) {
                     rm_user_t* r = (rm_user_t*)u;
-                    return rocke_b_global_load_i32(b_, r->buf, rocke_b_add(b_, r->base, m), 4);
+                    if(r->base != NULL)
+                    {
+                        m = rocke_b_global_load_i32(b_, r->buf, rocke_b_add(b_, r->base, m), 4);
+                        if(r->sapl)
+                            return m;
+                    }
+                    rocke_value_t *nv, *mr, *htl, *wtl;
+                    _magic_divmod(b_, m, r->hw, &nv, &mr);
+                    if(r->ds != NULL)
+                    {
+                        rocke_value_t* img = rocke_b_div(b_, nv, r->ds);
+                        rocke_value_t* im = rocke_b_mul(b_, img, r->ds);
+                        rocke_value_t* rr = rocke_b_sub(b_, nv, im);
+                        rocke_value_t* d = rocke_b_add(b_, rr, r->db);
+                        rocke_value_t* id = rocke_b_mul(b_, img, r->Di);
+                        nv = rocke_b_add(b_, id, d);
+                    }
+                    _magic_divmod(b_, mr, r->w, &htl, &wtl);
+                    rocke_value_t* nh = rocke_b_mul(b_, nv, r->Hi);
+                    rocke_value_t* ho = rocke_b_add(b_, htl, r->ho);
+                    rocke_value_t* nho = rocke_b_add(b_, nh, ho);
+                    rocke_value_t* nw = rocke_b_mul(b_, nho, r->Wi);
+                    rocke_value_t* wo = rocke_b_add(b_, wtl, r->wo);
+                    return rocke_b_add(b_, nw, wo);
                 };
                 epi.atomic_row_map_user = &rmu;
                 rocke_cshuffle_epilogue_atomic_store(
@@ -7516,7 +7640,101 @@ static rocke_kernel_def_t*
             rocke_value_t* kd2 = rocke_b_div(b, c_kd, c_block_k);
             n_tiles = rocke_b_mul(b, zc, kd2);
         }
-        if(spec->tapk_pingpong && spec->split_k > 1 && !spec->pp_boxes)
+        auto decode_t0 = [&](rocke_value_t* t0) {
+            /* _decode_t0 */
+            rocke_value_t* nkc = rocke_b_div(b, c_kd, c_block_k);
+            rocke_value_t* tap0 = rocke_b_div(b, t0, nkc);
+            rocke_value_t* tn = rocke_b_mul(b, tap0, nkc);
+            rocke_value_t* tr = rocke_b_sub(b, t0, tn);
+            s0[0] = rocke_b_mul(b, tr, c_block_k);
+            rocke_value_t* yz0 = rocke_b_div(b, tap0, c_Xl);
+            rocke_value_t* yx0 = rocke_b_mul(b, yz0, c_Xl);
+            s0[1] = rocke_b_sub(b, tap0, yx0);
+            if(is_3d)
+            {
+                rocke_value_t* z0_ = rocke_b_div(b, yz0, c_Yl);
+                rocke_value_t* zy0 = rocke_b_mul(b, z0_, c_Yl);
+                s0[2] = rocke_b_sub(b, yz0, zy0);
+                s0[3] = z0_;
+            }
+            else
+                s0[2] = yz0;
+        };
+        if(spec->pp_zskip)
+        {
+            /* pp_zskip: only the filter depths z some row of this M tile can
+             * use (the whole filter if the tile spans two images or dD != 1). */
+            rocke_value_t* c_hw = spec->pp_boxes
+                                      ? rocke_b_mul(b, rec_h_tilde_slice, rec_w_tilde_slice)
+                                      : rocke_b_mul(b, c_Hi, c_Wi);
+            rocke_value_t* dext = spec->pp_boxes ? rec_a_embed_h_coeff : ctx.p_Di;
+            rocke_value_t* c_dhw = rocke_b_mul(b, dext, c_hw);
+            rocke_value_t* me = rocke_b_add(b, block_m_off_v, rocke_b_const_i32(b, block_m));
+            rocke_value_t* mm = rocke_b_smin(b, me, rec_gemm_m);
+            rocke_value_t* m_last = rocke_b_sub(b, mm, c1);
+            rocke_value_t* pl_f = rocke_b_div(b, block_m_off_v, c_hw);
+            rocke_value_t* pl_l = rocke_b_div(b, m_last, c_hw);
+            rocke_value_t* q_f = rocke_b_div(b, block_m_off_v, c_dhw);
+            rocke_value_t* q_l = rocke_b_div(b, m_last, c_dhw);
+            rocke_value_t* e1 = rocke_b_cmp_eq(b, q_f, q_l);
+            rocke_value_t* e2 = rocke_b_cmp_eq(b, ctx.p_dD, c1);
+            rocke_value_t* same = rocke_b_land(b, e1, e2);
+            rocke_value_t* d_f = rocke_b_mod(b, pl_f, dext);
+            rocke_value_t* d_l = rocke_b_mod(b, pl_l, dext);
+            if(spec->pp_boxes)
+            {
+                d_f = rocke_b_add(b, d_f, rec_a_embed_w_coeff);
+                d_l = rocke_b_add(b, d_l, rec_a_embed_w_coeff);
+            }
+            rocke_value_t* zmax = rocke_b_sub(b, ctx.p_Z, c1);
+            rocke_value_t* fa = rocke_b_add(b, d_f, ctx.p_pD);
+            rocke_value_t* do1 = rocke_b_sub(b, ctx.p_Do, c1);
+            rocke_value_t* fs = rocke_b_sub(b, fa, do1);
+            rocke_value_t* z_lo = rocke_b_smax(b, fs, c0);
+            rocke_value_t* la = rocke_b_add(b, d_l, ctx.p_pD);
+            rocke_value_t* z_hi = rocke_b_smin(b, la, zmax);
+            z_lo = rocke_b_select(b, same, z_lo, c0);
+            z_hi = rocke_b_select(b, same, z_hi, zmax);
+            if(spec->pp_boxes)
+            {
+                rocke_value_t* lm = rocke_b_smax(b, z_lo, bx_zb);
+                z_lo = rocke_b_sub(b, lm, bx_zb);
+                rocke_value_t* ze = rocke_b_add(b, bx_zb, bx_zs);
+                rocke_value_t* ze1 = rocke_b_sub(b, ze, c1);
+                rocke_value_t* hm = rocke_b_smin(b, z_hi, ze1);
+                z_hi = rocke_b_sub(b, hm, bx_zb);
+            }
+            rocke_value_t* dz = rocke_b_sub(b, z_hi, z_lo);
+            rocke_value_t* dz1 = rocke_b_add(b, dz, c1);
+            rocke_value_t* nz = rocke_b_smax(b, dz1, c0);
+            rocke_value_t* yxl = rocke_b_mul(b, c_Yl, c_Xl);
+            rocke_value_t* kdb = rocke_b_div(b, c_kd, c_block_k);
+            rocke_value_t* per_z = rocke_b_mul(b, yxl, kdb);
+            rocke_value_t* zbase = rocke_b_mul(b, z_lo, per_z);
+            rocke_value_t* span = rocke_b_mul(b, nz, per_z);
+            rocke_value_t* t0;
+            if(spec->split_k > 1)
+            {
+                rocke_value_t* c_sk = bx_sk != NULL ? bx_sk : rocke_b_const_i32(b, spec->split_k);
+                rocke_value_t* sk1 = rocke_b_sub(b, c_sk, c1);
+                rocke_value_t* sp1 = rocke_b_add(b, span, sk1);
+                rocke_value_t* per = rocke_b_div(b, sp1, c_sk);
+                rocke_value_t* slc = bx_slice != NULL ? bx_slice : rocke_b_block_id_z(b);
+                rocke_value_t* t0c = rocke_b_mul(b, slc, per);
+                rocke_value_t* tp = rocke_b_add(b, t0c, per);
+                rocke_value_t* tm = rocke_b_smin(b, tp, span);
+                rocke_value_t* cnt = rocke_b_sub(b, tm, t0c);
+                n_tiles = rocke_b_smax(b, cnt, c0);
+                t0 = rocke_b_add(b, zbase, t0c);
+            }
+            else
+            {
+                t0 = zbase;
+                n_tiles = span;
+            }
+            decode_t0(t0);
+        }
+        else if(spec->tapk_pingpong && spec->split_k > 1 && !spec->pp_boxes)
         {
             /* Split-K (ping-pong): slice z takes tiles [t0, t0 + per) of the
              * flat (z, y, x, chunk) order; its first tile decoded once. */
@@ -7550,7 +7768,7 @@ static rocke_kernel_def_t*
             else
                 s0[2] = yz0;
         }
-        if(spec->tapk_pingpong && spec->split_k > 1 && spec->pp_boxes)
+        else if(spec->tapk_pingpong && spec->split_k > 1 && spec->pp_boxes)
         {
             /* pp_boxes split-K: the record's slice of the box's K tiles. */
             rocke_value_t* sk1 = rocke_b_sub(b, bx_sk, c1);
