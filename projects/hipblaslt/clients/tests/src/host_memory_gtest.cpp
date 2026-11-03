@@ -44,6 +44,35 @@ namespace
         EXPECT_GE(memory_pool<h_memory>::CachedBytes(), kSmall);
     }
 
+    TEST(HostMemory_pre_checkin, small_buffer_released_after_tests_that_do_not_reuse_it)
+    {
+        memory_pool<h_memory>::ReleaseCached();
+        auto idle = memory_pool<h_memory>::Get(kSmall);
+        ASSERT_NE(idle.get(), nullptr);
+        memory_pool<h_memory>::Restore(idle);
+        // This test returned the buffer; it stays through the next kHostPoolSmallIdleTests - 1.
+        end_test();
+        for(uint64_t t = 1; t < kHostPoolSmallIdleTests; t++)
+            end_test();
+        EXPECT_GE(memory_pool<h_memory>::CachedBytes(), kSmall);
+        end_test();
+        EXPECT_EQ(memory_pool<h_memory>::CachedBytes(), 0u);
+
+        // A test that reuses the buffer starts its count again.
+        auto reused = memory_pool<h_memory>::Get(kSmall);
+        ASSERT_NE(reused.get(), nullptr);
+        memory_pool<h_memory>::Restore(reused);
+        for(uint64_t t = 0; t < kHostPoolSmallIdleTests / 2; t++)
+            end_test();
+        reused = memory_pool<h_memory>::Get(kSmall);
+        memory_pool<h_memory>::Restore(reused);
+        end_test();
+        for(uint64_t t = 1; t < kHostPoolSmallIdleTests; t++)
+            end_test();
+        EXPECT_GE(memory_pool<h_memory>::CachedBytes(), kSmall);
+        memory_pool<h_memory>::ReleaseCached();
+    }
+
     TEST(HostMemory_pre_checkin, next_test_of_the_same_shape_reuses_the_large_buffer)
     {
         memory_pool<h_memory>::ReleaseCached();

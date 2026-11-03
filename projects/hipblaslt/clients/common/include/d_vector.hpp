@@ -51,6 +51,11 @@
 // because nearly all tests reuse them.
 inline constexpr size_t kHostPoolRetainLimit = size_t(1) << 30;
 
+// A smaller idle pinned host buffer is released once this many consecutive tests have not
+// reused it. The pool reuses a buffer only for requests between half its size and its size, so
+// without this a run of shrinking requests would keep every earlier buffer pinned.
+inline constexpr uint64_t kHostPoolSmallIdleTests = 100;
+
 /* ============================================================================================ */
 /*! \brief  (abstract class) wrapper around a pointer to hip device or pinned host memory, including allocation size in bytes */
 class hip_memory
@@ -255,12 +260,13 @@ public:
     }
 
     // Ends a test: releases the idle buffers of at least `bytes` that the test did not return,
-    // so a large buffer stays cached only while consecutive tests keep reusing it.
-    static void EndTest(size_t bytes)
+    // so a large buffer stays cached only while consecutive tests keep reusing it, and the
+    // smaller ones that the last `small_idle_tests` tests did not return.
+    static void EndTest(size_t bytes, uint64_t small_idle_tests)
     {
         std::lock_guard<std::mutex> lock(Instance().m_mutex);
         for(auto* pool : {&Instance().m_pool, &Instance().m_pool_managed})
-            Instance().release_from_earlier_tests(*pool, bytes);
+            Instance().release_from_earlier_tests(*pool, bytes, small_idle_tests);
         ++Instance().m_test;
     }
 
@@ -280,12 +286,19 @@ private:
     std::mutex m_mutex;
     uint64_t       m_test = 0; // tests ended, counted by EndTest
 
-    void release_from_earlier_tests(std::vector<M>& pool, size_t bytes)
+    // Releases the idle buffers of at least `bytes` returned before the current test and, when
+    // small_idle_tests is not 0, the smaller ones returned at least that many tests ago.
+    void release_from_earlier_tests(std::vector<M>& pool,
+                                    size_t          bytes,
+                                    uint64_t        small_idle_tests = 0)
     {
         pool.erase(std::remove_if(pool.begin(),
                                   pool.end(),
                                   [&](const M& m) {
-                                      return m.capacity() >= bytes && m.restored_test < m_test;
+                                      if(m.capacity() >= bytes)
+                                          return m.restored_test < m_test;
+                                      return small_idle_tests
+                                             && m_test - m.restored_test >= small_idle_tests;
                                   }),
                    pool.end());
     }
@@ -384,13 +397,13 @@ private:
 
 #ifdef GOOGLE_TEST
 // After each test, releases the idle pinned host buffers at or above kHostPoolRetainLimit
-// that the test did not reuse.
+// that the test did not reuse, and the smaller ones that kHostPoolSmallIdleTests tests did not.
 class HostPoolReleaseListener : public ::testing::EmptyTestEventListener
 {
 public:
     void OnTestEnd(const ::testing::TestInfo&) override
     {
-        memory_pool<h_memory>::EndTest(kHostPoolRetainLimit);
+        memory_pool<h_memory>::EndTest(kHostPoolRetainLimit, kHostPoolSmallIdleTests);
     }
 };
 #endif
