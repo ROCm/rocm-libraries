@@ -124,6 +124,7 @@ repo.
 | 6.11 | `step6_11_mxfp4_gemm` | `wmma_n_outer` | WMMA order (`OptLevel: 0` loop) |
 | 6.12 | `step6_12_mxfp4_gemm` | `cluster_aid_remap` | `ClusterAIDMapping=-2` |
 | 6.13 | `step6_13_mxfp4_gemm` | `epilogue_nan_clamp`, `epilogue_pk8_cvt` | FP8 store sequence |
+| 6.14 | `step6_14_mxfp4_gemm` | `init_c_wmma`, `tile_refill_mid`, `tile_read_ahead`, `source_order`, `cluster_signal_wmmas=6`, `cluster_signal_wave0`, `prefetch_gl2`, `coarse_ds_wait`, `loop_unroll2` | winner's main loop (`PrefetchGlobalRead=2`, `PrefetchGL2`, `InitCIterWmma`, `OptLevel: 0` loop) |
 
 The chain keeps only steps that are faster than the step before them, or
 that a later faster step needs: 6.4 is slower on its own, but `scale_tdm`,
@@ -173,6 +174,11 @@ T5 to T8 build on 6.9. They follow the winner compiled at StinkyTofu
 | T26 | `trial_pk8_on6_12_mxfp4_gemm` | 6.12, `epilogue_pk8_cvt` | FP8 store convert |
 | T27 | `trial_ipf_on6_13_mxfp4_gemm` | 6.13, `epilogue_inst_prefetch=6` | winner's epilogue |
 | T28 | `trial_ipf_on6_12_mxfp4_gemm` | 6.12, `epilogue_inst_prefetch=6` | SW instruction prefetch |
+| T29 | `trial_unr2_on6_13_mxfp4_gemm` | 6.13, `loop_unroll2` | main loop unrolled (winner: 3 tiles) |
+| T30 | `trial_unr2_on_t20_mxfp4_gemm` | T20, `loop_unroll2` | constant LDS buffers on T20's loop |
+| T31 | `trial_t20_unr2_on6_13_mxfp4_gemm` | 6.13, T20's loop flags, `loop_unroll2` | winner's main loop on 6.13 |
+| T32 to T40 | `trial_t31_no_<flag>_mxfp4_gemm` | T31 with one feature off (and the flags that need it) | which part of T31 matters |
+| T41 | `trial_misched_on6_14_mxfp4_gemm` | 6.14 without `source_order` | LLVM machine schedulers on, same IR |
 
 Design of each step:
 
@@ -350,9 +356,36 @@ Design of each step:
   winner places its prefetches every 4 KiB of layout; IR has no byte
   offsets, so the trial spaces them by store count, and six stores stay
   under 4 KiB on the timed beta = 0 path of T27 and T28.
+- **T29 two-tile loop.** The winner's loop body holds three tiles, so each
+  tile's LDS buffer is fixed. `loop_unroll2` runs tile pairs, buffer 0 then
+  buffer 1, so the buffer is a constant and no parity is carried. The pair
+  count comes from `spec.K`: an odd count of loop tiles peels one tile in
+  front, and the kernel needs the runtime K to equal `spec.K`. A runtime
+  remainder loop after the pairs loop instead spilled 146 VGPRs. Per tile
+  the loop drops from 479 to 444 instructions with no VALU and no `v_nop`,
+  and the closest accumulator reuse rises from 18 to 32 WMMAs, as in the
+  winner. The `s_wait_dscnt` count and the zero read-to-use gap at the
+  tile boundary do not change: they come from not reading ahead. T29 is
+  slower than 6.13.
+- **6.14 and T30 to T40 main loop.** A thread trace of one wave shows 6.13
+  losing time to waits at the tile boundary. T20's loop waits about as
+  little as the winner, but the runtime buffer parity adds LDS address
+  math between the WMMAs, and those VALU instructions cost more than the
+  waits they replace. `loop_unroll2` on the refill-mid loop (T30) removes
+  that math: VALU per tile drops from 33 to 12, with T20's wait placement
+  unchanged. T30 is faster than 6.13 where T20 alone is slower, and T31
+  adds the 6.13 steps on top. Leave-one-out runs on T31 (T32 to T40) show
+  that `source_order`, `prefetch_gl2`, `loop_unroll2` and `tile_read_ahead`
+  are each needed, the largest cost coming from dropping `source_order`.
+  The cluster signal helps only with `cluster_signal_wave0`. `init_c_wmma`
+  and `coarse_ds_wait` are within run noise. Dropping `gl2_prefetch_early`
+  (T37) is faster than T31. Both run the same GL2 prefetch instructions;
+  T37 issues them at the refill, 96 WMMAs into the tile, instead of 16
+  WMMAs in. 6.14 is T37.
 
 Host resources at M=4096, N=4096, K=65536 (no VGPR/SGPR spills and no scratch
-for any step except T6, which spills 2 VGPRs):
+for any step except T6, which spills 2 VGPRs, 6.14, T37 and T38, which spill
+8, and T40, which spills 16):
 
 | Step | VGPR | LDS |
 | --- | --- | --- |
@@ -369,6 +402,7 @@ for any step except T6, which spills 2 VGPRs):
 | 6.11 | 854 | 282624 |
 | 6.12 | 854 | 282624 |
 | 6.13 | 854 | 282624 |
+| 6.14 | 864 | 282624 |
 | T1 | 826 | 282624 |
 | T2 | 1008 | 282624 |
 | T3 | 942 | 282624 |
@@ -397,6 +431,19 @@ for any step except T6, which spills 2 VGPRs):
 | T26 | 854 | 282624 |
 | T27 | 854 | 282624 |
 | T28 | 854 | 282624 |
+| T29 | 834 | 282624 |
+| T30 | 876 | 282624 |
+| T31 | 876 | 282624 |
+| T32 | 860 | 282624 |
+| T33 | 860 | 282624 |
+| T34 | 796 | 282624 |
+| T35 | 876 | 282624 |
+| T36 | 880 | 282624 |
+| T37 | 864 | 282624 |
+| T38 | 870 | 282624 |
+| T39 | 876 | 282624 |
+| T40 | 812 | 282624 |
+| T41 | 836 | 282624 |
 
 Host tests pin one LLVM-IR fact per step and check the LDS layout model.
 `MxFp4LdsLayout` is the single address model used by the builder. The test

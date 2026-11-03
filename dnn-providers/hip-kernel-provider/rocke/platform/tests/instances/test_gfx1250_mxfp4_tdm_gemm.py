@@ -315,11 +315,8 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 "tile_read_ahead requires tile_refill_mid",
             ),
             (
-                {**problem, **read_ahead, "cluster_signal_wmmas": 6},
-                (
-                    "cluster_signal_wmmas requires tile_read_ahead, tdm_multicast "
-                    "and source_order"
-                ),
+                {**problem, **chain, "cluster_signal_wmmas": 6},
+                "cluster_signal_wmmas requires tile_read_ahead and tdm_multicast",
             ),
             (
                 {**problem, **read_ahead, "source_order": True, "cluster_signal_wmmas": 17},
@@ -380,11 +377,11 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertEqual(names[0], BASE_VARIANT)
         self.assertEqual(
             [variant_step(name) for name in names],
-            [f"6.{i}" for i in range(1, 14)],
+            [f"6.{i}" for i in range(1, 15)],
         )
         self.assertEqual(
             [name for name in names[1:]],
-            [f"step6_{i}_mxfp4_gemm" for i in range(2, 14)],
+            [f"step6_{i}_mxfp4_gemm" for i in range(2, 15)],
         )
         self.assertEqual(MXFP4_GEMM_VARIANTS[0][1], {})
         for name in names:
@@ -427,6 +424,8 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             "step6_12_mxfp4_gemm": esm,
             "trial_pka_on6_12_mxfp4_gemm": esm
             + ["-mllvm", "-amdgpu-kernarg-preload-count=11"],
+            "step6_14_mxfp4_gemm": esm + no_misched,
+            "trial_misched_on6_14_mxfp4_gemm": esm,
         }
         for name, options in expected.items():
             with self.subTest(variant=name):
@@ -740,6 +739,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             ("T25", True, False, 0),
             ("T26", False, True, 0),
             ("6.13", True, True, 0),
+            ("6.14", True, True, 0),
             ("T27", True, True, 2 * 11),
             ("T28", False, False, 2 * 11),
         ):
@@ -751,6 +751,37 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 self.assertEqual(_count(pk8, text), 2 * 64 if wide else 0)
                 self.assertEqual(_count(pk2, text), 0 if wide else values // 2)
                 self.assertEqual(_count(inst_prefetch, text), prefetches)
+        # T29: the loop runs tile pairs with constant buffers, so no parity
+        # is carried. An odd count of loop tiles peels one tile in front;
+        # 6.13 emits one loop copy and the peeled last tile. T30 does the
+        # same on the refill-mid loop, whose first tile is peeled (InitC)
+        # and whose last tile runs in the loop.
+        wmma = r"call <16 x float> @llvm\.amdgcn\.wmma\.scale\.f32\.32x16x128\.f4"
+        tile_wmmas = 4 * 8 * k_steps
+        parity_phi = r"%parity = phi i32"
+
+        def lower_k2560(step):
+            return _lower_kernel_to_llvm_python(
+                build_mxfp4_tdm_gemm(
+                    variant_spec(names[step], 1024, 1024, 2560, **YAML_TILE),
+                    arch="gfx1250",
+                ),
+                arch="gfx1250",
+                llvm_flavor="llvm23",
+            )
+
+        for label, text, copies, phis in (
+            ("6.13", by_step["6.13"], 2, 1),
+            ("T29 odd", by_step["T29"], 4, 0),
+            ("T29 even", lower_k2560("T29"), 3, 0),
+            ("T20", by_step["T20"], 2, 1),
+            ("T30 odd", by_step["T30"], 4, 0),
+            ("T30 even", lower_k2560("T30"), 3, 0),
+            ("6.14", by_step["6.14"], 4, 0),
+        ):
+            with self.subTest(step=label):
+                self.assertEqual(_count(wmma, text), copies * tile_wmmas)
+                self.assertEqual(_count(parity_phi, text), phis)
 
     def test_tdm_pad_fields_encoding(self):
         self.assertEqual(tdm_pad_fields(1024, 16), {"pad_interval": 7, "pad_amount": 3})

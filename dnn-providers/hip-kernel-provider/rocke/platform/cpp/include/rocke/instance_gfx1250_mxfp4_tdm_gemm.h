@@ -68,6 +68,7 @@ typedef struct rocke_mxfp4_tdm_gemm_spec
     bool epilogue_pk8_cvt;
     bool epilogue_inst_prefetch_set;
     int epilogue_inst_prefetch;
+    bool loop_unroll2;
     bool expert_scheduling;
     bool source_order;
 } rocke_mxfp4_tdm_gemm_spec_t;

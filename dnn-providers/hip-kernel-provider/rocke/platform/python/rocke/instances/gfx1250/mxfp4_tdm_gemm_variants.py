@@ -53,6 +53,24 @@ MXFP4_GEMM_VARIANTS, VARIANT_STEPS = _chain(
         "step6_13_mxfp4_gemm",
         {"epilogue_nan_clamp": True, "epilogue_pk8_cvt": True},
     ),
+    # The winner's main loop. Each feature alone was slower (T5 to T12,
+    # T29); together they are faster, and dropping any of them from the
+    # set is slower (T31 to T40). gl2_prefetch_early is left out (T37).
+    (
+        "6.14",
+        "step6_14_mxfp4_gemm",
+        {
+            "init_c_wmma": True,
+            "tile_refill_mid": True,
+            "tile_read_ahead": True,
+            "source_order": True,
+            "cluster_signal_wmmas": 6,
+            "cluster_signal_wave0": True,
+            "prefetch_gl2": True,
+            "coarse_ds_wait": True,
+            "loop_unroll2": True,
+        },
+    ),
 )
 
 # Trials build on 6.8 and stay off the chain. The YAML's
@@ -173,6 +191,46 @@ MXFP4_GEMM_TRIAL_VARIANTS += [
     ("trial_pk8_on6_12_mxfp4_gemm", {**_STEP6_12, "epilogue_pk8_cvt": True}),
     ("trial_ipf_on6_13_mxfp4_gemm", {**_STEP6_13, **_EPI_PREFETCH}),
     ("trial_ipf_on6_12_mxfp4_gemm", {**_STEP6_12, **_EPI_PREFETCH}),
+    ("trial_unr2_on6_13_mxfp4_gemm", {**_STEP6_13, "loop_unroll2": True}),
+]
+
+# T20's main loop with constant LDS buffers, alone and on 6.13.
+_T20 = dict(MXFP4_GEMM_TRIAL_VARIANTS)["trial_loop_all_on_t12_mxfp4_gemm"]
+MXFP4_GEMM_TRIAL_VARIANTS += [
+    ("trial_unr2_on_t20_mxfp4_gemm", {**_T20, "loop_unroll2": True}),
+    ("trial_t20_unr2_on6_13_mxfp4_gemm", {**_STEP6_13, **_T20, "loop_unroll2": True}),
+]
+
+# T31 with one feature off at a time; flags that require it go with it.
+_T31 = dict(MXFP4_GEMM_TRIAL_VARIANTS)["trial_t20_unr2_on6_13_mxfp4_gemm"]
+_DROP_CSIG = {"cluster_signal_wmmas": None, "cluster_signal_wave0": False}
+_ABLATIONS = (
+    ("unr2", {"loop_unroll2": False}),
+    ("initc", {"init_c_wmma": False}),
+    ("srco", {"source_order": False, **_DROP_CSIG}),
+    ("csw0", {"cluster_signal_wave0": False}),
+    ("csig", _DROP_CSIG),
+    ("pgl2e", {"gl2_prefetch_early": False}),
+    ("pgl2", {"prefetch_gl2": False, "gl2_prefetch_early": False}),
+    ("cdsw", {"coarse_ds_wait": False}),
+    (
+        "rahd",
+        {
+            "tile_read_ahead": False,
+            "gl2_prefetch_early": False,
+            "coarse_ds_wait": False,
+            **_DROP_CSIG,
+        },
+    ),
+)
+MXFP4_GEMM_TRIAL_VARIANTS += [
+    (f"trial_t31_no_{tag}_mxfp4_gemm", {**_T31, **off}) for tag, off in _ABLATIONS
+]
+
+# 6.14 with LLVM's machine schedulers on: the only change source_order makes.
+_STEP6_14 = dict(MXFP4_GEMM_VARIANTS)["step6_14_mxfp4_gemm"]
+MXFP4_GEMM_TRIAL_VARIANTS += [
+    ("trial_misched_on6_14_mxfp4_gemm", {**_STEP6_14, "source_order": False}),
 ]
 
 MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []
@@ -186,7 +244,7 @@ def variant_names(*, trials: bool = False) -> list[str]:
 
 
 def variant_step(name: str) -> str:
-    """The plan step label (``"6.1"`` .. ``"6.13"``, or ``"T*"``) of ``name``."""
+    """The plan step label (``"6.1"`` .. ``"6.14"``, or ``"T*"``) of ``name``."""
     if name in VARIANT_STEPS:
         return VARIANT_STEPS[name]
     for index, (trial, _) in enumerate(MXFP4_GEMM_TRIAL_VARIANTS, start=1):

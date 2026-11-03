@@ -166,6 +166,10 @@ class MxFp4TdmGemmSpec:
     # stores, as the winner's SW instruction prefetch past the 32640 B the
     # dispatcher fetches.
     epilogue_inst_prefetch: int | None = None
+    # Main loop unrolled to two tiles, one per LDS buffer, so each tile's
+    # buffer is a compile-time constant and its LDS addresses fold into
+    # immediate offsets (the winner unrolls three tiles).
+    loop_unroll2: bool = False
     # ESM2, as the winner's EnableESM2: LLVM's -amdgpu-expert-scheduling-mode.
     expert_scheduling: bool = False
     # StinkyTofu OptLevel 0: no machine scheduling, instructions stay in the
@@ -261,6 +265,7 @@ class MxFp4TdmGemmSpec:
                 "nclp": self.epilogue_nan_clamp,
                 "pk8": self.epilogue_pk8_cvt,
                 f"ipf{inst_prefetch}": inst_prefetch is not None,
+                "unr2": self.loop_unroll2,
                 "esm": self.expert_scheduling,
                 "srco": self.source_order,
             },
@@ -290,6 +295,7 @@ _STEP6_BOOL_FLAGS = (
     "cluster_aid_remap",
     "epilogue_nan_clamp",
     "epilogue_pk8_cvt",
+    "loop_unroll2",
     "expert_scheduling",
     "source_order",
 )
@@ -620,11 +626,8 @@ def _step6_reason(spec: MxFp4TdmGemmSpec) -> str | None:
     if spec.tile_read_ahead and not spec.tile_refill_mid:
         return "tile_read_ahead requires tile_refill_mid"
     if spec.cluster_signal_wmmas is not None:
-        if not (spec.tile_read_ahead and spec.tdm_multicast and spec.source_order):
-            return (
-                "cluster_signal_wmmas requires tile_read_ahead, tdm_multicast "
-                "and source_order"
-            )
+        if not (spec.tile_read_ahead and spec.tdm_multicast):
+            return "cluster_signal_wmmas requires tile_read_ahead and tdm_multicast"
         if spec.k_steps < 2:
             return "cluster_signal_wmmas needs at least two K-steps per tile"
         per_half = spec.wave_repeat_m * (spec.wave_repeat_n // 2)
@@ -1737,13 +1740,13 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
                 b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) for _ in range(n_acc)
             ]
             head_values = flatten_head(first_head) if read_ahead else []
-            start, start_parity = c0, c0
+            start, start_parity = c0, 0
         elif not read_ahead:
             accumulators = compute_tile(
                 c0, c0, undef, seed_zero=True, refill=refill(c0, c0)
             )
             head_values = []
-            start, start_parity = tile_k_v, c1
+            start, start_parity = tile_k_v, 1
         else:
             accumulators, head = compute_tile(
                 c0,
@@ -1755,43 +1758,77 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
                 next_parity=c1,
             )
             head_values = flatten_head(head)
-            start, start_parity = tile_k_v, c1
-        loop = b.scf_for_iter(
-            start,
-            K,
-            tile_k_v,
-            [("parity", start_parity)]
-            + [(f"acc{i}", value) for i, value in enumerate(accumulators)]
-            + [(f"head{i}", value) for i, value in enumerate(head_values)],
-            iv_name="k0",
-            elide_trailing_barrier=False,
-        )
-        with loop as (k0, carried):
-            parity = carried[0]
-            next_parity = b.sub(c1, parity)
-            acc = carried[1 : 1 + n_acc]
+            start, start_parity = tile_k_v, 1
+
+        def loop_tile(k_tile, parity, next_parity, acc, head_vals):
             if not read_ahead:
                 wait_next_tile()
-                updated = compute_tile(k0, parity, acc, refill=refill(k0, parity))
-                b.scf_yield(next_parity, *updated)
-            else:
-                # The last tile reads ahead from a buffer holding the clamped
-                # reload: valid LDS, never consumed.
-                updated, head = compute_tile(
-                    k0,
-                    parity,
-                    acc,
-                    **phases(k0, parity),
-                    head=unflatten_head(carried[1 + n_acc :]),
-                    next_parity=next_parity,
+                return compute_tile(k_tile, parity, acc, refill=refill(k_tile, parity)), []
+            # The last tile reads ahead from a buffer holding the clamped
+            # reload: valid LDS, never consumed.
+            updated, head = compute_tile(
+                k_tile,
+                parity,
+                acc,
+                **phases(k_tile, parity),
+                head=unflatten_head(head_vals),
+                next_parity=next_parity,
+            )
+            return updated, flatten_head(head)
+
+        carried_init = [(f"acc{i}", value) for i, value in enumerate(accumulators)] + [
+            (f"head{i}", value) for i, value in enumerate(head_values)
+        ]
+        if spec.loop_unroll2:
+            # As the non-refill loop_unroll2 path: the pair count comes from
+            # spec.K, so the kernel needs K == spec.K.
+            if (spec.K // spec.tile_k - start_parity) % 2:
+                accumulators, head_values = loop_tile(
+                    start, start_parity, 1 - start_parity, accumulators, head_values
                 )
-                b.scf_yield(next_parity, *updated, *flatten_head(head))
+                start, start_parity = ops.add(start, spec.tile_k), 1 - start_parity
+                carried_init = [
+                    (f"acc{i}", value) for i, value in enumerate(accumulators)
+                ] + [(f"head{i}", value) for i, value in enumerate(head_values)]
+            loop = b.scf_for_iter(
+                ops.v(start),
+                K,
+                b.const_i32(two_tiles),
+                carried_init,
+                iv_name="k0",
+                elide_trailing_barrier=False,
+            )
+            with loop as (k0, carried):
+                acc, head_vals = list(carried[:n_acc]), list(carried[n_acc:])
+                for pair_index, parity in enumerate((start_parity, 1 - start_parity)):
+                    acc, head_vals = loop_tile(
+                        ops.add(k0, pair_index * spec.tile_k), parity, 1 - parity, acc, head_vals
+                    )
+                b.scf_yield(*acc, *head_vals)
+            results = loop.results[:n_acc]
+        else:
+            loop = b.scf_for_iter(
+                start,
+                K,
+                tile_k_v,
+                [("parity", (c0, c1)[start_parity])] + carried_init,
+                iv_name="k0",
+                elide_trailing_barrier=False,
+            )
+            with loop as (k0, carried):
+                parity = carried[0]
+                next_parity = b.sub(c1, parity)
+                updated, head_vals = loop_tile(
+                    k0, parity, next_parity, carried[1 : 1 + n_acc], carried[1 + n_acc :]
+                )
+                b.scf_yield(next_parity, *updated, *head_vals)
+            results = loop.results[1 : 1 + n_acc]
         # No workgroup may exit while a TDM load into its LDS is in flight:
         # with multicast, peers' loads write here too.
         b.s_wait_tensorcnt(0)
         if spec.tdm_multicast:
             cluster_sync()
-        return loop.results[1 : 1 + n_acc]
+        return results
 
     n_acc = rm_count * rn_count
     two_tiles = 2 * spec.tile_k
@@ -1811,32 +1848,63 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
             issue_tdm(tile_k_v, c1)
             undef = [b.undef_vec(F32, _ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
             accumulators = compute_tile(c0, c0, undef, seed_zero=True)
-            start, start_parity = tile_k_v, c1
+            start, first_parity = tile_k_v, 1
         else:
             accumulators = [
                 b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) for _ in range(n_acc)
             ]
-            start, start_parity = c0, c0
+            start, first_parity = c0, 0
         upper = b.sub(K, tile_k_v)
-        loop = b.scf_for_iter(
-            start,
-            upper,
-            tile_k_v,
-            [("parity", start_parity)]
-            + [(f"acc{i}", value) for i, value in enumerate(accumulators)],
-            iv_name="k0",
-            elide_trailing_barrier=False,
-        )
-        with loop as (k0, carried):
-            parity = carried[0]
-            next_parity = b.sub(c1, parity)
-            prefetch_gl2(ops.v(ops.add(k0, two_tiles)))
+
+        def loop_tile(k_tile, parity, next_parity, acc):
+            prefetch_gl2(ops.v(ops.add(k_tile, two_tiles)))
             wait_tile_ready()
-            issue_tdm(ops.add(k0, spec.tile_k), next_parity)
-            updated = compute_tile(k0, parity, carried[1:])
-            b.scf_yield(next_parity, *updated)
+            issue_tdm(ops.add(k_tile, spec.tile_k), next_parity)
+            return compute_tile(k_tile, parity, acc)
+
+        if spec.loop_unroll2:
+            # Tile pairs, each starting in buffer first_parity. The pair
+            # count comes from spec.K, so the kernel needs K == spec.K: a
+            # runtime remainder loop next to the pairs loop spills the
+            # accumulators.
+            if (spec.K // spec.tile_k - 1 - first_parity) % 2:
+                accumulators = loop_tile(
+                    start, first_parity, 1 - first_parity, accumulators
+                )
+                start, first_parity = ops.add(start, spec.tile_k), 1 - first_parity
+            loop = b.scf_for_iter(
+                ops.v(start),
+                upper,
+                b.const_i32(two_tiles),
+                [(f"acc{i}", value) for i, value in enumerate(accumulators)],
+                iv_name="k0",
+                elide_trailing_barrier=False,
+            )
+            with loop as (k0, carried):
+                updated = list(carried)
+                for pair_index, parity in enumerate((first_parity, 1 - first_parity)):
+                    updated = loop_tile(
+                        ops.add(k0, pair_index * spec.tile_k), parity, 1 - parity, updated
+                    )
+                b.scf_yield(*updated)
+            last_parity, accumulators = first_parity, loop.results
+        else:
+            loop = b.scf_for_iter(
+                start,
+                upper,
+                tile_k_v,
+                [("parity", (c0, c1)[first_parity])]
+                + [(f"acc{i}", value) for i, value in enumerate(accumulators)],
+                iv_name="k0",
+                elide_trailing_barrier=False,
+            )
+            with loop as (k0, carried):
+                parity = carried[0]
+                next_parity = b.sub(c1, parity)
+                b.scf_yield(next_parity, *loop_tile(k0, parity, next_parity, carried[1:]))
+            last_parity, accumulators = loop.results[0], loop.results[1:]
         wait_tile_ready()
-        final = compute_tile(upper, loop.results[0], loop.results[1:])
+        final = compute_tile(upper, last_parity, accumulators)
 
     def saturate(value):
         # hipBLASLt's FP8 store: +-inf -> NaN (x * 0 + x), finite values
