@@ -12,8 +12,9 @@ k <= d + right``. A row with no visible key must be exactly 0.
 ``test_attention_unified_mask_gfx942_numeric.py`` covers the same kernels in
 more depth, but it needs torch, which the CI GPU lanes do not install. This file
 launches the gfx942 tiled 2D, split-KV 3D and dense kernels on ``rocke.runtime``
-device buffers and checks them against an FP32 numpy reference computed from
-the band definition above, after rounding the inputs to fp16 / bf16. It never
+device buffers (the shared ``DeviceArray``) and checks them against the
+torch-free float64 oracle ``rocke.numeric.sdpa_reference``, after rounding the
+inputs to fp16 / bf16 with the shared ``rocke.numeric.bf16`` codec. It never
 imports torch, and skips only off a gfx942 device.
 
 Run standalone:
@@ -23,7 +24,6 @@ Run standalone:
 
 from __future__ import annotations
 
-import ctypes
 import itertools
 import math
 
@@ -31,7 +31,11 @@ import numpy as np
 import pytest
 
 from kernels.common import attention_unified as au
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 from rocke.runtime.hip_module import get_device_arch
+
+from ._attention_device_array import DeviceArray
 
 _ARCH = get_device_arch()
 pytestmark = [
@@ -52,95 +56,42 @@ def rt():
 
 
 # ---------------------------------------------------------------------------
-# Host buffers: fp16 natively, bf16 as uint16 bit patterns (numpy has no bf16)
+# Host encoding and the reference
 # ---------------------------------------------------------------------------
 
 
-def _to_device_dtype(x, dtype):
-    """Round fp32 ``x`` to ``dtype``; returns (device bits, rounded fp32)."""
-    x = np.ascontiguousarray(x, dtype=np.float32)
-    if dtype == "fp16":
-        bits = x.astype(np.float16)
-        return bits, bits.astype(np.float32)
-    u = x.view(np.uint32)
-    bits = ((u + 0x7FFF + ((u >> 16) & 1)) >> 16).astype(np.uint16)
-    return bits, _from_device_dtype(bits, dtype)
+def _encode(x, dtype):
+    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
+    x = np.asarray(x, dtype=np.float32)
+    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
 
 
-def _from_device_dtype(bits, dtype):
-    if dtype == "fp16":
-        return bits.astype(np.float32)
-    return (bits.astype(np.uint32) << 16).view(np.float32)
+def _decode(bits, dtype):
+    return bits.astype(np.float32) if dtype == "fp16" else bf16_to_f32(bits)
 
 
-def _nan_bits(shape, dtype):
-    if dtype == "fp16":
-        return np.full(shape, np.nan, dtype=np.float16)
-    return np.full(shape, 0x7FC0, dtype=np.uint16)
+def _rounded(x, dtype):
+    """``x`` as ``dtype``: (device bits, the fp32 values they hold)."""
+    bits = _encode(x, dtype)
+    return bits, _decode(bits, dtype)
 
 
-def _u8(array):
-    return (ctypes.c_uint8 * array.nbytes).from_buffer(array)
+def _reference(q, k, v, *, top_left, window, right, **layout):
+    """``sdpa_reference`` for the band; returns (O, rows that see no key).
 
-
-class _DeviceArray:
-    """A device copy of a numpy array, exposing the tensor attributes the
-    launchers read. ``shape`` may be smaller than the host array along the first
-    axis, which models a view of the leading rows."""
-
-    device = None
-
-    def __init__(self, rt, host, *, shape=None):
-        from rocke.runtime.launcher import DeviceMem
-
-        self._rt = rt
-        self._host = np.ascontiguousarray(host)
-        self._mem = DeviceMem(self._host.nbytes)
-        rt.memcpy_h2d(self._mem.ptr(), _u8(self._host), self._host.nbytes)
-        self.shape = self._host.shape if shape is None else tuple(shape)
-
-    def stride(self, dim):
-        return self._host.strides[dim] // self._host.itemsize
-
-    def data_ptr(self):
-        return self._mem.ptr()
-
-    def read(self):
-        out = np.empty_like(self._host)
-        self._rt.memcpy_d2h(_u8(out), self._mem.ptr(), out.nbytes)
-        return out
-
-
-# ---------------------------------------------------------------------------
-# Reference
-# ---------------------------------------------------------------------------
-
-
-def _visible(q_len, kv_len, *, top_left, window, right):
-    p = np.arange(q_len)[:, None]
-    k = np.arange(kv_len)[None, :]
-    d = p + (0 if top_left else kv_len - q_len)
-    vis = np.ones((q_len, kv_len), dtype=bool)
-    if window > 0:
-        vis &= d - k < window
-    if right >= 0:
-        vis &= k <= d + right
-    return vis
-
-
-def _attend(q, k, v, vis, scale):
-    """``q [Sq,Hq,D]``, ``k``/``v`` ``[Skv,Hkv,D]`` fp32 -> ``[Sq,Hq,D]``; rows
-    with no visible key are 0."""
-    ratio = q.shape[1] // k.shape[1]
-    k = np.repeat(k, ratio, axis=1)
-    v = np.repeat(v, ratio, axis=1)
-    scores = np.einsum("qhd,khd->hqk", q, k) * scale
-    scores = np.where(vis[None], scores, -np.inf)
-    row_max = scores.max(axis=-1, keepdims=True)
-    probs = np.exp(scores - np.where(np.isfinite(row_max), row_max, 0.0))
-    denom = probs.sum(axis=-1, keepdims=True)
-    probs = np.divide(probs, denom, out=np.zeros_like(probs), where=denom > 0)
-    return np.einsum("hqk,khd->qhd", probs, v)
+    ``window`` is the cuDNN left bound (keys ``d - window < k``), which the
+    oracle takes as ``window - 1``. ``layout`` is the oracle's ragged offsets."""
+    out, lse = sdpa_reference(
+        q,
+        k,
+        v,
+        scale=1.0 / math.sqrt(q.shape[-1]),
+        left_bound=hipdnn_left_to_window(window if window > 0 else -1),
+        right_bound=right,
+        top_left=top_left,
+        **layout,
+    )
+    return out, np.isneginf(lse)
 
 
 def _check(got, want, empty, dtype, label):
@@ -220,47 +171,51 @@ def _run_unified(rt, problem, seqs, path, *, seed=0, wild_tail=False):
         table[s, :n] = [next(order) for _ in range(n)]
     table[-1] = _WILD_BLOCK if wild_tail else poison
 
-    q_bits, q = _to_device_dtype(rng.standard_normal((sum(q_lens), hq, _D)), dtype)
+    q_bits, q = _rounded(rng.standard_normal((sum(q_lens), hq, _D)), dtype)
     kv_shape = (num_blocks, _BS, hkv, _D)
     k_raw = rng.standard_normal(kv_shape)
     v_raw = rng.standard_normal(kv_shape)
     k_raw[poison] = v_raw[poison] = 64.0
-    k_bits, k = _to_device_dtype(k_raw, dtype)
-    v_bits, v = _to_device_dtype(v_raw, dtype)
+    k_bits, k = _rounded(k_raw, dtype)
+    v_bits, v = _rounded(v_raw, dtype)
     cu = np.array([0, *itertools.accumulate(q_lens)], dtype=np.int32)
 
-    out = _DeviceArray(rt, _nan_bits(q.shape, dtype))
+    out = DeviceArray(rt, _encode(np.full(q.shape, np.nan), dtype))
     au.run_unified_attention_torch(
         problem=problem,
-        q=_DeviceArray(rt, q_bits),
-        k=_DeviceArray(rt, k_bits),
-        v=_DeviceArray(rt, v_bits),
+        q=DeviceArray(rt, q_bits),
+        k=DeviceArray(rt, k_bits),
+        v=DeviceArray(rt, v_bits),
         out=out,
-        cu_seqlens_q=_DeviceArray(rt, cu),
-        seqused_k=_DeviceArray(rt, np.array(kv_lens, dtype=np.int32)),
+        cu_seqlens_q=DeviceArray(rt, cu),
+        seqused_k=DeviceArray(rt, np.array(kv_lens, dtype=np.int32)),
         softmax_scale=1.0 / math.sqrt(_D),
-        block_table=_DeviceArray(rt, table, shape=(len(seqs), width)),
+        block_table=DeviceArray(rt, table, shape=(len(seqs), width)),
         softcap=0.0,
         backend="tiled" if path == "2d" else "3d",
     )
-    got = _from_device_dtype(out.read(), dtype)
+    got = _decode(out.read(), dtype)
 
-    want = np.zeros_like(q)
-    empty = np.zeros(q.shape[0], dtype=bool)
-    for s, (q_len, kv_len) in enumerate(seqs):
-        rows = slice(int(cu[s]), int(cu[s + 1]))
-        keys = k[table[s, : needed[s]]].reshape(-1, hkv, _D)[:kv_len]
-        values = v[table[s, : needed[s]]].reshape(-1, hkv, _D)[:kv_len]
-        vis = _visible(
-            q_len,
-            kv_len,
-            top_left=problem.causal_top_left,
-            window=problem.sliding_window,
-            right=problem.right_bound,
+    # Each sequence's keys in order, packed for the oracle's ragged layout.
+    def packed(cache):
+        return np.concatenate(
+            [
+                cache[table[s, : needed[s]]].reshape(-1, hkv, _D)[:kv_len]
+                for s, kv_len in enumerate(kv_lens)
+            ]
         )
-        want[rows] = _attend(q[rows], keys, values, vis, 1.0 / math.sqrt(_D))
-        empty[rows] = ~vis.any(axis=1)
-    return got, want, empty
+
+    want, empty = _reference(
+        q,
+        packed(k),
+        packed(v),
+        top_left=problem.causal_top_left,
+        window=problem.sliding_window,
+        right=problem.right_bound,
+        q_offsets=cu,
+        kv_offsets=[0, *itertools.accumulate(kv_lens)],
+    )
+    return got, want, empty.all(axis=1)
 
 
 @pytest.mark.parametrize("seqs,top_left,window,right,dtype,path", _UNIFIED_ROWS)
@@ -362,27 +317,34 @@ def test_dense_band_matches_numpy(
     )
     rng = np.random.default_rng(1)
     b = _DENSE_BATCH
-    q_bits, q = _to_device_dtype(rng.standard_normal((b, sq, _DENSE_HQ, _D)), dtype)
-    k_bits, k = _to_device_dtype(rng.standard_normal((b, skv, _DENSE_HKV, _D)), dtype)
-    v_bits, v = _to_device_dtype(rng.standard_normal((b, skv, _DENSE_HKV, _D)), dtype)
-    out = _DeviceArray(rt, _nan_bits(q.shape, dtype))
-    scale = 1.0 / math.sqrt(_D)
+    q_bits, q = _rounded(rng.standard_normal((b, sq, _DENSE_HQ, _D)), dtype)
+    k_bits, k = _rounded(rng.standard_normal((b, skv, _DENSE_HKV, _D)), dtype)
+    v_bits, v = _rounded(rng.standard_normal((b, skv, _DENSE_HKV, _D)), dtype)
+    out = DeviceArray(rt, _encode(np.full(q.shape, np.nan), dtype))
     run_attention_dense_torch(
         spec=spec,
-        q=_DeviceArray(rt, q_bits),
-        k=_DeviceArray(rt, k_bits),
-        v=_DeviceArray(rt, v_bits),
+        q=DeviceArray(rt, q_bits),
+        k=DeviceArray(rt, k_bits),
+        v=DeviceArray(rt, v_bits),
         out=out,
-        scale=scale,
+        scale=1.0 / math.sqrt(_D),
     )
-    got = _from_device_dtype(out.read(), dtype)
-    vis = _visible(sq, skv, top_left=top_left, window=window, right=right)
-    empty = ~vis.any(axis=1)
+    got = _decode(out.read(), dtype)
+    # The oracle's dense layout is [B, H, S, D]; the kernel's is [B, S, H, D].
+    bhsd = (0, 2, 1, 3)
+    want, empty = _reference(
+        q.transpose(bhsd),
+        k.transpose(bhsd),
+        v.transpose(bhsd),
+        top_left=top_left,
+        window=window,
+        right=right,
+    )
+    want, empty = want.transpose(bhsd), empty.all(axis=1)
     if window and sq > skv + window:
         assert empty.any(), "case meant to have empty rows has none"
     for i in range(b):
-        want = _attend(q[i], k[i], v[i], vis, scale)
-        _check(got[i], want, empty, dtype, f"{spec.kernel_name()} batch {i}")
+        _check(got[i], want[i], empty[i], dtype, f"{spec.kernel_name()} batch {i}")
 
 
 if __name__ == "__main__":
