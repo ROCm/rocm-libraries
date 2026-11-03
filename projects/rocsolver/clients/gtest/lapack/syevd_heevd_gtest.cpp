@@ -64,6 +64,9 @@ const vector<vector<int>> size_range = {
 // for daily_lapack tests
 const vector<vector<int>> large_size_range = {{192, 192}, {256, 270}, {300, 300}};
 
+// for weekly large batch tests
+const vector<vector<int>> large_batch_size_range = {{7, 7}, {20, 20}};
+
 Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
 {
     vector<int> size = std::get<0>(tup);
@@ -87,7 +90,7 @@ Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
     return arg;
 }
 
-template <rocblas_int MODE, typename I>
+template <rocblas_int MODE, typename I, int BATCH_COUNT = 3>
 class SYEVD_HEEVD : public ::TestWithParam<syevd_heevd_tuple>
 {
 protected:
@@ -106,7 +109,7 @@ protected:
            && arg.peek<char>("uplo") == 'L')
             testing_syevd_heevd_bad_arg<BATCHED, STRIDED, T, I>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_syevd_heevd<BATCHED, STRIDED, T, I>(arg);
     }
 };
@@ -140,6 +143,25 @@ class SYEVD_HYBRID_64 : public SYEVD_HEEVD<1, int64_t>
 };
 
 class HEEVD_HYBRID_64 : public SYEVD_HEEVD<1, int64_t>
+{
+};
+
+// large batch
+int constexpr BCOUNT = 64 * 1024 + 1;
+
+class SYEVD_LARGE_BATCH : public SYEVD_HEEVD<0, rocblas_int, BCOUNT>
+{
+};
+
+class HEEVD_LARGE_BATCH : public SYEVD_HEEVD<0, rocblas_int, BCOUNT>
+{
+};
+
+class SYEVD_LARGE_BATCH_64 : public SYEVD_HEEVD<0, int64_t, BCOUNT>
+{
+};
+
+class HEEVD_LARGE_BATCH_64 : public SYEVD_HEEVD<0, int64_t, BCOUNT>
 {
 };
 
@@ -227,6 +249,56 @@ TEST_P(HEEVD_HYBRID, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batched tests
+
+// syevd_large_batch
+
+TEST_P(SYEVD_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYEVD_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+// heevd_large_batch
+
+TEST_P(HEEVD_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+// syevd_large_batch_64
+
+TEST_P(SYEVD_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYEVD_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+// heevd_large_batch_64
+
+TEST_P(HEEVD_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_LARGE_BATCH_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 // strided_batched tests
 
 TEST_P(SYEVD, strided_batched__float)
@@ -265,6 +337,56 @@ TEST_P(HEEVD_HYBRID, strided_batched__float_complex)
 }
 
 TEST_P(HEEVD_HYBRID, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+// large strided_batched tests
+
+// syevd_large_batch
+
+TEST_P(SYEVD_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYEVD_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+// heevd_large_batch
+
+TEST_P(HEEVD_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+// syevd_large_batch_64
+
+TEST_P(SYEVD_LARGE_BATCH_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYEVD_LARGE_BATCH_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+// heevd_large_batch_64
+
+TEST_P(HEEVD_LARGE_BATCH_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_LARGE_BATCH_64, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
 }
@@ -491,5 +613,30 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEEVD_HYBRID_64,
                          Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
+
+// weekly_lapack tests exercising batch_count > 64 * 1024 (large-batch splitting)
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         SYEVD_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         HEEVD_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         SYEVD_LARGE_BATCH_64,
+                         Combine(ValuesIn(large_batch_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         HEEVD_LARGE_BATCH_64,
+                         Combine(ValuesIn(large_batch_size_range),
                                  ValuesIn(op_range),
                                  ValuesIn(hetrd_stage_range)));
