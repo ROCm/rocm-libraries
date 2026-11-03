@@ -16,7 +16,7 @@
  *       rocke_gfx950_attention_tiled_2d_supports_args_default
  *       rocke_gfx950_attention_tiled_2d_supports
  *   - the body-context prologue
- *       rocke_gfx950_attn2d_build_ctx_init  (Python build body lines 711-1151):
+ *       rocke_g950_build_ctx_init_local  (Python build body lines 711-1151):
  *       require_tiled_attention_arch(arch) gate -> dtype fp16/bf16 gate ->
  *       WIDE-atom geometry select (Py813-814) -> the whole ALL-CAPS config
  *       derivation -> kernel attrs + param decls -> grid ids + wave
@@ -25,7 +25,7 @@
  *       TransposeLdsReader bind (Py1128) -> the SSA constants block.
  *   - the build driver
  *       rocke_gfx950_build_unified_attention_2d_tiled
- *     which zero-inits the shared ctx, calls rocke_gfx950_attn2d_build_ctx_init,
+ *     which zero-inits the shared ctx, calls rocke_g950_build_ctx_init_local,
  *     then drives the phase functions in the exact Python execution order:
  *         emit_q_load -> emit_loop_bounds_and_inits -> emit_preloop ->
  *         emit_q_gather -> emit_preloop_prefetch -> emit_licm_hoist ->
@@ -367,15 +367,11 @@ bool rocke_gfx950_attention_tiled_2d_supports(
 }
 
 /* ===================================================================== *
- *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
+ *  rocke_g950_build_ctx_init_local -- the prologue (Python 711-1151)
  *
- *  INTEGRATION NOTE. The header-declared external definition of this symbol
- *  lives in the dedicated prologue TU (ctx_prologue.c). This driver TU carries
- *  its own self-consistent copy (it uses the file-local rocke_g950_* helpers and
- *  the gfx950-specific "leave ctx->target / ctx->qk_atom NULL" derivation that
- *  the phase functions this driver calls expect). To avoid a duplicate external
- *  symbol at link time, this copy is file-local (static); only this driver calls
- *  it. The cross-TU external symbol is the prologue TU's definition.
+ *  File-local: only this driver calls it. It uses the file-local rocke_g950_*
+ *  helpers and the gfx950-specific "leave ctx->target / ctx->qk_atom NULL"
+ *  derivation that the phase functions this driver calls expect.
  * ===================================================================== */
 static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                             rocke_ir_builder_t* b,
@@ -873,7 +869,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
      * The transposed-32x32 path keeps P entirely in registers (softmax publish
      * is a no-op, PV reads PT32_n from registers), so P_lds was dead LDS there.
      * Drop the allocation to free the occupancy-limiting LDS at HD=128.
-     * Mirrors attention_tiled_2d.py P_LDS_DEAD and the ctx_prologue twin. */
+     * Mirrors attention_tiled_2d.py P_LDS_DEAD. */
     const bool P_LDS_DEAD = USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32;
     if(!ctx->REGISTER_PV && !P_LDS_DEAD)
     {
@@ -953,7 +949,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
 /* ===================================================================== *
  *  build_unified_attention_2d_tiled(spec, arch="gfx950")  (lines 711-3818)
  *
- *  The driver: populate the shared build ctx via rocke_gfx950_attn2d_build_ctx_init
+ *  The driver: populate the shared build ctx via rocke_g950_build_ctx_init_local
  *  (the prologue), then run the phase functions in Python execution order and
  *  return b->kernel from the epilogue.
  * ===================================================================== */
