@@ -34,9 +34,9 @@
  * with a 4-reg-per-lane accumulator decoded via _mfma_16x16_c_row.
  *
  * REDUCE KERNEL (build_unified_attention_reduce_tiled, lines 1002-1133). Arch-
- * neutral, pure f32 load / exp2 / store (byte-for-byte port of the gfx950
- * reduce): 64 threads, single active per (q_token, q_head), three passes (max,
- * combine, normalize).
+ * neutral, pure f32 load / exp2 / store (the gfx950 reduce with a runtime
+ * query head count): 64 threads, single active per (q_token, q_head), three
+ * passes (max, combine, normalize).
  *
  * REUSED HELPER PORTS (no IR re-emitted here):
  *   rocke/helper_helper_rocke.helpers.attention.h   -- apply_softcap_log2,

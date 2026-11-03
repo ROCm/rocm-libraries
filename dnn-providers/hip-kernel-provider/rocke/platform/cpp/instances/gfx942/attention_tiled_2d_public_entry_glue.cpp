@@ -513,7 +513,7 @@ static rocke_status_t
     /* Value-carrying optionals become conditional strings; value-less flags
      * are passed as positional parts (kernel_name_join drops empties), exactly
      * as the Python kernel_name does. */
-    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
+    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], wpe_buf[32], mw_buf[32], kvcp_buf[64];
     char rd_buf[32], ks_buf[32];
     int nqh, nkv;
@@ -532,6 +532,11 @@ static rocke_status_t
         t_buf[0] = '\0';
     /* Head counts are kernargs; only the GQA ratio is baked. */
     snprintf(hkv_buf, sizeof(hkv_buf), "g%d", nqh / nkv);
+    /* Except on the fast paged-KV descriptor path, whose shifts bake them. */
+    if(s->use_fast_paged_kv_desc)
+        snprintf(fhkv_buf, sizeof(fhkv_buf), "h%dkv%d", nqh, nkv);
+    else
+        fhkv_buf[0] = '\0';
     if(s->kv_storage_dtype)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
@@ -580,6 +585,7 @@ static rocke_status_t
             b_buf,
             t_buf,
             hkv_buf,
+            fhkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
             /* Python emits "fnuz" under the *same* condition as the kv part,

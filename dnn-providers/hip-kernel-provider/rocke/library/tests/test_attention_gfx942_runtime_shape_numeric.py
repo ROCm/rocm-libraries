@@ -10,11 +10,12 @@ compiled binary. Each case below runs a pair of such shapes back to back
 through ``run_unified_attention_torch``: the second launch must reuse the
 first binary (no new compile) and both must match an FP32 paged reference.
 
-The second shape of each pair changes the head counts at the same GQA ratio,
-the window size, and the batch by several log2 search buckets, so a value that
-is still baked into the binary corrupts it. Block-table rows are wider than the
-batch needs and unused slots point at a poison block, so a wrong stride cannot
-pass by luck.
+The second shape of each pair changes at least one of the head counts (at the
+same GQA ratio), the window size, or the batch (by several log2 search
+buckets), so a value that is still baked into the binary corrupts it. Only the
+2D pairs change the window; the 3D pairs keep it at 0. Block-table rows are
+wider than the batch needs and unused slots point at a poison block, so a wrong
+stride cannot pass by luck.
 
 The routing and key checks run on any host; the launches need a gfx942 GPU.
 """
@@ -252,6 +253,10 @@ def _reference(torch, q, k, v, cu, table, shape, d, bs):
     return out
 
 
+def _cache(path):
+    return au._ATTN_3D_TILED_CACHE if path == "3d" else au._ATTN_TILED_CACHE
+
+
 def _compiled():
     return len(au._ATTN_TILED_CACHE) + len(au._ATTN_3D_TILED_CACHE)
 
@@ -278,10 +283,11 @@ def test_pair_numeric_on_one_binary(torch, path, geometry, first, second):
             softmax_scale=1.0 / math.sqrt(d),
             block_table=table,
             softcap=0.0,
-            backend="tiled",
+            backend="3d" if path == "3d" else "tiled",
             use_graph=False,
         )
         torch.cuda.synchronize()
+        assert _key(problem, path) in _cache(path), f"shape {i} missed the {path} cache"
         if compiled is None:
             compiled = _compiled()
         else:

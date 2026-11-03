@@ -681,3 +681,18 @@ class TestDynamicTensorDescriptor:
         assert blk_term.op.operands[1].op.operands == [s_blk]
         # The int stride-1 term is the coord itself, widened.
         assert d_term.op.operands == [d]
+
+    def test_move_multiplies_deltas_by_runtime_strides(self):
+        b = _builder()
+        a, c, da, dc, s = _params(b, "a", "c", "da", "dc", "s")
+        desc = DynamicTensorDescriptor.create(
+            "t", coord_names=("a", "c"), strides=(s, 3)
+        )
+        start = len(b.kernel.body.ops)
+        prev, _ = desc.offset(b, a=a, c=c)
+        off, valid = desc.move(b, prev, {"a": a, "c": c}, {"a": da, "c": dc})
+        assert valid is None
+        env = {id(a): 5, id(c): 7, id(da): 2, id(dc): 4, id(s): 13}
+        _evaluate(_new_ops(b, start), env)
+        # The runtime stride scales the delta, not the 1 held in base_strides.
+        assert env[id(off)] == (5 + 2) * 13 + (7 + 4) * 3

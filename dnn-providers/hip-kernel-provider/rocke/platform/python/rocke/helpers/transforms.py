@@ -1863,6 +1863,29 @@ class DynamicTensorDescriptor(TensorDescriptor):
             off = b.const_i64(0)
         return off, valid
 
+    def move(
+        self,
+        b: IRBuilder,
+        prev_offset: Value,
+        old_values: Dict[str, Value],
+        delta_values: Dict[str, Value],
+    ) -> Tuple[Value, Optional[Value]]:
+        """:meth:`TensorDescriptor.move` with runtime strides."""
+        delta, new = self._run_chain_delta(b, old_values, delta_values)
+        off_delta: Optional[Value] = None
+        valid: Optional[Value] = None
+        for i, name in enumerate(self.base_names):
+            if name not in delta:
+                raise ValueError(
+                    f"after chain, base coord {name!r} not in {sorted(delta.keys())}"
+                )
+            valid = _and(b, valid, new[name].valid)
+            term = self._term(b, i, delta[name].value)
+            off_delta = term if off_delta is None else b.add(off_delta, term)
+        if off_delta is None:
+            return prev_offset, valid
+        return b.add(prev_offset, off_delta), valid
+
     @classmethod
     def create(
         cls,

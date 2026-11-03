@@ -23,7 +23,8 @@ gfx942-legal forms that the 2D gfx942 kernel
     gfx942 2D kernel uses (gfx942-legal), via ``dequant_fp8x8_to_dtype``.
 
 The reduce kernel is pure f32 load / exp2 / store (no MFMA, no transpose read),
-so it is arch-neutral and is a byte-for-byte port of the gfx950 reduce kernel.
+so it is arch-neutral. It is a port of the gfx950 reduce kernel that reads the
+query head count as a kernarg instead of baking it.
 
 See the gfx950 module docstring for the split-KV grid / workspace layout.
 """
@@ -1277,7 +1278,7 @@ def build_unified_attention_3d_tiled(
 
 
 # ---------------------------------------------------------------------------
-# Reduce kernel (arch-neutral; byte-for-byte port of the gfx950 reduce kernel)
+# Reduce kernel (arch-neutral; the gfx950 reduce with a runtime head count)
 # ---------------------------------------------------------------------------
 
 

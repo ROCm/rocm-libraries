@@ -58,15 +58,15 @@ def _prefill(*, dtype="bf16", head_size=128, hq=32, hkv=8, sq=1024, **kw):
     )
 
 
-def _decode(*, dtype="bf16", head_size=128, hq=32, hkv=8, **kw):
+def _decode(*, dtype="bf16", head_size=128, hq=32, hkv=8, sq=1, **kw):
     return P(
-        total_q=4,
+        total_q=4 * sq,
         num_seqs=4,
         num_query_heads=hq,
         num_kv_heads=hkv,
         head_size=head_size,
         block_size=16,
-        max_seqlen_q=1,
+        max_seqlen_q=sq,
         max_seqlen_k=4096,
         dtype=dtype,
         **kw,
@@ -136,6 +136,8 @@ _CASES_3D = (
     ("gfx942", "decode", _decode(), False),
     ("gfx942", "decode_window", _decode(sliding_window=256), False),
     ("gfx942", "decode_lse", _decode(emit_lse=True), False),
+    # Two queries per sequence leave the decode grid for the runtime search.
+    ("gfx942", "two_token", _decode(sq=2), False),
     ("gfx942", "strided", _decode(hq=4, hkv=2), True),
     ("gfx950", "decode", _decode(), False),
     ("gfx950", "strided", _decode(hq=4, hkv=2), True),
@@ -147,6 +149,8 @@ _CASES_3D = (
     [pytest.param(a, p, s, id=f"{a}-{i}") for a, i, p, s in _CASES_3D],
 )
 def test_3d_kernel_params_match_launch_signatures(arch, problem, strided_kv):
+    if problem.max_seqlen_q > 1:
+        assert not au._use_decode_grid(problem, arch)
     num_segments = au._num_segments(problem, arch)
     segment, reduce = au._tiled_3d_kernels(
         problem, arch, num_segments, strided_kv=strided_kv
@@ -163,7 +167,9 @@ def test_3d_kernel_params_match_launch_signatures(arch, problem, strided_kv):
     _assert_matches(reduce, red_sig)
 
 
-@pytest.mark.parametrize("codepath", ["narrow", "transposed_x8", "gfx942_4warp"])
+@pytest.mark.parametrize(
+    "codepath", ["narrow", "transposed_x8", "gfx942_4warp", "splitkv"]
+)
 def test_tuning_candidate_signature_matches_its_kernel(codepath):
     """The registry's tuning candidates launch through ``candidate.signature``."""
     from dispatch.attention import attention_candidates
@@ -173,13 +179,15 @@ def test_tuning_candidate_signature_matches_its_kernel(codepath):
     variants = [v for v in GFX942_TUNING_VARIANTS if v.codepath == codepath]
     candidates = {c.spec_id: c for c in attention_candidates()}
     head_size = 256 if codepath == "gfx942_4warp" else 128
+    # Two queries per sequence keep the split-KV segment off the decode grid.
+    seqlen_q = 2 if codepath == "splitkv" else 1024
     checked = 0
     for variant in variants:
         request = AttentionRequest(
             batch=1,
             nhead_q=16,
             nhead_k=2,
-            seqlen_q=1024,
+            seqlen_q=seqlen_q,
             seqlen_k=1024,
             hdim_q=head_size,
             hdim_v=head_size,
@@ -194,7 +202,19 @@ def test_tuning_candidate_signature_matches_its_kernel(codepath):
         if not candidate.admits(request)[0]:
             continue
         spec = candidate.select_spec(request)
-        _assert_matches(candidate.build(spec, "gfx942"), candidate.signature(spec))
+        kernel = candidate.build(spec, "gfx942")
+        if spec.path == "3d":
+            # The signature is the segment's; _get_3d_pipeline launches the
+            # reduce with the production 3D pair.
+            kernel, reduce = kernel
+            assert "_dg" not in kernel.name.split("_"), kernel.name
+            _, red_sig = au._tiled_3d_signatures(
+                "gfx942",
+                spec.kernel_spec.dtype,
+                kv_dtype=spec.kernel_spec.kv_storage_dtype,
+            )
+            _assert_matches(reduce, red_sig)
+        _assert_matches(kernel, candidate.signature(spec))
         checked += 1
         break
     assert checked, f"no {codepath} tuning candidate admits the request"
