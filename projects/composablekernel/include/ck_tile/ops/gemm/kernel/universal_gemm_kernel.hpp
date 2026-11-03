@@ -1607,27 +1607,13 @@ struct UniversalGemmKernel
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
 
         // Run GEMM cooperatively by whole workgroup.
-        const auto& c_block_tile = [&]() {
-            if constexpr(std::is_void_v<barrier_pipeline>)
-            {
-                return GemmPipeline{}.template operator()(as_block_window,
-                                                          AElementWise{},
-                                                          bs_block_window,
-                                                          BElementWise{},
-                                                          num_loop,
-                                                          smem_ptr);
-            }
-            else
-            {
-                return GemmPipeline{}.template operator()(as_block_window,
-                                                          AElementWise{},
-                                                          bs_block_window,
-                                                          BElementWise{},
-                                                          num_loop,
-                                                          smem_ptr,
-                                                          barriers);
-            }
-        }();
+        const auto& c_block_tile = RunGemmPipeline<GemmPipeline>(as_block_window,
+                                                                 AElementWise{},
+                                                                 bs_block_window,
+                                                                 BElementWise{},
+                                                                 num_loop,
+                                                                 smem_ptr,
+                                                                 barriers);
 
         const index_t k_batch = amd_wave_read_first_lane(kargs.k_batch);
         // Run Epilogue Pipeline
