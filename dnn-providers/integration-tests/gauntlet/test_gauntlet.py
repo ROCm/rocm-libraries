@@ -480,6 +480,9 @@ FEATURE_KEYS = {
     "SdpaFwd/Default": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151Decode": {"add_tensors", "node_patches"},
+    "SdpaFwd/FlydslCdna": {"add_tensors", "node_patches"},
+    "SdpaFwd/FlydslCdnaDecode": {"add_tensors", "node_patches"},
+    "SdpaFwd/FlydslDualwave": {"add_tensors", "node_patches"},
 }
 
 
@@ -533,6 +536,12 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
         "SdpaFwd/Flash2Region",
+        "SdpaFwd/FlydslCdna",
+        "SdpaFwd/FlydslCdnaDecode",
+        "SdpaFwd/FlydslCdnaStride",
+        "SdpaFwd/FlydslDecodeStride",
+        "SdpaFwd/FlydslDualwave",
+        "SdpaFwd/FlydslDualwaveStride",
         "SdpaFwd/Gfx1151",
         "SdpaFwd/Gfx1151Decode",
         "SdpaFwd/Gfx950Dense",
@@ -548,6 +557,9 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaBackward/AsmProbe",
         "SdpaFwd/AsmProbe",
         "SdpaFwd/Flash2Probe",
+        "SdpaFwd/FlydslCdnaProbe",
+        "SdpaFwd/FlydslDecodeProbe",
+        "SdpaFwd/FlydslDualwaveProbe",
         "SdpaFwd/Gfx950DenseProbe",
     ]
     for sp in SPACES:
@@ -571,6 +583,9 @@ def test_shipped_spaces_declare_cost_ceilings():
     assert any("2**31" in r for r in rules["SdpaFwd/Flash2Region"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx1151"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx1151Decode"])
+    assert any("2**31" in r for r in rules["SdpaFwd/FlydslCdna"])
+    assert any("2**31" in r for r in rules["SdpaFwd/FlydslCdnaDecode"])
+    assert any("2**31" in r for r in rules["SdpaFwd/FlydslDualwave"])
     assert any("2**29" in r for r in rules["SdpaBackward/Default"])
     assert any("2**30" in r for r in rules["RMSNorm/Default"])
     assert any("2**30" in r for r in rules["ResampleFwd/Default"])
@@ -1334,6 +1349,9 @@ LARGE_SCALE = {
     "SdpaFwd/Flash2Region": 8,
     "SdpaFwd/Gfx1151": 8,
     "SdpaFwd/Gfx1151Decode": 8,
+    "SdpaFwd/FlydslCdna": 8,
+    "SdpaFwd/FlydslCdnaDecode": 8,
+    "SdpaFwd/FlydslDualwave": 8,
 }
 # The poisoned share of V: a non-finite element of V reaches only its own head-dim column of the
 # output, so the share keeps part of the columns finite for the non-finite mask to grade
@@ -1345,6 +1363,9 @@ POISON_FRACTION = {
     "SdpaFwd/Flash2Region": 2**-12,
     "SdpaFwd/Gfx1151": 2**-12,
     "SdpaFwd/Gfx1151Decode": 2**-12,
+    "SdpaFwd/FlydslCdna": 2**-12,
+    "SdpaFwd/FlydslCdnaDecode": 2**-12,
+    "SdpaFwd/FlydslDualwave": 2**-12,
     # dscale and dbias sum over every normalization group, so one poisoned group (or stat) makes
     # every dscale element non-finite; one poisoned dy element (the fill plants at least one,
     # which this fraction rounds down to) leaves the other columns and rows finite
@@ -1383,6 +1404,9 @@ POISONABLE_SEED = {
     "SdpaFwd/Flash2Region": 13,
     "SdpaFwd/Gfx1151Decode": 13,
     "SdpaFwd/Gfx950Dense": 12,
+    "SdpaFwd/FlydslCdna": 4,
+    "SdpaFwd/FlydslCdnaDecode": 4,
+    "SdpaFwd/FlydslDualwave": 0,
 }
 # the tensors (by template name) whose fill the domain axis drives, per space
 PRIMARY_OPERANDS = {
@@ -1396,6 +1420,9 @@ PRIMARY_OPERANDS = {
     "ResampleFwd/Default": ["X"],
     "SdpaFwd/Default": ["Q", "K", "V"],
     "SdpaFwd/Gfx950Dense": ["Q", "K", "V"],
+    "SdpaFwd/FlydslCdna": ["Q", "K", "V"],
+    "SdpaFwd/FlydslCdnaDecode": ["Q", "K", "V"],
+    "SdpaFwd/FlydslDualwave": ["Q", "K", "V"],
     "SdpaFwd/Flash2Region": ["Q", "K", "V"],
     "SdpaFwd/Gfx1151": ["Q", "K", "V"],
     "SdpaFwd/Gfx1151Decode": ["Q", "K", "V"],
@@ -1416,6 +1443,9 @@ POISONED_OPERANDS = {
     "SdpaFwd/Default": ["V"],
     "SdpaBackward/Default": [],  # nan and inf are not drawn: see that space's description
     "SdpaFwd/Gfx950Dense": ["V"],
+    "SdpaFwd/FlydslCdna": ["V"],
+    "SdpaFwd/FlydslCdnaDecode": ["V"],
+    "SdpaFwd/FlydslDualwave": ["V"],
     "SdpaFwd/Flash2Region": ["V"],
     "SdpaFwd/Gfx1151": ["V"],
     "SdpaFwd/Gfx1151Decode": ["V"],
@@ -1430,7 +1460,12 @@ OLD_SHAPE_DIGESTS = {
 FIXED_SHAPE_SPACES = ["Matmul/Align", "SdpaFwd/Flash2"]
 # the padded-leading-stride probe spaces (R5): they draw strides (a `pad` of the row stride) next
 # to alignment and placement and have no domain axis; Matmul/Stride also has no dtype axis
-STRIDE_SPACES = ["Matmul/Stride", "SdpaFwd/AsmStride", "SdpaFwd/Gfx950DenseStride"]
+STRIDE_SPACES = [
+    "Matmul/Stride", "SdpaFwd/AsmStride", "SdpaFwd/Gfx950DenseStride",
+    "SdpaFwd/FlydslCdnaStride",
+    "SdpaFwd/FlydslDecodeStride",
+    "SdpaFwd/FlydslDualwaveStride",
+]  # fmt: skip
 NO_DOMAIN_SPACES = FIXED_SHAPE_SPACES + STRIDE_SPACES
 NO_DTYPE_SPACES = FIXED_SHAPE_SPACES + ["Matmul/Stride"]
 # the late axes a space gained after its domain axis, which sit before `domain` in the axis order
@@ -1460,6 +1495,12 @@ PLACEMENT_OPERAND = {
     "SdpaFwd/Gfx1151Decode": "Q",
     "SdpaFwd/Gfx950Dense": "Q",
     "SdpaFwd/Gfx950DenseStride": "Q",
+    "SdpaFwd/FlydslCdna": "Q",
+    "SdpaFwd/FlydslCdnaDecode": "Q",
+    "SdpaFwd/FlydslDualwave": "Q",
+    "SdpaFwd/FlydslCdnaStride": "Q",
+    "SdpaFwd/FlydslDecodeStride": "Q",
+    "SdpaFwd/FlydslDualwaveStride": "Q",
 }
 PATCHED_OPERANDS = (
     PLACEMENT_OPERAND  # every space declares alignments through tensor_patches
@@ -1488,12 +1529,18 @@ PADS = {
     "Matmul/Stride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 12, 16, 17, 31],
     "SdpaFwd/AsmStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
     "SdpaFwd/Gfx950DenseStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
+    "SdpaFwd/FlydslCdnaStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
+    "SdpaFwd/FlydslDecodeStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
+    "SdpaFwd/FlydslDualwaveStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
 }
 # pad_on value -> the uids of the tensors whose leading stride it pads
 PAD_ON_UIDS = {
     "Matmul/Stride": {"a": {1}, "b": {2}, "c": {0}, "all": {0, 1, 2}},
     "SdpaFwd/AsmStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
     "SdpaFwd/Gfx950DenseStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
+    "SdpaFwd/FlydslCdnaStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
+    "SdpaFwd/FlydslDecodeStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
+    "SdpaFwd/FlydslDualwaveStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
 }  # fmt: skip
 
 
@@ -3268,6 +3315,9 @@ GFX950_DENSE_TOML = (
     / "config"
     / "hipkernel_Gfx950AttentionDense.toml"
 )
+FLYDSL_SDPA_TOML = (
+    TESTS_ROOT.parent / "hip-kernel-provider" / "config" / "hipkernel_flydsl_sdpa.toml"
+)
 
 
 def _toml_validator(config, test_name, tensor):
@@ -3372,6 +3422,18 @@ def test_the_sdpa_forward_output_tolerance_reaches_fuzz_cases_only(run):
             GFX950_DENSE_TOML,
             "SdpaFwd/Gfx950Dense",
             {"bfloat16": expected_tolerance, "half": expected_tolerance},
+        ),
+        *(
+            (
+                FLYDSL_SDPA_TOML,
+                space_id,
+                {"bfloat16": expected_tolerance, "half": expected_tolerance},
+            )
+            for space_id in (
+                "SdpaFwd/FlydslCdna",
+                "SdpaFwd/FlydslCdnaDecode",
+                "SdpaFwd/FlydslDualwave",
+            )
         ),
     ):
         if not toml_path.is_file():

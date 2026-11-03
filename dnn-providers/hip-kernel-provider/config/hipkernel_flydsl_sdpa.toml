@@ -1,0 +1,64 @@
+# Integration test configuration for the FlyDSL CDNA SDPA forward engines:
+# hipkernel:flydsl_sdpa_cdna, hipkernel:flydsl_sdpa_cdna_decode and
+# hipkernel:flydsl_sdpa_cdna_dualwave (the three share this file: their packs are
+# FlydslSdpaCdna*Native.cpp over FlydslSdpaCdnaCommon.hpp, one graph matcher registered under
+# each engine's symbol). Filters use GTest-style globs: * matches any sequence of characters
+#
+# This file is for the gauntlet fuzz runs (`--test-config`). The CTest lanes of the FlyDSL
+# engines are generated into the build tree by hip-kernel-provider/src/CMakeLists.txt, one
+# TOML per engine and architecture, and carry no tolerance override.
+
+[meta]
+version = 1
+
+# No [[test_skips]] entry: the shipped descriptors name the architectures each engine serves
+# (the dual-wave one gfx950 only), and the packs arch-prune before the matcher, so another
+# device declines through the ordinary path. An entry cannot express "skip everywhere except
+# gfx950" -- the schema has no negation, and an empty `archs` list means EVERY arch
+# (TestSettings.hpp: `entry.archs.empty() || ...`), so a skip written that way would silence
+# gfx950 too.
+
+# -- Validator Overrides --
+# Change which comparison an output tensor is graded by (see TestSettings.hpp for the schema).
+# allclose is the default everywhere.
+#
+# SdpaFwd output O, gauntlet suites only (`*gauntlet*`; the quick bundles keep the common
+# allclose tolerance, tol::sdpa::getToleranceFwd<T>() = 1e-2). The fuzz spaces of these
+# engines (SdpaFwd/FlydslCdna, SdpaFwd/FlydslCdnaDecode, SdpaFwd/FlydslDualwave) do not narrow
+# V under the wide and large domains; O is graded per element as |impl - ref| <= atol + rtol *
+# |ref| with its own atol and rtol, the entry of hipkernel_Gfx950AttentionDense.toml.
+#
+# atol covers the rounding of P. A flash-attention kernel with 16-bit MFMA inputs rounds the
+# softmax weights P to the input type before the P.V product ([INFERENCE] for these kernels:
+# their source is not read here), a relative error of at most the unit roundoff u of the
+# rounding type, 2^-8 for bfloat16, so O_i = sum_j P_j V_j is off by at most u * sum_j P_j |V_j| <=
+# u * max|V|, whatever |O_i| is (a cancelling sum leaves O_i far below that). max|V| is 8
+# (wide draws +-8, large draws 4 to 8 in magnitude), so atol = 2^-8 * 8 = 0.03125. This is the
+# derivation of the Gfx950AttentionDense entry, which probed 2000 samples on gfx950 (the
+# largest error that did not scale with |O| was 0.0186 there); it has NOT been measured on
+# these kernels. A split-KV decode object merges its partial results through the log-sum-exp,
+# which may add a rounding the dense kernel does not have ([INFERENCE]), and the 1.7 percent
+# of |O| the dense probe saw as the softmax error is the margin rtol relies on: a run on
+# gfx950 that fails near the tolerance is a finding to size, not a defect to hide.
+# rtol covers what does scale with |O|: rounding O to the dtype (one ulp, at most 2^-7 of |O|
+# for bfloat16, 2^-10 for half) and the softmax error, so rtol = 2^-5 = 0.03125 for both
+# dtypes. Subnormal and all-zero outputs pass by atol (the largest half subnormal is 6.1e-5,
+# bfloat16 1.2e-38). A wrong softmax or a missing kv block is an error of order |O|, which the
+# tolerance fails wherever |O| exceeds a few hundredths; it cannot see an O below atol, as
+# the common tolerance of 1e-2 could not. The log-sum-exp output (`stats`) and the inputs
+# keep the common tolerance. The patterns carry the dtype tag the fuzz driver puts in the
+# suite (`gauntlet_SdpaFwd_FlydslCdna_fp16_cases.s7`); `_fp16_` does not match `_bfp16_`, so
+# both entries are written out.
+[[validator_overrides]]
+filters = ["*gauntlet*SdpaFwd*_bfp16_*"]
+tensors = ["*::O"]
+validator = "allclose"
+atol = 3.125e-2
+rtol = 3.125e-2
+
+[[validator_overrides]]
+filters = ["*gauntlet*SdpaFwd*_fp16_*"]
+tensors = ["*::O"]
+validator = "allclose"
+atol = 3.125e-2
+rtol = 3.125e-2

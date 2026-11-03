@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "Probe-only evidence for hipkernel:flydsl_sdpa_cdna (the generic MFMA prefill objects) on a padded leading stride, crossed with the declared alignment: BSHD or BHSD (layout), a small shape set, and a `pad` (0 to 31 elements) added to the row stride of the tensors `pad_on` names (q, k, v, o, or all four); the row stride is the stride between two consecutive sequence positions, in elements. BHSD: the row stride is the head size plus pad, and the head and batch strides grow with it. BSHD: the row stride is heads * head size plus pad and the head stride stays the head size, so a head's vector stays contiguous and only the rows are spread apart, the way a slice of a larger activation looks. The `pad` elements after a row are gap elements that belong to no element. `pad` takes 0 (packed), 1, 2, 3, 4, 5 and 7 (below or off a 16-byte vector of 8 half or bfloat16 elements), 8, 16 and 24 (16-byte multiples), and 9, 15, 17 and 31 (break the vector width). It is crossed with the declared alignment of Q, K, V and O (tensor_patches on uids 1, 0, 3, 2) and with the placement of the device pointers, as in Matmul/Align and SdpaFwd/Flash2: exact puts every device pointer at exactly the declared alignment, under misaligns Q below it (a PASS then means the backend rejected the pointer), default leaves the pointers where they are; under drawn at alignment 1 is rendered as exact. The FlyDSL CDNA kernels take every operand's batch, sequence and head strides as runtime arguments (not the fixed layouts of the rocKE dense kernel), so a padded row stride is a layout they can serve: servableStrides accepts a stride that is a positive multiple of 8 elements (the rows move as 16-byte vectors) with the head-dim stride 1 and the row stride at least the head size, and declines every other pad; the shared graph matcher also needs 16 bytes of declared alignment from Q, K, V and O. No mask, no stats, no bias; only strides, alignment and placement vary, the input fill stays at its default range. pad_on has no effect at pad 0, so every pad_on but 'all' is illegal there. `expect` is `declined` where the code says the graph cannot be served (a pad that is not a multiple of 8, a declared alignment below 16) and `declined_or_pass` elsewhere, where the engine may take it and then must be right: WRONG or CRASH on a padded stride is the finding. Every claim is what the pack code says; no case of this space had been run on a device when it was written. The shapes are the head sizes the engine serves, 64, 128 and 256 (exact objects) and 96 (a qkm1 object); with the padding on K or V alone (pad_on k or v) K's strides and V's differ, the graph needs an object that reads V through strides of its own, and only the qk_mask (qkm1) objects do (matcher: vOwnStrides), which the catalog ships for these head sizes without a mask, so the engine still serves them.",
+  "engine": "hipkernel:flydsl_sdpa_cdna",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "dtype": {"values": ["bfloat16", "half"]},
+    "layout": {"values": ["bshd", "bhsd"]},
+    "b": {"values": [1, 2]},
+    "hkv": {"values": [1, 2]},
+    "group": {"values": [1, 4]},
+    "sq": {"values": [16, 64, 128]},
+    "skv": {"values": [16, 64, 128]},
+    "d": {"values": [64, 96, 128, 256]},
+    "pad": {"values": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31]},
+    "pad_on": {"values": ["q", "k", "v", "o", "all"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "hq": "hkv * group",
+    "dims_q": "[b, hq, sq, d]",
+    "dims_kv": "[b, hkv, skv, d]",
+    "pad_q": "pad if pad_on in ['q', 'all'] else 0",
+    "pad_k": "pad if pad_on in ['k', 'all'] else 0",
+    "pad_v": "pad if pad_on in ['v', 'all'] else 0",
+    "pad_o": "pad if pad_on in ['o', 'all'] else 0",
+    "row_q": "(hq*d if layout == 'bshd' else d) + pad_q",
+    "row_k": "(hkv*d if layout == 'bshd' else d) + pad_k",
+    "row_v": "(hkv*d if layout == 'bshd' else d) + pad_v",
+    "row_o": "(hq*d if layout == 'bshd' else d) + pad_o",
+    "stride_q": "[sq*row_q, d, row_q, 1] if layout == 'bshd' else [hq*sq*row_q, sq*row_q, row_q, 1]",
+    "stride_k": "[skv*row_k, d, row_k, 1] if layout == 'bshd' else [hkv*skv*row_k, skv*row_k, row_k, 1]",
+    "stride_v": "[skv*row_v, d, row_v, 1] if layout == 'bshd' else [hkv*skv*row_v, skv*row_v, row_v, 1]",
+    "stride_o": "[sq*row_o, d, row_o, 1] if layout == 'bshd' else [hq*sq*row_o, sq*row_o, row_o, 1]",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "pad > 0 or pad_on == 'all'", "reason": "pad_on names no tensor when pad is 0: every pad_on would render the same packed graph"}
+  ],
+  "expect": "${'declined' if (pad % 8 != 0 or alignment < 16) else 'declined_or_pass'}",
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_kv}", "strides": "${stride_k}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_q}", "strides": "${stride_o}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_kv}", "strides": "${stride_v}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": 0.0883883461356163,
+        "attributes__diagonal_alignment": "TOP_LEFT",
+        "attributes__right_bound": "${None}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}
