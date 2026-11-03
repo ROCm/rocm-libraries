@@ -1244,6 +1244,8 @@ def _spec(idx: int):
         return _tf32_spec(idx)
     if 67 <= idx <= 70:
         return _split_k_cshuffle_spec(idx)
+    if idx >= 57 + _GFX942_3D_OFFSET:
+        return _gfx942_3d_any(idx - _GFX942_3D_OFFSET)
 
     raise SystemExit(f"unknown config index {idx}")
 
@@ -1391,6 +1393,72 @@ def _split_k_cshuffle_spec(idx: int):
     )
     base.update(kw)
     return DgradConvSpec(**base), "gfx950"
+
+
+# gfx942 3-D (NDHWC) tap-outer configs on the grouped 3x3x3 / pad-1 problem
+# the AOT cache builds its dgrad binaries against: (tile, overrides). Keep in
+# lockstep with make_cfg_3d() in conv_implicit_gemm_dgrad_emit.c. The numbers
+# below are _gfx942_3d_any's own; it serves parity config N as its config
+# N - _GFX942_3D_OFFSET (they follow the split-K cshuffle configs, which end
+# at 70).
+#   57: t128x256x64 w2x4 cshuffle, the plain tap-outer loop
+#   58: 57 + tapk_prefetch 1, b_kpack 4, xcd_remap 6
+#   59: 57 + tapk_prefetch 3, b_kpack 4
+#   60: t256x64x32 w4x1 + tapk_prefetch 3, b_kpack 2, xcd_remap 6, wpe2
+#   61: 60 with tapk_prefetch 2 (two LDS buffers)
+#   62: 60 with tapk_prefetch 1, no b_kpack, fp16
+#   63: 58 on the 2-D problem
+#   64: 58 ungrouped (groups 1; xcd_remap also serves it)
+#   65: 57 with pad (0, 1, 1)
+_GFX942_3D = {
+    57: ("s6", {}),
+    58: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
+    59: ("s6", dict(tapk_prefetch=3, b_kpack=4)),
+    60: ("s1", dict(tapk_prefetch=3, b_kpack=2, xcd_remap=6, waves_per_eu=2)),
+    61: ("s1", dict(tapk_prefetch=2, b_kpack=2, xcd_remap=6, waves_per_eu=2)),
+    62: ("s1", dict(tapk_prefetch=1, xcd_remap=6, waves_per_eu=2)),
+    63: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
+    64: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
+    65: ("s6", {}),
+}
+
+
+def _gfx942_3d_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    tile, kw = _GFX942_3D[idx]
+    groups = 1 if idx == 64 else 2
+    pad_d = 0 if idx == 65 else 1
+    if idx == 63:
+        p = ConvProblem(N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=groups)
+    else:
+        p = ConvProblem(
+            N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
+            sD=1, sH=1, sW=1, pD=pad_d, pH=1, pW=1, dD=1, dH=1, dW=1, groups=groups,
+        )
+    dt = "fp16" if idx == 62 else "bf16"
+    base = dict(
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        vector_size_a=8, vector_size_b=8, vector_size_c=8,
+        lds_k_pad=0, pipeline="mem", epilogue="cshuffle", tap_outer_k=True,
+    )
+    if tile == "s6":
+        base.update(tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4)
+    else:
+        base.update(tile_m=256, tile_n=64, tile_k=32, warp_m=4, warp_n=1)
+    base.update(kw)
+    data = ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
+    return DgradConvSpec(problem=p, data=data, **base), "gfx942"
+
+
+_GFX942_3D_OFFSET = 14
+
+
+def _gfx942_3d_any(idx: int):
+    """The gfx942 3-D configs below by their own number (from 57)."""
+    if idx in _GFX942_3D:
+        return _gfx942_3d_spec(idx)
+    raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
 
 
 def main() -> int:

@@ -137,8 +137,87 @@ static int make_cfg_split_k_cshuffle(int idx, rocke_dgrad_conv_spec_t* spec, con
     return 0;
 }
 
+/* gfx942 3-D tap-outer configs; mirrors _GFX942_3D in the Python emitter (the
+ * table is there). make_cfg_3d numbers them from 57; parity config N is its
+ * config N - GFX942_3D_OFFSET (they follow the split-K cshuffle configs, which
+ * end at 70). */
+#define GFX942_3D_OFFSET 14
+
+static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_dgrad_conv_spec_default();
+    *arch = "gfx942";
+    if(idx == 63)
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+    else
+        spec->problem = rocke_conv_problem_make_3d(
+            1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, idx == 65 ? 0 : 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = idx == 64 ? 1 : 2;
+    const char* dt = idx == 62 ? "fp16" : "bf16";
+    spec->dtype_a = dt;
+    spec->dtype_b = dt;
+    spec->dtype_d = dt;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->has_lds_k_pad = true;
+    spec->lds_k_pad = 0;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->tap_outer_k = true;
+    const bool s1 = idx >= 60 && idx <= 62;
+    if(s1)
+    {
+        spec->tile_m = 256;
+        spec->tile_n = 64;
+        spec->tile_k = 32;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->xcd_remap = 6;
+        spec->has_waves_per_eu = true;
+        spec->waves_per_eu = 2;
+        spec->tapk_prefetch = idx == 60 ? 3 : idx == 61 ? 2 : 1;
+        spec->b_kpack = idx == 62 ? 0 : 2;
+        return 0;
+    }
+    spec->tile_m = 128;
+    spec->tile_n = 256;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 4;
+    if(idx == 58 || idx == 63 || idx == 64)
+    {
+        spec->tapk_prefetch = 1;
+        spec->b_kpack = 4;
+        spec->xcd_remap = 6;
+    }
+    if(idx == 59)
+    {
+        spec->tapk_prefetch = 3;
+        spec->b_kpack = 4;
+    }
+    return 0;
+}
+
+/* The gfx942 3-D configs by their own number (from 57); mirrors
+ * _gfx942_3d_any() in the Python emitter. */
+static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    if(idx >= 57 && idx <= 65)
+        return make_cfg_3d(idx, spec, arch);
+    return -1;
+}
+
 static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx >= 57 + GFX942_3D_OFFSET)
+        return make_cfg_3d_any(idx - GFX942_3D_OFFSET, spec, arch);
     *spec = rocke_dgrad_conv_spec_default();
     spec->tile_m = 64;
     spec->tile_n = 64;

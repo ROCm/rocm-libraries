@@ -401,6 +401,11 @@ typedef struct rocke_conv_build_ctx
     int wg_b_buf_rows;
     rocke_value_t* wg_xw_nb0;
     int wg_xw_nsub;
+    /* dgrad 3-D kernargs (Python params, is_3d). */
+    rocke_value_t* p_W_stride_z;
+    rocke_value_t* p_magic_m_Di_mult;
+    rocke_value_t* p_magic_m_Di_shift;
+    rocke_value_t* p_dX_stride_di;
     void* wg_inc;
     /* wgrad emit_mfma_phase a_row_off / b_row_off (prefetch_regs=2), NULL off. */
     rocke_value_t* wg_a_row_off;
