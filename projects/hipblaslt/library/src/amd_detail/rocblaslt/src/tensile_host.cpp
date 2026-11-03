@@ -8097,10 +8097,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                    0,
                    sizeof(rocblaslt_matmul_heuristic_result) * requestedAlgoCount);
         *returnAlgoCount = 0;
+        // No solution, reported as for any other problem nothing serves: success
+        // with zero algorithms, without asking the Tensile heuristic.
         if(packedMustUseRocRoller(handle, prob))
         {
             logNoRocRollerKernel(__func__);
-            return rocblaslt_status_not_implemented;
+            return rocblaslt_status_success;
         }
     }
 
@@ -8930,7 +8932,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
             if(packedMustUseRocRoller(handle, *data->rocProblem))
             {
                 logNoRocRollerKernel(__func__);
-                return rocblaslt_status_not_implemented;
+                return rocblaslt_status_success;
             }
         }
 
