@@ -37,7 +37,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running " << variant.str()
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 1;
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 1;
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16;
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 4;
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 4;

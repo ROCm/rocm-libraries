@@ -54,7 +54,7 @@ TEST_F(TestCudnnCompatibilityV8NoexceptEngines, EarlyBuildFailureLeavesNullRawDe
 // As upstream, a failed knob query is recorded on an engine that keeps its descriptor.
 TEST_F(TestCudnnCompatibilityV8NoexceptEngines, KnobReadFailureKeepsEngine)
 {
-    fe::OperationGraph graph = convGraph();
+    const fe::OperationGraph graph = convGraph();
     ASSERT_GT(graph.getEngineCount(), 0);
     ON_CALL(*_mockBackend,
             backendGetAttribute(::testing::_,

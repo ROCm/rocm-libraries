@@ -125,7 +125,7 @@ TEST_F(TestCudnnCompatibilityV8EngineBuilders, GlobalIndexPastEngineCountNotSupp
 // As upstream, a failed knob query fails the build, after the engine itself was created.
 TEST_F(TestCudnnCompatibilityV8EngineBuilders, KnobReadFailureFailsBuild)
 {
-    fe::OperationGraph_v8 graph = convGraph();
+    const fe::OperationGraph_v8 graph = convGraph();
     ASSERT_GT(graph.getEngineCount(), 0);
     ON_CALL(*_mockBackend,
             backendGetAttribute(::testing::_,
