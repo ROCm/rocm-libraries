@@ -44,6 +44,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `LocalMatrix::Check()` on the host accepting CSR column indices equal to the number of columns and values of minus infinity, and rejecting complex matrices with a stored zero.
 * Fixed `LocalVector::Check()` on the host rejecting integer and complex vectors with a zero entry, and accepting complex vectors with an infinite entry.
 * Fixed `LocalVector::SetRandomUniform()` on the host setting every entry of an integer vector to the lower bound. Integer vectors now get values uniformly distributed from the lower to the upper bound.
+* Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the host limiting the second triangular solve to the iterations of the first one.
 
 ## (Unreleased) rocALUTION 4.1.1
 

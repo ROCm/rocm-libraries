@@ -1614,8 +1614,12 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // host_csritsv_solve overwrites the limit with the iterations it ran
+            int max_iter_L = max_iter;
+            int max_iter_U = max_iter;
+
             // Solve L
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_L,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1642,7 +1646,7 @@ namespace rocalution
             }
 
             // Solve U
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_U,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1805,8 +1809,12 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // host_csritsv_solve overwrites the limit with the iterations it ran
+            int max_iter_L  = max_iter;
+            int max_iter_LT = max_iter;
+
             // Solve L
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_L,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1833,7 +1841,7 @@ namespace rocalution
             }
 
             // Solve Lt
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_LT,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_transpose,

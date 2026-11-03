@@ -909,11 +909,6 @@ TYPED_TEST(matrix_csr, iterative_lu_solve_of_an_upper_triangular_matrix)
     auto in  = make_vector(TypeParam::backend, b);
     auto out = make_vector(TypeParam::backend, std::vector<T>(U.n, T(0)));
 
-    if(TypeParam::backend == Backend::Host)
-    {
-        KNOWN_BUG("the iteration count of the L solve becomes the limit of the U solve");
-    }
-
     A->ItLUAnalyse();
     ASSERT_TRUE(A->ItLUSolve(100, 1e-14, true, *in, out.get()));
     A->ItLUAnalyseClear();
@@ -943,12 +938,6 @@ TYPED_TEST(matrix_csr, iterative_ll_solve)
     ASSERT_NE(A, nullptr);
     auto in  = make_vector(TypeParam::backend, b);
     auto inv = make_vector(TypeParam::backend, inv_diag);
-
-    // Float does not reach 1e-14, so both solves run to the limit and the bug does not show
-    if(TypeParam::backend == Backend::Host && !std::is_same_v<T, float>)
-    {
-        KNOWN_BUG("the iteration count of the L solve becomes the limit of the L^T solve");
-    }
 
     A->ItLLAnalyse();
 
