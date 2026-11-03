@@ -776,6 +776,14 @@ protected:
             ASSERT_EQ(hipMalloc(&_workspace, static_cast<size_t>(workspaceSize)), hipSuccess);
             _workspaceSize = static_cast<size_t>(workspaceSize);
         }
+        if(_workspace != nullptr)
+        {
+            // _workspace (ws_t/ws_coa) is reused, never reallocated, across every instance
+            // this harness runs in a test process: an MFMA instance's transpose/reorganize
+            // under-writing it would otherwise read a previous sibling's correct weights
+            // and pass. 0xFF bytes are NaN in both fp16 and bf16.
+            ASSERT_EQ(hipMemsetAsync(_workspace, 0xFF, _workspaceSize, _stream), hipSuccess);
+        }
         // Every dX element the kernel does not write stays NaN and fails the comparison.
         reference.gpu->getTensor(DX_UID).fillWithSentinelValue();
         auto buffers = reference.gpu->toDeviceVariantPack();
