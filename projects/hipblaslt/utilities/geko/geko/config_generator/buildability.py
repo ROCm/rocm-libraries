@@ -349,8 +349,12 @@ class CodegenChecker:
                 del fork[k]
         for k in fork:
             self.constant.pop(k, None)
-        wavefront = (fork.get("WavefrontSize") or [self.constant.get("WavefrontSize", 64)])[0]
-        return TuningSpace(config_path, fork, groups, mi_group, int(wavefront))
+        wavefront = int((fork.get("WavefrontSize") or [self.constant.get("WavefrontSize", -1)])[0])
+        if wavefront == -1:  # auto, resolved as TensileLite does (SolutionStructs/Solution.py): wave32 if the ISA has it
+            from tensilelite.Common.Architectures import gfxToIsa
+
+            wavefront = 32 if self.isa_info[gfxToIsa(self.arch)].archCaps["HasWave32"] else 64
+        return TuningSpace(config_path, fork, groups, mi_group, wavefront)
 
     def _initialised(self, perm: Dict[str, Any], buf: io.StringIO):
         """Validate ``perm`` and set up its kernel writer, as Ductile's ``_validate_solution`` does without code
