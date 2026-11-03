@@ -69,15 +69,15 @@ field on the tiled kernel specs is a declared `KnobAxis` in `axes.py`
 (`_GFX950_2D_AXES`, `_GFX942_2D_AXES`, `_3D_AXES`); `test_tuning_space.py`
 fails if a kernel field is on no axis. Axes are ordered prerequisites-first,
 and the space is walked depth-first with the kernel's own spec validator
-pruning illegal prefixes, plus `UnifiedSpace.validate` on gfx950 2D (the LDS
-budget and the padded-K / aliased-Q rule, which the tiled 2D validator does
-not model). There is no size cap: the full space is millions of
-specs per shape on the transposed paths, so `sweep_space` is a lazy stream and
-`sample_space(req, n, seed)` draws `n` random legal specs per candidate. Held
-out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They reject
-any request that does not pin both `algorithm="unified_tuning"` and their own
-`spec_id` before constructing a spec, so normal dispatch does not pay the
-enumeration cost and the historical winner is unchanged. Sweeps probe them
+pruning illegal prefixes (on gfx950 2D it refuses a padded K slot that holds
+Q), plus `UnifiedSpace.validate` on gfx950 2D (the LDS budget, which the tiled
+2D validator does not model). There is no size cap: the full space is millions
+of specs per shape on the transposed paths, so `sweep_space` is a lazy stream
+and `sample_space(req, n, seed)` draws `n` random legal specs per candidate.
+Held out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They
+reject any request that does not pin both `algorithm="unified_tuning"` and
+their own `spec_id` before constructing a spec, so normal dispatch does not pay
+the enumeration cost and the historical winner is unchanged. Sweeps probe them
 through `opt_in_probe` and execute the returned `AttentionTuningSpec`, which
 also owns its build, cache key, and launch grid.
 

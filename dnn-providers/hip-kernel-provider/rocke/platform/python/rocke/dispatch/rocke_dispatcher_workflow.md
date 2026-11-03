@@ -194,7 +194,7 @@ setting fit, so the walk keeps going past a failure until those are decided.
 | Refuse | Settings that must never be built are rejected with a reason. | A knob known to give wrong answers; a field that is not a knob; changing a value the variant fixes. |
 | Build | The family builds the kernel spec; the kernel's own checks run. | An unsupported tile size is refused here. |
 | Drop no-ops | Knobs that compile to the same kernel as leaving them out are removed. | A value equal to the default; a padded-K layout the kernel turns off. |
-| Validate | The family's final legality check. | On gfx950 2D attention: the kernel would need more LDS than the chip has, or a padded K buffer that Q shares (this gave wrong output on MI355X). |
+| Validate | The family's final legality check. | On gfx950 2D attention: the kernel would need more LDS than the chip has. (A padded K buffer that Q shares, which gave wrong output on MI355X, is refused earlier, in Build.) |
 | Name it | The remaining knobs are hashed into `config_key`, and the family's `stem` adds the readable part of `tuning_id`. | `transposed32_nw2_mw32_t2xb_hipcc_wpenone@dc4ec33bb0fe3416` |
 
 Dropping no-ops is what keeps "one kernel, one id": two different-looking knob
