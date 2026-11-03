@@ -17,7 +17,7 @@ import unittest
 
 import pytest
 from rocke.runtime.comgr import CompilerInfo
-from rocke.runtime.compiler_options import lookup, require_accepted
+from rocke.runtime.compiler_options import measured_answers, require_accepted
 
 from ._compiler_test_utils import (
     REQUIRE_COMPILER_TOOLS_ENV,
@@ -51,24 +51,18 @@ def _compile_on(llvm_major: int) -> None:
     )
 
 
-# The LLVM majors the helpers below search the table for.
-_CANDIDATE_MAJORS = range(1, 1000)
-
-
 def _refusing_major() -> int:
     """An LLVM major the table records as refusing ``OPTION``."""
     return next(
         major
-        for major in _CANDIDATE_MAJORS
-        if (answer := lookup(OPTION, major)) is not None and not answer.accepted
+        for major, answer in measured_answers()[OPTION].items()
+        if not answer.accepted
     )
 
 
 def _unmeasured_major() -> int:
     """An LLVM major newer than every one the table has an answer for."""
-    return 1 + max(
-        major for major in _CANDIDATE_MAJORS if lookup(OPTION, major) is not None
-    )
+    return 1 + max(measured_answers()[OPTION])
 
 
 def test_refused_option_skips(monkeypatch):

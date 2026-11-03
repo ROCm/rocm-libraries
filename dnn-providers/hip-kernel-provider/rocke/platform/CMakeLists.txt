@@ -517,6 +517,11 @@ if(ROCKE_INSTALL_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
 
+    # Test-only copy of the compiler-option measurement tool for the installed
+    # reproduction gate below; the table it checks is package data.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_compiler_options.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/compiler_options")
+
     # This GPU test lives alongside its benchmark helpers in the Python package.
     # Stage it under tests/ so rocke_pytest collects it in both install layouts.
     install(FILES
@@ -608,6 +613,20 @@ if(ROCKE_INSTALL_TESTS)
            "  RUN_SERIAL TRUE\n"
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT 1800)\n")
+
+    # Re-measure which -mllvm options the loaded compiler accepts and fail when
+    # its committed column in compiler_options.json differs or is missing. The
+    # build-tree twin is in tests/cmake/CoreTests.cmake. It fails rather than
+    # skips without a queryable COMGR: every lane that runs it compiles. Like
+    # the arch-domain entry above it only loads COMGR, so it needs neither the
+    # compiler tools nor the compiler-check requirement.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_compiler_options_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/compiler_options/gen_compiler_options.py\" --check)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_compiler_options_reproducibility PROPERTIES\n"
+           "  LABELS \"ckc;python;host;toolchain;generated-artifact;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+           "  TIMEOUT 600)\n")
 
     # The differential golden: every parity family's Python reference output,
     # LLVM IR at each LLVM flavor (the flavor is a lowering argument, so one host
@@ -864,10 +883,12 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 180)\n")
 
     # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
-    # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
-    # shared read-ahead helper. The prefill occupancy / agpr_acc guards compile
+    # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, the
+    # shared read-ahead helper, and the compile-test skip policy. The prefill
+    # occupancy / agpr_acc guards compile
     # through comgr and read the code object with llvm-objdump, so the entry also
-    # takes the compiler environment; with it they fail rather than skip. Same
+    # takes the compiler environment; with it they fail rather than skip, and the
+    # skip-policy tests check that they do. Same
     # PYTHONPATH contract as the conv entry above; the staged library tree carries
     # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
     # tests/golden/mla_prefill_gfx942_ir_sha256.json.
@@ -877,7 +898,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_mla_prefill_gfx942_golden.py"
         "tests/library/tests/test_mla_reference.py"
         "tests/library/tests/test_mla_benchmark_shapes.py"
-        "tests/library/tests/test_read_ahead.py")
+        "tests/library/tests/test_read_ahead.py"
+        "tests/library/tests/test_compiler_test_utils.py")
     set(_ROCKE_LIBRARY_MLA_TESTS "")
     foreach(_rocke_mla_test ${_ROCKE_LIBRARY_MLA_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_MLA_TESTS

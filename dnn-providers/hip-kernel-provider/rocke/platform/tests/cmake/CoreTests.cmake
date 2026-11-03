@@ -31,10 +31,23 @@ if(BUILD_TESTING)
         SKIP_RETURN_CODE 77
         TIMEOUT 1800
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+    # The committed column of compiler_options.json for the loaded compiler,
+    # re-measured. The installed manifest registers the same gate.
+    add_test(
+      NAME rocke_compiler_options_reproducibility
+      COMMAND "${Python3_EXECUTABLE}" -u
+              "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_compiler_options.py"
+              --check)
+    set_tests_properties(
+      rocke_compiler_options_reproducibility
+      PROPERTIES
+        LABELS "ckc;python;host;toolchain;generated-artifact;standard"
+        TIMEOUT 600
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
   else()
     message(WARNING
-            "rocKE: Python3 interpreter not found; arch-domain reproducibility "
-            "CTest is not registered")
+            "rocKE: Python3 interpreter not found; arch-domain and "
+            "compiler-option reproducibility CTests are not registered")
   endif()
 
   # The binding consumes Python-built IR; this binary exercises the independent

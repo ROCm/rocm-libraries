@@ -12,7 +12,8 @@ The answers are measured, never assumed from a version number:
 COMGR in a child process, once per option, and records in
 ``data/compiler_options.json`` whether that compiler accepted it. A host can
 only measure its own compiler, so the table has one column per LLVM major
-version measured. This module is the only reader.
+version measured. This module is the only reader and writer of that file's
+format (:func:`parse_table`, :func:`format_table`); the tool only measures.
 
     data/compiler_options.json
       options
@@ -31,12 +32,25 @@ from __future__ import annotations
 
 import functools
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from .comgr import CompilerInfo
+
+__all__ = [
+    "SCHEMA",
+    "TABLE_PATH",
+    "Answer",
+    "CompilerOptionNotAccepted",
+    "backend_options",
+    "format_table",
+    "lookup",
+    "measured_answers",
+    "parse_table",
+    "require_accepted",
+]
 
 SCHEMA = "rocke.compiler_options/v1"
 
@@ -65,7 +79,7 @@ class Answer(NamedTuple):
     verified_on: str
 
 
-def backend_options(options: Sequence[str]) -> tuple:
+def backend_options(options: Sequence[str]) -> tuple[str, ...]:
     """The LLVM backend option names in a COMGR option list, in order.
 
     COMGR takes a backend option in two spellings, ``-mllvm <option>`` and
@@ -93,35 +107,96 @@ def backend_options(options: Sequence[str]) -> tuple:
     return tuple(names)
 
 
-@functools.cache
-def _table() -> dict:
-    doc = json.loads(TABLE_PATH.read_text(encoding="utf-8"))
-    if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
+def _parse_answer(cell: object, *, where: str) -> Answer:
+    """One ``{accepted, evidence, verified_on}`` cell, with its types checked.
+
+    The types are checked rather than coerced: ``bool("false")`` is ``True``,
+    so a hand-edited ``"accepted": "false"`` would otherwise read as accepted.
+    A wrong type here is a bad value in the file, not a bad argument, so it is
+    a ``ValueError`` like every other table error (hence the ``noqa``).
+    """
+    if not isinstance(cell, dict) or set(cell) != set(Answer._fields):
         raise ValueError(
-            f"{TABLE_PATH} is not a {SCHEMA} table; regenerate it with {_MEASURE_TOOL}"
+            f"compiler option table: {where} must be an object with exactly the "
+            f"keys {', '.join(Answer._fields)}, got {cell!r}"
+        )
+    answer = Answer(**cell)
+    if not isinstance(answer.accepted, bool):
+        raise ValueError(  # noqa: TRY004
+            f"compiler option table: {where} accepted={answer.accepted!r}, "
+            "expected true or false"
+        )
+    if not isinstance(answer.evidence, str) or not isinstance(answer.verified_on, str):
+        raise ValueError(  # noqa: TRY004
+            f"compiler option table: {where} evidence={answer.evidence!r} and "
+            f"verified_on={answer.verified_on!r}, expected strings"
+        )
+    return answer
+
+
+def parse_table(text: str) -> dict[str, dict[int, Answer]]:
+    """Read a ``compiler_options.json`` document: option -> LLVM major -> answer.
+
+    Raises ``ValueError`` naming the offending entry when the document is not
+    a :data:`SCHEMA` table or an entry has the wrong shape or type.
+    """
+    doc = json.loads(text)
+    schema = doc.get("schema") if isinstance(doc, dict) else None
+    if schema != SCHEMA:
+        raise ValueError(
+            f"compiler option table: schema={schema!r}, expected {SCHEMA!r}; "
+            f"regenerate it with {_MEASURE_TOOL}"
         )
     options = doc.get("options")
     if not isinstance(options, dict):
-        raise ValueError(f"{TABLE_PATH} has no `options` mapping")  # noqa: TRY004
-    return options
+        raise ValueError(  # noqa: TRY004
+            f"compiler option table: options={options!r}, expected an object "
+            "mapping each option to its measured LLVM majors"
+        )
+    answers: dict[str, dict[int, Answer]] = {}
+    for option, column in options.items():
+        if not isinstance(column, dict) or not all(major.isdigit() for major in column):
+            raise ValueError(
+                f"compiler option table: {option!r} has {column!r}, expected an "
+                "object keyed by LLVM major version"
+            )
+        answers[option] = {
+            int(major): _parse_answer(cell, where=f"{option!r} on LLVM {major}")
+            for major, cell in column.items()
+        }
+    return answers
 
 
-def measured_options() -> tuple:
-    """Every option the table has an answer for, in file order."""
-    return tuple(_table())
+def format_table(answers: Mapping[str, Mapping[int, Answer]]) -> str:
+    """The ``compiler_options.json`` text for ``answers``, as :func:`parse_table`
+    reads it: options in the given order, LLVM majors ascending."""
+    doc = {
+        "schema": SCHEMA,
+        "options": {
+            option: {
+                str(major): answer._asdict() for major, answer in sorted(column.items())
+            }
+            for option, column in answers.items()
+        },
+    }
+    return json.dumps(doc, indent=2) + "\n"
+
+
+@functools.cache
+def _table() -> dict[str, dict[int, Answer]]:
+    return parse_table(TABLE_PATH.read_text(encoding="utf-8"))
+
+
+def measured_answers() -> dict[str, dict[int, Answer]]:
+    """Every committed answer, option -> LLVM major -> :class:`Answer`, in file
+    order. The dictionaries are a fresh copy the caller may change."""
+    return {option: dict(column) for option, column in _table().items()}
 
 
 def lookup(option: str, llvm_major: int) -> Answer | None:
     """The measured answer for ``option`` on LLVM ``llvm_major``, or ``None``
     when that pair was never measured."""
-    cell = _table().get(option, {}).get(str(llvm_major))
-    if cell is None:
-        return None
-    return Answer(
-        accepted=bool(cell["accepted"]),
-        evidence=str(cell.get("evidence", "")),
-        verified_on=str(cell.get("verified_on", "")),
-    )
+    return _table().get(option, {}).get(llvm_major)
 
 
 def require_accepted(
@@ -161,7 +236,7 @@ def require_accepted(
             )
         if not answer.accepted:
             accepting = sorted(
-                int(m) for m, cell in _table()[name].items() if cell["accepted"]
+                major for major, cell in _table()[name].items() if cell.accepted
             )
             raise CompilerOptionNotAccepted(
                 f"{needed_by} needs the compiler option '-mllvm {name}', which the "
