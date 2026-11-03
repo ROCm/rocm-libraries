@@ -75,9 +75,10 @@ def test_a_call_to_a_nonexistent_intrinsic_is_rejected_at_link():
 
 
 def test_a_target_the_host_clang_does_not_know_cannot_be_judged():
+    # Only a host that can judge a known target can say why it cannot judge an
+    # unknown one; any other host skips with its own reason.
+    _verdict_or_skip(_VALID, "gfx90a")
     verdict, text = arbiter_verdict(_VALID, "gfx9999")
-    if verdict == "cannot_judge" and "no host clang" in text:
-        pytest.skip(text)
     assert (verdict, text) == ("cannot_judge", "host clang cannot target gfx9999")
 
 
