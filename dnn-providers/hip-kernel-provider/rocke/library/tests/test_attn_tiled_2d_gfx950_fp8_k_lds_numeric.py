@@ -33,6 +33,7 @@ from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.hip_module import get_device_arch
 
 from ._attention_device_array import DeviceArray
+from ._attn_tiled_2d_gfx950_qk_paths import FP8_K_IN_LDS, QK_PATHS
 
 _ARCH = get_device_arch()
 pytestmark = [
@@ -49,15 +50,6 @@ _K_SCALE = 0.75
 _V_SCALE = 1.25
 # bf16 output after fp8 K/V; the reference runs over the same dequantized values.
 _TOL = 4e-2
-
-# One spec per QK path that can hold fp8 K in LDS.
-_QK_PATHS = {
-    "16x16": dict(),
-    "32x32 non-transposed": dict(use_mfma_32x32=True, block_m_per_warp=32),
-    "32x32 transposed": dict(
-        use_mfma_32x32=True, use_transposed_qk_32x32=True, block_m_per_warp=32
-    ),
-}
 
 
 @pytest.fixture(scope="module")
@@ -134,9 +126,8 @@ def _tuning_spec(path, num_kv_blocks):
         sliding_window=0,
         has_softcap=False,
         tile_size=64,
-        kv_storage_dtype="fp8e4m3",
-        use_fp8_mfma_qk=True,
-        **_QK_PATHS[path],
+        **FP8_K_IN_LDS,
+        **QK_PATHS[path],
     )
     return AttentionTuningSpec(
         path="2d",
@@ -150,7 +141,7 @@ def _tuning_spec(path, num_kv_blocks):
     )
 
 
-@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+@pytest.mark.parametrize("path", sorted(QK_PATHS))
 def test_fp8_k_in_lds_matches_reference(rt, path):
     q, (k_bytes, k_values), (v_bytes, v_values), block_table = _inputs()
     num_kv_blocks = int(k_bytes.shape[0])
