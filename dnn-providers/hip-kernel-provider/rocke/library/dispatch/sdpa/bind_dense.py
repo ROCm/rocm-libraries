@@ -84,7 +84,7 @@ SDPA_DENSE_FEATURES = frozenset(
         "causal_br",
         "window",
         "window_br",
-        "window_right",
+        "noncausal_window",
         "lse",
         "mma_core_mode",
         "implementation_hint",

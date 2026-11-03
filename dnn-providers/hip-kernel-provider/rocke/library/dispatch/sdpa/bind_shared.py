@@ -55,9 +55,9 @@ def to_attention_request(req: SdpaRequest) -> AttentionRequest:
 
     ``SdpaRequest.left_bound`` / ``right_bound`` / ``diagonal`` are in the
     same cuDNN/hipDNN band vocabulary as ``AttentionRequest.right_bound`` /
-    ``diagonal_alignment``. The one adjustment is ``sliding_window``: it sees
-    W keys, while hipDNN ``left_bound = W`` keeps W + 1, so lower with
-    ``left_bound + 1``.
+    ``diagonal_alignment``, and hipDNN ``left_bound = L`` keeps the L keys
+    ending at the diagonal, which is what ``sliding_window = L`` sees, so the
+    left bound passes through unchanged.
     """
     features = req.features()
     if "causal_tl" in features:
@@ -81,7 +81,7 @@ def to_attention_request(req: SdpaRequest) -> AttentionRequest:
         arch=req.arch,
         dtype=req.dtype,
         mask_type=mask_type,
-        sliding_window=(req.left_bound + 1) if is_window and req.left_bound >= 0 else 0,
+        sliding_window=req.left_bound if is_window and req.left_bound > 0 else 0,
         right_bound=req.right_bound if is_window else -1,
         diagonal_alignment=(
             (1 if req.diagonal == "bottom_right" else 0) if is_window else None
@@ -96,8 +96,8 @@ def to_attention_request(req: SdpaRequest) -> AttentionRequest:
 
 
 def kept_keys(s_q: int, s_kv: int, top_left: bool, left: int, right: int):
-    """Per query row, the first and last key a hipDNN band keeps (``-1``
-    unbounded, ``left = W`` keeps W + 1 keys). A row that keeps no key is
+    """Per query row, the first and last key a band keeps (``-1`` unbounded;
+    ``left = W`` is FlashAttention's window and keeps W + 1 keys). A row that keeps no key is
     ``(0, -1)``, so two bands keep the same keys iff both arrays are equal.
 
     A band keeps one contiguous run of keys per row, so this is O(s_q) where
@@ -111,10 +111,10 @@ def kept_keys(s_q: int, s_kv: int, top_left: bool, left: int, right: int):
 
 
 def asked_band(req: SdpaRequest) -> AttentionBand:
-    """The band ``req`` names, in ``AttentionBand`` terms (``left_bound = W``
-    there sees W keys)."""
+    """The band ``req`` names, in ``AttentionBand`` terms (``left_bound = L``
+    keeps L keys there, as in hipDNN)."""
     return AttentionBand(
-        left_bound=None if req.left_bound < 0 else req.left_bound + 1,
+        left_bound=None if req.left_bound < 0 else req.left_bound,
         right_bound=None if req.right_bound < 0 else req.right_bound,
         alignment=(
             Alignment.TOP_LEFT if req.diagonal == "top_left" else Alignment.BOTTOM_RIGHT

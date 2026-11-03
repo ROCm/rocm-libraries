@@ -87,7 +87,7 @@ SDPA_UNIFIED_FEATURES = frozenset(
         "causal_br",
         "window",
         "window_br",
-        "window_right",
+        "noncausal_window",
         "padded",
         "ragged",
         "lse",

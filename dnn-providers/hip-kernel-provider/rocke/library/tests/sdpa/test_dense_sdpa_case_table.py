@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from rocke.dispatch.core import opt_in_probe
+from rocke.numeric.sdpa_reference import hipdnn_left_to_window
 
 from dispatch.attention import ATTENTION_ROUTE_REGISTRY
 from dispatch.sdpa.bind_dense import (
@@ -40,7 +41,11 @@ def _spec_keeps(spec, req):
     top_left = not getattr(spec, "causal_bottom_right", False)
     got = kept_keys(req.s_q, req.s_kv, top_left, window - 1 if window else -1, right)
     want = kept_keys(
-        req.s_q, req.s_kv, req.diagonal == "top_left", req.left_bound, req.right_bound
+        req.s_q,
+        req.s_kv,
+        req.diagonal == "top_left",
+        hipdnn_left_to_window(req.left_bound),
+        req.right_bound,
     )
     return all(np.array_equal(a, b) for a, b in zip(got, want))
 

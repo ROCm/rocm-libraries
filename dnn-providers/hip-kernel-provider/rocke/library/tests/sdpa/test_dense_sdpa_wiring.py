@@ -26,9 +26,15 @@ from dispatch.sdpa.common import (
     SdpaBias,
     SdpaDropout,
     SdpaFp8,
-    SdpaPaged,
 )
-from tests.sdpa.request_cases import bhsd, bshd, make_request, packed, ragged_offset
+from tests.sdpa.request_cases import (
+    bhsd,
+    bshd,
+    make_request,
+    packed,
+    paged,
+    ragged_offset,
+)
 
 ARCHES = ("gfx942", "gfx950")
 S = 256
@@ -94,7 +100,7 @@ _DECLINED_CASES = {
         o=_ragged(_BASE.o),
     ),
     "dropout": replace(_BASE, dropout=SdpaDropout(0.1)),
-    "paged": replace(_BASE, paged=SdpaPaged(max_seq_len_kv=8)),
+    "paged": paged(_BASE),
     "block_mask": replace(_BASE, block_mask=packed((2, 4, 1, 1), "uint8")),
     "fp8": _dense_request(dtype="fp8_e4m3", fp8=SdpaFp8(descale_q=packed((1,)))),
     "fp8_s_o": _dense_request(
@@ -208,7 +214,7 @@ def test_full_attention_is_admitted_at_equal_lengths(arch):
 
 @pytest.mark.parametrize("arch", ARCHES)
 def test_top_left_window_is_admitted(arch):
-    _admitted(_dense_request(arch=arch, left_bound=63, right_bound=0))
+    _admitted(_dense_request(arch=arch, left_bound=64, right_bound=0))
 
 
 @pytest.mark.parametrize("arch", ARCHES)
@@ -265,13 +271,13 @@ def test_gfx942_bottom_right_causal_is_admitted():
 def test_gfx950_bottom_right_window_with_unequal_lengths_is_declined():
     """The dense body anchors windows top-left."""
     req = _dense_request(
-        s_q=S, s_kv=2 * S, left_bound=63, right_bound=0, diagonal="bottom_right"
+        s_q=S, s_kv=2 * S, left_bound=64, right_bound=0, diagonal="bottom_right"
     )
     _declined(req)
 
 
 def test_gfx950_lookahead_band_is_admitted():
-    _admitted(_dense_request(left_bound=63, right_bound=2))
+    _admitted(_dense_request(left_bound=64, right_bound=2))
 
 
 # --- the candidates' own rules decide ----------------------------------------
@@ -303,7 +309,7 @@ def test_gfx942_launches_its_dense_candidate():
 def test_candidates_is_empty_exactly_when_admits_is_false():
     cases = [
         _dense_request(d=32),
-        replace(_BASE, paged=SdpaPaged(max_seq_len_kv=8)),
+        paged(_BASE),
         _dense_request(arch="gfx942", s_q=200, s_kv=200),
         replace(_BASE, algorithm="attention_dense_grid"),
         _BASE,

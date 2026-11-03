@@ -44,7 +44,10 @@ def request_from_case(case: SdpaCase, arch: str) -> SdpaRequest:
             n: SdpaTensor(case.dtype, descs[n].dims, descs[n].strides) for n in "qkvo"
         }
 
+    # ``case.band`` is FlashAttention's window (``left = W`` keeps W + 1 keys);
+    # hipDNN's ``left_bound = L`` keeps L keys, so W lifts to W + 1.
     left, right, top_left = case.band
+    left = left + 1 if left >= 0 else -1
     kwargs = dict(
         arch=arch,
         **ops,

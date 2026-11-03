@@ -28,9 +28,15 @@ from dispatch.sdpa.common import (
     SdpaBias,
     SdpaDropout,
     SdpaFp8,
-    SdpaPaged,
 )
-from tests.sdpa.request_cases import bhsd, bshd, make_request, packed, ragged_offset
+from tests.sdpa.request_cases import (
+    bhsd,
+    bshd,
+    make_request,
+    packed,
+    paged,
+    ragged_offset,
+)
 
 UNIFIED_HEAD_SIZES = (64, 128, 256)
 ARCHES = ("gfx942", "gfx950")
@@ -85,7 +91,7 @@ _DECLINED_CASES = {
     "alibi": replace(_BASE, alibi=True),
     "sinks": replace(_BASE, sink_token=packed((1, 4, 1, 1))),
     "dropout": replace(_BASE, dropout=SdpaDropout(0.1)),
-    "paged": replace(_BASE, paged=SdpaPaged(max_seq_len_kv=8)),
+    "paged": paged(_BASE),
     "block_mask": replace(_BASE, block_mask=packed((2, 4, 1, 1), "uint8")),
     "fp8": _unified_request(dtype="fp8_e4m3", fp8=SdpaFp8(descale_q=packed((1,)))),
     "fp8_s_o": _unified_request(
@@ -130,7 +136,7 @@ def test_permanent_declines_are_not_tagged_not_yet_implemented(feature):
 
 
 def test_unsupported_head_dim_reports_head_dim_before_a_feature_gap():
-    req = replace(_unified_request(d=32), paged=SdpaPaged(max_seq_len_kv=8))
+    req = paged(_unified_request(d=32))
     assert "head_dim" in _declined(req)
 
 
@@ -237,7 +243,7 @@ def test_causal_bottom_right_is_admitted():
 
 
 def test_sliding_window_is_admitted():
-    _admitted(replace(_BASE, left_bound=3, right_bound=0))
+    _admitted(replace(_BASE, left_bound=4, right_bound=0))
 
 
 def test_lse_is_admitted_on_a_decode_shape():
@@ -280,12 +286,12 @@ def test_gfx942_ragged_full_attention_decode_is_admitted():
 
 
 def test_gfx942_noncausal_band_is_declined():
-    req = replace(_unified_request(arch="gfx942"), left_bound=2, right_bound=1)
+    req = replace(_unified_request(arch="gfx942"), left_bound=3, right_bound=1)
     assert _declined(req).startswith("band:")
 
 
 def test_gfx950_noncausal_band_is_admitted():
-    _admitted(replace(_BASE, left_bound=2, right_bound=1))
+    _admitted(replace(_BASE, left_bound=3, right_bound=1))
 
 
 # Arches outside the attention layer's band dispatch: the unified problem is
@@ -295,7 +301,7 @@ NON_BAND_ARCHES = ("gfx1151", "gfx1201", "gfx90a", "gfx1100")
 
 @pytest.mark.parametrize("arch", NON_BAND_ARCHES)
 @pytest.mark.parametrize(
-    "bounds", [{"right_bound": 0}, {"left_bound": 2, "right_bound": 0}]
+    "bounds", [{"right_bound": 0}, {"left_bound": 3, "right_bound": 0}]
 )
 def test_non_band_arch_top_left_with_unequal_lengths_is_declined(arch, bounds):
     req = _unified_request(arch=arch, s_q=4, s_kv=8, **bounds)
@@ -395,7 +401,7 @@ def test_gfx942_d256_outside_the_fast_cohort_is_still_admitted():
     """A sliding window drops the request out of the fast cohort onto the
     default builder. The binding defers to the registry, which still serves it."""
     req = _unified_request(
-        arch="gfx942", d=256, dtype="bf16", left_bound=3, right_bound=0
+        arch="gfx942", d=256, dtype="bf16", left_bound=4, right_bound=0
     )
     assert not _gfx942_d256_fast(req)
     _admitted(req)
@@ -407,7 +413,7 @@ def test_gfx942_d256_outside_the_fast_cohort_is_still_admitted():
 def test_candidates_is_empty_exactly_when_admits_is_false():
     cases = [
         _unified_request(d=32),
-        replace(_BASE, paged=SdpaPaged(max_seq_len_kv=8)),
+        paged(_BASE),
         replace(_BASE, stats=packed((2, 4, 8, 1))),
         _unified_request(arch="gfx942"),
         _unified_request(arch="gfx1151", s_q=4, s_kv=8, right_bound=0),

@@ -21,7 +21,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from rocke.numeric.sdpa_reference import sdpa_reference
+from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
 from dispatch.sdpa.bind_unified import _LaunchPlan, sdpa_unified_admits
 from tests.sdpa import cases as C
@@ -47,7 +47,7 @@ def fake_kernel(plan, req):
         torch.cat(k_pages).double().numpy(),
         torch.cat(v_pages).double().numpy(),
         scale=float(req.scale),
-        left_bound=req.left_bound,
+        left_bound=hipdnn_left_to_window(req.left_bound),
         right_bound=req.right_bound,
         top_left=req.diagonal == "top_left",
         q_offsets=np.asarray(kt["cu_seqlens_q"].tolist()),

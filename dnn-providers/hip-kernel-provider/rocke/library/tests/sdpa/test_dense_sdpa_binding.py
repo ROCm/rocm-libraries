@@ -20,7 +20,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from rocke.numeric.sdpa_reference import sdpa_reference
+from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
 from dispatch.sdpa.bind_dense import _DensePlan, sdpa_dense_admits
 from tests.sdpa import cases as C
@@ -46,7 +46,7 @@ def fake_kernel(plan, req):
         flat(kt["k"]),
         flat(kt["v"]),
         scale=float(req.scale),
-        left_bound=req.left_bound,
+        left_bound=hipdnn_left_to_window(req.left_bound),
         right_bound=req.right_bound,
         top_left=req.diagonal == "top_left",
         q_offsets=np.arange(b + 1) * s_q,
