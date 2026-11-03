@@ -894,7 +894,8 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     const bool xh_ok = s->tapk_xhalo && s->tap_outer_k;
     if(s->xh_yring
        && (!xh_ok || s->tapk_prefetch != 3 || !s->xhalo_exact || !s->xh_a_k4 || !s->xh_b_wide
-           || s->tapk_ztrim != 1 || s->split_k > 1 || s->xh_persist))
+           || s->tapk_ztrim != 1 || s->split_k > 1 || s->xh_persist || s->xh_dlds
+           || s->lds_k_outer || s->tapk_setprio == 2 || s->xh_fast_a > 1))
     {
         snprintf(
             reason,
