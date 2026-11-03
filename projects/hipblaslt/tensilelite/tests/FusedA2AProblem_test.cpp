@@ -50,7 +50,7 @@ namespace
 
 TEST(FusedA2AProblem, ShapePredicate)
 {
-    Predicates::Contraction::FusedA2AShape mt256(256);
+    Predicates::Contraction::GemmA2AShape mt256(256);
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 4, 2048)));
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 8, 2048)));
     // AM % (MT0 * W) != 0
@@ -137,7 +137,7 @@ TEST(FusedA2AClientProblemFactory, PerProblemWorldAndExtent)
         EXPECT_EQ(p.world(), worlds[i]);
         EXPECT_EQ(p.fusedA2AExtent(), 2048);
         size_t const nShard = 2048 / worlds[i];
-        auto const&  recv   = p.tensors()[ContractionProblemGemm::TENSOR::A2A_RECV];
+        auto const&  recv   = p.tensors()[ContractionProblemGemm::TENSOR::A2A_BUF];
         EXPECT_EQ(recv.sizes(), (std::vector<size_t>{nShard, 512, worlds[i]}));
         EXPECT_EQ(recv.strides(), (std::vector<size_t>{1, nShard, nShard * 512}));
     }

@@ -503,7 +503,7 @@ namespace TensileLite
                                                         rv.back().freeSizeA(0)));
                                     rv.back().setWorld(m_worlds[i]);
                                     rv.back().setFusedA2AExtent(m_fusedA2AExtents[i]);
-                                    rv.back().setA2ARecv();
+                                    rv.back().setA2ABuf();
                                 }
                                 if(k < m_biasTypeArgs.size())
                                 {

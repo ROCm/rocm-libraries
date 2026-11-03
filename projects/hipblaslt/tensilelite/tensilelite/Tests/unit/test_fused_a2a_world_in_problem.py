@@ -113,11 +113,11 @@ class TestMergeKeepsWorld:
     def test_strips_lds_only(self):
         rows, n = fixSizeInconsistencies(
             [[[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 2, 2048], [0, 1.0]],
-             [[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 4, 2048], [0, 2.0]]], "base", True)
+             [[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 4, 2048], [0, 2.0]]], "base", _FUSED_CONFIG)
         assert n == 2
         assert sorted(r[0] for r in rows) == [[3072, 512, 1, 2048, 2, 2048],
                                               [3072, 512, 1, 2048, 4, 2048]]
-        assert fixSizeInconsistencies(rows, "base", True) == (rows, 2)
+        assert fixSizeInconsistencies(rows, "base", _FUSED_CONFIG) == (rows, 2)
 
 
 class TestClientWriterWorld:

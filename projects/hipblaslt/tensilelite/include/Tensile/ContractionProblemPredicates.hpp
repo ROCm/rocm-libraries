@@ -2913,7 +2913,7 @@ namespace TensileLite
             };
 
             // value is the solution's MacroTile0.
-            struct FusedA2AShape : public Predicate_CRTP<FusedA2AShape, ContractionProblemGemm>
+            struct GemmA2AShape : public Predicate_CRTP<GemmA2AShape, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2922,15 +2922,15 @@ namespace TensileLite
                 };
                 int64_t value;
 
-                FusedA2AShape() = default;
-                FusedA2AShape(int64_t value)
+                GemmA2AShape() = default;
+                GemmA2AShape(int64_t value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "FusedA2AShape";
+                    return "GemmA2AShape";
                 }
 
                 bool fits(ContractionProblemGemm const& problem) const

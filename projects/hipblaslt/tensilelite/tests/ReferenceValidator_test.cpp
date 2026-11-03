@@ -230,12 +230,12 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
     ASSERT_EQ(device->inputArr.size(), 2u);
     auto const& reference = dynamic_cast<ContractionInputs const&>(*validator.referenceInputs(0));
     auto&       rotated   = dynamic_cast<ContractionInputs&>(*device->inputArr[1]);
-    auto const& recv      = problem->tensors()[ContractionProblemGemm::TENSOR::A2A_RECV];
+    auto const& recv      = problem->tensors()[ContractionProblemGemm::TENSOR::A2A_BUF];
     HIP_CHECK_EXC(hipMemcpy(
         rotated.d, reference.d, problem->d().totalAllocatedBytes(), hipMemcpyHostToDevice));
     HIP_CHECK_EXC(
-        hipMemcpy(rotated.a2aRecv, reference.d, recv.totalAllocatedBytes(), hipMemcpyHostToDevice));
-    EXPECT_EQ(rotated.maxElements[ContractionProblemGemm::TENSOR::A2A_RECV],
+        hipMemcpy(rotated.a2aBuf, reference.d, recv.totalAllocatedBytes(), hipMemcpyHostToDevice));
+    EXPECT_EQ(rotated.maxElements[ContractionProblemGemm::TENSOR::A2A_BUF],
               recv.totalAllocatedElements());
     TimingEvents events({}, 1, 1);
     validator.validateWarmups({1}, events, events);
@@ -246,7 +246,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
 
     validator.preSolution(&solution);
     float bad = static_cast<float const*>(reference.d)[recv.totalLogicalElements() - 1] + 100.0f;
-    HIP_CHECK_EXC(hipMemcpy(static_cast<float*>(rotated.a2aRecv) + recv.totalLogicalElements() - 1,
+    HIP_CHECK_EXC(hipMemcpy(static_cast<float*>(rotated.a2aBuf) + recv.totalLogicalElements() - 1,
                             &bad,
                             sizeof(bad),
                             hipMemcpyHostToDevice));

@@ -3031,7 +3031,7 @@ class GlobalWriteBatchWriter:
     leaves ALREADY IN PACKET ELEMENTS while outRectYS stays in ROWS, the
     hardware not scaling y.  outNShardPkS is both dst_pitch and rect_x, the
     same nShard.  Divisibility by the packet element is a
-    precondition (the FusedA2AShape predicate); a non-multiple truncates here.
+    precondition (the GemmA2AShape predicate); a non-multiple truncates here.
 
     The two shifts use different amounts: elements->bytes uses D_ELEMENT_LOG2,
     elements->packet-elements uses packetElementLog2 minus it.  Conflating them
@@ -3143,7 +3143,7 @@ class GlobalWriteBatchWriter:
     The four packet coordinates are FOLDED into the 64-bit base addresses by
     _fusedA2AComputeCopyFields and emitted as literal 0, leaving N unconstrained.
     What still has to fit -- rect_x, rect_y, src_pitch -- is packed unmasked, so
-    an over-range value corrupts a neighbouring field. The FusedA2AShape predicate
+    an over-range value corrupts a neighbouring field. The GemmA2AShape predicate
     bounds rect_x and src_pitch; the MacroTile1 limit in Solution.py bounds rect_y.
 
     Args:

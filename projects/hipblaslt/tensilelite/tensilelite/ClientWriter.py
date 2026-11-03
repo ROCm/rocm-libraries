@@ -32,7 +32,7 @@ from pathlib import Path
 from enum import Enum
 from glob import glob
 
-from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
+from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy, isFusedA2A
 from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from .Toolchain.Component import Assembler
 
@@ -170,7 +170,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
         logic.schedule, logic.problemType, logic.exactLogic, logic.library
     functions.append((scheduleName, problemType))
     functionNames.append("tensile_%s" % (problemType))
-    problemSizes = ProblemSizesMock(exactLogic, problemType["FusedGemmA2A"]) if exactLogic else ProblemSizesMockDummy()
+    problemSizes = ProblemSizesMock(exactLogic, problemType) if exactLogic else ProblemSizesMockDummy()
     if len(problemType["BiasDataTypeList"]) > 0:
       biasTypeArgs = BiasTypeArgs(problemType, [problemType["BiasDataTypeList"][0]])
     else:
@@ -361,7 +361,7 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
   if globalParameters["DisableAsmComments"]:
     callCreateLibraryCmd += " --disable-asm-comments"
 
-  if any((LibraryIO.rawLibraryLogic(LibraryIO.readYAML(f))[4] or {}).get("FusedGemmA2A", False)
+  if any(isFusedA2A(LibraryIO.rawLibraryLogic(LibraryIO.readYAML(f))[4])
          for f in glob(os.path.join(libraryLogicPath, "*.yaml"))):
     callCreateLibraryCmd += " --enable-gemm-a2a-fusion"
 

@@ -657,7 +657,7 @@ def formProblemSize(
         temp["ProblemSizes"] = [{"Exact": FlowList([1, 1, 1, 1])}]
     else:
         problems = ProblemSizesMock(
-            exactLogic, problemTypeStat.get("FusedGemmA2A", False)
+            exactLogic, problemTypeStat
         ).problems
         for problem, (_, mapping) in zip(problems, exactLogic):
             if mapping[0] != solutionIndex:

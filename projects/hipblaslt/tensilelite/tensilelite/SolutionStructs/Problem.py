@@ -266,7 +266,7 @@ class ExactDict(Problem):
         raise RuntimeError ("specified size=%s does not have enough indices for problem (expected %d, got %d)" \
                 % (self.sizes, problemType["TotalIndices"], len(self.sizes)))
 
-    if problemType and problemType["FusedGemmA2A"]:
+    if problemType and isFusedA2A(problemType):
       from ..Components.Signature import FUSED_A2A_MAX_RANKS
       if self.world is None:
         raise RuntimeError("FusedGemmA2A problem %s must set 'world'" % list(self.sizes))
@@ -290,8 +290,8 @@ Adapter class for class `ProblemSizes`. It satisfies the implicit usage requirem
 of ClientWriter.writeClientConfig() by converting ExactLogic to list of `Problem` objects
 """
 class ProblemSizesMock:
-  def __init__(self, exactLogic, fusedGemmA2A=False):
-    if fusedGemmA2A:
+  def __init__(self, exactLogic, problemType=None):
+    if isFusedA2A(problemType):
       self.problems = [Problem(sizes[:-2], world=sizes[-2], a2aExtent=sizes[-1]) for sizes, solution in exactLogic]
     else:
       self.problems = [Problem(problem) for problem, solution in exactLogic]
@@ -313,14 +313,14 @@ class ProblemSizes:
         for sizeTypeKey in dictionary:
           #print ("PROBLEM parsed:", sizeTypeKey, dictionary[sizeTypeKey])
           if sizeTypeKey == "Range":
-            if problemType["FusedGemmA2A"]:
+            if isFusedA2A(problemType):
               raise RuntimeError("FusedGemmA2A problems must use Exact dicts, not Range")
             psr = ProblemSizeRange(problemType, dictionary[sizeTypeKey])
             self.ranges.append( psr )
           elif sizeTypeKey == "Exact":
             e= dictionary[sizeTypeKey]
             if isinstance(e,list):
-              if problemType["FusedGemmA2A"]:
+              if isFusedA2A(problemType):
                 raise RuntimeError("FusedGemmA2A problem %s must be an Exact dict with 'world'" % e)
               self.exacts.append(ExactList(e, problemType))
             elif isinstance(e,dict):
@@ -553,6 +553,11 @@ _defaultProblemType = {
     "DataTypeMXSA": "E8",
     "DataTypeMXSB": "E8",
 }
+
+
+def isFusedA2A(problemType):
+  """problemType: a ProblemType or a raw logic ProblemType dict."""
+  return bool((problemType or {}).get("FusedGemmA2A", False))
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
 # DataType (Ti)        = The data-type of the input matrices: A/B

@@ -273,10 +273,10 @@ namespace TensileLite
                         auto const& problem
                             = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
                         auto const&  result = dynamic_cast<ContractionInputs const&>(*inputs);
-                        const size_t recv   = ContractionProblemGemm::TENSOR::A2A_RECV;
+                        const size_t recv   = ContractionProblemGemm::TENSOR::A2A_BUF;
                         checkResults(problem.tensors()[recv],
                                      m_referenceRecvs[d].data(),
-                                     result.a2aRecv,
+                                     result.a2aBuf,
                                      result.maxElements[recv],
                                      result.gpu,
                                      1,
