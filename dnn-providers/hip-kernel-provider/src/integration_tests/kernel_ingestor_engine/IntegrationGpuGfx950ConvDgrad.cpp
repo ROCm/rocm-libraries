@@ -48,6 +48,7 @@
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
 #include "ScopedPluginLogCapture.hpp"
 
 // ---- hipkernel:Gfx950ConvDgradAot: the shipped dgrad catalog on the GPU ----
@@ -1036,27 +1037,36 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, CappedBenchmarkMatchesCpuReference)
     ASSERT_NO_FATAL_FAILURE(executeAndVerify(*recreated, variant.dtype, reference));
 }
 
-/// RAII: lowers gfx950_conv_dgrad::batchChunkByteLimitForTesting() so a small batch
+/// RAII: lowers the loaded provider's own batch-chunk byte limit so a small batch
 /// exercises the chunked-launch device path (DeviceTables, views into dY/dX), which no
 /// test otherwise reaches -- the kernels' real 32-bit ABI limit needs a multi-GiB image
 /// per batch element to trigger naturally.
+///
+/// Goes through the plugin's exported
+/// hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting symbol
+/// (setProviderDgradBatchChunkByteLimit), not the header's inline
+/// batchChunkByteLimitForTesting() directly: this TU and the loaded provider .so are
+/// separate binaries, each with its own copy of that function-local static, so setting
+/// this TU's copy would leave the provider's own limit at I32_MAX and the chunk path
+/// untested.
 class ScopedBatchChunkLimit
 {
 public:
     explicit ScopedBatchChunkLimit(int64_t limit)
-        : _previous(gfx950_conv_dgrad::batchChunkByteLimitForTesting())
     {
-        gfx950_conv_dgrad::batchChunkByteLimitForTesting() = limit;
+        // EXPECT_, not ASSERT_: gtest's ASSERT_* macros expand to a bare `return;`, which
+        // a constructor (no return type, not even void) cannot contain.
+        EXPECT_EQ(detail::setProviderDgradBatchChunkByteLimit(limit), "");
     }
     ~ScopedBatchChunkLimit()
     {
-        gfx950_conv_dgrad::batchChunkByteLimitForTesting() = _previous;
+        // The documented production default (Gfx950ConvDgradGeometry.hpp): production
+        // code never touches the limit, so restoring it here is restoring the only value
+        // any other test can observe.
+        EXPECT_EQ(detail::setProviderDgradBatchChunkByteLimit(gfx950_conv_dgrad::I32_MAX), "");
     }
     ScopedBatchChunkLimit(const ScopedBatchChunkLimit&) = delete;
     ScopedBatchChunkLimit& operator=(const ScopedBatchChunkLimit&) = delete;
-
-private:
-    int64_t _previous;
 };
 
 // The batch-chunk device path (DeviceTables, step.views into dY/dX at an n0/n offset)

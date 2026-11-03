@@ -1090,6 +1090,11 @@ void resetGfx950ConvDgradAotModuleCache()
     gfx950ConvDgradAotKpackModuleCache().clear();
 }
 
+void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
+{
+    dgrad::batchChunkByteLimitForTesting() = limit;
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
