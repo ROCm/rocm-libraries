@@ -652,7 +652,8 @@ static const char*
  * is split on ',' (blank entries dropped): the first entry is the output's when
  * the op has a result, the rest pair with the operands in order. Side-effecting
  * asm (the default) is volatile and clobbers "memory" unless the op names its
- * own clobber. At most one result. */
+ * own clobber. The template, constraints and clobber go into C++ string
+ * literals through h_escape_cxx_string. At most one result. */
 static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     if(!rocke_h_live(lw))
@@ -670,9 +671,10 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
     const char* raw_template = h_inline_asm_string_attr(lw, op, "template");
     const char* raw_constraints = h_inline_asm_string_attr(lw, op, "constraints");
     const bool sideeffect = rocke_attr_get_bool(&op->attrs, "sideeffect", true);
-    const char* clobber = rocke_attr_get(&op->attrs, "clobber")
-                              ? h_inline_asm_string_attr(lw, op, "clobber")
-                              : (sideeffect ? "memory" : "");
+    const char* clobber
+        = rocke_attr_get(&op->attrs, "clobber")
+              ? rocke_h_escape_cxx_string(lw, h_inline_asm_string_attr(lw, op, "clobber"))
+              : (sideeffect ? "memory" : "");
 
     /* re.sub(r"\$(\d+)", r"%\1", template) */
     char* tmpl = rocke_arena_strdup(&lw->b->arena, raw_template);
@@ -695,6 +697,7 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
             cursor[0] = '%';
         }
     }
+    const char* template_literal = rocke_h_escape_cxx_string(lw, tmpl);
     size_t num_entries = 0;
     for(const char* entry_start = raw_constraints;;)
     {
@@ -717,7 +720,7 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
             {
                 return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
             }
-            entries[num_entries++] = entry;
+            entries[num_entries++] = rocke_h_escape_cxx_string(lw, entry);
         }
         if(!end)
         {
@@ -742,7 +745,7 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
         rocke_h_emitf(lw,
                       "asm %s(\"%s\" : \"%s\"(%s) : %s%s%s%s);",
                       side,
-                      tmpl,
+                      template_literal,
                       entries[0],
                       name,
                       ins,
@@ -756,7 +759,7 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
         rocke_h_emitf(lw,
                       "asm %s(\"%s\" : :%s%s%s%s%s);",
                       side,
-                      tmpl,
+                      template_literal,
                       ins[0] ? " " : "",
                       ins,
                       clobber_open,

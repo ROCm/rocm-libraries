@@ -143,16 +143,19 @@ def test_4x4x4_mfma_atoms_lower_to_the_same_source(op_id, operand_type):
     assert "f32x4 " in hip and "__builtin_amdgcn_mfma_f32_4x4x4" in hip
 
 
-def _inline_asm_kernel(*, with_result: bool, **attr_changes) -> IRBuilder:
-    """One tile.inline_asm op; `attr_changes` overwrites its attrs (None
-    deletes one) to build the malformed op a serialized kernel could carry."""
+def _inline_asm_kernel(
+    *, with_result: bool, asm_template: str | None = None, **attr_changes
+) -> IRBuilder:
+    """One tile.inline_asm op, with ``asm_template`` if given; ``attr_changes``
+    overwrites its attrs (None deletes one) to build the malformed op a
+    serialized kernel could carry."""
     builder = IRBuilder("inline_asm_kernel")
     builder.param("out", PtrType(F32, "global"))
     operand = builder.const_i32(1)
     if with_result:
-        builder.inline_asm("v_mov_b32 $0, $1", "=v, v", [operand], I32)
+        builder.inline_asm(asm_template or "v_mov_b32 $0, $1", "=v, v", [operand], I32)
     else:
-        builder.inline_asm("s_nop $0", "n", [operand])
+        builder.inline_asm(asm_template or "s_nop $0", "n", [operand])
     op = builder.kernel.body.ops[-1]
     assert op.name == "tile.inline_asm"
     for key, value in attr_changes.items():
@@ -172,6 +175,23 @@ def test_inline_asm_lowers_to_the_same_source(with_result, attr_changes):
     builder = _inline_asm_kernel(with_result=with_result, **attr_changes)
     hip = lower_hip_with_both_engines(builder.kernel, "gfx942")
     assert "asm " in hip
+
+
+def test_a_multiline_inline_asm_template_stays_one_string_literal():
+    # A newline and a tab between instructions, a quote and a backslash in the
+    # template, a quote in the clobber: each becomes an escape in its literal.
+    builder = _inline_asm_kernel(
+        with_result=True,
+        asm_template='v_mov_b32 $0, $1\n\ts_nop 0 ; "\\" quoted',
+        clobber='vcc"',
+    )
+    hip = lower_hip_with_both_engines(builder.kernel, "gfx942")
+    (statement,) = [line for line in hip.splitlines() if "asm " in line]
+    assert (
+        r'asm volatile ("v_mov_b32 %0, %1\012\011s_nop 0 ; \"\\\" quoted" : '
+        in statement
+    )
+    assert statement.endswith(r' : "vcc\"");')
 
 
 @pytest.mark.parametrize(

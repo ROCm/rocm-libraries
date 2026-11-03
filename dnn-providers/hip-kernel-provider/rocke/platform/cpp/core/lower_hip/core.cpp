@@ -49,6 +49,7 @@
 
 #include <exception>
 #include <new>
+#include <string>
 
 /* ============================== prologue ============================== */
 
@@ -595,6 +596,35 @@ const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
 const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val)
 {
     return h_hip_float_literal(lw, val, "double", "");
+}
+
+const char* rocke_h_escape_cxx_string(rocke_h_lowerer_t* lw, const char* text)
+{
+    std::string escaped;
+    for(const unsigned char* byte = (const unsigned char*)text; *byte; ++byte)
+    {
+        if(*byte == '\\' || *byte == '"')
+        {
+            escaped += '\\';
+            escaped += (char)*byte;
+        }
+        else if(*byte >= 0x20 && *byte <= 0x7E)
+        {
+            escaped += (char)*byte;
+        }
+        else
+        {
+            char octal[5];
+            snprintf(octal, sizeof octal, "\\%03o", (unsigned)*byte);
+            escaped += octal;
+        }
+    }
+    const char* owned = rocke_arena_strdup(&lw->b->arena, escaped.c_str());
+    if(!owned)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory escaping a string literal");
+    }
+    return owned;
 }
 
 /* ============================== waitcnt encoders ===================== */

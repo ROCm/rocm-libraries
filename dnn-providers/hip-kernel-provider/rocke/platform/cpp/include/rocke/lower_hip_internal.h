@@ -201,6 +201,13 @@ const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val);
  * string. */
 const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val);
 
+/* Python _escape_cxx_string(text): `text` written as the inside of a C++
+ * string literal. Printable ASCII stays as it is, except a backslash or a
+ * double quote, which take a backslash; every other byte becomes a three-digit
+ * octal escape (\012), which, unlike a \x escape, cannot run on into the
+ * character after it. Returns an arena-owned string. */
+const char* rocke_h_escape_cxx_string(rocke_h_lowerer_t* lw, const char* text);
+
 /* Python _encode_waitcnt: arch-aware s_waitcnt immediate. Selects the gfx9/10
  * split-VMCNT layout or the gfx11 contiguous layout off lw->arch. -1 on any
  * counter means "no wait" (encoded as that field's architectural max). On a

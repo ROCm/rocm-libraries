@@ -321,6 +321,26 @@ def _inline_asm_string_attr(op: Op, key: str) -> str:
     return value
 
 
+def _escape_cxx_string(text: str) -> str:
+    r"""``text`` written as the inside of a C++ string literal.
+
+    Printable ASCII stays as it is, except ``\`` and ``"``, which take a
+    backslash. Every other byte of the UTF-8 encoding -- such as the newline
+    between two instructions of an inline asm template -- becomes a three-digit
+    octal escape (``\012``), which, unlike a ``\x`` escape, cannot run on into
+    the character after it.
+    """
+    out = []
+    for byte in text.encode("utf-8"):
+        if byte in (ord("\\"), ord('"')):
+            out.append("\\" + chr(byte))
+        elif 0x20 <= byte <= 0x7E:
+            out.append(chr(byte))
+        else:
+            out.append(f"\\{byte:03o}")
+    return "".join(out)
+
+
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     """Encode `s_waitcnt` for the gfx9/gfx10 layout used by gfx950.
 
@@ -1528,7 +1548,9 @@ class _Lowerer:
         Constraints are the LLVM comma list (``"=v,v"``): leading ``=``/``+``
         entries are outputs, the rest inputs. A ``"memory"`` clobber is added
         for side-effecting asm so raw-address ds_reads order against the
-        surrounding LDS writes/barriers.
+        surrounding LDS writes/barriers. The template, constraints and clobber
+        are written into C++ string literals with :func:`_escape_cxx_string`, so
+        a multi-line template stays one literal.
         """
         import re as _re
 
@@ -1539,16 +1561,18 @@ class _Lowerer:
                 f"got {len(op.results)} (inline_asm_multi not yet lowered)"
             )
 
-        template = _re.sub(r"\$(\d+)", r"%\1", _inline_asm_string_attr(op, "template"))
+        template = _escape_cxx_string(
+            _re.sub(r"\$(\d+)", r"%\1", _inline_asm_string_attr(op, "template"))
+        )
         parts = [
-            c.strip()
+            _escape_cxx_string(c.strip())
             for c in _inline_asm_string_attr(op, "constraints").split(",")
             if c.strip()
         ]
         side = "volatile " if op.attrs.get("sideeffect", True) else ""
         in_names = [_name(o) for o in op.operands]
         if "clobber" in op.attrs:
-            clob = _inline_asm_string_attr(op, "clobber")
+            clob = _escape_cxx_string(_inline_asm_string_attr(op, "clobber"))
         else:
             clob = "memory" if op.attrs.get("sideeffect", True) else ""
         clob_str = f' : "{clob}"' if clob else ""
