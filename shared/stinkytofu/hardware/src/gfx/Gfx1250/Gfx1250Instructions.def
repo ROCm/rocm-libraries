@@ -454,10 +454,12 @@ DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_AT
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
 // so reordering it affects performance but not correctness.
 // Support null saddr + 64-bit vaddr or 64-bit saddr + 32-bit vaddr.
+// vaddr is declared 32-bit (saddr form): a 64-bit declaration makes the verifier reject
+// that form, and the width cannot depend on saddr, so the null-saddr width goes unchecked.
 // temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
 DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {GLOBALPrefetch},
     .logical = "GlobalPrefetchB8",
-    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+    .operand_fields = { {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
 
 // FLAT-addressed form of the same prefetch: identical operands and semantics, including
 // both addressing modes (null saddr + 64-bit vaddr, or 64-bit saddr + 32-bit vaddr).
