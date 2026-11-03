@@ -22,12 +22,12 @@
 #
 # ########################################################################
 
-# AMD ROCm toolchain (amdflang). The recommended default: amdflang is the LLVM-based Fortran compiler shipped with ROCm.
+# Intel oneAPI toolchain (ifx, the LLVM-based compiler).
 #
-# Usage, from projects/hipsolver/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
+# Usage, from bindings/fortran/hipsolver:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
 #
 # The compilers are looked up on PATH; libhipsolver is needed only at link time.
 
-set(CMAKE_Fortran_COMPILER amdflang CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       amdclang CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")

@@ -22,12 +22,12 @@
 #
 # ########################################################################
 
-# GNU toolchain (gfortran).
+# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
 #
-# Usage, from projects/hipsolver/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/gnu.cmake
+# Usage, from bindings/fortran/hipsolver:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
 #
 # The compilers are looked up on PATH; libhipsolver is needed only at link time.
 
-set(CMAKE_Fortran_COMPILER gfortran CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       gcc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")
