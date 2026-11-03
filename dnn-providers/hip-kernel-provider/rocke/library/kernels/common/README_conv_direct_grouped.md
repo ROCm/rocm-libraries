@@ -288,6 +288,7 @@ dgrad --variants <variant> --verify` runs them on a shape.
 | `direct_grouped_dgrad_4c` | `build_direct_conv_4c` (fused weights) | `DGRAD_4C_*` | forward, over the transposed problem |
 | `direct_grouped_dgrad_fused` | `build_direct_conv` (fused weights) | `DGRAD_FUSED_*`, filtered by `_dgrad_fused_policy_reason` | forward, over the transposed problem |
 | `direct_depthwise_dgrad_win` | `build_direct_depthwise_dgrad_windowed` | `DW_WIN_*`, filtered by `_dw_win_policy_reason` | dgrad |
+| `direct_depthwise_win` (fwd) | `build_direct_depthwise_dgrad_windowed` (`mfma=True, fwd=True`; depthwise, or grouped with `cpg = kpg` in `DW_WIN_FWD_GROUP_CH`) | `DW_WIN_MFMA_*` over `DW_WIN_FWD_FILTERS` / `DW_WIN_FWD_G8_FILTERS` | forward (stride 1 or 2: `out_stride`); the spec's problem is the transposed stride-1 grid (`dw_win_fwd_problem`) |
 
 The weight pre-pass pipeline (`direct_grouped_dgrad_mfma`) stays in the
 cache next to them. The case studies are in

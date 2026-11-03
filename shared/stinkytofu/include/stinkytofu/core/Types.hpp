@@ -106,7 +106,8 @@ struct PassFeatureConfig {
         /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
         /// filler, tensor_load) may issue; below it, and with room in the queue, the next
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
-        /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
+        /// to make (a promoted barrier) are not held. < 0 = automatic: one WMMA short of a full
+        /// queue, (wmmaQueueDepth - 1) x the next WMMA's latency. 0 = off; ignored at depth 1.
         int wmmaQueueCoverCycles = 0;
         /// How many WMMAs one refill issues once the queue drops below the refill line
         /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
@@ -213,6 +214,14 @@ struct AsmCapsConfig {
     /// When false, all of the above are skipped; only Rule 4a remains
     /// active if `requiresXCntForVolatileVMEM` is set independently.
     /// See Gfx1250HazardPass for the complete rule definitions.
+    ///
+    /// The four SW instruction-prefetch passes read the same flag for the drain
+    /// before each prefetch, so a caller gets replay protection from both passes
+    /// or from neither. There is deliberately no third "unspecified" state: a
+    /// caller that leaves this false gets no gfx1250 replay protection anywhere,
+    /// which is what Gfx1250HazardPass has always done with it. Every in-tree
+    /// entry point sets it -- `Backend::configurePassManager` from
+    /// `ModuleOptions`, and `stinkytofu-opt` from its `--arch` target ID.
     bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu

@@ -44,6 +44,7 @@ __all__ = [
     "GOLDEN_FLAVORS",
     "GOLDEN_PROFILE_FLAVORS",
     "check_golden",
+    "check_golden_flavors",
     "compare",
     "golden_shard",
     "golden_subdocument",
@@ -134,6 +135,63 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any]) -> list[str]:
     return errors
 
 
+def _flavor_set_errors(doc: Mapping[str, Any]) -> list[str]:
+    """Check which flavor documents and aliases a loaded golden holds."""
+    have = doc.get("flavors", {})
+    aliases = doc.get("aliases", {})
+    errors: list[str] = []
+    if aliases != GOLDEN_ALIASES:
+        errors.append(
+            f"golden aliases {aliases} do not match emission-profile aliases "
+            f"{GOLDEN_ALIASES}; re-bless it"
+        )
+    if set(have) != set(GOLDEN_PROFILE_FLAVORS):
+        errors.append(
+            f"golden profile documents {sorted(have)} do not match "
+            f"{list(GOLDEN_PROFILE_FLAVORS)}; re-bless it"
+        )
+    overlap = set(have) & set(aliases)
+    if overlap:
+        errors.append(
+            f"golden lanes are both direct and aliased: {sorted(overlap)}; "
+            "re-bless it"
+        )
+    if errors:
+        # Report the documents themselves first; the checks below only add
+        # detail once those are right.
+        return errors
+    represented = set(have) | set(aliases)
+    for fl in sorted(represented - set(GOLDEN_FLAVORS)):
+        errors.append(
+            f"golden has stale flavor {fl!r} not in LLVM_FLAVORS; re-bless it"
+        )
+    for fl, source in sorted(aliases.items()):
+        if source not in have:
+            errors.append(
+                f"golden alias {fl!r} names missing flavor {source!r}; re-bless it"
+            )
+    return errors
+
+
+def check_golden_flavors(golden_path: Path) -> list[str]:
+    """Check that a golden holds exactly the flavor documents and aliases the
+    current flavor set needs, without lowering anything.
+
+    This is the part of :func:`check_golden` (with no ``flavor``) that looks
+    only at the golden itself: a document for each emission profile, the
+    expected aliases, and nothing for a flavor no longer in
+    :data:`GOLDEN_FLAVORS`. A caller that checks the flavors one at a time,
+    ``check_golden(path, run, flavor)`` for each entry of
+    :data:`GOLDEN_FLAVORS`, runs this once as well to get the same coverage as
+    one all-flavor call. Empty list == OK.
+    """
+    try:
+        doc = load_golden(golden_path)
+    except ValueError as e:
+        return [str(e)]
+    return _flavor_set_errors(doc)
+
+
 def check_golden(
     golden_path: Path,
     run: Callable[[str], Mapping[str, Any]],
@@ -142,39 +200,26 @@ def check_golden(
     """Compare fresh runs against a golden's flavor sub-documents.
 
     ``run(flavor)`` lowers every case at ``flavor`` and returns a sub-document
-    in the golden's shape. With no ``flavor``, every entry of
-    :data:`GOLDEN_FLAVORS` is checked, and a sub-document for a flavor no
-    longer in that tuple is reported as stale. Drift strings are prefixed
-    with the flavor when more than one is checked. ``golden_path`` may be a
-    file or a shard directory (see :func:`load_golden`). Empty list == OK.
+    in the golden's shape. With no ``flavor``, the golden's flavor documents
+    are checked first (see :func:`check_golden_flavors`) and then every entry
+    of :data:`GOLDEN_FLAVORS` is compared. With a ``flavor``, only that
+    flavor is compared. Drift strings are prefixed with the flavor when more
+    than one is checked. ``golden_path`` may be a file or a shard directory
+    (see :func:`load_golden`). Empty list == OK.
     """
     try:
         doc = load_golden(golden_path)
     except ValueError as e:
         return [str(e)]
-    have = doc.get("flavors", {})
-    aliases = doc.get("aliases", {})
-    wanted = [flavor] if flavor else list(GOLDEN_FLAVORS)
-    errors: list[str] = []
-    if not flavor:
-        if aliases != GOLDEN_ALIASES:
-            errors.append(
-                f"golden aliases {aliases} do not match emission-profile aliases "
-                f"{GOLDEN_ALIASES}; re-bless it"
-            )
-        if set(have) != set(GOLDEN_PROFILE_FLAVORS):
-            errors.append(
-                f"golden profile documents {sorted(have)} do not match "
-                f"{list(GOLDEN_PROFILE_FLAVORS)}; re-bless it"
-            )
-        overlap = set(have) & set(aliases)
-        if overlap:
-            errors.append(
-                f"golden lanes are both direct and aliased: {sorted(overlap)}; "
-                "re-bless it"
-            )
+    if flavor:
+        wanted = [flavor]
+    else:
+        errors = _flavor_set_errors(doc)
         if errors:
             return errors
+        wanted = list(GOLDEN_FLAVORS)
+    have = doc.get("flavors", {})
+    errors = []
     for fl in wanted:
         base = golden_subdocument(doc, fl)
         if base is None:
@@ -185,15 +230,4 @@ def check_golden(
             continue
         prefix = "" if len(wanted) == 1 else f"[{fl}] "
         errors.extend(prefix + e for e in compare(base, run(fl)))
-    if not flavor:
-        represented = set(have) | set(aliases)
-        for fl in sorted(represented - set(GOLDEN_FLAVORS)):
-            errors.append(
-                f"golden has stale flavor {fl!r} not in LLVM_FLAVORS; re-bless it"
-            )
-        for fl, source in sorted(aliases.items()):
-            if source not in have:
-                errors.append(
-                    f"golden alias {fl!r} names missing flavor {source!r}; re-bless it"
-                )
     return errors

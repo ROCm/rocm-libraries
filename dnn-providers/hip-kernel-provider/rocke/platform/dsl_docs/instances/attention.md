@@ -12,7 +12,11 @@ Production tiled matrix-core, paged-KV decode:
 - `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
 - `library/kernels/gfx950/attention_dense.py` -- dense flash prefill (contiguous or paged K/V); block orders and
   grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md)
-- `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
+- `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA).
+  Opt-in `FmhaMfmaSpec.free_stride` adds per-tensor batch strides and rebases Q/K/V/O per batch
+  (`global_ptr_add`), so one kernel reads BSHD, BHSD, general strides and packed QKV. Default off and
+  byte-identical. The builder has no C++ mirror yet, though both lowerers emit it identically, so
+  the default backend serves it. Host strides: `_sdpa_fwd_strides.py`.
 - `platform/python/rocke/helpers/attention.py`
 
  FMHA expansion (CK Tile `01_fmha` family parity), all under `library/kernels/common/`:
@@ -440,6 +444,7 @@ Grid:
 
 ```text
 grid_x = total query blocks
+         (gfx942/gfx950, every sequence decoding: num_seqs; use_decode_grid)
 grid_y = KV heads
 grid_z = KV segments
 ```
@@ -451,11 +456,13 @@ Step by step:
 ```text
 1. Decode q block, kv head, and segment index.
 2. Determine segment KV token range.
-3. Stage Q.
+3. Stage Q (gfx942/gfx950: in LDS, then read into registers once).
 4. Iterate only over KV tiles in this segment.
-5. Compute QK with MFMA.
+5. Compute QK with MFMA (gfx942/gfx950: S^T = K Q^T, so each lane owns
+   one query row).
 6. Apply softcap, then masks and bias.
-7. Maintain online softmax state for this segment:
+7. Maintain online softmax state for this segment (gfx942/gfx950: one
+   m / l pair per lane):
  - seg_max
  - seg_expsum
  - seg_output accumulator
@@ -466,6 +473,8 @@ Step by step:
 ```
 
 The segment kernel does not produce the final normalized output when multiple segments exist. It produces numerically stable partials.
+
+On gfx942 and gfx950 the transposed S^T layout keeps P in registers as the B operand of the PV MFMA (O^T = V^T P^T), so no P tile goes through LDS. The derivation, the differences between the two architectures, and how many segments a decode launch uses are in [gfx950 ALGORITHM.md §5.1](../../../library/builders/gfx950/attention/ALGORITHM.md#51-inside-the-segment-kernel) and [§6.1](../../../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule), and in [gfx942 ALGORITHM.md §8](../../../library/builders/gfx942/attention/ALGORITHM.md#8-the-decode-path-3d-split-kv).
 
 ## 3D Reduce Kernel
 
