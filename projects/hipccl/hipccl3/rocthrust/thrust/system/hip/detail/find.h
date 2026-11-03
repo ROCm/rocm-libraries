@@ -40,17 +40,21 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/detail/temporary_array.h>
 #  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/general/temp_storage.h>
+#  include <thrust/system/hip/detail/get_value.h>
+#  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/counting_iterator.h)
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/transform_iterator.h)
-#  include _THRUST_LIBCXX_INCLUDE(__iterator/zip_iterator.h)
-#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
 #  include _THRUST_STD_INCLUDE(__functional/not_fn.h)
 #  include _THRUST_STD_INCLUDE(__iterator/distance.h)
-#  include _THRUST_STD_INCLUDE(tuple)
+#  include _THRUST_STD_INCLUDE(cstdint)
+
+// rocprim include
+#  include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -70,84 +74,111 @@ InputIt THRUST_HOST_DEVICE find(execution_policy<Derived>& policy, InputIt first
 }; // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
-#  include <thrust/system/hip/detail/reduce.h>
+#  include <thrust/find.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
-namespace __find_if
+namespace detail
 {
-
-template <typename TupleType>
-struct functor
+template <typename Derived, typename InputIt, typename Size, typename Predicate>
+THRUST_HIP_RUNTIME_FUNCTION Size
+find_if_n_impl(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
-  THRUST_HIP_DEVICE_FUNCTION TupleType operator()(const TupleType& lhs, const TupleType& rhs) const
-  {
-    // select the smallest index among true results
-    if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
-    {
-      return TupleType(true, (_THRUST_STD::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
-    }
-    else if (thrust::get<0>(lhs))
-    {
-      return lhs;
-    }
-    else
-    {
-      return rhs;
-    }
-  }
-};
-} // namespace __find_if
+  using namespace thrust::system::hip_rocprim::temp_storage;
 
+  hipStream_t stream = hip_rocprim::stream(policy);
+  bool debug_sync    = THRUST_HIP_DEBUG_SYNC_FLAG;
+
+  // Bind the predicate to the input iterator so that rocPRIM only loads the boolean results and
+  // never materializes the input values. rocPRIM's find_first_of exits early as soon as a block
+  // finds a match, so a single key that compares equal to `true` gives a single-pass find_if.
+  const auto input = _THRUST_LIBCXX::make_transform_iterator(thrust::try_unwrap_contiguous_iterator(first), predicate);
+  const auto keys  = rocprim::constant_iterator<bool>(true);
+
+  size_t tmp_size = 0;
+  hip_rocprim::throw_on_error(
+    rocprim::find_first_of(
+      nullptr,
+      tmp_size,
+      input,
+      keys,
+      static_cast<size_t*>(nullptr),
+      static_cast<size_t>(num_items),
+      1,
+      rocprim::equal_to<bool>(),
+      stream,
+      debug_sync),
+    "find_if: failed to get temp storage size");
+
+  size_t storage_size = 0;
+  void* ptr           = nullptr;
+  void* tmp_ptr       = nullptr;
+  size_t* result_ptr;
+
+  auto l_part = make_linear_partition(make_partition(&tmp_ptr, tmp_size), ptr_aligned_array(&result_ptr, 1));
+
+  // Calculate storage_size including alignment
+  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+
+  // Allocate temporary storage for both the algorithm and the result.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  ptr = static_cast<void*>(tmp.data().get());
+
+  // Create pointers with alignment
+  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+
+  // Run find_if.
+  hip_rocprim::throw_on_error(
+    rocprim::find_first_of(
+      tmp_ptr,
+      tmp_size,
+      input,
+      keys,
+      result_ptr,
+      static_cast<size_t>(num_items),
+      1,
+      rocprim::equal_to<bool>(),
+      stream,
+      debug_sync),
+    "find_if: failed to run algorithm");
+
+  return static_cast<Size>(hip_rocprim::get_value(policy, result_ptr));
+}
+} // namespace detail
+
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class Size, class Predicate>
 InputIt THRUST_HOST_DEVICE
 find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
-  using result_type = _THRUST_STD::tuple<bool, Size>;
-
-  // empty sequence
   if (num_items == 0)
   {
     return first;
   }
 
-  // this implementation breaks up the sequence into separate intervals
-  // in an attempt to early-out as soon as a value is found
-  //
-  // XXX compose find_if from a look-back prefix scan algorithm
-  //     and abort kernel when the first element is found
-
-  // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
-  const Size interval_threshold = 1 << 20;
-  const Size interval_size      = (_THRUST_STD::min)(interval_threshold, num_items);
-
-  const auto begin = _THRUST_LIBCXX::make_zip_iterator(
-    _THRUST_LIBCXX::make_transform_iterator(thrust::try_unwrap_contiguous_iterator(first), predicate),
-    _THRUST_LIBCXX::counting_iterator<Size>(0));
-  const auto end = begin + num_items;
-
-  for (auto interval_begin = begin; interval_begin < end; interval_begin += interval_size)
+  // struct workaround is required for HIP-clang
+  struct workaround
   {
-    auto interval_end = interval_begin + interval_size;
-    if (end < interval_end)
+    THRUST_HOST static Size par(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
     {
-      interval_end = end;
-    } // end if
-
-    const result_type result = reduce(
-      policy, interval_begin, interval_end, result_type(false, interval_end - begin), __find_if::functor<result_type>());
-
-    // see if we found something
-    if (thrust::get<0>(result))
-    {
-      return first + thrust::get<1>(result);
+      return hip_rocprim::detail::find_if_n_impl(policy, first, num_items, predicate);
     }
-  }
+#  if defined(__HIP_DEVICE_COMPILE__)
+    THRUST_DEVICE static Size seq(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
+    {
+      return thrust::find_if(cvt_to_seq(derived_cast(policy)), first, first + num_items, predicate) - first;
+    }
+#  endif
+  };
 
-  // nothing was found if we reach here...
-  return first + num_items;
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  Size result_idx = workaround::par(policy, first, num_items, predicate);
+#  else
+  Size result_idx = workaround::seq(policy, first, num_items, predicate);
+#  endif
+
+  return first + result_idx;
 }
 
 template <class Derived, class InputIt, class Predicate>
