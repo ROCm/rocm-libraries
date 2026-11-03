@@ -218,9 +218,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                   "qr_tdm pipeline: FAST_EXP2=0 has no code path here - log2(e) is never folded "
                   "into scale_s, so the kernel would return 2^logit instead of e^logit");
 
-    static_assert(!kHasLogitsSoftCap,
-                  "qr_tdm pipeline does not implement logits soft cap - LogitsTransform is never "
-                  "applied, so scores would reach softmax uncapped and unscaled");
+    // LogitsTransform leaves the capped score with scale_s and log2(e) already
+    // folded in, which is the frame the bias branches hand downstream. Both at
+    // once would scale twice, so they cannot share an instance.
+    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
+                  "qr_tdm split-kv folds scale_s into the capped score, so logits soft cap and "
+                  "bias cannot share the same instance");
 
     // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
     // Dropout requires kernel dispatch interface expansion (dropout object +
@@ -438,7 +441,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
               typename VPageBlockNavigator,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename AttentionVariantParams,
+              typename BlockIndices>
     CK_TILE_HOST_DEVICE auto run_single_v_double_k_lds_buffer(
         const QDramBlockWindowTmp& q_dram_block_window_tmp,         // M0*K0 tile
         const KDramBlockWindowLengths& k_dram_block_window_lengths, // N0*K0 tile
@@ -452,6 +457,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         FmhaMask mask,
         PositionEncoding position_encoding,
         float scale_s,
+        const AttentionVariant& variant,
+        const AttentionVariantParams& variant_params,
+        const BlockIndices& block_indices,
         index_t kv_l2p_offset,
         void* smem_arena,
         float sink_v,
@@ -1051,6 +1059,21 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                     });
                 });
             }
+            else if constexpr(kHasLogitsSoftCap)
+            {
+                // No scale_s here: under FAST_EXP2 LogitsSoftCapParams folds both
+                // scale_s and log2(e) into its own constants, so this one call
+                // leaves s_acc in the same frame the bias branches above do.
+                tile_elementwise_inout(
+                    [&](auto& x) {
+                        x = variant.LogitsTransform(variant_params,
+                                                    variant.QueryTransform(variant_params, x),
+                                                    block_indices.batch_idx,
+                                                    block_indices.qo_head_idx,
+                                                    block_indices.kv_head_idx);
+                    },
+                    s_acc);
+            }
 
             const auto k_origin = make_tuple(kv_tile_start, 0);
 
@@ -1382,9 +1405,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // branch on the kernel side.
     //
     // No LDS carving here: the single-V path takes one arena pointer and slices
-    // it itself through
-    // Policy::LdsArenaLayout. The variant hooks are not part of this pipeline and
-    // block_indices has no consumer; everything else is forwarded and used.
+    // it itself through Policy::LdsArenaLayout. Everything else is forwarded;
+    // the variant hooks reach the logits soft cap site in run_.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowLengths,
               typename KPageBlockNavigator,
@@ -1408,9 +1430,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                FmhaMask mask,
                PositionEncoding position_encoding,
                float scale_s,
-               const AttentionVariant& /*variant*/,
-               const AttentionVariantParams& /*variant_params*/,
-               const BlockIndices& /*block_indices*/,
+               const AttentionVariant& variant,
+               const AttentionVariantParams& variant_params,
+               const BlockIndices& block_indices,
                index_t kv_l2p_offset, // logical-to-physical offset of seqlen_k coordinate
                void* smem_ptr,
                float sink_v) const
@@ -1431,6 +1453,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                                                 mask,
                                                 position_encoding,
                                                 scale_s,
+                                                variant,
+                                                variant_params,
+                                                block_indices,
                                                 kv_l2p_offset,
                                                 smem_ptr,
                                                 sink_v,

@@ -1993,6 +1993,52 @@ class SplitKVQrTdmTiles(unittest.TestCase):
             [32, 64, 128, 256],
         )
 
+    def test_qr_tdm_owns_logits_soft_cap(self):
+        # qr_tdm applies the soft cap itself now, so the entries that dispatch
+        # on an exact head dim have to be its own. The companion check below is
+        # what keeps this one honest: a universal claim over an empty set is
+        # vacuously true, and an empty set is exactly what a reverted qr_tdm
+        # change produces -- soft cap would slide back onto the padded fallback
+        # with every test still green.
+        kernels = get_fwd_splitkv_blobs(
+            targets=["gfx1250"],
+            kernel_filter="",
+            receipt=600,
+            mask_impl="simplified",
+            optdim_list=[-1],
+        )
+        exact = [
+            k
+            for k in kernels
+            if k.F_pipeline.F_logits == "t" and k.F_pipeline.F_dpad == "f"
+        ]
+        for kernel in exact:
+            self.assertEqual(kernel.F_pipeline.tag, "qr_tdm", kernel.filename)
+        # d32 is absent by construction: its bucket carries bk0max 64, so the
+        # unpadded head-dim predicate reads 64 and can never hold under
+        # hdim_q <= 32. get_fwd_splitkv_blobs drops those as unreachable.
+        self.assertEqual(sorted({kernel.F_hdim for kernel in exact}), [64, 128, 256])
+
+    def test_qr_keeps_the_soft_cap_head_dim_fallback(self):
+        # hdim % 8 != 0 is the one thing qr_tdm declines, soft cap or not, and
+        # the head-dim padded qr entry is the only predicate that accepts it.
+        kernels = get_fwd_splitkv_blobs(
+            targets=["gfx1250"],
+            kernel_filter="",
+            receipt=600,
+            mask_impl="simplified",
+            optdim_list=[-1],
+        )
+        fallback = {
+            kernel.F_hdim
+            for kernel in kernels
+            if kernel.F_pipeline.tag == "qr"
+            and kernel.F_pipeline.F_logits == "t"
+            and kernel.F_pipeline.F_dpad == "t"
+            and kernel.F_dtype in ("fp16", "bf16")
+        }
+        self.assertEqual(sorted(fallback), [32, 64, 128, 256])
+
 
 if __name__ == "__main__":
     unittest.main()

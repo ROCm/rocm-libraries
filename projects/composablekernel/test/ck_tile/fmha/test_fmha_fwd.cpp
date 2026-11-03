@@ -1213,6 +1213,70 @@ TEST_P(SplitKvSinkSoftCap, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
+// SplitKvSinkSoftCap pins the mode to batch, the page size to 0 and the sink
+// to on, so the rest of what a soft-capped split-kv kernel has to handle --
+// group mode, paged KV, no sink -- had no numerical coverage. The cap is
+// always on here; the axes above are what varies.
+class SplitKvSoftCapTraits
+    : public TestWithParam<std::tuple<std::tuple<int, int>, mode_enum, int, int>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSoftCapTraits);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKvSoftCapTraits,
+                         Combine(SplitKVHDimValues,
+                                 Values(mode_enum::batch, mode_enum::group),
+                                 Values(0, 128), // page_block_size
+                                 Values(0, 1))); // init_sink
+
+TEST_P(SplitKvSoftCapTraits, DataTypeConfig)
+{
+    auto [hdims, mode, page_block_size, init_sink] = GetParam();
+    auto [hdim_q, hdim_v]                          = hdims;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        2,  // batch
+        2,  // nhead
+        -1, // nhead_k
+        {256},
+        {1024},
+        hdim_q,
+        hdim_v,
+        0,     // seqlen_knew
+        {-1},  // seqlen_qpads
+        {-1},  // seqlen_kpads
+        {},    // q_eff
+        {},    // kv_eff
+        0,     // rotary_dim
+        true,  // i_perm
+        false, // o_perm
+        0,     // scale_s
+        30.f,  // logits_soft_cap
+        def_is_v_rowmajor,
+        def_lse,
+        page_block_size,
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        "0",   // mask_str
+        qscale_str,
+        true, // is_rotary_interleaved
+        3,    // num_splits
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation, without which this checks nothing
+        init_sink,
+        0, // pack_gqa
+        stream_config);
+    CHECK_RESULT(result);
+}
+
 // Two paths want to contribute the sink logit to the merged denominator: split
 // 0 publishes it on its early exit, and a split with work seeds it when the
 // split one back is empty. One empty leading split makes both fire, so the

@@ -926,28 +926,12 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         pipelines = []
         if dtype in ["fp16", "bf16"]:
             squant = "f"
-            # qr_tdm: left out is logits soft cap, which the pipeline
-            # static_asserts away (so does the prefill qr_tdm). The sequence
-            # padding variants follow the gfx9 qr order: the unpadded ones come
-            # first, since spad == t / skpad == t predicates always hold. Head
-            # dims are padded together, like fmha_fwd.py.
-            for mask, bias, pagedkv, sink in itertools.product(
-                get_mask_map(mask_impl).keys(),
-                BIAS_MAP.keys(),
-                ["t", "f"],
-                ["t", "f"],
-            ):
-                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
-                pipelines.append(Pipeline("qr_tdm", "row", "f", "t", "f", "f", "f", bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-                pipelines.append(Pipeline("qr_tdm", "row", "t", "f", "f", "f", "f", bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-            # qr: fallback for everything qr_tdm leaves out. Its three dpad == f
-            # entries only accept the bucket's exact head dim, and there qr_tdm's
-            # dpad == f entries win every time -- the spad == skpad == t one
-            # accepts any sequence length -- so they are skipped for the traits
-            # qr_tdm emits. The head-dim padded entry stays: it serves the head
-            # dims qr_tdm declines (hdim % 8 != 0, see dcheck).
+            # qr_tdm covers every trait the pipeline implements, logits soft cap
+            # included. The sequence padding variants follow the gfx9 qr order:
+            # the unpadded ones come first, since spad == t / skpad == t
+            # predicates always hold. Head dims are padded together, like
+            # fmha_fwd.py. Soft cap and bias never meet -- the pipeline
+            # static_asserts that, and get_fwd_splitkv_blobs drops the pairing.
             for logits, mask, bias, pagedkv, sink in itertools.product(
                 ["t", "f"],
                 get_mask_map(mask_impl).keys(),
@@ -955,12 +939,23 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 ["t", "f"],
                 ["t", "f"],
             ):
-                # Soft cap rules bias out further down, so spelling it here
-                # keeps the entries emitted and the entries kept the same set.
-                if logits == "t" and bias == "no":
-                    pipelines.append(Pipeline("qr", "row", "f", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-                    pipelines.append(Pipeline("qr", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-                    pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
+                pipelines.append(Pipeline("qr_tdm", "row", "f", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_tdm", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+            # qr: for fp16/bf16 the only job left is the head dims qr_tdm
+            # declines (hdim % 8 != 0, see dcheck). Its head-dim predicate is
+            # unconditionally true, so this one entry catches them for every
+            # bias and for soft cap alike; the dpad == f rungs would only ever
+            # match what qr_tdm already took.
+            for logits, mask, bias, pagedkv, sink in itertools.product(
+                ["t", "f"],
+                get_mask_map(mask_impl).keys(),
+                BIAS_MAP.keys(),
+                ["t", "f"],
+                ["t", "f"],
+            ):
                 pipelines.append(Pipeline("qr", "row", "t", "t", "t", "t", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
         elif dtype in ["fp8", "bf8"]:
             squant = "t" if dtype == "fp8" else "f"
