@@ -14,7 +14,7 @@
 
 #include "rocke/arch_target.h" /* rocke_set_unknown_arch_reason, rocke_mma_catalog_has_shape */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_floor_div, rocke_ceil_div */
-#include "rocke/ir.h" /* rocke_scheduler_strategy_is_valid */
+#include "rocke/ir.h" /* rocke_scheduler_strategy_reason */
 
 const char* rocke_wmma_ab_dtype(const char* dtype)
 {
@@ -91,17 +91,8 @@ bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
                               size_t reason_cap)
 {
     char msg[512];
-    if(sched != NULL && !rocke_scheduler_strategy_is_valid(sched))
-    {
-        /* normalize_scheduler_strategy's ValueError, word for word. */
-        snprintf(msg,
-                 sizeof msg,
-                 "unsupported scheduler_strategy '%s'; expected one "
-                 "of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None",
-                 sched);
-        rocke_spec_set_reason(reason, reason_cap, msg);
+    if(rocke_scheduler_strategy_reason(sched, reason, reason_cap))
         return false;
-    }
     const long long total_c = rocke_direct_conv_problem_total_c(p);
     const long long total_k = rocke_direct_conv_problem_total_k(p);
     const long long Ho = rocke_direct_conv_problem_Ho(p);

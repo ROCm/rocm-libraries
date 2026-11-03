@@ -751,12 +751,17 @@ bool rocke_attr_get_float(const rocke_attr_map_t* m, const char* key, double* ou
 const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key); /* NULL if absent */
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
 
-/* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
-bool rocke_scheduler_strategy_is_valid(const char* strategy);
-/* The strategies it takes, sorted, as normalize_scheduler_strategy's
- * ValueError lists them ("...; expected one of: <these>, or None"). */
+/* The scheduler strategies, sorted, as normalize_scheduler_strategy's
+ * ValueError lists them ("...; expected one of: <these>, or None"). The one
+ * C++ list of them: rocke_scheduler_strategy_is_valid reads it. */
 #define ROCKE_SCHEDULER_STRATEGY_CHOICES \
     "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause"
+/* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
+bool rocke_scheduler_strategy_is_valid(const char* strategy);
+/* normalize_scheduler_strategy's ValueError: returns true (and writes the
+ * reason, word for word) when `strategy` is not NULL and not one of
+ * ROCKE_SCHEDULER_STRATEGY_CHOICES. */
+bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t reason_cap);
 
 /* ============================ OPCODE TABLE ============================== */
 

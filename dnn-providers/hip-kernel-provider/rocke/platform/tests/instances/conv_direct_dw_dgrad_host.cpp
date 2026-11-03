@@ -468,6 +468,36 @@ static void test_fwd_wmma_scheduler_reason(void)
                     "iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause, or None");
     s.sched = "iterative-ilp";
     expect_fwd_wmma("sched iterative-ilp", &s, NULL);
+
+    /* Small C / small K write the same text (they had a shorter one). */
+    const char* want = "unsupported scheduler_strategy 'bogus'; expected one of: iterative-ilp, "
+                       "iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause, or None";
+    char reason[ERR_CAP];
+    rocke_fwd_smallc_wmma_spec_t smallc = rocke_fwd_smallc_wmma_spec_default();
+    smallc.problem = dense_problem(32, 48, 3, 64);
+    smallc.sched = "bogus";
+    CHECK(!rocke_fwd_smallc_wmma_is_valid_spec(&smallc, "gfx1250", reason, sizeof(reason))
+              && strcmp(reason, want) == 0,
+          "fwd_smallc_wmma sched bogus: %s",
+          reason);
+    rocke_fwd_smallk_wmma_spec_t smallk = rocke_fwd_smallk_wmma_spec_default();
+    smallk.problem = dense_problem(32, 48, 64, 4);
+    smallk.sched = "bogus";
+    CHECK(!rocke_fwd_smallk_wmma_is_valid_spec(&smallk, "gfx1250", reason, sizeof(reason))
+              && strcmp(reason, want) == 0,
+          "fwd_smallk_wmma sched bogus: %s",
+          reason);
+
+    /* rocke_scheduler_strategy_is_valid reads ROCKE_SCHEDULER_STRATEGY_CHOICES:
+     * every listed name, and no prefix, suffix or empty name. */
+    const char* good[]
+        = {"iterative-ilp", "iterative-maxocc", "iterative-minreg", "max-ilp", "max-memory-clause"};
+    for(const char* g : good)
+        CHECK(rocke_scheduler_strategy_is_valid(g), "strategy %s refused", g);
+    const char* bad[] = {"", "max", "max-ilp,", "iterative-ilp, iterative-maxocc", "max-memory"};
+    for(const char* x : bad)
+        CHECK(!rocke_scheduler_strategy_is_valid(x), "strategy '%s' accepted", x);
+    CHECK(rocke_scheduler_strategy_is_valid(NULL), "NULL strategy refused");
 }
 
 /* Python: a // b and ceil_div(a, b) = -(-a // b), for every sign. */

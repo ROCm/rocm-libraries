@@ -868,10 +868,34 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
 
 bool rocke_scheduler_strategy_is_valid(const char* strategy)
 {
-    return strategy == NULL || strcmp(strategy, "max-ilp") == 0
-           || strcmp(strategy, "max-memory-clause") == 0 || strcmp(strategy, "iterative-ilp") == 0
-           || strcmp(strategy, "iterative-minreg") == 0
-           || strcmp(strategy, "iterative-maxocc") == 0;
+    if(strategy == NULL)
+        return true;
+    /* One of the ", "-separated names of ROCKE_SCHEDULER_STRATEGY_CHOICES. */
+    const size_t n = strlen(strategy);
+    const char* name = ROCKE_SCHEDULER_STRATEGY_CHOICES;
+    for(;;)
+    {
+        const char* sep = strstr(name, ", ");
+        const size_t len = sep != NULL ? (size_t)(sep - name) : strlen(name);
+        if(n > 0 && len == n && strncmp(name, strategy, n) == 0)
+            return true;
+        if(sep == NULL)
+            return false;
+        name = sep + 2;
+    }
+}
+
+bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t reason_cap)
+{
+    if(rocke_scheduler_strategy_is_valid(strategy))
+        return false;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "unsupported scheduler_strategy '%s'; expected one "
+                 "of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None",
+                 strategy);
+    return true;
 }
 
 /* ============================ OPCODE TABLE ============================== */

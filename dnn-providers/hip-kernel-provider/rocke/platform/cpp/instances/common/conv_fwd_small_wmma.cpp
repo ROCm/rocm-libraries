@@ -378,12 +378,8 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-    {
-        snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", spec->sched);
-        rocke_spec_set_reason(reason, reason_cap, msg);
+    if(rocke_scheduler_strategy_reason(spec->sched, reason, reason_cap))
         return false;
-    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
@@ -607,12 +603,8 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-    {
-        snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", spec->sched);
-        rocke_spec_set_reason(reason, reason_cap, msg);
+    if(rocke_scheduler_strategy_reason(spec->sched, reason, reason_cap))
         return false;
-    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }

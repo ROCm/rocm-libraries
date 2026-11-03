@@ -204,6 +204,7 @@ class TestSmallSpecs(unittest.TestCase):
             (pk, dict(waves_p=1)),
             (pk, dict(tiles_p=12, prefetch=True)),
             (pk, dict(stages=4, prefetch=True, sched="iterative-ilp")),
+            (pk, dict(sched="bogus")),
         ):
             specs.append(
                 (
@@ -217,7 +218,7 @@ class TestSmallSpecs(unittest.TestCase):
                 ok, why_cpp, name, grid, lds = describe(to_dict(spec), arch)
                 why = reason(spec, arch)
                 self.assertEqual(ok, why is None, (arch, spec, why, why_cpp))
-                if why is not None and "scheduler" not in why:
+                if why is not None:
                     self.assertEqual(why_cpp, why, (arch, spec))
                 self.assertEqual(name, spec.kernel_name())
                 self.assertEqual(lds, spec.lds_bytes())
