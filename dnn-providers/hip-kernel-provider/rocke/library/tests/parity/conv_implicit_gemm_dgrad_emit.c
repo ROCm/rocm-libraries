@@ -218,7 +218,7 @@ static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch
     return 0;
 }
 
-/* 71-76, 84-94: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
+/* 71-76, 84-94, 97-100: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
  * Python emitter (the table is there). */
 static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
@@ -257,6 +257,27 @@ static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
         spec->tapk_ztrim = 1;
         spec->tapk_pp_bslab = 3;
         spec->cshuffle_m_chunks = 7;
+        return 0;
+    }
+    if(idx == 99 || idx == 100)
+    {
+        /* split-K ping-pong without boxes */
+        spec->tapk_pp_sched = idx == 99 ? 5 : 2;
+        spec->split_k = idx == 99 ? 4 : 3;
+        spec->split_atomic_pairs = idx == 100;
+        return 0;
+    }
+    if(idx == 97 || idx == 98)
+    {
+        /* tapk_pp_sched 7: split boxes (97), plain (98) */
+        spec->tapk_pp_sched = 7;
+        if(idx == 97)
+        {
+            spec->split_k = 8;
+            spec->pp_boxes = 7;
+            spec->pp_box_order = 2;
+            spec->pp_box_det = 1;
+        }
         return 0;
     }
     if(idx == 93 || idx == 94)
@@ -435,9 +456,16 @@ static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx == 95 || idx == 96)
+    {
+        /* xh_fast_a without xh_tap_rsrc on 77 / 79 */
+        const int r = make_cfg_3d_xh(idx == 95 ? 77 : 79, spec, arch);
+        spec->xh_tap_rsrc = false;
+        return r;
+    }
     if(idx >= 77 && idx <= 83)
         return make_cfg_3d_xh(idx, spec, arch);
-    if((idx >= 71 && idx <= 76) || (idx >= 84 && idx <= 94))
+    if((idx >= 71 && idx <= 76) || (idx >= 84 && idx <= 94) || (idx >= 97 && idx <= 100))
         return make_cfg_3d_pp(idx, spec, arch);
     if(idx >= 57 && idx <= 70)
         return make_cfg_3d(idx, spec, arch);

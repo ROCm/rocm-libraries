@@ -1628,6 +1628,15 @@ _GFX942_3D_PP = {
     94: dict(
         _T128, tapk_pp_sched=2, split_k=8, pp_boxes=7, pp_box_order=1, pp_box_det=2
     ),
+    # 97-98: tapk_pp_sched 7 (three tiles ahead), split boxes and plain.
+    97: dict(
+        _T128, tapk_pp_sched=7, split_k=8, pp_boxes=7, pp_box_order=2, pp_box_det=1
+    ),
+    98: dict(_T128, tapk_pp_sched=7),
+    # 99-100: split-K ping-pong without boxes (the plain packed-atomic store;
+    # 100: pair lanes).
+    99: dict(_T128, tapk_pp_sched=5, split_k=4),
+    100: dict(_T128, tapk_pp_sched=2, split_k=3, split_atomic_pairs=True),
 }
 
 
@@ -1698,6 +1707,9 @@ _GFX942_3D_XH = {
     82: dict(_XH_FULL, xh_yring=66, tapk_ztrim=1, no_agpr=True, xh_defer=0),
     83: dict(_XH_FULL, xh_yring=66, tapk_ztrim=1, xh_order=1, xh_defer=2),
 }
+# 95-96: xh_fast_a without xh_tap_rsrc (the tap offset per load) on 77 and 79.
+_GFX942_3D_XH[95] = dict(_GFX942_3D_XH[77], xh_tap_rsrc=False)
+_GFX942_3D_XH[96] = dict(_GFX942_3D_XH[79], xh_tap_rsrc=False)
 
 
 def _gfx942_3d_xh_spec(idx: int):
