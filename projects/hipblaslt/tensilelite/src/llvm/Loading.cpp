@@ -38,6 +38,31 @@ namespace TensileLite
 
     template <typename MyProblem, typename MySolution>
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+        LoadLibraryFilePreload(std::string const&                  filename,
+                               const std::vector<LazyLoadingInit>& preloaded)
+    {
+        return LLVMLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
+    }
+
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+        LoadLibraryData(std::vector<uint8_t> const& data)
+    {
+        return LLVMLoadLibraryData<MyProblem, MySolution>(data);
+    }
+
+    template TENSILELITEHOST_EXPORT
+        std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
+        LoadLibraryFilePreload<ContractionProblemGemm, ContractionSolution>(
+            std::string const& filename, const std::vector<LazyLoadingInit>& preloaded);
+
+    template TENSILELITEHOST_EXPORT
+        std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
+        LoadLibraryData<ContractionProblemGemm, ContractionSolution>(
+            std::vector<uint8_t> const& data);
+
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LLVMLoadLibraryFile(std::string const&                  filename,
                             const std::vector<LazyLoadingInit>& preloaded)
     {

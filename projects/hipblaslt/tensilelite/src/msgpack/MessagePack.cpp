@@ -41,6 +41,37 @@
 
 namespace TensileLite
 {
+
+    std::map<int, std::string> LoadLibraryMapping(std::string const& filename)
+    {
+        return MessagePackLoadLibraryMapping(filename);
+    }
+
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+        LoadLibraryFilePreload(std::string const&                  filename,
+                               const std::vector<LazyLoadingInit>& preloaded)
+    {
+        return MessagePackLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
+    }
+
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+        LoadLibraryData(std::vector<uint8_t> const& data)
+    {
+        return MessagePackLoadLibraryData<MyProblem, MySolution>(data);
+    }
+
+    template TENSILELITEHOST_EXPORT
+        std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
+        LoadLibraryFilePreload<ContractionProblemGemm, ContractionSolution>(
+            std::string const& filename, const std::vector<LazyLoadingInit>& preloaded);
+
+    template TENSILELITEHOST_EXPORT
+        std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
+        LoadLibraryData<ContractionProblemGemm, ContractionSolution>(
+            std::vector<uint8_t> const& data);
+
     namespace Serialization
     {
         void objectToMap(const msgpack::object&                            object,
