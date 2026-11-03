@@ -1,8 +1,6 @@
-// Copyright (c) 2018 NVIDIA Corporation
-// Modifications Copyright© 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
-// Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
-//
-// Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
+// SPDX-FileCopyrightText: Copyright (c) 2018, NVIDIA Corporation
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: BSL-1.0
 
 // TODO: These need to be turned into proper Thrust algorithms (dispatch layer,
 // backends, etc).
