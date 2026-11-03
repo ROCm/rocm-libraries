@@ -7,6 +7,7 @@ from __future__ import annotations
 import dataclasses
 import unittest
 from dataclasses import replace
+from unittest import mock
 from itertools import islice
 
 from dispatch.attention import (
@@ -35,7 +36,10 @@ from dispatch.attention.axes import (
     tuning_axes,
 )
 from dispatch.attention.common import _problem
-from dispatch.attention.dense_rules import resolve_dense_num_persistent
+from dispatch.attention.dense_rules import (
+    _dense_axes_for,
+    resolve_dense_num_persistent,
+)
 from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
 from dispatch.attention.tuning_specs import _SEMANTIC_FIELDS
 from dispatch.attention.unified_rules import (
@@ -657,7 +661,7 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
                 )
                 pool = sum(
                     int(n)
-                    for n in re.findall(r"addrspace\(3\) global \[(\d+) x i8\]", ir)
+                    for n in re.findall(r"addrspace\(3\)\s+global\s+\[(\d+) x i8\]", ir)
                 )
                 self.assertEqual(_gfx950_2d_lds_bytes(spec.kernel_spec), pool)
 
@@ -1032,10 +1036,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from kernels.gfx942.attention_dense import build_attention_dense
 
+        # These pipeline knobs are tunable now, not classified as untunable.
+        self.assertEqual(DENSE_UNTUNABLE_KNOBS["gfx942"], frozenset({"lazy_rescale"}))
         base = gfx942_dense_spec(_gfx942_request())
-        ok, why = supports_gfx942(replace(base, lds_num_buffers=2), arch="gfx942")
-        self.assertFalse(ok)
-        self.assertIn("lds_num_buffers", why)
 
         def ir(spec):
             kernel = build_attention_dense(spec, arch="gfx942")
@@ -1054,6 +1057,7 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 _gfx942_request(
                     dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
                 ),
+                _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128),
                 # A wide sliding window keeps the default geometry, so the
                 # window-only knobs are swept from their defaults.
                 _gfx942_request(sliding_window=512),
@@ -1061,6 +1065,264 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         )
         missing = _dense_swept_fields("gfx942") - changed
         self.assertFalse(missing, sorted(missing))
+
+    def test_bf16_cfvst_kdb_vpf_sweep_and_explicit_selection(self):
+        req = _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128)
+        default = attention_tuning_spec(req, "gfx942_dense")
+        base = default.kernel_spec
+
+        # New tuning choices must not alter the default kernel spec.
+        self.assertIsNone(base.use_cfvst)
+        self.assertTrue(base.resolved_use_cfvst())
+        self.assertEqual(base.lds_num_buffers, 1)
+        self.assertFalse(base.v_reg_prefetch)
+
+        # Production-level tuning stays one knob at a time on the default
+        # CFVST body.
+        specs = _gfx942_specs(req, level="production")
+        modes = {
+            (
+                spec.kernel_spec.resolved_use_cfvst(),
+                spec.kernel_spec.lds_num_buffers,
+                spec.kernel_spec.v_reg_prefetch,
+            )
+            for spec in specs
+        }
+        for expected in (
+            (True, 1, False),  # default
+            (False, 1, False),  # CFVST off
+            (True, 2, False),  # KDB
+            (True, 1, True),  # VPF
+        ):
+            self.assertIn(expected, modes)
+        self.assertNotIn((True, 2, True), modes)
+
+        # Explicit tuning pins can opt into every legal independent mode,
+        # including the combined mode outside the curated production sweep.
+        choices = (
+            {"lds_num_buffers": 2},
+            {"v_reg_prefetch": True},
+            {"lds_num_buffers": 2, "v_reg_prefetch": True},
+        )
+        for knobs in choices:
+            with self.subTest(knobs=knobs):
+                selected = tuning_spec_with_knobs(req, "gfx942_dense", knobs)
+                spec = selected.kernel_spec
+                self.assertTrue(spec.resolved_use_cfvst())
+                self.assertEqual(spec.lds_num_buffers, knobs.get("lds_num_buffers", 1))
+                self.assertEqual(
+                    spec.v_reg_prefetch, knobs.get("v_reg_prefetch", False)
+                )
+                # Bare IDs are searchable only in the production sweep.
+                # Full-only IDs need their explicit knobs for replay.
+                if not (spec.lds_num_buffers == 2 and spec.v_reg_prefetch):
+                    replayed = attention_tuning_spec(
+                        req, "gfx942_dense", selected.tuning_id
+                    )
+                    self.assertEqual(replayed, selected)
+
+        fp16_req = _gfx942_request(dtype="fp16")
+        for knob in ({"lds_num_buffers": 2}, {"v_reg_prefetch": True}):
+            with self.subTest(rejected=knob):
+                with self.assertRaises(ValueError):
+                    tuning_spec_with_knobs(fp16_req, "gfx942_dense", knob)
+
+    def test_ids_recorded_before_v_reg_prefetch_are_refused(self):
+        """The tuning-id migration. Adding the defaulted v_reg_prefetch field
+        (default False; lds_num_buffers keeps its default 1) adds one entry to the
+        gfx942 dense defaults fingerprint, so every gfx942_dense config_key changes.
+        An id recorded before the field existed is refused, never silently rebuilt,
+        and its knobs re-canonicalize to the current id."""
+        from dispatch.attention import dense_rules, gfx942_dense
+
+        req = _gfx942_request(dtype="bf16", seqlen_q=4096, seqlen_k=4096)
+        current = gfx942_dense._make_gfx942_attention_dense_candidate()
+        shipped = current.select_spec(
+            replace(req, algorithm=current.algorithm, spec_id="gfx942_dense")
+        )
+        self.assertEqual(shipped.kernel_spec.lds_num_buffers, 1)
+        self.assertFalse(shipped.kernel_spec.v_reg_prefetch)
+
+        real_defaults = dense_rules._dense_defaults
+
+        def defaults_without_v_reg_prefetch(base, recorded):
+            return tuple(
+                (name, value)
+                for name, value in real_defaults(base, recorded)
+                if name != "v_reg_prefetch"
+            )
+
+        for knobs in ({}, {"pv_priority": 2}):
+            with self.subTest(knobs=knobs):
+                # Record the id as the fingerprint stood before the field existed.
+                with mock.patch.object(
+                    dense_rules, "_dense_defaults", defaults_without_v_reg_prefetch
+                ):
+                    old = gfx942_dense._make_gfx942_attention_dense_candidate()
+                    pin = replace(
+                        req,
+                        algorithm=old.algorithm,
+                        spec_id="gfx942_dense",
+                        tuning_knobs=knobs,
+                    )
+                    stored = old.select_spec(pin)
+                fresh = tuning_spec_with_knobs(req, "gfx942_dense", knobs)
+                self.assertNotEqual(stored.config_key, fresh.config_key)
+                self.assertEqual(stored.kernel_spec, fresh.kernel_spec)
+                pin = replace(
+                    pin, tuning_id=stored.tuning_id, tuning_knobs=stored.knobs
+                )
+                ok, why = current.admits(pin)
+                self.assertFalse(ok)
+                self.assertIn("defaults they are relative to", why)
+                self.assertIn(stored.tuning_id, why)
+                self.assertIn(fresh.tuning_id, why)
+
+    def test_diag_split_keeps_bf16_cfvst_axes_reachable(self):
+        """A diagonal-split base keeps the CFVST axes the kernel accepts."""
+        req = _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128)
+        base = attention_tuning_spec(req, "gfx942_dense").kernel_spec
+        for persistent in (False, True):
+            with self.subTest(persistent=persistent):
+                split = replace(base, persistent=persistent, causal_diag_split=True)
+                axes = {axis.name for axis in _dense_axes_for(split, "gfx942")}
+                self.assertTrue({"use_cfvst", "use_v_swizzle", "v_row_pad"} <= axes)
+                selected = tuning_spec_with_knobs(
+                    req,
+                    "gfx942_dense",
+                    {
+                        "persistent": persistent,
+                        "causal_diag_split": True,
+                        "use_cfvst": True,
+                    },
+                )
+                ok, why = supports_gfx942(selected.kernel_spec, arch="gfx942")
+                self.assertTrue(ok, why)
+                self.assertTrue(selected.kernel_spec.causal_diag_split)
+                self.assertTrue(selected.kernel_spec.resolved_use_cfvst())
+
+    def test_nonpersistent_bf16_cfvst_remains_a_legal_explicit_pin(self):
+        """The new persistent gate applies to KDB/VPF, not CFVST on its own."""
+        req = _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128)
+        choice = tuning_spec_with_knobs(
+            req, "gfx942_dense", {"persistent": False, "use_cfvst": True}
+        )
+        kernel = choice.kernel_spec
+        self.assertFalse(kernel.persistent)
+        self.assertTrue(kernel.resolved_use_cfvst())
+        self.assertEqual(kernel.lds_num_buffers, 1)
+        self.assertFalse(kernel.v_reg_prefetch)
+        ok, why = supports_gfx942(kernel, arch="gfx942")
+        self.assertTrue(ok, why)
+
+    def test_pipeline_tuning_pins_reject_out_of_scope_modes(self):
+        """Tuning must not advertise configurations that the kernel gate rejects.
+
+        Exercise the real public pinning path, including combinations with the
+        prerequisite CFVST explicitly enabled or turned off.
+        """
+        bf16 = _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128)
+        fp16 = _gfx942_request(dtype="fp16", hdim_q=128, hdim_v=128)
+        modes = (
+            {"lds_num_buffers": 2},
+            {"v_reg_prefetch": True},
+            {"lds_num_buffers": 2, "v_reg_prefetch": True},
+        )
+        invalid = (
+            [
+                # BF16 D128: the prerequisite CFVST and persistent grid are both required.
+                (bf16, {"persistent": False, "use_cfvst": True, **mode})
+                for mode in modes
+            ]
+            + [(bf16, {"use_cfvst": False, **mode}) for mode in modes]  # No CFVST.
+            + [(fp16, {"use_cfvst": True, **mode}) for mode in modes]
+            + [(bf16, {"use_cfvst": True, "block_n": 32, **mode}) for mode in modes]
+            + [
+                (
+                    _gfx942_request(
+                        dtype="bf16", hdim_q=128, hdim_v=128, sliding_window=128
+                    ),
+                    {"use_cfvst": True, **mode},
+                )
+                for mode in modes
+            ]
+            + [
+                (
+                    _gfx942_request(
+                        dtype="bf16", hdim_q=128, hdim_v=128, use_sinks=True
+                    ),
+                    {"use_cfvst": True, **mode},
+                )
+                for mode in modes
+            ]
+            + [
+                (
+                    _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128, mask_type=0),
+                    {"use_cfvst": True, **mode},
+                )
+                for mode in modes
+            ]
+        )
+        for req, knobs in invalid:
+            with self.subTest(dtype=req.dtype, mask=req.mask_type, knobs=knobs):
+                with self.assertRaises(ValueError):
+                    tuning_spec_with_knobs(req, "gfx942_dense", knobs)
+
+    def test_full_pipeline_pad4_dsplit_explicit_pin_replays(self):
+        """The measured full optimization is selectable without hand-building a spec.
+
+        The curated production sweep intentionally excludes the combined mode;
+        full combination pins still need a stable selection/replay identity.
+        """
+        req = _gfx942_request(
+            dtype="bf16",
+            hdim_q=128,
+            hdim_v=128,
+            seqlen_q=4096,
+            seqlen_k=4096,
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+        )
+        knobs = {
+            "lds_num_buffers": 2,
+            "v_reg_prefetch": True,
+            "lds_row_pad": 4,
+            "causal_diag_split": True,
+        }
+        selected = tuning_spec_with_knobs(req, "gfx942_dense", knobs)
+        spec = selected.kernel_spec
+        self.assertTrue(spec.persistent)
+        self.assertEqual(spec.block_n, 64)
+        self.assertTrue(spec.resolved_use_cfvst())
+        self.assertEqual(spec.lds_num_buffers, 2)
+        self.assertTrue(spec.v_reg_prefetch)
+        self.assertEqual(spec.lds_row_pad, 4)
+        self.assertTrue(spec.causal_diag_split)
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
+        ok, why = supports_gfx942(spec, arch="gfx942")
+        self.assertTrue(ok, why)
+        name = selected.kernel_name()
+        for marker in ("kdb1", "vpf1", "krowpad4", "dsplit"):
+            self.assertIn(marker, name)
+        replay = tuning_spec_with_knobs(req, "gfx942_dense", dict(selected.knobs))
+        self.assertEqual(replay.kernel_spec, spec)
+        self.assertEqual(replay.tuning_id, selected.tuning_id)
+        self.assertEqual(replay.kernel_name(), name)
+
+    def test_pipeline_axis_values_remain_declared(self):
+        """Both independent pipeline levers and their prerequisite remain tunable."""
+        axes = {axis.name: axis for axis in tuning_axes("gfx942", "dense")}
+        for key, expected in (
+            ("use_cfvst", True),
+            ("lds_num_buffers", 2),
+            ("v_reg_prefetch", True),
+        ):
+            self.assertIn(key, axes)
+            self.assertTrue(
+                any((key, expected) in choice for choice in axes[key].choices),
+                (key, expected),
+            )
 
     def test_production_specs_are_legal_distinct_and_start_at_the_shipped_spec(self):
         for req in (_gfx942_request(), _gfx942_request(seqlen_q=8192, seqlen_k=8192)):

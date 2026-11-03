@@ -125,7 +125,7 @@ be smaller than 2 GiB.
 | `conv_direct_dgrad_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM, dgrad with stride 1 or 2 (phase decomposition) or per-axis dilation, dense and grouped (`cpg`, `kpg` multiples of 8, or 2/4/8/16 packed into block-diagonal super-groups with `pack_groups`), `PAD` in 0..(K-1)*dil. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 | `conv_direct_fwd_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward, dense and grouped (`cpg`, `kpg` multiples of 8, or small groups packed block-diagonally), square filters, stride 1 or 2, per-axis dilation. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 | `conv_direct_fwd_smallc_wmma` / `conv_direct_fwd_smallk_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward of tiny channel counts, ungrouped and undilated, square filters: `C <= 4` stems (`K` a multiple of 8) and `K` in (1, 2, 4, 8) layers (`C` a multiple of 8). Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
-| Winograd forward (`conv_winograd_fwd`, `conv_winograd_gemm_wmma`, `conv_winograd_gen`, `conv_winograd_fused_1d_wmma`) | ❌ | ❌ | ❌ | gfx1250 only: fp16 / bf16 I/O, stride 1, 2-D, `C/g` and `K/g` >= 32, dilation up to 35; 3x3 as F(m x n, 3x3) with tiles 2..6 (not 6x6), 1-D / 7x1 / 5x5 and segmented long filters through the generalized pipeline, fused 1-D kernel for `1 x r` with `C` in {32, 64, 128} (fp16). Kernels built per problem (no AOT cache); explicit K2 specs with long register-path runs (`tiles_per_thread`) of tiles >= 4 spill to scratch (see `dsl_docs/instances/convolution.md`); plan from `conv_winograd_select`; opt-in dispatcher route `algorithm="winograd"` (candidate `conv_winograd_fwd`), never picked by `auto` |
+| Winograd forward (`conv_winograd_fwd`, `conv_winograd_fwd_rt`, `conv_winograd_gemm_wmma`, `conv_winograd_gen`, `conv_winograd_fused_1d_wmma`) | ❌ | ❌ | ❌ | gfx1250 only: fp16 / bf16 I/O, stride 1, 2-D, `C/g` and `K/g` >= 32, dilation up to 35; 3x3 as F(m x n, 3x3) with tiles 2..6 (not 6x6), 1-D / 7x1 / 5x5 and segmented long filters through the generalized pipeline, fused 1-D kernel for `1 x r` with `C` in {32, 64, 128} (fp16). Kernels built per problem, except the 3x3 pipeline's shape-generic transforms (`conv_winograd_fwd_rt`, compiled ahead of time; opt-in route `algorithm="winograd_aot"`, candidate `conv_winograd_fwd_aot`); explicit K2 specs with long register-path runs (`tiles_per_thread`) of tiles >= 4 spill to scratch (see `dsl_docs/instances/convolution.md`); plan from `conv_winograd_select`; opt-in dispatcher route `algorithm="winograd"` (candidate `conv_winograd_fwd`), never picked by `auto` |
 
 ---
 
@@ -133,7 +133,7 @@ be smaller than 2 GiB.
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
-| `fmha_fwd_mfma` | ✅ | ✅ | ✅ | auto-dispatches to WMMA on gfx1151 |
+| `fmha_fwd_mfma` | ✅ | ✅ | ✅ | auto-dispatches to WMMA on gfx1151; opt-in `free_stride` (any Q/K/V/O layout via per-tensor batch strides) has no C++ builder twin; numeric-verified on gfx942 and gfx950 for the contiguous BSHD/BHSD, padded-head-dim and packed-QKV placements, with gfx942 run in CI |
 | `fmha_bwd` | ✅ | ✅ | ✅ | |
 | `fmha_appendkv` | ✅ | ✅ | ✅ | |
 | `fmha_paged_prefill` | ✅ | ✅ | ✅ | |
