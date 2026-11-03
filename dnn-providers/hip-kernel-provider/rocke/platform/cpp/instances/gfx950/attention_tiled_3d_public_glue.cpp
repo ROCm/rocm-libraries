@@ -357,6 +357,25 @@ const rocke_type_t* rocke_gfx950_unified_attention_3d_tiled_spec_dtype_ir(
     return rocke_bf16();
 }
 
+int rocke_gfx950_unified_attention_3d_tiled_spec_binary_search_iters(
+    const rocke_unified_attention_3d_tiled_spec_t* s)
+{
+    double v;
+    int r;
+    if(s == NULL)
+    {
+        return -1;
+    }
+    if(s->num_seqs <= 0)
+    {
+        return 32;
+    }
+    /* max(1, ceil(log2(num_seqs + 1))) */
+    v = ceil(log2((double)(s->num_seqs + 1)));
+    r = (int)v;
+    return r < 1 ? 1 : r;
+}
+
 int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     const rocke_unified_attention_3d_tiled_spec_t* s, char* buf, size_t cap)
 {

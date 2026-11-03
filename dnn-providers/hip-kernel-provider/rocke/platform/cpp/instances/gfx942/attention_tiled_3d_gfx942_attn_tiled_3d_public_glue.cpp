@@ -40,6 +40,7 @@
  * the 16x16x16 f16+bf16 atoms present), which IS fully reproducible here. The
  * fallback reason strings mirror the Python text byte-for-byte.
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -240,6 +241,25 @@ const rocke_type_t*
         return rocke_f16();
     }
     return rocke_bf16();
+}
+
+int rocke_unified_attention_3d_tiled_spec_binary_search_iters(
+    const rocke_unified_attention_3d_tiled_spec_t* s)
+{
+    double v;
+    int r;
+    if(s == NULL)
+    {
+        return -1;
+    }
+    if(s->num_seqs <= 0)
+    {
+        return 32;
+    }
+    /* max(1, ceil(log2(num_seqs + 1))) */
+    v = ceil(log2((double)(s->num_seqs + 1)));
+    r = (int)v;
+    return r < 1 ? 1 : r;
 }
 
 int rocke_unified_attention_3d_tiled_spec_kernel_name(
