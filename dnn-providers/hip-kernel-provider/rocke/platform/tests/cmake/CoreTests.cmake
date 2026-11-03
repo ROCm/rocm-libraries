@@ -31,6 +31,19 @@ if(BUILD_TESTING)
         SKIP_RETURN_CODE 77
         TIMEOUT 1800
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+    # The arch-table parity test reads cpp/core/arch/data.cpp, which the
+    # installed test tree does not carry, so CMakeLists.txt keeps it out of the
+    # installed pytest cohort; run it here, from the source tree, instead.
+    add_test(
+      NAME rocke_arch_table_engine_parity
+      COMMAND "${Python3_EXECUTABLE}" -m pytest
+              "${CMAKE_CURRENT_SOURCE_DIR}/core/test_arch_table_engine_parity.py" -q)
+    set_tests_properties(
+      rocke_arch_table_engine_parity
+      PROPERTIES
+        LABELS "ckc;python;host"
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; arch-domain reproducibility "

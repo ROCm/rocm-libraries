@@ -26,7 +26,9 @@ costs a regex and runs everywhere a source tree exists.
 
 CPU-only: no GPU, compile, or built C++ engine required. Source-only: it reads
 ``cpp/core/arch/data.cpp``, which an installed test artifact does not carry, so
-``CMakeLists.txt`` keeps it out of the installed pytest cohort.
+``CMakeLists.txt`` keeps it out of the installed pytest cohort and
+``tests/cmake/CoreTests.cmake`` runs it from the source tree as the
+``rocke_arch_table_engine_parity`` CTest.
 """
 
 from __future__ import annotations
