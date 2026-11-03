@@ -110,6 +110,10 @@ THRUST_NAMESPACE_BEGIN
 //! :ref:`copyable arguments <address-stability>`.
 //! @endrst
 //!
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 //! \see https://en.cppreference.com/w/cpp/algorithm/transform
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename UnaryFunction>
@@ -166,6 +170,10 @@ THRUST_HOST_DEVICE OutputIterator transform(
 //! :ref:`copyable arguments <address-stability>`.
 //! @endrst
 //!
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 //!  \see https://en.cppreference.com/w/cpp/algorithm/transform
 template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
 OutputIterator transform(InputIterator first, InputIterator last, OutputIterator result, UnaryFunction op)
@@ -237,6 +245,10 @@ OutputIterator transform(InputIterator first, InputIterator last, OutputIterator
 //! :ref:`copyable arguments <address-stability>`.
 //! @endrst
 //!
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 //! \see https://en.cppreference.com/w/cpp/algorithm/transform
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy,
@@ -305,6 +317,10 @@ THRUST_HOST_DEVICE OutputIterator transform(
 //! :ref:`copyable arguments <address-stability>`.
 //! @endrst
 //!
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 //! \see https://en.cppreference.com/w/cpp/algorithm/transform
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename BinaryFunction>
 OutputIterator
@@ -388,6 +404,10 @@ transform(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, Ou
  *  \endcode
  *
  *  \see thrust::transform
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy,
@@ -466,6 +486,10 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  \endcode
  *
  *  \see thrust::transform
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename ForwardIterator, typename UnaryFunction, typename Predicate>
 ForwardIterator
@@ -545,6 +569,10 @@ transform_if(InputIterator first, InputIterator last, ForwardIterator result, Un
  *  \endcode
  *
  *  \see thrust::transform
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy,
@@ -623,6 +651,10 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  \endcode
  *
  *  \see thrust::transform
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,
@@ -718,6 +750,10 @@ ForwardIterator transform_if(
  *  \endcode
  *
  *  \see thrust::transform
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy,
@@ -811,6 +847,10 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  \endcode
  *
  *  \see thrust::transform
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,
@@ -844,6 +884,10 @@ ForwardIterator transform_if(
 }
 
 //! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename UnaryFunction>
 THRUST_HOST_DEVICE OutputIterator transform_n(
   const detail::execution_policy_base<DerivedPolicy>& exec,
@@ -857,6 +901,10 @@ THRUST_HOST_DEVICE OutputIterator transform_n(
 }
 
 //! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
 OutputIterator transform_n(
   InputIterator first, _THRUST_STD::iter_difference_t<InputIterator> count, OutputIterator result, UnaryFunction op)
@@ -868,6 +916,10 @@ OutputIterator transform_n(
 }
 
 //! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename DerivedPolicy,
           typename InputIterator1,
           typename InputIterator2,
@@ -886,6 +938,10 @@ THRUST_HOST_DEVICE OutputIterator transform_n(
 }
 
 //! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename BinaryFunction>
 OutputIterator transform_n(
   InputIterator1 first1,
@@ -902,6 +958,10 @@ OutputIterator transform_n(
 }
 
 //! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename DerivedPolicy,
           typename InputIterator,
           typename ForwardIterator,
@@ -920,6 +980,10 @@ THRUST_HOST_DEVICE ForwardIterator transform_if_n(
 }
 
 //! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename InputIterator, typename ForwardIterator, typename UnaryFunction, typename Predicate>
 ForwardIterator transform_if_n(
   InputIterator first,
@@ -935,6 +999,10 @@ ForwardIterator transform_if_n(
 }
 
 //! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename DerivedPolicy,
           typename InputIterator1,
           typename InputIterator2,
@@ -956,6 +1024,10 @@ THRUST_HOST_DEVICE ForwardIterator transform_if_n(
 }
 
 //! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename InputIterator1,
           typename InputIterator2,
           typename ForwardIterator,
@@ -977,6 +1049,10 @@ ForwardIterator transform_if_n(
 }
 
 //! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename DerivedPolicy,
           typename InputIterator1,
           typename InputIterator2,
@@ -1007,6 +1083,10 @@ THRUST_HOST_DEVICE ForwardIterator transform_if_n(
 }
 
 //! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.1.0
+ *  \endverbatim
+ */
 template <typename InputIterator1,
           typename InputIterator2,
           typename InputIterator3,

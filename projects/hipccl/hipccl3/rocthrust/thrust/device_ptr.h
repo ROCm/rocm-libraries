@@ -37,6 +37,10 @@ THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup memory_management Memory Management
  *  \{
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 
 template <typename T>
@@ -69,6 +73,10 @@ class device_reference;
  *  \see device_allocator
  *  \see device_pointer_cast
  *  \see raw_pointer_cast
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T>
 class device_ptr
@@ -86,6 +94,10 @@ public:
    *  This constructor accepts a \c std::nullptr_t value.
    *
    *  \post <tt>get() == nullptr</tt>.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE device_ptr(std::nullptr_t)
       : super_t(nullptr)
@@ -102,6 +114,10 @@ public:
    *  \pre \c ptr points to a location in device memory.
    *
    *  \post <tt>get() == nullptr</tt>.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   template <typename U>
   THRUST_HOST_DEVICE explicit device_ptr(U* ptr)
@@ -117,6 +133,10 @@ public:
    *  \pre <tt>std::is_convertible_v<U*, T*> == true</tt>.
    *
    *  \post <tt>get() == other.get()</tt>.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   template <typename U>
   THRUST_HOST_DEVICE device_ptr(device_ptr<U> const& other)
@@ -134,6 +154,10 @@ public:
    *  \post <tt>get() == other.get()</tt>.
    *
    *  \return \c *this.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   template <typename U>
   THRUST_HOST_DEVICE device_ptr& operator=(device_ptr<U> const& other)
@@ -149,6 +173,10 @@ public:
    *  \post <tt>get() == nullptr</tt>.
    *
    *  \return \c *this.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE device_ptr& operator=(std::nullptr_t)
   {
@@ -164,6 +192,10 @@ public:
  *  \param dp The \c device_ptr to output.
  *
  *  \return \c os.
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T, typename CharT, typename Traits>
 THRUST_HOST std::basic_ostream<CharT, Traits>&
@@ -178,6 +210,10 @@ operator<<(std::basic_ostream<CharT, Traits>& os, device_ptr<T> const& dp);
  *  \pre \c ptr points to a location in device memory.
  *
  *  \return A \c device_ptr<T> pointing to \c ptr.
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T>
 THRUST_HOST_DEVICE device_ptr<T> device_pointer_cast(T* ptr);
@@ -186,6 +222,10 @@ THRUST_HOST_DEVICE device_ptr<T> device_pointer_cast(T* ptr);
  *
  *  \tparam T    Any type.
  *  \param  dptr A \c device_ptr to a \c T.
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T>
 THRUST_HOST_DEVICE device_ptr<T> device_pointer_cast(device_ptr<T> const& dptr);
