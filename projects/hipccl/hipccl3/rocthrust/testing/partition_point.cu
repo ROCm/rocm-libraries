@@ -122,6 +122,7 @@ void TestPartitionPointWithBigIndexesHelper(int magnitude)
                (1ll << magnitude) - 17);
 }
 
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
 void TestPartitionPointWithBigIndexes()
 {
   TestPartitionPointWithBigIndexesHelper(30);
@@ -130,3 +131,4 @@ void TestPartitionPointWithBigIndexes()
   TestPartitionPointWithBigIndexesHelper(33);
 }
 DECLARE_UNITTEST(TestPartitionPointWithBigIndexes);
+#endif // THRUST_FORCE_32_BIT_OFFSET_TYPE
