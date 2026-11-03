@@ -1015,11 +1015,6 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
 # LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
     **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
-    "mfma.scale.f32.16x16x128.f8f6f4": (
-        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
-        "i32 immarg, i32, i32 immarg, i32)"
-    ),
 }
 
 # LLVM 24 changes the named-barrier pointer ABI from LDS addrspace(3) to

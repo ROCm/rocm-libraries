@@ -50,6 +50,7 @@ from kernels.gfx950.attention_tiled_2d import (
 from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec as Gfx950Spec3D,
 )
+from rocke.core.llvm_profile import _flavor_at_least
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 
 P = au.UnifiedAttentionProblem
@@ -493,6 +494,8 @@ _SHARED_PAIRS = [
     "arch,path,a,b", [p[1:] for p in _SHARED_PAIRS], ids=[p[0] for p in _SHARED_PAIRS]
 )
 def test_same_outputs_share_key_and_ir(routing_env, arch, path, a, b, flavor):
+    if arch == "gfx1250" and not _flavor_at_least(flavor, "llvm22"):
+        pytest.skip("llvm20 does not declare the gfx1250 WMMA intrinsics")
     key_fn, lower = (
         (au._tiled_cache_key, _lower_2d)
         if path == "2d"

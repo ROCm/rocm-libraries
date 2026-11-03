@@ -521,7 +521,7 @@ static bool ll_need_has(const rocke_lower_t* L, const char* key)
                       rocke_llvm_flavor_name(minimum),
                       rocke_llvm_flavor_name(L->flavor));
     }
-    rocke_ll_fail(L, ROCKE_ERR_VALUE, "intrinsic '%s' has no declaration in any flavor table", key);
+    rocke_ll_fail(L, ROCKE_ERR_KEY, "intrinsic '%s' has no declaration in any flavor table", key);
 }
 
 /* Python: _Lowerer._check_arch_domain. Refuses the lowering when the committed

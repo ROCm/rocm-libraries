@@ -34,18 +34,21 @@ ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> roc
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
 # The parity family that carries the llvm23-gated gfx1250 ops.
 GFX1250_FAMILY = "gfx1250_lowering"
-# Families whose every config uses an op that an older flavor cannot declare
-# (TDM data movement, or gfx1250 WMMA, which llvm20 lacks). Under such a flavor
-# both engines reject all of them, which the gate reads as ALL_REJECTED, so they
-# are compared in the llvm23 lane only.
+# Families whose every config uses an llvm23-gated op (their kernels move data
+# with TDM). Under another flavor both engines reject all of them, which the
+# gate reads as ALL_REJECTED, so they are compared in the llvm23 lane only.
 TARGET_OP_PROFILE_FAMILIES = (
-    "conv_winograd_fused_1d_wmma",
     "conv_dgrad_patch_wmma",
     "conv_dgrad_smallc_wmma",
     "conv_direct_dgrad_wmma",
     "conv_direct_fwd_wmma",
     "conv_fwd_small_wmma",
 )
+# Families whose every config uses gfx1250 WMMA. Flavors below llvm22 do not
+# declare it, so both engines reject all of them there. Flavors from llvm22 on
+# compare them in the default lane.
+GFX1250_WMMA_FAMILIES = ("conv_winograd_fused_1d_wmma",)
+GFX1250_WMMA_MIN_FLAVOR = "llvm22"
 
 
 def _selected_profile_supports_target_ops() -> bool:
@@ -59,6 +62,17 @@ def _selected_profile_supports_target_ops() -> bool:
     )
 
     return _supports_llvm23_target_ops(_resolve_llvm_flavor())
+
+
+def _selected_flavor_declares_gfx1250_wmma() -> bool:
+    """True when the selected lane is llvm22 or newer."""
+    python_root = ROCKE / "python"
+    if str(python_root) not in sys.path:
+        sys.path.insert(0, str(python_root))
+    from rocke.core.llvm_profile import _flavor_at_least
+    from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+    return _flavor_at_least(_resolve_llvm_flavor(), GFX1250_WMMA_MIN_FLAVOR)
 
 
 def _cxx() -> str | None:
@@ -199,23 +213,23 @@ def main() -> int:
     # A dashboard per lane, beside the archive it describes: one shared path
     # meant the diagnostic ir run overwrote the gating run's JSON.
     supports_target_ops = _selected_profile_supports_target_ops()
+    declares_wmma = _selected_flavor_declares_gfx1250_wmma()
     only_subs = [s for s in args.only.split(",") if s]
+    # Families that the selected lane cannot compare. The llvm23 lane below
+    # compares them instead.
+    lane_excluded = (
+        [] if supports_target_ops else list(TARGET_OP_PROFILE_FAMILIES)
+    ) + ([] if declares_wmma else list(GFX1250_WMMA_FAMILIES))
     llvm23_families = [
-        f
-        for f in TARGET_OP_PROFILE_FAMILIES
-        if not only_subs or any(s in f for s in only_subs)
+        f for f in lane_excluded if not only_subs or any(s in f for s in only_subs)
     ]
-    # Under another flavor the default lane leaves the llvm23-only families
-    # out (run_diff passes when that leaves nothing to compare).
+    # Under another flavor the default lane leaves the families out (run_diff
+    # passes when that leaves nothing to compare).
     status = run_gate(
         "LLVM-IR (the contract)",
         str(build_root / "dashboard_ll.json"),
         ["--mode", "ll"]
-        + (
-            []
-            if supports_target_ops
-            else ["--exclude", ",".join(TARGET_OP_PROFILE_FAMILIES)]
-        ),
+        + (["--exclude", ",".join(lane_excluded)] if lane_excluded else []),
     )
     # The gfx1250-only ops need the LLVM23-generation target-op profile. Under
     # an older profile both engines reject those configs, which reads as

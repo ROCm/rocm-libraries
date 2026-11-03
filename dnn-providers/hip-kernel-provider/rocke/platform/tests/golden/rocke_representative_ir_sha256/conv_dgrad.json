@@ -19,14 +19,6 @@
           "sha256": "b5d4d6e65fd47be84dde2c8b12b798d34ac5914958788eb6548bb8c5f2a4425b",
           "status": "ok"
         },
-        "conv_dgrad/gfx1250/n1h8c64k64r3_g4": {
-          "arch": "gfx1250",
-          "bytes": 57666,
-          "family": "conv_dgrad",
-          "kernel_name": "irhash_dgrad_1250_g4_s1_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
-          "sha256": "64e4551e37048f6ecc0dc55337d86590c60ae7f17bd04e478e5d56be17e3afe2",
-          "status": "ok"
-        },
         "conv_dgrad/gfx90a/n1h8c16k32r3_s1": {
           "arch": "gfx90a",
           "bytes": 67716,
@@ -108,7 +100,12 @@
           "status": "ok"
         }
       },
-      "expected_failures": {}
+      "expected_failures": {
+        "conv_dgrad/gfx1250/n1h8c64k64r3_g4": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        }
+      }
     },
     "llvm22": {
       "cases": {

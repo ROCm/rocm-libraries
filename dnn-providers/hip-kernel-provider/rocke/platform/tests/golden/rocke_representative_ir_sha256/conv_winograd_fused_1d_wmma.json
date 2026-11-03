@@ -2,25 +2,17 @@
   "aliases": {},
   "flavors": {
     "llvm20": {
-      "cases": {
+      "cases": {},
+      "expected_failures": {
         "conv_winograd_fused_1d_wmma/gfx1250/1x11_4s3_c128_sel": {
-          "arch": "gfx1250",
-          "bytes": 997274,
-          "family": "conv_winograd_fused_1d_wmma",
-          "kernel_name": "conv_wino_fused1d_N1H1W600C128_K128Y1X11_3xF4_4_q2_fk4_g10_xwmma16_pf_mg_w4_mh",
-          "sha256": "c99fcd5869decb0e69f350259b757fa951786b57f1739b99e1372cb36b53f093",
-          "status": "ok"
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
         },
         "conv_winograd_fused_1d_wmma/gfx1250/1x7_4s2_c64_valu": {
-          "arch": "gfx1250",
-          "bytes": 166365,
-          "family": "conv_winograd_fused_1d_wmma",
-          "kernel_name": "conv_wino_fused1d_N1H1W600C64_K64Y1X7_2xF4_4_q2_fk2_g10",
-          "sha256": "36893620e3eec260d6170dd3054be142a26becae26abb8bc8fab688402a32974",
-          "status": "ok"
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
         }
-      },
-      "expected_failures": {}
+      }
     },
     "llvm22": {
       "cases": {

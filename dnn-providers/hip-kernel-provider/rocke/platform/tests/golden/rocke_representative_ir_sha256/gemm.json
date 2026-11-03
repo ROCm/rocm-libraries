@@ -35,22 +35,6 @@
           "sha256": "6d66e31c59a5808861d121eab930b3749802fe9027eb3defd2476fca94e322f7",
           "status": "ok"
         },
-        "gemm/gfx1250/t32x32x32": {
-          "arch": "gfx1250",
-          "bytes": 26599,
-          "family": "gemm",
-          "kernel_name": "irhash_gemm_1250_a_fp16_t32x32x32_w2x2x1_wt16x16x32_mem_intrawave_default_pad",
-          "sha256": "e247d2c5781fc9f59545b7f7f618365ea4d2cac3d6c78ce5b1f421928ab3517a",
-          "status": "ok"
-        },
-        "gemm/gfx1250/t64x32x32": {
-          "arch": "gfx1250",
-          "bytes": 75671,
-          "family": "gemm",
-          "kernel_name": "irhash_gemm_1250_b_fp16_t64x32x32_w2x1x1_wt16x16x32_mem_intrawave_default_pad",
-          "sha256": "2cf5f724056a4508509cb2bbd20c3beda766d17f1cd524edc49e6b6b873659eb",
-          "status": "ok"
-        },
         "gemm/gfx90a/t128x128x16": {
           "arch": "gfx90a",
           "bytes": 89303,
@@ -139,6 +123,14 @@
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16 requires llvm23 (ROCm 7.13+), got llvm20",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/t32x32x32": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/t64x32x32": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
           "type": "NotImplementedError"
         }
       }

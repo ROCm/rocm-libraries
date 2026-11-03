@@ -27,54 +27,6 @@
           "sha256": "960dde16f771e8e06fe7eebf29f1a9e479847318e4af5c0837c7e9aba97d2baa",
           "status": "ok"
         },
-        "conv/gfx1250/n1h7c256k64r3/splitk_cshuffle": {
-          "arch": "gfx1250",
-          "bytes": 42631,
-          "family": "conv",
-          "kernel_name": "irhash_conv_1250_splitk_cshuffle_N1H7W7C256_K64Y3X3_t32x32x32_w2x1_a16x16x32_mem_cshuffle_splitk",
-          "sha256": "f82e7e69e5b2facf7c90fa2b537d9c6edfdcf26d7e0b7776404067695ea077db",
-          "status": "ok"
-        },
-        "conv/gfx1250/n1h7c256k64r3/splitk_default": {
-          "arch": "gfx1250",
-          "bytes": 53537,
-          "family": "conv",
-          "kernel_name": "irhash_conv_1250_splitk_default_N1H7W7C256_K64Y3X3_t32x32x32_w2x1_a16x16x32_mem_default_splitk",
-          "sha256": "d6ecd55e89f1baa7180002c9a3bd5c2d0f9488828e8d63ad58f240b658433856",
-          "status": "ok"
-        },
-        "conv/gfx1250/n2h14c64k64r3g4/g4_cshuffle": {
-          "arch": "gfx1250",
-          "bytes": 38016,
-          "family": "conv",
-          "kernel_name": "irhash_conv_1250_g4_cshuffle_N2H14W14C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_cshuffle",
-          "sha256": "b46df8d4f376e15aa09f5243ab58fe97672aacac8917fb34916299faaaffe9d2",
-          "status": "ok"
-        },
-        "conv/gfx1250/n2h14c64k64r3g64/dw_gm4_direct": {
-          "arch": "gfx1250",
-          "bytes": 83197,
-          "family": "conv",
-          "kernel_name": "irhash_conv_1250_dw_gm4_direct_N2H14W14C64_K64Y3X3G64_t32x32x32_w2x1_a16x16x32_mem_default_gm4",
-          "sha256": "8f43c23ac6f66dfaffa67f42948b0828a05cd3f6130328220af2ef758b59eb0d",
-          "status": "ok"
-        },
-        "conv/gfx1250/n2h14c64k64r3g64/dw_gm8_cshuffle": {
-          "arch": "gfx1250",
-          "bytes": 60515,
-          "family": "conv",
-          "kernel_name": "irhash_conv_1250_dw_gm8_cshuffle_N2H14W14C64_K64Y3X3G64_t32x32x32_w2x1_a16x16x32_mem_cshuffle_gm8",
-          "sha256": "283996cda1ae81548d8ddf0151160d9ea4a419757a66ca4e9cd7e2c9c1963c8a",
-          "status": "ok"
-        },
-        "conv/gfx1250/n2h14c64k64r3g64/dw_unmerged": {
-          "arch": "gfx1250",
-          "bytes": 134414,
-          "family": "conv",
-          "kernel_name": "irhash_conv_1250_dw_unmerged_N2H14W14C64_K64Y3X3G64_t32x32x32_w2x1_a16x16x32_mem_default",
-          "sha256": "db7254d1a5fb2485ab4624ee444c4b439b7453c8a96879463af724bd44d36499",
-          "status": "ok"
-        },
         "conv/gfx90a/n1h8c16k32r3": {
           "arch": "gfx90a",
           "bytes": 23613,
@@ -182,8 +134,32 @@
       },
       "expected_failures": {
         "conv/gfx1250/n1h7c256k64r3/splitk_cluster4": {
-          "message": "cluster_barrier requires LLVM flavor llvm23, got llvm20",
-          "type": "ValueError"
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "conv/gfx1250/n1h7c256k64r3/splitk_cshuffle": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "conv/gfx1250/n1h7c256k64r3/splitk_default": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "conv/gfx1250/n2h14c64k64r3g4/g4_cshuffle": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "conv/gfx1250/n2h14c64k64r3g64/dw_gm4_direct": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "conv/gfx1250/n2h14c64k64r3g64/dw_gm8_cshuffle": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "conv/gfx1250/n2h14c64k64r3g64/dw_unmerged": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
         }
       }
     },

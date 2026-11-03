@@ -19,22 +19,6 @@
           "sha256": "e7f3de3dd59168e6b207215b03d70ad5cb811e9203dc4a692c9ab8a5fdea234f",
           "status": "ok"
         },
-        "conv_wgrad/gfx1250/n1h8c16k32r3_spk4": {
-          "arch": "gfx1250",
-          "bytes": 53100,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1250_spk4_N1H8W8C16_K32Y3X3_t32x32x32_w2x1_a16x16x32_mem_default_spk",
-          "sha256": "4cb4af882d9ba2405ac67c3d5c0cf7ddb6a893bed24d6c2496f7ba542187767c",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
-          "arch": "gfx1250",
-          "bytes": 66522,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1250_g4_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
-          "sha256": "12b3aeebc16eee6aa445c2bad6fd46ef7a5bafcbfd0b44e5b2b85e445c199b89",
-          "status": "ok"
-        },
         "conv_wgrad/gfx90a/n1h8c16k32r3": {
           "arch": "gfx90a",
           "bytes": 21866,
@@ -180,7 +164,16 @@
           "status": "ok"
         }
       },
-      "expected_failures": {}
+      "expected_failures": {
+        "conv_wgrad/gfx1250/n1h8c16k32r3_spk4": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        },
+        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
+          "message": "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
+          "type": "NotImplementedError"
+        }
+      }
     },
     "llvm22": {
       "cases": {
