@@ -112,11 +112,9 @@ jobs:
                        | .value as $arch
                        | $arch.components[]
                        | {family: $family, component: ascii_downcase, runs_on: $arch.runs_on}]}')
-          # Other test types run without limits: a command_timeout of 0 disables
-          # the test step's `timeout` command, and 7200 minutes is the
-          # self-hosted runner job maximum.
+          # Other test types use the longest limits allowed.
           timeouts=$(echo "$timeouts" | jq -c --arg test_type "$TEST_TYPE" \
-            'map_values(map_values(.[$test_type] // {command_timeout: "0", step_timeout_minutes: 7200, job_timeout_minutes: 7200}))')
+            'map_values(map_values(.[$test_type] // {command_timeout: "0", step_timeout_minutes: 360, job_timeout_minutes: 7200}))')
           echo "build_matrix=${build}" >> "$GITHUB_OUTPUT"
           echo "test_matrix=${test}" >> "$GITHUB_OUTPUT"
           echo "timeouts=${timeouts}" >> "$GITHUB_OUTPUT"
