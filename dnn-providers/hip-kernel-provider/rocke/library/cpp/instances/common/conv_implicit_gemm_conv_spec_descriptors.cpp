@@ -1384,7 +1384,7 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             "uk_xhalo is implemented in the 3-D uniform_k_decode + "
                             "reg_prefetch=1 lds_xor loop only");
         /* C port: the wave-private DMA staging form only (Python-only otherwise). */
-        if(s->fxh_dma < 1000 || s->rpf_pingpong || s->xh_yring)
+        if(s->fxh_dma < 1000 || s->rpf_pingpong || s->xh_yring / 10 == 2)
             ROCKE_SPEC_FAIL(
                 reason, reason_cap, "uk_xhalo: the C port carries the fxh_dma >= 1000 loop only");
     }
@@ -1434,8 +1434,15 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     if(s->fxh_dma >= 1000 && !(s->xh_wait_smem && s->warp_n == 1))
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "fxh_dma >= 1000 (wave-private A) needs xh_wait_smem and warp_n 1");
-    if(s->xh_yring)
-        ROCKE_SPEC_FAIL(reason, reason_cap, "xh_yring is not ported to the C engine");
+    if(s->xh_yring
+       && !((s->xh_yring % 10 == 2 || s->xh_yring % 10 == 4) && s->xh_yring / 10 <= 2
+            && s->fxh_dma >= 1000 && s->uk_tap_fast && !s->uk_chunk_group
+            && s->warp_m % (s->xh_yring % 10) == 0))
+        ROCKE_SPEC_FAIL(
+            reason,
+            reason_cap,
+            "xh_yring (2 or 4 rows, + 10: early reload, + 20: also early ring rows) "
+            "needs fxh_dma >= 1000, uk_tap_fast without chunk groups, warp_m %% rows == 0");
     if(s->lds_xor_rowkey && !(s->lds_xor && s->lds_kpack_read && s->tile_k == 32))
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,

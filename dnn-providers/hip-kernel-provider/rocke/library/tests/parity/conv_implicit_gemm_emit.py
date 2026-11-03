@@ -1015,6 +1015,8 @@ _GFX942_3D_OFFSET = 32
 #  116: 114 + uk_tap_fast
 #  117: 114 with epi_quad_xpose=3
 #  118: 55 + xh_stride_m without uk_xhalo: rejected by both engines
+#  119: 116 + xh_yring=14 (the input-row ring, early reload)
+#  120: 116 + xh_yring=2
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1148,6 +1150,8 @@ def _gfx942_3d_spec(idx: int):
     knobs[116] = (55, dict(_s4, uk_tap_fast=True))
     knobs[117] = (55, dict(_s4, epi_quad_xpose=3))
     knobs[118] = (55, dict(xh_stride_m=True))
+    knobs[119] = (55, dict(_s4, uk_tap_fast=True, xh_yring=14))
+    knobs[120] = (55, dict(_s4, uk_tap_fast=True, xh_yring=2))
     _pp.update({
         110: dict(_p84, xcd_remap=0, split_streamk=True),
         111: dict(xcd_remap=0, split_hybrid=4, split_det=1),

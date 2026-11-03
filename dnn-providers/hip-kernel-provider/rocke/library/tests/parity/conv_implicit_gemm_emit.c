@@ -1079,6 +1079,12 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->m_band = idx == 115 ? 32 : 0;
         spec->uk_tap_fast = idx == 116;
         return 0;
+    case 119:
+    case 120:
+        if(make_cfg_3d(116, spec, arch) != 0)
+            return -1;
+        spec->xh_yring = idx == 119 ? 14 : 2;
+        return 0;
     case 118:
         if(make_cfg_3d_base(55, spec, arch) != 0)
             return -1;
