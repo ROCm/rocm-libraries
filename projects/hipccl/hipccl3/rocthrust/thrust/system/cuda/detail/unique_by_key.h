@@ -182,7 +182,7 @@ THRUST_RUNTIME_FUNCTION ::cuda::std::pair<KeyOutputIt, ValOutputIt> unique_by_ke
 {
   using size_type = thrust::detail::it_difference_t<KeyInputIt>;
 
-  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(keys_first, keys_last));
+  size_type num_items = static_cast<size_type>(::cuda::std::distance(keys_first, keys_last));
   ::cuda::std::pair<KeyOutputIt, ValOutputIt> result_end{};
   cudaError_t status        = cudaSuccess;
   size_t temp_storage_bytes = 0;
@@ -304,4 +304,4 @@ THRUST_NAMESPACE_END
 #  include <thrust/memory.h>
 #  include <thrust/unique.h>
 
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

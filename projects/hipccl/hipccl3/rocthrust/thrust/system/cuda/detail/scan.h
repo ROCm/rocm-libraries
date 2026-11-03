@@ -262,7 +262,7 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan(
   thrust::cuda_cub::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, ScanOp scan_op)
 {
   using diff_t           = thrust::detail::it_difference_t<InputIt>;
-  diff_t const num_items = _THRUST_STD::distance(first, last);
+  diff_t const num_items = ::cuda::std::distance(first, last);
   return thrust::cuda_cub::inclusive_scan_n(policy, first, num_items, result, scan_op);
 }
 
@@ -276,7 +276,7 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan(
   ScanOp scan_op)
 {
   using diff_t           = thrust::detail::it_difference_t<InputIt>;
-  diff_t const num_items = _THRUST_STD::distance(first, last);
+  diff_t const num_items = ::cuda::std::distance(first, last);
   return thrust::cuda_cub::inclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
 
@@ -284,7 +284,7 @@ template <typename Derived, typename InputIt, typename OutputIt>
 _CCCL_HOST_DEVICE OutputIt
 inclusive_scan(thrust::cuda_cub::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  return thrust::cuda_cub::inclusive_scan(policy, first, last, result, _THRUST_STD::plus<>{});
+  return thrust::cuda_cub::inclusive_scan(policy, first, last, result, ::cuda::std::plus<>{});
 }
 
 _CCCL_EXEC_CHECK_DISABLE
@@ -314,7 +314,7 @@ _CCCL_HOST_DEVICE OutputIt exclusive_scan(
   ScanOp scan_op)
 {
   using diff_t           = thrust::detail::it_difference_t<InputIt>;
-  diff_t const num_items = _THRUST_STD::distance(first, last);
+  diff_t const num_items = ::cuda::std::distance(first, last);
   return thrust::cuda_cub::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
 
@@ -322,7 +322,7 @@ template <typename Derived, typename InputIt, typename OutputIt, typename T>
 _CCCL_HOST_DEVICE OutputIt exclusive_scan(
   thrust::cuda_cub::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, T init)
 {
-  return thrust::cuda_cub::exclusive_scan(policy, first, last, result, init, _THRUST_STD::plus<>{});
+  return thrust::cuda_cub::exclusive_scan(policy, first, last, result, init, ::cuda::std::plus<>{});
 }
 
 template <typename Derived, typename InputIt, typename OutputIt>
@@ -337,4 +337,4 @@ THRUST_NAMESPACE_END
 
 #  include <thrust/scan.h>
 
-#endif // NVCC
+#endif // _CCCL_CUDA_COMPILATION()

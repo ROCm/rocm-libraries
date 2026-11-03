@@ -62,4 +62,4 @@ _CCCL_HOST_DEVICE thrust::detail::it_value_t<Pointer> get_value(execution_policy
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
 
-#endif
+#endif // _CCCL_CUDA_COMPILATION()
