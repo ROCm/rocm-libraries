@@ -249,11 +249,13 @@ class Case:
 
 def load_pins_cases(path: str, arch: str) -> dict:
     """``{case: {cmd, kernel, calls}}`` of a pins file, or of one mode of a pin
-    table (``PATH#MODE``, ``dispatch/conv_pins.py``). A table's cases are
+    table (``PATH#MODE``, or ``PATH#MODE@FORM`` for its ``<case>_<FORM>`` cases;
+    ``dispatch/conv_pins.py``). A table's cases are
     resolved through the dispatcher (:func:`dispatch.conv_pins.dispatch_conv_pinned`
     on a ``ConvGroupedRequest`` built from each case's command), so a replay of
     a table runs exactly the instances and launches dispatch hands a runtime."""
     file, _, mode = path.partition("#")
+    mode, _, form = mode.partition("@")
     doc = json.load(open(file))
     if "modes" not in doc:
         if mode:
@@ -264,6 +266,16 @@ def load_pins_cases(path: str, arch: str) -> dict:
     table = load_conv_pins(file, mode or None)
     out = {}
     for k, row in doc["modes"][table.mode]["cases"].items():
+        # ``@FORM`` replays the cases named <case>_<FORM> (e.g. the padded
+        # "adapter" form, @pad1) under their plain names; without it, the
+        # cases without a form suffix.
+        base, _, suffix = k.rpartition("_")
+        if form:
+            if suffix != form:
+                continue
+            k = base
+        elif not re.fullmatch(r"s\d+", suffix):
+            continue
         res = dispatch_conv_pinned(request_from_miopen_cmd(row["cmd"], arch), table)
         lp = res.spec.launch_params()
         label = res.spec.name
