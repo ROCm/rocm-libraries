@@ -84,7 +84,7 @@ if(DEFINED ROCFFT_FORTRAN_COMPILER_DIR)
   endif()
   set(_rocfft_dir "${ROCFFT_FORTRAN_COMPILER_DIR}")
 else()
-  # Must mirror the mapping in projects/rocfft/fortran/CMakeLists.txt.
+  # Must mirror the mapping in bindings/fortran/rocfft/CMakeLists.txt.
   if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
     set(_rocfft_fc "gfortran")
   elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")

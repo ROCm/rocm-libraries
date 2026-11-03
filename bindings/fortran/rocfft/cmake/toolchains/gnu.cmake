@@ -22,9 +22,9 @@
 # THE SOFTWARE.
 # #############################################################################
 
-# AMD ROCm toolchain (amdflang).
-# Usage, from projects/rocfft/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
+# GNU toolchain (gfortran).
+# Usage, from bindings/fortran/rocfft:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/gnu.cmake
 
-set(CMAKE_Fortran_COMPILER amdflang CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       amdclang CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER gfortran CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       gcc CACHE FILEPATH "C compiler")
