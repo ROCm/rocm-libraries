@@ -4,6 +4,9 @@ include: matmul_common.yaml
 
 
 Tests:
+# K = 96, which no workgroup tile divides, with host-pre-swizzled scales: a
+# Tensile MX kernel serves it. Only pre-swizzled scales have a Tensile fallback;
+# with compact scales nothing serves this shape.
 - name: rocroller_predicate
   category: pre_checkin
   function:
@@ -26,8 +29,9 @@ Tests:
 # A single rocRoller buffer descriptor's num_records field is 32 bits, so it cannot
 # address an operand >= 4 GiB. Here input A = M*K (f8) = 65536*65536 = 4 GiB = 2^32
 # bytes, which would otherwise wrap num_records and silently produce all-zero output.
-# The rocRoller kernel must stay unsupported; the call is then served by the
-# TensileLite fallback. Output is kept tiny (N=256) so the case allocates ~8 GiB
+# The rocRoller kernel must stay unsupported. The scales are compact, which no
+# TensileLite MX kernel reads, so the answer is no solution rather than a kernel
+# that returns zeros. Output is kept tiny (N=256) so the case allocates ~8 GiB
 # (A + host copy), not 4 GiB of fp32 output.
 # nightly + gfx950: large allocation, matches the matmul_*_grid_limit large-size group.
 - name: rocroller_predicate_4gib_buffer
@@ -43,20 +47,43 @@ Tests:
   alpha: 1
   beta: 0
   initialization: hpl
+  expect_no_solution: 1
   unit_check: 0
   norm_check: 0
   gpu_arch: '950'
 
-# Block scaling routes a problem to rocRoller, which serves batch_count == 1
-# only. The problem must reach the TensileLite heuristic and get a kernel
-# instead of failing the call. gfx950 because gfx1250 never routes to
-# rocRoller, so only here does a batched block-scaled problem reach the
-# fallback. No numerical check: the generated MX kernels this lands on fail
+# Batched MX GEMMs reach the Tensile heuristic: rocRoller serves batch_count == 1
+# only. Tensile's MX kernels read host-pre-swizzled scales
+# (Block_32_UE8M0_32_8_EXT = 1001), so with those the problem must get a kernel
+# and the call succeed. gfx950 because only there do the MX types reach these
+# paths. No numerical check: the generated MX kernels this lands on fail
 # norm_check at batch_count 1 too, with HIPBLASLT_USE_ROCROLLER=0 and so
 # without any rocRoller routing at all. That is a TensileLite defect this test
 # must not be coupled to; what it asserts is that a solution is found and the
-# call succeeds, which is what used to be impossible.
+# call succeeds.
 - name: matmul_mxf8_batched_rocroller_fallback
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r }
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r }
+  M: [256]
+  N: [256]
+  K: [256]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  batch_count: [2, 16]
+  initialization: uniform_low_precision
+  unit_check: 0
+  norm_check: 0
+  gpu_arch: '950'
+
+# The same batched problems with compact (packed, not pre-swizzled) scales have
+# no kernel: rocRoller declines batch_count > 1 and no Tensile MX kernel reads
+# compact scales. The answer is no solution, not a kernel that misreads them.
+- name: matmul_mx_batched_packed_scales_no_solution
   category: pre_checkin
   function:
     matmul:
@@ -71,6 +98,7 @@ Tests:
   beta: 0
   batch_count: [2, 16]
   initialization: uniform_low_precision
+  expect_no_solution: 1
   unit_check: 0
   norm_check: 0
   gpu_arch: '950'

@@ -190,6 +190,8 @@ struct Arguments
     char    integer_exact_pattern[16];
     // skip, rather than fail, when the library offers no solution (size-threshold sweeps)
     int8_t  allow_no_solution;
+    // pass only when the library offers no solution: the refusal is what is under test
+    int8_t  expect_no_solution;
     int8_t  timing;
 
     char transA;
@@ -334,6 +336,7 @@ struct Arguments
     OPER(skip_launch_solution) SEP   \
     OPER(integer_exact_pattern) SEP  \
     OPER(allow_no_solution) SEP      \
+    OPER(expect_no_solution) SEP     \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

@@ -667,11 +667,10 @@ namespace
     TEST_P(rocroller_predicate_test, fallsBackToTensile)
     {
         // Problems rocRoller declines: a K no workgroup tile divides, and an
-        // operand too large for its 32-bit buffer descriptor. rocRoller still
-        // refuses both, but refusing is no longer the caller's answer -
-        // getBestSolutions falls back to the generated library, so a kernel is
-        // found and run. These reported "NO solution found!" before that
-        // fallback existed.
+        // operand too large for its 32-bit buffer descriptor. With pre-swizzled
+        // scales the generated library serves the problem. With compact scales
+        // no generated kernel can, so the case expects no solution rather than
+        // a rocRoller kernel that would address the operand wrongly.
         rocroller_predicate_testing{}(GetParam());
     }
     INSTANTIATE_TEST_CATEGORIES(rocroller_predicate_test);
