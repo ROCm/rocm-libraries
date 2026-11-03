@@ -109,6 +109,12 @@ constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_dense.bias.uid";
 constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN = "gfx950_attention_dense.bias.stride_batch";
 constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx950_attention_dense.bias.stride_head";
 constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = "gfx950_attention_dense.bias.stride_query";
+/// The largest bias stride and bias element index a launch may use: the kernel takes each
+/// stride as an int32_t and addresses the bias with 32-bit element offsets. rocKE states the
+/// same bound as ADDITIVE_BIAS_INDEX_LIMIT (an exclusive 2^31) in
+/// kernels/common/_attention_additive_bias.py. additiveBiasFor() and the saved-plan reader
+/// both check against this one constant.
+constexpr int64_t MAX_BIAS_INDEX = std::numeric_limits<int32_t>::max();
 
 /// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout.
 constexpr uint32_t BATCH_AXIS = 0;
@@ -167,9 +173,7 @@ std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
 /// The largest bias element index a launch reaches: (seqlen_kv - 1) plus, for each
 /// leading axis, (extent - 1) * stride, with the problem's batch, query-head and query-row
 /// extents. nullopt when a product or the sum overflows int64_t. The kernel addresses the
-/// bias with 32-bit element offsets, so a launch needs this below 2^31. additiveBiasFor() and
-/// the saved-plan
-/// reader both apply this one bound.
+/// bias with 32-bit element offsets, so a launch needs this at most MAX_BIAS_INDEX.
 std::optional<int64_t> largestAdditiveBiasIndex(const AttentionDenseProblem& problem,
                                                 const std::array<int32_t, 3>& strides)
 {
@@ -462,7 +466,6 @@ std::optional<AdditiveBias>
         return std::nullopt;
     }
 
-    constexpr int64_t INT32_LIMIT = 2147483648LL; // 2^31
     const std::array<int64_t, 3> extents{problem.batch, problem.numQueryHeads, problem.seqLenQ};
     AdditiveBias bias;
     bias.uid = uid;
@@ -470,7 +473,7 @@ std::optional<AdditiveBias>
     {
         const int64_t extent = dims->Get(axis);
         const int64_t stride = extent == 1 ? 0 : strides->Get(axis);
-        if((extent != 1 && extent != extents[axis]) || stride < 0 || stride >= INT32_LIMIT)
+        if((extent != 1 && extent != extents[axis]) || stride < 0 || stride > MAX_BIAS_INDEX)
         {
             HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
                                    << describeOperand("attn_mask", *tensor) << " axis " << axis
@@ -481,7 +484,7 @@ std::optional<AdditiveBias>
         bias.strides[axis] = static_cast<int32_t>(stride);
     }
     const auto maxIndex = largestAdditiveBiasIndex(problem, bias.strides);
-    if(!maxIndex.has_value() || *maxIndex >= INT32_LIMIT)
+    if(!maxIndex.has_value() || *maxIndex > MAX_BIAS_INDEX)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"size_limit"}
                                << "attn_mask reaches element 2^31 or beyond; the kernel "
@@ -1587,14 +1590,13 @@ Gfx950AttentionDenseLaunchInputs
         AdditiveBias bias;
         bias.uid = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_BIAS_UID_VALUE);
         const auto readStride = [&inputs](std::string_view name) {
-            return static_cast<int32_t>(requireLaunchInt(inputs, name, 0, INT32_LIMIT));
+            return static_cast<int32_t>(requireLaunchInt(inputs, name, 0, MAX_BIAS_INDEX));
         };
         bias.strides = {readStride(GFX950_ATTENTION_DENSE_BIAS_STRIDE_BATCH_VALUE),
                         readStride(GFX950_ATTENTION_DENSE_BIAS_STRIDE_HEAD_VALUE),
                         readStride(GFX950_ATTENTION_DENSE_BIAS_STRIDE_QUERY_VALUE)};
         const auto largest = largestAdditiveBiasIndex(problem, bias.strides);
-        // INT32_LIMIT here is INT32_MAX, so this is additiveBiasFor()'s "index >= 2^31".
-        if(!largest.has_value() || *largest > INT32_LIMIT)
+        if(!largest.has_value() || *largest > MAX_BIAS_INDEX)
         {
             serialization::refuseIngestorPlan(
                 serialization::IngestorPlanRefusal::INCOMPATIBLE,

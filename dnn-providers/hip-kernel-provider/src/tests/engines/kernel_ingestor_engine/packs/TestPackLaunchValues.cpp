@@ -495,6 +495,15 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsABiasReachingTheLastInt32Ele
     SavedLaunchInputs past = edge;
     past.values["bias.stride_batch"] = LAST_ELEMENT - KEY_REACH + 1;
     expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, past, "reach element 2^31");
+
+    // With a single key, the batch stride is the whole reach, so the largest stride the
+    // kernel takes is read too.
+    SavedLaunchInputs widest = edge;
+    widest.values["seqlen_kv"] = int64_t{1};
+    widest.values["bias.stride_batch"] = LAST_ELEMENT;
+    const auto readWidest = readGfx950AttentionDenseLaunchInputs(widest);
+    ASSERT_TRUE(readWidest.binding.bias.has_value());
+    EXPECT_EQ(readWidest.binding.bias->strides[0], LAST_ELEMENT);
 }
 
 TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAScaleOfAnotherType)

@@ -40,8 +40,9 @@ _STRIDES = ("batch", "head", "sq")
 # in i32 (additive_bias_elem_ptr also zero-extends the index, so it relies on it
 # being non-negative too; the x4 loads then add only a host-constant offset); every
 # host validator of a bias launch bounds the largest element index by this
-# (through check_additive_bias_reach). The gfx1151 dispatch binding and the hipDNN
-# dense pack (Gfx950AttentionDenseNative.cpp) keep their own copies of the bound.
+# (through check_additive_bias_reach). The gfx1151 dispatch binding keeps its own
+# copy of the bound; the hipDNN dense pack (Gfx950AttentionDenseNative.cpp) states
+# it once, as the inclusive MAX_BIAS_INDEX = 2**31 - 1.
 ADDITIVE_BIAS_INDEX_LIMIT = 2**31
 
 

@@ -2905,6 +2905,12 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABiasTheKernelCannotRead)
     cases.push_back({"a stride of 2^31",
                      withBias({BATCH, HEADS, SEQ, SEQ}, {{int64_t{1} << 31, SEQ * SEQ, SEQ, 1}}),
                      "attn_mask"});
+    // One less passes the stride check, so only the reach check stops it: the batch axis
+    // alone then reaches past element 2^31 - 1.
+    cases.push_back(
+        {"a stride of 2^31 - 1 on a full axis",
+         withBias({BATCH, HEADS, SEQ, SEQ}, {{(int64_t{1} << 31) - 1, SEQ * SEQ, SEQ, 1}}),
+         "size_limit"});
     // Every stride fits in i32, but (B-1)*2^30 + (Hq-1)*2^29 is past 2^31.
     cases.push_back(
         {"a last element past 2^31",
