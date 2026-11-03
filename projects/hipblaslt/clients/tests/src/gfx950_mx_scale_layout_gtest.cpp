@@ -1,12 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// gfx950, HIPBLASLT_USE_ROCROLLER=0. The Tensile path in tensile_host.cpp
-// keeps HostPreSwizzle kernels (name token MXSFHPS) for scale 1001 and drops
-// them for packed scale 3. This runs hipblasLtMatmulAlgoGetHeuristic,
-// hipblaslt_ext::isSolutionSupported, and hipblasLtMatmul, so removing those
-// checks in getBestSolutions, getAllSolutions, isSolutionSupported, or
-// runContractionProblem fails this test.
+// gfx950 keeps HostPreSwizzle kernels (name token MXSFHPS) for scale 1001 and
+// drops them for packed scale 3. Both scale modes search the same Tensile
+// problem, which ranks the HostPreSwizzle kernels first, so these tests fail if
+// the layout checks in tensile_host.cpp are removed from the heuristic, the
+// support check, or the launch, in the C API or the hipblaslt_ext::Gemm API.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -19,9 +18,14 @@
 
 namespace
 {
-    constexpr int64_t kM = 128;
-    constexpr int64_t kN = 128;
-    constexpr int64_t kK = 256;
+    constexpr int64_t kM          = 128;
+    constexpr int64_t kN          = 128;
+    constexpr int64_t kK          = 256;
+    constexpr size_t  kWorkspace  = 64ull << 20;
+    constexpr size_t  kScaleBytes = 1u << 20;
+    constexpr int     kAlgoCount  = 32;
+    const float       kAlpha      = 1.f;
+    const float       kBeta       = 0.f;
 
     bool archIsGfx950()
     {
@@ -31,12 +35,18 @@ namespace
         return std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
     }
 
-    struct EnvGuard
+    bool isPreswizzled(const std::string& kernelName)
+    {
+        return kernelName.find("MXSFHPS") != std::string::npos;
+    }
+
+    // The handle reads HIPBLASLT_USE_ROCROLLER in its constructor.
+    struct RocRollerEnv
     {
         bool        had = false;
         std::string old;
 
-        explicit EnvGuard(const char* value)
+        explicit RocRollerEnv(const char* value)
         {
             if(const char* cur = std::getenv("HIPBLASLT_USE_ROCROLLER"))
             {
@@ -46,7 +56,7 @@ namespace
             setenv("HIPBLASLT_USE_ROCROLLER", value, 1);
         }
 
-        ~EnvGuard()
+        ~RocRollerEnv()
         {
             if(had)
                 setenv("HIPBLASLT_USE_ROCROLLER", old.c_str(), 1);
@@ -55,7 +65,9 @@ namespace
         }
     };
 
-    struct Query
+    // FP8 E4M3, A is K x M (transA = T), B is K x N (transB = N), FP32 D.
+    // The scale buffers cover the 32x8 pre-swizzle of this shape.
+    struct Problem
     {
         hipblasLtHandle_t           handle = nullptr;
         hipblasLtMatmulDesc_t       desc   = nullptr;
@@ -63,36 +75,37 @@ namespace
         hipblasLtMatrixLayout_t     b      = nullptr;
         hipblasLtMatrixLayout_t     d      = nullptr;
         hipblasLtMatmulPreference_t pref   = nullptr;
+        void*                       dA     = nullptr;
+        void*                       dB     = nullptr;
+        void*                       dD     = nullptr;
         void*                       scaleA = nullptr;
         void*                       scaleB = nullptr;
+        void*                       ws     = nullptr;
 
-        void release()
+        ~Problem()
         {
             if(pref)
                 hipblasLtMatmulPreferenceDestroy(pref);
             if(desc)
                 hipblasLtMatmulDescDestroy(desc);
-            if(a)
-                hipblasLtMatrixLayoutDestroy(a);
-            if(b)
-                hipblasLtMatrixLayoutDestroy(b);
-            if(d)
-                hipblasLtMatrixLayoutDestroy(d);
-            if(scaleA)
-                static_cast<void>(hipFree(scaleA));
-            if(scaleB)
-                static_cast<void>(hipFree(scaleB));
-            pref = nullptr;
-            desc = nullptr;
-            a = b = d = nullptr;
-            scaleA = scaleB = nullptr;
+            for(auto layout : {a, b, d})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            for(void* p : {dA, dB, dD, scaleA, scaleB, ws})
+                if(p)
+                    static_cast<void>(hipFree(p));
         }
     };
 
-    // A is K x M (transA = T), B is K x N (transB = N). FP8 E4M3 in, FP32 out.
-    // The scale buffers are large enough for the 32x8 pre-swizzle of this shape.
-    void makeQuery(Query& q, hipblasLtMatmulMatrixScale_t mode)
+    void allocZeroed(void** p, size_t bytes)
     {
+        ASSERT_EQ(hipMalloc(p, bytes), hipSuccess);
+        ASSERT_EQ(hipMemset(*p, 0, bytes), hipSuccess);
+    }
+
+    void makeProblem(Problem& q, hipblasLtHandle_t handle, hipblasLtMatmulMatrixScale_t mode)
+    {
+        q.handle = handle;
         ASSERT_EQ(hipblasLtMatmulDescCreate(&q.desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                   HIPBLAS_STATUS_SUCCESS);
         hipblasOperation_t opA = HIPBLAS_OP_T;
@@ -113,11 +126,12 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(hipblasLtMatrixLayoutCreate(&q.d, HIP_R_32F, kM, kN, kM), HIPBLAS_STATUS_SUCCESS);
 
-        constexpr size_t kScaleBytes = 1u << 20;
-        ASSERT_EQ(hipMalloc(&q.scaleA, kScaleBytes), hipSuccess);
-        ASSERT_EQ(hipMalloc(&q.scaleB, kScaleBytes), hipSuccess);
-        ASSERT_EQ(hipMemset(q.scaleA, 0, kScaleBytes), hipSuccess);
-        ASSERT_EQ(hipMemset(q.scaleB, 0, kScaleBytes), hipSuccess);
+        allocZeroed(&q.dA, kK * kM);
+        allocZeroed(&q.dB, kK * kN);
+        allocZeroed(&q.dD, kM * kN * sizeof(float));
+        allocZeroed(&q.scaleA, kScaleBytes);
+        allocZeroed(&q.scaleB, kScaleBytes);
+        allocZeroed(&q.ws, kWorkspace);
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
                       q.desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &q.scaleA, sizeof(void*)),
                   HIPBLAS_STATUS_SUCCESS);
@@ -126,7 +140,7 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
 
         ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&q.pref), HIPBLAS_STATUS_SUCCESS);
-        uint64_t workspace = 64ull << 20;
+        uint64_t workspace = kWorkspace;
         ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(q.pref,
                                                         HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                                         &workspace,
@@ -134,162 +148,194 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
     }
 
-    struct Heuristic
+    std::vector<std::string> names(hipblasLtHandle_t                              handle,
+                                   std::vector<hipblasLtMatmulHeuristicResult_t>& results)
     {
-        std::vector<hipblasLtMatmulHeuristicResult_t> results;
-        std::vector<std::string>                      names;
-    };
-
-    Heuristic query(Query& q)
-    {
-        hipblasLtMatmulHeuristicResult_t raw[32]{};
-        int                              count = 0;
-        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
-                      q.handle, q.desc, q.a, q.b, q.d, q.d, q.pref, 32, raw, &count),
-                  HIPBLAS_STATUS_SUCCESS);
-        Heuristic out;
-        for(int i = 0; i < count; ++i)
-        {
-            if(raw[i].state != HIPBLAS_STATUS_SUCCESS)
-                continue;
-            out.results.push_back(raw[i]);
-            out.names.push_back(hipblaslt_ext::getKernelNameFromAlgo(q.handle, raw[i].algo));
-        }
+        std::vector<std::string> out;
+        for(auto& result : results)
+            out.push_back(hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo));
         return out;
     }
 
-    // isSolutionSupported ignores an algo whose first data byte is 0.
-    const hipblasLtMatmulHeuristicResult_t* preswizzledAlgo(const Heuristic& pre)
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(Problem& q)
     {
-        for(const auto& result : pre.results)
-        {
-            if(result.algo.data[0] != 0)
-                return &result;
-        }
-        return nullptr;
+        hipblasLtMatmulHeuristicResult_t raw[kAlgoCount]{};
+        int                              count = 0;
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      q.handle, q.desc, q.a, q.b, q.d, q.d, q.pref, kAlgoCount, raw, &count),
+                  HIPBLAS_STATUS_SUCCESS);
+        std::vector<hipblasLtMatmulHeuristicResult_t> out;
+        for(int i = 0; i < count; ++i)
+            if(raw[i].state == HIPBLAS_STATUS_SUCCESS)
+                out.push_back(raw[i]);
+        return out;
     }
 
-    hipblasStatus_t launch(Query&                                     q,
-                            const hipblasLtMatmulHeuristicResult_t& result,
-                            void*                                   a,
-                            void*                                   b,
-                            void*                                   d,
-                            void*                                   workspace)
+    hipblasStatus_t matmul(Problem& q, const hipblasLtMatmulHeuristicResult_t& result)
     {
-        const float alpha = 1.f;
-        const float beta  = 0.f;
         return hipblasLtMatmul(q.handle,
                                q.desc,
-                               &alpha,
-                               a,
+                               &kAlpha,
+                               q.dA,
                                q.a,
-                               b,
+                               q.dB,
                                q.b,
-                               &beta,
-                               d,
+                               &kBeta,
+                               q.dD,
                                q.d,
-                               d,
+                               q.dD,
                                q.d,
                                &result.algo,
-                               workspace,
-                               result.workspaceSize,
+                               q.ws,
+                               kWorkspace,
                                nullptr);
     }
 
-    TEST(Gfx950MxScaleLayout, packed_scale_does_not_return_preswizzled_kernels)
+    hipblasStatus_t supported(Problem& q, const hipblasLtMatmulHeuristicResult_t& result)
     {
-        if(!archIsGfx950())
-            GTEST_SKIP() << "requires gfx950";
+        hipblasLtMatmulHeuristicResult_t copy      = result;
+        size_t                           workspace = 0;
+        int                              count     = 0;
+        return hipblaslt_ext::isSolutionSupported(
+            &copy, q.handle, q.desc, &kAlpha, q.a, q.b, &kBeta, q.d, q.d, &workspace, &count);
+    }
 
-        // 0 selects the Tensile path. The handle reads this in its constructor.
-        EnvGuard rocroller("0");
+    hipblaslt_ext::Gemm extGemm(Problem& q)
+    {
+        return hipblaslt_ext::Gemm(
+            q.handle, q.desc, &kAlpha, q.dA, q.a, q.dB, q.b, &kBeta, q.dD, q.d, q.dD, q.d);
+    }
 
-        Query packed;
-        Query preswizzled;
-        ASSERT_EQ(hipblasLtCreate(&packed.handle), HIPBLAS_STATUS_SUCCESS);
-        preswizzled.handle = packed.handle;
-        makeQuery(packed, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
-        makeQuery(preswizzled, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
-        if(HasFatalFailure())
-            return;
+    std::vector<hipblasLtMatmulHeuristicResult_t> extHeuristic(hipblaslt_ext::Gemm& gemm)
+    {
+        hipblaslt_ext::GemmPreference pref;
+        pref.setMaxWorkspaceBytes(kWorkspace);
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        EXPECT_EQ(gemm.algoGetHeuristic(kAlgoCount, pref, results), HIPBLAS_STATUS_SUCCESS);
+        return results;
+    }
 
-        const Heuristic packedH = query(packed);
-        const Heuristic preH    = query(preswizzled);
+    class Gfx950MxScaleLayout : public ::testing::Test
+    {
+    protected:
+        void SetUp() override
+        {
+            if(!archIsGfx950())
+                GTEST_SKIP() << "requires gfx950";
+        }
+    };
 
-        ASSERT_FALSE(preH.names.empty()) << "scale 1001 returned no kernel";
-        for(const auto& name : preH.names)
-            EXPECT_NE(name.find("MXSFHPS"), std::string::npos) << name;
-        for(const auto& name : packedH.names)
-            EXPECT_EQ(name.find("MXSFHPS"), std::string::npos) << name;
+    // The setting under which the packed problem used to run a HostPreSwizzle
+    // kernel and fail its numerical check.
+    TEST_F(Gfx950MxScaleLayout, smoke_MatmulApiRocRollerOff)
+    {
+        RocRollerEnv      env("0");
+        hipblasLtHandle_t handle = nullptr;
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        {
+            Problem packed;
+            Problem preswizzled;
+            makeProblem(packed, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            makeProblem(preswizzled, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+            if(HasFatalFailure())
+                return;
 
-        const hipblasLtMatmulHeuristicResult_t* algo = preswizzledAlgo(preH);
-        ASSERT_NE(algo, nullptr);
+            auto preResults = heuristic(preswizzled);
+            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+            for(const auto& name : names(handle, preResults))
+                EXPECT_TRUE(isPreswizzled(name)) << name;
 
-        const float alpha = 1.f;
-        const float beta  = 0.f;
-        int         supported = 0;
-        size_t      workspaceBytes = 0;
-        hipblasLtMatmulHeuristicResult_t forPreswizzled = *algo;
-        EXPECT_EQ(hipblaslt_ext::isSolutionSupported(&forPreswizzled,
-                                                     packed.handle,
-                                                     preswizzled.desc,
-                                                     &alpha,
-                                                     preswizzled.a,
-                                                     preswizzled.b,
-                                                     &beta,
-                                                     preswizzled.d,
-                                                     preswizzled.d,
-                                                     &workspaceBytes,
-                                                     &supported),
-                  HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(supported, 1);
+            auto packedResults = heuristic(packed);
+            for(const auto& name : names(handle, packedResults))
+                EXPECT_FALSE(isPreswizzled(name)) << name;
 
-        // The same algo against packed scales is the call isSolutionSupported
-        // makes from the heuristic top-up. Success here means that check is gone.
-        int    refused = 0;
-        size_t ignored = 0;
-        hipblasLtMatmulHeuristicResult_t forPacked = *algo;
-        EXPECT_NE(hipblaslt_ext::isSolutionSupported(&forPacked,
-                                                     packed.handle,
-                                                     packed.desc,
-                                                     &alpha,
-                                                     packed.a,
-                                                     packed.b,
-                                                     &beta,
-                                                     packed.d,
-                                                     packed.d,
-                                                     &ignored,
-                                                     &refused),
-                  HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(refused, 0);
+            // isSolutionSupported skips an algo whose first data byte is 0.
+            const hipblasLtMatmulHeuristicResult_t* algo = nullptr;
+            for(const auto& result : preResults)
+                if(result.algo.data[0] != 0)
+                {
+                    algo = &result;
+                    break;
+                }
+            ASSERT_NE(algo, nullptr);
 
-        void* a = nullptr;
-        void* b = nullptr;
-        void* d = nullptr;
-        void* workspace = nullptr;
-        ASSERT_EQ(hipMalloc(&a, static_cast<size_t>(kK * kM)), hipSuccess);
-        ASSERT_EQ(hipMalloc(&b, static_cast<size_t>(kK * kN)), hipSuccess);
-        ASSERT_EQ(hipMalloc(&d, static_cast<size_t>(kM * kN * sizeof(float))), hipSuccess);
-        ASSERT_EQ(hipMemset(a, 0, static_cast<size_t>(kK * kM)), hipSuccess);
-        ASSERT_EQ(hipMemset(b, 0, static_cast<size_t>(kK * kN)), hipSuccess);
-        ASSERT_EQ(hipMemset(d, 0, static_cast<size_t>(kM * kN * sizeof(float))), hipSuccess);
-        if(algo->workspaceSize > 0)
-            ASSERT_EQ(hipMalloc(&workspace, algo->workspaceSize), hipSuccess);
+            EXPECT_EQ(supported(preswizzled, *algo), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_NE(supported(packed, *algo), HIPBLAS_STATUS_SUCCESS);
 
-        // Launching it for scale 1001 is implemented. Launching it for packed
-        // scale 3 is the runContractionProblem check: not_implemented, which
-        // hipblasLtMatmul reports as an internal error.
-        EXPECT_EQ(launch(preswizzled, *algo, a, b, d, workspace), HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
-        EXPECT_EQ(launch(packed, *algo, a, b, d, workspace), HIPBLAS_STATUS_INTERNAL_ERROR);
+            // runContractionProblem returns not_implemented, which hipblasLtMatmul
+            // reports as an internal error.
+            EXPECT_EQ(matmul(preswizzled, *algo), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_EQ(matmul(packed, *algo), HIPBLAS_STATUS_INTERNAL_ERROR);
+        }
+        hipblasLtDestroy(handle);
+    }
 
-        static_cast<void>(hipFree(workspace));
-        static_cast<void>(hipFree(d));
-        static_cast<void>(hipFree(b));
-        static_cast<void>(hipFree(a));
-        preswizzled.handle = nullptr;
-        preswizzled.release();
-        packed.release();
-        hipblasLtDestroy(packed.handle);
+    // Packed scale 3 goes to rocRoller. FP8 E4M3 with scale 1001 on both sides
+    // stays on Tensile, and still gets its HostPreSwizzle kernels.
+    TEST_F(Gfx950MxScaleLayout, smoke_MatmulApiRocRollerOn)
+    {
+        RocRollerEnv      env("1");
+        hipblasLtHandle_t handle = nullptr;
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        {
+            Problem packed;
+            Problem preswizzled;
+            makeProblem(packed, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            makeProblem(preswizzled, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+            if(HasFatalFailure())
+                return;
+
+            auto preResults = heuristic(preswizzled);
+            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+            for(const auto& name : names(handle, preResults))
+                EXPECT_TRUE(isPreswizzled(name)) << name;
+
+            auto packedResults = heuristic(packed);
+            for(const auto& name : names(handle, packedResults))
+                EXPECT_FALSE(isPreswizzled(name)) << name;
+        }
+        hipblasLtDestroy(handle);
+    }
+
+    // hipblaslt_ext::Gemm has no rocRoller dispatch, so it reaches the Tensile
+    // filter whatever HIPBLASLT_USE_ROCROLLER says.
+    TEST_F(Gfx950MxScaleLayout, smoke_ExtGemmApi)
+    {
+        hipblasLtHandle_t handle = nullptr;
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        {
+            Problem packed;
+            Problem preswizzled;
+            makeProblem(packed, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            makeProblem(preswizzled, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+            if(HasFatalFailure())
+                return;
+
+            auto preGemm    = extGemm(preswizzled);
+            auto packedGemm = extGemm(packed);
+
+            auto preResults = extHeuristic(preGemm);
+            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+            for(const auto& name : names(handle, preResults))
+                EXPECT_TRUE(isPreswizzled(name)) << name;
+
+            auto packedResults = extHeuristic(packedGemm);
+            for(const auto& name : names(handle, packedResults))
+                EXPECT_FALSE(isPreswizzled(name)) << name;
+
+            hipblasLtMatmulAlgo_t algo      = preResults[0].algo;
+            size_t                workspace = 0;
+            EXPECT_EQ(preGemm.isAlgoSupported(algo, workspace), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_NE(packedGemm.isAlgoSupported(algo, workspace), HIPBLAS_STATUS_SUCCESS);
+
+            preGemm.setMaxWorkspaceBytes(kWorkspace);
+            packedGemm.setMaxWorkspaceBytes(kWorkspace);
+            EXPECT_EQ(preGemm.initialize(algo, preswizzled.ws), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(preGemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_NE(packedGemm.initialize(algo, packed.ws), HIPBLAS_STATUS_SUCCESS);
+        }
+        hipblasLtDestroy(handle);
     }
 }

@@ -6338,7 +6338,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     return status;
 }
 
-rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
+rocblaslt_status gemmCreate(rocblaslt_handle                   handle,
+                            RocblasltContractionProblem const& problem,
                             std::shared_ptr<void>&             gemmData,
                             size_t&                            gemmCount)
 {
@@ -6367,7 +6368,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
 
         // Building the key queries the device, and this runs on every gemm
         // object creation, so only when a tuning file will be consulted.
-        const bool cacheTuningKey = TensileLite::selectTuningFile().active;
+        const bool cacheTuningKey   = TensileLite::selectTuningFile().active;
+        const int  requiredMxLayout = rocblaslt_gfx950_required_mx_scale_format(
+            handle->properties.gcnArchName, problem.scaleAType, problem.scaleBType);
 
         if(gemmData)
         {
@@ -6376,6 +6379,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             updateTensileProblem(problem, data->problem);
             data->inputs         = GetTensileInputs(problem);
             data->enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data->requiredMxScaleFormat = requiredMxLayout;
             if(cacheTuningKey)
                 data->tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
         }
@@ -6385,6 +6389,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             data.problem        = ConstructTensileProblem(problem);
             data.inputs         = GetTensileInputs(problem);
             data.enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data.requiredMxScaleFormat = requiredMxLayout;
             if(cacheTuningKey)
                 data.tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
 
@@ -6543,6 +6548,13 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             {
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
+            }
+            if(!rocblaslt_kernel_mx_scale_format_ok(data->requiredMxScaleFormat,
+                                                    solution->problemType.mxScaleFormat))
+            {
+                log_error(__func__,
+                          rocblaslt_mx_layout_reject_message(data->requiredMxScaleFormat));
+                return rocblaslt_status_not_implemented;
             }
 
             if(data->problem.getParams().uniformSummationOrder() == 1)
@@ -7871,7 +7883,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                                      Inputs&                inputs,
                                      rocblaslt_matmul_algo* algo,
                                      const Tuning*          tuning,
-                                     size_t*                workspaceSizeInBytes)
+                                     size_t*                workspaceSizeInBytes,
+                                     int                    requiredMxLayout = -1)
 {
     GemmMasterLibraryPtr                   library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -7905,15 +7918,14 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             return rocblaslt_status_invalid_value;
         }
 
+        int required = requiredMxLayout;
         if constexpr(std::is_same<Inputs, RocblasltContractionProblem>::value)
-        {
-            const int required = rocblaslt_gfx950_required_mx_scale_format(
+            required = rocblaslt_gfx950_required_mx_scale_format(
                 handle->properties.gcnArchName, inputs.scaleAType, inputs.scaleBType);
-            if(!rocblaslt_kernel_mx_scale_format_ok(required, solution->problemType.mxScaleFormat))
-            {
-                log_error(__func__, rocblaslt_mx_layout_reject_message(required));
-                return rocblaslt_status_not_implemented;
-            }
+        if(!rocblaslt_kernel_mx_scale_format_ok(required, solution->problemType.mxScaleFormat))
+        {
+            log_error(__func__, rocblaslt_mx_layout_reject_message(required));
+            return rocblaslt_status_not_implemented;
         }
 
         if(isCustomKernelForPointerArray(tensile_prob, *solution))
@@ -8257,8 +8269,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
 
             setRestrictions<T>(data->problem, a, b);
 
-            return isSolutionSupported(
-                handle, data->problem, data->inputs, &algo, tuning, &workspaceSizeInBytes);
+            return isSolutionSupported(handle,
+                                       data->problem,
+                                       data->inputs,
+                                       &algo,
+                                       tuning,
+                                       &workspaceSizeInBytes,
+                                       data->requiredMxScaleFormat);
         };
 
         return dispatchByComputeType(data->problem.computeType(), checkSupportForTypeTag);

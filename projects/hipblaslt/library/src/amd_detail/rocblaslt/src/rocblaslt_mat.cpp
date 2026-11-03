@@ -485,7 +485,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
 #endif
 
 
-    return gemmCreate(problem, gemmData, gemmCount);
+    return gemmCreate(handle, problem, gemmData, gemmCount);
 }
 
 rocblaslt_status
@@ -1196,7 +1196,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         effective_sm_count_target(handle, nullptr, nullptr),
         effective_uniform_summation_order(handle, nullptr)};
     problem.int4EncodingA = problemtype.int4_encoding_a;
-    return gemmCreate(problem, gemmData, gemmCount);
+    return gemmCreate(handle, problem, gemmData, gemmCount);
 }
 
 rocblaslt_status rocblaslt_gemm_create_cpp(const rocblaslt_handle           handle,
