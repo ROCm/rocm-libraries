@@ -161,5 +161,30 @@ class PpBoxInterior(unittest.TestCase):
                 self.assertEqual(sum(sg.gemm_m for sg in full), p.Di * p.Hi * p.Wi)
 
 
+class XhWmask(unittest.TestCase):
+    XH = (
+        "dgrad-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x8-mem-cshuffle-grp-f0x3-s1x1-d1x1-wpe2-xcd6-lxor-"
+        "tapk-tpf3-xh-bkp2-ilv4-xhx-mch2-lda1-lsb-sp1-bw-bpad4-zt1-ak4-xo7-xdf4-xfa1-xep1-elb-nag-mb11-xsm-xyr130-"
+        "xel-xtr-msg1024-wave64-gfx942-llvm22"
+    )
+
+    def test_support(self):
+        from kernels.conv.kernel_identity import identity_supports_problem
+        from kernels.conv.kernel_label import decode
+
+        base = decode(self.XH)
+        xwm = dataclasses.replace(base, xh_dx_wmask=True)
+        self.assertIn("-xwm-", xwm.label())
+        self.assertEqual(decode(xwm.label()), xwm)
+        halo = ConvProblem(N=1, Hi=130, Wi=130, C=64, K=64, Y=3, X=3, Di=258, Z=3, sD=1, pD=0, dD=1)
+        pad1 = dataclasses.replace(halo, Di=256, Hi=128, Wi=128, pD=1, pH=1, pW=1)
+        self.assertTrue(identity_supports_problem(base, halo)[0])
+        self.assertFalse(identity_supports_problem(base, pad1)[0])  # pW == 1
+        self.assertFalse(identity_supports_problem(xwm, halo)[0])  # would skip the w columns
+        self.assertTrue(identity_supports_problem(xwm, pad1)[0])  # W-extended view (Wi 130: xyr130)
+        for v in (1, 2):
+            self.assertTrue(identity_supports_problem(dataclasses.replace(xwm, dx_interior=v), halo)[0])
+
+
 if __name__ == "__main__":
     unittest.main()
