@@ -56,6 +56,14 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
 /// it in a state manager of its own (own catalog and winner caches), so constructing a
 /// Container costs no per-kernel work. Callers holding the pointer keep the state alive
 /// across a rediscoverSharedStatesForTesting(). Thread-safe.
+///
+/// Process-wide, not per-Container: every Container built for the same engine id shares
+/// one process-wide UHD resolver (UhdKernelHeuristic), which caches a load failure per
+/// (metric, arch) as permanent -- it retries only an artifact that did not exist yet, not
+/// one that existed but failed to load (e.g. still being written). Before this state was
+/// shared, each new Container built its own resolver and so retried on its own
+/// construction; now a transient failure outlives every Container until the process
+/// restarts or rediscoverSharedStatesForTesting() runs (test-only).
 std::shared_ptr<const hipdnn_plugin_sdk::ingestor::KernelIngestorSharedState<Handle>>
     discoveredSharedState(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId);
 
