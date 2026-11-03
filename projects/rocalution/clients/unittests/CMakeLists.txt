@@ -159,8 +159,19 @@ endif()
 include(GoogleTest)
 gtest_discover_tests(rocalution-unit-test-lifecycle
   DISCOVERY_MODE PRE_TEST
-  PROPERTIES LABELS "${ROCALUTION_UNIT_TEST_LABELS}"
+  TEST_LIST rocalution_unit_test_lifecycle_TESTS
 )
+
+# Before CMake 4.4, gtest_discover_tests splits a list passed in PROPERTIES, so
+# only the first label would be set (CMake issue 17812). The labels are set in a
+# file that CTest includes after the discovered tests instead.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocalution_unit_test_lifecycle_labels.cmake"
+  "if(rocalution_unit_test_lifecycle_TESTS)\n"
+  "  set_tests_properties(\${rocalution_unit_test_lifecycle_TESTS} PROPERTIES LABELS \"${ROCALUTION_UNIT_TEST_LABELS}\")\n"
+  "endif()\n"
+)
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/rocalution_unit_test_lifecycle_labels.cmake")
 
 rocalution_install_unit_test(rocalution-unit-test-lifecycle)
 
