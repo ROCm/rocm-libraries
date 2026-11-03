@@ -97,6 +97,21 @@ class _RecordingLauncher:
         self.calls.append((values, config))
 
 
+class _AnyKeyMemo(dict):
+    """A Stage 2 memo that holds a launcher for every key (the key spells the
+    reduction's variant fields, which this host test does not care about)."""
+
+    def __init__(self, launcher):
+        super().__init__()
+        self._launcher = launcher
+
+    def __contains__(self, key):
+        return True
+
+    def __getitem__(self, key):
+        return self._launcher
+
+
 def _launch_host(spec, arch):
     from rocke.runtime.launcher import LaunchConfig
 
@@ -104,7 +119,7 @@ def _launch_host(spec, arch):
     launcher = _RecordingLauncher()
     stage2 = _RecordingLauncher()
     # Pre-seed the Stage 2 memo so the workspace reduction needs no compiler.
-    stage2_memo = {(spec.data.dtype_d, spec.ws_replicas): stage2}
+    stage2_memo = _AnyKeyMemo(stage2)
     run, extras, pool = _streamk_launch(
         rt=rt,
         launcher=launcher,
