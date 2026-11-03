@@ -587,6 +587,16 @@ static bool _dgrad_dy_halo_ok(const rocke_dgrad_conv_spec_t* s, char* reason, si
 }
 
 // ---------------------------------------------------------------------------
+/* Python pp_a_partial: the ping-pong dY tile loaded in partial passes. */
+static bool _dgrad_pp_a_partial(const rocke_dgrad_conv_spec_t* s)
+{
+    if(!(s->tapk_pingpong >= 4 && s->has_vector_size_a && s->vector_size_a && s->split_k <= 1))
+        return false;
+    const int chunks = s->tile_m * s->tile_k / s->vector_size_a;
+    const int bs = rocke_dgrad_conv_spec_block_size(s);
+    return chunks % bs != 0 && chunks % s->wave_size == 0;
+}
+
 // Arch-aware spec validation (Python is_valid_dgrad_spec)
 // ---------------------------------------------------------------------------
 
@@ -680,17 +690,16 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || (s->xh_tap_rsrc && !xh_ok) || (s->xh_yring && !xh_ok) || (s->tapk_lds_ahead && !xh_ok)
        || (s->tapk_lds_barrier && !xh_ok) || (s->tapk_setprio && !xh_ok)
        || (s->lds_xor && !s->tapk_pingpong && !xh_ok) || (s->xh_b_wide && !xh_ok)
-       || (s->xh_b_kpad && !xh_ok)
-       || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->pp_boxes && s->split_k <= 1))
+       || (s->xh_b_kpad && !xh_ok) || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->split_k <= 1))
        || s->split_atomic_pairs || s->tapk_pp_persist || s->tapk_pp_xhalo
-       || (s->tapk_ztrim && !xh_ok) || (s->tapk_pp_bslab && !s->tapk_pingpong)
+       || (s->tapk_ztrim && !xh_ok && !s->tapk_pingpong) || (s->tapk_pp_bslab && !s->tapk_pingpong)
        || (s->xh_a_k4 && !xh_ok) || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok)
        || (s->xh_fast_a && !xh_ok) || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk
        || s->pp_sk_mode || s->pp_zskip
        || ((s->pp_boxes || s->pp_box_cus || s->pp_box_order) && !s->tapk_pingpong)
        || (s->pp_box_det && !(s->pp_box_det == 1 && s->pp_boxes && s->split_k > 1))
        || (s->epi_lds_barriers && !s->pp_boxes && !xh_ok) || (s->no_agpr && !xh_ok)
-       || (s->cshuffle_m_chunks > 1 && !s->pp_boxes && !xh_ok))
+       || (s->cshuffle_m_chunks > 1 && !s->pp_boxes && !xh_ok && !s->tapk_pingpong))
     {
         snprintf(reason,
                  reason_cap,
@@ -1266,7 +1275,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
      * split_k <= 1 and has to split the tile evenly over the block's threads;
      * B's width and the wavelet loaders' are chosen by the loader itself. */
     if(!(s->pipeline && strcmp(s->pipeline, "wavelet") == 0) && s->split_k <= 1
-       && s->has_vector_size_a)
+       && s->has_vector_size_a && !_dgrad_pp_a_partial(s))
     {
         if(!rocke_conv_coalesced_load_ok("A",
                                          s->tile_m,
@@ -4292,9 +4301,10 @@ static rocke_kernel_def_t*
     const bool xh = spec->tap_outer_k && spec->tapk_xhalo;
     const bool xh_ak4 = xh && spec->xh_a_k4;
     const int ak4_mp = xh_ak4 ? _dgrad_xh_a_k4_rows(spec) : 0;
-    int a_shape[2] = {spec->dy_halo ? _dgrad_dy_halo_lds_rows(spec)
-                      : xh          ? _dgrad_xhalo_lds_rows(spec)
-                                    : block_m,
+    int a_shape[2] = {spec->dy_halo               ? _dgrad_dy_halo_lds_rows(spec)
+                      : xh                        ? _dgrad_xhalo_lds_rows(spec)
+                      : _dgrad_pp_a_partial(spec) ? block_m + 8
+                                                  : block_m,
                       lds_layout.row_stride};
     if(xh_ak4)
     {
@@ -4900,7 +4910,28 @@ static rocke_kernel_def_t*
             else
             {
                 bool use_cshuffle_ = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
-                if(use_cshuffle_ && spec->xh_epi == 1)
+                if(use_cshuffle_ && spec->tapk_pp_epi && !spec->pp_boxes)
+                {
+                    /* _emit_pp_cshuffle_epilogue over the stride-1 dX descriptor */
+                    rocke_dynamic_tensor_descriptor_t* dX_desc
+                        = _dgrad_make_dx_descriptor_dynamic(b, &ctx);
+                    struct dgrad_dx_addr_ctx pctx;
+                    pctx.desc = &dX_desc->base;
+                    pctx.c_group_base = c_group_base;
+                    _emit_pp_cshuffle_epilogue(b,
+                                               spec,
+                                               atom,
+                                               &grid,
+                                               epi_accs_,
+                                               pp_bf16_n ? pp_bf16 : NULL,
+                                               dx_rsrc,
+                                               _dgrad_dx_addr_fn,
+                                               &pctx,
+                                               ctx.p_dg_M,
+                                               ctx.p_dg_N,
+                                               spec->epi_lds_barriers);
+                }
+                else if(use_cshuffle_ && spec->xh_epi == 1)
                     _emit_xh_cshuffle_epilogue(b,
                                                spec,
                                                &ctx,
@@ -7369,6 +7400,41 @@ static rocke_kernel_def_t*
         const int n_st = is_3d ? 4 : 3;
         const char* st_names[4] = {"pf_kb", "pf_x", "pf_y", "pf_z"};
         rocke_value_t* s0[4] = {c0, c0, c0, is_3d ? c0 : NULL};
+        if(spec->tapk_ztrim)
+        {
+            /* _ztrim_range: the z taps the tile's rows can use (uniform). */
+            rocke_value_t* m0 = block_m_off_v;
+            rocke_value_t* ma = rocke_b_add(b, m0, rocke_b_const_i32(b, block_m - 1));
+            rocke_value_t* mm = rocke_b_sub(b, ctx.p_dg_M, rocke_b_const_i32(b, 1));
+            rocke_value_t* m1 = rocke_b_smin(b, ma, mm);
+            rocke_value_t *q0, *r0, *q1, *r1;
+            _magic_divmod(b, m0, &hw_div, &q0, &r0);
+            _magic_divmod(b, m1, &hw_div, &q1, &r1);
+            dgrad_magic_div_t dd_ = {ctx.p_Di, ctx.p_magic_m_Di_mult, ctx.p_magic_m_Di_shift};
+            rocke_value_t *n0, *di0, *n1, *di1;
+            _magic_divmod(b, q0, &dd_, &n0, &di0);
+            _magic_divmod(b, q1, &dd_, &n1, &di1);
+            rocke_value_t* c1_ = rocke_b_const_i32(b, 1);
+            rocke_value_t* zmax = rocke_b_sub(b, ctx.p_Z, c1_);
+            rocke_value_t* a0 = rocke_b_add(b, di0, ctx.p_pD);
+            rocke_value_t* a1 = rocke_b_sub(b, a0, ctx.p_Do);
+            rocke_value_t* a2 = rocke_b_add(b, a1, c1_);
+            rocke_value_t* lo = rocke_b_smax(b, a2, c0);
+            rocke_value_t* h0 = rocke_b_add(b, di1, ctx.p_pD);
+            rocke_value_t* hi = rocke_b_smin(b, h0, zmax);
+            rocke_value_t* same = rocke_b_cmp_eq(b, n0, n1);
+            lo = rocke_b_select(b, same, lo, c0);
+            hi = rocke_b_select(b, same, hi, zmax);
+            rocke_value_t* d = rocke_b_sub(b, hi, lo);
+            rocke_value_t* d1 = rocke_b_add(b, d, c1_);
+            rocke_value_t* cnt = rocke_b_smax(b, d1, c0);
+            rocke_value_t* z_lo = rocke_b_readfirstlane(b, lo);
+            rocke_value_t* z_cnt = rocke_b_readfirstlane(b, cnt);
+            s0[3] = z_lo;
+            rocke_value_t* zc = rocke_b_mul(b, z_cnt, c_yx);
+            rocke_value_t* kd2 = rocke_b_div(b, c_kd, c_block_k);
+            n_tiles = rocke_b_mul(b, zc, kd2);
+        }
         if(spec->tapk_pingpong && spec->split_k > 1 && spec->pp_boxes)
         {
             /* pp_boxes split-K: the record's slice of the box's K tiles. */
@@ -7400,6 +7466,23 @@ static rocke_kernel_def_t*
                 s0[2] = yz0;
         }
         set_tile(s0[0], s0[1], s0[2], s0[3], NULL);
+        const bool a_partial = _dgrad_pp_a_partial(spec);
+        if(a_partial)
+        {
+            /* pp_a_partial: the generic loader cannot split the dY tile. */
+            pp_fast_a();
+            rocke_ctl_staged_t a_st, b_st;
+            load_a_fast(&a_st);
+            _dg_b_load_global(b,
+                              &b_sync_loader,
+                              tid,
+                              spec->lds_k_outer ? _tpf_w_descriptor_kouter : _tpf_w_descriptor,
+                              &tc,
+                              w_rsrc,
+                              &b_st);
+            store_tile(&a_st, &b_st, A_smem, B_smem);
+        }
+        else
         {
             rocke_ctl_staged_t a_st, b_st;
             load_tile(&a_st, &b_st);
@@ -7616,7 +7699,19 @@ static rocke_kernel_def_t*
             /* _pp_two_ahead: tile 1 rides in registers across the back edge. */
             set_tile(nxt0[0], nxt0[1], nxt0[2], is_3d ? nxt0[3] : NULL, NULL);
             rocke_ctl_staged_t s1a, s1b;
-            load_tile(&s1a, &s1b);
+            if(a_partial)
+            {
+                load_a_fast(&s1a);
+                _dg_b_load_global(b,
+                                  &b_sync_loader,
+                                  tid,
+                                  spec->lds_k_outer ? _tpf_w_descriptor_kouter : _tpf_w_descriptor,
+                                  &tc,
+                                  w_rsrc,
+                                  &s1b);
+            }
+            else
+                load_tile(&s1a, &s1b);
             rocke_value_t* nxt1[4] = {};
             advance(nxt0, nxt1);
             const int n_regs = s1a.count + s1b.count;

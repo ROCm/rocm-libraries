@@ -244,6 +244,21 @@ static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
     static const int pbx[6] = {7, 7, 77, 77, 77, 7};
     static const int pbo[6] = {2, 2, 2, 0, 3, 1};
     static const int pbd[6] = {1, 1, 0, 1, 1, 1};
+    if(idx == 84)
+    {
+        /* no boxes: tapk_ztrim, the partial dY tile, stride-1 pp_epi 2 */
+        spec->tile_m = 224;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 4;
+        spec->tapk_pp_sched = 5;
+        spec->tapk_pp_epi = 2;
+        spec->tapk_ztrim = 1;
+        spec->tapk_pp_bslab = 3;
+        spec->cshuffle_m_chunks = 7;
+        return 0;
+    }
     const int i = idx - 71;
     spec->tapk_pp_sched = pps[i];
     spec->tapk_pp_bslab = pbs[i];
@@ -347,7 +362,7 @@ static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** 
 {
     if(idx >= 77 && idx <= 83)
         return make_cfg_3d_xh(idx, spec, arch);
-    if(idx >= 71 && idx <= 76)
+    if((idx >= 71 && idx <= 76) || idx == 84)
         return make_cfg_3d_pp(idx, spec, arch);
     if(idx >= 57 && idx <= 70)
         return make_cfg_3d(idx, spec, arch);
