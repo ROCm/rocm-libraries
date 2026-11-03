@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -198,19 +199,18 @@ TEST_F(TestCudnnCompatibilityV8Heuristics, OpensourceModeRunsFallback)
     EXPECT_EQ(fallback.size(), 3U);
 }
 
-TEST_F(TestCudnnCompatibilityV8Heuristics, UnknownHeurModeRejected)
+// As upstream, the mode map's .at() throws for a value outside HeurMode_t.
+TEST_F(TestCudnnCompatibilityV8Heuristics, UnknownHeurModeThrowsOutOfRange)
 {
     fe::OperationGraph_v8 graph = convGraph();
     fe::EngineConfigList configs;
-    const BuildFailure failure = failureOf([&] {
-        [[maybe_unused]] const std::vector<cudnnStatus_t> statuses = fe::get_heuristics_list(
+    EXPECT_THROW(
+        fe::get_heuristics_list(
             std::vector<fe::HeurMode_t>{fe::HeurMode_t::FALLBACK, static_cast<fe::HeurMode_t>(99)},
             graph,
             AllowAll,
-            configs);
-    });
-    ASSERT_TRUE(failure.thrown);
-    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+            configs),
+        std::out_of_range);
     EXPECT_TRUE(configs.empty());
 }
 

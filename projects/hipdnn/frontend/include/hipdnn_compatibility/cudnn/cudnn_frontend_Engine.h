@@ -189,8 +189,8 @@ public:
             return std::move(m_engine);
         }
 
+        std::shared_ptr<const detail::v8::EngineRecord> record;
         ManagedOpaqueDescriptor built;
-        std::vector<Engine_v8::Knob> knobs;
         const detail::v8::Outcome outcome = detail::v8::guarded([&] {
             // Upstream creates the descriptor here, so a failed engine still has a (null) raw
             // view.
@@ -203,16 +203,10 @@ public:
                     CUDNN_STATUS_BAD_PARAM,
                     "EngineBuilder: the operation graph is not a built OperationGraph");
             }
-            std::shared_ptr<const detail::v8::EngineRecord> record = detail::v8::makeEngineRecord(
+            record = detail::v8::makeEngineRecord(
                 std::move(graph), m_engine.idx, "EngineBuilder: global engine index");
-            for(const detail::v8::EngineKnob& knob : record->knobs())
-            {
-                knobs.emplace_back(
-                    knob.type, knob.range.maxValue, knob.range.minValue, knob.range.stride);
-            }
-            hipdnnBackendDescriptor_t engine = record->hipdnnEngine();
             built = detail::v8::makeManaged(
-                CUDNN_BACKEND_ENGINE_DESCRIPTOR, std::move(record), engine);
+                CUDNN_BACKEND_ENGINE_DESCRIPTOR, record, record->hipdnnEngine());
         });
         if(!outcome)
         {
@@ -221,6 +215,23 @@ public:
         }
 
         m_engine.pointer = std::move(built);
+
+        // As upstream, a failed knob query is recorded on the finalized engine, which keeps its
+        // descriptor and the knobs read so far (none here).
+        std::vector<Engine_v8::Knob> knobs;
+        const detail::v8::Outcome knobOutcome = detail::v8::guarded([&] {
+            for(const detail::v8::EngineKnob& knob : record->knobs())
+            {
+                knobs.emplace_back(
+                    knob.type, knob.range.maxValue, knob.range.minValue, knob.range.stride);
+            }
+        });
+        if(!knobOutcome)
+        {
+            knobs.clear();
+            set_error_and_throw_exception(
+                &m_engine, knobOutcome.status, knobOutcome.message.c_str());
+        }
         m_engine.numKnobs = static_cast<int64_t>(knobs.size());
         m_engine.knobs = std::move(knobs);
         CUDNN_FE_LOG_LABEL_ENDL(m_engine);

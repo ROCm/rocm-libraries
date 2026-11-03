@@ -463,6 +463,7 @@ protected:
                      .setxDesc(tensor(1, ACTIVATION))
                      .setSavedMeanAndInvVar(tensor(2, CHANNEL), tensor(3, CHANNEL))
                      .setScaleAndBias(tensor(4, CHANNEL), tensor(5, CHANNEL))
+                     .setEpsilonTensor(scalar(7))
                      .setyDesc(tensor(6, ACTIVATION))
                      .build();
              },

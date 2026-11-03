@@ -142,9 +142,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, DescriptorBuildersReportCoreErr
                       .setDim(4, dims.data())
                       .setStride(4, strides.data())
                       .setId(1)
-                      .setAlignment(16)
-                      .setVirtual()
-                      .setByValue()
+                      .setAlignment(0)
                       .build();
               }),
               CUDNN_STATUS_BAD_PARAM);
@@ -603,27 +601,20 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, FailedEngineGetInFilterLeavesNo
     EXPECT_TRUE(pending.empty()) << pending;
 }
 
-// Upstream hands a negative count to reserve()/resize(), so std::length_error escapes a
-// catch(cudnnException&). The compatibility layer reports BAD_PARAM.
-TEST_F(TestCudnnCompatibilityV8BuilderContracts, NegativeCountsAreBadParam)
+// As upstream, a negative count reaches reserve()/resize(), which throws std::length_error.
+TEST_F(TestCudnnCompatibilityV8BuilderContracts, NegativeCountsThrowLengthError)
 {
     std::array<void*, 1> pointers{};
     const std::array<std::int64_t, 1> uids{};
 
     fe::VariantPackBuilder_v8 dataPointers;
-    BuildFailure failure = failureOf([&] { dataPointers.setDataPointers(-1, pointers.data()); });
-    EXPECT_TRUE(failure.thrown);
-    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
+    EXPECT_THROW(dataPointers.setDataPointers(-1, pointers.data()), std::length_error);
 
     fe::VariantPackBuilder_v8 uidPack;
-    failure = failureOf([&] { uidPack.setUids(-1, uids.data()); });
-    EXPECT_TRUE(failure.thrown);
-    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
+    EXPECT_THROW(uidPack.setUids(-1, uids.data()), std::length_error);
 
     fe::OperationGraphBuilder_v8 graph;
-    failure = failureOf([&] { graph.setOperationGraph(-1, nullptr); });
-    EXPECT_TRUE(failure.thrown);
-    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
+    EXPECT_THROW(graph.setOperationGraph(-1, nullptr), std::length_error);
 }
 
 } // namespace

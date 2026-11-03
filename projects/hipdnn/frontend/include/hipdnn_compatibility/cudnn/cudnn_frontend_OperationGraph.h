@@ -150,13 +150,6 @@ public:
                 "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: numOps exceeds MAX_OPGRAPH_OPS");
             return *this;
         }
-        if(detail::rejectNegativeCount(
-               &m_operationGraph,
-               numOps_,
-               "OperationGraphBuilder: setOperationGraph count is negative"))
-        {
-            return *this;
-        }
         m_operationGraph.numOps = numOps_;
         m_operationGraph.feature_vectors.resize(static_cast<size_t>(numOps_));
         for(auto i = 0u; i < numOps_; i++)

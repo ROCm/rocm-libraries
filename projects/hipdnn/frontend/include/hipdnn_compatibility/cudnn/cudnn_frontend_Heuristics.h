@@ -382,8 +382,8 @@ inline std::vector<cudnnStatus_t>
                         int32_t sm_count = -1,
                         std::shared_ptr<const DeviceProperties> device_properties = nullptr)
 {
-    // Upstream's map has no OPENSOURCE entry, so its .at() throws std::out_of_range for a valid
-    // enumerator. OPENSOURCE runs fallback selection, as it does on the v9 API.
+    // Upstream's map has no OPENSOURCE entry; here OPENSOURCE runs fallback selection, as it does
+    // on the v9 API. A value outside HeurMode_t throws std::out_of_range from .at(), as upstream.
     std::unordered_map<HeurMode_t, std::string> mode_to_string = {
         {HeurMode_t::A, "heuristics_mode_a"},
         {HeurMode_t::B, "heuristics_mode_b"},
@@ -395,17 +395,8 @@ inline std::vector<cudnnStatus_t>
     string_modes.reserve(modes.size());
     for(const HeurMode_t mode : modes)
     {
-        const auto found = mode_to_string.find(mode);
-        if(found == mode_to_string.end())
-        {
-            set_error_and_throw_exception(
-                nullptr,
-                CUDNN_STATUS_BAD_PARAM,
-                "get_heuristics_list: the heuristic mode is not a HeurMode_t enumerator");
-            return {CUDNN_STATUS_BAD_PARAM};
-        }
+        string_modes.push_back(mode_to_string.at(mode));
         detail::warnUnhonoredHeuristicMode(mode);
-        string_modes.push_back(found->second);
     }
 
     return get_heuristics_list(string_modes,

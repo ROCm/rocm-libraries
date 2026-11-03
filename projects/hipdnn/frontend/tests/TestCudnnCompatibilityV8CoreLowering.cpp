@@ -973,6 +973,7 @@ TEST_F(TestCudnnCompatibilityV8CoreLowering, NormForwardSlotsPerMode)
              in.invVariance = makeTensor(3, {1, 3, 1, 1});
              in.scale = makeTensor(4, {1, 3, 1, 1});
              in.bias = makeTensor(5, {1, 3, 1, 1});
+             in.epsilon = makeTensor(7, {1, 1, 1, 1});
              in.y = makeTensor(6, {2, 3, 4, 4});
              return makeNormForward(CUDNN_BATCH_NORM, CUDNN_NORM_FWD_INFERENCE, in);
          },

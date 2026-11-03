@@ -486,6 +486,39 @@ TEST_F(TestCudnnCompatibilityV8BuilderGraph, FrontendRejectionIsBadParam)
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
 
+// TensorBuilder::build() accepts a virtual tensor passed by value or holding a constant, as
+// upstream; hipDNN's tensor rule rejects it when the graph is built.
+TEST_F(TestCudnnCompatibilityV8BuilderGraph, VirtualTensorWithValueRejectedAtGraphBuild)
+{
+    TensorSpec byValueSpec{1, SCALAR};
+    byValueSpec.isVirtual = true;
+    byValueSpec.byValue = true;
+    const v8fe::Tensor byValue = tensor(byValueSpec);
+    ASSERT_EQ(byValue.get_status(), CUDNN_STATUS_SUCCESS) << byValue.get_error();
+
+    TensorSpec constantSpec{3, SCALAR};
+    constantSpec.isVirtual = true;
+    const v8fe::Tensor constantValue
+        = tweaked(constantSpec, [](v8fe::TensorBuilder& builder) { builder.setConstValue(2.5F); });
+    ASSERT_EQ(constantValue.get_status(), CUDNN_STATUS_SUCCESS) << constantValue.get_error();
+
+    for(const v8fe::Tensor* input : {&byValue, &constantValue})
+    {
+        SCOPED_TRACE(input->getId());
+        const v8fe::Operation relu
+            = unary(PointwiseMode_t::RELU_FWD, *input, tensor(input->getId() + 1, SCALAR));
+        ASSERT_EQ(relu.get_status(), CUDNN_STATUS_SUCCESS) << relu.get_error();
+
+        const BuildFailure failure = graphFailure({&relu});
+        ASSERT_TRUE(failure.thrown);
+        EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+        EXPECT_NE(failure.what.find("lowering tensor UID " + std::to_string(input->getId())),
+                  std::string::npos)
+            << failure.what;
+        EXPECT_NE(failure.what.find("cannot be virtual"), std::string::npos) << failure.what;
+    }
+}
+
 TEST_F(TestCudnnCompatibilityV8BuilderGraph, MissingHandleRejected)
 {
     const v8fe::Operation relu

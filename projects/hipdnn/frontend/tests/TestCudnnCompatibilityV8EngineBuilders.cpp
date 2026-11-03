@@ -122,4 +122,27 @@ TEST_F(TestCudnnCompatibilityV8EngineBuilders, GlobalIndexPastEngineCountNotSupp
         << failure.what;
 }
 
+// As upstream, a failed knob query fails the build, after the engine itself was created.
+TEST_F(TestCudnnCompatibilityV8EngineBuilders, KnobReadFailureFailsBuild)
+{
+    fe::OperationGraph_v8 graph = convGraph();
+    ASSERT_GT(graph.getEngineCount(), 0);
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(::testing::_,
+                                HIPDNN_ATTR_ENGINE_KNOB_INFO,
+                                ::testing::_,
+                                ::testing::_,
+                                ::testing::_,
+                                ::testing::_))
+        .WillByDefault(::testing::Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    fe::EngineBuilder_v8 builder;
+    builder.setOperationGraph(graph).setGlobalEngineIdx(0);
+    const BuildFailure failure
+        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+    ASSERT_TRUE(failure.thrown);
+    EXPECT_NE(failure.status, CUDNN_STATUS_SUCCESS);
+    EXPECT_NE(failure.what.find("reading the knobs of engine"), std::string::npos) << failure.what;
+}
+
 } // namespace

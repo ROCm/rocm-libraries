@@ -46,9 +46,7 @@ TEST_F(TestCudnnCompatibilityV8NoexceptBoundary, BuildersReturnCoreStatus)
                                   .setDim(4, dims.data())
                                   .setStride(4, strides.data())
                                   .setId(1)
-                                  .setAlignment(16)
-                                  .setVirtual()
-                                  .setByValue()
+                                  .setAlignment(0)
                                   .build();
     EXPECT_EQ(tensor.get_status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(tensor.get_raw_desc(), nullptr);
@@ -245,24 +243,21 @@ TEST_F(TestCudnnCompatibilityV8NoexceptBoundary, ExecuteWithFailedVariantPackIsB
               CUDNN_STATUS_BAD_PARAM);
 }
 
-// Upstream hands a negative count to reserve()/resize(), which throws std::length_error even
-// with exceptions disabled. The compatibility layer records BAD_PARAM on the object instead; build() then
-// reports the missing operands with the same status.
-TEST_F(TestCudnnCompatibilityV8NoexceptBoundary, NegativeCountsSetBadParam)
+// As upstream, a negative count reaches reserve()/resize(), which throws std::length_error even
+// with exceptions disabled.
+TEST_F(TestCudnnCompatibilityV8NoexceptBoundary, NegativeCountsThrowLengthError)
 {
     std::array<void*, 1> pointers = {nullptr};
     const std::array<std::int64_t, 1> uids = {1};
 
-    const fe::VariantPack dataPointers
-        = fe::VariantPackBuilder().setDataPointers(-1, pointers.data()).build();
-    EXPECT_EQ(dataPointers.get_status(), CUDNN_STATUS_BAD_PARAM);
+    fe::VariantPackBuilder dataPointers;
+    EXPECT_THROW(dataPointers.setDataPointers(-1, pointers.data()), std::length_error);
 
-    const fe::VariantPack uidPack = fe::VariantPackBuilder().setUids(-1, uids.data()).build();
-    EXPECT_EQ(uidPack.get_status(), CUDNN_STATUS_BAD_PARAM);
+    fe::VariantPackBuilder uidPack;
+    EXPECT_THROW(uidPack.setUids(-1, uids.data()), std::length_error);
 
-    const fe::OperationGraph graph
-        = fe::OperationGraphBuilder().setOperationGraph(-1, nullptr).build();
-    EXPECT_EQ(graph.get_status(), CUDNN_STATUS_BAD_PARAM);
+    fe::OperationGraphBuilder graph;
+    EXPECT_THROW(graph.setOperationGraph(-1, nullptr), std::length_error);
 }
 
 } // namespace

@@ -233,7 +233,6 @@ struct TensorLabels
     std::string_view vectorCount;
     std::string_view reorderingMode;
     std::string_view constantValue;
-    std::string_view isVirtual;
 };
 
 // The C++ type setConstValue stored the constant's bytes from.
@@ -364,15 +363,6 @@ inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
         throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
                                  std::string(labels.alignment) + " must be > 0");
     }
-    // As hipDNN's TensorAttributes rule: a virtual tensor has no caller-side
-    // value to pass.
-    if(inputs.isVirtual && (inputs.isByValue || inputs.constantValue))
-    {
-        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
-                                 std::string(labels.isVirtual) + " (UID " + std::to_string(uniqueId)
-                                     + ") cannot be passed by value or hold a constant");
-    }
-
     const DataType_t dataType = requireLowerable(rawType, labels.dataType);
     if(inputs.vectorCount != 1)
     {
@@ -1182,9 +1172,12 @@ inline std::shared_ptr<const NormForwardOperationRecord>
     {
         fields.bias = requireTensor(inputs.bias, labels.bias);
     }
+    // cuDNN requires the forward epsilon in every phase; batch-norm inference takes the inverse
+    // variance, so its epsilon is checked but not lowered.
+    const TensorPtr& epsilon = requireTensor(inputs.epsilon, labels.epsilon);
     if(target != OperationTarget::BATCHNORM_INFERENCE)
     {
-        fields.epsilon = requireTensor(inputs.epsilon, labels.epsilon);
+        fields.epsilon = epsilon;
     }
     fields.y = requireTensor(inputs.y, labels.y);
     if(target == OperationTarget::BATCHNORM || target == OperationTarget::LAYERNORM)

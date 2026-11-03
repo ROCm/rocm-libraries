@@ -327,7 +327,6 @@ public:
             "TensorBuilder: vector count",
             "TensorBuilder: reordering mode",
             "TensorBuilder: constant value",
-            "TensorBuilder: virtual tensor",
         };
         return detail::v8::buildDescriptor(m_tensor, CUDNN_BACKEND_TENSOR_DESCRIPTOR, [&] {
             cudnnDataType_t cudnn_data_type;

@@ -47,8 +47,7 @@ constexpr v8::TensorLabels TENSOR_LABELS{"dataType",
                                          "alignment",
                                          "vectorCount",
                                          "reordering",
-                                         "constant",
-                                         "virtual"};
+                                         "constant"};
 constexpr v8::ConvolutionLabels CONV_LABELS{"computeType",
                                             "mode",
                                             "spatialDims",
@@ -268,21 +267,6 @@ TEST(TestCudnnCompatibilityV8CoreFactories, TensorChecksRunInOrderWithCallerLabe
     inputs.reorderingMode = CUDNN_TENSOR_REORDERING_INT8x32;
     expectTensorError(
         inputs, CUDNN_STATUS_NOT_SUPPORTED, "reordering other than NONE is not supported");
-
-    inputs = tensorInputs();
-    inputs.isVirtual = true;
-    inputs.isByValue = true;
-    inputs.dataType = CUDNN_DATA_INT8x32;
-    expectTensorError(inputs,
-                      CUDNN_STATUS_BAD_PARAM,
-                      "virtual (UID 1) cannot be passed by value or hold a constant");
-
-    inputs = tensorInputs();
-    inputs.isVirtual = true;
-    inputs.constantValue = std::vector<std::byte>(sizeof(float));
-    expectTensorError(inputs,
-                      CUDNN_STATUS_BAD_PARAM,
-                      "virtual (UID 1) cannot be passed by value or hold a constant");
 
     inputs = tensorInputs({1});
     inputs.dataType = CUDNN_DATA_INT64;

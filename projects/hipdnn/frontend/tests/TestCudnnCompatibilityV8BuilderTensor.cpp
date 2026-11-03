@@ -510,20 +510,6 @@ TEST_F(TestCudnnCompatibilityV8BuilderTensor, ConstantSizeMismatchRejected)
     }
 }
 
-TEST_F(TestCudnnCompatibilityV8BuilderTensor, VirtualTensorWithValueRejected)
-{
-    v8fe::TensorBuilder byValue;
-    complete(byValue).setVirtual().setByValue();
-    v8fe::TensorBuilder constantValue;
-    complete(constantValue).setVirtual().setConstValue(1.0F);
-    for(v8fe::TensorBuilder* builder : {&byValue, &constantValue})
-    {
-        const BuildFailure failure = buildFailure(*builder);
-        EXPECT_TRUE(failure.thrown);
-        EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
-    }
-}
-
 TEST_F(TestCudnnCompatibilityV8BuilderTensor, RaggedOffsetLowersAsLinkedTensor)
 {
     TensorSpec offsetSpec{9, {3, 1, 1, 1}};

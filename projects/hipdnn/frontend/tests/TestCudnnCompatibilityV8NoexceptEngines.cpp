@@ -13,6 +13,7 @@
 
 #include "fake_backend/CompatibilityV8PlanFixture.hpp"
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,29 @@ TEST_F(TestCudnnCompatibilityV8NoexceptEngines, EarlyBuildFailureLeavesNullRawDe
     EXPECT_EQ(config.get_raw_desc(), nullptr);
 }
 
+// As upstream, a failed knob query is recorded on an engine that keeps its descriptor.
+TEST_F(TestCudnnCompatibilityV8NoexceptEngines, KnobReadFailureKeepsEngine)
+{
+    fe::OperationGraph graph = convGraph();
+    ASSERT_GT(graph.getEngineCount(), 0);
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(::testing::_,
+                                HIPDNN_ATTR_ENGINE_KNOB_INFO,
+                                ::testing::_,
+                                ::testing::_,
+                                ::testing::_,
+                                ::testing::_))
+        .WillByDefault(::testing::Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    fe::Engine engine = fe::EngineBuilder().setOperationGraph(graph).setGlobalEngineIdx(0).build();
+    EXPECT_NE(engine.get_status(), CUDNN_STATUS_SUCCESS);
+    EXPECT_NE(std::string(engine.get_error()).find("reading the knobs of engine"),
+              std::string::npos)
+        << engine.get_error();
+    EXPECT_NE(engine.get_raw_desc(), nullptr);
+    EXPECT_TRUE(engine.getSupportedKnobs().empty());
+}
+
 TEST_F(TestCudnnCompatibilityV8NoexceptEngines, HeuristicsListReportsStatuses)
 {
     fe::OperationGraph graph = convGraph();
@@ -67,11 +91,12 @@ TEST_F(TestCudnnCompatibilityV8NoexceptEngines, HeuristicsListReportsStatuses)
               std::vector<cudnnStatus_t>{CUDNN_STATUS_NOT_SUPPORTED});
     EXPECT_TRUE(first.empty());
 
+    // As upstream, .at() throws even with exceptions disabled.
     fe::EngineConfigList unknown;
-    EXPECT_EQ(
+    EXPECT_THROW(
         fe::get_heuristics_list(
             std::vector<fe::HeurMode_t>{static_cast<fe::HeurMode_t>(99)}, graph, AllowAll, unknown),
-        std::vector<cudnnStatus_t>{CUDNN_STATUS_BAD_PARAM});
+        std::out_of_range);
     EXPECT_TRUE(unknown.empty());
 }
 

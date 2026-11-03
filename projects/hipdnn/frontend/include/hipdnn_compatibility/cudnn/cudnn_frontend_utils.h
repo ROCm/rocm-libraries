@@ -113,20 +113,6 @@ static inline void set_error_and_throw_exception(const BackendDescriptor* desc,
 #endif
 }
 
-namespace detail
-{
-// Upstream lets a negative count reach reserve() or resize(), which throws std::length_error.
-inline bool rejectNegativeCount(const BackendDescriptor* desc, int64_t count, const char* message)
-{
-    if(count >= 0)
-    {
-        return false;
-    }
-    set_error_and_throw_exception(desc, CUDNN_STATUS_BAD_PARAM, message);
-    return true;
-}
-} // namespace detail
-
 inline std::string to_string(cudnnBackendBehaviorNote_t note)
 {
     switch(note)

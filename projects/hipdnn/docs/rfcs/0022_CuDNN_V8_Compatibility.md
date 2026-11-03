@@ -78,7 +78,11 @@ heuristics list).
   norm translate to hipDNN and run on any engine that claims them.
 - Everything else returns `CUDNN_STATUS_NOT_SUPPORTED` with a message naming the builder and the
   rule. Builders throw `cudnnException` unless `NV_CUDNN_DISABLE_EXCEPTION` is defined; no other
-  exception type leaves a builder, getter, filter or C entry point. Nothing is silently dropped except
+  exception type leaves a builder, getter, filter or C entry point, except the two standard
+  exceptions upstream itself throws in every build mode: `std::out_of_range` from
+  `get_heuristics_list` with a value outside `HeurMode_t`, and `std::length_error` from a negative
+  count given to `VariantPackBuilder::setDataPointers`, `setUids` or
+  `OperationGraphBuilder::setOperationGraph`. Nothing is silently dropped except
   the store-and-ignore items listed in §3.4.
 - Per-call overhead over the hipDNN equivalent on the same plan, measured by
   `samples/cudnn_shim/ConvFpropV8.cpp --overhead`: `cudnnBackendExecute` < 1 µs;
@@ -201,8 +205,8 @@ runs no heuristics and needs no GPU.
 |---|---|
 | alignment ≥ 16 | not set (16 is hipDNN's default; cuDNN's value is a lower bound) |
 | alignment < 16 | forwarded; needs plugin API ≥ 1.3.0, which no provider reports yet |
-| by-value | runtime pass-by-value tensor ([RFC 0016](./0016_RuntimePassByValueTensors.md)); `BAD_PARAM` on a virtual tensor |
-| constant value | `HIPDNN_ATTR_TENSOR_VALUE_EXT`; bytes copied at `TensorBuilder::build()`. The value's size must equal the data type's element size, except that a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` tensor is stored as one element; `BAD_PARAM` otherwise and on a virtual tensor |
+| by-value | runtime pass-by-value tensor ([RFC 0016](./0016_RuntimePassByValueTensors.md)); on a virtual tensor, `BAD_PARAM` at graph build |
+| constant value | `HIPDNN_ATTR_TENSOR_VALUE_EXT`; bytes copied at `TensorBuilder::build()`. The value's size must equal the data type's element size, except that a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` tensor is stored as one element; `BAD_PARAM` otherwise, and at graph build on a virtual tensor |
 | ragged offset | forwarded; needs plugin API ≥ 1.3.0 |
 | vector count > 1, reordering | `NOT_SUPPORTED` (a count ≤ 1 is not sent, as upstream) |
 
@@ -229,9 +233,11 @@ runs no heuristics and needs no GPU.
 - **Alpha / beta.** Alpha ≠ 1 or beta ≠ 0 on any op → `NOT_SUPPORTED`. No hipDNN engine accepts the
   alternative (an extra scalar multiply). A pointwise alpha2 is checked only on modes with a B input
   and on activation-backward modes; cuDNN ignores it on one-input forward modes.
-- **Store and ignore:** NaN propagation (hipDNN has no equivalent); the epsilon of batch-norm
-  inference, batch-norm backward and RMS-norm backward (hipDNN's operations take inverse variance or
-  saved statistics instead; see `KNOWN_DIVERGENCES.md`).
+- **Store and ignore:** NaN propagation (hipDNN has no equivalent).
+- **Epsilon.** Required on every norm forward operation, as cuDNN requires it. Batch-norm inference
+  takes the inverse variance, and the backward operations take saved statistics, so their epsilon
+  is not lowered; cuDNN uses a backward epsilon only without saved statistics, which the
+  compatibility layer requires.
 - **`NOT_SUPPORTED` when set:** dynamic shapes, override shapes.
 
 ### 3.5 Engine selection
@@ -259,7 +265,9 @@ runs no heuristics and needs no GPU.
 - **Knobs.** hipDNN knobs that map onto a cuDNN knob type are shown; others are hidden, and choosing a
   hidden knob is `NOT_SUPPORTED`. A choice of `-1` is upstream's "unset" and is ignored unless the knob
   is shown and accepts `-1`. `EngineConfigBuilder::build()` checks the choices and builds the config's
-  hipDNN `ENGINECFG`, so a knob failure surfaces there.
+  hipDNN `ENGINECFG`, so a knob failure surfaces there. As upstream, `EngineBuilder::build()` reports a
+  failure to read the engine's knobs; under `NV_CUDNN_DISABLE_EXCEPTION` the engine keeps its
+  descriptor, with no knobs and the failure's status.
 
 ### 3.6 Plans and execution
 
@@ -333,9 +341,6 @@ runs no heuristics and needs no GPU.
   - `VariantPackBuilder_v8::build` passes the data-pointer count as the `UNIQUE_IDS` count, which
     over-reads the caller's UIDs when fewer UIDs than pointers are given; the compatibility layer passes the UID count
     and reports the mismatch as `BAD_PARAM`.
-  - `VariantPackBuilder_v8::setDataPointers` and `setUids` and
-    `OperationGraphBuilder_v8::setOperationGraph` pass a negative count to `reserve` or `resize`, which
-    throws `std::length_error` even under `NV_CUDNN_DISABLE_EXCEPTION`; the compatibility layer reports `BAD_PARAM`.
   - `OperationGraphBuilder_v8::addOperation` on a builder with no operations yet stores the descriptor
     at `ops[-1]` (the count starts at -1); the compatibility layer starts from 0.
   - `OperationBuilder_v8::setcDesc` copies `CUDNN_DIM_MAX + 1` padding, dilation and stride entries
@@ -359,8 +364,8 @@ runs no heuristics and needs no GPU.
   - `get_raw_desc()` dereferences a null pointer after a `build()` that failed before creating it
     (reachable under `NV_CUDNN_DISABLE_EXCEPTION`); the compatibility layer returns null.
   - `get_heuristics_list(std::vector<HeurMode_t>, ...)` throws `std::out_of_range` for
-    `HeurMode_t::OPENSOURCE`; the compatibility layer runs fallback selection (§3.5) and reports a value outside the
-    enum as `BAD_PARAM`.
+    `HeurMode_t::OPENSOURCE`; the compatibility layer runs fallback selection (§3.5). A value outside
+    the enum throws `std::out_of_range`, as upstream.
 - The misspelled alias `EngineHeuristicsBuilde` is kept.
 - FE-enum JSON rendering goes through a compatibility layer name table. `describe()` output matches upstream, but the
   compatibility layer defines no nlohmann serializer for hipDNN's enums, so serializing a frontend enum directly yields
@@ -404,7 +409,7 @@ runs no heuristics and needs no GPU.
 | v0.x heuristics run fallback selection only, and missing notes change engine choice | One WARN per mode; documented in `KNOWN_DIVERGENCES.md` |
 | Unsupported by providers: int8, four-op conv fusions, alignment < 16, ragged tensors | Out of scope; expected failures in the corpus harness |
 | Lifetime bugs | Records own hipDNN descriptors and objects hold views; tests destroy everything but the plan and execute it; ASan run |
-| Core exceptions escaping builders (PyTorch catches only `cudnnException`) | `guarded` at every public entry; tested in the throwing and the `NV_CUDNN_DISABLE_EXCEPTION` binaries |
+| Core exceptions escaping builders (PyTorch catches only `cudnnException`) | `guarded` at every public entry; tested in the throwing and the `NV_CUDNN_DISABLE_EXCEPTION` binaries. Only the two standard exceptions upstream throws on invalid input (§2) pass through |
 | A plan executed on another thread's handle (PyTorch's quantized ops cache plans process-wide) | Runs on that handle, pinned by unit and integration tests; documented in `KNOWN_DIVERGENCES.md` |
 | Plain ReLU and ReLU6 after a matmul need the hipBLASLt provider to read an unset lower clip as 0 (§9 R9) | The hipBLASLt provider does so since rocm-libraries#14363; with an older provider those graphs have no hipBLASLt engine |
 | A plan executed on a handle for another device | The compatibility layer does not check it; hipDNN's `hipdnnBackendExecute` rejects it with `BAD_PARAM` before any provider call (rocm-libraries#14364). PyTorch keys every v8 plan cache on the device, so it never does this |

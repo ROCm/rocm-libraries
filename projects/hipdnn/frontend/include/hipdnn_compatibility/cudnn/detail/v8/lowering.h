@@ -292,6 +292,10 @@ private:
         {
             lowered->set_ragged_offset(_byUid.at(ragged->uniqueId()).lowered);
         }
+        // Graph inputs as well as operation outputs: a virtual tensor passed by value or holding
+        // a constant is rejected here, at graph finalization, not at TensorBuilder::build().
+        checkFrontend(lowered->validate(),
+                      "lowering tensor UID " + std::to_string(tensor.uniqueId()));
         return lowered;
     }
 
