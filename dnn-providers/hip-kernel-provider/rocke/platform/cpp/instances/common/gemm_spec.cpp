@@ -377,11 +377,11 @@ bool rocke_gemm_is_fp8_ab(const char* name)
  * deliberately f16/bf16-only: the small ops that share it promote to f32 on
  * read, which is not what a packed fp8 MMA operand wants.
  *
- * Returns NULL for an unsupported dtype (Python ValueError path): with a
- * builder, after setting its sticky error; without one, for the caller to turn
- * into a structured reject. Shared by the validator, the emitter and the
- * epilogue (declared in instance_gemm_internal.h). */
-const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
+ * Returns NULL for an unsupported dtype (Python ValueError path), for the
+ * caller to turn into a structured reject or a builder error. Shared by the
+ * validator, the emitter and the epilogue (declared in
+ * instance_gemm_internal.h). */
+const rocke_type_t* rocke_gemm_dtype_ir(const char* name)
 {
     if(name != NULL && strcmp(name, "fp64") == 0)
     {
@@ -391,7 +391,7 @@ const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
     {
         return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
     }
-    return (b != NULL) ? rocke_b_io_ir_type(b, name) : rocke_io_ir_type(name);
+    return rocke_io_ir_type(name);
 }
 
 /* _acc_dtype(spec): catalog accumulator dtype (validated in _storage_dtype). */
@@ -579,7 +579,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
         return NULL;
     }
 
-    ty = rocke_gemm_dtype_ir(NULL, d->dtype_a);
+    ty = rocke_gemm_dtype_ir(d->dtype_a);
     if(ty == NULL)
     {
         if(reason != NULL && reason_cap > 0)
@@ -592,7 +592,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
         }
         return NULL;
     }
-    c_ty = rocke_gemm_dtype_ir(NULL, d->dtype_c);
+    c_ty = rocke_gemm_dtype_ir(d->dtype_c);
     if(c_ty == NULL)
     {
         if(reason != NULL && reason_cap > 0)
@@ -940,11 +940,11 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             CK_GEMM_REJECT("tdm and direct_to_lds are alternative load paths");
         }
         {
-            int row_bytes = t->tile_k * rocke_gemm_dtype_bytes(spec->data.dtype_a);
+            int row_bytes = t->tile_k * rocke_gemm_elem_bytes(spec);
             if(spec->trait.lds_k_pad)
             {
                 char why[256] = {0};
-                if(rocke_gemm_tdm_padding_for_tile(rocke_gemm_dtype_bytes(spec->data.dtype_a),
+                if(rocke_gemm_tdm_padding_for_tile(rocke_gemm_elem_bytes(spec),
                                                    t->tile_k,
                                                    spec->trait.lds_k_pad,
                                                    NULL,

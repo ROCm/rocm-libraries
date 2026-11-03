@@ -302,8 +302,8 @@ rocke_value_t* rocke_gemm_emit_mfma(rocke_ir_builder_t* b,
 rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
                                         const rocke_gemm_universal_spec_t* spec);
 
-/* _elem_bytes(spec): storage element size in bytes of the homogeneous A/B/C
- * dtype. */
+/* _elem_bytes(spec): bytes per A/B storage element: 2 for f16/bf16, 8 for
+ * fp64, 1 for the fp8/bf8 operands (whose C stays 16-bit). */
 int rocke_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec);
 
 /* _FP8_AB_DTYPES membership: whether `name` is an 8-bit float A/B storage
@@ -311,9 +311,10 @@ int rocke_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec);
 bool rocke_gemm_is_fp8_ab(const char* name);
 
 /* _dtype_ir(name): a GEMM storage dtype string to its IR scalar type (fp64,
- * fp8/bf8, else io_ir_type). NULL for an unsupported dtype, after setting the
- * sticky error of `b` when it is non-NULL. Defined in gemm_spec.cpp. */
-const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name);
+ * fp8/bf8, else io_ir_type). NULL for an unsupported dtype; no builder is
+ * involved, so a caller that holds one sets its error. Defined in
+ * gemm_spec.cpp. */
+const rocke_type_t* rocke_gemm_dtype_ir(const char* name);
 
 /* _validate_storage(spec): the GEMM storage-dtype rule. A/B/C are homogeneous
  * f16 / bf16 (f32 acc) or fp64 (fp64 acc), except fp8/bf8 A/B, which need

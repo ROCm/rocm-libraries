@@ -100,16 +100,21 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
     const rocke_type_t* ty;
     const rocke_type_t* c_ty;
 
-    if(!rocke_gemm_check_storage(spec, NULL, 0))
     {
-        /* Python ValueError: set the builder's sticky error. */
-        return rocke_b_io_ir_type(b, "");
+        /* Python ValueError: set the builder's sticky error to its text. */
+        char reason[256] = {0};
+        if(!rocke_gemm_check_storage(spec, reason, sizeof(reason)))
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
+            return NULL;
+        }
     }
-    ty = rocke_gemm_dtype_ir(b, d->dtype_a);
-    c_ty = rocke_gemm_dtype_ir(b, d->dtype_c);
+    ty = rocke_gemm_dtype_ir(d->dtype_a);
+    c_ty = rocke_gemm_dtype_ir(d->dtype_c);
     if(ty == NULL || c_ty == NULL)
     {
-        return NULL;
+        /* io_ir_type's ValueError, through the helper that sets it. */
+        return rocke_b_io_ir_type(b, ty == NULL ? d->dtype_a : d->dtype_c);
     }
     if(c_ty_out != NULL)
     {
@@ -1458,7 +1463,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     /* ---- TDM plumbing. Mirrors Python's `if spec.trait.tdm:` prologue. ---- */
     if(spec->trait.tdm)
     {
-        ctx.tdm_elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_a);
+        ctx.tdm_elem_bytes = rocke_gemm_elem_bytes(spec);
         rocke_gemm_tdm_padding_for_tile(ctx.tdm_elem_bytes,
                                         ctx.block_k,
                                         spec->trait.lds_k_pad,

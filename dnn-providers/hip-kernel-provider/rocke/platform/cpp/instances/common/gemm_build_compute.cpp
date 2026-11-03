@@ -25,7 +25,6 @@
 
 /* Forward declarations. */
 static void rocke_gemm_tdm_drain(rocke_ir_builder_t* b);
-static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx);
 
 /* ===================================================================== *
  *  emit_mfma_phase
@@ -329,8 +328,10 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
         /* Single-buffer load-then-compute pipeline. parity is compile-time 0
          * (Python passes no lds_parity -> default 0). */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, for_op.iv, 0, NULL);
-        rocke_gemm_drain_prefetch_and_sync(
-            ctx); /* re-reads trait.tdm each iter: no CSE risk here */
+        if(ctx->spec->trait.tdm)
+            rocke_gemm_tdm_drain(b);
+        else
+            rocke_b_sync(b);
 
         rocke_gemm_emit_mfma_phase(ctx,
                                    ctx->A_smem,
@@ -359,15 +360,6 @@ static void rocke_gemm_tdm_drain(rocke_ir_builder_t* b)
 {
     rocke_b_s_wait_tensorcnt(b, 0);
     rocke_b_sync_lds_only(b);
-}
-
-/* The simple K-loop's drain after its load phase. */
-static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx)
-{
-    if(ctx->spec->trait.tdm)
-        rocke_gemm_tdm_drain(ctx->b);
-    else
-        rocke_b_sync(ctx->b);
 }
 
 /* Workgroup barrier ids of the split barrier: signal / wait the whole WG. */

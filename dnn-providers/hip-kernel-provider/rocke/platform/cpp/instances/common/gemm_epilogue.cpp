@@ -24,6 +24,7 @@
 #include "rocke/helper_rocke.helpers.fuse.h" /* FusedEpilogue apply/decl */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type           */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 
 /* Dispatch helpers for the attached fused epilogue (Python's runtime method
  * resolution on the _fused_epilogue object). The pointer is the FusedEpilogue
@@ -88,21 +89,27 @@ static rocke_value_t* rocke_gemm_fe_apply_vec(rocke_ir_builder_t* b,
  * even when A/B are 8-bit, so io_ir_type still covers every reachable case.
  *
  * The rule itself is rocke_gemm_check_storage (instance_gemm_internal.h), shared
- * with the validator and the emitter. In Python a failure raises ValueError; the
- * C port has no public sticky-error setter, so a failure routes through
- * rocke_b_io_ir_type to set the builder's sticky error. The call sites are
+ * with the validator and the emitter. In Python a failure raises ValueError; here
+ * it sets the builder's sticky error to the same text. The call sites are
  * reached only after is_valid_spec, so the emitted IR is unaffected. */
 static const rocke_type_t* gemm_c_storage_dtype(rocke_ir_builder_t* b,
                                                 const rocke_gemm_universal_spec_t* spec)
 {
     if(!rocke_ir_builder_ok(b))
         return NULL;
-    if(!rocke_gemm_check_storage(spec, NULL, 0))
     {
-        /* Force the ValueError-equivalent sticky error through the io helper. */
-        return rocke_b_io_ir_type(b, NULL);
+        char reason[256] = {0};
+        if(!rocke_gemm_check_storage(spec, reason, sizeof(reason)))
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
+            return NULL;
+        }
     }
-    return rocke_gemm_dtype_ir(b, spec->data.dtype_c);
+    {
+        const rocke_type_t* c_ty = rocke_gemm_dtype_ir(spec->data.dtype_c);
+        /* io_ir_type's ValueError, through the helper that sets it. */
+        return c_ty != NULL ? c_ty : rocke_b_io_ir_type(b, spec->data.dtype_c);
+    }
 }
 
 /* =====================================================================

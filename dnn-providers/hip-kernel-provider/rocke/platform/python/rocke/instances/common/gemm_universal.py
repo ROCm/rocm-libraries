@@ -799,12 +799,10 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         # pad_m/pad_n/pad_k are not consulted: OOB is handled by clipping the
         # descriptor's tensor extents, so the mover copies less rather than the
         # VGPR path's predicated masking.
-        row_bytes = t.tile_k * _dtype_bytes(spec.data.dtype_a)
+        row_bytes = t.tile_k * _elem_bytes(spec)
         if spec.trait.lds_k_pad:
             try:
-                _tdm_padding_for_tile(
-                    _dtype_bytes(spec.data.dtype_a), t.tile_k, spec.trait.lds_k_pad
-                )
+                _tdm_padding_for_tile(_elem_bytes(spec), t.tile_k, spec.trait.lds_k_pad)
             except ValueError as exc:
                 return False, f"tdm cannot encode lds_k_pad: {exc}"
         elif row_bytes % 4 or row_bytes < 8:
@@ -1690,7 +1688,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     if spec.trait.tdm:
         from ...core.ir import I64 as _I64
 
-        _tdm_elem_bytes = _dtype_bytes(spec.data.dtype_a)
+        _tdm_elem_bytes = _elem_bytes(spec)
         _tdm_pad_enable, _tdm_pad_interval, _tdm_pad_amount = _tdm_padding_for_tile(
             _tdm_elem_bytes, block_k, spec.trait.lds_k_pad
         )
