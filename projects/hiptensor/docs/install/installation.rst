@@ -152,6 +152,41 @@ nightly builds for ROCm and its components, including hipTensor. See
 `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
+.. _verify-hiptensor-install:
+
+Verify your installation
+========================
+
+After installing the runtime and development packages (or the ROCm HPC SDK), you
+can verify your installation by compiling and running a minimal smoke test.
+
+1. Create a file named ``test_hiptensor.cpp``:
+
+   .. code-block:: cpp
+
+      #include <cstdio>
+      #include <hiptensor/hiptensor.h>
+
+      int main() {
+          hiptensorHandle_t handle;
+          CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
+          std::printf("hipTensor version: %zu (HIP runtime: %d)\n",
+                      hiptensorGetVersion(), hiptensorGetHiprtVersion());
+          CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+          return 0;
+      }
+
+2. Compile and run the program:
+
+   .. code-block:: bash
+
+      hipcc test_hiptensor.cpp -lhiptensor -o test_hiptensor
+      ./test_hiptensor
+
+   If hipTensor is installed properly, the program initializes a hipTensor
+   handle on the active GPU and prints the installed hipTensor and HIP runtime
+   versions.
+
 .. _uninstall-hiptensor:
 
 Uninstall hipTensor
