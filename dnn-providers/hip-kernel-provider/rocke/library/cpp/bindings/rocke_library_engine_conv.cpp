@@ -34,6 +34,7 @@
 extern "C" {
 #include "rocke/arch_domain.h"
 #include "rocke/arena.h"
+#include "rocke/instance_conv_dgrad_interior.h"
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_pp_mfma.h"
@@ -2235,6 +2236,112 @@ std::vector<std::string> conv_dgrad_verify(const py::dict& d, const std::string&
                              rocke_build_implicit_gemm_conv_dgrad_new(&b, &s, arch.c_str()));
 }
 
+/* ============ dgrad interior-only dX (dx_interior) + shell zero-fill ============ */
+
+py::dict conv_problem_to_py(const rocke_conv_problem_t& p)
+{
+    py::dict d;
+    d["N"] = p.N;
+    d["Hi"] = p.Hi;
+    d["Wi"] = p.Wi;
+    d["C"] = p.C;
+    d["K"] = p.K;
+    d["Y"] = p.Y;
+    d["X"] = p.X;
+    d["sH"] = p.sH;
+    d["sW"] = p.sW;
+    d["pH"] = p.pH;
+    d["pW"] = p.pW;
+    d["dH"] = p.dH;
+    d["dW"] = p.dW;
+    d["groups"] = p.groups;
+    if(p.is_3d)
+    {
+        d["Di"] = p.Di;
+        d["Z"] = p.Z;
+        d["sD"] = p.sD;
+        d["pD"] = p.pD;
+        d["dD"] = p.dD;
+    }
+    return d;
+}
+
+rocke_conv_problem_t conv_problem_from_py(const py::dict& d)
+{
+    rocke_conv_problem_t p = rocke_conv_problem_default(1, 1, 1, 1, 1, 1, 1);
+    fill_conv_problem(&p, d);
+    return p;
+}
+
+/* The dX kernarg dict of a view launch (Python interior_view_dx / wmask_view):
+ * p_dX_stride_di only for a 3-D problem. */
+py::dict dx_view_to_py(const rocke_dgrad_dx_view_t& v, bool is_3d)
+{
+    py::dict s;
+    s["p_dX_stride_n"] = v.stride_n;
+    s["p_dX_stride_hi"] = v.stride_hi;
+    s["p_dX_stride_wi"] = v.stride_wi;
+    if(is_3d)
+        s["p_dX_stride_di"] = v.stride_di;
+    return s;
+}
+
+rocke_dgrad_halo_zero_spec_t halo_zero_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_dgrad_halo_zero_spec_t s = rocke_dgrad_halo_zero_spec_default();
+    s.block = dict_int(d, "block", s.block);
+    std::string v;
+    if(dict_str(d, "name", v))
+    {
+        store.push_back(v);
+        s.name = store.back().c_str();
+    }
+    return s;
+}
+
+std::string conv_dgrad_halo_zero_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_halo_zero_spec_t s = halo_zero_build_spec(d, store);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_dgrad_halo_zero_new(&b, &s);
+    if(!k || !rocke_ir_builder_ok(&b))
+    {
+        std::string msg
+            = std::string("rocke_library_engine.conv_dgrad_halo_zero_lower_llvm build failed: ")
+              + rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
+    guard.reset();
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_dgrad_halo_zero_lower_llvm");
+}
+
+std::string conv_dgrad_halo_zero_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_dgrad_halo_zero_serialize_ir",
+                                rocke_dgrad_halo_zero_spec_t,
+                                halo_zero_build_spec,
+                                rocke_build_dgrad_halo_zero_new(&b, &s));
+}
+
+std::vector<std::string> conv_dgrad_halo_zero_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_dgrad_halo_zero_verify",
+                             rocke_dgrad_halo_zero_spec_t,
+                             halo_zero_build_spec,
+                             rocke_build_dgrad_halo_zero_new(&b, &s));
+}
+
 /* =================== conv_wgrad_workspace_reduce (Stage 2) ================ */
 
 rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
@@ -2518,6 +2625,109 @@ void register_conv(py::module_& m)
 
     /* ---- wgrad two-stage family ---- */
     reg3("conv_wgrad", conv_wgrad_lower_llvm, conv_wgrad_serialize_ir, conv_wgrad_verify);
+    /* ---- dgrad interior-only dX (launch-time dx_interior) ---- */
+    reg3("conv_dgrad_halo_zero",
+         conv_dgrad_halo_zero_lower_llvm,
+         conv_dgrad_halo_zero_serialize_ir,
+         conv_dgrad_halo_zero_verify);
+    m.def(
+        "conv_dgrad_interior_view",
+        [](const py::dict& problem, bool keep_w, int axes) -> py::dict {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            rocke_conv_problem_t v = rocke_dgrad_interior_view_problem(&p, keep_w, axes);
+            rocke_dgrad_dx_view_t dx;
+            rocke_dgrad_interior_view_dx(&p, keep_w, axes, &dx);
+            py::dict out;
+            out["problem"] = conv_problem_to_py(v);
+            out["dx_offset"] = dx.offset;
+            out["dx_strides"] = dx_view_to_py(dx, p.is_3d);
+            return out;
+        },
+        py::arg("problem"),
+        py::arg("keep_w"),
+        py::arg("axes"),
+        "C port of interior_view_problem + interior_view_dx: {problem, dx_offset, dx_strides}.");
+    m.def(
+        "conv_dgrad_wmask_view",
+        [](const py::dict& problem) -> py::dict {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            rocke_conv_problem_t v;
+            rocke_dgrad_dx_view_t dx;
+            rocke_dgrad_wmask_view(&p, &v, &dx);
+            py::dict out;
+            out["problem"] = conv_problem_to_py(v);
+            out["dx_offset"] = dx.offset;
+            out["dx_strides"] = dx_view_to_py(dx, p.is_3d);
+            return out;
+        },
+        py::arg("problem"),
+        "C port of wmask_view: {problem, dx_offset, dx_strides}.");
+    m.def(
+        "conv_dgrad_dx_interior_problem_ok",
+        [](const py::dict& problem, int mask) -> py::tuple {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            char reason[256] = {0};
+            const bool ok = rocke_dgrad_dx_interior_problem_ok(&p, mask, reason, sizeof(reason));
+            return py::make_tuple(ok, std::string(reason));
+        },
+        py::arg("problem"),
+        py::arg("mask"),
+        "C port of dx_interior_problem_ok: (ok, reason).");
+    m.def(
+        "conv_dgrad_dx_interior_launch_ok",
+        [](const py::dict& spec, int dx_interior, int axes, const py::dict& problem) -> py::tuple {
+            std::deque<std::string> store;
+            rocke_dgrad_conv_spec_t s = conv_dgrad_build_spec(spec, store);
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            char reason[256] = {0};
+            const bool ok = rocke_dgrad_dx_interior_launch_ok(
+                &s, dx_interior, axes, &p, reason, sizeof(reason));
+            return py::make_tuple(ok, std::string(reason));
+        },
+        py::arg("spec"),
+        py::arg("dx_interior"),
+        py::arg("axes"),
+        py::arg("problem"),
+        "C port of dx_interior_launch_conflict: (ok, reason), reason 'ok' when accepted.");
+    m.def(
+        "conv_dgrad_halo_zero_launch",
+        [](const py::dict& problem, int elem_bytes, int axes, const py::dict& spec) -> py::tuple {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            std::deque<std::string> store;
+            rocke_dgrad_halo_zero_spec_t s = halo_zero_build_spec(spec, store);
+            int64_t vals[ROCKE_DGRAD_HALO_ZERO_SCALARS];
+            int grid[3], block[3];
+            if(rocke_dgrad_halo_zero_launch(&p, elem_bytes, axes, &s, vals, grid, block)
+               != ROCKE_OK)
+                throw py::value_error("dx_interior zero-fill needs C * elem_bytes % 16 == 0");
+            static const char* const names[ROCKE_DGRAD_HALO_ZERO_SCALARS] = {"Di",
+                                                                             "Do",
+                                                                             "Hi",
+                                                                             "Ho",
+                                                                             "ru",
+                                                                             "hd",
+                                                                             "hh",
+                                                                             "e",
+                                                                             "L1",
+                                                                             "L2",
+                                                                             "L3",
+                                                                             "n1",
+                                                                             "n2",
+                                                                             "u1",
+                                                                             "u2",
+                                                                             "u3"};
+            py::dict v;
+            for(int i = 0; i < ROCKE_DGRAD_HALO_ZERO_SCALARS; ++i)
+                v[names[i]] = vals[i];
+            return py::make_tuple(v,
+                                  py::make_tuple(grid[0], grid[1], grid[2]),
+                                  py::make_tuple(block[0], block[1], block[2]));
+        },
+        py::arg("problem"),
+        py::arg("elem_bytes"),
+        py::arg("axes"),
+        py::arg("spec"),
+        "C port of halo_zero_launch without the pointer kernargs: (values, grid, block).");
     /* ---- implicit-GEMM dgrad ---- */
     reg3("conv_dgrad", conv_dgrad_lower_llvm, conv_dgrad_serialize_ir, conv_dgrad_verify);
     m.def(

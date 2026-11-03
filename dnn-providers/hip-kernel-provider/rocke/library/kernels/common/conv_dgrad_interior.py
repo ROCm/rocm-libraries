@@ -148,6 +148,39 @@ def dx_interior_problem_ok(p, mask: int = DXA_ALL) -> Tuple[bool, str]:
     return True, "ok"
 
 
+def dx_interior_launch_conflict(identity, p) -> str:
+    """Why a dgrad binary (``identity``: a KernelIdentity or any object with
+    its fields) cannot run the interior / W-masked launch on ``p``, or ``""``
+    (the launch rules of identity_supports_problem; the view or record problem
+    is then checked against the binary itself). C++ twin:
+    rocke_dgrad_dx_interior_launch_ok."""
+    dxi = int(getattr(identity, "dx_interior", 0) or 0)
+    if getattr(identity, "xh_dx_wmask", False) and not dxi:
+        hw = (int(getattr(p, "X", 1)) - 1) // 2
+        if not identity.tapk_xhalo or hw < 1 or int(getattr(p, "pW", 0)) != hw:
+            return "xh_dx_wmask serves pW == (X-1)/2 problems (or a dx_interior launch)"
+        if int(getattr(p, "sW", 1)) != 1 or int(getattr(p, "dW", 1)) != 1:
+            return "xh_dx_wmask serves stride 1 / dilation 1 W"
+        return ""
+    if not dxi:
+        return ""
+    if dxi not in DXI_MODES:
+        return f"dx_interior={dxi} is not a mode"
+    if not identity.tap_outer_k:
+        return "dx_interior serves the stride-1 tap-outer kernels only"
+    if identity.split_k > 1 and not (identity.pp_boxes and identity.pp_box_det):
+        return "dx_interior: split-K only as pp_box_det (no dX zeroing)"
+    if identity.pp_streamk or getattr(identity, "tapk_pp_persist", 0) == 2:
+        return "dx_interior: no stream-K (it zeroes dX)"
+    ax = int(getattr(identity, "dx_interior_axes", 0) or 0)
+    if ax < 0 or ax > 7:
+        return "dx_interior_axes is a bit mask 0..7"
+    if getattr(identity, "xh_dx_wmask", False) and ax and not ax & 1:
+        return "xh_dx_wmask skips the W shell: dx_interior_axes must include W"
+    ok, why = dx_interior_problem_ok(p, ax or DXA_ALL)
+    return "" if ok else why
+
+
 def interior_view_problem(p, keep_w: bool, axes: int = DXA_ALL):
     """The (padded) problem whose dX is the halo problem's interior along ``axes``."""
     hd, hh, hw = halo_widths(p, axes)

@@ -1152,13 +1152,11 @@ def identity_supports_problem(
         and getattr(identity, "xh_dx_wmask", False)
         and not getattr(identity, "dx_interior", 0)
     ):
-        from kernels.common.conv_dgrad_interior import wmask_view
+        from kernels.common.conv_dgrad_interior import dx_interior_launch_conflict, wmask_view
 
-        hw = (int(getattr(problem, "X", 1)) - 1) // 2
-        if not identity.tapk_xhalo or hw < 1 or int(getattr(problem, "pW", 0)) != hw:
-            return False, "xh_dx_wmask serves pW == (X-1)/2 problems (or a dx_interior launch)"
-        if int(getattr(problem, "sW", 1)) != 1 or int(getattr(problem, "dW", 1)) != 1:
-            return False, "xh_dx_wmask serves stride 1 / dilation 1 W"
+        why = dx_interior_launch_conflict(identity, problem)
+        if why:
+            return False, why
         return identity_supports_problem(
             dataclasses.replace(identity, xh_dx_wmask=False), wmask_view(problem)[0], llvm_flavor
         )
@@ -1168,28 +1166,15 @@ def identity_supports_problem(
     # reductions that write dX without a zeroed buffer.
     if identity.direction == "dgrad" and getattr(identity, "dx_interior", 0):
         from kernels.common.conv_dgrad_interior import (
-            DXI_MODES,
             dx_interior_keeps_w,
-            dx_interior_problem_ok,
+            dx_interior_launch_conflict,
             interior_view_problem,
         )
 
-        if identity.dx_interior not in DXI_MODES:
-            return False, f"dx_interior={identity.dx_interior} is not a mode"
-        if not identity.tap_outer_k:
-            return False, "dx_interior serves the stride-1 tap-outer kernels only"
-        if identity.split_k > 1 and not (identity.pp_boxes and identity.pp_box_det):
-            return False, "dx_interior: split-K only as pp_box_det (no dX zeroing)"
-        if identity.pp_streamk or getattr(identity, "tapk_pp_persist", 0) == 2:
-            return False, "dx_interior: no stream-K (it zeroes dX)"
-        _ax = int(getattr(identity, "dx_interior_axes", 0) or 0)
-        if _ax < 0 or _ax > 7:
-            return False, "dx_interior_axes is a bit mask 0..7"
-        if getattr(identity, "xh_dx_wmask", False) and _ax and not _ax & 1:
-            return False, "xh_dx_wmask skips the W shell: dx_interior_axes must include W"
-        ok, why = dx_interior_problem_ok(problem, _ax or 7)
-        if not ok:
+        why = dx_interior_launch_conflict(identity, problem)
+        if why:
             return False, why
+        _ax = int(getattr(identity, "dx_interior_axes", 0) or 0)
         if identity.pp_boxes:
             # pp_boxes: the halo problem itself, records on the interior only
             # (pp_box_sub_gemms(interior=True)); the dX store is the dense one.
