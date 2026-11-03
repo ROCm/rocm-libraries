@@ -45,9 +45,28 @@ bool rocsparse::csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
 
     for(std::size_t block = 0; block < nblocks; ++block)
     {
-        const I begin = row_blocks[block];
-        const I end   = row_blocks[block + 1];
-        const I span  = end - begin;
+        I begin = row_blocks[block];
+        I end   = row_blocks[block + 1];
+
+        // The first block also takes the empty prefix adaptive does not skip,
+        // and the last block the empty suffix. Count only the rows from the
+        // first to the last nonempty one.
+        if(block == 0)
+        {
+            while(begin < end && row_ptr[begin + 1] == row_ptr[begin])
+            {
+                ++begin;
+            }
+        }
+        if(block == nblocks - 1)
+        {
+            while(end > begin && row_ptr[end] == row_ptr[end - 1])
+            {
+                --end;
+            }
+        }
+
+        const I span = end - begin;
         if(span <= 0)
         {
             continue;

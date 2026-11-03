@@ -145,9 +145,9 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
     rocsparse::csrmv_adaptive_partition<I, J> partition;
     if(std::is_same<A, _Float16>{} || std::is_same<A, rocsparse_bfloat16>{})
     {
-        // Half-precision matrices keep the adaptive default. Their output can be
-        // half precision, and nnz-split adds every partial sum to y with an
-        // atomic in the output type.
+        // Analysis only knows the matrix type, and only half-precision matrices
+        // can have a half-precision y, where nnz-split would add every partial
+        // sum with an atomic in that precision. Keep the adaptive default.
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans, nullptr));
     }
     else

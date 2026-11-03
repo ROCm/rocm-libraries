@@ -86,14 +86,15 @@ namespace rocsparse
 
     // Rows of 32 workgroups of 256 threads. ComputeRowBlocks skips an empty
     // prefix or suffix longer than this, and csrmv_adaptive_partition_is_poor_fit
-    // counts a block spanning more rows than this as wide. Sharing the limit
-    // keeps an empty edge that adaptive does not skip from counting as wide.
+    // counts a block spanning more rows than this as wide.
     inline constexpr uint32_t csrmv_adaptive_wide_block_rows = 32 * 256;
 
     // True when the adaptive row blocks are a poor fit for this matrix, so that
     // csrmv_select_algorithm chooses nnz-split for csrmv_alg_default.
     //
     // A zero row span is an intermediate chunk of one long row and is ignored.
+    // Empty rows before the first and after the last nonempty row are not part
+    // of any block's span, whether or not adaptive skips them.
     // The two poor partitions are:
     // - wide blocks, walked serially by one workgroup, that together span at
     //   least one eighth of the rows
@@ -104,8 +105,7 @@ namespace rocsparse
     //
     // The fractions and the 8-block minimum are heuristics that separate the
     // scattered-row and alternating-row patterns from populated matrices and
-    // from the empty edges adaptive skips. They were checked on gfx1201 (wave32)
-    // and gfx90a (wave64).
+    // from empty edges.
     template <typename I>
     bool csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
                                               std::size_t row_block_size,

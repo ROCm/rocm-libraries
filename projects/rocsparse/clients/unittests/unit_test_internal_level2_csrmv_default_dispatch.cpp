@@ -134,6 +134,37 @@ namespace
         return a;
     }
 
+    // Rows longer than a block alternate with empty rows, so adaptive puts each
+    // empty row in a block of its own.
+    Pattern long_and_empty_rows()
+    {
+        Pattern a;
+        a.n = 2000;
+        for(int g = 0; g < 8; ++g)
+        {
+            a.add(2000);
+            a.add(0);
+        }
+        return a;
+    }
+
+    // An empty prefix too short for adaptive to skip, then short rows. The
+    // first block holds the prefix and the first 1024 short rows.
+    Pattern short_empty_prefix()
+    {
+        Pattern a;
+        a.n = 1;
+        for(int i = 0; i < 8000; ++i)
+        {
+            a.add(0);
+        }
+        for(int i = 0; i < 2048; ++i)
+        {
+            a.add(1);
+        }
+        return a;
+    }
+
     // Long rows, then an empty suffix adaptive already skips.
     Pattern long_then_empty()
     {
@@ -238,9 +269,14 @@ namespace
     };
 
     // y = op(A) x + beta y0, with A the matrix the routine sees: m x n stored
-    // rows for CSR, and the transpose of the stored pattern for CSC.
+    // rows for CSR, and the transpose of the stored pattern for CSC. Symmetric
+    // matrices are only mirrored for a non-transposed CSR product.
     std::vector<cd> reference(const Pattern& a, const std::vector<cd>& val, const Options& o)
     {
+        if(o.symmetric && (o.as_csc || o.compute_op != rocsparse_operation_none))
+        {
+            ADD_FAILURE() << "the reference does not cover this symmetric case";
+        }
         const int64_t rows = o.as_csc ? a.n : a.m;
         const int64_t cols = o.as_csc ? a.m : a.n;
         const int64_t ylen = (o.compute_op == rocsparse_operation_none) ? rows : cols;
@@ -469,42 +505,50 @@ namespace
         {
             rocsparse_spmv_descr descr   = nullptr;
             rocsparse_error      error[] = {nullptr};
+            auto                 checked = [&](rocsparse_status status) {
+                if(error[0] != nullptr)
+                {
+                    EXPECT_EQ(rocsparse_destroy_error(error[0]), rocsparse_status_success);
+                    error[0] = nullptr;
+                }
+                return status;
+            };
             EXPECT_EQ(rocsparse_create_spmv_descr(&descr), rocsparse_status_success);
             const rocsparse_datatype ytype = dt_of<T>();
-            EXPECT_EQ(rocsparse_spmv_set_input(
-                          handle, descr, rocsparse_spmv_input_alg, &o.alg, sizeof(o.alg), error),
+            EXPECT_EQ(checked(rocsparse_spmv_set_input(
+                          handle, descr, rocsparse_spmv_input_alg, &o.alg, sizeof(o.alg), error)),
                       rocsparse_status_success);
             EXPECT_EQ(
-                rocsparse_spmv_set_input(
-                    handle, descr, rocsparse_spmv_input_operation, &o.op, sizeof(o.op), error),
+                checked(rocsparse_spmv_set_input(
+                    handle, descr, rocsparse_spmv_input_operation, &o.op, sizeof(o.op), error)),
                 rocsparse_status_success);
-            EXPECT_EQ(rocsparse_spmv_set_input(handle,
-                                               descr,
-                                               rocsparse_spmv_input_scalar_datatype,
-                                               &ytype,
-                                               sizeof(ytype),
-                                               error),
+            EXPECT_EQ(checked(rocsparse_spmv_set_input(handle,
+                                                       descr,
+                                                       rocsparse_spmv_input_scalar_datatype,
+                                                       &ytype,
+                                                       sizeof(ytype),
+                                                       error)),
                       rocsparse_status_success);
-            EXPECT_EQ(rocsparse_spmv_set_input(handle,
-                                               descr,
-                                               rocsparse_spmv_input_compute_datatype,
-                                               &ytype,
-                                               sizeof(ytype),
-                                               error),
+            EXPECT_EQ(checked(rocsparse_spmv_set_input(handle,
+                                                       descr,
+                                                       rocsparse_spmv_input_compute_datatype,
+                                                       &ytype,
+                                                       sizeof(ytype),
+                                                       error)),
                       rocsparse_status_success);
 
             auto stage = [&](rocsparse_v2_spmv_stage s) {
                 size_t size = 0;
-                EXPECT_EQ(
-                    rocsparse_v2_spmv_buffer_size(handle, descr, mat, dcx, dcy, s, &size, error),
-                    rocsparse_status_success);
+                EXPECT_EQ(checked(rocsparse_v2_spmv_buffer_size(
+                              handle, descr, mat, dcx, dcy, s, &size, error)),
+                          rocsparse_status_success);
                 void* buffer = nullptr;
                 if(size > 0)
                 {
                     EXPECT_EQ(hipMalloc(&buffer, size), hipSuccess);
                 }
-                const rocsparse_status status = rocsparse_v2_spmv(
-                    handle, descr, &alpha, mat, dcx, &beta, dcy, s, size, buffer, error);
+                const rocsparse_status status = checked(rocsparse_v2_spmv(
+                    handle, descr, &alpha, mat, dcx, &beta, dcy, s, size, buffer, error));
                 if(buffer != nullptr)
                 {
                     EXPECT_EQ(hipFree(buffer), hipSuccess);
@@ -514,10 +558,6 @@ namespace
             EXPECT_EQ(stage(rocsparse_v2_spmv_stage_analysis), rocsparse_status_success);
             repoint();
             out.compute_status = stage(rocsparse_v2_spmv_stage_compute);
-            if(error[0] != nullptr)
-            {
-                EXPECT_EQ(rocsparse_destroy_error(error[0]), rocsparse_status_success);
-            }
             EXPECT_EQ(rocsparse_destroy_spmv_descr(descr), rocsparse_status_success);
         }
         else
@@ -575,14 +615,21 @@ namespace
             }
             const std::vector<cd> ref = reference(a, val, o);
             EXPECT_EQ(y.size(), ref.size());
+            size_t mismatches = 0;
             for(size_t i = 0; i < std::min(y.size(), ref.size()); ++i)
             {
-                const cd got = to_cd(y[i]);
-                EXPECT_NEAR(got.real(), ref[i].real(), 1e-4 * std::max(1.0, std::abs(ref[i])))
-                    << "y[" << i << "]";
-                EXPECT_NEAR(got.imag(), ref[i].imag(), 1e-4 * std::max(1.0, std::abs(ref[i])))
-                    << "y[" << i << "]";
+                const cd     got = to_cd(y[i]);
+                const double tol = 1e-4 * std::max(1.0, std::abs(ref[i]));
+                if(std::abs(got.real() - ref[i].real()) > tol
+                   || std::abs(got.imag() - ref[i].imag()) > tol)
+                {
+                    if(mismatches++ < 5)
+                    {
+                        ADD_FAILURE() << "y[" << i << "] = " << got << ", expected " << ref[i];
+                    }
+                }
             }
+            EXPECT_EQ(mismatches, 0u);
         }
 
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
@@ -648,6 +695,17 @@ TEST_F(CsrmvDefaultDispatch, default_keeps_adaptive_when_empty_suffix_is_skipped
     expect_adaptive(run_f32(handle, long_then_empty(), Options{}), rocsparse::csrmv_alg_adaptive);
 }
 
+TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_for_empty_rows_between_long_rows)
+{
+    expect_nnzsplit(run_f32(handle, long_and_empty_rows(), Options{}));
+}
+
+TEST_F(CsrmvDefaultDispatch, default_keeps_adaptive_for_short_empty_prefix)
+{
+    expect_adaptive(run_f32(handle, short_empty_prefix(), Options{}),
+                    rocsparse::csrmv_alg_adaptive);
+}
+
 TEST_F(CsrmvDefaultDispatch, switched_default_with_int64_indices)
 {
     expect_nnzsplit(run<int64_t, int64_t, float, float>(handle, scattered_gap(), Options{}));
@@ -690,6 +748,8 @@ TEST_F(CsrmvDefaultDispatch, switched_default_with_symmetric_matrix)
         handle, scattered_gap_lower(), o));
 }
 
+// The v2 analysis lives in the SpMV descriptor, which the test cannot read, so
+// this checks y on matrices that switch with rocsparse_spmv.
 TEST_F(CsrmvDefaultDispatch, switched_default_with_v2_spmv)
 {
     Options o;
@@ -706,8 +766,7 @@ TEST_F(CsrmvDefaultDispatch, switched_default_with_v2_spmv)
               rocsparse_status_success);
 }
 
-// f16 and bf16 outputs are accumulated in the output type by nnz-split, so
-// half-precision matrices keep adaptive.
+// Half-precision matrices keep adaptive whatever the output type.
 TEST_F(CsrmvDefaultDispatch, half_precision_default_keeps_adaptive)
 {
     expect_adaptive(run<int32_t, int32_t, _Float16, float>(handle, scattered_gap(), Options{}),
@@ -740,10 +799,13 @@ TEST_F(CsrmvDefaultDispatch, conjugate_transposed_csc_default_uses_the_csr_rule)
 }
 
 // The selection is stored for the operation that was analysed. A transposed
-// compute on the same descriptor falls back to the transpose default.
+// compute on the same descriptor uses rowsplit, which does not check the
+// analysed pointers, so it succeeds after a repoint where a reused nnz-split
+// analysis would return invalid_pointer.
 TEST_F(CsrmvDefaultDispatch, preprocess_none_then_compute_transpose)
 {
     Options o;
+    o.repoint    = true;
     o.compute_op = rocsparse_operation_transpose;
     expect_nnzsplit(run_f32(handle, scattered_gap(), o));
     expect_nnzsplit(run_f32(handle, alternating(), o));

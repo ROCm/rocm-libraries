@@ -711,20 +711,9 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
     const bool skip_diag = (descr->type == rocsparse_matrix_type_symmetric);
     const bool conj      = (trans == rocsparse_operation_conjugate_transpose || force_conj);
 
-    // Replay the (block, npt) tuning chosen during analysis. If analysis did not
-    // populate it (defensive; the nnzsplit path always analyses first), recompute
-    // from the same rules using the stored skew signal.
-    uint32_t block = csrmv_info->nnzsplit.block_size;
-    uint32_t npt   = csrmv_info->nnzsplit.nnz_per_thread;
-    if(block == 0u)
-    {
-        block = rocsparse::nnzsplit_block_size(handle);
-        npt   = rocsparse::nnzsplit_nnz_per_thread(handle->properties,
-                                                 block,
-                                                 static_cast<int64_t>(m),
-                                                 static_cast<int64_t>(nnz),
-                                                 csrmv_info->nnzsplit.max_row_nnz);
-    }
+    // Replay the (block, npt) tuning chosen during analysis.
+    const uint32_t block = csrmv_info->nnzsplit.block_size;
+    const uint32_t npt   = csrmv_info->nnzsplit.nnz_per_thread;
 
     if(trans == rocsparse_operation_none || descr->type == rocsparse_matrix_type_symmetric)
     {

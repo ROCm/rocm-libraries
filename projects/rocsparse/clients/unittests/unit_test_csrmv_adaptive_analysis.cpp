@@ -116,21 +116,50 @@ TEST(csrmv_adaptive_analysis, poor_fit_wide_blocks_covering_the_matrix)
 {
     const int        n = 10000;
     std::vector<int> blocks{0, n};
-    std::vector<int> ptr(static_cast<size_t>(n) + 1, 0);
-    ptr.back() = 2;
+    std::vector<int> ptr(static_cast<size_t>(n) + 1, 1);
+    ptr.front() = 0;
+    ptr.back()  = 2;
     EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), n));
 }
 
-// The wide-block limit is the empty-edge length adaptive skips, so an empty
-// prefix too short to be skipped is not wide either. general_wg_size returns 128
-// for some matrices, and 32 * 128 rows must not be the limit.
-TEST(csrmv_adaptive_analysis, poor_fit_span_limit_matches_the_skipped_edge)
+// The limit is fixed: general_wg_size returns 128 for some matrices, and
+// 32 * 128 rows must not be the limit.
+TEST(csrmv_adaptive_analysis, poor_fit_span_limit_is_fixed)
 {
-    auto empty_prefix = [](int edge) {
+    auto gap = [](int span) {
         const int        populated = 1000;
+        const int        n         = span + populated;
+        std::vector<int> blocks{0, span, n};
+        std::vector<int> ptr{0};
+        for(int row = 0; row < n; ++row)
+        {
+            const bool empty = row > 0 && row < span - 1;
+            ptr.push_back(ptr.back() + (empty ? 0 : 1));
+        }
+        return rocsparse::csrmv_adaptive_partition_is_poor_fit(
+            blocks.data(), blocks.size(), ptr.data(), n);
+    };
+    EXPECT_FALSE(gap(4097));
+    EXPECT_FALSE(gap(8192));
+    EXPECT_TRUE(gap(8193));
+}
+
+// Adaptive does not close a block on empty rows, so the first block holds the
+// empty prefix and the populated rows up to a full block of nonzeros. A prefix
+// longer than the limit is trimmed by adaptive; a shorter one stays in the
+// block. Neither counts towards the span.
+TEST(csrmv_adaptive_analysis, good_fit_with_an_empty_prefix)
+{
+    auto prefix = [](int edge) {
+        const int        populated = 4 * 1024;
         const int        n         = edge + populated;
-        std::vector<int> blocks{0, edge, n};
+        const int        first     = edge > 8192 ? edge - 2 : 0;
+        std::vector<int> blocks{first};
+        for(int b = 1; b <= 4; ++b)
+        {
+            blocks.push_back(edge + b * 1024);
+        }
         std::vector<int> ptr(static_cast<size_t>(edge) + 1, 0);
         for(int row = 0; row < populated; ++row)
         {
@@ -139,9 +168,27 @@ TEST(csrmv_adaptive_analysis, poor_fit_span_limit_matches_the_skipped_edge)
         return rocsparse::csrmv_adaptive_partition_is_poor_fit(
             blocks.data(), blocks.size(), ptr.data(), n);
     };
-    EXPECT_FALSE(empty_prefix(4097));
-    EXPECT_FALSE(empty_prefix(8192));
-    EXPECT_TRUE(empty_prefix(8193));
+    EXPECT_FALSE(prefix(4097));
+    EXPECT_FALSE(prefix(8000));
+    EXPECT_FALSE(prefix(8192));
+    EXPECT_FALSE(prefix(20000));
+}
+
+// After trimming a long empty suffix, the last block can hold only the few
+// empty rows adaptive keeps. It is an edge, not an underfilled block.
+TEST(csrmv_adaptive_analysis, trimmed_empty_suffix_is_not_underfilled)
+{
+    const int        suffix = 9000;
+    const int        n      = 9 + suffix;
+    std::vector<int> blocks{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12};
+    std::vector<int> ptr{0};
+    for(int row = 0; row < n; ++row)
+    {
+        const int len = row < 7 ? 2000 : (row < 9 ? 10 : 0);
+        ptr.push_back(ptr.back() + len);
+    }
+    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
+        blocks.data(), blocks.size(), ptr.data(), n));
 }
 
 // A wide block that is only a small share of the matrix, and no transition
