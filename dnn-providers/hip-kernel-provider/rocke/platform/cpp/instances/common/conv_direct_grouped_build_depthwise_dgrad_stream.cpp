@@ -51,12 +51,6 @@ int dgs_pymod(int a, int m)
     return r < 0 ? r + m : r;
 }
 
-void dgs_reason(char* reason, size_t reason_cap, const char* text)
-{
-    if(reason != NULL && reason_cap > 0)
-        snprintf(reason, reason_cap, "%s", text);
-}
-
 void dgs_set_err(rocke_ir_builder_t* b)
 {
     if(b->status == ROCKE_OK)
@@ -838,7 +832,7 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
     const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
-        dgs_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -910,7 +904,7 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
             return false;
         }
     }
-    dgs_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -966,7 +960,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        dgs_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -976,10 +970,10 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        dgs_reason(err,
-                   err_cap,
-                   (m != NULL && m[0] != '\0') ? m
-                                               : "build_direct_depthwise_dgrad_streaming failed");
+        rocke_spec_set_reason(
+            err,
+            err_cap,
+            (m != NULL && m[0] != '\0') ? m : "build_direct_depthwise_dgrad_streaming failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
@@ -1080,7 +1074,8 @@ bool rocke_dconv_dw_tiled_padding_reason(const rocke_direct_depthwise_tiled_spec
     }
     if(!spec->dgrad && pad_w != p->PAD)
     {
-        dgs_reason(reason, reason_cap, "DirectDepthwiseTiledSpec: one padding for both axes");
+        rocke_spec_set_reason(
+            reason, reason_cap, "DirectDepthwiseTiledSpec: one padding for both axes");
         return true;
     }
     return false;

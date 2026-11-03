@@ -64,10 +64,15 @@ from kernels.common.conv_direct_grouped import (
     _buf_load_half,
     _buf_load_vN,
     _buf_store_vN,
+    _dw_mfma_in_passes,
+    _dw_mfma_lds_bytes,
     _dw_mfma_passes,
+    _dw_mfma_tile_w,
+    _dw_win_byte_strides,
     _dw_win_tile,
     _io_type,
     _trunc_f32,
+    _trunc_f32_elem,
     dilation_reason,
     emit_direct_params,
     one_padding_reason,
@@ -120,7 +125,7 @@ class DwFwdWmmaSpec:
 
     @property
     def tile_w(self) -> int:
-        return 32 // self.w_fold
+        return _dw_mfma_tile_w(self.w_fold)
 
     def grid(self) -> Tuple[int, int, int]:
         p = self.problem
@@ -135,9 +140,13 @@ class DwFwdWmmaSpec:
 
     def in_passes(self) -> int:
         """16-byte input loads per thread and window row."""
-        win = self.tile_w + 4 * _dw_mfma_passes(self.problem.KW) - 2
-        per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        return ceil_div(self.w_fold * win * per_px, self.threads_per_block)
+        return _dw_mfma_in_passes(
+            self.tile_w,
+            self.problem.KW,
+            self.w_fold,
+            self.block_ch,
+            self.threads_per_block,
+        )
 
     def frag_vgprs(self) -> int:
         """VGPRs of the register-resident fragments: the one-hot weights
@@ -148,10 +157,13 @@ class DwFwdWmmaSpec:
         return 8 * (p.KH * kwp + p.KH + kwp) + 4 * self.prefetch_rows * self.in_passes()
 
     def lds_bytes(self) -> int:
-        per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        in_px = ceil_div(self.in_passes() * self.threads_per_block, per_px)
-        out_px = self.w_fold * self.tile_w
-        return 2 * (in_px + out_px) * (self.block_ch + DW_DGRAD_MFMA_CH) * 2
+        return _dw_mfma_lds_bytes(
+            self.in_passes(),
+            self.threads_per_block,
+            self.block_ch,
+            self.w_fold,
+            self.tile_w,
+        )
 
     def unrolled_wmmas(self) -> int:
         p = self.problem
@@ -286,11 +298,8 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     p_Wo = params["p_Wo"]
     p_G = params["p_groups"]
     c2 = b.const_i32(2)
-    x_img, x_row, x_px = (
-        b.mul(params[n], c2) for n in ("p_A_stride_n", "p_A_stride_hi", "p_A_stride_wi")
-    )
-    y_img, y_row, y_px = (
-        b.mul(params[n], c2) for n in ("p_D_stride_n", "p_D_stride_ho", "p_D_stride_wo")
+    x_img, x_row, x_px, y_img, y_row, y_px = _dw_win_byte_strides(
+        b, params, fwd=True, c2=c2
     )
 
     c0 = b.const_i32(0)
@@ -299,18 +308,15 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     zero_acc = b.zero_vec_f32(8)
     wmma_op = wmma_fwd_op(p.dtype, arch)
     zero_f32 = b.const_f32(0.0)
-    if p.dtype == "bf16":
-        zero_half = b.trunc_f32_to_bf16(zero_f32)
-    else:
-        zero_half = b.trunc_f32_to_f16(zero_f32)
+    zero_half = _trunc_f32_elem(b, p.dtype, zero_f32)
 
     tid = b.thread_id_x()
     bx = b.block_id_x()
     by = b.block_id_y()
     n_tile, h0 = _dw_win_tile(b, p_Ho, ROWS)
-    c32 = b.const_i32(32)
-    lane = b.mod(tid, c32)
-    wave = b.div(tid, c32)
+    c_wave_size = b.const_i32(DW_FWD_WMMA_WAVE)
+    lane = b.mod(tid, c_wave_size)
+    wave = b.div(tid, c_wave_size)
     x0 = b.mul(bx, b.const_i32(TW))
     img0 = b.mul(n_tile, b.const_i32(F))
     ch_blk = b.mul(by, b.const_i32(BLOCK_CH))

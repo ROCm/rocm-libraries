@@ -51,7 +51,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import align_up, ceil_div
@@ -256,11 +256,7 @@ def fwd_smallc_reason(spec: FwdSmallcWmmaSpec, arch: str = "gfx1250") -> str | N
     vgprs = 8 * spec.tiles_k * (spec.tiles_p + spec.steps) + 8 * spec.tiles_p
     if vgprs > SMALL_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
-    return None
+    return scheduler_strategy_reason(spec.sched)
 
 
 def is_valid_fwd_smallc_spec(
@@ -749,11 +745,7 @@ def fwd_smallk_reason(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> str | N
     )
     if vgprs > SMALL_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
-    return None
+    return scheduler_strategy_reason(spec.sched)
 
 
 def is_valid_fwd_smallk_spec(

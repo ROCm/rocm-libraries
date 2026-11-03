@@ -80,7 +80,7 @@ int rocke_direct_depthwise_dgrad_win_block_ch(const rocke_direct_depthwise_dgrad
 
 int rocke_direct_depthwise_dgrad_win_tile_w(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
-    return spec->mfma ? 32 / spec->w_fold : spec->block_w;
+    return spec->mfma ? rocke_dw_mfma_tile_w(spec->w_fold) : spec->block_w;
 }
 
 int rocke_dw_mfma_passes(int KW)
@@ -91,6 +91,30 @@ int rocke_dw_mfma_passes(int KW)
 bool rocke_dw_mfma_w_fold_ok(int w_fold)
 {
     return w_fold == 1 || w_fold == 2 || w_fold == 4;
+}
+
+int rocke_dw_mfma_tile_w(int w_fold)
+{
+    return w_fold > 0 ? 32 / w_fold : 0;
+}
+
+int rocke_dw_mfma_in_passes(int tile_w, int KW, int w_fold, int block_ch, int threads)
+{
+    if(threads <= 0)
+        return 0;
+    const int win = tile_w + 4 * rocke_dw_mfma_passes(KW) - 2;
+    const int per_px = block_ch / ROCKE_DW_DGRAD_MFMA_CH;
+    return (int)rocke_ceil_div((long long)w_fold * win * per_px, threads);
+}
+
+long rocke_dw_mfma_lds_bytes(int in_passes, int threads, int block_ch, int w_fold, int tile_w)
+{
+    const int per_px = block_ch / ROCKE_DW_DGRAD_MFMA_CH;
+    if(per_px <= 0)
+        return 0;
+    const int in_px = (int)rocke_ceil_div((long long)in_passes * threads, per_px);
+    const int out_px = w_fold * tile_w;
+    return 2L * (in_px + out_px) * (block_ch + ROCKE_DW_DGRAD_MFMA_CH) * 2;
 }
 
 /* 8-channel input chunks a wave contracts (1 for depthwise). */
@@ -115,11 +139,11 @@ long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
 
 static int dw_win_mfma_in_passes(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
-    const int win = rocke_direct_depthwise_dgrad_win_tile_w(spec)
-                    + 4 * rocke_dw_mfma_passes(spec->problem.KW) - 2;
-    const int per_px = rocke_direct_depthwise_dgrad_win_block_ch(spec) / ROCKE_DW_DGRAD_MFMA_CH;
-    return (int)rocke_ceil_div((long long)spec->w_fold * win * per_px,
-                               rocke_direct_depthwise_dgrad_win_threads_per_block(spec));
+    return rocke_dw_mfma_in_passes(rocke_direct_depthwise_dgrad_win_tile_w(spec),
+                                   spec->problem.KW,
+                                   spec->w_fold,
+                                   rocke_direct_depthwise_dgrad_win_block_ch(spec),
+                                   rocke_direct_depthwise_dgrad_win_threads_per_block(spec));
 }
 
 int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
@@ -134,12 +158,11 @@ int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
 int rocke_direct_depthwise_dgrad_win_mfma_lds_bytes(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
-    const int block_ch = rocke_direct_depthwise_dgrad_win_block_ch(spec);
-    const int per_px = block_ch / ROCKE_DW_DGRAD_MFMA_CH;
-    const int threads = rocke_direct_depthwise_dgrad_win_threads_per_block(spec);
-    const int in_px = (int)rocke_ceil_div((long long)dw_win_mfma_in_passes(spec) * threads, per_px);
-    const int out_px = spec->w_fold * rocke_direct_depthwise_dgrad_win_tile_w(spec);
-    return 2 * (in_px + out_px) * (block_ch + ROCKE_DW_DGRAD_MFMA_CH) * 2;
+    return (int)rocke_dw_mfma_lds_bytes(dw_win_mfma_in_passes(spec),
+                                        rocke_direct_depthwise_dgrad_win_threads_per_block(spec),
+                                        rocke_direct_depthwise_dgrad_win_block_ch(spec),
+                                        spec->w_fold,
+                                        rocke_direct_depthwise_dgrad_win_tile_w(spec));
 }
 
 rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
@@ -351,10 +374,13 @@ bool rocke_direct_depthwise_dgrad_win_is_valid_spec(
  *  Shared emission helpers
  * ===================================================================== */
 
-/* _dw_win_byte_strides: (dy_img, dy_row, dy_px, dx_img, dx_row, dx_px). */
-static void dw_win_byte_strides(rocke_ir_builder_t* b, const rocke_dconv_params_t* prm, V* out[6])
+void rocke_dw_win_byte_strides(rocke_ir_builder_t* b,
+                               const rocke_dconv_params_t* prm,
+                               V* out[6],
+                               V* c2)
 {
-    V* c2 = rocke_b_const_i32(b, 2);
+    if(c2 == NULL)
+        c2 = rocke_b_const_i32(b, 2);
     out[0] = rocke_b_mul(b, prm->p_A_stride_n, c2); /* p_dY_stride_n  */
     out[1] = rocke_b_mul(b, prm->p_A_stride_hi, c2); /* p_dY_stride_ho */
     out[2] = rocke_b_mul(b, prm->p_A_stride_wi, c2); /* p_dY_stride_wo */
@@ -400,6 +426,11 @@ void rocke_dconv_buf_store_vN(
 V* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, V* val)
 {
     return bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, val) : rocke_b_vec_trunc_f32_to_f16(b, val);
+}
+
+V* rocke_dconv_trunc_f32_elem(rocke_ir_builder_t* b, bool bf16, V* val)
+{
+    return bf16 ? rocke_b_trunc_f32_to_bf16(b, val) : rocke_b_trunc_f32_to_f16(b, val);
 }
 
 void rocke_dw_win_guarded(rocke_ir_builder_t* b,
@@ -502,7 +533,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
     V* ch_taps = rocke_b_mul(b, ch, c_taps);
     V* w_lane = rocke_b_select(b, ch_ok, ch_taps, oob_lane);
     V* bs[6];
-    dw_win_byte_strides(b, &prm, bs);
+    rocke_dw_win_byte_strides(b, &prm, bs, NULL);
     V *dy_img = bs[0], *dy_row_bytes = bs[1], *dy_px = bs[2];
     V *dx_img = bs[3], *dx_row_bytes = bs[4], *dx_px = bs[5];
 
@@ -524,8 +555,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
             }
         V* zero_half = NULL;
         if(KW % 2)
-            zero_half = bf16 ? rocke_b_trunc_f32_to_bf16(b, zero_f32)
-                             : rocke_b_trunc_f32_to_f16(b, zero_f32);
+            zero_half = rocke_dconv_trunc_f32_elem(b, bf16, zero_f32);
         for(int r = 0; r < KH; ++r)
             for(int k = 0; k < N_PAIRS; ++k)
             {
@@ -823,8 +853,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* oob_uniform = rocke_b_const_i32(b, ROCKE_DW_DGRAD_WIN_OOB_UNIFORM);
     V* zero_acc = rocke_b_zero_vec_f32(b, 4);
     V* zero_f32 = rocke_b_const_f32(b, 0.0);
-    V* zero_half
-        = bf16 ? rocke_b_trunc_f32_to_bf16(b, zero_f32) : rocke_b_trunc_f32_to_f16(b, zero_f32);
+    V* zero_half = rocke_dconv_trunc_f32_elem(b, bf16, zero_f32);
 
     V* tid = rocke_b_thread_id_x(b);
     V* bx = rocke_b_block_id_x(b);
@@ -852,7 +881,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* k = rocke_b_mod(b, col16, c8);
     V* q = rocke_b_div(b, col16, c8);
     V* bs[6];
-    dw_win_byte_strides(b, &prm, bs);
+    rocke_dw_win_byte_strides(b, &prm, bs, NULL);
     V *dy_img = bs[0], *dy_row_bytes = bs[1], *dy_px = bs[2];
     V *dx_img = bs[3], *dx_row_bytes = bs[4], *dx_px = bs[5];
 

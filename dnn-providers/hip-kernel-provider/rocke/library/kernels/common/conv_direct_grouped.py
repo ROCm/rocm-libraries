@@ -290,6 +290,13 @@ def _trunc_f32(b: IRBuilder, dtype: str, val: Value) -> Value:
     return b.vec_trunc_f32_to_f16(val)
 
 
+def _trunc_f32_elem(b: IRBuilder, dtype: str, val: Value) -> Value:
+    """Truncate one f32 value to the output dtype."""
+    if dtype == "bf16":
+        return b.trunc_f32_to_bf16(val)
+    return b.trunc_f32_to_f16(val)
+
+
 def _mfma(
     b: IRBuilder,
     dtype: str,
@@ -7763,6 +7770,34 @@ def _dw_mfma_passes(KW: int) -> int:
     return (KW + 4) // 4
 
 
+def _dw_mfma_tile_w(w_fold: int) -> int:
+    """Output columns per image of a Toeplitz tile: its 32 columns split over
+    ``w_fold`` images."""
+    return 32 // w_fold
+
+
+def _dw_mfma_in_passes(
+    tile_w: int, KW: int, w_fold: int, block_ch: int, threads: int
+) -> int:
+    """16-byte loads per thread and window row of the Toeplitz form: a window
+    of ``tile_w + 4 * passes - 2`` columns per image, ``block_ch / 8`` loads
+    per column, ``w_fold`` images."""
+    win = tile_w + 4 * _dw_mfma_passes(KW) - 2
+    per_px = block_ch // DW_DGRAD_MFMA_CH
+    return ceil_div(w_fold * win * per_px, threads)
+
+
+def _dw_mfma_lds_bytes(
+    in_passes: int, threads: int, block_ch: int, w_fold: int, tile_w: int
+) -> int:
+    """LDS bytes of the Toeplitz form: double-buffered input window rows and
+    output rows, ``block_ch + 8`` channels per pixel (16-byte bank skew)."""
+    per_px = block_ch // DW_DGRAD_MFMA_CH
+    in_px = ceil_div(in_passes * threads, per_px)
+    out_px = w_fold * tile_w
+    return 2 * (in_px + out_px) * (block_ch + DW_DGRAD_MFMA_CH) * 2
+
+
 @dataclass(frozen=True)
 class DirectDepthwiseDgradWindowedSpec:
     """Windowed depthwise dgrad kernel (stride 1, cpg = kpg = 1).
@@ -7835,7 +7870,7 @@ class DirectDepthwiseDgradWindowedSpec:
     @property
     def tile_w(self) -> int:
         """dX columns per block along W (per image)."""
-        return 32 // self.w_fold if self.mfma else self.block_w
+        return _dw_mfma_tile_w(self.w_fold) if self.mfma else self.block_w
 
     @property
     def n_tiles(self) -> int:
@@ -7876,9 +7911,13 @@ class DirectDepthwiseDgradWindowedSpec:
 
     def _mfma_in_passes(self) -> int:
         """16-byte dY loads per thread and window row (MFMA form)."""
-        win = self.tile_w + 4 * _dw_mfma_passes(self.problem.KW) - 2
-        per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        return -(-self.w_fold * win * per_px // self.threads_per_block)
+        return _dw_mfma_in_passes(
+            self.tile_w,
+            self.problem.KW,
+            self.w_fold,
+            self.block_ch,
+            self.threads_per_block,
+        )
 
     def mfma_frag_vgprs(self) -> int:
         """VGPRs of the register-resident fragments (MFMA form): the one-hot
@@ -7892,10 +7931,13 @@ class DirectDepthwiseDgradWindowedSpec:
     def mfma_lds_bytes(self) -> int:
         """LDS bytes of the MFMA form: double-buffered dY window rows and dX
         rows, ``block_ch + 8`` channels per pixel (16-byte bank skew)."""
-        per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        in_px = -(-self._mfma_in_passes() * self.threads_per_block // per_px)
-        out_px = self.w_fold * self.tile_w
-        return 2 * (in_px + out_px) * (self.block_ch + DW_DGRAD_MFMA_CH) * 2
+        return _dw_mfma_lds_bytes(
+            self._mfma_in_passes(),
+            self.threads_per_block,
+            self.block_ch,
+            self.w_fold,
+            self.tile_w,
+        )
 
     def kernel_name(self) -> str:
         """Every baked fact: the filter and padding, the dtype and each knob.
@@ -8113,11 +8155,18 @@ def is_valid_depthwise_dgrad_win_spec(
     return _depthwise_dgrad_win_check(spec)
 
 
-def _dw_win_byte_strides(b: IRBuilder, params: Dict[str, Value], fwd: bool = False):
+def _dw_win_byte_strides(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    fwd: bool = False,
+    c2: Optional[Value] = None,
+):
     """Byte strides of the dgrad tensors from the element-stride kernargs:
     ``(dy_img, dy_row, dy_px, dx_img, dx_row, dx_px)``. Under the forward
-    ABI (``fwd``) dY is the forward input A and dX the forward output D."""
-    c2 = b.const_i32(2)
+    ABI (``fwd``) dY is the forward input A and dX the forward output D.
+    ``c2`` is the caller's i32 constant 2 (made here when ``None``)."""
+    if c2 is None:
+        c2 = b.const_i32(2)
     names = (
         (
             "p_A_stride_n",
@@ -8235,10 +8284,7 @@ def build_direct_depthwise_dgrad_windowed(
         ]
         zero_half = None
         if KW % 2:
-            if p.dtype == "bf16":
-                zero_half = b.trunc_f32_to_bf16(zero_f32)
-            else:
-                zero_half = b.trunc_f32_to_f16(zero_f32)
+            zero_half = _trunc_f32_elem(b, p.dtype, zero_f32)
         for r in range(KH):
             weights.append(
                 [
@@ -8523,10 +8569,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     oob_uniform = b.const_i32(DW_DGRAD_WIN_OOB_UNIFORM)
     zero_acc = b.zero_vec_f32(4)
     zero_f32 = b.const_f32(0.0)
-    if p.dtype == "bf16":
-        zero_half = b.trunc_f32_to_bf16(zero_f32)
-    else:
-        zero_half = b.trunc_f32_to_f16(zero_f32)
+    zero_half = _trunc_f32_elem(b, p.dtype, zero_f32)
 
     tid = b.thread_id_x()
     bx = b.block_id_x()

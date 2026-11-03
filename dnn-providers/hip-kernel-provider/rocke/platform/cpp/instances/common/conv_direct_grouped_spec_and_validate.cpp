@@ -3274,21 +3274,6 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
 #define ROCKE_DCONV_GEN_ZERO_DIV "integer division or modulo by zero"
 #define ROCKE_DCONV_GEN_ZERO_MOD "integer modulo by zero"
 
-/* Python floor division (a // b) for b != 0. */
-static long dconv_gen_floordiv(long a, long b)
-{
-    long q = a / b;
-    if((a % b != 0) && ((a < 0) != (b < 0)))
-        --q;
-    return q;
-}
-
-/* -(-a // b): Python ceil division for b != 0. */
-static long dconv_gen_ceildiv(long a, long b)
-{
-    return -dconv_gen_floordiv(-a, b);
-}
-
 rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void)
 {
     rocke_direct_conv_spec_t s;
@@ -3341,11 +3326,11 @@ int rocke_direct_conv_preload_weight_vgprs(const rocke_direct_conv_spec_t* spec)
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const long k_atom = spec->fold_k32 ? 32 : 16;
     const long n_k_atoms
-        = spec->fold_k32 ? dconv_gen_floordiv(p->cpg, k_atom) : dconv_gen_ceildiv(p->cpg, k_atom);
+        = spec->fold_k32 ? rocke_floor_div(p->cpg, k_atom) : rocke_ceil_div(p->cpg, k_atom);
     /* Each of the waves_m waves of a group keeps only its own M-tiles. */
-    const long n_m_tiles = dconv_gen_floordiv(dconv_gen_ceildiv(p->kpg, 16), spec->waves_m);
-    return (int)dconv_gen_floordiv(
-        (long)p->KH * p->KW * n_k_atoms * n_m_tiles * dconv_gen_floordiv(k_atom, 4), 2);
+    const long n_m_tiles = rocke_floor_div(rocke_ceil_div(p->kpg, 16), spec->waves_m);
+    return (int)rocke_floor_div(
+        (long)p->KH * p->KW * n_k_atoms * n_m_tiles * rocke_floor_div(k_atom, 4), 2);
 }
 
 /* dgrad_weights_lds_bytes(spec). */
@@ -3367,22 +3352,21 @@ long rocke_direct_conv_lds_bytes(const rocke_direct_conv_spec_t* spec)
     const long load_vec = spec->fold_k32 ? 8 : 4;
     const long threads = rocke_direct_conv_threads_per_block(spec);
     const long lds_w = (long)(spec->block_q - 1) * p->stride + p->KW;
-    const long num_chunks = lds_w * spec->block_groups * dconv_gen_floordiv(p->cpg, load_vec);
-    const long passes = dconv_gen_floordiv(num_chunks + threads - 1, threads);
+    const long num_chunks = lds_w * spec->block_groups * rocke_floor_div(p->cpg, load_vec);
+    const long passes = rocke_floor_div(num_chunks + threads - 1, threads);
     long stage = passes * threads * load_vec * 2;
     long total;
     if(spec->lds_pad)
     {
-        const long cols
-            = dconv_gen_ceildiv(passes * threads,
-                                spec->block_groups * dconv_gen_floordiv(p->cpg, load_vec))
-              + 1;
+        const long cols = rocke_ceil_div(passes * threads,
+                                         spec->block_groups * rocke_floor_div(p->cpg, load_vec))
+                          + 1;
         stage += cols * spec->lds_pad * 2;
     }
     if(spec->dgrad_weights_lds)
     {
-        const long wl_vecs = dconv_gen_floordiv(dconv_gen_weights_lds_bytes(spec), 16);
-        const long wl_passes = dconv_gen_floordiv(wl_vecs + threads - 1, threads);
+        const long wl_vecs = rocke_floor_div(dconv_gen_weights_lds_bytes(spec), 16);
+        const long wl_passes = rocke_floor_div(wl_vecs + threads - 1, threads);
         const long wl = wl_passes * threads * 16;
         total = stage > wl ? stage : wl;
         if(spec->double_buffer)
@@ -3689,11 +3673,11 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
     }
     if(spec->waves_q == 0)
         ROCKE_DCONV_GEN_RAISE(ROCKE_DCONV_GEN_ZERO_DIV);
-    if(dconv_gen_floordiv(spec->block_q, spec->waves_q) < 16)
-        ROCKE_DCONV_GEN_RAISE("block_q//waves_q must be >= 16 (got %d//%d=%ld)",
+    if(rocke_floor_div(spec->block_q, spec->waves_q) < 16)
+        ROCKE_DCONV_GEN_RAISE("block_q//waves_q must be >= 16 (got %d//%d=%lld)",
                               spec->block_q,
                               spec->waves_q,
-                              dconv_gen_floordiv(spec->block_q, spec->waves_q));
+                              rocke_floor_div(spec->block_q, spec->waves_q));
     /* Not a Python rule: a negative wave count passes the checks above there
      * and fails later; the C builder sizes arrays from it, so stop here. */
     if(spec->waves_k < 0 || spec->waves_q < 0)
@@ -3713,7 +3697,7 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
     {
         /* The one extent rule of the row-stream knobs (direct_conv_grid()[2]):
          * it does not change the IR. */
-        const long gz = (long)p->N * dconv_gen_ceildiv(p->H, spec->block_h);
+        const long gz = (long)p->N * rocke_ceil_div(p->H, spec->block_h);
         if(gz < ROCKE_DCONV_GEN_XCD_MIN_ROW_BANDS)
             ROCKE_DCONV_GEN_RAISE("DirectConvSpec xcd_tiles needs at least %d image row bands "
                                   "(got %ld); the remap would be the identity",
@@ -3830,11 +3814,11 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
         /* LDS budget: the A/B staging ring plus the waves_k > 1 cross-wave
          * reduction scratch (build_direct_conv's own sizing). */
         const long load_vec = spec->fold_k32 ? 8 : 4;
-        const long n_vecs = dconv_gen_floordiv(p->cpg, load_vec);
+        const long n_vecs = rocke_floor_div(p->cpg, load_vec);
         const long lds_w = (long)(spec->block_q - 1) * p->stride + p->KW;
         const long threads = rocke_direct_conv_threads_per_block(spec);
         const long num_chunks = lds_w * spec->block_groups * n_vecs;
-        const long passes = dconv_gen_floordiv(num_chunks + threads - 1, threads);
+        const long passes = rocke_floor_div(num_chunks + threads - 1, threads);
         const long lds_total_fp16 = passes * threads * load_vec;
         const long ab_bytes = lds_total_fp16 * 2 * (spec->double_buffer ? 2 : 1);
         const long red_bytes = spec->waves_k > 1

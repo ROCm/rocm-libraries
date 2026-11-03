@@ -63,18 +63,16 @@ int rocke_direct_dw_fwd_wmma_block_ch(const rocke_direct_dw_fwd_wmma_spec_t* spe
 
 int rocke_direct_dw_fwd_wmma_tile_w(const rocke_direct_dw_fwd_wmma_spec_t* spec)
 {
-    return spec->w_fold > 0 ? 32 / spec->w_fold : 0; /* w_fold <= 0 is rejected */
+    return rocke_dw_mfma_tile_w(spec->w_fold);
 }
 
 int rocke_direct_dw_fwd_wmma_in_passes(const rocke_direct_dw_fwd_wmma_spec_t* spec)
 {
-    const int win
-        = rocke_direct_dw_fwd_wmma_tile_w(spec) + 4 * rocke_dw_mfma_passes(spec->problem.KW) - 2;
-    const int per_px = rocke_direct_dw_fwd_wmma_block_ch(spec) / ROCKE_DW_DGRAD_MFMA_CH;
-    if(rocke_direct_dw_fwd_wmma_threads_per_block(spec) <= 0)
-        return 0; /* block_waves < 1 is rejected */
-    return (int)rocke_ceil_div((long long)spec->w_fold * win * per_px,
-                               rocke_direct_dw_fwd_wmma_threads_per_block(spec));
+    return rocke_dw_mfma_in_passes(rocke_direct_dw_fwd_wmma_tile_w(spec),
+                                   spec->problem.KW,
+                                   spec->w_fold,
+                                   rocke_direct_dw_fwd_wmma_block_ch(spec),
+                                   rocke_direct_dw_fwd_wmma_threads_per_block(spec));
 }
 
 int rocke_direct_dw_fwd_wmma_frag_vgprs(const rocke_direct_dw_fwd_wmma_spec_t* spec)
@@ -87,15 +85,11 @@ int rocke_direct_dw_fwd_wmma_frag_vgprs(const rocke_direct_dw_fwd_wmma_spec_t* s
 
 long rocke_direct_dw_fwd_wmma_lds_bytes(const rocke_direct_dw_fwd_wmma_spec_t* spec)
 {
-    const int block_ch = rocke_direct_dw_fwd_wmma_block_ch(spec);
-    const int per_px = block_ch / ROCKE_DW_DGRAD_MFMA_CH;
-    if(per_px <= 0)
-        return 0; /* block_waves < 1 is rejected */
-    const int in_px = (int)rocke_ceil_div((long long)rocke_direct_dw_fwd_wmma_in_passes(spec)
-                                              * rocke_direct_dw_fwd_wmma_threads_per_block(spec),
-                                          per_px);
-    const int out_px = spec->w_fold * rocke_direct_dw_fwd_wmma_tile_w(spec);
-    return 2L * (in_px + out_px) * (block_ch + ROCKE_DW_DGRAD_MFMA_CH) * 2;
+    return rocke_dw_mfma_lds_bytes(rocke_direct_dw_fwd_wmma_in_passes(spec),
+                                   rocke_direct_dw_fwd_wmma_threads_per_block(spec),
+                                   rocke_direct_dw_fwd_wmma_block_ch(spec),
+                                   spec->w_fold,
+                                   rocke_direct_dw_fwd_wmma_tile_w(spec));
 }
 
 int rocke_direct_dw_fwd_wmma_unrolled_wmmas(const rocke_direct_dw_fwd_wmma_spec_t* spec)
@@ -285,20 +279,17 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     V* p_Wo = prm.p_Wo;
     V* p_G = prm.p_groups;
     V* c2 = rocke_b_const_i32(b, 2);
-    V* x_img = rocke_b_mul(b, prm.p_A_stride_n, c2);
-    V* x_row = rocke_b_mul(b, prm.p_A_stride_hi, c2);
-    V* x_px = rocke_b_mul(b, prm.p_A_stride_wi, c2);
-    V* y_img = rocke_b_mul(b, prm.p_D_stride_n, c2);
-    V* y_row = rocke_b_mul(b, prm.p_D_stride_ho, c2);
-    V* y_px = rocke_b_mul(b, prm.p_D_stride_wo, c2);
+    V* bs[6];
+    rocke_dw_win_byte_strides(b, &prm, bs, c2);
+    V *x_img = bs[0], *x_row = bs[1], *x_px = bs[2];
+    V *y_img = bs[3], *y_row = bs[4], *y_px = bs[5];
 
     V* c0 = rocke_b_const_i32(b, 0);
     V* oob_lane = rocke_b_const_i32(b, ROCKE_DW_DGRAD_WIN_OOB_LANE);
     V* oob_uniform = rocke_b_const_i32(b, ROCKE_DW_DGRAD_WIN_OOB_UNIFORM);
     V* zero_acc = rocke_b_zero_vec_f32(b, 8);
     V* zero_f32 = rocke_b_const_f32(b, 0.0);
-    V* zero_half
-        = bf16 ? rocke_b_trunc_f32_to_bf16(b, zero_f32) : rocke_b_trunc_f32_to_f16(b, zero_f32);
+    V* zero_half = rocke_dconv_trunc_f32_elem(b, bf16, zero_f32);
 
     V* tid = rocke_b_thread_id_x(b);
     V* bx = rocke_b_block_id_x(b);
@@ -306,9 +297,9 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     V* n_tile;
     V* h0;
     rocke_dw_win_tile(b, p_Ho, ROWS, &n_tile, &h0);
-    V* c32 = rocke_b_const_i32(b, 32);
-    V* lane = rocke_b_mod(b, tid, c32);
-    V* wave = rocke_b_div(b, tid, c32);
+    V* c_wave_size = rocke_b_const_i32(b, ROCKE_DW_FWD_WMMA_WAVE);
+    V* lane = rocke_b_mod(b, tid, c_wave_size);
+    V* wave = rocke_b_div(b, tid, c_wave_size);
     V* c_tw0 = rocke_b_const_i32(b, TW);
     V* x0 = rocke_b_mul(b, bx, c_tw0);
     V* c_f = rocke_b_const_i32(b, F);

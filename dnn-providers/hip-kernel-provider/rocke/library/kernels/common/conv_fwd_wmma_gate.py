@@ -37,7 +37,7 @@ in the same order and the same rejection messages.
 from __future__ import annotations
 
 from rocke.core.arch import ArchTarget
-from rocke.core.codegen_policy import normalize_scheduler_strategy
+from rocke.core.codegen_policy import scheduler_strategy_reason
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
@@ -132,11 +132,7 @@ def wmma_fwd_limits_reason(
 ) -> str | None:
     """The checks a forward validator ends with: a known scheduler strategy,
     i32 byte offsets into X, W and Y, and an i32 flat block id."""
-    try:
-        normalize_scheduler_strategy(sched)
-    except ValueError as e:
-        return str(e)
-    why = wmma_fwd_tensor_bytes_reason(p)
+    why = scheduler_strategy_reason(sched) or wmma_fwd_tensor_bytes_reason(p)
     if why is not None:
         return why
     if n_blocks > _I32_MAX:
