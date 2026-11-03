@@ -10303,7 +10303,8 @@ namespace rocalution
             cast_G->vec_[i] = nc;
             (*rG)[nc]       = i;
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
@@ -10330,7 +10331,6 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(cast_G->vec_[col_j] == -2)
                     {
                         min_j    = j;
@@ -10344,9 +10344,9 @@ namespace rocalution
                     min_j    = j;
                 }
 
-                if(val_j > max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10515,7 +10515,8 @@ namespace rocalution
             cast_G->vec_[i] = nc;
             (*rG)[nc]       = i;
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries, ghost entries included
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
@@ -10542,7 +10543,6 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(cast_G->vec_[col_j] == -2)
                     {
                         min_j    = col_j;
@@ -10556,9 +10556,9 @@ namespace rocalution
                     min_j    = col_j;
                 }
 
-                if(val_j > max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10574,9 +10574,9 @@ namespace rocalution
                         val_j *= static_cast<ValueType>(-1);
                     }
 
-                    if(val_j > max_a_ij)
+                    if(-val_j > max_a_ij)
                     {
-                        max_a_ij = val_j;
+                        max_a_ij = -val_j;
                     }
                 }
             }
@@ -10748,7 +10748,8 @@ namespace rocalution
                 }
             }
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
@@ -10770,12 +10771,10 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
-
                     if(U[col_j] == 0)
                     {
                         min_j    = j;
-                        min_a_ij = max_a_ij;
+                        min_a_ij = val_j;
                     }
                 }
 
@@ -10785,9 +10784,9 @@ namespace rocalution
                     min_j    = j;
                 }
 
-                if(val_j < max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10958,7 +10957,8 @@ namespace rocalution
                 }
             }
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries, ghost entries included
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
@@ -10980,11 +10980,10 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(U[col_j] == 0)
                     {
                         min_j    = col_j;
-                        min_a_ij = max_a_ij;
+                        min_a_ij = val_j;
                     }
                 }
 
@@ -10994,9 +10993,9 @@ namespace rocalution
                     min_j    = col_j;
                 }
 
-                if(val_j < max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -11012,9 +11011,9 @@ namespace rocalution
                         val_j *= static_cast<ValueType>(-1);
                     }
 
-                    if(val_j > max_a_ij)
+                    if(-val_j > max_a_ij)
                     {
-                        max_a_ij = val_j;
+                        max_a_ij = -val_j;
                     }
                 }
             }

@@ -487,9 +487,6 @@ TYPED_TEST(backend_pairwise_amg, initial_pass_pairs_only_strong_negative_couplin
     expect_valid_pairwise(A, agg, 2);
     EXPECT_EQ(agg.G[0], 0);
     EXPECT_EQ(agg.G[1], 0);
-
-    KNOWN_BUG("the threshold is -beta times the largest signed coupling, which is "
-              "positive when all couplings are negative, so every coupling passes");
     EXPECT_EQ(agg.nc, 3);
     EXPECT_NE(agg.G[2], agg.G[3]);
 }
@@ -638,9 +635,6 @@ TYPED_TEST(backend_pairwise_amg, further_pass_pairs_only_strong_negative_couplin
     ASSERT_TRUE(this->further(coarse, 0.25, 0, &agg));
     expect_valid_pairwise(A, agg, 4);
     EXPECT_EQ(agg.G[0], agg.G[2]);
-
-    KNOWN_BUG("the threshold is -beta times the smallest coupling, which is positive "
-              "when it is negative, so every coupling passes");
     EXPECT_EQ(agg.nc, 3);
     EXPECT_NE(agg.G[4], agg.G[6]);
 }
@@ -799,12 +793,18 @@ TYPED_TEST(backend_pairwise_amg, ghost_couplings_count_in_the_strength_threshold
     ASSERT_TRUE(this->further(galerkin(A, agg.G, agg.nc), 0.25, 0, &agg, &coarse_weak));
     EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0}));
 
-    KNOWN_BUG("the ghost couplings enter the threshold with their sign, as a maximum");
-
     const Csr<T> strong = column_ghost<T>(4, -8.0);
     Aggregation  alone;
     ASSERT_TRUE(this->initial(A, 0.25, 0, &alone, &strong));
     EXPECT_EQ(alone.G, (std::vector<int>{0, 1, 2, 3}));
+
+    const Csr<T> coarse_strong = column_ghost<T>(2, -8.0);
+    Aggregation  pairs;
+    ASSERT_TRUE(this->initial(A, 0.25, 0, &pairs));
+    ASSERT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
+    ASSERT_TRUE(this->further(galerkin(A, pairs.G, pairs.nc), 0.25, 0, &pairs, &coarse_strong));
+    EXPECT_EQ(pairs.nc, 2);
+    EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
 }
 
 // For a negative diagonal the signs of the row, its ghost couplings included, are flipped
@@ -825,6 +825,21 @@ TYPED_TEST(backend_pairwise_amg, ghost_couplings_of_a_negated_matrix)
         ASSERT_TRUE(this->further(galerkin(A, agg.G, agg.nc), 0.25, 0, &agg, &coarse_ghost));
         EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0}));
         EXPECT_EQ(agg.nc, 1);
+
+        // A strong ghost coupling makes the local couplings weak
+        const Csr<T> strong = sign(column_ghost<T>(4, -8.0));
+        Aggregation  alone;
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 0, &alone, &strong));
+        EXPECT_EQ(alone.G, (std::vector<int>{0, 1, 2, 3}));
+
+        const Csr<T> coarse_strong = sign(column_ghost<T>(2, -8.0));
+        Aggregation  pairs;
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 0, &pairs));
+        ASSERT_IN_LOOP(pairs.G == (std::vector<int>{0, 0, 1, 1}));
+        ASSERT_IN_LOOP(
+            this->further(galerkin(A, pairs.G, pairs.nc), 0.25, 0, &pairs, &coarse_strong));
+        EXPECT_EQ(pairs.nc, 2);
+        EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
     }
 }
 
@@ -870,6 +885,49 @@ TYPED_TEST(backend_pairwise_amg, positive_couplings_are_never_strong)
         expect_valid_pairwise(A, agg, 4);
         EXPECT_EQ(agg.nc, 3);
         EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0, 1, 1, 2, 2}));
+    }
+}
+
+// Node 0 of M couples by -1 to 1 and by +8 to 2. Only the negative couplings set the
+// threshold, -beta max_{a_0k < 0} |a_0k| = -0.25, so 0 pairs with 1, locally and with
+// negative or positive ghost couplings
+TYPED_TEST(backend_pairwise_amg, positive_couplings_do_not_count_in_the_strength_threshold)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> M(3);
+    M.add(0, 9.0);
+    M.add(1, -1.0);
+    M.add(2, 8.0);
+    M.end_row();
+    M.add(0, -1.0);
+    M.add(1, 1.0);
+    M.end_row();
+    M.add(0, 8.0);
+    M.add(2, 8.0);
+    M.end_row();
+    const Csr<T> A = doubled(M);
+
+    for(double v : {0.0, -0.1, 8.0})
+    {
+        SCOPED_TRACE(v == 0.0 ? std::string("local") : "ghost couplings " + std::to_string(v));
+        const bool   with_ghost    = v != 0.0;
+        const Csr<T> ghost         = column_ghost<T>(3, v);
+        const Csr<T> doubled_ghost = column_ghost<T>(A.n, v);
+
+        Aggregation initial;
+        ASSERT_IN_LOOP(this->initial(M, 0.25, 0, &initial, with_ghost ? &ghost : nullptr));
+        EXPECT_EQ(initial.nc, 2);
+        EXPECT_EQ(initial.G, (std::vector<int>{0, 0, 1}));
+
+        Aggregation agg;
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 0, &agg, with_ghost ? &doubled_ghost : nullptr));
+        ASSERT_IN_LOOP(agg.G == (std::vector<int>{0, 0, 1, 1, 2, 2}));
+        ASSERT_IN_LOOP(dense(galerkin(A, agg.G, agg.nc)) == dense(M));
+
+        ASSERT_IN_LOOP(this->further(M, 0.25, 0, &agg, with_ghost ? &ghost : nullptr));
+        expect_valid_pairwise(A, agg, 4);
+        EXPECT_EQ(agg.nc, 2);
+        EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0, 1, 1}));
     }
 }
 

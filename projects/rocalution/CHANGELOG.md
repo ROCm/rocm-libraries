@@ -13,6 +13,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
 * CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
+* `PairwiseAMG` now builds different aggregates and hierarchies, as `beta` now sets the strength threshold, so the number of levels and of iterations can change.
 
 ### Removed
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
@@ -41,6 +42,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed the strength test of the pairwise aggregation (`PairwiseAMG`), which used a wrong threshold. The initial pass took every negative coupling as strong in rows without a positive coupling, and in rows with one measured the couplings against the largest positive coupling instead. The further passes took every negative coupling, and small positive ones, as strong, except in rows with a positive ghost coupling, which then set the threshold. A coupling is now strong if it is below `-beta` times the largest magnitude of the negative couplings of the row, ghost couplings included.
 
 ## (Unreleased) rocALUTION 4.1.1
 
