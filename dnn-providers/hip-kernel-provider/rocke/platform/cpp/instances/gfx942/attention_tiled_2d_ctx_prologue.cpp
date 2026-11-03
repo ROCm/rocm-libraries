@@ -398,6 +398,18 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        /* Appended LAST and only when requested, so the LSE-off ABI is unchanged. */
+        if(spec->emit_lse)
+        {
+            memset(&o, 0, sizeof(o));
+            o.noalias = true;
+            o.noalias_set = true;
+            o.writeonly = true;
+            o.writeonly_set = true;
+            o.align = 4;
+            o.align_set = true;
+            ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
+        }
     }
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
@@ -875,13 +887,13 @@ void rocke_gfx942_attn2d_permute_p_c_to_a16(rocke_gfx942_attn2d_build_ctx_t* ctx
     for(int bit = 0; bit < 2; ++bit)
     {
         rocke_value_t* lane_bit = rocke_gfx942_attn2d_bit2(ctx, lane_col_mod4, bit);
-        int reg_bit = 1 << bit;
+        int reg_bit = 1 << bit; /* 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle */
         rocke_value_t* old[4];
         for(i = 0; i < 4; ++i)
             old[i] = vals[i];
         for(int reg = 0; reg < 4; ++reg)
         {
-            rocke_value_t* partner = rocke_b_warp_shuffle_xor(b, old[reg ^ reg_bit], reg_bit);
+            rocke_value_t* partner = rocke_b_warp_shuffle_xor_dpp(b, old[reg ^ reg_bit], reg_bit);
             rocke_value_t* same_bit
                 = rocke_b_cmp_eq(b, lane_bit, rocke_b_const_i32(b, (reg >> bit) & 1));
             vals[reg] = rocke_b_select(b, same_bit, old[reg], partner);

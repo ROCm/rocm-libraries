@@ -1277,6 +1277,42 @@ def test_reused_workers_isolate_roles_and_import_roots(tmp_path):
     assert all(process.poll() is not None for process in processes)
 
 
+def test_worker_directory_removal_waits_out_windows_handle_release(
+    monkeypatch, tmp_path
+):
+    # Windows frees a killed worker's handles asynchronously, so the first deletes of its
+    # directory can fail with a PermissionError (WinError 32 on worker.log). The cleanup
+    # must retry rather than replace the worker's real failure with that error.
+    import tempfile
+
+    from reference_common import session as session_module
+
+    directory = tempfile.TemporaryDirectory(dir=tmp_path)
+    real_cleanup = directory.cleanup
+    attempts = []
+
+    def flaky_cleanup():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise PermissionError(32, "being used by another process")
+        real_cleanup()
+
+    monkeypatch.setattr(directory, "cleanup", flaky_cleanup)
+    monkeypatch.setattr(session_module.time, "sleep", lambda _seconds: None)
+    session_module._remove_worker_directory(directory)
+    assert len(attempts) == 3
+    assert not Path(directory.name).exists()
+
+    # A directory that never frees is left behind, not raised.
+    stuck = tempfile.TemporaryDirectory(dir=tmp_path)
+
+    def locked_cleanup():
+        raise PermissionError(32, "being used by another process")
+
+    monkeypatch.setattr(stuck, "cleanup", locked_cleanup)
+    session_module._remove_worker_directory(stuck)
+
+
 @pytest.mark.parametrize("behavior", ["raise", "exit", "timeout"])
 def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
     import os

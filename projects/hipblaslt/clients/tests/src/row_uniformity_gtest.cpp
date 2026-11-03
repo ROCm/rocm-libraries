@@ -973,7 +973,46 @@ namespace
                              << " staggering=" << staggering << " clamp_reachable=" << reachable
                              << " clamp_unreachable=" << unreachable << " honored=" << honored;
         }
+
+        // Unlike checkRowUniformity, needs no witness with the mode off: the
+        // default heuristic picks run once with the mode on and must either be
+        // row-uniform or refused cleanly.
+        void checkDefaultPicksUniform(const Problem& problem)
+        {
+            RowUniformityHarness harness(problem);
+            prepare(harness);
+            if(IsSkipped() || HasFailure())
+                return;
+
+            int        enumeratedCount = 0;
+            const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
+            ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
+
+            for(const auto& candidate : candidates)
+            {
+                const auto status = harness.run(candidate, /*uniformMode=*/true);
+                if(status == HIPBLAS_STATUS_INVALID_VALUE)
+                    continue;
+                ASSERT_EQ(status, HIPBLAS_STATUS_SUCCESS);
+                const int64_t badRow = harness.firstNonUniformRowOfLastRun();
+                EXPECT_EQ(badRow, -1)
+                    << "Row " << badRow << " of D differs bitwise from row 0 for "
+                    << harness.solutionName(candidate) << " with uniform summation order enabled"
+                    << " and smCountTarget=" << problem.smCountTarget;
+            }
+        }
     };
+
+    // Uniform summation order keeps a mapping-1 StaggerU on Hybrid StreamK
+    // kernels (perTileExtraIters). A CU budget makes the heuristic pick the
+    // dynamic work-queue sub-mode; with tiles > grid one workgroup runs several
+    // whole tiles, and declareStaggerParms masks sgpr StaggerU to its low 8 bits
+    // on the first tile, so later tiles stagger by mapping 0 (M tile index).
+    // gfx950: MT96x32x128 Hybrid, 768 tiles on a 512-workgroup grid.
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicStagger_1536x1536x2048_SmCount160)
+    {
+        checkDefaultPicksUniform({1536, 1536, 2048, HIP_R_32F, 160});
+    }
 
     // Measured non-uniform on gfx950 with the default heuristic path.
     TEST_F(RowUniformity_pre_checkin, Regression_6144x5120x8192)

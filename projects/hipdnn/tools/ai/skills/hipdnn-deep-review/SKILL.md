@@ -1,7 +1,7 @@
 ---
 name: hipdnn-deep-review
 description: "Multi-agent deep review of a hipDNN or dnn-providers PR, branch or commit range. Scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. For a PR body or a quick single-pass review, use hipdnn-pr-quality."
-argument-hint: "[<PR URL or number> | branch:<name> | <base>..<head>] evidence:<dir> scratch:<dir> [clone:<dir>] [intent:<file>] [terms:<file>] [knowledge:<dir>] [round:<N>]"
+argument-hint: "[<PR URL or number> | branch:<name> | <base>..<head>] evidence:<dir> scratch:<dir> [clone:<dir>] [intent:<file>] [terms:<file>] [knowledge:<dir>] [round:<N>] [prior:<dir>]"
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task
 ---
 
@@ -35,6 +35,7 @@ Ask for what is missing; record it in `PIN.md`:
 | `evidence:<dir>`, `scratch:<dir>`, `clone:<dir>` | `$EVIDENCE` outside the product tree; disposable `$SCRATCH`; optional clone (default `$SCRATCH/clone`) |
 | `terms:<file>`, `knowledge:<dir>` | Optional private terms, one fixed string per line, outside the repository; optional `$KNOWLEDGE` store |
 | `round:<N>` | Default: one more than the highest `$EVIDENCE/r<k>/`; 1 when none |
+| `prior:<dir>` | Optional published record of earlier rounds that `$EVIDENCE` lacks (`LEDGER.md` and `r<k>/`); [RUNBOOK.md](RUNBOOK.md) *Iterate* seeds `$EVIDENCE` from it |
 | Agent limits | Ask the user or the host for `Agents:` (maximum concurrent agents), `Cores:` (CPU cores for builds and tests) and `Mutation:` (a host recipe for mutating a built tree, or none); the skill assumes no values. They go into `dispatch-context.md` ([RUNBOOK.md](RUNBOOK.md) *Fan out*) |
 | Scope notes | Ask the user for scope notes the change's description does not state, such as areas being deprecated, or `none`. Free text; it goes into `dispatch-context.md` as `Scope:` and is informational unless it says "do not file findings in <area>" ([lanes/common.md](lanes/common.md) *Rules*) |
 

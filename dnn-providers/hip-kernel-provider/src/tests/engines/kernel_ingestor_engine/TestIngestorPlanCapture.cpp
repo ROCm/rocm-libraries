@@ -163,8 +163,8 @@ TEST(TestIngestorPlanCapture, RefusesARestoredPlan)
         handler, std::make_unique<PreparedDispatch>(), 0, "restored test plan");
 
     expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "loaded from a saved payload");
-    const std::string message
-        = expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "keep the original bytes");
+    const std::string message = expectSaveRefusal(
+        plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "does not call the provider");
 
     // The benchmarking advice does not apply to a restored plan.
     EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;

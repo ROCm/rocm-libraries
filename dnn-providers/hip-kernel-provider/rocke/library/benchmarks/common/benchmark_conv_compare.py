@@ -1,12 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Side-by-side comparison of direct-conv and implicit-GEMM conv benchmarks.
+"""Side-by-side comparison of direct-conv, implicit-GEMM and Winograd conv benchmarks.
 
 Runs ``benchmark_direct_conv.py`` and ``benchmark_implicit_gemm_conv.py`` on the
-same convolution shape, then prints a compact summary of the best kernel found
-by each approach.
+same convolution shape, and on a cache run also ``benchmark_winograd_aot.py``
+(the AOT Winograd ``F(m x m, 3 x 3)`` forward), then prints a compact summary
+of the best kernel found by each approach.
 
-The two benchmark scripts are invoked as subprocesses so this script carries no
+The benchmark scripts are invoked as subprocesses so this script carries no
 benchmark logic of its own — it only forwards arguments and aggregates results.
 
 Usage
@@ -34,11 +35,18 @@ compiled during the comparison:
       --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --groups 4
 
 The two scripts' entries have distinct identities, so one directory can hold
-both caches.
+both caches. The Winograd sweep runs out of the same directory when its own
+cache is there too (``benchmark_winograd_aot.py --compile-all --cache-dir
+kernel_cache``), on the 3x3 stride-1 forward cases; without that cache, on a
+JIT comparison or with ``--skip-winograd`` it is left out.
 
 The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` /
 ``--dtype`` / ``--direction`` / ``--run-from-cache`` / ``--early-stop`` /
 ``--early-stop-after`` / ``--fast-rank`` flags are forwarded to both scripts.
+The Winograd sweep takes the shape, ``--warmup`` / ``--iters`` / ``--verify`` /
+``--dtype`` / ``--direction`` / ``--timing`` and the results files; it times
+each stage's binaries and the assembled pipelines rather than a list of
+kernels, so it has no early stopping or fast ranking to forward to.
 
 Early stopping carries over from one script to the other: direct conv runs
 first and records each case's best time (a kernel that fails ``--verify`` is
@@ -191,11 +199,9 @@ def _cpg_valid_for_direct(C: int, K: int, groups: int) -> tuple[bool, str]:
     return True, ""
 
 
-def _build_shape_args(args) -> list[str]:
-    """Shared shape args forwarded to both scripts."""
-    a: list[str] = [
-        "--arch",
-        args.arch,
+def _shape_flags(args) -> list[str]:
+    """The explicit shape, as every script spells it."""
+    return [
         "--N",
         str(args.N),
         "--Hi",
@@ -220,6 +226,15 @@ def _build_shape_args(args) -> list[str]:
         str(args.pW),
         "--groups",
         str(args.groups),
+    ]
+
+
+def _build_shape_args(args) -> list[str]:
+    """Shared shape args forwarded to both scripts."""
+    a: list[str] = [
+        "--arch",
+        args.arch,
+        *_shape_flags(args),
         "--top",
         str(args.top),
         "--warmup",
@@ -301,6 +316,54 @@ def _build_implicit_only_args(args) -> list[str]:
     return a
 
 
+def _build_winograd_args(args) -> list[str]:
+    """Args of the Winograd AOT sweep: its case input, the measurement flags
+    and the cache. It has no kernel list to cut short, so none of the early
+    stopping or fast-ranking flags apply to it."""
+    a: list[str] = [
+        "--arch",
+        args.arch,
+        "--warmup",
+        str(args.warmup),
+        "--iters",
+        str(args.iters),
+        "--run-from-cache",
+        args.run_from_cache,
+        "--timing",
+        args.timing,
+    ]
+    if args.verify:
+        a.append("--verify")
+    if args.dtype is not None:
+        a += ["--dtype", args.dtype]
+    if args.direction is not None:
+        a += ["--direction", args.direction]
+    if args.miopen_cmd:
+        a += ["--miopen-cmd", args.miopen_cmd]
+    elif args.miopen_file:
+        a += ["--miopen-file", args.miopen_file]
+    else:
+        a += _shape_flags(args)
+    return a
+
+
+def _winograd_skip_reason(args) -> str:
+    """Why the Winograd sweep sits this comparison out (``""``: it runs)."""
+    if args.run_from_cache is None:
+        return "the Winograd sweep runs from an AOT cache (--run-from-cache)"
+    if args.direction not in (None, "fwd"):
+        return "Winograd runs the forward direction only"
+    from benchmarks.common.benchmark_winograd_aot import cache_index
+
+    index = cache_index(args.run_from_cache, args.arch)
+    if not index.is_file():
+        return (
+            f"no Winograd cache ({index} is missing; build it with "
+            f"benchmark_winograd_aot.py --compile-all)"
+        )
+    return ""
+
+
 def _build_miopen_args(args) -> list[str]:
     """MIOpen input args forwarded to both scripts."""
     a: list[str] = [
@@ -327,30 +390,36 @@ def _build_miopen_args(args) -> list[str]:
 # The line an EarlyStop prints when a seeded sweep skipped every kernel.
 _ALL_STOPPED_RE = re.compile(r"all \d+ early-stopped: .*")
 
+# The line the Winograd sweep prints for a case it does not run.
+_NOT_WINOGRAD_RE = re.compile(r"not a Winograd case: (.*)")
+
 
 def _write_results(
     path: str,
     rows_direct: str,
     rows_implicit: str,
+    rows_winograd: str | None = None,
     *,
     miopen_file: str | None = None,
     miopen_cmd: str | None = None,
     timing: str | None = None,
 ) -> None:
-    """Join the two sweeps' per-case rows into ``path`` (and a ``.csv``).
+    """Join the sweeps' per-case rows into ``path`` (and a ``.csv``).
 
-    The two files are what the children wrote under ``--results``; a sweep that
-    was skipped (``--skip-direct`` / ``--skip-implicit``) or that reached no
-    case leaves none, and :func:`case_results.read_rows` reads that as no rows,
-    so the merged table is simply one-sided.
+    The files are what the children wrote under ``--results``; a sweep that was
+    skipped (``--skip-direct`` / ``--skip-implicit`` / ``--skip-winograd``) or
+    that reached no case leaves none, and :func:`case_results.read_rows` reads
+    that as no rows, so the merged table simply lacks that side.
 
     The children key their rows by geometry, not by the line they read, so the
     MIOpenDriver command goes back on here, from the input this run was given.
-    ``timing`` is how both children timed their kernels; the merge takes only
+    ``timing`` is how the children timed their kernels; the merge takes only
     rows measured that way (``None``: the rows must agree among themselves).
     """
     rows = case_results.merge(
-        case_results.read_rows(rows_direct) + case_results.read_rows(rows_implicit),
+        case_results.read_rows(rows_direct)
+        + case_results.read_rows(rows_implicit)
+        + (case_results.read_rows(rows_winograd) if rows_winograd else []),
         case_results.miopen_cmds_by_key(miopen_file=miopen_file, miopen_cmd=miopen_cmd),
         timing=timing,
     )
@@ -366,6 +435,8 @@ def _print_summary(
     direct: tuple[float | None, str],
     implicit: tuple[float | None, str],
     implicit_note: str = "",
+    winograd: "tuple[float | None, str] | None" = None,
+    winograd_note: str = "",
 ) -> None:
     direct_tflops, direct_name = direct
     implicit_tflops, implicit_name = implicit
@@ -383,6 +454,8 @@ def _print_summary(
 
     _fmt("direct-conv", direct_tflops, direct_name)
     _fmt("implicit-GEMM", implicit_tflops, implicit_name, implicit_note)
+    if winograd is not None:
+        _fmt("Winograd", winograd[0], winograd[1], winograd_note)
 
     if direct_tflops is not None and implicit_tflops is not None:
         ratio = direct_tflops / implicit_tflops
@@ -391,15 +464,32 @@ def _print_summary(
             f"\n  Speedup direct/implicit: {ratio:.3f}x  →  {winner} wins",
             flush=True,
         )
+    others = [
+        (tflops, label)
+        for tflops, label in (
+            (direct_tflops, "direct-conv"),
+            (implicit_tflops, "implicit-GEMM"),
+        )
+        if tflops is not None
+    ]
+    if winograd is not None and winograd[0] is not None and others:
+        best_tflops, best_label = max(others)
+        ratio = winograd[0] / best_tflops
+        winner = "Winograd" if ratio >= 1.0 else best_label
+        print(
+            f"  Speedup Winograd/{best_label}: {ratio:.3f}x  →  {winner} wins",
+            flush=True,
+        )
     print(f"{'='*72}", flush=True)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare direct-conv and implicit-GEMM benchmarks for the same conv shape. "
-            "Both benchmark scripts are run as subprocesses; their output is echoed and "
-            "their best TFLOPS results are printed side-by-side."
+            "Compare direct-conv, implicit-GEMM and (on a cache run, 3x3 stride-1 "
+            "forward) Winograd benchmarks for the same conv shape. The benchmark "
+            "scripts are run as subprocesses; their output is echoed and their best "
+            "TFLOPS results are printed side-by-side."
         )
     )
     parser.add_argument(
@@ -485,6 +575,13 @@ def main() -> int:
         action="store_true",
         dest="skip_implicit",
         help="skip the implicit-GEMM benchmark (direct-conv only)",
+    )
+    parser.add_argument(
+        "--skip-winograd",
+        action="store_true",
+        dest="skip_winograd",
+        help="skip the Winograd AOT benchmark (it runs by default on a cache "
+        "run whose directory holds the Winograd cache)",
     )
 
     rank_grp = parser.add_argument_group(
@@ -718,8 +815,16 @@ def main() -> int:
             )
             args.skip_direct = True
 
+    winograd_note = ""
+    if not args.skip_winograd:
+        winograd_note = _winograd_skip_reason(args)
+        if winograd_note:
+            print(f"[info] Winograd skipped: {winograd_note}", file=sys.stderr)
+            args.skip_winograd = True
+
     direct_result: tuple[float | None, str] = (None, "")
     implicit_result: tuple[float | None, str] = (None, "")
+    winograd_result: tuple[float | None, str] = (None, "")
     implicit_note = ""
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -747,18 +852,25 @@ def main() -> int:
             rows_implicit = str(
                 results_path.with_name(results_path.stem + ".implicit.jsonl")
             )
+            rows_winograd = str(
+                results_path.with_name(results_path.stem + ".winograd.jsonl")
+            )
         else:
             rows_direct = str(Path(tmp) / "direct_rows.jsonl")
             rows_implicit = str(Path(tmp) / "implicit_rows.jsonl")
+            rows_winograd = str(Path(tmp) / "winograd_rows.jsonl")
+        winograd_args = [] if args.skip_winograd else _build_winograd_args(args)
         if args.results:
             direct_args += ["--results", rows_direct]
             implicit_args += ["--results", rows_implicit]
+            winograd_args += ["--results", rows_winograd]
         if args.skip_measured:
             # Each sweep skips what *it* already recorded: a run killed
-            # between the two has the case on one side only, and resuming has
-            # to finish the other rather than skip it.
+            # between two of them has the case on some sides only, and
+            # resuming has to finish the others rather than skip it.
             direct_args += ["--skip-measured", args.skip_measured]
             implicit_args += ["--skip-measured", args.skip_measured]
+            winograd_args += ["--skip-measured", args.skip_measured]
 
         overall_rc = 0
 
@@ -788,17 +900,31 @@ def main() -> int:
             if tflops is None and m:
                 implicit_note = m.group(0)
 
+        if not args.skip_winograd:
+            script = _SCRIPT_DIR / "benchmark_winograd_aot.py"
+            tflops, name, output, rc = _run_script(script, winograd_args)
+            winograd_result = (tflops, name)
+            if rc != 0:
+                overall_rc = 1
+                print(_sweep_failure_message(script, rc), file=sys.stderr)
+            m = _NOT_WINOGRAD_RE.search(output)
+            if tflops is None and m:
+                winograd_note = f"not a Winograd case: {m.group(1)}"
+
         if args.results:
             _write_results(
                 args.results,
                 rows_direct,
                 rows_implicit,
+                rows_winograd,
                 miopen_file=args.miopen_file,
                 miopen_cmd=args.miopen_cmd,
                 timing=args.timing,
             )
 
-    _print_summary(direct_result, implicit_result, implicit_note)
+    _print_summary(
+        direct_result, implicit_result, implicit_note, winograd_result, winograd_note
+    )
     return overall_rc
 
 

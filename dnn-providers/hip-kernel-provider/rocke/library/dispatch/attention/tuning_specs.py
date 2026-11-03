@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
 
 from kernels.common.attention_unified import (
+    _GFX942_4WARP_LSE_REFUSAL,
     UnifiedAttentionProblem,
     _kv_block_bytes,
     _kv_cache_policy_3d,
@@ -208,6 +209,8 @@ def make_explicit_attention_2d_spec(
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
+    if problem.emit_lse and config.builder_kind == "gfx942_4warp_gqa":
+        raise ValueError(_GFX942_4WARP_LSE_REFUSAL)
     if config.num_warps not in NUM_WARPS:
         raise ValueError(f"num_warps must be one of {NUM_WARPS}")
     if config.block_m_per_warp not in BLOCK_M_PER_WARP:
@@ -231,6 +234,9 @@ def make_explicit_attention_2d_spec(
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
         waves_per_eu=config.waves_per_eu,
+        # The output the caller asked for, never a tuning knob (see
+        # _SEMANTIC_FIELDS); passed only when on, so LSE-off specs are as before.
+        **({"emit_lse": True} if problem.emit_lse else {}),
         **knobs,
     )
 

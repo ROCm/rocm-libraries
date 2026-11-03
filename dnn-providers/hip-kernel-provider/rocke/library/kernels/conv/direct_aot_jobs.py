@@ -21,9 +21,11 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
+    DIRECT_DEPTHWISE_WIN_FWD as _DW_WIN_FWD,
     DIRECT_DGRAD_PATCH_WMMA as _DGRAD_PATCH,
     DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
+    DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
@@ -86,6 +88,28 @@ DOUBLE_BUFFER = (True, False)
 # Neither tuple is reducible further without giving up a shape's best config.
 DW_BLOCK_W_FWD = (4, 16)
 DW_BLOCK_W_DGRAD = (4, 7, 8, 16)
+# Channel-packed depthwise dgrad: (cpl, block_w values, block_waves values).
+# Two channels per lane win on most layers; the wider packs only on a few.
+DW_DGRAD_CPL_GRID = (
+    (2, (4, 7, 8), (1, 2, 4)),
+    (4, (4,), (1, 2)),
+    (8, (4, 8), (1, 4)),
+)
+# Spill gate of the channel-packed depthwise dgrad grid (see
+# _dw_dgrad_packed_spills): the live-register estimate past which the compiled
+# grid spills. Calibrated by compiling every cpl > 1 entry: on gfx942 / gfx950
+# each entry estimated past 288 overflows the 256 architectural VGPRs (most of
+# them to scratch), and on gfx1151 / gfx1201 each one spills to scratch, while
+# the entries at or below it compile spill-free bar a single register on a few.
+# gfx1250 gives a lane of a block of up to two waves far more registers and
+# spills only in four-wave blocks, past 448.
+DW_DGRAD_PACKED_LIVE_BUDGET = 288
+DW_DGRAD_PACKED_LIVE_BUDGET_GFX1250 = 448
+# Rotated-filter depthwise dgrad through the output-stationary kernel: wide
+# tiles amortize the KW-1 column halo of the large filters it serves.
+DW_TILED_DGRAD_BLOCK_W = (4, 8, 16, 32)
+DW_TILED_DGRAD_BLOCK_H = (1, 2, 3, 4, 7)
+DW_TILED_DGRAD_BLOCK_WAVES = (1,)
 DW_BLOCK_WAVES = (1, 2, 4)
 # Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
 # 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
@@ -154,6 +178,12 @@ DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
 DW_WIN_MFMA_PREFETCH = 2
+# The forward pass on the same Toeplitz MFMA kernel (rotated filter,
+# direct_depthwise_win): "same"-padded square filters, stride 1.
+DW_WIN_FWD_FILTERS = (3, 5, 7, 9)
+# ... and its grouped form (cpg = kpg, the ResNeXt 3x3 layers).
+DW_WIN_FWD_G8_FILTERS = (3,)
+DW_WIN_FWD_GROUP_CH = (8, 16, 24, 32, 40, 48, 56, 64)
 # 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
 # the transposed problem with fused weights. The cache carries the image of
 # the 4c dispatch policy -- the (4, 16) tile with gathered weights, LDS-staged
@@ -788,11 +818,18 @@ class DirectCaps:
     # with dilation.
     dil_h: int = 1
     dil_w: int = 1
+    # Filter width and column padding where they differ from KH / PAD (0 and
+    # -1: the same); only the rotated-filter depthwise dgrad rows use them.
+    kw: int = 0
+    pad_w: int = -1
 
     @property
     def KW(self) -> int:
-        # Every capability below is a square filter.
-        return self.KH
+        return self.kw or self.KH
+
+    @property
+    def PAD_W(self) -> int:
+        return self.PAD if self.pad_w < 0 else self.pad_w
 
 
 def _grouped_channels() -> Tuple[int, ...]:
@@ -816,6 +853,8 @@ _DEPTHWISE_FILTERS_LARGE = (13, 31)
 # large filters (RepLKNet-style 13x13 .. 31x31) build quickly; it covers
 # every odd filter up to the depthwise limit.
 _DEPTHWISE_TILED_FILTERS = tuple(range(3, 32, 2))
+# Non-square depthwise filters the rotated-filter dgrad kernel caches.
+_DEPTHWISE_TILED_DGRAD_RECT = ((51, 5), (5, 51))
 _STRIDES = (1, 2)
 # The non-grouped kernel exists for 3x3: its LDS halo reuse is what lets it beat
 # implicit GEMM there. A 1x1 has no halo to share and is a plain GEMM.
@@ -975,6 +1014,23 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _all_pads(k)
         ),
     ),
+    # Depthwise forward on the windowed dgrad kernel's MFMA form (rotated
+    # filter over its stride-1 grid): stride 1 and 2, "same" padding; and its
+    # grouped form with 8..64 channels per group.
+    _DW_WIN_FWD: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
+            for k in DW_WIN_FWD_FILTERS
+            for s in _STRIDES
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_FWD_GROUP_CH
+            for s in _STRIDES
+        ),
+    ),
     # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
     # padding (it bounds its rows by p_Ho and its columns by p_Wo).
     "direct_depthwise_dgrad_win": (
@@ -983,6 +1039,30 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
             for k in _DEPTHWISE_FILTERS
             for pad in _all_pads(k)
+        ),
+    ),
+    # Large-filter stride-1 depthwise dgrad as a rotated-filter forward pass
+    # (13x13 .. 31x31, "same" padding); the row-streaming kernel
+    # (direct_depthwise_dgrad) preloads every tap and stops at 11x11.
+    _DW_TILED_DGRAD: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_TILED_FILTERS
+            if k > max(_DEPTHWISE_FILTERS)
+        )
+        # SLaK-style decomposed large kernels (51x5 and 5x51, "same" padding).
+        + tuple(
+            DirectCaps(
+                KH=kh,
+                kw=kw,
+                PAD=_same_pad(kh),
+                pad_w=_same_pad(kw),
+                stride=1,
+                cpg=1,
+                kpg=1,
+            )
+            for kh, kw in _DEPTHWISE_TILED_DGRAD_RECT
         ),
     ),
     # Grouped dgrad, scalar FMA: any stride and padding the reference covers.
@@ -1315,6 +1395,10 @@ def _knob_grid(
     elif variant == "direct_depthwise_dgrad":
         for bw, waves in itertools.product(DW_BLOCK_W_DGRAD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
+        # Channel-packed lanes (cpl > 1); cpl == 1 keeps the knob-less identity.
+        for cpl, bws, waves_list in DW_DGRAD_CPL_GRID:
+            for bw, waves in itertools.product(bws, waves_list):
+                yield dict(block_w=bw, block_waves=waves, cpl=cpl)
     elif variant == "direct_depthwise_dgrad_win":
         for (bw, bh), dot2, waves in itertools.product(
             DW_WIN_TILES, (False, True), DW_WIN_WAVES
@@ -1336,6 +1420,31 @@ def _knob_grid(
                 block_h=bh,
                 prefetch_rows=DW_WIN_MFMA_PREFETCH,
             )
+    elif variant == _DW_WIN_FWD:
+        # A grouped block holds whole groups: one or two per block, plus the
+        # depthwise wave counts that are whole multiples of the group.
+        waves_grid = DW_WIN_MFMA_WAVES
+        if caps is not None and caps.cpg > 1:
+            per_group = caps.cpg // 8
+            waves_grid = tuple(
+                w
+                for w in sorted({per_group, 2 * per_group, *DW_WIN_MFMA_WAVES})
+                if w <= 8 and w % per_group == 0
+            )
+        for fold, waves, bh in itertools.product(
+            DW_WIN_MFMA_FOLDS, waves_grid, DW_WIN_MFMA_BLOCK_H
+        ):
+            yield dict(
+                w_fold=fold,
+                block_waves=waves,
+                block_h=bh,
+                prefetch_rows=DW_WIN_MFMA_PREFETCH,
+            )
+    elif variant == _DW_TILED_DGRAD:
+        for bw, bh, waves in itertools.product(
+            DW_TILED_DGRAD_BLOCK_W, DW_TILED_DGRAD_BLOCK_H, DW_TILED_DGRAD_BLOCK_WAVES
+        ):
+            yield dict(block_w=bw, block_h=bh, block_waves=waves)
     elif variant == "direct_depthwise_col":
         for bh, bw, waves in itertools.product(
             DW_COL_BLOCK_H, DW_COL_BLOCK_W, DW_BLOCK_WAVES
@@ -1786,6 +1895,31 @@ def _nongrouped_spills(spec, arch: str) -> bool:
     return nongrouped_register_reason(spec, arch) is not None
 
 
+def _dw_dgrad_packed_spills(caps: DirectCaps, knobs: dict, arch: str) -> bool:
+    """Would this channel-packed (``cpl > 1``) depthwise dgrad binary spill?
+
+    Not a validity rule -- a spilling kernel is still correct -- but it costs
+    build time, cache size and tuning time for a binary selection would skip.
+    The estimate is per lane: two registers per packed weight tap (the
+    ``cpl * KH * KW`` taps are preloaded) plus the accumulator rows,
+    ``cpl * KH * block_w`` of them per stride step. The compiled grid tracks
+    the weights far more than the accumulator slots or the prefetched dY rows,
+    so neither the slot count's stride factor nor the prefetch is charged; see
+    :data:`DW_DGRAD_PACKED_LIVE_BUDGET` for the calibration.
+    """
+    from rocke.core.arch import ArchTarget
+
+    cpl = knobs.get("cpl", 1)
+    if cpl == 1:
+        return False
+    live = cpl * caps.KH * (2 * caps.KW + knobs["block_w"] / caps.stride)
+    if ArchTarget.from_gfx(arch).target_family == "gfx12_cdna":
+        if knobs["block_waves"] < 4:
+            return False
+        return live > DW_DGRAD_PACKED_LIVE_BUDGET_GFX1250
+    return live > DW_DGRAD_PACKED_LIVE_BUDGET
+
+
 def _depthwise_stream_spills(spec) -> bool:
     """Would this row-streaming depthwise kernel spill registers? Such a binary
     takes minutes to compile and runs far slower than the output-stationary
@@ -1838,7 +1972,7 @@ def _identity(
         dilation_h=caps.dil_h,
         dilation_w=caps.dil_w,
         pad_h=caps.PAD,
-        pad_w=caps.PAD,
+        pad_w=caps.PAD_W,
         cpg=caps.cpg,
         kpg=caps.kpg,
         knobs=json.dumps(knobs, sort_keys=True),
@@ -1915,6 +2049,8 @@ def _caps_of(identity: KernelIdentity) -> DirectCaps:
         kpg=identity.kpg,
         dil_h=identity.dilation_h,
         dil_w=identity.dilation_w,
+        kw=0 if identity.filter_w == identity.filter_h else identity.filter_w,
+        pad_w=-1 if identity.pad_w == identity.pad_h else identity.pad_w,
     )
 
 
@@ -2133,6 +2269,7 @@ def probe_problem(
         dtype=dtype,
         dil_h=caps.dil_h,
         dil_w=caps.dil_w,
+        pad_w=caps.pad_w,
     )
 
 
@@ -2149,6 +2286,8 @@ def _job(identity: KernelIdentity, caps: DirectCaps, knobs: dict) -> BuildJob:
             kpg=caps.kpg,
             dil_h=caps.dil_h,
             dil_w=caps.dil_w,
+            **({"kw": caps.kw} if caps.kw else {}),
+            **({"pad_w": caps.pad_w} if caps.pad_w >= 0 else {}),
         ),
     )
 
@@ -2192,6 +2331,10 @@ def _caps_jobs(
             continue
         if variant == "direct_grouped_dgrad_fused" and _dgrad_fused_policy_reason(
             caps, knobs, arch, dtype
+        ):
+            continue
+        if variant == "direct_depthwise_dgrad" and _dw_dgrad_packed_spills(
+            caps, knobs, arch
         ):
             continue
         spec = make_spec(variant, probe, knobs, wave_size)
@@ -2340,6 +2483,13 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
             identity.dtype_a,
         )
     rebuilt = replace(rebuilt, llvm_flavor=identity.llvm_flavor)
+    if (caps.kw or caps.pad_w >= 0) and identity.algorithm != _DW_TILED_DGRAD:
+        # Only the rotated-filter depthwise dgrad rows carry a non-square
+        # filter or per-axis padding.
+        raise LookupError(
+            f"the direct grid cannot build this identity: "
+            f"{caps.KH}x{caps.KW} filter, padding {caps.PAD}x{caps.PAD_W}"
+        )
     if rebuilt != identity:
         want, got = identity.to_dict(), rebuilt.to_dict()
         diff = {k: want[k] for k in want if want[k] != got[k]}

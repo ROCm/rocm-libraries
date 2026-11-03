@@ -4,53 +4,129 @@
 
 .. _installation:
 
-*********************************
-Installing and building hipTensor
-*********************************
+*****************
+Install hipTensor
+*****************
 
-The quickest way to install hipTensor is to use the prebuilt packages that are released with ROCm.
-Alternatively, this topic includes instructions to build from source.
+hipTensor is supported on AMD Instinct and Radeon GPUs by ROCm. See the `ROCm compatibility matrix
+<https://rocm.docs.amd.com/en/docs-7.14.0/compatibility/compatibility-matrix.html>`__ for support information.
 
-The available ROCm packages are:
+Before installing hipTensor, make sure your system meets the ROCm hardware,
+software, and driver requirements.
 
-*  hiptensor (library and header files for development)
-*  hiptensor-dev (library development package)
-*  hiptensor-samples (sample executables)
-*  hiptensor-tests (test executables)
-*  hiptensor-clients (samples and test executables)
+Install the ROCm HPC SDK
+========================
 
-Prerequisites
-=============
+hipTensor is part of the ROCm HPC SDK on Linux. It is not included in the ROCm Core SDK. For the most complete installation, we recommend that developers use the ``amdrocm-hpc-sdk`` meta package.
 
-hipTensor requires a ROCm-enabled platform, using ROCm version 7.0 or later.
-For more information, see :doc:`ROCm installation <rocm-install-on-linux:index>`
-and the `ROCm GitHub <https://github.com/ROCm/ROCm>`_.
+For instructions, see `Install ROCm HPC SDK <https://rocm.docs.amd.com/en/latest/components/hpc-sdk/install.html>`_. Use the selector panel on that page to view instructions appropriate for your system environment.
 
-Installing prebuilt packages
-============================
+Install hipTensor on Linux
+==========================
 
-To install hipTensor on Ubuntu or Debian, use these commands:
+Alternatively, if you want to install hipTensor without additional ROCm libraries and tools, install the ``amdrocm-hiptensor`` package.
 
-.. code-block:: shell
+1. Complete the `ROCm installation prerequisites
+   <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=pkgman#prerequisites>`_ to install dependencies and configure GPU access permissions.
 
-   sudo apt-get update
-   sudo apt-get install hiptensor hiptensor-dev hiptensor-samples hiptensor-tests
+2. Install the hipTensor package that matches your desired ROCm version,
+   development package needs, and AMD GPU architecture. Package names use the
+   following format:
 
-To install hipTensor on RHEL-based systems, use:
+   .. code-block:: shell-session
 
-.. code-block:: shell
+      amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor<-dev/-devel><rocm_version>
 
-   sudo yum update
-   sudo yum install hiptensor hiptensor-dev hiptensor-samples hiptensor-tests
+   Where:
 
-To install hipTensor on SLES, use:
+   * ``<-dev/-devel>`` specifies whether to install the library files and
+     headers. Omit this suffix to only install runtime packages.
 
-.. code-block:: shell
+     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
-   sudo dnf upgrade
-   sudo dnf install hiptensor hiptensor-dev hiptensor-samples hiptensor-tests
+     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-After hipTensor is installed, it can be used just like any other library with a C++ API.
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
+
+   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
+     for a single AMD GPU architecture. Omit this to install for all
+     architectures at the cost of disk space.
+
+   For example: ``amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-dev7.14``
+
+   Use the following command to install the desired hipTensor development package
+   release for supported GPU architectures:  
+
+   .. tab-set::
+
+      .. tab-item:: Debian-based distros
+
+         .. code-block:: bash
+
+            sudo apt install amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor-dev<rocm_version>
+
+      .. tab-item:: RHEL-based distros
+
+         .. code-block:: bash
+
+            sudo dnf install amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor-devel<rocm_version>
+
+      .. tab-item:: SLES
+
+         .. code-block:: bash
+
+            sudo zypper install amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor-devel<rocm_version>
+
+Uninstall hipTensor
+===================
+
+Replace ``<rocm_version>`` with the ROCm version used during installation and
+``<-llvm_target>`` with the GPU architecture used during installation.
+
+.. tab-set::
+
+   .. tab-item:: Debian-based distros
+
+      .. code-block:: bash
+
+         sudo apt autoremove amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor-dev<rocm_version>
+
+   .. tab-item:: RHEL-based distros
+
+      .. code-block:: bash
+
+         sudo dnf remove amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor-devel<rocm_version>
+
+   .. tab-item:: SLES
+
+      .. code-block:: bash
+
+         sudo zypper remove amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor-devel<rocm_version>
+
+Install from Tarball
+====================
+
+Install
+-------
+
+The standard ROCm tarball installation includes hipTensor. No additional steps
+are required. For details on ROCm tarball installation, refer to `Install AMD
+ROCm <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=tar>`_ and select the
+Tarball installation method.
+
+Uninstall
+---------
+
+The standard ROCm uninstallation process removes hipTensor. No additional steps
+are required. Refer to the `Uninstalling
+<https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=tar#uninstalling>`_ section
+and select the Tarball installation method.
+
+Install a nightly build
+=======================
+
+The `TheRock <https://github.com/ROCm/TheRock>`_ build system also publishes nightly builds for ROCm and its components, including hipTensor. See `Nightly <https://github.com/ROCm/TheRock#nightly-release-status>`_ release status for details.
 
 Building and installing hipTensor from source
 =============================================

@@ -361,6 +361,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* seg_max; /* F32* readonly                             */
     rocke_value_t* seg_l; /* F32* readonly (segm_expsum)               */
     rocke_value_t* red_seq_lens; /* I32* readonly (_seq_lens, unused body)    */
+    rocke_value_t* red_lse; /* F32* noalias writeonly (lse_ptr); NULL unless emit_lse */
 
     /* ---------- grid ids (lines 1029-1031) ---------- */
     rocke_value_t* q_token; /* block_id_x()                              */
