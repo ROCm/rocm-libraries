@@ -441,7 +441,10 @@ class TestAbLoadElemBytesBounds(unittest.TestCase):
         from rocke.instances.common.gemm_universal import is_valid_spec
 
         base = _fp8_spec()  # TDM
-        no_tdm = replace(base, trait=replace(base.trait, tdm=False))
+        no_tdm = replace(base, trait=replace(base.trait, tdm=False, tdm_depth=1))
+        # Both bases are valid on their own, so a reject below is the width's.
+        for ok_spec in (base, no_tdm):
+            self.assertTrue(is_valid_spec(ok_spec, arch=ARCH)[0])
         for label, spec0, width in (
             ("0", no_tdm, 0),
             ("-1", no_tdm, -1),

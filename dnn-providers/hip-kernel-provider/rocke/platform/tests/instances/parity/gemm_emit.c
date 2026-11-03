@@ -529,6 +529,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     case 26:
     case 27:
     case 28:
+    case 32: /* config 28 batched: the TDM fills take the batch offset in i64 */
     {
         /* idx -> (name, tdm_depth, split_barrier, tdm_alternate_issuers,
          * tdm_early_refill); mirrors _TDM_SYNC_CONFIGS in gemm_emit.py. */
@@ -546,8 +547,9 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
             {"test_tdm_split_alternate", 2, true, true, false},
             {"test_tdm_early_refill", 2, true, true, true},
         };
-        int c = idx - 24;
-        spec->name = sync_cfgs[c].name;
+        bool batched = idx == 32;
+        int c = batched ? 28 - 24 : idx - 24;
+        spec->name = batched ? "test_tdm_early_refill_batched" : sync_cfgs[c].name;
         spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 128,
                                               .tile_n = 128,
                                               .tile_k = 256,
@@ -573,7 +575,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->data.layout = "RCR";
         spec->wave_size = 32;
         spec->block_size = 128;
-        spec->batched = false;
+        spec->batched = batched;
         break;
     }
     case 29: /* the only bf8 config: bf8 x bf8 K=64 atom, TDM ping-pong */
@@ -657,15 +659,15 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 gfx1250; the rest use
- * the gfx950 baseline. */
+/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; the rest
+ * use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
     if(idx == 9 || idx == 11 || idx == 12)
     {
         return "gfx942";
     }
-    if(idx >= 13 && idx <= 30)
+    if((idx >= 13 && idx <= 30) || idx == 32)
     {
         return "gfx1250";
     }
@@ -676,7 +678,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..31>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..32>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

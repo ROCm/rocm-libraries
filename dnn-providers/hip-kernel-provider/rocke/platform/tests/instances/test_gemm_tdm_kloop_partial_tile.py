@@ -162,14 +162,35 @@ class TestTdmTileOriginIsI64(unittest.TestCase):
         self.assertEqual(set(geps), {"i64"})
 
     def test_a_batched_fill_offset_is_i64_from_the_start(self):
-        """batch * stride must be formed in i64 too, not widened after an i32
-        multiply has already wrapped."""
+        """batch * stride must be formed in i64 and be what the fills add, not
+        an i32 product widened after it may already have wrapped."""
         from dataclasses import replace
 
         ll = _lower(replace(_ring_spec(2), batched=True))
-        for stride in ("%stride_a", "%stride_b"):
-            with self.subTest(stride):
-                self.assertRegex(ll, rf"= zext i32 {stride} to i64")
+        defs = {
+            m.group(1): (m.group(2), m.group(3).split(", "))
+            for m in re.finditer(
+                r"^\s*(%[\w.]+) = (add|mul|zext)(?: nsw)? i\d+ (.+?)(?: to i64)?$",
+                ll,
+                re.M,
+            )
+        }
+        fills = re.findall(
+            r"getelementptr \S+, ptr addrspace\(1\) %(\w+), i64 (%[\w.]+)", ll
+        )
+        self.assertTrue(fills, "no TDM fill address")
+        seen = set()
+        for operand, index in fills:
+            with self.subTest(operand=operand, index=index):
+                op, (batch, _) = defs[index]
+                self.assertEqual(op, "add", "the fill offset is batch + row/k")
+                op, factors = defs[batch]
+                self.assertEqual(op, "mul", "the batch term is an i64 product")
+                widened = {defs[f][1][0] for f in factors if defs[f][0] == "zext"}
+                stride = f"%stride_{operand.lower()}"
+                self.assertIn(stride, widened, "the stride is widened before *")
+                seen.add(operand)
+        self.assertEqual(seen, {"A", "B"})
 
 
 class TestTdmKLoopIgnoresTheUnrollExperiment(unittest.TestCase):

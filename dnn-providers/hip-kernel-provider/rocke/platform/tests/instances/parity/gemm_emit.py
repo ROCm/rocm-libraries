@@ -644,13 +644,18 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1250",
         )
-    if idx in _TDM_SYNC_CONFIGS:
+    if idx in _TDM_SYNC_CONFIGS or idx == _TDM_BATCHED_CONFIG:
         # The gfx1250 TDM K-loop synchronisation traits, on config 23's
         # geometry (four waves, so the alternating issuers have two pairs).
         # Each trait reshapes a different loop -- the depth-2 ping-pong, the
         # depth >= 3 ring, the issuer gates of the load phase, and the two-tile
         # early-refill loop -- so each needs its own config to be compared.
-        name, depth, split, alt, early = _TDM_SYNC_CONFIGS[idx]
+        # Config 32 is config 28 batched: its TDM fills take the batch offset
+        # in i64.
+        batched = idx == _TDM_BATCHED_CONFIG
+        name, depth, split, alt, early = _TDM_SYNC_CONFIGS[28 if batched else idx]
+        if batched:
+            name = "test_tdm_early_refill_batched"
         return (
             UniversalGemmSpec(
                 name=name,
@@ -685,7 +690,7 @@ def _spec(idx: int) -> UniversalGemmSpec:
                 ),
                 wave_size=32,
                 block_size=128,
-                batched=False,
+                batched=batched,
             ),
             "gfx1250",
         )
@@ -829,12 +834,15 @@ _TDM_SYNC_CONFIGS = {
     28: ("test_tdm_early_refill", 2, True, True, True),
 }
 
+# Config 28 with ``batched=True``, appended after config 31.
+_TDM_BATCHED_CONFIG = 32
+
 
 def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..31>\n",
+        usage="usage: gemm_emit.py <config_index 0..32>\n",
     )
 
 
