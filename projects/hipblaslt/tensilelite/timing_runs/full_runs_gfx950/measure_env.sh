@@ -19,6 +19,14 @@
 #                      are passed through.
 #   TENSILELITE_CACHE  ~/.tensilelite, cleared by clear_caches as before (current TensileLite
 #                      sources neither read nor write it).
+#   GPU_TARGET   --gpu-targets of the build phases (default gfx950)
+#   CORES        taskset core list (default 0-24; OMP_NUM_THREADS stays 25, so give 25 cores)
+#   GPU          ROCR_VISIBLE_DEVICES of the runs (default 0)
+#   ANALYZE_DIR  directory holding analyze_timing.py / aggregate_timing.py (default $TL/scripts),
+#                so logs of an older TL can be analysed with a newer analyzer
+#   CLEAR_CACHE  per-config | once | never: when the per-config scripts clear the caches (default
+#                per-config; KEEP_CACHE=1 means once). once clears before the first config of the
+#                pass; never leaves the caches as the previous pass left them.
 # OUT, LIST and SCRATCH are set by the scripts themselves (their defaults depend on the script);
 # each script then calls check_rm_target on every directory it deletes.
 TL=${TL:-/home/alvasile/rocm-libraries/projects/hipblaslt/tensilelite}
@@ -26,6 +34,17 @@ CLIENT=${CLIENT:-/tmp/tl_client_msgpack/tensilelite/client/tensilelite-client}
 ART=${ART:-/tmp/tl_split_gfx950/artifacts}
 TENSILE_CACHE=${TENSILE_CACHE:-/home/alvasile/.tensile}
 TENSILELITE_CACHE=${TENSILELITE_CACHE:-/home/alvasile/.tensilelite}
+GPU_TARGET=${GPU_TARGET:-gfx950}
+CORES=${CORES:-0-24}
+GPU=${GPU:-0}
+ANALYZE_DIR=${ANALYZE_DIR:-$TL/scripts}
+if [ -z "$CLEAR_CACHE" ]; then
+  if [ "${KEEP_CACHE:-0}" = "1" ]; then CLEAR_CACHE=once; else CLEAR_CACHE=per-config; fi
+fi
+case $CLEAR_CACHE in
+  per-config|once|never) ;;
+  *) echo "CLEAR_CACHE='$CLEAR_CACHE' must be per-config, once or never" >&2; exit 1 ;;
+esac
 export TENSILE_HELPER_CACHE_DIR=$TENSILE_CACHE/helper_cache
 export TENSILE_HELPER_PCH_DIR=$TENSILE_CACHE/helper_pch
 export TENSILE_HELPER_CHUNK_CACHE_DIR=$TENSILE_CACHE/helper_chunk_cache
