@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "e4eb0bd2-2325-4326-b51a-50c657784041",
+  "name": "hipkernel:Gfx1151WmmaAttentionDecode",
+  "sdk_version": "1.2.0",
+  "graph_match": {
+    "native": "hipkernel.gfx1151_wmma_attention_decode.graph_match"
+  },
+  "metadata": "a448d4b8-16ed-4ed8-8a79-c05c4bdb6b9d",
+  "sort_kernel_catalog": {
+    "default": "4d11a2ac-dbe5-4f26-9495-6d77ef167151"
+  }
+}

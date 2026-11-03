@@ -812,7 +812,8 @@ class AddrCalculation:
                 module.add(VAndB32(dst=vgpr(kidx), src0=(kernel["NumWaveSplitK"]-1), src1=vgpr("Serial"), comment="kidx = Serial % NumWaveSplitK"))
                 module.add(VCmpXNeU32(dst=EXEC(), src0=(kernel["NumWaveSplitK"]-1), src1=vgpr(kidx), comment="kidx == NumWaveSplitK-1" ))
                 module.add(VMovB32(dst=vgpr(addrVgpr), src=vgpr(bufferOOB), comment="LD%s clip if kidx != NumWaveSplitK-1." % tc))
-                module.add(SMovB64(dst=EXEC(), src=-1, comment="Reset exec mask"))
+                SMovX = SMovB64 if kernel["WavefrontSize"] == 64 else SMovB32
+                module.add(SMovX(dst=EXEC(), src=-1, comment="Reset exec mask"))
 
         else:
             if tc == 'Bias' and kernel["ProblemType"]["UseBias"] and isSingleKernel:

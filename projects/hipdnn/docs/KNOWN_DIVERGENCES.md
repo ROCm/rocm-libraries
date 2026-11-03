@@ -8,7 +8,7 @@ Errors that a setter or filter "records" are returned by the next `validate()`, 
 
 ## Heuristic modes
 
-Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. Modes other than `FALLBACK` log a warning and use hipDNN's default engine selection, so plan choice and performance can differ from cuDNN.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` logs a warning and uses hipDNN's default engine selection. Plan choice and performance can differ from cuDNN.
 
 ## Note filters
 
@@ -65,11 +65,13 @@ Notes hipDNN engines report map for both select and deselect. Any other value, i
 
 If the filters bar only some engines, `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan, as cuDNN does, instead of failing because the top-ranked engine was barred.
 
+hipDNN's native `build_plans(HEURISTICS_CHOICE)` falls back on any plan-build failure. If the active plan fails to finalize, it logs a WARN with the engine ID and the failure, then tries the other ranked plans (scanning the ranked list from the top) and logs a WARN for each that also fails; the first plan that builds becomes the active plan. Plans barred by filters, descriptor-invalid plans, deselected engines, and plans over the workspace limit are skipped with an INFO line. When no plan builds, the error code is `GRAPH_EXECUTION_PLAN_CREATION_FAILED` and its message lists every attempted engine's failure, in attempt order; this includes a graph with a single plan. An active plan that builds but whose workspace exceeds the `deselect_workspace_greater_than` limit is an error, not skipped. A preferred engine (`set_preferred_engine_id_ext`) is a soft preference: if its plan fails to build, the fallback applies. `build_plans(ALL)` and `build_plan_at_index` do not fall back. When the shim's own filters bar the active plan, the shim retargets with `build_plan_at_index`, which does not walk the fallback: if the retarget target fails to build, its error is returned.
+
 If no created plan survives, the next plan creation (`create_execution_plans`, `create_execution_plan`), `check_support()`, `build_plans()`, or `build_plan_at_index()` returns `GRAPH_NOT_SUPPORTED`; cuDNN returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` from `check_support()`. This includes `deselect_engines` alone barring every applicable engine.
 
 ## Engine indices
 
-Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's ranking order (not cuDNN's). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it. The `int64_t` overload of `deselect_engines` is a hipDNN extension.
+Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension.
 
 ## Knobs
 
@@ -99,6 +101,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `get_behavior_notes_for_plan_at_index` resolves the plan's engine from its name: built-in engines by name hash, others (including plugin engines) by the `0x`-prefixed hexadecimal ID hipDNN reports for them.
 - `print()` on a graph whose operation graph is not built prints an empty object.
 - `deserialize` ignores `enforce_precompiled`.
+- A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
 
 ## hipDNN extensions
 

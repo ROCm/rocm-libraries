@@ -1594,6 +1594,29 @@
     reorderGRInstForDTVB: false
     tailLoopOptA: false
     tailLoopOptB: false
+  - DepthU: 512
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    ScheduleIterAlg: 1
+    SolutionIndex: 6
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [2, 1, 32]
+  - DepthU: 512
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 7
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [2, 1, 32]
 - [2, 3, 0, 1]
 - - - [1024, 11, 1, 2048, 1024, 1024, 2048, 2048]
     - [3, 1.92]
@@ -1615,6 +1638,14 @@
     - [4, 10.35]
   - - [2048, 968, 1, 16384, 2048, 2048, 16384, 16384]
     - [5, 9.83]
+  - - [5120, 1, 1, 6144, 5120, 5120, 6144, 6144]
+    - [7, 225]
+  - - [5120, 2, 1, 6144, 5120, 5120, 6144, 6144]
+    - [7, 449]
+  - - [5120, 3, 1, 6144, 5120, 5120, 6144, 6144]
+    - [6, 674]
+  - - [5120, 4, 1, 6144, 5120, 5120, 6144, 6144]
+    - [7, 894]
 - null
 - null
 - DeviceEfficiency

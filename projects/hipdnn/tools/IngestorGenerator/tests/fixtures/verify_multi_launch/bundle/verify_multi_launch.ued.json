@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "dd037c41-6153-44d5-ad35-ad0213a4241d",
+  "name": "hipkernel:VerifyMultiLaunch",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.verify_multi_launch.graph_match"
+  },
+  "metadata": "b374b5a4-d900-49f5-bd81-968933c9295d"
+}

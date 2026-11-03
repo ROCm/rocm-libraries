@@ -170,6 +170,35 @@ namespace
         EXPECT_EQ(algosFor(past, kSize, kSize, past), 0);
     }
 
+    // Before the fix the search ran on these anyway: minutes on gfx942, SIGFPE on gfx950.
+    TEST_F(AlgoErrors, smoke_HeuristicReportsNoAlgosForEmptyOrInvalidProblems)
+    {
+        auto algosFor = [&](int64_t m, int64_t n, int32_t batchA) {
+            hipblasLtMatrixLayout_t la = nullptr, lb = nullptr, lcd = nullptr;
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&la, kType, m, kSize, kSize),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&lb, kType, kSize, n, kSize),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&lcd, kType, m, n, kSize),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          la, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchA, sizeof(batchA)),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = -1;
+            EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                          handle, desc, la, lb, lcd, lcd, pref, 1, &result, &returned),
+                      HIPBLAS_STATUS_SUCCESS);
+            for(auto l : {la, lb, lcd})
+                hipblasLtMatrixLayoutDestroy(l);
+            return returned;
+        };
+        EXPECT_GT(algosFor(kSize, kSize, 1), 0);
+        EXPECT_EQ(algosFor(0, kSize, 1), 0) << "M = 0";
+        EXPECT_EQ(algosFor(kSize, 0, 1), 0) << "N = 0";
+        EXPECT_EQ(algosFor(kSize, kSize, 2), 0) << "A batch count differs from B, C and D";
+    }
+
     TEST_F(AlgoErrors, smoke_MatmulRejectsUnknownIndex)
     {
         const hipblasLtMatmulAlgo_t algo = algoWithUnknownIndex();

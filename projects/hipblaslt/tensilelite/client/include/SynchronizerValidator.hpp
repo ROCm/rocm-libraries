@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "DeviceContext.hpp"
 #include "RunListener.hpp"
 
 #include "ProgramOptions.hpp"
@@ -29,6 +30,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace TensileLite
 {
@@ -48,7 +52,8 @@ namespace TensileLite
         class SynchronizerValidator : public RunListener
         {
         public:
-            SynchronizerValidator(po::variables_map const& args);
+            SynchronizerValidator(po::variables_map const&                    args,
+                                  std::vector<std::shared_ptr<DeviceContext>> devices);
             virtual ~SynchronizerValidator();
 
             virtual bool needMoreBenchmarkRuns() const override
@@ -82,15 +87,14 @@ namespace TensileLite
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
             }
             // Runs after the first warmup launch; later warmups are not
             // observed, so a check covers the launches since the previous one.
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override;
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override;
 
             virtual size_t numSyncs() override
             {
@@ -105,17 +109,16 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
             // Deliberately unchecked: the readback synchronizes the stream,
             // perturbing the back-to-back cadence these enqueues exercise.
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override
             {
             }
 
@@ -129,20 +132,27 @@ namespace TensileLite
         private:
             /// Checks every Synchronizer buffer reachable from *inputs*.
             /// `stage` names the launch phase, for the diagnostic.
-            void checkInputs(std::shared_ptr<ProblemInputs> inputs, char const* stage);
+            void
+                checkInputs(int deviceId, std::shared_ptr<ProblemInputs> inputs, char const* stage);
 
             /// Reads back one buffer, re-zeroing it only when dirty.
             /// Returns false when dirty.
-            bool checkBuffer(ContractionProblemGemm const& problem,
+            bool checkBuffer(int                           deviceId,
+                             ContractionProblemGemm const& problem,
                              void*                         deviceSynchronizer,
                              char const*                   stage,
                              size_t                        gemmIdx);
+
+            /// Reads back *bytes* at *device*, re-zeroing them only when dirty.
+            /// Returns false when dirty.
+            bool checkRegion(int deviceId, void* device, size_t bytes, std::string const& what);
 
             /// Pinned host staging buffer of at least *bytes*, grown on demand
             /// and reused across launches.
             uint8_t* stagingBuffer(size_t bytes);
 
             bool                m_enabled      = false;
+            std::vector<std::shared_ptr<DeviceContext>> m_devices;
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;
@@ -151,8 +161,8 @@ namespace TensileLite
 
         protected:
             // Keep device transfers overridable for host-only lifecycle tests.
-            virtual uint8_t* readBuffer(void* device, size_t bytes);
-            virtual void clearBuffer(void* device, size_t bytes);
+            virtual uint8_t* readBuffer(int deviceId, void* device, size_t bytes);
+            virtual void     clearBuffer(int deviceId, void* device, size_t bytes);
 
             /// Whether the check should do anything right now: switched on, and
             /// the solution in hand may use the Synchronizer.

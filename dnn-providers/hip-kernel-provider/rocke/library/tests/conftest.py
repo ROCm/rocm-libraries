@@ -39,14 +39,19 @@ _TESTROOT = Path(__file__).resolve().parent
 if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
+# pytest rewrites asserts only in test modules and conftest files. Every
+# operation's pinned GPU tests come from this helper, so register it before a
+# test module imports it; otherwise a failed assert shows none of its values.
+pytest.register_assert_rewrite("reference_common.pinned_tests")
+
 
 def pytest_addoption(parser):
+    from reference_common.artifact import OPERATIONS
+
     parser.addoption("--rocke-reference-arch", default=None)
     parser.addoption("--rocke-reference-bundle", type=Path, default=None)
     parser.addoption("--rocke-reference-lock", type=Path, default=None)
-    parser.addoption(
-        "--rocke-reference-operation", choices=("sdpa", "conv"), default=None
-    )
+    parser.addoption("--rocke-reference-operation", choices=OPERATIONS, default=None)
     parser.addoption(
         "--gdn-batch",
         action="store",
@@ -59,6 +64,24 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="run GDN all-candidate numeric coverage for one stable spec ID",
+    )
+    parser.addoption(
+        "--rocke-seam-arches",
+        action="store",
+        default=None,
+        help=(
+            "comma-separated arch list for test_attention_body_seams's "
+            "score-hook IR-identity check (default: gfx950,gfx942,gfx1151)"
+        ),
+    )
+    parser.addoption(
+        "--rocke-require-hipdnn-assets",
+        action="store_true",
+        default=False,
+        help=(
+            "fail, instead of skip, the SDPA tests that read hipDNN's graph "
+            "template and golden bundles when those are missing"
+        ),
     )
 
 
@@ -115,11 +138,12 @@ def _restore_attention_arch_state():
     at all on a CPU one. Restoring it here makes the leak class impossible
     rather than relying on each test's own teardown.
 
-    ``_2D_LAUNCH_META`` is *cleared*, not restored: it is a pure memo whose
-    entries are derived from whatever arch was resolved when they were computed,
-    so a pinned-gfx942 entry must not be served back to a gfx950 test.
-    ``test_attn_k_slice_hd`` and ``test_attn_bf16_d128_ring`` clear it by hand
-    today; this makes that unnecessary.
+    ``_2D_LAUNCH_META`` and ``_2D_KV_ADDR_LIMITS`` are *cleared*, not restored:
+    they are pure memos whose entries are derived from whatever arch was
+    resolved when they were computed, so a pinned-gfx942 entry must not be
+    served back to a gfx950 test. ``test_attn_k_slice_hd`` and
+    ``test_attn_bf16_d128_ring`` clear the launch meta by hand today; this makes
+    that unnecessary.
 
     Deliberately NOT covered here: ``HIPDNN_GFX942_*`` env overrides. An env leak
     belongs to the test that pops them (``monkeypatch.delenv``), not to a blanket
@@ -141,6 +165,7 @@ def _restore_attention_arch_state():
         if au is not None:
             au._RESOLVED_ATTENTION_ARCH = prev
             au._2D_LAUNCH_META.clear()
+            au._2D_KV_ADDR_LIMITS.clear()
 
 
 def pytest_sessionstart(session):

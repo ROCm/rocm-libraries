@@ -52,7 +52,7 @@ tox -e isort         # isort (black profile) on same directories
 
 ## Rebuilding Assembly Without Full Rerun
 
-After a Tensile run creates `tensile-out/`, you can edit assembly and rebuild only object code:
+After a TensileLite run creates `tensile-out/`, you can edit assembly and rebuild only object code:
 
 ```bash
 make co TENSILE_OUT=tensile-out                          # auto-detect arch

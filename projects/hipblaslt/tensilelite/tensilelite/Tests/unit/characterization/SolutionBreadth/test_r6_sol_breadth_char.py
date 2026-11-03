@@ -63,7 +63,7 @@ _CONFIG_YAML = """\
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Breadth sweep for Tensile/SolutionStructs/Solution.py coverage (R6).
+# Breadth sweep for tensilelite/SolutionStructs/Solution.py coverage (R6).
 #
 # ForkParameters cartesian (capped at limit=8 by harness):
 #   TransposeLDS x AssertSummationElementMultiple x LdsPadA/B x StoreVectorWidth

@@ -32,6 +32,7 @@ const std::set<NodeAttributes>& cpuSupportedOps()
         NodeAttributes::RMSNormBackwardAttributes,
         NodeAttributes::PointwiseAttributes,
         NodeAttributes::SdpaAttributes,
+        NodeAttributes::SdpaBackwardAttributes,
     };
     return s_ops;
 }
@@ -44,6 +45,7 @@ const std::set<NodeAttributes>& gpuSupportedOps()
     static const std::set<NodeAttributes> s_ops = {
         NodeAttributes::ConvolutionFwdAttributes,
         NodeAttributes::SdpaAttributes,
+        NodeAttributes::SdpaBackwardAttributes,
     };
     return s_ops;
 }
@@ -114,6 +116,14 @@ bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, s
 constexpr std::string_view K_CPU_TIER_PREFIX = "quick_";
 constexpr int64_t K_CPU_MAX_WORKING_SET_ELEMENTS = int64_t{4} * 1024 * 1024;
 
+// Backward is capped on its own axis because its cost does not follow the forward cap: the
+// scalar backward needs seconds to tens of seconds at a 256x128 head (8.4M MACs per Q*K^T
+// pass) while the 64-row shapes below 3.2M finish in about a second or less, so the 4M
+// element cap above would admit every one of them. The threshold sits between those two
+// clusters. Measured on a loaded CI runner, so only the gap, not the absolute times, is
+// meaningful.
+constexpr int64_t K_CPU_MAX_SDPA_BWD_MACS = int64_t{4} * 1024 * 1024;
+
 namespace
 {
 
@@ -132,10 +142,9 @@ int64_t elementCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttribute
     return elements;
 }
 
-// Both caps apply to Sdpa only, so a graph with no Sdpa node is affordable by
-// construction. Batchnorm and the other CPU-covered ops are cheap at every
-// checked-in shape, and gating them would trade real coverage for no measurable
-// time.
+// Both caps apply to Sdpa forward and backward only, so a graph with no Sdpa node is
+// affordable by construction. Batchnorm and the other CPU-covered ops are cheap at every
+// checked-in shape, and gating them would trade real coverage for no measurable time.
 bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
                                       const void* graphBuffer,
                                       size_t size)
@@ -146,10 +155,18 @@ bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
             graphBuffer, size);
         const auto& tensorMap = graph.getTensorMap();
 
+        const auto lookup = [&tensorMap](int64_t uid) {
+            const auto it = tensorMap.find(uid);
+            return it == tensorMap.end() ? nullptr : it->second;
+        };
+
         for(uint32_t i = 0; i < graph.nodeCount(); ++i)
         {
             const auto& node = graph.getNode(i);
-            if(node.attributes_type() != NodeAttributes::SdpaAttributes)
+            const bool isForward = node.attributes_type() == NodeAttributes::SdpaAttributes;
+            const bool isBackward
+                = node.attributes_type() == NodeAttributes::SdpaBackwardAttributes;
+            if(!isForward && !isBackward)
             {
                 continue;
             }
@@ -159,20 +176,38 @@ bool isSdpaShapeAffordableOnCpuRunner(std::string_view bundleId,
                 return false;
             }
 
-            const auto* attributes = node.attributes_as_SdpaAttributes();
+            if(isForward)
+            {
+                const auto* attributes = node.attributes_as_SdpaAttributes();
+                if(attributes == nullptr)
+                {
+                    continue;
+                }
+
+                const int64_t working = std::max(elementCount(lookup(attributes->q_tensor_uid())),
+                                                 elementCount(lookup(attributes->k_tensor_uid())));
+                if(working > K_CPU_MAX_WORKING_SET_ELEMENTS)
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            const auto* attributes = node.attributes_as_SdpaBackwardAttributes();
             if(attributes == nullptr)
             {
                 continue;
             }
 
-            const auto lookup = [&tensorMap](int64_t uid) {
-                const auto it = tensorMap.find(uid);
-                return it == tensorMap.end() ? nullptr : it->second;
-            };
-
-            const int64_t working = std::max(elementCount(lookup(attributes->q_tensor_uid())),
-                                             elementCount(lookup(attributes->k_tensor_uid())));
-            if(working > K_CPU_MAX_WORKING_SET_ELEMENTS)
+            // Q is [B, H, Sq, D] and K is [B, Hkv, Skv, D], so Q's element count times Skv is
+            // the multiply-accumulate count of one Q*K^T pass (B * H * Sq * Skv * D).
+            const auto* k = lookup(attributes->k_tensor_uid());
+            if(k == nullptr || k->dims() == nullptr || k->dims()->size() < 2)
+            {
+                continue;
+            }
+            const int64_t seqKv = (*k->dims())[k->dims()->size() - 2];
+            if(elementCount(lookup(attributes->q_tensor_uid())) * seqKv > K_CPU_MAX_SDPA_BWD_MACS)
             {
                 return false;
             }
@@ -250,66 +285,24 @@ std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps)
 
 const std::vector<KnownReferenceGap>& knownReferenceGaps()
 {
-    // Every entry here is a promise to delete it. The GPU Sdpa reference
-    // dispatches through a dtype-keyed plan registry (GpuSdpaFwdSignatureKey.hpp)
-    // with no FP8 tuple, and its plan builders reject variable sequence lengths
-    // outright (GpuSdpaFwdPlan.hpp, GpuSdpaRaggedFwdPlan.hpp). These are being
-    // implemented; until they are, these bundles must fail applicability rather
-    // than vanish, and the run must not be red for a gap we have already
-    // written down.
-    //
-    // Note the CPU reference already handles fp8 (CPU SdpaFwdPlan registers
-    // FP8_E4M3 -> BFLOAT16), so none of the fp8 entries below apply to it. It
-    // shares the variable-sequence-length gap and also declines ragged tensors.
-    static const std::vector<KnownReferenceGap> s_gaps = {
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_nomask_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented, and no FP8 plan exists"},
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
-         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_nomask_batch_Small.Small",
-         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
-        // CPU declines only variable sequence lengths and ragged tensors (CPU
-        // SdpaFwdPlan.hpp). It handles fp8 fine, which is why the fp8 batch
-        // bundles above are GPU-only entries and the fp8 *group* bundle appears
-        // for both references.
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_nomask_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
-         "ragged tensors (ragged_offset_tensor_uid) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bshd_bf16_hd128_nomask_ragged_Small.Small",
-         "ragged tensors (ragged_offset_tensor_uid) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
-         "ragged tensors (ragged_offset_tensor_uid) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
-         "ragged tensors (ragged_offset_tensor_uid) are not implemented"},
-    };
+    // Every entry here is a promise to delete it: a listed bundle must fail
+    // applicability rather than vanish, and the run must not be red for a gap we
+    // have already written down. Both references run every bundle today (the GPU fp8
+    // forward dequantizes first, as the CPU one does), so the list is empty.
+    static const std::vector<KnownReferenceGap> s_gaps = {};
     return s_gaps;
 }
 
 const KnownReferenceGap* findKnownReferenceGap(ReferenceExecutorType type,
                                                std::string_view bundleId)
 {
-    const auto& gaps = knownReferenceGaps();
+    return findKnownReferenceGap(knownReferenceGaps(), type, bundleId);
+}
+
+const KnownReferenceGap* findKnownReferenceGap(const std::vector<KnownReferenceGap>& gaps,
+                                               ReferenceExecutorType type,
+                                               std::string_view bundleId)
+{
     const auto it = std::find_if(gaps.begin(), gaps.end(), [&](const KnownReferenceGap& gap) {
         return gap.reference == type && gap.bundleId == bundleId;
     });

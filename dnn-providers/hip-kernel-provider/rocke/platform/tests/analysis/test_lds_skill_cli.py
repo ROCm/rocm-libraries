@@ -6,18 +6,18 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 import pytest
 
-import rocke
 from rocke.analysis.lds.registry import registered_targets
 from rocke.assets import dsl_docs_dir
-
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 # Installed tests carry the CLI beside this module; checkouts use the skill tree.
 PREDICT = Path(__file__).resolve().with_name("lds-bank-conflict-expert") / "predict.py"
@@ -34,15 +34,12 @@ if not PREDICT.is_file():
 
 
 def _run(request: dict[str, object], cwd: Path) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    # Use the package pytest imported, in either the source or installed layout.
-    env["PYTHONPATH"] = str(Path(rocke.__file__).resolve().parent.parent)
     return subprocess.run(
-        [sys.executable, str(PREDICT), "-"],
+        rocke_python_command(PREDICT, "-"),
         input=json.dumps(request),
         text=True,
         capture_output=True,
-        env=env,
+        env=rocke_subprocess_env(),
         cwd=cwd,
         check=False,
     )

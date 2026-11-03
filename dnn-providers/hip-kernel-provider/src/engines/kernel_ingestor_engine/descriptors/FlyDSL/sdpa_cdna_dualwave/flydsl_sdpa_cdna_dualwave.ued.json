@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "id": "28b2f769-e3c4-57cd-91c8-3327594a0760",
+  "name": "hipkernel:flydsl_sdpa_cdna_dualwave",
+  "sdk_version": "1.2.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_cdna_dualwave.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "314784cc-5d55-54b3-a5ce-160aeed54a19"
+  },
+  "metadata": "798ed3e1-93e3-5c95-8bab-c8c767225601",
+  "knobs": [
+    "block_m",
+    "waves_per_eu",
+    "setprio"
+  ]
+}

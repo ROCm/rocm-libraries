@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -204,7 +205,7 @@ ReadWriteDestKeys collectReadWriteDestKeys(const StinkyInstruction& inst) {
     for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
         if (!field.isDest) continue;
         const size_t destSlot = destIdx++;
-        if (!field.isReadWrite) continue;
+        if (!readsDestination(inst, destSlot)) continue;
         if (destSlot >= destRegs.size()) continue;
         // operandFields describes the printed operands, so a dest the emitter
         // skips carries no field a source could be tied to.

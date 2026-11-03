@@ -19,11 +19,11 @@ from typing import List
 
 import pytest
 
-import Tensile.LibraryIO as L
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+import tensilelite.LibraryIO as L
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
 pytestmark = pytest.mark.unit
 

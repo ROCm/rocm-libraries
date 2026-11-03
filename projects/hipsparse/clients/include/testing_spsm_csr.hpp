@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -57,8 +58,7 @@ void testing_spsm_csr_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpSMAlg_t   alg       = HIPSPARSE_SPSM_ALG_DEFAULT;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
     auto dcol_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -210,8 +210,7 @@ void testing_spsm_csr(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hcsr_row_ptr;
@@ -323,8 +322,8 @@ void testing_spsm_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, C1, typeT, alg, descr, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -432,8 +431,6 @@ void testing_spsm_csr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));

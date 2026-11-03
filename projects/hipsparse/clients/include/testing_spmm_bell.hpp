@@ -62,8 +62,7 @@ void testing_spmm_bell_bad_arg(const Arguments& argus)
     hipDataType          dataType     = HIP_R_32F;
     hipsparseSpMMAlg_t   alg          = HIPSPARSE_SPMM_BLOCKED_ELL_ALG1;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dind_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int32_t) * safe_size), device_free};
@@ -318,8 +317,8 @@ void testing_spmm_bell(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_bufferSize(
         handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, &bufferSize));
 
-    void* dbuffer;
-    CHECK_HIP_ERROR(hipMalloc(&dbuffer, bufferSize));
+    auto  dbuffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* dbuffer         = dbuffer_managed.get();
 
     if(argus.call_preprocess)
     {
@@ -447,7 +446,6 @@ void testing_spmm_bell(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(dbuffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matB));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matC1));
