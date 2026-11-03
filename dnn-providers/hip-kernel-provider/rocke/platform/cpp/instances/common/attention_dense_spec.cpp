@@ -4,11 +4,15 @@
  * attention_dense_spec.cpp -- C port of library/kernels/common/
  * attention_dense_spec.py (see rocke/instance_attention_dense_spec.h).
  *
- * Every ValueError reason is the Python text byte for byte. Python ints are
- * unbounded, so the 32-bit limit products are computed exactly with
- * ExactProduct (base-10**9 limbs, no __int128, so MSVC builds it), and a C
- * remainder is used only where its zero-ness matches Python's for every operand
- * sign (x % y == 0 holds in both languages for the same x, y != 0).
+ * Every ValueError reason is the Python text byte for byte, when it fits the
+ * caller's buffer (a cut one ends in "..."). Two rejects have no Python text:
+ * the "division by zero" placeholder (Python raises ZeroDivisionError) and a
+ * decode the traits list but this port does not implement (Python raises
+ * KeyError). Python ints are unbounded, so the 32-bit limit products are
+ * computed exactly with ExactProduct (base-10**9 limbs, no __int128, so MSVC
+ * builds it), and a C remainder is used only where its zero-ness matches
+ * Python's for every operand sign (x % y == 0 holds in both languages for the
+ * same x, y != 0).
  */
 #include "rocke/instance_attention_dense_spec.h"
 

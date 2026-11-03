@@ -851,9 +851,10 @@ def _reject_sites() -> tuple[set, set]:
 
 
 def test_cases_reach_every_reject_site():
-    """Every reject the C++ port mirrors is hit by some base case, so dropping
-    one of its conditions in C changes a recorded answer. A count would not
-    notice a site that no case reaches."""
+    """Every reject the C++ port mirrors is hit by some base case. A count would
+    not notice a site that no case reaches. Reaching a site is necessary, not
+    sufficient: a condition with several terms still needs a case each term
+    decides on its own (as the varlen and paged pair-decode rows do)."""
     # Unreachable in both engines: __post_init__ already rejects any dtype other
     # than bf16 / fp16 before the paged block, so no spec reaches this re-check.
     unreachable = ("paged not yet implemented for dtype",)
