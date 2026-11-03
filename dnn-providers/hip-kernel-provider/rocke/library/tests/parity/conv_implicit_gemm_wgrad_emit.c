@@ -416,13 +416,15 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
     case 56:
     case 57:
     case 67:
+    case 68:
     {
-        /* gfx1250 WMMA async K loop. Must match the Python emitter's 55-57
-         * and 67 (55 with bf16 operands). */
+        /* gfx1250 WMMA async K loop. Must match the Python emitter's 55-57,
+         * 67 (55 with bf16 operands) and 68 (55 with an explicit vector_size_a,
+         * which both engines must reject). */
         const bool big = idx == 56;
         if(idx == 57)
             spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
-        else if(idx == 55 || idx == 67)
+        else if(idx == 55 || idx == 67 || idx == 68)
             spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
         else
             spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
@@ -445,6 +447,11 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         spec->split_k = big ? 4 : 2;
         spec->lds_k_outer = true;
         spec->async_dma = true;
+        if(idx == 68)
+        {
+            spec->has_vector_size_a = true;
+            spec->vector_size_a = 4;
+        }
         *arch = "gfx1250";
         return 0;
     }

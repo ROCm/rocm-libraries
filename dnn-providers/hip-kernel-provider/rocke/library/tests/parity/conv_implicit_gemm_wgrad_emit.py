@@ -78,6 +78,9 @@
 #         global atomics for the scratch adds)
 #   67 -- gfx1250 async_dma with bf16 operands: case 55 with bf16 A/B, so the
 #         out-of-range chunks zero-fill a bf16 LDS tile with bf16 zeros
+#   68 -- both engines must reject: case 55 with an explicit vector_size_a
+#         (the async K loop derives its chunk widths from the channel counts,
+#         so an explicit A/B load-width cap is rejected rather than ignored)
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no other case loads bf16 operands: the
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
@@ -94,7 +97,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-67, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-68, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -718,7 +721,7 @@ def _spec(idx: int):
             arch,
         )
 
-    if 55 <= idx <= 57 or idx == 67:
+    if 55 <= idx <= 57 or idx in (67, 68):
         # gfx1250 WMMA K loop: the global_load_async_to_lds ping-pong.
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -730,6 +733,14 @@ def _spec(idx: int):
             56: (p, "fp32", 4, True, {"async_dma": True}, "gfx1250"),
             57: (p_c3, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
             67: (p_small, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
+            68: (
+                p_small,
+                "fp32",
+                2,
+                False,
+                {"async_dma": True, "vector_size_a": 4},
+                "gfx1250",
+            ),
         }[idx]
         wave32 = arch == "gfx1250"
         dtype_ab = "bf16" if idx == 67 else "fp16"

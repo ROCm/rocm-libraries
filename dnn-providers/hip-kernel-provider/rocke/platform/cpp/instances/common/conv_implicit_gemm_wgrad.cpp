@@ -1050,6 +1050,72 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
+    /* The A/B load widths are a cap on the free-axis auto-selection, so an
+     * inadmissible request is rejected rather than silently downgraded. The
+     * async K loop derives its chunk widths from the channel counts alone
+     * (wgrad_wmma_async_available and the gfx9 async loaders), so an explicit
+     * cap there is rejected rather than ignored. Mirrors the vector_size_a/b
+     * loop of Python is_valid_wgrad_spec, in its order (the range uses
+     * dtype_a for both operands, as Python does). */
+    {
+        const char* da = s->dtype_a ? s->dtype_a : "fp16";
+        const int vec_cap = strcmp(da, "fp32") == 0 ? 4 : 8;
+        const struct
+        {
+            const char* name;
+            bool has;
+            int v;
+            int chan;
+        } caps[2] = {
+            {"vector_size_a",
+             s->has_vector_size_a,
+             s->vector_size_a,
+             rocke_conv_problem_kpg(&s->problem)},
+            {"vector_size_b",
+             s->has_vector_size_b,
+             s->vector_size_b,
+             rocke_conv_problem_cpg(&s->problem)},
+        };
+        for(const auto& c : caps)
+        {
+            if(!c.has)
+                continue;
+            if(s->async_dma)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "%s is not honoured on the async_dma path (the direct "
+                             "global->LDS intrinsic derives its own width); leave it None",
+                             c.name);
+                return false;
+            }
+            if(c.v < 1 || c.v > vec_cap)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "%s=%d out of range 1..%d for this dtype",
+                             c.name,
+                             c.v,
+                             vec_cap);
+                return false;
+            }
+            if(c.chan % c.v)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "%s=%d must divide the stride-1 channel run (%d); a wider "
+                             "vector would read across the contiguous boundary",
+                             c.name,
+                             c.v,
+                             c.chan);
+                return false;
+            }
+        }
+    }
+
     if(s->pipeline && strcmp(s->pipeline, "basic") == 0 && s->async_dma)
     {
         if(reason && reason_cap)
