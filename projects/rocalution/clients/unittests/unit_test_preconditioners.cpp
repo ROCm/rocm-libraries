@@ -1982,9 +1982,6 @@ TYPED_TEST(preconditioners, aichebyshev_approximates_the_inverse)
     p.SetOperator(*A);
     p.Build();
     const std::vector<T> z = apply(p, *A, r);
-
-    KNOWN_BUG("the series starts from A instead of I, Z scales only the diagonal and the "
-              "coefficients are halved");
     expect_near(z, exact_solve(ref, r), 1e-4);
 }
 

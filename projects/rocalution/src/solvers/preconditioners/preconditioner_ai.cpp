@@ -100,8 +100,6 @@ namespace rocalution
 
         assert(this->op_ != NULL);
 
-        this->AIChebyshev_.CloneFrom(*this->op_);
-
         ValueType q = (static_cast<ValueType>(1) - sqrt(this->lambda_min_ / this->lambda_max_))
                       / (static_cast<ValueType>(1) + sqrt(this->lambda_min_ / this->lambda_max_));
         ValueType c = static_cast<ValueType>(1) / sqrt(this->lambda_min_ * this->lambda_max_);
@@ -113,24 +111,24 @@ namespace rocalution
 
         Z.AddScalarDiagonal(static_cast<ValueType>(-1) * (this->lambda_max_ + this->lambda_min_)
                             / (static_cast<ValueType>(2)));
-        Z.ScaleDiagonal(static_cast<ValueType>(2) / (this->lambda_max_ - this->lambda_min_));
+        Z.Scale(static_cast<ValueType>(2) / (this->lambda_max_ - this->lambda_min_));
 
-        // Chebyshev formula/series
-        // ai = I c_0 / 2 + sum c_k T_k
+        // Chebyshev formula/series of 1/x on [alpha, beta]
+        // ai = I c_0 / 2 + sum c_k T_k, with c_k = 2 c (-q)^k
         // Tk = 2 Z T_k-1 - T_k-2
 
-        // 1st term
-        // T_0 = I
-        // ai = I c_0 / 2
-        this->AIChebyshev_.AddScalarDiagonal(c / static_cast<ValueType>(2));
+        // 1st and 2nd term
+        // T_0 = I, T_1 = Z
+        // ai = I c_0 / 2 + c_1 Z
+        ValueType c0_half = c;
+        c                 = c * static_cast<ValueType>(-2) * q;
+
+        this->AIChebyshev_.CloneFrom(Z);
+        this->AIChebyshev_.Scale(c);
+        this->AIChebyshev_.AddScalarDiagonal(c0_half);
 
         OperatorType Tkm2;
         Tkm2.CloneFrom(Z);
-        // 2nd term
-        // T_1 = Z
-        // ai = ai + c_1 Z
-        c = c * static_cast<ValueType>(-1) * q;
-        this->AIChebyshev_.MatrixAdd(Tkm2, static_cast<ValueType>(1), c, true);
 
         // T_2 = 2*Z*Z - I
         // + c (2*Z*Z - I)
