@@ -22,7 +22,7 @@ Published artifact packaging was separately verified at run `36897764926`.
 The unified mask/band suites and the gfx942 dense cross-length/band rows were
 added from `pytest --co -m gpu` collection on 2026-10-20. The Torch-free gfx942
 band suite (`test_attention_band_gfx942_numpy_numeric.py`) was added on
-2026-10-27: 29 cases passed with 0 skips on gfx942 (MI300A) with `import torch`
+2026-10-27: 29 cases passed with 0 skips on gfx942 with `import torch`
 blocked.
 One ragged cross-length dense row (197x400, full attention) was added to it
 afterwards, making 30.

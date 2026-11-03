@@ -15,7 +15,7 @@ so every row compiles the binary that actually ships rather than one that differ
 from it by an untracked tuning default.
 
 Every test is marked ``gpu`` and gated with a device skipif, so it is a graceful
-skip on a CPU CI box and only executes on a gfx942 (MI300X) ROCm runner. Select
+skip on a CPU CI box and only executes on a gfx942 ROCm runner. Select
 it with ``run_all.py --gpu`` (or ``pytest -m gpu``); the default CPU lane excludes
 it via ``-m "not gpu"``. Run standalone:
 
@@ -41,10 +41,9 @@ torch = pytest.importorskip("torch", reason="ROCm torch required")
 
 def _gpu_ready():
     """True only on a gfx942 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
-    target), NOT the marketing name: the whole MI300 family is gfx942, but the
-    marketing string varies (``MI300X``/``MI300A``/``MI308X``) and a substring check
-    for ``"mi300"`` silently MISSES ``MI308X`` -- the exact skip that hid this lane on
-    the first run. The arch string is stable across the family."""
+    target), NOT the device name: the name differs between gfx942 parts, so a
+    substring check on it silently misses some of them -- the exact skip that hid
+    this lane on the first run. The arch string is the same on every gfx942 part."""
     if not torch.cuda.is_available():
         return False
     arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
@@ -52,7 +51,7 @@ def _gpu_ready():
 
 
 requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 (MI300X) GPU with ROCm torch"
+    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
 )
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
