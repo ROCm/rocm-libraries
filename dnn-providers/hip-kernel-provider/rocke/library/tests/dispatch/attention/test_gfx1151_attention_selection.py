@@ -378,8 +378,13 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     self.assertEqual(_window_bounds(request), expected)
 
     def test_explicit_layout_and_score_requirements_are_not_ignored_elsewhere(self):
+        # gfx950 serves contiguous prefill with its dense kernel and a single
+        # contiguous query row with the strided decode kernel, never RDNA WMMA.
+        single_row = dispatch_attention(
+            _request(arch="gfx950", layout="dense", seqlen_q=1)
+        )
+        self.assertEqual(single_row.candidate.name, "attention_strided_decode")
         for changes in (
-            {"layout": "dense"},
             {"layout": "ragged"},
             {"layout": "paged"},
             {"use_softcap": True},
@@ -409,9 +414,13 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     plain = dispatch_attention(make(layout=layout)).spec
                     lse = dispatch_attention(make(layout=layout, emit_lse=True)).spec
                     self.assertEqual(plain, lse)
+        # On CDNA the same request routes to unified tiled 2D, whose LSE
+        # variant is a different binary (one more pointer argument).
         for arch in ("gfx950", "gfx942"):
-            with self.subTest(arch=arch), self.assertRaises(ValueError):
-                dispatch_attention(_request(arch=arch, emit_lse=True))
+            with self.subTest(arch=arch):
+                plain = dispatch_attention(_request(arch=arch)).spec
+                lse = dispatch_attention(_request(arch=arch, emit_lse=True)).spec
+                self.assertEqual(lse.kernel_name(), plain.kernel_name() + "_lse")
 
     def test_score_features_layouts_and_fp8_reach_both_kernels(self):
         features = dict(

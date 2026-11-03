@@ -48,10 +48,11 @@ if sys.path and sys.path[0] != _LIB_ROOT:
 def _cases():
     """case id -> zero-arg builder returning a KernelDef.
 
-    Covers the default spec, the reference path, and every legal registered
-    tile's base configuration (every knob at its default: the kernel ``auto``
-    runs on that tile) for both gate kinds, so a change to any tile is
-    visible. Knobs are hashed by the ``knob_*`` cases: one per knob on each
+    Covers the default spec, the reference path, every legal registered
+    tile's base configuration (every knob at its default) for both gate
+    kinds, so a change to any tile is visible, and the configuration ``auto``
+    dispatches for every case (``auto_*``), so a change to a shipped default
+    is too. Knobs are hashed by the ``knob_*`` cases: one per knob on each
     path it changes, plus the knob combinations that share LDS
     (``knob_conv_once_norm_gate_once``, ``knob_out_lds_norm_gate_once_kda``,
     ``knob_out_lds_2rounds_cv_rn_ngo``). Hashing every (tile x knob)
@@ -59,7 +60,11 @@ def _cases():
     covered on device, by the knob suite (every knob on every configured tile
     and together) and the pinned-dispatch suite, not by IR hashes.
     """
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
+    from dispatch.gdn import (
+        GdnDecodeRequest,
+        dispatch_gdn_decode,
+        dispatch_gdn_decode_bases,
+    )
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
@@ -203,6 +208,34 @@ def _cases():
             cases[f"registered_{result.candidate.spec_id}"] = (
                 lambda spec=result.spec.kernel_spec: build_gdn_decode(spec, arch=_ARCH)
             )
+    # What ``auto`` dispatches per case (gate kind x plain / conv + norm x
+    # state width; f16 runs the bf16 row on its own state type), and the row
+    # less the knobs a one-flag request cannot read (conv only, norm only,
+    # and norm only at GQA heads, the one fused mode open to Hk != Hv).
+    modes = {"plain": (False, False, 16), "cv_rn": (True, True, 16)}
+    one_flag = {"cv": (True, False, 16), "rn": (False, True, 16)}
+    one_flag["rn_gqa"] = (False, True, 32)
+    for gate_kind in ("gdn", "kda"):
+        for mode, (conv, norm, heads_v) in {**modes, **one_flag}.items():
+            states = ("bf16", "f16", "f32") if mode in modes else ("bf16", "f32")
+            for state_dtype in states:
+                result = dispatch_gdn_decode(
+                    GdnDecodeRequest(
+                        batch=16,
+                        arch=_ARCH,
+                        gate_kind=gate_kind,
+                        num_k_heads=16,
+                        num_v_heads=heads_v,
+                        state_dtype=state_dtype,
+                        fuse_conv=conv,
+                        fuse_out_norm=norm,
+                    )
+                )
+                cases[f"auto_{gate_kind}_{mode}_st{state_dtype}"] = (
+                    lambda spec=result.spec.kernel_spec: build_gdn_decode(
+                        spec, arch=_ARCH
+                    )
+                )
     return cases
 
 
@@ -426,7 +459,8 @@ def test_gdn_decode_ir_matches_golden():
 
 
 def test_every_shipped_configuration_is_recorded():
-    """A new tuned tile must arrive with a golden entry, not silently uncovered."""
+    """A new registered tile or ``auto`` configuration must arrive with a golden
+    entry, not silently uncovered."""
     import pytest
     from rocke.core.ir_golden import GOLDEN_FLAVORS, golden_subdocument
 
@@ -553,7 +587,7 @@ def test_gdn_cases_carry_no_kda_marker():
     gdn_ids = [cid for cid in ids if "kda" not in cid]
     kda_ids = [cid for cid in ids if "kda" in cid]
 
-    # The original GDN set: default, simple, no_l2norm + one per GDN tuned tile.
+    # The original GDN set: default, simple, no_l2norm + one per registered GDN tile.
     assert len(gdn_ids) >= 7, f"expected the original GDN case set, got {gdn_ids}"
     assert kda_ids, "the KDA gate kind is unpinned"
     assert not set(gdn_ids) & set(kda_ids)

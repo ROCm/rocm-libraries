@@ -82,12 +82,14 @@ void rocke_batched_gemm_spec_finalize(rocke_batched_gemm_spec_t* spec)
  *
  *  Python:
  *      def _data_spec(self) -> DataSpec:
- *          dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
- *          return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+ *          data = mono_data_spec(self.dtype)
+ *          if data.dtype_a == "fp64":
+ *              return replace(data, dtype_acc="fp64")
+ *          return data
  *
- *  DataSpec(dtype_a/b/c=dt) leaves dtype_acc / layout at their defaults
- *  ("fp32" / "RCR"); we start from the universal default DataSpec and override
- *  only A/B/C.
+ *  mono_data_spec: dt = "fp16" for f16/fp16, else dtype; A/B/C = dt, with the
+ *  "fp32" / "RCR" defaults. We start from the universal default DataSpec and
+ *  override A/B/C (and the fp64 accumulator).
  * ===================================================================== */
 rocke_gemm_data_spec_t rocke_batched_gemm_data_spec(const rocke_batched_gemm_spec_t* spec)
 {
@@ -112,6 +114,10 @@ rocke_gemm_data_spec_t rocke_batched_gemm_data_spec(const rocke_batched_gemm_spe
     d.dtype_a = dt;
     d.dtype_b = dt;
     d.dtype_c = dt;
+    if(strcmp(dt, "fp64") == 0)
+    {
+        d.dtype_acc = "fp64";
+    }
     return d;
 }
 
@@ -383,10 +389,10 @@ rocke_status_t rocke_batched_gemm_signature(rocke_arena_t* arena,
         return ROCKE_ERR_VALUE;
     }
 
-    /* ptr_dt = spec.dtype if dtype in ("f16","fp16","bf16") else "f16" */
+    /* ptr_dt = spec.dtype if dtype in ("f16","fp16","bf16","fp64") else "f16" */
     if(spec->dtype != NULL
        && (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "fp16") == 0
-           || strcmp(spec->dtype, "bf16") == 0))
+           || strcmp(spec->dtype, "bf16") == 0 || strcmp(spec->dtype, "fp64") == 0))
     {
         ptr_dt = spec->dtype;
     }
