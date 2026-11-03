@@ -655,6 +655,57 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
     return reg_id | (offset << 6) | ((size - 1) << 11)
 
 
+# gfx1250 TDM LDS padding: the descriptor's ``pad_interval`` is 3 bits and
+# ``pad_amount`` 7 bits, both counted in dwords. Mirrored by
+# ROCKE_TDM_PAD_INTERVAL_MAX / ROCKE_TDM_PAD_AMOUNT_MAX in rocke/ir.h.
+TDM_PAD_INTERVAL_MAX = 7
+TDM_PAD_AMOUNT_MAX = 127
+
+
+def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> Tuple[int, int]:
+    """Encode an LDS row pad as :meth:`IRBuilder.tdm_descriptor_2d`'s
+    ``(pad_interval, pad_amount)``.
+
+    The mover inserts ``pad_bytes`` of gap into the LDS destination after every
+    ``interval_bytes`` of payload. Both are counted in dwords, and the interval
+    is a log2 biased by one:
+
+        ``pad_interval = log2(interval_bytes / 4) - 1``
+        ``pad_amount   = pad_bytes / 4 - 1``
+
+    Raises ``ValueError`` for a pad the fields cannot express. The error
+    messages are mirrored by ``rocke_encode_tdm_padding``.
+    """
+    interval_bytes = int(interval_bytes)
+    pad_bytes = int(pad_bytes)
+    if pad_bytes <= 0:
+        raise ValueError(
+            "encode_tdm_padding needs a positive pad; pad_enable=0 otherwise"
+        )
+    if interval_bytes % 4 or pad_bytes % 4:
+        raise ValueError(
+            f"TDM padding is dword-granular, got interval={interval_bytes}B pad={pad_bytes}B"
+        )
+    interval_dwords = interval_bytes // 4
+    if interval_dwords < 2 or interval_dwords & (interval_dwords - 1):
+        raise ValueError(
+            f"TDM pad interval must be a power-of-two dword count >= 2, got {interval_dwords}"
+        )
+    pad_interval = interval_dwords.bit_length() - 2
+    pad_amount = pad_bytes // 4 - 1
+    if pad_interval > TDM_PAD_INTERVAL_MAX:
+        raise ValueError(
+            f"TDM pad_interval {pad_interval} exceeds {TDM_PAD_INTERVAL_MAX} "
+            f"(interval {interval_bytes}B too large)"
+        )
+    if pad_amount > TDM_PAD_AMOUNT_MAX:
+        raise ValueError(
+            f"TDM pad_amount {pad_amount} exceeds {TDM_PAD_AMOUNT_MAX} "
+            f"(pad {pad_bytes}B too large)"
+        )
+    return pad_interval, pad_amount
+
+
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
@@ -5431,7 +5482,8 @@ class IRBuilder:
         ``tile_dim1 x tile_dim0`` elements, packed row-major at ``lds_addr``
         (an i64 from ``smem_addr_of`` or an i32 LDS byte address) unless
         ``pad_interval`` is given, which enables LDS padding with the raw
-        ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields.
+        ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields;
+        :func:`encode_tdm_padding` derives them from a row pad in bytes.
         ``workgroup_mask`` selects the cluster workgroups that receive the
         tile (0 = only the issuing workgroup).
 
@@ -5470,13 +5522,15 @@ class IRBuilder:
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
             )
         pad_enable = pad_interval is not None
-        if pad_enable and not 0 <= pad_interval <= 7:
+        if pad_enable and not 0 <= pad_interval <= TDM_PAD_INTERVAL_MAX:
             raise ValueError(
-                f"{name} pad_interval must be in 0..7 (got {pad_interval})"
+                f"{name} pad_interval must be in 0..{TDM_PAD_INTERVAL_MAX} "
+                f"(got {pad_interval})"
             )
-        if not 0 <= pad_amount <= 0x7F or (pad_amount and not pad_enable):
+        if not 0 <= pad_amount <= TDM_PAD_AMOUNT_MAX or (pad_amount and not pad_enable):
             raise ValueError(
-                f"{name} pad_amount must be in 0..127 and needs pad_interval (got {pad_amount})"
+                f"{name} pad_amount must be in 0..{TDM_PAD_AMOUNT_MAX} and needs "
+                f"pad_interval (got {pad_amount})"
             )
 
         def word(value: int) -> Value:

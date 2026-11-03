@@ -152,15 +152,17 @@ cluster; both are left to the caller.
 D# groups from a global pointer or an i64 global address (`global_addr_of`),
 and `isa_features/tdm_verify.py` runs a real global -> LDS -> global round trip
 with a padded row pitch, so `has_tdm` is set for gfx1250. The universal GEMM
-loads A and B through it on gfx1250 (`TraitSpec.tdm`), with its own encode of
-`lds_k_pad` into the pad fields. Limits:
+loads A and B through it on gfx1250 (`TraitSpec.tdm`). `encode_tdm_padding`
+(C: `rocke_encode_tdm_padding`) turns a row pad in bytes into the descriptor's
+pad fields; the GEMM's `lds_k_pad` and the winograd GEMM's row skew both go
+through it. Limits:
 
 - Only rank 2 is covered. D# groups 2 to 4 are zero, so there is no higher
   rank, gather, or iteration.
 - The multicast `workgroup_mask` is packed but never launched.
-- LDS padding is exposed only through the raw `pad_interval` and
-  `pad_amount` fields; the universal GEMM is the only caller that encodes a
-  row pad into them.
+- LDS padding is one gap of up to 512 bytes after every power-of-two
+  interval of 8 to 1024 bytes: the 3-bit `pad_interval` and 7-bit
+  `pad_amount` fields cannot express other pads.
 
 **The block-scaled GEMM prefetch flag is correctness-verified only.**
 `BlockScaledGemmSpec(prefetch=True)` is the named user of the data-prefetch

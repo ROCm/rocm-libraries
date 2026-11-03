@@ -320,17 +320,6 @@ bool rocke_gemm_check_storage(const rocke_gemm_universal_spec_t* spec,
                               char* reason,
                               size_t reason_cap);
 
-/* _encode_tdm_padding(interval_bytes, pad_bytes): a row-stride pad as the TDM
- * descriptor's (pad_interval, pad_amount), both counted in dwords. On failure
- * returns ROCKE_ERR_VALUE with the Python ValueError text in `reason`.
- * Defined in gemm_spec.cpp. */
-rocke_status_t rocke_gemm_tdm_encode_padding(int64_t interval_bytes,
-                                             int64_t pad_bytes,
-                                             int* out_pad_interval,
-                                             int* out_pad_amount,
-                                             char* reason,
-                                             size_t reason_cap);
-
 /* _tdm_padding_for_tile(elem_bytes, row_elems, pad_elems) -> (pad_enable,
  * pad_interval, pad_amount); pad_elems == 0 disables padding. Defined in
  * gemm_spec.cpp. */

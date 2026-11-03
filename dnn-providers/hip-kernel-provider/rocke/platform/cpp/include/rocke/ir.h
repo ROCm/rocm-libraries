@@ -1800,6 +1800,22 @@ void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
                                        int width_bytes,
                                        int offset_bytes,
                                        int cachepolicy);
+/* gfx1250 TDM LDS padding: the descriptor's pad_interval is 3 bits and
+ * pad_amount 7 bits, both counted in dwords. Must match
+ * rocke.core.ir.TDM_PAD_INTERVAL_MAX / TDM_PAD_AMOUNT_MAX. */
+#define ROCKE_TDM_PAD_INTERVAL_MAX 7
+#define ROCKE_TDM_PAD_AMOUNT_MAX 127
+/* Encode an LDS row pad -- pad_bytes of gap after every interval_bytes of
+ * payload -- as rocke_b_tdm_descriptor_2d's pad_interval / pad_amount (mirrors
+ * rocke.core.ir.encode_tdm_padding). Returns 1, or 0 with the Python
+ * ValueError text in `reason` (when non-NULL) for a pad the fields cannot
+ * express. */
+int rocke_encode_tdm_padding(int64_t interval_bytes,
+                             int64_t pad_bytes,
+                             int* out_pad_interval,
+                             int* out_pad_amount,
+                             char* reason,
+                             size_t reason_cap);
 /* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
  * IRBuilder.tdm_descriptor_2d). ``global_ptr`` is a global pointer or the i64
  * address of one (rocke_b_global_addr_of). ``pad_interval`` < 0 disables LDS

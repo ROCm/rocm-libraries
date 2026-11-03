@@ -71,6 +71,7 @@ from ...core.ir import (
     Value,
     VectorType,
     dtype_to_ir_type,
+    encode_tdm_padding,
 )
 from ...helpers.io import io_ir_type
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
@@ -424,65 +425,17 @@ _BF16_WARP_TILE_SHAPES_GFX950 = {
 }
 
 
-# TDM LDS padding: ``pad_interval`` is 3 bits and ``pad_amount`` 7 bits in the
-# descriptor (IRBuilder.tdm_descriptor_2d), both counted in dwords.
-_TDM_PAD_INTERVAL_MAX = 7
-_TDM_PAD_AMOUNT_MAX = 127
-
-
-def _encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> Tuple[int, int]:
-    """Encode a row-stride pad as the descriptor's ``(pad_interval, pad_amount)``.
-
-    The mover inserts ``pad_bytes`` of gap into the LDS destination after every
-    ``interval_bytes`` of payload. Both are counted in dwords, and the interval
-    is a log2 biased by one:
-
-        ``pad_interval = log2(interval_bytes / 4) - 1``
-        ``pad_amount   = pad_bytes / 4 - 1``
-
-    Setting ``interval_bytes`` to one tile row and ``pad_bytes`` to the
-    ``lds_k_pad`` gap reproduces the VGPR path's padded row stride exactly, so
-    the ``ds_read`` side needs no change.
-    """
-    interval_bytes = int(interval_bytes)
-    pad_bytes = int(pad_bytes)
-    if pad_bytes <= 0:
-        raise ValueError(
-            "encode_tdm_padding needs a positive pad; pad_enable=0 otherwise"
-        )
-    if interval_bytes % 4 or pad_bytes % 4:
-        raise ValueError(
-            f"TDM padding is dword-granular, got interval={interval_bytes}B pad={pad_bytes}B"
-        )
-    interval_dwords = interval_bytes // 4
-    if interval_dwords < 2 or interval_dwords & (interval_dwords - 1):
-        raise ValueError(
-            f"TDM pad interval must be a power-of-two dword count >= 2, got {interval_dwords}"
-        )
-    pad_interval = interval_dwords.bit_length() - 2
-    pad_amount = pad_bytes // 4 - 1
-    if pad_interval > _TDM_PAD_INTERVAL_MAX:
-        raise ValueError(
-            f"TDM pad_interval {pad_interval} exceeds {_TDM_PAD_INTERVAL_MAX} "
-            f"(interval {interval_bytes}B too large)"
-        )
-    if pad_amount > _TDM_PAD_AMOUNT_MAX:
-        raise ValueError(
-            f"TDM pad_amount {pad_amount} exceeds {_TDM_PAD_AMOUNT_MAX} "
-            f"(pad {pad_bytes}B too large)"
-        )
-    return pad_interval, pad_amount
-
-
 def _tdm_padding_for_tile(elem_bytes: int, row_elems: int, pad_elems: int):
     """``(pad_enable, pad_interval, pad_amount)`` for a ``row_elems``-wide tile.
 
-    ``pad_elems == 0`` disables padding, which is what the unpadded LDS layout
+    One tile row as the interval and the ``lds_k_pad`` gap as the pad reproduce
+    the VGPR path's padded row stride exactly, so the ``ds_read`` side needs no
+    change. ``pad_elems == 0`` disables padding, which is what the unpadded LDS layout
     wants; the two encoded fields are then zero.
     """
     if int(pad_elems) == 0:
         return 0, 0, 0
-    interval, amount = _encode_tdm_padding(
+    interval, amount = encode_tdm_padding(
         int(elem_bytes) * int(row_elems), int(elem_bytes) * int(pad_elems)
     )
     return 1, interval, amount
@@ -837,8 +790,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         row_bytes = t.tile_k * _dtype_bytes(spec.data.dtype_a)
         if spec.trait.lds_k_pad:
             try:
-                _encode_tdm_padding(
-                    row_bytes, spec.trait.lds_k_pad * _dtype_bytes(spec.data.dtype_a)
+                _tdm_padding_for_tile(
+                    _dtype_bytes(spec.data.dtype_a), t.tile_k, spec.trait.lds_k_pad
                 )
             except ValueError as exc:
                 return False, f"tdm cannot encode lds_k_pad: {exc}"
