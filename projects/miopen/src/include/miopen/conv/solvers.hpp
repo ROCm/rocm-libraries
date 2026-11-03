@@ -4653,6 +4653,30 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
+/// FP32 forward 1D convolution (NCHW, H == 1; strided, dilated, grouped) for RDNA.
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectConv1dFwd final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvHipDirectConv1dFwd>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override
+    {
+        return 0;
+    }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 // ConvHipConv tuning state: a hipconv config record, resolved to a kernel at runtime.
 // Serialized whole because PerfConfigBase's field-wise format splits on the record's commas.
 struct PerformanceConfigConvHipConv : PerfConfig
