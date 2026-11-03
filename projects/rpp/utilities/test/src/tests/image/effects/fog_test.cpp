@@ -42,16 +42,23 @@ namespace {
 
 // fog has no golden model: the output blends the image with a fog layer baked into the library
 // (src/include/tensor/fog_mask.hpp) that the API does not describe, and intensityFactor = 0 is not
-// an identity. Correctness checks storable, changed output; Negative checks the parameter ranges.
+// an identity. Correctness checks storable, changed output; Grey checks that a fully grey-lifted
+// pixel stays grey; Negative checks the parameter ranges.
 
 // Mid-range values inside the documented ranges (intensityFactor in [0,0.5], greyFactor in [0,1]).
 constexpr float kIntensity = 0.4f;
 constexpr float kGrey = 0.6f;
 
+// For the Grey check: greyFactor 1 makes every pixel grey, and intensityFactor 0 keeps the blend
+// weight (the alpha mask alone, below 1) from saturating, so the source still shows in the output.
+constexpr float kFullGrey = 1.0f;
+constexpr float kNoIntensity = 0.0f;
+
 // Asserts the ROI changed and every output element is storable for its dtype (U8 [0,255],
-// I8 [-128,127], F16/F32 [0,1]).
+// I8 [-128,127], F16/F32 [0,1]). At greyFactor 1 it also asserts that each pixel's channels are
+// equal: the grey lift makes R = G = B before the fog blend, and the fog layer is per pixel.
 template <typename T>
-void run_fog(const TestConfig& cfg) {
+void run_fog(const TestConfig& cfg, float intensityFactor = kIntensity, float greyFactor = kGrey) {
     RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t count = element_count(srcDesc);
@@ -61,8 +68,8 @@ void run_fog(const TestConfig& cfg) {
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
-        intensity[i] = kIntensity;
-        grey[i] = kGrey;
+        intensity[i] = intensityFactor;
+        grey[i] = greyFactor;
         roi[i] = roiVec[i];
     }
 
@@ -101,10 +108,25 @@ void run_fog(const TestConfig& cfg) {
                             firstBad = v;
                         }
                     });
-    EXPECT_TRUE(changed) << "fog left the ROI unchanged at intensityFactor " << kIntensity
-                         << " / greyFactor " << kGrey;
+    EXPECT_TRUE(changed) << "fog left the ROI unchanged at intensityFactor " << intensityFactor
+                         << " / greyFactor " << greyFactor;
     EXPECT_TRUE(storable) << "fog produced " << firstBad
                           << ", outside the storable range for dtype " << dtype_name(cfg.dtype);
+
+    if (greyFactor != kFullGrey) return;
+    bool pixelsGrey = true;
+    for_each_roi_pixel(
+        srcDesc, dstDesc, roiVec.data(), XYWH,
+        [&](Rpp32u n, Rpp32u j, Rpp32u i, std::size_t, std::size_t dstPix) {
+            for (Rpp32u c = 1; c < dstDesc.c && pixelsGrey; ++c) {
+                const double v = to_double(actual[channel_index(dstDesc, dstPix, c)]);
+                if (v == to_double(actual[dstPix])) continue;
+                pixelsGrey = false;
+                ADD_FAILURE() << "n=" << n << " row=" << j << " col=" << i << ": channel " << c
+                              << " is " << v << " but channel 0 is " << to_double(actual[dstPix])
+                              << " at greyFactor " << kFullGrey;
+            }
+        });
 }
 
 // One out-of-range parameter pair per case, covering both bounds of both ranges.
@@ -168,6 +190,23 @@ INSTANTIATE_TEST_SUITE_P(
                      {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kSubVectorSize}),
     })),
     config_param_name);
+
+// Full name: Image_Effects/FogGreyTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>
+class FogGreyTest : public SkipListTest<TestConfig> {};
+
+TEST_P(FogGreyTest, Correctness) {
+    const TestConfig& cfg = GetParam();
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(cfg.dtype, [&](auto tag) {
+        run_fog<Element<decltype(tag)>>(cfg, kNoIntensity, kFullGrey);
+    });
+}
+
+// 3-channel layouts only. kDefaultSize is 48 wide, so every row is vector body (16 pixels per
+// iteration) with no scalar tail, including for PLN3 input.
+INSTANTIATE_TEST_SUITE_P(Image_Effects, FogGreyTest,
+                         ::testing::ValuesIn(make_configs(presets::kDefaultDTypes,
+                                                          presets::kLayouts3ChConv, {Roi::Full})),
+                         config_param_name);
 
 // Full name:
 // Image_Effects/FogNegativeTest.Negative/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_i<I>_g<G>

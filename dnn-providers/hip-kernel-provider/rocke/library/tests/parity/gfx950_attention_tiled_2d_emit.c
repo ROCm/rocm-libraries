@@ -1102,7 +1102,28 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_qblock_reverse = true;
         break;
 
+    /* --- idx64-67: emit_lse, one per epilogue store site, each an existing
+     *     config plus emit_lse (lockstep with the Python _CONFIGS[64..67]).
+     *     64: transposed32 scalar-state (55); 65: coalesced mfma32 (32);
+     *     66: striped16 GQA-16 (3); 67: striped16 + ALiBi (5 + use_alibi). */
     case 64:
+        make_spec(55, s);
+        s->emit_lse = true;
+        break;
+    case 65:
+        make_spec(32, s);
+        s->emit_lse = true;
+        break;
+    case 66:
+        make_spec(3, s);
+        s->emit_lse = true;
+        break;
+    case 67:
+        make_spec(5, s);
+        s->use_alibi = true;
+        s->emit_lse = true;
+        break;
+    case 68:
         /* Additive bias on the 16x16 path with two M atoms per warp (GQA). */
         s->head_size = 128;
         s->block_size = 16;
@@ -1119,7 +1140,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_tile_size = true;
         s->tile_size = 32;
         break;
-    case 65:
+    case 69:
         /* Additive bias on the 16x16 path composed with ALiBi, QQ bias, softcap,
          * sinks and a sliding window (the ALiBi slope replaces the hoisted
          * query head). */
@@ -1135,7 +1156,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_qq_bias = true;
         s->use_additive_bias = true;
         break;
-    case 66:
+    case 70:
         /* Additive bias on the transposed 32x32 combo the selector builds for a
          * biased d64/b32/GQA-8 problem (mask-once and mask-limit off). */
         s->head_size = 64;
@@ -1159,7 +1180,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma32_skip_legacy_qreg = true;
         s->use_fast_paged_kv_desc = true;
         break;
-    case 67:
+    case 71:
         /* Additive bias on the bare transposed 32x32 path with QQ bias. */
         s->head_size = 128;
         s->block_size = 32;
@@ -1179,9 +1200,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_qk_32x32 = true;
         break;
 
-    /* idx68, 69: additive bias with paths that do not emit it; both engines
+    /* idx72, 73: additive bias with paths that do not emit it; both engines
      * reject these (BOTH_REJECTED). */
-    case 68:
+    case 72:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1200,7 +1221,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_scalar_state = true;
         s->use_transposed_mask_once = true;
         break;
-    case 69:
+    case 73:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1212,10 +1233,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_additive_bias = true;
         s->use_register_pv = true;
         break;
-    /* idx70-73: more additive-bias paths that do not emit it (BOTH_REJECTED).
-     * 68/69 cover mask-once and register-PV; these four cover the remaining
+    /* idx74-77: more additive-bias paths that do not emit it (BOTH_REJECTED).
+     * 72/73 cover mask-once and register-PV; these four cover the remaining
      * rejections, see the Python emitter for why each one matters. */
-    case 70:
+    case 74:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1233,7 +1254,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_qk_32x32 = true;
         s->use_transposed_invariant_hoist = true;
         break;
-    case 71:
+    case 75:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1250,7 +1271,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma_32x32 = true;
         s->use_transposed_qk_32x32 = false;
         break;
-    case 72:
+    case 76:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1269,7 +1290,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_scalar_state = true;
         s->use_grouped_kv2_softmax = true;
         break;
-    case 73:
+    case 77:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1292,6 +1313,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_half_local_pv = true;
         break;
 
+    case 78: /* idx68 + emit_lse: bias params precede lse_ptr. */
+        make_spec(68, s);
+        s->emit_lse = true;
+        break;
     default:
         return -1;
     }

@@ -17,6 +17,9 @@
 # Each kernel is lowered with _native_lower(kernel, arch="gfx942") and the two
 # .ll texts are concatenated (segment first, then reduce) to stdout so they can
 # be byte-compared with the C emitter gfx942_attention_tiled_3d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS (with emit_lse set for the
+# _REDUCE_LSE configs) in platform/cpp/bindings/attention_tiled_parity_configs.py;
+# update it in step.
 import sys
 
 from kernels.gfx942.attention_tiled_3d import (
@@ -331,11 +334,52 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
-    # idx20: QQ bias alone (no config here enabled it before). The gfx950
+    20: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): bf16 D128 GQA.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    21: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): fp16 D64.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    22: dict(
+        # Decode GQA with waves_per_eu, which the reduce inherits.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        waves_per_eu=2,
+    ),
+    # idx23: QQ bias alone (no config here enabled it before). The gfx950
     # twin's mask build order fix (bind cmp_ge/cmp_lt before land, since C's
     # argument evaluation order is unspecified) was mirrored into this file's
     # 3D compute without a parity config to pin it -- this is that config.
-    20: dict(
+    23: dict(
         head_size=64,
         block_size=16,
         num_query_heads=16,
@@ -348,10 +392,10 @@ _CONFIGS = {
         use_qq_bias=True,
         kv_storage_dtype=None,
     ),
-    # idx21: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # idx24: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
     # The gfx942 Python spec has no use_additive_bias field (TypeError); the C
     # twin rejects it in rocke_unified_attention_3d_tiled_spec_validate.
-    21: dict(
+    24: dict(
         head_size=64,
         block_size=16,
         num_query_heads=16,
@@ -365,6 +409,9 @@ _CONFIGS = {
         kv_storage_dtype=None,
     ),
 }
+
+# Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
+_REDUCE_LSE = frozenset({20, 21})
 
 
 def _kernels(idx: int):
@@ -380,6 +427,8 @@ def _kernels(idx: int):
         num_kv_heads=cfg["num_kv_heads"],
         dtype=cfg["dtype"],
         num_segments=cfg["num_segments"],
+        waves_per_eu=cfg.get("waves_per_eu"),
+        emit_lse=idx in _REDUCE_LSE,
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx942")
     return seg_kernel, red_kernel

@@ -776,6 +776,19 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
         /* Appended only when on, so the bias-off ABI and IR are unchanged. */
         if(spec->use_additive_bias)
             ctx->additive_bias = rocke_declare_additive_bias_params(b);
+        /* Trailing LSE output, after the additive-bias params as in Python.
+         * Off -> no param, ABI unchanged. */
+        if(spec->emit_lse)
+        {
+            memset(&o, 0, sizeof(o));
+            o.noalias = true;
+            o.noalias_set = true;
+            o.writeonly = true;
+            o.writeonly_set = true;
+            o.align = 4;
+            o.align_set = true;
+            ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
+        }
     }
 
     /* ---- grid ids + wave decomposition (Py891-904) ---- */
@@ -1161,6 +1174,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_fp8_mfma_pv ? "fp8pv" : "",
             s->use_register_pv ? "regpv" : "",
             s->use_qblock_reverse ? "qrev" : "",
+            s->emit_lse ? "lse" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

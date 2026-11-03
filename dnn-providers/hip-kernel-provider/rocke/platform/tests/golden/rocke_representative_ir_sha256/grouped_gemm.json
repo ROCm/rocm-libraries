@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -30,6 +28,19 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267459,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "e260ef4ca6ae29ae67e152ee7e3da958edc0a2bc3799ed310225b30fb137afe2",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "grouped_gemm/gfx950/m8192n1024k512e64": {
           "arch": "gfx950",

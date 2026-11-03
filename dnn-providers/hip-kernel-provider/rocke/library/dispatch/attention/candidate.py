@@ -41,8 +41,8 @@ DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
     """Coverage for one geometry variant, judged by ``_unified_path_coverage``
-    on the variant's own path, so an LSE or bias request on a 2D variant is
-    refused even if that variant ever declared the feature by mistake."""
+    on the variant's own path: the scalar check with the tiled-only features
+    (additive bias, LSE) stripped, then that path's gate for those features."""
 
     def precheck(req):
         problem = _tuning_problem(req)
@@ -85,6 +85,7 @@ def make_tuning_candidate(
             include_qq_bias_stride=True,
             include_additive_bias=bias,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
+            emit_lse=bool(getattr(spec.kernel_spec, "emit_lse", False)),
         )
 
     def bind_torch(request, spec, tensors, **kwargs):
@@ -109,11 +110,12 @@ def make_tuning_candidate(
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            # Only split-KV variants write LSE; 2D variants refuse the feature.
+            # Every unified variant writes LSE except the gfx942 4-warp GQA
+            # builder (see _GFX942_4WARP_LSE_REFUSAL).
             supports_features=(
-                ATTENTION_FEATURES | {"lse"}
-                if variant.path == "3d"
-                else ATTENTION_FEATURES
+                ATTENTION_FEATURES
+                if variant.builder_kind == "gfx942_4warp_gqa"
+                else ATTENTION_FEATURES | {"lse"}
             )
             | frozenset(extra_features),
         ),

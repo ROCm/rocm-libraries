@@ -17,6 +17,7 @@ from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
 )
 from _emit_common import run_emit
 
+
 # Shared base for the bf16 d64_b32_h64kv8 / T=64 / num_warps=4 experiment family.
 _BASE = dict(
     head_size=64,
@@ -46,11 +47,14 @@ _CONFIGS = {
     3: dict(_BASE, use_transposed_half_local_pv=True, use_mfma32_skip_legacy_qreg=True),
     4: dict(_BASE, use_agpr_alloc_zero=True, use_transposed_half_local_pv=True),
     5: dict(_BASE, use_grouped_kv2_softmax=True),
-    # idx6: additive bias; both engines reject it (BOTH_REJECTED). The C++
+    # LSE output through the wrapper: trailing lse_ptr and the wrapper's own
+    # kernel name ("..._lse_fastkv_regp").
+    6: dict(_BASE, emit_lse=True),
+    # idx7: additive bias; both engines reject it (BOTH_REJECTED). The C++
     # builder routes through rocke_build_unified_attention_2d_tiled_scalar,
     # which has no bias score site -- a bias-on fastKV spec would otherwise
     # silently build a kernel named "..._addb_..._fastkv_regp" with no bias.
-    6: dict(_BASE, use_additive_bias=True),
+    7: dict(_BASE, use_additive_bias=True),
 }
 
 

@@ -10,6 +10,8 @@
 # build_unified_attention_2d_tiled(spec, arch="gfx950") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx950") to stdout so it can be
 # byte-compared with the C emitter gfx950_attention_tiled_2d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS in
+# platform/cpp/bindings/attention_tiled_parity_configs.py; update it in step.
 #
 # The config table is kept IN LOCKSTEP with the C make_spec() switch (same index
 # -> same UnifiedAttention2DTiledSpec). This is the "edge / feature-flag" cluster:
@@ -1069,9 +1071,9 @@ _CONFIGS = {
         num_seqs=2,
         use_qblock_reverse=True,
     ),
-    # idx64-67: additive bias. idx64: the 16x16 path with two M atoms per warp
+    # idx68-71: additive bias. idx68: the 16x16 path with two M atoms per warp
     # (GQA).
-    64: dict(
+    68: dict(
         head_size=128,
         block_size=16,
         num_query_heads=16,
@@ -1086,9 +1088,9 @@ _CONFIGS = {
         block_m_per_warp=32,
         tile_size=32,
     ),
-    # idx65: the 16x16 path composed with ALiBi, QQ bias, softcap, sinks and a
+    # idx69: the 16x16 path composed with ALiBi, QQ bias, softcap, sinks and a
     # sliding window (the ALiBi slope replaces the hoisted query head).
-    65: dict(
+    69: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -1101,9 +1103,9 @@ _CONFIGS = {
         use_qq_bias=True,
         use_additive_bias=True,
     ),
-    # idx66: the transposed 32x32 combo the selector builds for a biased
+    # idx70: the transposed 32x32 combo the selector builds for a biased
     # d64/b32/GQA-8 problem (mask-once and mask-limit off).
-    66: dict(
+    70: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1124,8 +1126,8 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_fast_paged_kv_desc=True,
     ),
-    # idx67: the bare transposed 32x32 path with QQ bias.
-    67: dict(
+    # idx71: the bare transposed 32x32 path with QQ bias.
+    71: dict(
         head_size=128,
         block_size=32,
         num_query_heads=16,
@@ -1142,9 +1144,9 @@ _CONFIGS = {
         use_mfma_32x32=True,
         use_transposed_qk_32x32=True,
     ),
-    # idx68, 69: additive bias with paths that do not emit it; both engines
+    # idx72, 73: additive bias with paths that do not emit it; both engines
     # reject these (BOTH_REJECTED).
-    68: dict(
+    72: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1162,7 +1164,7 @@ _CONFIGS = {
         use_transposed_scalar_state=True,
         use_transposed_mask_once=True,
     ),
-    69: dict(
+    73: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -1174,15 +1176,15 @@ _CONFIGS = {
         use_additive_bias=True,
         use_register_pv=True,
     ),
-    # idx70-73: more additive-bias paths that do not emit it; both engines
-    # reject these too (BOTH_REJECTED). 68/69 cover mask-once and
+    # idx74-77: more additive-bias paths that do not emit it; both engines
+    # reject these too (BOTH_REJECTED). 72/73 cover mask-once and
     # register-PV; these four cover the remaining rejections so losing any
     # one of them would go unnoticed (the non-transposed 32x32 path has no
     # bias site in either engine, so C++ would otherwise silently emit a
     # kernel that takes the bias params and never adds them; an
     # invariant-hoist spec would pass a NULL query head into
     # rocke_add_additive_bias).
-    70: dict(
+    74: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1199,7 +1201,7 @@ _CONFIGS = {
         use_transposed_qk_32x32=True,
         use_transposed_invariant_hoist=True,
     ),
-    71: dict(
+    75: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1215,7 +1217,7 @@ _CONFIGS = {
         use_mfma_32x32=True,
         use_transposed_qk_32x32=False,
     ),
-    72: dict(
+    76: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1233,7 +1235,7 @@ _CONFIGS = {
         use_transposed_scalar_state=True,
         use_grouped_kv2_softmax=True,
     ),
-    73: dict(
+    77: dict(
         head_size=128,
         block_size=32,
         num_query_heads=32,
@@ -1255,6 +1257,21 @@ _CONFIGS = {
         use_transposed_half_local_pv=True,
     ),
 }
+
+# --- idx64-67: emit_lse (trailing lse_ptr + FP32 LSE store), one per epilogue
+#     store site, each an existing config plus emit_lse=True.
+#   idx64: transposed32 scalar-state (idx55 + LSE).
+#   idx65: coalesced mfma32 Acc_lds epilogue (idx32 + LSE).
+#   idx66: striped16 epilogue, GQA-16 (idx3 + LSE).
+#   idx67: striped16 + ALiBi (idx5 + ALiBi + LSE): the LSE row index must use
+#          the query head, not the hoisted ALiBi slope.
+_CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
+_CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
+_CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
+_CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+# idx78: additive bias + emit_lse on the idx68 path; the four bias
+# params precede lse_ptr in both engines.
+_CONFIGS[78] = {**_CONFIGS[68], "emit_lse": True}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

@@ -304,6 +304,32 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->kv_cache_policy = "stream";
         break;
     case 18:
+        /* Reduce with emit_lse (see make_reduce_spec): bf16 D128 GQA. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+    case 19:
+        /* Reduce with emit_lse (see make_reduce_spec): fp16 D64. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+    case 20:
         /* Additive bias composed with ALiBi, QQ bias and softcap (all on the
          * score before the mask select). */
         s->head_size = 128;
@@ -320,7 +346,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_additive_bias = true;
         s->kv_storage_dtype = NULL;
         break;
-    case 19:
+    case 21:
         /* Additive bias on the decode grid with multi-page tiles and sinks. */
         s->head_size = 64;
         s->block_size = 32;
@@ -338,7 +364,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_decode_grid = true;
         s->kv_cache_policy = "stream";
         break;
-    case 20:
+    case 22:
         /* Additive bias with an fp8 K/V cache and a sliding window. */
         s->head_size = 128;
         s->block_size = 16;
@@ -352,7 +378,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_additive_bias = true;
         s->kv_storage_dtype = "fp8e4m3";
         break;
-    case 21:
+    case 23:
         /* QQ bias alone, so the bound cmp_ge/cmp_lt order of the QQ mask is
          * pinned without additive bias, ALiBi or softcap riding along. */
         s->head_size = 64;
@@ -374,8 +400,10 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
 }
 
 /* Derive the reduce spec from the segment spec, exactly as the Python emitter
- * (head_size / num_query_heads / num_kv_heads / dtype / num_segments). */
-static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
+ * (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
+ * waves_per_eu; configs 18-19 also set emit_lse, as _REDUCE_LSE does). */
+static void make_reduce_spec(int idx,
+                             const rocke_unified_attention_3d_tiled_spec_t* s,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
 {
     *r = rocke_unified_attention_reduce_tiled_spec_default();
@@ -384,6 +412,9 @@ static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
     r->num_kv_heads = s->num_kv_heads;
     r->dtype = s->dtype;
     r->num_segments = s->num_segments;
+    r->has_waves_per_eu = s->has_waves_per_eu;
+    r->waves_per_eu = s->waves_per_eu;
+    r->emit_lse = (idx == 18 || idx == 19);
 }
 
 /* Build kernel via `which` (0=segment, 1=reduce), lower to .ll, print to stdout.
@@ -466,7 +497,7 @@ int main(int argc, char** argv)
     }
 
     rocke_unified_attention_reduce_tiled_spec_t r;
-    make_reduce_spec(&s, &r);
+    make_reduce_spec(idx, &s, &r);
 
     if(strcmp(mode, "ll") == 0)
     {

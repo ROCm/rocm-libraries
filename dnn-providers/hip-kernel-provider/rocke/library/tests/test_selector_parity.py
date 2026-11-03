@@ -770,6 +770,7 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_sinks",
             "use_alibi",
             "use_qq_bias",
+            "use_additive_bias",
             "use_transposed_scalar_state",
             "use_transposed_invariant_hoist",
             "use_transposed_mask_once",
