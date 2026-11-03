@@ -75,6 +75,16 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
     case 5:
         s->use_grouped_kv2_softmax = true;
         break;
+    /* The pack predicate admits windowed, sinks and i64 specs; pin each body. */
+    case 6:
+        s->sliding_window = 256;
+        break;
+    case 7:
+        s->use_sinks = true;
+        break;
+    case 8:
+        s->use_i64_kv_addr = true;
+        break;
     default:
         return -1;
     }

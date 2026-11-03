@@ -141,6 +141,10 @@ def supports_fastkv_register_p_2d(
     return True, "supported"
 
 
+# The body uses gfx950-only wide MFMA atoms and transposed LDS reads.
+_NOT_GFX950 = "fastKV register-P is a gfx950 kernel; {arch} is not supported"
+
+
 def _fastkv_register_p_spec_error(spec: UnifiedAttention2DTiledSpec) -> str | None:
     """Why the fastKV register-P builder refuses ``spec``, or None if it builds."""
     if not spec.use_fast_paged_kv_desc:
@@ -163,6 +167,8 @@ def supports_fastkv_register_p_2d_spec(
     refusing what :func:`build_unified_attention_2d_fastkv_register_p` raises on,
     so the builder is validatable at pack time.
     """
+    if arch != "gfx950":
+        return False, _NOT_GFX950.format(arch=arch)
     error = _fastkv_register_p_spec_error(spec)
     if error is not None:
         return False, error
@@ -189,11 +195,13 @@ def build_unified_attention_2d_fastkv_register_p(
 ) -> KernelDef:
     """Build the experimental fastKV + register-P 2D attention kernel.
 
-    Thin wrapper over :func:`build_unified_attention_2d_tiled`; the ``arch``
-    target (gfx950-only, see that builder) is threaded straight through, so
-    a gfx942 request fails with the same clean structured error.
+    Thin wrapper over :func:`build_unified_attention_2d_tiled`. That builder
+    also admits gfx942 for its narrow-atom variant, so this one refuses every
+    target but gfx950 itself.
     """
 
+    if arch != "gfx950":
+        raise ValueError(_NOT_GFX950.format(arch=arch))
     error = _fastkv_register_p_spec_error(spec)
     if error is not None:
         raise ValueError(error)

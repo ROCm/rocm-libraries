@@ -366,6 +366,9 @@ def test_fastkv_register_p_builder_packs_through_its_spec_predicate():
     no_fast_desc = dataclasses.replace(spec, use_fast_paged_kv_desc=False)
     with pytest.raises(HkpPackError, match="use_fast_paged_kv_desc"):
         _check_support_predicate(module, builder, no_fast_desc, "gfx950")
+    # The shared tiled gate admits gfx942 for its narrow builder; this one must not.
+    with pytest.raises(HkpPackError, match="gfx950 kernel"):
+        _check_support_predicate(module, builder, spec, "gfx942")
 
 
 # --- C. Literal validation --------------------------------------------------
