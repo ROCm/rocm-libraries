@@ -63,6 +63,15 @@ Tests:
   denseld: [1000]
   matrix: [rocsparse_matrix_random]
 
+- name: gtsv_no_pivot_diagonal
+  category: quick
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [1025]
+  N: [1, 8]
+  denseld: [1025]
+  matrix: [rocsparse_matrix_zero]
+
 # Pre-checkin
 - name: gtsv_no_pivot_bad_arg
   category: pre_checkin
