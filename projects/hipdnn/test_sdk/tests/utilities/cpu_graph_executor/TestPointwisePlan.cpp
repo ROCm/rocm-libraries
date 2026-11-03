@@ -777,7 +777,9 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfEluAlphaValueSet)
                                DataType::FLOAT,
                                DataType::FLOAT>
         planBuilder;
-    EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)),
+                 CpuReferenceNotApplicableError);
 }
 
 TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSoftPlusBetaValueSet)
@@ -813,7 +815,9 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSoftPlusBetaValueSet)
                                DataType::FLOAT,
                                DataType::FLOAT>
         planBuilder;
-    EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)),
+                 CpuReferenceNotApplicableError);
 }
 
 template <typename T>
@@ -1016,6 +1020,113 @@ TEST(TestPointwisePlanBuilder, RejectsParameterizedTernary)
                                DataType::FLOAT>
         planBuilder;
 
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
     EXPECT_THROW(planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0)),
-                 std::runtime_error);
+                 CpuReferenceNotApplicableError);
+}
+
+TEST(TestPointwisePlanBuilder, DeclinesReluParamOnUnsupportedBinaryMode)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW,
+                                    0.0f);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const PointwisePlanBuilder<DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::FLOAT>
+        planBuilder;
+
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    EXPECT_THROW(executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack),
+                 CpuReferenceNotApplicableError);
+}
+
+TEST(TestPointwisePlanBuilder, DeclinesSwishBetaOnUnsupportedUnaryMode)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 3, 4, 4},
+                                   {1, 3, 4, 4},
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::ABS,
+                                   1,
+                                   TensorLayout::NCHW,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   2.0f);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    EXPECT_THROW(executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack),
+                 CpuReferenceNotApplicableError);
+}
+
+TEST(TestPointwisePlanBuilder, DeclinesNonBroadcastableShapes)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    // The frontend rejects non-broadcastable shapes, so edit the serialized graph instead
+    auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
+    const GraphWrapper original(serializedGraph.data(), serializedGraph.size());
+    const auto secondInputUid
+        = original.getNodeWrapper(0).attributesAs<PointwiseAttributes>().in_1_tensor_uid().value();
+    for(auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == secondInputUid)
+        {
+            tensor->dims = {1, 3, 5, 2};
+        }
+    }
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    auto badGraph = builder.Release();
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(badGraph.data(), badGraph.size()));
+    EXPECT_THROW(executor.execute(badGraph.data(), badGraph.size(), variantPack),
+                 CpuReferenceNotApplicableError);
+}
+
+TEST(TestPointwisePlanBuilder, MissingPlanBuilderIsNotApplicable)
+{
+    PlanBuilderRegistry registry;
+    const PointwiseSignatureKey unregistered(
+        PointwiseMode::ADD, DataType::INT32, DataType::FLOAT, DataType::INT32, DataType::INT32);
+
+    EXPECT_THROW(registry.getPlanBuilder(unregistered), CpuReferenceNotApplicableError);
 }

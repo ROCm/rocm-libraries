@@ -63,7 +63,7 @@ public:
 
         std::ostringstream oss;
         oss << "No plan builder registered for signature key: " << key;
-        throw std::runtime_error(oss.str());
+        throw utilities::CpuReferenceNotApplicableError(oss.str());
     }
 
 private:

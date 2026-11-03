@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
@@ -297,6 +298,48 @@ public:
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
 
+        // ELU and Softplus parameters are not implemented
+        if(nodeAttributes->elu_alpha().has_value() || nodeAttributes->softplus_beta().has_value())
+        {
+            return false;
+        }
+
+        // Relu clip and swish parameters are only consumed by RELU_FWD, SWISH_FWD and RELU_BWD
+        const bool hasReluOrSwishParams = nodeAttributes->relu_lower_clip().has_value()
+                                          || nodeAttributes->relu_upper_clip().has_value()
+                                          || nodeAttributes->relu_lower_clip_slope().has_value()
+                                          || nodeAttributes->swish_beta().has_value();
+        if(hasReluOrSwishParams
+           && mode != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD
+           && mode != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD
+           && mode != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD)
+        {
+            return false;
+        }
+
+        // Every input must broadcast to the output shape
+        std::vector<int64_t> inputUids = {nodeAttributes->in_0_tensor_uid()};
+        for(const auto& optionalUid :
+            {nodeAttributes->in_1_tensor_uid(), nodeAttributes->in_2_tensor_uid()})
+        {
+            if(optionalUid.has_value())
+            {
+                inputUids.push_back(optionalUid.value());
+            }
+        }
+        const auto* outDims = tensorMap.at(nodeAttributes->out_0_tensor_uid())->dims();
+        for(const auto uid : inputUids)
+        {
+            const auto* inDims = tensorMap.at(uid)->dims();
+            if(inDims == nullptr || outDims == nullptr
+               || !hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(
+                   std::vector<int64_t>(inDims->begin(), inDims->end()),
+                   std::vector<int64_t>(outDims->begin(), outDims->end())))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -330,14 +373,16 @@ public:
                || nodeAttributes->relu_lower_clip_slope().has_value()
                || nodeAttributes->swish_beta().has_value()))
         {
-            throw std::runtime_error("Parameterized ternary pointwise operations are not supported "
-                                     "in PointwisePlanBuilder for the Cpu Graph Executor");
+            throw utilities::CpuReferenceNotApplicableError(
+                "Parameterized ternary pointwise operations are not supported "
+                "in PointwisePlanBuilder for the Cpu Graph Executor");
         }
 
         if(nodeAttributes->elu_alpha().has_value() || nodeAttributes->softplus_beta().has_value())
         {
-            throw std::runtime_error("ELU and Softplus parameters are not supported "
-                                     "in PointwisePlanBuilder for the Cpu Graph Executor yet");
+            throw utilities::CpuReferenceNotApplicableError(
+                "ELU and Softplus parameters are not supported "
+                "in PointwisePlanBuilder for the Cpu Graph Executor yet");
         }
 
         return std::make_unique<
