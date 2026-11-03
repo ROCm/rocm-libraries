@@ -135,6 +135,57 @@ def test_validate_uniform_summation_order_must_be_bool(tmp_path, value, ok):
         assert "CustomKernel.uniformSummationOrder" in msg
 
 
+# A CustomKernel block written for rocRoller's Stream-K launch, each way such a
+# block can say so: (args, grid and workspace lines).
+_ROCROLLER_STREAMK_BLOCKS = {
+    "grid": ("[]", "grid: [RocRollerStreamK, One, One]"),
+    "workspace": ("[]", "grid: [TilesX, TilesY, Batch]\n            workspaceType: RocRollerStreamK"),
+    "kernarg": ("[{type: uint32, semantic: RR_SKNumWGs}]", "grid: [TilesX, TilesY, Batch]"),
+}
+
+
+def _write_rocroller_streamk_kernel(path, spelling, uniform_order):
+    args, grid = _ROCROLLER_STREAMK_BLOCKS[spelling]
+    write_kernel(path, f"""\
+          Source:
+            Origin: rocroller
+          Version: 1.0.0
+          Features: {{}}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args: {args}
+            macrotile: [128, 64, 128]
+            threads: [256, 1, 1]
+            {grid}
+            uniformSummationOrder: {uniform_order}
+        """)
+
+
+@pytest.mark.parametrize("uniform_order", ["true", "false"])
+@pytest.mark.parametrize("spelling", sorted(_ROCROLLER_STREAMK_BLOCKS))
+def test_validate_refuses_a_rocroller_streamk_kernel(tmp_path, spelling, uniform_order):
+    """TensileLite cannot launch rocRoller's Stream-K, and declaring uniform
+    summation order does not change that: its K split follows the grid and the
+    tile, so its rows are not summed in one order either."""
+    _write_rocroller_streamk_kernel(tmp_path / "external.s", spelling, uniform_order)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert not valid
+    assert "without rocRoller Stream-K, which is not supported" in msg
+
+
+@pytest.mark.parametrize("spelling", sorted(_ROCROLLER_STREAMK_BLOCKS))
+def test_get_custom_kernel_config_refuses_a_rocroller_streamk_block(tmp_path, spelling):
+    _write_rocroller_streamk_kernel(tmp_path / "k.s", spelling, "true")
+
+    with pytest.raises(RuntimeError, match="'k' is a rocRoller Stream-K kernel"):
+        getCustomKernelConfig("k", {}, str(tmp_path))
+
+
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
     """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""
@@ -1037,6 +1088,17 @@ def test_build_from_metadata_rocroller_wgm_args_flatten_workgroup_x():
         {"MatrixInstruction": [16, 16, 16, 1]},
     )
     assert ck["grid"] == ["TilesXY", "One", "Batch"]
+
+
+@pytest.mark.parametrize("name", sorted(ck_mod._ROCROLLER_STREAMK_KERNARGS))
+def test_build_from_metadata_refuses_rocroller_streamk_kernargs(name):
+    # Each kernarg rocRoller hoists its Stream-K decomposition into marks the
+    # kernel, before any argument is mapped to a semantic.
+    streamK = {".name": name, ".size": 4, ".value_kind": "by_value"}
+    with pytest.raises(RuntimeError, match=rf"is a rocRoller Stream-K kernel \({name}\)"):
+        _buildCustomKernelFromMetadata(
+            "k", _kernel_yaml([_D_ARG, streamK]), {"MatrixInstruction": [16, 16, 16, 1]}
+        )
 
 
 def test_build_from_metadata_macrotile_name_fallback():

@@ -526,6 +526,38 @@ def _hasRocRollerWgmArgs(args):
     return any(arg.get("semantic") in roles for arg in args)
 
 
+# rocRoller Stream-K hoists its work decomposition into kernargs that TensileLite
+# does not compute, so TensileLite cannot launch such a kernel. These
+# .amdgpu_metadata kernarg names mark one. A CustomKernel block written for one
+# names RR_SK* arguments or a RocRollerStreamK grid or workspace.
+_ROCROLLER_STREAMK_KERNARGS = frozenset(
+    {"numSKTiles", "numSKTilesPerWG", "numDPTiles", "numDPTilesPerWG", "SCRATCH_ZeroedBeforeAndAfter"}
+)
+
+
+def _rocRollerStreamKMarks(metadataArgs=(), customKernel=None):
+    """What marks a kernel as rocRoller Stream-K, sorted; empty if nothing does."""
+    marks = {a.get(".name") for a in metadataArgs if isinstance(a, dict)} & _ROCROLLER_STREAMK_KERNARGS
+    if isinstance(customKernel, dict):
+        for arg in customKernel.get("args") or []:
+            semantic = arg.get("semantic") if isinstance(arg, dict) else None
+            if isinstance(semantic, str) and semantic.startswith("RR_SK"):
+                marks.add(semantic)
+        if customKernel.get("workspaceType") == "RocRollerStreamK":
+            marks.add("workspaceType RocRollerStreamK")
+        if "RocRollerStreamK" in (customKernel.get("grid") or []):
+            marks.add("grid RocRollerStreamK")
+    return sorted(marks)
+
+
+def _rocRollerStreamKRefusal(kernelName, marks):
+    return (
+        f"Custom kernel '{kernelName}' is a rocRoller Stream-K kernel ({', '.join(marks)}). "
+        f"rocRoller Stream-K kernels are not supported: TensileLite does not compute "
+        f"the work decomposition they read from their kernel arguments."
+    )
+
+
 def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     """Build a CustomKernel dict from the amdgpu_metadata and custom.config sections."""
     if not isinstance(fullYaml, dict):
@@ -546,6 +578,9 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         )
 
     metadataArgs = kernelMeta[".args"]
+    streamKMarks = _rocRollerStreamKMarks(metadataArgs)
+    if streamKMarks:
+        raise RuntimeError(_rocRollerStreamKRefusal(kernelName, streamKMarks))
     args = [_metadataArgToCustomArg(a, kernelName) for a in metadataArgs]
     if args and args[-1]["semantic"] == "ScaleBlockSizeA":
         last = metadataArgs[-1]
@@ -694,6 +729,10 @@ def getCustomKernelConfig(
         fullYaml = _readEmbeddedYaml(kernelName, directory)
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
+    streamKMarks = _rocRollerStreamKMarks(customKernel=kernelConfig["CustomKernel"])
+    if streamKMarks:
+        raise RuntimeError(_rocRollerStreamKRefusal(kernelName, streamKMarks))
+
     kernelConfig["CustomKernel"]["name"] = kernelName
     kernelConfig["CustomKernel"].setdefault("workspaceType", "None")
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemC", 0)
@@ -797,6 +836,12 @@ def validateCustomKernelMetadata(name, directory=None):
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
             if not isinstance(custom_kernel.get("uniformSummationOrder", False), bool):
                 missing.append("CustomKernel.uniformSummationOrder (true or false)")
+            streamKMarks = _rocRollerStreamKMarks(customKernel=custom_kernel)
+            if streamKMarks:
+                missing.append(
+                    f"CustomKernel without rocRoller Stream-K, which is not supported "
+                    f"({', '.join(streamKMarks)})"
+                )
 
     if missing:
         kind = "External" if is_external else "TensileLite"
