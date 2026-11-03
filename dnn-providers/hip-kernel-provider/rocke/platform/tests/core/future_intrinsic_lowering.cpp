@@ -3356,7 +3356,7 @@ void case_buffer_rsrc_refusals()
             "gfx942",
             flavor,
             &err);
-        if(st != ROCKE_ERR_VALUE
+        if(st != ROCKE_ERR_TYPE
            || err.find("buffer_rsrc ptr must be a global pointer, got ptr addrspace(4) "
                        "(its parameter's addr_space)")
                   == std::string::npos)

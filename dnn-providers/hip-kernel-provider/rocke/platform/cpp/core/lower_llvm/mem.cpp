@@ -108,17 +108,17 @@ static void op_tile_smem_alloc(rocke_lower_t* L, const rocke_op_t* op)
     (void)op;
 }
 
-/* Python _require_global_header_ptr; the text is the Python engine's. The
- * global-pointer ops emit against ptr addrspace(1); the IR rules check the IR
- * type, but a parameter's addr_space override (such as "constant") moves its
- * header type away from it. */
+/* Python _require_global_header_ptr; the text is the Python engine's, and the
+ * status is its TypeError's. The global-pointer ops emit against
+ * ptr addrspace(1); the IR rules check the IR type, but a parameter's
+ * addr_space override (such as "constant") moves its header type away from it. */
 static void
     ll_require_global_header_ptr(rocke_lower_t* L, const char* op_name, const rocke_value_t* ptr)
 {
     const char* header = rocke_ll_value_ptr_type(L, ptr);
     if(strcmp(header, "ptr addrspace(1)") != 0)
         rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
+                      ROCKE_ERR_TYPE,
                       "%s ptr must be a global pointer, got %s (its parameter's addr_space)",
                       op_name,
                       header);
@@ -1793,7 +1793,7 @@ static void op_tile_global_store_async_from_lds(rocke_lower_t* L, const rocke_op
     lds = op->operands[1];
     if(strcmp(rocke_ll_value_ptr_type(L, dst), "ptr addrspace(1)") != 0)
         rocke_ll_fail(
-            L, ROCKE_ERR_VALUE, "global_store_async_from_lds dst_ptr must be a global pointer");
+            L, ROCKE_ERR_TYPE, "global_store_async_from_lds dst_ptr must be a global pointer");
     width = ll_attr_int(op, "width_bytes", 0);
     if(width == 1)
         suffix = "b8";
@@ -1840,7 +1840,7 @@ static void op_tile_global_load_tr16_b128(rocke_lower_t* L, const rocke_op_t* op
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_load_tr16_b128 expects one operand and result");
     src = op->operands[0];
     if(strcmp(rocke_ll_value_ptr_type(L, src), "ptr addrspace(1)") != 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_load_tr16_b128 src_ptr must be a global pointer");
+        rocke_ll_fail(L, ROCKE_ERR_TYPE, "global_load_tr16_b128 src_ptr must be a global pointer");
     dtype = ll_attr_str(op, "dtype", "");
     if(strcmp(dtype, "f16") == 0)
         suffix = "v8f16";
