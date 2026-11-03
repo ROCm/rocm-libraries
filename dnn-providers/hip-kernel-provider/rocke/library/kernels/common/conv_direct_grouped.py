@@ -71,6 +71,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from rocke.core.arch import MmaOp
 from rocke.core.ir import (
     BF16,
     I16,
@@ -7714,10 +7715,11 @@ def _build_direct_depthwise_dgrad_streaming_packed(
 # Forms:
 #   * VALU: one channel (or ``ch_per_lane`` packed channels) per lane, f32 FMA.
 #   * ``dot2`` (gfx950): filter taps paired on llvm.amdgcn.fdot2.
-#   * ``mfma`` (gfx950, Toeplitz): one-hot weights times 8 channels per
-#     16x16x32 MFMA; dY window rows and finished dX rows are staged through
-#     LDS double buffers (one barrier per row). ``w_fold`` puts 1, 2 or 4
-#     images in one tile and ``prefetch_rows`` sets the dY rows in flight. Its
+#   * ``mfma`` (Toeplitz): one-hot weights times 8 channels per 16x16x32
+#     MFMA (gfx950) or, at ``wave_size=32``, WMMA (gfx1250); dY window rows
+#     and finished dX rows are staged through LDS double buffers (one barrier
+#     per row). ``w_fold`` puts 1, 2 or 4 images in one tile and
+#     ``prefetch_rows`` sets the dY rows in flight. Its
 #     non-finite semantics differ: an Inf / NaN in dY reaches its whole
 #     8-channel group (see _build_dw_dgrad_win_toeplitz).
 # ---------------------------------------------------------------------------
@@ -7886,9 +7888,7 @@ class DirectDepthwiseDgradWindowedSpec:
         p = self.problem
         kwp = _dw_mfma_passes(p.KW) * self.cin_chunks
         rows = self.prefetch_rows * self._mfma_in_passes()
-        # wave32 WMMA (16x16x32): 16-element A / B fragments and 8 f32
-        # accumulators per lane, twice the wave64 MFMA's.
-        frag = 8 if self.wave_size == 32 else 4
+        frag = _dw_toeplitz_lanes(self.wave_size).frag_vgprs
         return frag * (p.KH * kwp + p.KH + kwp) + 4 * rows
 
     def mfma_lds_bytes(self) -> int:
@@ -7979,8 +7979,12 @@ def _depthwise_dgrad_win_mfma_check(
     p = spec.problem
     if spec.dot2 or spec.ch_per_lane != 1:
         return False, "mfma excludes dot2 and ch_per_lane > 1"
-    if spec.fwd and spec.wave_size == 32:
-        # The wave32 WMMA builder emits only the dgrad pass.
+    if spec.fwd and _dw_toeplitz_lanes(spec.wave_size).k_chunks != 1:
+        # The forward mode is a wave64 MFMA mode. The Toeplitz builder loads
+        # the grouped form's dense A row as one 8-channel K chunk per lane
+        # (k_chunks == 1); at k_chunks == 2 (the wave32 WMMA) that A operand
+        # would hold the wrong taps. The depthwise forward is validated only
+        # at wave64 (the gfx950 forward AOT variant).
         return False, "fwd needs the wave64 MFMA form (got wave_size=32)"
     if spec.w_fold not in DW_DGRAD_MFMA_W_FOLDS:
         return False, f"w_fold must be 1, 2 or 4 (got {spec.w_fold})"
@@ -8476,11 +8480,17 @@ class _DwToeplitzAtom:
 
     wave: int
     k_chunks: int
-    wmma_op: Optional[object] = None  # None: the MFMA intrinsic
+    wmma_op: MmaOp | None = None  # None: the MFMA intrinsic
 
     @property
     def acc_len(self) -> int:
         """f32 accumulators (D channels) per lane."""
+        return 4 * self.k_chunks
+
+    @property
+    def frag_vgprs(self) -> int:
+        """VGPRs of one A, B or D fragment: ``8 * k_chunks`` 16-bit A / B
+        slots or ``4 * k_chunks`` f32 accumulators per lane."""
         return 4 * self.k_chunks
 
     def mma(self, b: IRBuilder, dtype: str, a: Value, x: Value, acc: Value) -> Value:
@@ -8489,17 +8499,31 @@ class _DwToeplitzAtom:
         return b.mma(self.wmma_op, a, x, acc)
 
 
-def _dw_toeplitz_atom(spec: DirectDepthwiseDgradWindowedSpec, arch: str):
-    """The :class:`_DwToeplitzAtom` of ``spec`` on ``arch`` (no IR emitted)."""
-    if spec.wave_size != 32:
-        return _DwToeplitzAtom(wave=64, k_chunks=1)
+def _dw_toeplitz_lanes(wave_size: int) -> _DwToeplitzAtom:
+    """The lane geometry of the Toeplitz atom at ``wave_size``, without its op:
+    the one place the form's wave size picks the MFMA (wave64, one K chunk per
+    lane) or the WMMA (wave32, two). The validator's limits and
+    :func:`_dw_toeplitz_atom` both read it."""
+    if wave_size == 32:
+        return _DwToeplitzAtom(wave=32, k_chunks=2)
+    return _DwToeplitzAtom(wave=64, k_chunks=1)
+
+
+def _dw_toeplitz_atom(
+    spec: DirectDepthwiseDgradWindowedSpec, arch: str
+) -> _DwToeplitzAtom:
+    """The :class:`_DwToeplitzAtom` of ``spec`` on ``arch`` (no IR emitted):
+    :func:`_dw_toeplitz_lanes` plus the WMMA op on the wave32 form."""
+    lanes = _dw_toeplitz_lanes(spec.wave_size)
+    if lanes.k_chunks == 1:
+        return lanes
     from rocke.core.arch import ArchTarget
 
     ab = "bf16" if spec.problem.dtype == "bf16" else "f16"
     op = ArchTarget.from_gfx(arch).mma.op_for_shape(
         family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
     )
-    return _DwToeplitzAtom(wave=32, k_chunks=2, wmma_op=op)
+    return _DwToeplitzAtom(wave=lanes.wave, k_chunks=lanes.k_chunks, wmma_op=op)
 
 
 def _build_dw_dgrad_win_toeplitz(
@@ -8541,7 +8565,8 @@ def _build_dw_dgrad_win_toeplitz(
     through the uniform one.
 
     ``fwd`` (the rotated filter, its ``out_stride`` and the grouped form) is
-    a wave64 MFMA mode: the validator rejects it at wave32.
+    a wave64 MFMA mode: the grouped A row below is one K chunk per lane, and
+    the validator rejects ``fwd`` at wave32.
     """
     p = spec.problem
     KH, KW, PAD = p.KH, p.KW, p.PAD
@@ -8641,7 +8666,7 @@ def _build_dw_dgrad_win_toeplitz(
     for r in range(KH):
         row: List[Value] = []
         for ph in range(KWP):
-            comps: List[Value] = []
+            comps: list[Value] = []
             for j in range(J):
                 u = t if J == 1 else b.mul(t, b.const_i32(J))
                 s = b.sub(b.add(u, b.const_i32(4 * ph + j)), q)

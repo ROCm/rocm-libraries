@@ -26,8 +26,8 @@
  * 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
  * cpg 64 (stride 2) -- mirrors _WIN_G8_CFGS.
  * Indices 62..72: the Toeplitz WMMA form (mfma at wave_size 32, gfx1250);
- * 68..72 both reject (71 and 72: fwd at stride 1 and 2, the wave32 form has
- * no forward pass) -- mirrors _WMMA_WIN_CFGS.
+ * 68..72 both reject (71 and 72: fwd at stride 1 and 2, the forward mode is
+ * wave64 only) -- mirrors _WMMA_WIN_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>

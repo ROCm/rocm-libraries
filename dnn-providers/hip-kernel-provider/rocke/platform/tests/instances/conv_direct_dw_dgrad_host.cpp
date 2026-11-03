@@ -347,7 +347,7 @@ static void test_toeplitz_wmma_refusals(void)
     CHECK(strcmp(reason, "mfma needs one of ('gfx950',) (got gfx942)") == 0,
           "gfx942 reason: %s",
           reason);
-    /* 71 / 72: fwd at stride 1 and 2; the wave32 form has no forward pass. */
+    /* 71 / 72: fwd at stride 1 and 2; the forward mode is wave64 only. */
     s = win_wmma(3, 1, "fp16");
     s.fwd = true;
     check_win_refused(

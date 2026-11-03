@@ -1040,8 +1040,11 @@ the target's wave size and records it in the cache entry
 the record and the run-side guard `direct_entry_wave_reason`); the VALU form
 keeps its logical wave64. On gfx1250 the wave64 MFMA form is refused with the
 hint `set wave_size=32`. The non-finite semantics are those of the MFMA form.
-The WMMA form has no forward pass: both engines reject `fwd` (and so
-`out_stride=2` and the grouped form) at `wave_size=32`.
+The forward mode is wave64 only: the one Toeplitz builder loads the grouped
+form's dense A row as one 8-channel K chunk per lane, which does not fit the
+WMMA's two chunks per lane, and the depthwise forward is validated only at
+wave64. Both engines reject `fwd` (and so `out_stride=2` and the grouped
+form) at `wave_size=32`.
 
 AOT cache image (`library/kernels/conv/direct_aot_jobs.py`): the square
 filters `_DEPTHWISE_FILTERS` with every padding; for the VALU form the `(block_w, block_h)` tiles of

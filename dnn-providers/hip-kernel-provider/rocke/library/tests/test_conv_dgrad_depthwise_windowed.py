@@ -388,12 +388,38 @@ class TestWmmaSpec(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(why, "mfma needs one of ('gfx950',) (got gfx942)")
 
-    def test_wave32_form_has_no_forward_pass(self):
+    def test_fragment_widths_come_from_the_atom(self):
+        """The validator's VGPR count and the builder read the fragment width
+        from the one atom pick: two K chunks per lane (8 VGPRs per fragment)
+        on the wave32 WMMA, one (4) on the wave64 MFMA."""
+        from kernels.common.conv_direct_grouped import (
+            _dw_toeplitz_atom,
+            _dw_toeplitz_lanes,
+        )
+
+        for wave, arch, chunks in ((32, "gfx1250", 2), (64, "gfx950", 1)):
+            spec = self._wmma(wave_size=wave)
+            lanes = _dw_toeplitz_lanes(wave)
+            atom = _dw_toeplitz_atom(spec, arch)
+            self.assertEqual((lanes.wave, lanes.k_chunks), (wave, chunks))
+            self.assertEqual((atom.wave, atom.k_chunks), (wave, chunks))
+            self.assertEqual(atom.wmma_op is None, wave == 64)
+            p = spec.problem
+            kwp = (p.KW + 4) // 4
+            rows = spec.prefetch_rows * spec._mfma_in_passes()
+            self.assertEqual(
+                spec.mfma_frag_vgprs(),
+                4 * chunks * (p.KH * kwp + p.KH + kwp) + 4 * rows,
+            )
+
+    def test_forward_mode_is_wave64_only(self):
         """``fwd`` (the rotated-filter forward pass, any ``out_stride`` or
-        group size) is a wave64 MFMA mode: the wave32 builder emits only the
-        dgrad pass, so the spec is rejected instead of building a dgrad
-        kernel. The C++ mirror rejects the same specs (parity configs 71, 72
-        of conv_direct_dgrad_ext_emit)."""
+        group size) is a wave64 MFMA mode: the Toeplitz builder loads the
+        grouped form's dense A row as one K chunk per lane, which the wave32
+        WMMA's two K chunks per lane do not fit, and the depthwise forward is
+        validated only at wave64. So the spec is rejected at wave32. The C++
+        mirror rejects the same specs (parity configs 71, 72 of
+        conv_direct_dgrad_ext_emit)."""
         cases = (
             (_problem(2, 14, 14, 64, 3, 3, 1, "fp16"), {}),
             (_problem(2, 14, 14, 64, 3, 3, 1, "bf16"), {"out_stride": 2}),

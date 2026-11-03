@@ -9,6 +9,7 @@
  *   _depthwise_dgrad_win_check / is_valid_...    -> rocke_direct_depthwise_dgrad_win_is_valid_spec()
  *   kernel_name()                                -> rocke_direct_depthwise_dgrad_win_kernel_name()
  *   build_direct_depthwise_dgrad_windowed(...)   -> rocke_build_direct_depthwise_dgrad_win_new()
+ *   _dw_toeplitz_lanes(...)                      -> dw_toeplitz_lanes()
  *   _dw_toeplitz_atom(...)                       -> dw_toeplitz_atom()
  *   _build_dw_dgrad_win_toeplitz(...)            -> dw_win_build_toeplitz()
  *
@@ -112,6 +113,35 @@ long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
     return (long long)spec->block_h * p->KH * dw_win_passes(p->KW) * dw_win_cin_chunks(p);
 }
 
+/* The 16x16x32 atom of the Toeplitz form (mirrors _DwToeplitzAtom). */
+typedef struct dw_toeplitz_atom_t
+{
+    int wave; /* lanes per wave */
+    int k_chunks; /* 8-channel K chunks per lane */
+    const char* wmma_op_id; /* NULL: the MFMA intrinsic */
+} dw_toeplitz_atom_t;
+
+/* The lane geometry of the Toeplitz atom at wave_size, without its op
+ * (mirrors _dw_toeplitz_lanes): the one place the form's wave size picks the
+ * MFMA (wave64, one K chunk per lane) or the WMMA (wave32, two). */
+static dw_toeplitz_atom_t dw_toeplitz_lanes(int wave_size)
+{
+    dw_toeplitz_atom_t atom = {64, 1, NULL};
+    if(wave_size == 32)
+    {
+        atom.wave = 32;
+        atom.k_chunks = 2;
+    }
+    return atom;
+}
+
+/* VGPRs of one A, B or D fragment: 8 k_chunks 16-bit A / B slots or
+ * 4 k_chunks f32 accumulators per lane. */
+static int dw_toeplitz_frag_vgprs(const dw_toeplitz_atom_t* atom)
+{
+    return 4 * atom->k_chunks;
+}
+
 static int dw_win_mfma_in_passes(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const int win
@@ -127,9 +157,8 @@ int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const int kwp = dw_win_passes(p->KW) * dw_win_cin_chunks(p);
     const int rows = spec->prefetch_rows * dw_win_mfma_in_passes(spec);
-    /* wave32 WMMA (16x16x32): 16-element A / B fragments and 8 f32
-     * accumulators per lane, twice the wave64 MFMA's. */
-    const int frag = spec->wave_size == 32 ? 8 : 4;
+    const dw_toeplitz_atom_t lanes = dw_toeplitz_lanes(spec->wave_size);
+    const int frag = dw_toeplitz_frag_vgprs(&lanes);
     return frag * (p->KH * kwp + p->KH + kwp) + 4 * rows;
 }
 
@@ -267,8 +296,12 @@ static bool
     {
         if(spec->dot2 || cpl != 1)
             DW_WIN_FAIL("mfma excludes dot2 and ch_per_lane > 1");
-        /* The wave32 WMMA builder emits only the dgrad pass. */
-        if(spec->fwd && spec->wave_size == 32)
+        /* The forward mode is a wave64 MFMA mode. The Toeplitz builder loads
+         * the grouped form's dense A row as one 8-channel K chunk per lane
+         * (k_chunks == 1); at k_chunks == 2 (the wave32 WMMA) that A operand
+         * would hold the wrong taps. The depthwise forward is validated only
+         * at wave64 (the gfx950 forward AOT variant). */
+        if(spec->fwd && dw_toeplitz_lanes(spec->wave_size).k_chunks != 1)
             DW_WIN_FAIL("fwd needs the wave64 MFMA form (got wave_size=32)");
         if(spec->w_fold != 1 && spec->w_fold != 2 && spec->w_fold != 4)
             DW_WIN_FAIL("w_fold must be 1, 2 or 4 (got %d)", spec->w_fold);
@@ -801,24 +834,16 @@ typedef struct dw_win_plan
     V* g_off;
 } dw_win_plan;
 
-typedef struct dw_toeplitz_atom_t
-{
-    int wave; /* lanes per wave */
-    int k_chunks; /* 8-channel K chunks per lane */
-    const char* wmma_op_id; /* NULL: the MFMA intrinsic */
-} dw_toeplitz_atom_t;
-
-/* The atom of spec on arch (no IR emitted); false (error set) when the
- * target has no wave32 WMMA atom. */
+/* The atom of spec on arch (no IR emitted): dw_toeplitz_lanes plus the WMMA
+ * op on the wave32 form; false (error set) when the target has no wave32 WMMA
+ * atom. */
 static bool dw_toeplitz_atom(rocke_ir_builder_t* b,
                              const rocke_direct_depthwise_dgrad_win_spec_t* spec,
                              const char* arch,
                              dw_toeplitz_atom_t* atom)
 {
-    atom->wave = 64;
-    atom->k_chunks = 1;
-    atom->wmma_op_id = NULL;
-    if(spec->wave_size != 32)
+    *atom = dw_toeplitz_lanes(spec->wave_size);
+    if(atom->k_chunks == 1)
         return true;
     const char* ab = dw_win_is_bf16(&spec->problem) ? "bf16" : "f16";
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
@@ -830,8 +855,6 @@ static bool dw_toeplitz_atom(rocke_ir_builder_t* b,
             b, ROCKE_ERR_VALUE, "build_direct_depthwise_dgrad_windowed: no WMMA atom");
         return false;
     }
-    atom->wave = 32;
-    atom->k_chunks = 2;
     atom->wmma_op_id = op->op_id;
     return true;
 }
