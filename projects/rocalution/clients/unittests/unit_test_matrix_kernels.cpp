@@ -1965,11 +1965,6 @@ TYPED_TEST(matrix_kernels_stencil, laplace_2d_apply_add_adds_the_scaled_product)
 
     for(T scalar : {static_cast<T>(1), static_cast<T>(0.5)})
     {
-        if(scalar != static_cast<T>(1))
-        {
-            KNOWN_BUG("ApplyAdd ignores the scalar");
-        }
-
         for(int size : grid_sizes)
         {
             SCOPED_TRACE("grid " + std::to_string(size) + ", scalar " + std::to_string(scalar));
@@ -2061,13 +2056,9 @@ TYPED_TEST(matrix_kernels_local_stencil, apply_and_apply_add_on_the_host)
     S.ApplyAdd(in, static_cast<T>(1), &out);
     EXPECT_EQ(values_of(out), ref.apply(x));
 
-    KNOWN_BUG("LocalStencil::ApplyAdd calls Apply, which overwrites the output");
-
     out.CopyFromData(y.data());
     S.ApplyAdd(in, static_cast<T>(1), &out);
     EXPECT_EQ(values_of(out), apply_add(ref, x, static_cast<T>(1), y));
-
-    KNOWN_BUG("ApplyAdd ignores the scalar");
 
     out.CopyFromData(y.data());
     S.ApplyAdd(in, static_cast<T>(0.5), &out);

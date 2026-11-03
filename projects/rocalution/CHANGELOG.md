@@ -47,6 +47,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the host limiting the second triangular solve to the iterations of the first one, and `LocalMatrix::ItLLSolve()` stopping the transposed solve before it reaches the tolerance.
 * Fixed `LocalMatrix::CreateFromMap()` doing nothing when the matrix has no entries yet, and on the host losing entries and leaving values at zero for maps with unassigned nodes, which also affected the restriction of `PairwiseAMG` on the host.
 * Fixed `LocalMatrix::Transpose()` not swapping the sizes of a matrix without entries.
+* Fixed `LocalStencil::ApplyAdd()` overwriting the output instead of adding to it, and the Laplace stencil on the host ignoring the scalar.
 
 ## (Unreleased) rocALUTION 4.1.1
 

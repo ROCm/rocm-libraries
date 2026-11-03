@@ -227,11 +227,13 @@ namespace rocalution
                     int idx = i * this->size_ + j;
 
                     cast_out->vec_[idx]
-                        += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_] // i-1
-                           + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1] // j-1
-                           + static_cast<ValueType>(4) * cast_in->vec_[idx] // i,j
-                           + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1] // j+1
-                           + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_]; // i+1
+                        += scalar
+                           * (static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_] // i-1
+                              + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1] // j-1
+                              + static_cast<ValueType>(4) * cast_in->vec_[idx] // i,j
+                              + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1] // j+1
+                              + static_cast<ValueType>(-1)
+                                    * cast_in->vec_[idx + this->size_]); // i+1
                 }
 
                 // boundary layers
@@ -244,17 +246,20 @@ namespace rocalution
                 int idx = 0 * this->size_ + j;
 
                 cast_out->vec_[idx]
-                    += static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
-                       + static_cast<ValueType>(4) * cast_in->vec_[idx]
-                       + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
-                       + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_];
+                    += scalar
+                       * (static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
+                          + static_cast<ValueType>(4) * cast_in->vec_[idx]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_]);
 
                 idx = (this->size_ - 1) * this->size_ + j;
 
-                cast_out->vec_[idx] += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
-                                       + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
-                                       + static_cast<ValueType>(4) * cast_in->vec_[idx]
-                                       + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1];
+                cast_out->vec_[idx]
+                    += scalar
+                       * (static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
+                          + static_cast<ValueType>(4) * cast_in->vec_[idx]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]);
             }
 
 #ifdef _OPENMP
@@ -265,41 +270,49 @@ namespace rocalution
                 int idx = i * this->size_ + 0;
 
                 cast_out->vec_[idx]
-                    += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
-                       + static_cast<ValueType>(4) * cast_in->vec_[idx]
-                       + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
-                       + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_];
+                    += scalar
+                       * (static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
+                          + static_cast<ValueType>(4) * cast_in->vec_[idx]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_]);
 
                 idx = i * this->size_ + this->size_ - 1;
 
                 cast_out->vec_[idx]
-                    += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
-                       + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
-                       + static_cast<ValueType>(4) * cast_in->vec_[idx]
-                       + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_];
+                    += scalar
+                       * (static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
+                          + static_cast<ValueType>(4) * cast_in->vec_[idx]
+                          + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_]);
             }
 
             // boundary points
 
             int idx = 0 * (this->size_) + 0;
-            cast_out->vec_[idx] += static_cast<ValueType>(4) * cast_in->vec_[idx]
-                                   + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
-                                   + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_];
+            cast_out->vec_[idx]
+                += scalar
+                   * (static_cast<ValueType>(4) * cast_in->vec_[idx]
+                      + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]
+                      + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_]);
 
             idx = 0 * (this->size_) + this->size_ - 1;
-            cast_out->vec_[idx] += static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
-                                   + static_cast<ValueType>(4) * cast_in->vec_[idx]
-                                   + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_];
+            cast_out->vec_[idx]
+                += scalar
+                   * (static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
+                      + static_cast<ValueType>(4) * cast_in->vec_[idx]
+                      + static_cast<ValueType>(-1) * cast_in->vec_[idx + this->size_]);
 
             idx = (this->size_ - 1) * (this->size_) + 0;
-            cast_out->vec_[idx] += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
-                                   + static_cast<ValueType>(4) * cast_in->vec_[idx]
-                                   + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1];
+            cast_out->vec_[idx] += scalar
+                                   * (static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
+                                      + static_cast<ValueType>(4) * cast_in->vec_[idx]
+                                      + static_cast<ValueType>(-1) * cast_in->vec_[idx + 1]);
 
             idx = (this->size_ - 1) * (this->size_) + this->size_ - 1;
-            cast_out->vec_[idx] += static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
-                                   + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
-                                   + static_cast<ValueType>(4) * cast_in->vec_[idx];
+            cast_out->vec_[idx] += scalar
+                                   * (static_cast<ValueType>(-1) * cast_in->vec_[idx - this->size_]
+                                      + static_cast<ValueType>(-1) * cast_in->vec_[idx - 1]
+                                      + static_cast<ValueType>(4) * cast_in->vec_[idx]);
         }
     }
 

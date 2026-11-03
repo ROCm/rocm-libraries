@@ -148,7 +148,7 @@ namespace rocalution
                || ((this->stencil_ == this->stencil_accel_) && (in.vector_ == in.vector_accel_)
                    && (out->vector_ == out->vector_accel_)));
 
-        this->stencil_->Apply(*in.vector_, out->vector_);
+        this->stencil_->ApplyAdd(*in.vector_, scalar, out->vector_);
     }
 
     // LCOV_EXCL_START
