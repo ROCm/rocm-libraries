@@ -1726,11 +1726,16 @@ def supports_tiled_reduce_spec(
     3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
     ``hkp_pack`` validate it as a companion at pack time, and states what the builder
     otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
-    evenly, and the segment-factor cache fits in LDS. The kernel is arch-neutral, so
-    ``arch`` is only checked to be a gfx target.
+    evenly, and the segment-factor cache fits in LDS. The kernel is one 64-thread CTA
+    whose ``wave64_reduce_max/sum`` butterfly assumes a single wave64, so ``arch`` is
+    gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
+    wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
     """
-    if not isinstance(arch, str) or not arch.startswith("gfx"):
-        return False, f"tiled reduce kernel: {arch!r} is not a gfx target"
+    from ..common.attention_arch import validate_tiled_attention_arch
+
+    arch_ok, arch_reason = validate_tiled_attention_arch(arch)
+    if not arch_ok:
+        return False, f"tiled reduce kernel: {arch_reason}"
     if spec.dtype not in ("fp16", "bf16"):
         return (
             False,

@@ -292,3 +292,31 @@ def test_reduce_predicate_rejects_a_non_gfx_target():
         head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
     )
     assert not supports_tiled_reduce_spec(spec, arch="sm_90")[0]
+
+
+@pytest.mark.parametrize("arch", ["gfx1100", "gfx1201"])
+def test_reduce_predicate_rejects_a_wave32_target(arch):
+    """The reduce CTA is 64 threads folded by a wave64 butterfly; on a wave32 target
+    those threads are two waves and the cross-half stage never combines them."""
+    from kernels.gfx950.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec,
+        supports_tiled_reduce_spec,
+    )
+
+    spec = UnifiedAttentionReduceTiledSpec(
+        head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
+    )
+    assert not supports_tiled_reduce_spec(spec, arch=arch)[0]
+
+
+@pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
+def test_reduce_predicate_admits_the_segment_kernel_arches(arch):
+    from kernels.gfx950.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec,
+        supports_tiled_reduce_spec,
+    )
+
+    spec = UnifiedAttentionReduceTiledSpec(
+        head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
+    )
+    assert supports_tiled_reduce_spec(spec, arch=arch) == (True, "supported")
