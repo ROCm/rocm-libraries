@@ -84,16 +84,15 @@ std::optional<std::string> deriveResampleBackwardIndex(const fb::Graph& graph,
 
     auto& index = *inputs.at(indexUid);
 
-    // The reference's own checks decide which shapes and parameters can be derived. It
-    // validates before writing anything, so a rejected graph keeps its filled index for
-    // the backward reference to fail.
+    Tensor<float> x(toVector(dxAttributes->dims()), toVector(dxAttributes->strides()));
+    x.fillWithRandomValues(-1.0f, 1.0f, seed);
+    Tensor<float> y(index.dims(), index.strides());
+    ShallowTensor<int32_t> indexView(index.rawHostData(), index.dims(), index.strides());
+
+    // The reference validates ranks before writing, so a rejected graph keeps its
+    // filled index for the backward reference to fail.
     try
     {
-        Tensor<float> x(toVector(dxAttributes->dims()), toVector(dxAttributes->strides()));
-        x.fillWithRandomValues(-1.0f, 1.0f, seed);
-        Tensor<float> y(index.dims(), index.strides());
-        ShallowTensor<int32_t> indexView(index.rawHostData(), index.dims(), index.strides());
-
         hipdnn_test_sdk::utilities::CpuFpReferenceResampleFwd::
             forward<float, float, float, int32_t>(x,
                                                   y,
@@ -104,7 +103,7 @@ std::optional<std::string> deriveResampleBackwardIndex(const fb::Graph& graph,
                                                   attributes.padding_mode(),
                                                   &indexView);
     }
-    catch(const std::exception&)
+    catch(const std::runtime_error&)
     {
         return std::nullopt;
     }
