@@ -158,9 +158,11 @@ With `HIPBLASLT_EMULATION_PROFILE=<file>`, each emulated call appends one row:
 
 - `t_*_ms` and `cpu_*_ms`: measured GPU-event and host wall-clock times in
   milliseconds, summed over all sub-GEMMs when the problem is split.
-- `pred_*_rel`: performance-model predictions, as a fraction of the
-  predicted native GEMM cost. `pred_total_rel < 1` means emulation is
-  predicted to be faster than native.
+- `scale_chunk_size`, `gemm_chunk_size`: moduli per INT8 GEMM pass that ran,
+  the smallest over all sub-GEMMs when the problem is split.
+- `pred_*_rel`: performance-model predictions for the workspace the call
+  received, as a fraction of the predicted native GEMM cost.
+  `pred_total_rel < 1` means emulation is predicted to be faster than native.
 
 ## Build
 
