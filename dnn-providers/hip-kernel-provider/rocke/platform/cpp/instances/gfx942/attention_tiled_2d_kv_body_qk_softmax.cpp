@@ -141,6 +141,10 @@ static rocke_value_t* fh_max_seq_prefix_len(rocke_gfx942_attn2d_build_ctx_t* ctx
 
 static rocke_value_t* fh_warp_xor_reduce_max(rocke_gfx942_attn2d_build_ctx_t* ctx, rocke_value_t* v)
 {
+    /* Intentionally on ds_swizzle for all masks (mirrors Python
+     * attention.py::warp_xor_reduce_max): masks 1, 2, 4, 8 are not routed
+     * to warp_shuffle_xor_dpp here, unlike the sum reduce. They could take
+     * the same win; add it on both engines together if so. */
     rocke_value_t* cur = v;
     for(int k = 0; k < 4; ++k)
     {
