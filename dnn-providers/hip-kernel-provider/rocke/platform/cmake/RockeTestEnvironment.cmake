@@ -3,7 +3,7 @@
 
 include("${CMAKE_CURRENT_LIST_DIR}/ImportedLibraryLocation.cmake")
 
-# Build-tree commands only. Installed tests use runtime discovery after relocation.
+# Build-tree commands only. Installed native tests receive an owner-selected flavor.
 set(_ROCKE_COMGR_TEST_LAUNCHER "${CMAKE_CURRENT_LIST_DIR}/../tools/run_with_comgr.py")
 # Anchor build-local selections before packaging or CTest changes directory.
 # Do not collapse '..': traversing a directory symlink first can select a
@@ -22,12 +22,11 @@ endfunction()
 # Form a build-test command prefix that supplies a compiler default while
 # preserving the environment of the process that invokes CTest.
 function(rocke_comgr_test_launcher output default_comgr)
-  set(_launcher "")
+  set(_launcher "${Python3_EXECUTABLE}" "${_ROCKE_COMGR_TEST_LAUNCHER}")
   if(default_comgr)
-    # Match configure-time relative overrides before CTest changes directory.
     rocke_normalize_comgr_path(_absolute "${default_comgr}")
-    set(_launcher "${Python3_EXECUTABLE}" "${_ROCKE_COMGR_TEST_LAUNCHER}"
-                  --default-comgr "${_absolute}" --)
+    list(APPEND _launcher --default-comgr "${_absolute}")
   endif()
+  list(APPEND _launcher --)
   set(${output} "${_launcher}" PARENT_SCOPE)
 endfunction()

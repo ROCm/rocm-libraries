@@ -72,10 +72,10 @@ bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
 
 /* Lower `kernel` to AMDGPU LLVM IR text.
  *
- *   flavor : ROCKE_LLVM_FLAVOR_AUTO resolves via $ROCKE_LLVM_FLAVOR, then
- *            a natively discovered COMGR candidate's LLVM version. If no compiler
- *            can be queried, lowering fails. When compilation is owned
- *            by the caller, pass an explicit flavor matching that compiler.
+ *   flavor : ROCKE_LLVM_FLAVOR_AUTO resolves only via $ROCKE_LLVM_FLAVOR.
+ *            Native lowering is compiler-free: the compilation owner must pass
+ *            its queried flavor or provide that environment setting. No SDK,
+ *            build-directory or compiler-library discovery occurs here.
  *   arch   : ISA backend gfx string ("gfx942","gfx950",...). Required: NULL
  *            fails with ROCKE_ERR_VALUE, because there is no default target.
  *   out_text : on ROCKE_OK, receives a malloc'd NUL-terminated string the caller
