@@ -512,10 +512,27 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 
+    set(_rocke_barrier_parity_entries "")
+    if(TARGET rocke_optimization_barrier_emit)
+      rocke_cxx_test_installed_name(_rocke_installed_name
+                                  rocke_optimization_barrier_emit)
+      string(APPEND _rocke_barrier_parity_entries
+             "add_test(rocke_optimization_barrier_hip_pair python "
+             "\"${ROCKE_TEST_CTEST_REL}tests/core/"
+             "test_optimization_barrier_cli.py\" --native "
+             "\"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}\" "
+             "--launcher \"${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/"
+             "subprocess_launcher.py\" --emitter "
+             "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
+             "optimization_barrier_emit.py\" --count 12)\n"
+             "set_tests_properties(rocke_optimization_barrier_hip_pair "
+             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT 120)\n")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n"
+           "${_rocke_barrier_parity_entries}")
 
     # Compiler tool locations for Python entries that compile and disassemble
     # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its

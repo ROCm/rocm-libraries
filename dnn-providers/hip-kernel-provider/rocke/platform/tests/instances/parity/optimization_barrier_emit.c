@@ -47,8 +47,10 @@ static void build_hip_epilogue(rocke_ir_builder_t* b, int idx)
     auto* opaque = rocke_b_optimization_barrier(b, value);
     if(idx % 2)
         rocke_attr_set_str(b, &opaque->op->attrs, "clobber", "");
-    rocke_b_global_store(
-        b, output, rocke_b_thread_id_x(b), rocke_b_cast_f32_to(b, opaque, type), 2);
+    /* Sequence side-effecting builder calls in Python's evaluation order. */
+    auto* tid = rocke_b_thread_id_x(b);
+    auto* converted = rocke_b_cast_f32_to(b, opaque, type);
+    rocke_b_global_store(b, output, tid, converted, 2);
     rocke_b_ret(b);
 }
 

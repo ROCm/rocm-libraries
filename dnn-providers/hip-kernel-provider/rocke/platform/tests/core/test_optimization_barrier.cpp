@@ -159,8 +159,9 @@ static int test_tensor_epilogue_hip()
                 CHECK(opaque);
                 if(explicit_clobber)
                     rocke_attr_set_str(&b, &opaque->op->attrs, "clobber", "");
-                rocke_b_global_store(
-                    &b, output, rocke_b_thread_id_x(&b), rocke_b_cast_f32_to(&b, opaque, type), 2);
+                auto* tid = rocke_b_thread_id_x(&b);
+                auto* converted = rocke_b_cast_f32_to(&b, opaque, type);
+                rocke_b_global_store(&b, output, tid, converted, 2);
                 rocke_b_ret(&b);
                 // The tensor epilogue has the same barrier contract in both routes.
                 CHECK(test_llvm_roundtrip(&b, arch) == 0);

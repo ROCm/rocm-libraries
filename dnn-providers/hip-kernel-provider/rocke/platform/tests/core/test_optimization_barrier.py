@@ -27,6 +27,11 @@ from rocke.core.ir import (
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.engines import (
+    assert_both_engines_reject,
+    assert_both_engines_reject_hip,
+    lower_hip_with_both_engines,
+)
 
 
 @pytest.mark.parametrize(
@@ -163,11 +168,6 @@ def test_hip_general_pure_asm_preserves_explicit_memory_clobber():
 
 
 @pytest.fixture
-def hip_engine():
-    return pytest.importorskip("rocke_engine")
-
-
-@pytest.fixture
 def barrier_emitter():
     return runpy.run_path(
         str(
@@ -180,16 +180,14 @@ def barrier_emitter():
 
 
 @pytest.mark.parametrize("index", range(8))
-def test_hip_barrier_paired_emitters(index, hip_engine, barrier_emitter):
+def test_hip_barrier_paired_emitters(index, barrier_emitter):
     arch, dtype, clobber = barrier_emitter["HIP_CONFIGS"][index]
     kernel = barrier_emitter["build_hip_epilogue"](dtype, clobber)
-    python = lower_kernel_to_hip(kernel, arch=arch)
-    native = hip_engine.lower_serialized_ir_hip(serialize(kernel), arch=arch)
-    assert native == python
-    assert "factor_a * factor_b" in native
-    assert 'asm ("" : "=v"' in native
-    assert "asm volatile" not in native
-    assert ' : "memory"' not in native
+    source = lower_hip_with_both_engines(kernel, arch)
+    assert "factor_a * factor_b" in source
+    assert 'asm ("" : "=v"' in source
+    assert "asm volatile" not in source
+    assert ' : "memory"' not in source
 
 
 @pytest.mark.parametrize(
@@ -197,7 +195,7 @@ def test_hip_barrier_paired_emitters(index, hip_engine, barrier_emitter):
     [("clobber", v) for v in (False, True, 0, 1, 0.0, 1.0, "memory")]
     + [("sideeffect", v) for v in (0, 1, 0.0, 1.0, "", "false")],
 )
-def test_hip_native_rejects_malformed_barrier_attributes(field, value, hip_engine):
+def test_hip_native_rejects_malformed_barrier_attributes(field, value):
     b = IRBuilder("invalid_native_asm")
     result = b.optimization_barrier(b.param("value", F32))
     result.op.attrs[field] = value
@@ -206,15 +204,12 @@ def test_hip_native_rejects_malformed_barrier_attributes(field, value, hip_engin
         if field == "clobber"
         else "HIP inline asm sideeffect must be a boolean"
     )
-    with pytest.raises(ValueError, match=diagnostic):
-        lower_kernel_to_hip(b.kernel, arch="gfx1250")
-    with pytest.raises(RuntimeError, match=diagnostic):
-        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
+    assert_both_engines_reject_hip(b.kernel, "gfx1250", ValueError, diagnostic)
 
 
 @pytest.mark.parametrize("sideeffect", [None, False, True])
 @pytest.mark.parametrize("output", [None, F32])
-def test_hip_general_assembly_matches_native(sideeffect, output, hip_engine):
+def test_hip_general_assembly_matches_native(sideeffect, output):
     b = IRBuilder("general_asm")
     value = b.param("value", F32)
     b.inline_asm(
@@ -229,28 +224,24 @@ def test_hip_general_assembly_matches_native(sideeffect, output, hip_engine):
     else:
         op.attrs["sideeffect"] = sideeffect
     op.attrs["clobber"] = "memory"
-    assert lower_kernel_to_hip(b.kernel, arch="gfx1250") == (
-        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
-    )
+    lower_hip_with_both_engines(b.kernel, "gfx1250")
 
 
 @pytest.mark.parametrize("clobber", [False, True, 0, 1, 0.0, 1.0])
-def test_hip_general_assembly_rejects_non_string_clobber(clobber, hip_engine):
+def test_hip_general_assembly_rejects_non_string_clobber(clobber):
     b = IRBuilder("invalid_general_clobber")
     result = b.inline_asm("v_mov_b32 $0, $1", "=v,0", [b.param("value", F32)], F32)
     result.op.attrs["clobber"] = clobber
-    with pytest.raises(ValueError, match="HIP inline asm clobber must be a string"):
-        lower_kernel_to_hip(b.kernel, arch="gfx1250")
-    with pytest.raises(RuntimeError, match="HIP inline asm clobber must be a string"):
-        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
+    assert_both_engines_reject_hip(
+        b.kernel, "gfx1250", ValueError, "HIP inline asm clobber must be a string"
+    )
 
 
 @pytest.mark.parametrize("index", range(4))
-def test_hip_assembly_paired_emitters(index, hip_engine, barrier_emitter):
+def test_hip_assembly_paired_emitters(index, barrier_emitter):
     arch, output = barrier_emitter["HIP_STRING_CONFIGS"][index]
     kernel = barrier_emitter["build_hip_assembly"](output)
-    source = lower_kernel_to_hip(kernel, arch=arch)
-    assert source == hip_engine.lower_serialized_ir_hip(serialize(kernel), arch=arch)
+    source = lower_hip_with_both_engines(kernel, arch)
     assert r"\n\ts_nop 0 ; \"quoted\" \\path" in source
 
 
@@ -286,13 +277,11 @@ def test_hip_assembly_string_literal(suffix, escaped, output, roundtrip):
 
 @pytest.mark.parametrize("suffix,escaped", _HIP_ASM_STRING_CASES)
 @pytest.mark.parametrize("output", [None, F32])
-def test_hip_assembly_string_matches_native(suffix, escaped, output, hip_engine):
+def test_hip_assembly_string_matches_native(suffix, escaped, output):
     kernel = _asm_string_kernel(suffix, output)
-    python = lower_kernel_to_hip(kernel, arch="gfx950")
-    native = hip_engine.lower_serialized_ir_hip(serialize(kernel), arch="gfx950")
-    assert native == python
+    source = lower_hip_with_both_engines(kernel, "gfx950")
     prefix = "v_mov_b32 %0, %1" if output else "s_nop 0"
-    assert f'asm volatile ("{prefix}{escaped}"' in native
+    assert f'asm volatile ("{prefix}{escaped}"' in source
 
 
 def _sideeffect_kernel(sideeffect, outputs):
@@ -335,14 +324,11 @@ def test_llvm_inline_asm_rejects_non_bool_sideeffect(
 @pytest.mark.parametrize("outputs", [0, 1, 2])
 @pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
 @pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23", "llvm24"])
-def test_llvm_native_rejects_non_bool_sideeffect(
-    sideeffect, outputs, arch, flavor, hip_engine
-):
+def test_llvm_native_rejects_non_bool_sideeffect(sideeffect, outputs, arch, flavor):
     kernel = _sideeffect_kernel(sideeffect, outputs)
-    with pytest.raises(
-        RuntimeError, match="LLVM inline asm sideeffect must be a boolean"
-    ):
-        hip_engine.lower_serialized_ir(serialize(kernel), arch=arch, flavor=flavor)
+    assert_both_engines_reject(
+        kernel, arch, ValueError, "LLVM inline asm sideeffect must be a boolean", flavor
+    )
 
 
 @pytest.mark.parametrize("sideeffect", [None, False, True])
@@ -360,15 +346,10 @@ def test_llvm_inline_asm_preserves_boolean_and_default(
     )
 
 
-def test_hip_assembly_requires_output_constraint(hip_engine):
+def test_hip_assembly_requires_output_constraint():
     b = IRBuilder("missing_output_constraint")
     result = b.inline_asm("", "=v,0", [b.param("value", F32)], F32)
     result.op.attrs["constraints"] = " , "
-    with pytest.raises(
-        ValueError, match="HIP inline asm requires an output constraint"
-    ):
-        lower_kernel_to_hip(b.kernel, arch="gfx1250")
-    with pytest.raises(
-        RuntimeError, match="HIP inline asm requires an output constraint"
-    ):
-        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
+    assert_both_engines_reject_hip(
+        b.kernel, "gfx1250", ValueError, "HIP inline asm requires an output constraint"
+    )
