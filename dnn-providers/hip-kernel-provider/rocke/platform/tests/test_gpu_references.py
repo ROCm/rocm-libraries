@@ -95,13 +95,14 @@ def project(tmp_path):
     (tmp_path / "CMakeLists.txt").write_text(
         f"""cmake_minimum_required(VERSION 3.25)
 project(reference_install NONE)
-set(_rocke_library_dir "${{CMAKE_CURRENT_SOURCE_DIR}}/library")
+set(_ROCKE_LIBRARY_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/library")
 set(ROCKE_TEST_INSTALL_DIR "tests")
 set(Python3_EXECUTABLE "{Path(sys.executable).as_posix()}")
 include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/InstallGpuReferences.cmake")
 set(installed "")
-foreach(operation IN LISTS _rocke_reference_operations)
-  string(APPEND installed "${{operation}}=${{_rocke_${{operation}}_installed_architectures}}\\n")
+foreach(operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
+  string(TOUPPER "${{operation}}" upper)
+  string(APPEND installed "${{operation}}=${{_ROCKE_${{upper}}_INSTALLED_ARCHITECTURES}}\\n")
 endforeach()
 file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/installed.txt" "${{installed}}")
 """
@@ -363,9 +364,9 @@ def test_reference_operations_are_defined_once_by_their_packages(tmp_path):
     """CMake, the artifact CLI and publication all follow the operation packages."""
     discovered = _cmake_script(
         tmp_path,
-        f'set(_rocke_library_dir "{_LIBRARY.as_posix()}")\n'
+        f'set(_ROCKE_LIBRARY_DIR "{_LIBRARY.as_posix()}")\n'
         f'include("{(_PLATFORM / "cmake/InstallGpuReferences.cmake").as_posix()}")\n'
-        'set(result "${_rocke_reference_operations}")\n',
+        'set(result "${_ROCKE_REFERENCE_OPERATIONS}")\n',
     )
     assert discovered.split(";") == _OPERATIONS
     assert _artifact_operations(_LIBRARY) == _OPERATIONS
