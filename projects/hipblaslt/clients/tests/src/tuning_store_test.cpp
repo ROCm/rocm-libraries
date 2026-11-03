@@ -6,8 +6,8 @@
 // link the store directly, so they need neither a device nor the hooks
 // hipblaslt-test uses.
 
-#include "TuningCacheStore.hpp"
 #include "../../common/include/test_process.hpp"
+#include "TuningCacheStore.hpp"
 
 #include <gtest/gtest.h>
 
