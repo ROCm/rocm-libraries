@@ -117,7 +117,18 @@ def test_declined_feature_is_declined_with_a_declined_features_reason(feature):
 
 # A NOT_YET_IMPLEMENTED decline names an implementation shortcut with its own
 # follow-on (a reference oracle, a schema), not a permanent kernel/ABI limit.
-_NOT_YET_IMPLEMENTED_FEATURES = {"bias", "bias_broadcast", "alibi", "sinks", "paged"}
+_NOT_YET_IMPLEMENTED_FEATURES = {
+    "scale_tensor",
+    "bias",
+    "bias_broadcast",
+    "alibi",
+    "sinks",
+    "dropout",
+    "paged",
+    "block_mask",
+    "fp8",
+    "fp8_s_o",
+}
 
 
 @pytest.mark.parametrize("feature", sorted(_NOT_YET_IMPLEMENTED_FEATURES))

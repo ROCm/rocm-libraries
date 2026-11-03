@@ -128,7 +128,15 @@ def test_declined_feature_is_declined_with_a_declined_features_reason(feature):
 # follow-on (a reference oracle, a schema), not a permanent kernel/ABI limit.
 # Unlike the unified gate, dense bias/alibi are not tagged: no dense candidate
 # declares that support, planned or otherwise.
-_NOT_YET_IMPLEMENTED_FEATURES = {"sinks", "paged"}
+_NOT_YET_IMPLEMENTED_FEATURES = {
+    "scale_tensor",
+    "sinks",
+    "dropout",
+    "paged",
+    "block_mask",
+    "fp8",
+    "fp8_s_o",
+}
 
 
 @pytest.mark.parametrize("feature", sorted(_NOT_YET_IMPLEMENTED_FEATURES))
@@ -261,7 +269,7 @@ def test_gfx950_bottom_right_causal_is_admitted_on_the_grid_body():
 
 
 def test_gfx942_bottom_right_causal_is_admitted():
-    """gfx942's dense candidate now serves a moving bottom-right diagonal (#14367)."""
+    """gfx942's dense candidate serves a moving bottom-right diagonal."""
     req = _dense_request(
         arch="gfx942", s_q=S, s_kv=2 * S, right_bound=0, diagonal="bottom_right"
     )
