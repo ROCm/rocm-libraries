@@ -1024,9 +1024,12 @@ group, in its receptive-field rows and over `4 * ceil((KW + 1) / 4)` columns
 with the VALU form up to fp32 summation order.
 
 **Toeplitz WMMA form (`mfma=True`, `wave_size=32`, gfx1250).** The same form on
-the wave32 `wmma_f32_16x16x32_{f16,bf16}` (`_build_dw_dgrad_win_wmma` / C++
-`dw_win_build_wmma`): tile rows, columns, passes, LDS staging, grid and kernel
-name are unchanged, and the knob keeps its name `mfma`. A wave32 lane carries
+the wave32 `wmma_f32_16x16x32_{f16,bf16}`: one builder per engine
+(`_build_dw_dgrad_win_toeplitz` / C++ `dw_win_build_toeplitz`) serves both
+atoms and picks the MFMA or the WMMA once from `wave_size`
+(`_dw_toeplitz_atom` / `dw_toeplitz_atom`). Tile rows, columns, passes, LDS
+staging, grid and kernel name are unchanged, and the knob keeps its name
+`mfma`. A wave32 lane carries
 16 K elements, two 8-channel window-column chunks `u = 2 t + j`: the A
 fragment holds two one-hot weight chunks, B is two `ds_load_b128` reads, and
 D is one 16-byte LDS store of the wave's 8 channels per lane. The fragments
