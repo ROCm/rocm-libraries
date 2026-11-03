@@ -38,6 +38,7 @@ __all__ = [
     "DIRECT_MFMA_DGRAD",
     "DIRECT_MFMA_HELPERS",
     "DIRECT_SPLIT_REDUCE",
+    "PER_AXIS_PAD_VARIANTS",
     "direct_dgrad_weight_transforms",
     "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
@@ -102,6 +103,17 @@ DIRECT_SPLIT_REDUCE = "direct_split_reduce"
 # Stride-1 depthwise dgrad through the output-stationary forward kernel with
 # the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
 DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
+# The variants that offset columns by a column padding of their own
+# (problem.PAD_W != problem.PAD) and the only ones with a non-square filter:
+# the rotated-filter depthwise dgrad and the direct (1 x R, rectangular,
+# poly_view) and small-K WMMA forwards. Every other variant takes one padding
+# for both axes. The cache selection (direct_spec_for_problem) and the AOT
+# identity lookup (direct_aot_jobs.direct_job_for_identity) both read it.
+PER_AXIS_PAD_VARIANTS = (
+    DIRECT_DEPTHWISE_TILED_DGRAD,
+    DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_WMMA,
+)
 # variant -> (transpose helper, reorganize helper)
 DIRECT_MFMA_HELPERS = {
     "direct_grouped_dgrad_mfma": (DIRECT_DGRAD_TRANSPOSE, DIRECT_DGRAD_REORGANIZE),
@@ -728,13 +740,13 @@ def direct_spec_for_problem(
         )
     if getattr(problem, "pad_w", -1) < -1:
         return None, f"pad_w must be -1 (PAD) or at least 0 (got {problem.pad_w})"
-    if getattr(problem, "PAD_W", problem.PAD) != problem.PAD and (
-        variant
-        not in (DIRECT_DEPTHWISE_TILED_DGRAD, DIRECT_FWD_SMALLK_WMMA, DIRECT_FWD_WMMA)
+    if (
+        getattr(problem, "PAD_W", problem.PAD) != problem.PAD
+        and variant not in PER_AXIS_PAD_VARIANTS
     ):
         return None, (
-            "one padding for both axes (only the rotated-filter dgrad, the "
-            "small-K forward and the 1 x R WMMA forward differ)"
+            f"one padding for both axes (only {', '.join(PER_AXIS_PAD_VARIANTS)} "
+            "take a column padding of their own)"
         )
     spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)

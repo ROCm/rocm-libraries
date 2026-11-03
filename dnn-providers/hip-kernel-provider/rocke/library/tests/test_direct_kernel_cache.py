@@ -1883,3 +1883,33 @@ def test_direct_job_for_identity_still_rejects_per_axis_pad_elsewhere():
     daj.direct_job_for_identity(ident)
     with pytest.raises(LookupError):
         daj.direct_job_for_identity(replace(ident, pad_w=0))
+
+
+def test_per_axis_pad_variants_drive_both_gates():
+    """PER_AXIS_PAD_VARIANTS is the one list of variants with a column
+    padding of their own: every grid row with a non-square filter or a
+    per-axis padding belongs to one of them, the AOT identity lookup reads
+    the same tuple, and the cache selection lets exactly those variants past
+    its one-padding rule."""
+    from kernels.conv import direct_aot_jobs as daj
+    from kernels.conv import direct_variants as dv
+
+    assert daj.PER_AXIS_PAD_VARIANTS is dv.PER_AXIS_PAD_VARIANTS
+    per_axis_rows = {
+        variant
+        for variant, (_, rows) in daj.DIRECT_CAPABILITIES.items()
+        for c in rows
+        if c.kw or c.pad_w >= 0
+    }
+    assert per_axis_rows == set(dv.PER_AXIS_PAD_VARIANTS)
+    problem = _problem(groups=1, cpg=64, kpg=64, pad_w=0)
+    checked = 0
+    for variant, (_, rows) in daj.DIRECT_CAPABILITIES.items():
+        knobs = next(iter(_knob_grid(variant, "gfx1250", "fp16", rows[0])), None)
+        if knobs is None:  # no knob grid on this arch
+            continue
+        _, why = direct_spec_for_problem(variant, problem, knobs, "gfx1250", 32)
+        one_padding = why.startswith("one padding for both axes (only ")
+        assert one_padding == (variant not in dv.PER_AXIS_PAD_VARIANTS), (variant, why)
+        checked += 1
+    assert checked > len(dv.PER_AXIS_PAD_VARIANTS)

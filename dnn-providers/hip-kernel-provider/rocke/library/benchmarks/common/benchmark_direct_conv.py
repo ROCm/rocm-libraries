@@ -257,8 +257,9 @@ def parse_miopen_cmd_direct(cmd: str):
             f"-F {miopen_args.forw}, -g {groups})"
         )
 
-    # The direct kernels take one stride and one padding for both axes;
-    # substituting the H value for W would run, and report, another problem.
+    # The direct kernels take one stride for both axes (a 1-D conv's row
+    # stride aside, below); substituting the H value for W would run, and
+    # report, another problem.
     sH = miopen_args.sH
     # A 1-D conv (H = 1, a 1 x R filter, no row padding) has one output row
     # whatever its row stride: its column stride is the problem's stride.
@@ -274,7 +275,9 @@ def parse_miopen_cmd_direct(cmd: str):
     # ungrouped stride-1 forward (the small-K WMMA kernel), an ungrouped 1-D
     # strided forward (poly_view) and an ungrouped stride-1 1 x R forward,
     # dilated or not (direct_fwd_wmma), are the problems a direct kernel
-    # computes with per-axis padding; every other variant refuses it.
+    # computes with per-axis padding: the shapes of PER_AXIS_PAD_VARIANTS
+    # (kernels.conv.direct_variants), which the cache selection checks per
+    # variant. Every other problem keeps one padding for both axes.
     pad_w_ok = (
         (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1)
         or (
@@ -3231,8 +3234,9 @@ def main() -> int:
     if args.run_from_cache:
         return _cache_dispatch(args, arch, cases)
 
-    # A per-axis padding runs only from the cache, on the rotated-filter dgrad
-    # kernel: the sweeps below build kernels with one padding for both axes.
+    # A per-axis padding runs only from the cache, on PER_AXIS_PAD_VARIANTS
+    # (kernels.conv.direct_variants): the sweeps below build kernels with one
+    # padding for both axes.
     for prob, _, direction in cases:
         if prob.PAD_W != prob.PAD:
             print(

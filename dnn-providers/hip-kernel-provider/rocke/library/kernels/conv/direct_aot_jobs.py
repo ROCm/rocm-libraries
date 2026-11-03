@@ -39,6 +39,7 @@ from kernels.conv.direct_variants import (
     DIRECT_WAVE_PARAMETRIC,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
+    PER_AXIS_PAD_VARIANTS,
     direct_wgrad_fold_knobs,
     dgrad_rtc_vgprs,
     direct_dgrad_weight_transforms,
@@ -2917,14 +2918,9 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
             identity.dtype_a,
         )
     rebuilt = replace(rebuilt, llvm_flavor=identity.llvm_flavor)
-    if (caps.kw or caps.pad_w >= 0) and identity.algorithm not in (
-        _DW_TILED_DGRAD,
-        _FWD_WMMA,
-        _FWD_SMALLK,
-    ):
-        # Only the rotated-filter depthwise dgrad and the WMMA forward rows
-        # (1 x R, rectangular, small-K) carry a non-square filter or per-axis
-        # padding; the spec validation below still checks those.
+    if (caps.kw or caps.pad_w >= 0) and identity.algorithm not in PER_AXIS_PAD_VARIANTS:
+        # Only the PER_AXIS_PAD_VARIANTS rows carry a non-square filter or a
+        # per-axis padding; the spec validation below still checks those.
         raise LookupError(
             f"the direct grid cannot build this identity: "
             f"{caps.KH}x{caps.KW} filter, padding {caps.PAD}x{caps.PAD_W}"
