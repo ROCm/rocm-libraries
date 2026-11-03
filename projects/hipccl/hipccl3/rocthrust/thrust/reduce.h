@@ -82,6 +82,10 @@ THRUST_NAMESPACE_BEGIN
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator>
 THRUST_HOST_DEVICE detail::it_value_t<InputIterator>
@@ -124,6 +128,10 @@ reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec, InputIt
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator>
 detail::it_value_t<InputIterator> reduce(InputIterator first, InputIterator last);
@@ -171,6 +179,10 @@ detail::it_value_t<InputIterator> reduce(InputIterator first, InputIterator last
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename T>
 THRUST_HOST_DEVICE T reduce(
@@ -213,6 +225,10 @@ THRUST_HOST_DEVICE T reduce(
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename T>
 T reduce(InputIterator first, InputIterator last, T init);
@@ -267,6 +283,10 @@ T reduce(InputIterator first, InputIterator last, T init);
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see transform_reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename T, typename BinaryFunction>
 THRUST_HOST_DEVICE T reduce(
@@ -319,6 +339,10 @@ THRUST_HOST_DEVICE T reduce(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see transform_reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename T, typename BinaryFunction>
 T reduce(InputIterator first, InputIterator last, T init, BinaryFunction binary_op);
@@ -375,6 +399,10 @@ T reduce(InputIterator first, InputIterator last, T init, BinaryFunction binary_
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
 THRUST_HOST_DEVICE void reduce_into(
@@ -431,6 +459,10 @@ THRUST_HOST_DEVICE void reduce_into(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator>
 void reduce_into(InputIterator first, InputIterator last, OutputIterator output);
@@ -489,6 +521,10 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output)
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T>
 THRUST_HOST_DEVICE void reduce_into(
@@ -547,6 +583,10 @@ THRUST_HOST_DEVICE void reduce_into(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator, typename T>
 void reduce_into(InputIterator first, InputIterator last, OutputIterator output, T init);
@@ -596,7 +636,7 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  execution policy for parallelization:
  *
  *  \code
- *  #include <cuda/functional>
+ *  #include _THRUST_LIBCXX_INCLUDE(functional)
  *  #include <thrust/reduce.h>
  *  #include <thrust/device_vector.h>
  *  #include <thrust/execution_policy.h>
@@ -605,7 +645,7 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  thrust::device_vector<int> output(1);
  *  thrust::reduce_into(thrust::device,
  *                      data.begin(), data.end(), output.begin(), -1,
- *                      cuda::maximum{});
+ *                      _THRUST_LIBCXX::maximum{});
  *  // output[0] == 3
  *  \endcode
  *
@@ -613,6 +653,10 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  \see reduce
  *  \see transform_reduce
  *  \see transform_reduce_into
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
 THRUST_HOST_DEVICE void reduce_into(
@@ -657,7 +701,7 @@ THRUST_HOST_DEVICE void reduce_into(
  *  compute the maximum value of a sequence of integers.
  *
  *  \code
- *  #include <cuda/functional>
+ *  #include _THRUST_LIBCXX_INCLUDE(functional)
  *  #include <thrust/reduce.h>
  *  #include <thrust/device_vector.h>
  *  #include <thrust/execution_policy.h>
@@ -665,7 +709,7 @@ THRUST_HOST_DEVICE void reduce_into(
  *  thrust::device_vector<int> data{1, 0, 2, 2, 1, 3};
  *  thrust::device_vector<int> output(1);
  *  thrust::reduce_into(data.begin(), data.end(), output.begin(), -1,
- *                      cuda::maximum{});
+ *                      _THRUST_LIBCXX::maximum{});
  *  // output[0] == 3
  *  \endcode
  *
@@ -673,6 +717,10 @@ THRUST_HOST_DEVICE void reduce_into(
  *  \see reduce
  *  \see transform_reduce
  *  \see transform_reduce_into
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
 void reduce_into(InputIterator first, InputIterator last, OutputIterator output, T init, BinaryFunction binary_op);
@@ -733,6 +781,10 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -797,6 +849,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator1, typename OutputIterator2>
 _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
@@ -865,6 +921,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -934,6 +994,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,
@@ -1013,6 +1077,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -1090,6 +1158,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,

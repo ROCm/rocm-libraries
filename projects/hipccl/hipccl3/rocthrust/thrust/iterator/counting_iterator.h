@@ -165,6 +165,10 @@ using unit_stride = compile_time_value<1>;
 //! \endcode
 //!
 //! \see make_counting_iterator
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 template <typename Incrementable,
           typename System       = use_default,
           typename Traversal    = use_default,
@@ -272,11 +276,7 @@ private:
   THRUST_HOST_DEVICE bool equal(
     counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference, OtherStrideHolder> const& y) const
   {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
     if constexpr (_THRUST_LIBCXX::is_floating_point_v<Incrementable>)
-#else
-    if constexpr (::rocprim::is_floating_point<Incrementable>::value)
-#endif
     {
       return distance_to(y) == 0;
     }

@@ -72,6 +72,10 @@ THRUST_NAMESPACE_BEGIN
  *  \see https://en.cppreference.com/w/cpp/algorithm/reverse
  *  \see \p reverse_copy
  *  \see \p reverse_iterator
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename BidirectionalIterator>
 THRUST_HOST_DEVICE void reverse(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
@@ -105,6 +109,10 @@ THRUST_HOST_DEVICE void reverse(const thrust::detail::execution_policy_base<Deri
  *  \see https://en.cppreference.com/w/cpp/algorithm/reverse
  *  \see \p reverse_copy
  *  \see \p reverse_iterator
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename BidirectionalIterator>
 void reverse(BidirectionalIterator first, BidirectionalIterator last);
@@ -155,6 +163,10 @@ void reverse(BidirectionalIterator first, BidirectionalIterator last);
  *  \see https://en.cppreference.com/w/cpp/algorithm/reverse_copy
  *  \see \p reverse
  *  \see \p reverse_iterator
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename BidirectionalIterator, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator reverse_copy(
@@ -203,6 +215,10 @@ THRUST_HOST_DEVICE OutputIterator reverse_copy(
  *  \see https://en.cppreference.com/w/cpp/algorithm/reverse_copy
  *  \see \p reverse
  *  \see \p reverse_iterator
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename BidirectionalIterator, typename OutputIterator>
 OutputIterator reverse_copy(BidirectionalIterator first, BidirectionalIterator last, OutputIterator result);

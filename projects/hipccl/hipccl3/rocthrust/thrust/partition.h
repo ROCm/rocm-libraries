@@ -99,6 +99,10 @@ THRUST_NAMESPACE_BEGIN
  *  \see https://en.cppreference.com/w/cpp/algorithm/partition
  *  \see \p stable_partition
  *  \see \p partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename Predicate>
 THRUST_HOST_DEVICE ForwardIterator partition(
@@ -156,6 +160,10 @@ THRUST_HOST_DEVICE ForwardIterator partition(
  *  \see https://en.cppreference.com/w/cpp/algorithm/partition
  *  \see \p stable_partition
  *  \see \p partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator, typename Predicate>
 ForwardIterator partition(ForwardIterator first, ForwardIterator last, Predicate pred);
@@ -220,6 +228,10 @@ ForwardIterator partition(ForwardIterator first, ForwardIterator last, Predicate
  *  \see https://en.cppreference.com/w/cpp/algorithm/partition
  *  \see \p stable_partition
  *  \see \p partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename Predicate>
 THRUST_HOST_DEVICE ForwardIterator partition(
@@ -284,6 +296,10 @@ THRUST_HOST_DEVICE ForwardIterator partition(
  *  \see https://en.cppreference.com/w/cpp/algorithm/partition
  *  \see \p stable_partition
  *  \see \p partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
 ForwardIterator partition(ForwardIterator first, ForwardIterator last, InputIterator stencil, Predicate pred);
@@ -356,6 +372,10 @@ ForwardIterator partition(ForwardIterator first, ForwardIterator last, InputIter
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p stable_partition_copy
  *  \see \p partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator,
@@ -432,6 +452,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p stable_partition_copy
  *  \see \p partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
 _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
@@ -502,6 +526,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p stable_partition_copy
  *  \see \p partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -577,6 +605,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p stable_partition_copy
  *  \see \p partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,
@@ -649,6 +681,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
  *  \see https://en.cppreference.com/w/cpp/algorithm/stable_partition
  *  \see \p partition
  *  \see \p stable_partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename Predicate>
 THRUST_HOST_DEVICE ForwardIterator stable_partition(
@@ -709,6 +745,10 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
  *  \see https://en.cppreference.com/w/cpp/algorithm/stable_partition
  *  \see \p partition
  *  \see \p stable_partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator, typename Predicate>
 ForwardIterator stable_partition(ForwardIterator first, ForwardIterator last, Predicate pred);
@@ -775,6 +815,10 @@ ForwardIterator stable_partition(ForwardIterator first, ForwardIterator last, Pr
  *  \see https://en.cppreference.com/w/cpp/algorithm/stable_partition
  *  \see \p partition
  *  \see \p stable_partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename Predicate>
 THRUST_HOST_DEVICE ForwardIterator stable_partition(
@@ -841,6 +885,10 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
  *  \see https://en.cppreference.com/w/cpp/algorithm/stable_partition
  *  \see \p partition
  *  \see \p stable_partition_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
 ForwardIterator stable_partition(ForwardIterator first, ForwardIterator last, InputIterator stencil, Predicate pred);
@@ -915,6 +963,10 @@ ForwardIterator stable_partition(ForwardIterator first, ForwardIterator last, In
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p partition_copy
  *  \see \p stable_partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator,
@@ -993,6 +1045,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_pa
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p partition_copy
  *  \see \p stable_partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
 _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
@@ -1065,6 +1121,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p partition_copy
  *  \see \p stable_partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -1142,6 +1202,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_pa
  *  \see http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2569.pdf
  *  \see \p partition_copy
  *  \see \p stable_partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,
@@ -1217,6 +1281,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
  *
  *  \see \p partition
  *  \see \p find_if_not
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename Predicate>
 THRUST_HOST_DEVICE ForwardIterator partition_point(
@@ -1268,6 +1336,10 @@ THRUST_HOST_DEVICE ForwardIterator partition_point(
  *
  *  \see \p partition
  *  \see \p find_if_not
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator, typename Predicate>
 ForwardIterator partition_point(ForwardIterator first, ForwardIterator last, Predicate pred);
@@ -1327,6 +1399,10 @@ ForwardIterator partition_point(ForwardIterator first, ForwardIterator last, Pre
  *  \endcode
  *
  *  \see \p partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename Predicate>
 THRUST_HOST_DEVICE bool is_partitioned(
@@ -1375,6 +1451,10 @@ THRUST_HOST_DEVICE bool is_partitioned(
  *  \endcode
  *
  *  \see \p partition
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename Predicate>
 bool is_partitioned(InputIterator first, InputIterator last, Predicate pred);

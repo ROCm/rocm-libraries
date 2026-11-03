@@ -62,6 +62,10 @@ THRUST_NAMESPACE_BEGIN
  *  \see tuple
  *
  *  \deprecated Use _THRUST_STD::tuple_element instead
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <size_t N, class T>
@@ -79,6 +83,10 @@ using _THRUST_STD::tuple_element;
  *  \see tuple
  *
  *  \deprecated Use _THRUST_STD::tuple_size instead
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T>
@@ -125,6 +133,10 @@ using _THRUST_STD::tuple_size;
  *  \see tie
  *
  *  \deprecated Use _THRUST_STD::tuple instead
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class... Ts>

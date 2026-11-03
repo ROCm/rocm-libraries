@@ -87,6 +87,10 @@ using _THRUST_STD::swap;
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/swap_ranges
  *  \see \c swap
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
 THRUST_HOST_DEVICE ForwardIterator2 swap_ranges(
@@ -135,6 +139,10 @@ THRUST_HOST_DEVICE ForwardIterator2 swap_ranges(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/swap_ranges
  *  \see \c swap
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator1, typename ForwardIterator2>
 ForwardIterator2 swap_ranges(ForwardIterator1 first1, ForwardIterator1 last1, ForwardIterator2 first2);

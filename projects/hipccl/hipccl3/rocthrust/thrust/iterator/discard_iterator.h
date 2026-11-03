@@ -107,6 +107,10 @@ THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 //! \endcode
 //!
 //! \see make_discard_iterator
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 template <typename System = use_default>
 class discard_iterator : public detail::make_discard_iterator_base<System>::type
 {
