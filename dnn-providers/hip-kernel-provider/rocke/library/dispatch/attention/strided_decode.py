@@ -112,6 +112,11 @@ def make_candidate() -> KernelCandidate:
         # Head size and GQA ratio are the kernel's call: defer to the same gate
         # the strided runner applies, so dispatch admits what the kernel admits.
         problem = _problem(req)
+        # The strided spec bakes the bottom-right causal band only (it takes no
+        # ``causal_top_left`` / ``right_bound``), so a top-left diagonal reached
+        # through NO_MASK / SLIDING_WINDOW + right_bound=0 is refused as well.
+        if problem.causal_top_left or problem.right_bound != 0:
+            return False, "strided decode uses bottom-right causal alignment"
         ok, why = _explicit_path_supported(problem, None, "3d", req.arch.lower())
         if not ok:
             return False, why

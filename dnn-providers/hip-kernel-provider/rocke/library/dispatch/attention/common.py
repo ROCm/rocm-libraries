@@ -702,7 +702,9 @@ def normalize_band(
       (``_has_no_mask_kernel``); see the known gap above.
     * Full attention ignores the alignment, and with one query row per sequence
       (``seqlen_q == 1``, single-token decode) it is the same computation as
-      bottom-right causal, so it is normalised to that.
+      bottom-right causal, so it is normalised to that. Likewise a bottom-right
+      band with no right bound is causal at ``seqlen_q == 1``: the one query row
+      sits on the diagonal at its last key. A top-left one keeps its band.
     * Top-left and bottom-right coincide when every sequence has ``q_len == kv_len``.
       ``uniform_lengths`` (the dense kernel, which takes uniform lengths) folds them at
       ``seqlen_q == seqlen_k``. The paged unified kernels do not: ``seqlen_q`` /
@@ -757,6 +759,15 @@ def normalize_band(
         )
     if sq == sk and (uniform_lengths or not _has_no_mask_kernel(req.arch)):
         align = Alignment.BOTTOM_RIGHT
+    if (
+        right_bound is None
+        and align is Alignment.BOTTOM_RIGHT
+        and sq == 1
+        and not uniform_lengths
+    ):
+        # One query row sits on the bottom-right diagonal at its last key, so an
+        # unbounded right side is the causal one (as for full attention above).
+        right_bound = 0
     return AttentionBand(left_bound, right_bound, align)
 
 
