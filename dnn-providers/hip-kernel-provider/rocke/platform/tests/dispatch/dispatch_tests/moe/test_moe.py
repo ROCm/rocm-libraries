@@ -15,6 +15,7 @@ from rocke.dispatch.families.moe import (
     moe_candidates,
     moe_sweep_space,
 )
+from rocke.tests.arch_marks import arch_specific
 
 # Every (arch, dtype) the family claims to dispatch.
 _ARCHES = ("gfx942", "gfx950")
@@ -108,6 +109,9 @@ class TestMoeDispatch(unittest.TestCase):
         self.assertEqual(r.spec.block_size, 256)
 
 
+@arch_specific(
+    ("gfx950",), reason="pins the shipped gfx950 tiling; gfx942 has its own retile"
+)
 class TestGfx950SpecIsUnchanged(unittest.TestCase):
     """The gfx942 registration must not move gfx950.
 
@@ -142,6 +146,9 @@ class TestGfx942Retile(unittest.TestCase):
     shipped tiling's LDS pool does not fit CDNA3.
     """
 
+    @arch_specific(
+        ("gfx942",), reason="gfx942 takes the 16x16x16 f16 atom and the 128 down tile"
+    )
     def test_f16_takes_the_gfx942_atom_and_down_tile(self):
         for dtype in ("fp16", "bf16"):
             with self.subTest(dtype=dtype):
@@ -157,6 +164,9 @@ class TestGfx942Retile(unittest.TestCase):
                 self.assertEqual(r.spec.tile_k_gu, 32)
                 self.assertEqual(r.spec.tile_k_down, 64)
 
+    @arch_specific(
+        ("gfx942",), reason="16x16x128 is gfx950-only; gfx942 takes 16x16x32"
+    )
     def test_fp8_takes_the_catalog_atom_not_the_hero_atom(self):
         r = dispatch_moe(_moe(arch="gfx942", dtype="fp8"))
         self.assertEqual(r.candidate.spec_id, "mega_fp8")
@@ -173,6 +183,9 @@ class TestGfx942Retile(unittest.TestCase):
         }
         self.assertEqual(len(set(names.values())), 2, names)
 
+    @arch_specific(
+        ("gfx942",), reason="the shipped K=32 f16 atom does not exist on gfx942"
+    )
     def test_the_shipped_f16_atom_is_still_refused_where_it_does_not_exist(self):
         # The predicate gates on the atom the SELECTED spec names, so this is
         # the check that would fail if the gfx942 spec ever regained K=32.
@@ -215,6 +228,7 @@ class TestSelectedSpecIsRunnable(unittest.TestCase):
                     kernel = dispatch_moe(_moe(arch=arch, dtype=dtype)).build()
                     self.assertLessEqual(_emitted_lds_bytes(kernel, arch), cap)
 
+    @arch_specific(("gfx942",), reason="the measured LDS cost is the gfx942 retile")
     def test_gfx942_lds_is_the_measured_retile_cost(self):
         # Pinned so a future retile has to restate what it costs.
         expected = {"fp16": 58368, "bf16": 58368, "fp8": 37008}
