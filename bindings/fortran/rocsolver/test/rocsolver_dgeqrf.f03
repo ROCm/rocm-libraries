@@ -1,5 +1,5 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+! Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 !
 ! SPDX-License-Identifier: MIT
 !
@@ -38,8 +38,8 @@ program dgeqrf
   integer :: i, j ! indices for iterating over results
 
   ! Define our input data
-  real(c_double) :: hA(3,3) = reshape((/12, 6, -4, -51, 167, 24, 4, -68, -41/), (/3, 3/))
-  real(c_double) :: hResult(3,3) = reshape((/&
+  real(c_double), target :: hA(3,3) = reshape((/12, 6, -4, -51, 167, 24, 4, -68, -41/), (/3, 3/))
+  real(c_double), target :: hResult(3,3) = reshape((/&
   -14.000000000000000d0,       -21.000000000000000d0,        14.000000000000002d0,&
   0.23076923076923078d0,       -175.00000000000000d0,        70.000000000000000d0,&
  -0.15384615384615385d0,        5.5555555555555559D-002,  -35.000000000000000d0/), shape(hResult), order=(/2,1/))
@@ -47,31 +47,36 @@ program dgeqrf
   integer(c_int), parameter :: N = 3
   integer(c_int), parameter :: lda = 3
 
-  real(c_double) :: hIpiv(3) ! CPU buffer for Householder scalars
+  real(c_double), target :: hIpiv(3) ! CPU buffer for Householder scalars
+  integer(c_size_t) :: size_A = size(hA)
+  integer(c_size_t) :: size_Ipiv = size(hIpiv)
 
-  real(c_double), pointer :: dA(:,:)   ! GPU buffer for A
-  real(c_double), pointer :: dIpiv(:)  ! GPU buffer for Householder scalars
+  type(c_ptr) :: dA     ! GPU buffer for A
+  type(c_ptr) :: dIpiv  ! GPU buffer for Householder scalars
 
   type(c_ptr) :: handle ! rocblas_handle
-    
+
   real(c_double) :: error
   real(c_double), parameter :: error_max = 100 * epsilon(error_max)
   !
-  write(*,"(a)",advance="no") "-- Running test 'rocsolver_dgeqrf' (Fortran 2008 interfaces) - "
+  write(*,"(a)",advance="no") "-- Running test 'rocsolver_dgeqrf' (Fortran 2003 interfaces) - "
 
-  ! Allocate device-side memory & copy memory from host to device
-  call hipCheck(hipMalloc(dA,    source=hA))
-  call hipCheck(hipMalloc(dIpiv, source=hIpiv))
+  ! Allocate device-side memory
+  call hipCheck(hipMalloc(dA, size_A * 8))
+  call hipCheck(hipMalloc(dIpiv, size_Ipiv * 8))
 
   ! Create rocBLAS handle
   call rocblasCheck(rocblas_create_handle(handle))
+
+  ! Copy memory from host to device
+  call hipCheck(hipMemcpy(dA, c_loc(hA(1,1)), size_A * 8, hipMemcpyHostToDevice))
 
   ! Compute the QR factorization on the device
   call rocsolverCheck(rocsolver_dgeqrf(handle, M, N, dA, lda, dIpiv))
 
   ! Copy result from device to host
-  call hipCheck(hipMemcpy(hA,    dA,    hipMemcpyDeviceToHost))
-  call hipCheck(hipMemcpy(hIpiv, dIpiv, hipMemcpyDeviceToHost))
+  call hipCheck(hipMemcpy(c_loc(hA(1,1)), dA, size_A * 8, hipMemcpyDeviceToHost))
+  call hipCheck(hipMemcpy(c_loc(hIpiv(1)), dIpiv, size_Ipiv * 8, hipMemcpyDeviceToHost))
 
   ! Output results
   do j = 1,size(hA,2)
@@ -91,7 +96,7 @@ program dgeqrf
   call hipCheck(hipFree(dIpiv))
   call rocblasCheck(rocblas_destroy_handle(handle))
   call hipCheck(hipDeviceReset())
-    
+
   write(*,*) "PASSED!"
 
 end program dgeqrf
