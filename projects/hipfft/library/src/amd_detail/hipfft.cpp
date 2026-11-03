@@ -2535,11 +2535,9 @@ struct p2p_enabler
             else if(err != hipErrorPeerAccessAlreadyEnabled)
                 HIP_EXPECT_SUCCESS(err);
         }
-        else
-        {
-            // peer access not supported between the two devices
-            throw HIPFFT_INTERNAL_ERROR;
-        }
+        // can_access == 0 is not fatal. Some multi-GPU systems (Navi 32 on
+        // Windows) cannot enable peer access; hipMemcpyPeerAsync then stages
+        // through host memory.
     }
     ~p2p_enabler()
     try
