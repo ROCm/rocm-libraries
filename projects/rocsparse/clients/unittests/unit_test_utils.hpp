@@ -84,11 +84,17 @@ inline void unit_test_throw_rocsparse_error(const char* call, rocsparse_status s
 
 namespace rocsparse_ut
 {
-#define UT_CHECK_HIP(cmd)                                             \
-    do                                                                \
-    {                                                                 \
-        hipError_t status_ = (cmd);                                   \
-        ASSERT_EQ(status_, hipSuccess) << hipGetErrorString(status_); \
+// A failed call leaves its error pending, so consume it before the assert
+// returns; otherwise a later hipGetLastError() blames the wrong call.
+#define UT_CHECK_HIP(cmd)                                                             \
+    do                                                                                \
+    {                                                                                 \
+        hipError_t status_ = (cmd);                                                   \
+        if(status_ != hipSuccess)                                                     \
+        {                                                                             \
+            (void)hipGetLastError();                                                  \
+        }                                                                             \
+        ASSERT_EQ(status_, hipSuccess) << #cmd << ": " << hipGetErrorString(status_); \
     } while(0)
 
 #define UT_EXPECT_ROC(cmd, expected) EXPECT_EQ((cmd), (expected))
