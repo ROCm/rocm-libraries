@@ -82,7 +82,7 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
             return false;
         }
     }
-    if(p->stride < 1) /* before fsw_ho / fsw_wo divide by it */
+    if(p->stride < 1) /* before rocke_direct_conv_problem_Ho / _Wo divide by it */
     {
         snprintf(msg, sizeof msg, "stride %d < 1", p->stride);
         rocke_spec_set_reason(reason, reason_cap, msg);

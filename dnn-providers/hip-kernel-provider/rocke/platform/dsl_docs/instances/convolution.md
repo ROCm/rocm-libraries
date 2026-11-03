@@ -508,7 +508,8 @@ Note this layout is different from `ConvProblem`:
 - `KH`/`KW` not `R`/`S`;
 - single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`);
 - dilation is `dil_h`/`dil_w` (default 1; `Ho`/`Wo` use the dilated extent
-  `(KH-1)*dil_h + 1`). Only the non-grouped forward kernel computes a dilated
+  `(KH-1)*dil_h + 1`). `direct_nongrouped`, `direct_fwd_wmma`,
+  `direct_fwd_tapouter_wmma` and `direct_dgrad_wmma` compute a dilated
   convolution; every other variant rejects one (`dilation_reason`).
 
 ### 16c Kernel

@@ -110,8 +110,8 @@ typedef struct rocke_direct_conv_problem
                         * to "fp16".  Zero-initialising the struct leaves dtype
                         * NULL, which silently selects fp16 and will silently
                         * drop a bf16 request. */
-    int dil_h; /* default 1; filter dilation, honoured by the non-grouped */
-    int dil_w; /* forward kernel only (every other variant rejects it)   */
+    int dil_h; /* default 1; filter dilation: direct_nongrouped, the WMMA */
+    int dil_w; /* forward / tap-outer / dgrad take it, the rest refuse it */
     int pad_w; /* default -1 (= PAD); column padding where it differs from
                 * PAD. Only the variants of Python's PER_AXIS_PAD_VARIANTS
                 * (library/kernels/conv/direct_variants.py) take such a

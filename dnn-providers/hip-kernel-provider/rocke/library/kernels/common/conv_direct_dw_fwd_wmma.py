@@ -3,10 +3,11 @@
 
 """Depthwise forward convolution as a Toeplitz WMMA product (gfx1250).
 
-The forward twin of the windowed depthwise dgrad's Toeplitz form
-(``_build_dw_dgrad_win_wmma`` in :mod:`conv_direct_grouped`): a stride-1
-depthwise dgrad is a stride-1 depthwise convolution with a flipped filter, so
-this kernel is that one with un-flipped taps and the forward tensor roles.
+The forward twin of the windowed depthwise dgrad's Toeplitz form (the
+``mfma=True`` form of :func:`build_direct_depthwise_dgrad_windowed` in
+:mod:`conv_direct_grouped`): a stride-1 depthwise dgrad is a stride-1
+depthwise convolution with a flipped filter, so this kernel is that one with
+un-flipped taps and the forward tensor roles.
 
 Each wave owns 8 channels. One ``16x16x32`` WMMA multiplies one-hot weights
 (A) by 4 window columns x 8 channels of an input row (B) into 32 output

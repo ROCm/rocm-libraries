@@ -322,9 +322,10 @@ class DirectConvProblem:
     PAD: int = 1
     stride: int = 1
     dtype: str = "fp16"  # "fp16" or "bf16"
-    # Filter dilation per axis. Only the non-grouped forward kernel computes a
-    # dilated convolution; every other variant refuses one (see
-    # forward_padding_reason and dilation_reason).
+    # Filter dilation per axis. The variants that compute a dilated
+    # convolution take it (direct_nongrouped, direct_fwd_wmma,
+    # direct_fwd_tapouter_wmma and direct_dgrad_wmma); every other refuses one
+    # (see forward_padding_reason and dilation_reason).
     dil_h: int = 1
     dil_w: int = 1
     # Column padding when it differs from the row padding (-1: PAD). Only the
@@ -451,10 +452,7 @@ class DirectConv16cSpec:
 def dilation_reason(p: "DirectConvProblem") -> Optional[str]:
     """Why a direct-conv kernel without dilation support cannot compute ``p``."""
     if p.is_dilated:
-        return (
-            f"this direct conv kernel has no dilation (got {p.dil_h}x{p.dil_w}); "
-            f"only the non-grouped forward kernel computes a dilated convolution"
-        )
+        return f"this direct conv kernel has no dilation (got {p.dil_h}x{p.dil_w})"
     return None
 
 

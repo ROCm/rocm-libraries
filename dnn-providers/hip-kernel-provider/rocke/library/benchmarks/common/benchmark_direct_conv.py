@@ -249,11 +249,13 @@ def parse_miopen_cmd_direct(cmd: str):
         )
 
     dilated = miopen_args.dH != 1 or miopen_args.dW != 1
-    # Dilated: the non-grouped forward kernel and the WMMA dgrad.
+    # Dilated: direct_nongrouped, direct_fwd_wmma, direct_fwd_tapouter_wmma
+    # (forward) and direct_dgrad_wmma compute one; this benchmark takes
+    # ungrouped forward and dgrad problems.
     if dilated and (miopen_args.forw not in (1, 2) or groups != 1):
         raise ValueError(
-            f"direct conv computes a dilated convolution only forward / dgrad and "
-            f"ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
+            f"the direct conv benchmark runs a dilated convolution only forward / "
+            f"dgrad and ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
             f"-F {miopen_args.forw}, -g {groups})"
         )
 
@@ -3200,8 +3202,8 @@ def main() -> int:
             args.direction not in ("fwd", "dgrad") or args.groups != 1
         ):
             print(
-                f"error: direct conv computes a dilated convolution only forward / "
-                f"dgrad and ungrouped (got dH={args.dH}, dW={args.dW})",
+                f"error: the direct conv benchmark runs a dilated convolution only "
+                f"forward / dgrad and ungrouped (got dH={args.dH}, dW={args.dW})",
                 file=sys.stderr,
             )
             return 2

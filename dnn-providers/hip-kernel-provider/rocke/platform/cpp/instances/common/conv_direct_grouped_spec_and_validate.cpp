@@ -228,8 +228,7 @@ bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* wh
             return true;
         snprintf(why,
                  why_cap,
-                 "this direct conv kernel has no dilation (got %dx%d); only the non-grouped "
-                 "forward kernel computes a dilated convolution",
+                 "this direct conv kernel has no dilation (got %dx%d)",
                  p->dil_h,
                  p->dil_w);
         return true;
