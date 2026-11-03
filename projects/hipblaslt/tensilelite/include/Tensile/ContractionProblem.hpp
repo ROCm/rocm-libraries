@@ -416,7 +416,6 @@ namespace TensileLite
             POINTER_ARRAY = 1,
             BATCHMODE_COUNT
         };
-
         using Solution = ContractionSolution;
         using Inputs   = ContractionInputs;
 
