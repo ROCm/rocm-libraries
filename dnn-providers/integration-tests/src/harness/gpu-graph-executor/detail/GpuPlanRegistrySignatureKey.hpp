@@ -17,6 +17,7 @@
 #include "GpuRMSNormSignatureKey.hpp"
 #include "GpuReductionSignatureKey.hpp"
 #include "GpuResampleSignatureKey.hpp"
+#include "GpuSdpaBwdSignatureKey.hpp"
 #include "GpuSdpaFwdSignatureKey.hpp"
 #include "GpuSdpaRaggedFwdSignatureKey.hpp"
 
@@ -31,6 +32,7 @@ using GpuPlanRegistrySignatureKey = std::variant<GpuBatchnormFwdTrainSignatureKe
                                                  GpuLayernormBwdSignatureKey,
                                                  GpuMatmulSignatureKey,
                                                  GpuSdpaFwdSignatureKey,
+                                                 GpuSdpaBwdSignatureKey,
                                                  GpuSdpaRaggedFwdSignatureKey,
                                                  GpuPointwiseSignatureKey,
                                                  GpuReductionSignatureKey,
