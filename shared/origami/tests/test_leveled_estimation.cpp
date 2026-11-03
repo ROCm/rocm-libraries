@@ -5,9 +5,20 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #include "common.hpp"
+#include "origami/logger.hpp"
 
 // Tests for the leveled estimation cascade that rank_configs() uses when
 // ORIGAMI_LEVELED_ESTIMATION is set.
@@ -276,9 +287,8 @@ TEST_CASE("Leveled: whenever nothing is pruned the ranking matches the single pa
 }
 
 TEST_CASE("Leveled: split-K-prone shapes skip the prune", "[origami][leveled]") {
-  // Few output tiles and a deep K: every config that passes level 0 reaches the full
-  // model, so the ranking matches the single pass exactly. This also shows level 0
-  // keeps exactly the configs the single pass accepts.
+  // Few output tiles and a deep K: the cascade does not prune, so rank_configs() takes
+  // the single pass and the ranking matches it exactly.
   auto configs = sweep_configs();
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch) {
@@ -295,9 +305,9 @@ TEST_CASE("Leveled: split-K-prone shapes skip the prune", "[origami][leveled]") 
 }
 
 TEST_CASE("Leveled: GEMV shapes skip the prune", "[origami][leveled]") {
-  // M == 1 or N == 1 with a shallow K, so the split-K-prone skip does not apply: every
-  // config that passes level 0 reaches the full model. The same shapes with M or N of 2
-  // are pruned, so the GEMV skip is what keeps these lists whole.
+  // M == 1 or N == 1 with a shallow K, so the split-K-prone skip does not apply: the
+  // cascade does not prune and the ranking is the single pass. The same shapes with M or
+  // N of 2 are pruned, so the GEMV skip is what keeps these lists whole.
   auto configs = sweep_configs();
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch) {
@@ -322,6 +332,59 @@ TEST_CASE("Leveled: GEMV shapes skip the prune", "[origami][leveled]") {
       }
     }
   }
+}
+
+TEST_CASE("Leveled: shapes without a prune skip the cascade entirely", "[origami][leveled]") {
+  // GEMV and split-K-prone shapes go straight to the single pass: the cascade's level 0
+  // never runs, so it logs nothing. A shape the cascade prunes logs its level-0 rejections.
+  // The list holds a config that exceeds LDS on every architecture, which level 0 rejects.
+  // Per-process name, so that concurrent test runs do not share the log.
+#ifdef _WIN32
+  const auto pid = _getpid();
+#else
+  const auto pid = getpid();
+#endif
+  const std::string log_path = (std::filesystem::temp_directory_path() /
+                                ("origami_leveled_skip_" + std::to_string(pid) + ".log"))
+                                   .string();
+  std::remove(log_path.c_str());
+  portable_setenv("ORIGAMI_LOG_FILE", log_path.c_str(), 1);
+  portable_setenv("ANALYTICAL_GEMM_DEBUG", "1", 1);
+  origami::Logger::instance().update_from_env();
+  origami::runtime_options::get().update_from_env();
+
+  auto configs = sample_configs();
+  configs.push_back(make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
+  for (size_t i = 0; i < configs.size(); ++i) configs[i].index = i;
+
+  auto leveled_log = [&](const origami::problem_t& problem, const origami::hardware_t& hardware) {
+    std::remove(log_path.c_str());
+    origami::Logger::instance().update_from_env();
+    auto flat = rank(problem, hardware, configs, false);
+    require_same_ranking(rank(problem, hardware, configs, true), flat);
+    origami::Logger::instance().flush();
+    std::ifstream ifs(log_path);
+    std::ostringstream ss;
+    ss << ifs.rdbuf();
+    return ss.str().find("[leveled]") != std::string::npos;
+  };
+
+  auto hardware      = make_hardware(950);
+  bool gemv_logged   = leveled_log(make_problem(1, 4096, 1024), hardware);
+  bool gemv_n_logged = leveled_log(make_problem(4096, 1, 1024), hardware);
+  bool split_logged  = leveled_log(make_problem(1024, 1024, 16384), hardware);
+  bool pruned_logged = leveled_log(make_problem(8192, 8192, 4096), hardware);
+
+  std::remove(log_path.c_str());
+  portable_unsetenv("ORIGAMI_LOG_FILE");
+  portable_unsetenv("ANALYTICAL_GEMM_DEBUG");
+  origami::Logger::instance().update_from_env();
+  origami::runtime_options::get().update_from_env();
+
+  REQUIRE_FALSE(gemv_logged);
+  REQUIRE_FALSE(gemv_n_logged);
+  REQUIRE_FALSE(split_logged);
+  REQUIRE(pruned_logged);
 }
 
 TEST_CASE("Leveled: small-grid shapes keep the single-pass pick", "[origami][leveled]") {

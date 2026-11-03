@@ -28,6 +28,18 @@ struct leveled_estimation_result_t {
 };
 
 /**
+ * @brief Whether the leveled cascade prunes any config for this problem.
+ *
+ * False for GEMV shapes (M == 1 or N == 1) and for split-K-prone shapes: a reference
+ * 256x256 tiling underfills the problem's CU budget and K has at least 64 iterations of a
+ * 64-deep k-tile. For those shapes the cascade would score every config that passes
+ * level 0 with the full model, which is the single-pass ranking, so rank_configs() checks
+ * this first and takes the single pass directly. It depends on the problem and the CU
+ * budget only, not on the configs.
+ */
+bool leveled_estimation_prunes(const problem_t& problem, const hardware_t& hardware);
+
+/**
  * @brief Score configs with the leveled (coarse-to-fine) estimation cascade.
  *
  * 1. Level 0: drop configs that the single-pass ranking rejects without running the
@@ -35,7 +47,7 @@ struct leveled_estimation_result_t {
  * 2. Level 1: score the rest with a cheap context-free proxy and keep the best
  *    max(kLeveledMinKeep, n * kLeveledKeepFraction). Configs whose proxy cost equals
  *    that of the last kept config are kept too, so the cut never splits a group of
- *    equal proxy cost. The prune is skipped for split-K-prone problems.
+ *    equal proxy cost. The prune is skipped when leveled_estimation_prunes() is false.
  * 3. Full level: build the context for each survivor and score it with
  *    estimation_latency_from_context(), the same latency the single-pass ranking computes.
  *

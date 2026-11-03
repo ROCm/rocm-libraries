@@ -678,9 +678,12 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   // The pruned configs are appended after the ranked survivors (see below), so the
   // result holds the same configs as the single-pass ranking. When the cascade finds
   // no valid config, the single-pass ranking below runs instead, so the fallback is
-  // the same as without the cascade.
+  // the same as without the cascade. Shapes the cascade would not prune (GEMV and
+  // split-K-prone ones) go straight to the single pass, which gives the same ranking
+  // without the cascade's extra passes.
   std::vector<std::size_t> leveled_pruned;
   if (model == model_t::gemm && runtime_options::get().leveled_estimation &&
+      gemm::leveled_estimation_prunes(problem, hardware) &&
       std::all_of(configs.begin(), configs.end(), [](const config_t& config) {
         return config.prediction_mode == prediction_modes_t::estimation;
       })) {

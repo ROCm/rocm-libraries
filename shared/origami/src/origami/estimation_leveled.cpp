@@ -57,21 +57,6 @@ struct mi_latency_cache {
   }
 };
 
-// The winner for split-K-prone shapes depends on cross-CU K-reduction reuse that the
-// level-1 proxy cannot see, so the prune would drop it. For these shapes every config
-// that passes level 0 reaches the full level.
-bool is_split_k_prone(const problem_t& problem, std::size_t n_cu) {
-  const std::size_t ref_tiles = math::safe_ceil_div(problem.size.m, kSplitKRefTile) *
-                                math::safe_ceil_div(problem.size.n, kSplitKRefTile) * problem.batch;
-  const std::size_t ref_k_iters = problem.size.k / kSplitKRefDepth;
-  return ref_tiles < n_cu && ref_k_iters >= kSplitKMinKIters;
-}
-
-// GEMV shapes (M == 1 or N == 1) are never pruned either. The full model has GEMV and
-// M-edge terms the proxy cannot model, and hipBLASLt's predicates reject most configs
-// of these lists after the ranking, so a pruned list may keep few runnable configs.
-bool is_gemv(const problem_t& problem) { return problem.size.m == 1 || problem.size.n == 1; }
-
 void log_leveled_rejection(const config_t& config, int level, const char* reason) {
   OLOG_DEBUG("  [leveled] Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
                                        << ") MI=(" << config.mi.m << "," << config.mi.n << ","
@@ -165,6 +150,22 @@ double score_proxy(const problem_t& problem,
 
 }  // namespace
 
+bool leveled_estimation_prunes(const problem_t& problem, const hardware_t& hardware) {
+  // GEMV shapes (M == 1 or N == 1). The full model has GEMV and M-edge terms the proxy
+  // cannot model, and hipBLASLt's predicates reject most configs of these lists after the
+  // ranking, so a pruned list may keep few runnable configs.
+  if (problem.size.m == 1 || problem.size.n == 1) return false;
+
+  // Split-K-prone shapes. The winner depends on cross-CU K-reduction reuse that the
+  // proxy cannot see, so the prune would drop it.
+  const std::size_t n_cu =
+      std::max<std::size_t>(resolve_num_cus(problem.num_cus, hardware.N_CU), 1);
+  const std::size_t ref_tiles = math::safe_ceil_div(problem.size.m, kSplitKRefTile) *
+                                math::safe_ceil_div(problem.size.n, kSplitKRefTile) * problem.batch;
+  const std::size_t ref_k_iters = problem.size.k / kSplitKRefDepth;
+  return !(ref_tiles < n_cu && ref_k_iters >= kSplitKMinKIters);
+}
+
 leveled_estimation_result_t rank_leveled_estimation(const problem_t& problem,
                                                     const hardware_t& hardware,
                                                     const std::vector<config_t>& configs) {
@@ -197,11 +198,11 @@ leveled_estimation_result_t rank_leveled_estimation(const problem_t& problem,
   // tie, and the tie-breakers in rank_configs() need the whole group. The kept set
   // therefore depends on proxy values only, not on the order of the config list.
   std::size_t keep =
-      (is_split_k_prone(problem, n_cu) || is_gemv(problem))
-          ? candidates.size()
-          : std::max(kLeveledMinKeep,
+      leveled_estimation_prunes(problem, hardware)
+          ? std::max(kLeveledMinKeep,
                      static_cast<std::size_t>(static_cast<double>(candidates.size()) *
-                                              kLeveledKeepFraction));
+                                              kLeveledKeepFraction))
+          : candidates.size();
   if (candidates.size() > keep) {
     std::nth_element(candidates.begin(), candidates.begin() + keep - 1, candidates.end());
     const double cut_cost = candidates[keep - 1].first;
