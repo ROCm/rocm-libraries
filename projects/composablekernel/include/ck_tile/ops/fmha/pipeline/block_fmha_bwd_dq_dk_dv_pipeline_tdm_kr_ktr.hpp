@@ -543,26 +543,54 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             number<kQDOSlots>{});
 
         // dS: Reg -> Reg -> LDS
-        GemmDataType* ds_lds_ptr = static_cast<GemmDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGradT<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeLSE<Problem>() +
-            Policy::template GetSmemSizeD<Problem>()));
+        // Two boxes: tile i uses box i % kSGradBoxes
+        // Box 0 sits in the staged region, where it aliases bias_lds
+        // Box 1 is appended past the last slot
+        constexpr index_t kSGradBoxes   = Policy::template GetSGradBoxes<Problem>();
+        constexpr index_t kSGradBox0Off = Policy::template GetSGradBox0Offset<Problem>();
 
-        auto ds_lds = make_tensor_view<address_space_enum::lds>(
-            ds_lds_ptr, Policy::template MakeSGradLdsBlockDescriptor<Problem>());
+        // box 1 must start at box 0's offset modulo a bank row
+        // every lane hits the same bank in both boxes,
+        // so bank conflicts stay as with one box
+        static_assert(kSGradBoxes == 1 ||
+                          (Policy::template GetSGradBoxBase<Problem>(1) - kSGradBox0Off) %
+                                  Policy::kLdsBankRowBytes ==
+                              0,
+                      "dS boxes must keep box 0's LDS bank alignment");
 
+        auto ds_box_off = [&](auto j) -> index_t {
+            constexpr index_t jj = j;
+            if constexpr(jj == 0)
+            {
+                return kSGradBox0Off;
+            }
+            else
+            {
+                // box 1, appended past the last slot
+                return Policy::template GetSGradBoxBase<Problem>(jj);
+            }
+        };
         // Box is [kN0][kM0]; the gemm_4 slice is kK4 rows of it, and the window
         // therefore walks dim 0 instead of dim 1.
-        auto ds_lds_window =
-            make_tile_window(ds_lds, make_tuple(number<kN0>{}, number<kM0>{}), {0, 0});
+        auto ds_lds_windows = generate_tuple(
+            [&](auto j) {
+                auto tv = make_tensor_view<address_space_enum::lds>(
+                    static_cast<GemmDataType*>(
+                        static_cast<void*>(static_cast<char*>(smem_ptr) + ds_box_off(j))),
+                    Policy::template MakeSGradLdsBlockDescriptor<Problem>());
+                return make_tile_window(tv, make_tuple(number<kN0>{}, number<kM0>{}), {0, 0});
+            },
+            number<kSGradBoxes>{});
 
-        auto ds_lds_read_window =
-            make_tile_window(ds_lds_window.get_bottom_tensor_view(),
-                             make_tuple(number<kN0>{}, number<kM0>{}),
-                             ds_lds_window.get_window_origin(),
-                             Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
+        auto ds_lds_read_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(
+                    ds_lds_windows.at(j).get_bottom_tensor_view(),
+                    make_tuple(number<kN0>{}, number<kM0>{}),
+                    ds_lds_windows.at(j).get_window_origin(),
+                    Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
+            },
+            number<kSGradBoxes>{});
 
         auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
             Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
@@ -850,6 +878,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                                  auto& do_rd_dst,
                                  auto& lse_rd_dst,
                                  auto& d_rd_dst,
+                                 auto& ds_wr,
+                                 auto& ds_rd,
                                  auto issue_next_tile) {
             // gemm_0/gemm_2 consume the register copies loaded at the end of the
             // previous iteration, so these two selections have no direct user --
@@ -1058,20 +1088,26 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
-            if constexpr(kHasBiasGrad)
+            // Wait until every wave has read the previous tile's dS
+            // Not needed with two boxes: the previous tile used the other box,
+            // and this box was last read before the previous tile's barrier below
+            if constexpr(kHasBiasGrad || (kQDOSlots >= 2 && kSGradBoxes == 1))
             {
                 // SGrad and BiasGrad use the same address in LDS.
                 block_sync_lds();
             }
-            store_tile(ds_lds_window, dst_reg_tensor);
+            store_tile(ds_wr, dst_reg_tensor);
 
+            // Orders this tile's dS store before its read
+            // with two boxes, also every read of this box
+            // before it is written again
             block_sync_lds();
 
             // Release tile i+1 only, leaving kQDOSlots - 2 tiles in flight:
             // each transfer gets kQDOSlots - 1 iterations of compute to hide
             // behind.
             s_wait_tensorcnt_barrier<kTdmWaitCnt>();
-            auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
+            auto ds_reg_tensor = load_tile_transpose(ds_rd);
             q_reg_tensor       = load_tile(q_rd_dst);
             lse                = load_tile(lse_rd_dst);
             // STAGE7 SGrad@K^T Gemm4
@@ -1125,6 +1161,9 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             // remainder` shape would need kQDOSlots - 1 extra copies of the body
             // on top; breaking out of the middle costs a few scalar branches per
             // round instead and emits the body exactly kQDOSlots times.
+            // dS box by tile parity: kQDOSlots copies don't line up
+            // with two boxes, so the box is a runtime select
+            constexpr index_t kDSB = kSGradBoxes - 1;
             while(i_total_loops < (num_total_loop - 1))
             {
                 static_for<0, kQDOSlots, 1>{}([&](auto j) {
@@ -1143,6 +1182,10 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                             do_lds_read_windows.at(number<kNxt>{}),
                             lse_lds_read_windows.at(number<kNxt>{}),
                             d_lds_read_windows.at(number<kNxt>{}),
+                            (i_total_loops & 1) ? ds_lds_windows.at(number<kDSB>{})
+                                                : ds_lds_windows.at(number<0>{}),
+                            (i_total_loops & 1) ? ds_lds_read_windows.at(number<kDSB>{})
+                                                : ds_lds_read_windows.at(number<0>{}),
                             [&] { issue_qdo_tile(number<kWr>{}, i_total_loops + kIssueAhead); });
                     }
                 });
@@ -1155,6 +1198,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             // where both arms name the same window and the select folds away.
             constexpr index_t kB   = kQDOSlots - 1;
             constexpr bool kTwoBox = (kQDOSlots == 2);
+            // dS box used on odd tiles
+            constexpr index_t kDSB = kSGradBoxes - 1;
             // false: read slot 0 and refill slot kB; true: the reverse.
             bool phase = false;
 
@@ -1186,6 +1231,9 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                     sec ? lse_lds_read_windows.at(number<0>{})
                         : lse_lds_read_windows.at(number<kB>{}),
                     sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
+                    sec ? ds_lds_windows.at(number<kDSB>{}) : ds_lds_windows.at(number<0>{}),
+                    sec ? ds_lds_read_windows.at(number<kDSB>{})
+                        : ds_lds_read_windows.at(number<0>{}),
                     [&] {
                         load_tile_tdm(tdm_config_q,
                                       sec ? q_lds_windows.at(number<0>{})
@@ -1412,11 +1460,11 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         // SGrad and Bias/BiasGrad use the same address in LDS, finish loading bias/dbias or, when
         // bias is not used, loading ds in the hot loop to reuse LDS.
         block_sync_lds();
-        store_tile(ds_lds_window, dst_reg_tensor);
+        store_tile(ds_lds_windows.at(number<0>{}), dst_reg_tensor);
 
         block_sync_lds();
 
-        auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
+        auto ds_reg_tensor = load_tile_transpose(ds_lds_read_windows.at(number<0>{}));
 
         HotLoopScheduler::template GemmStagedScheduler<3>();
         __builtin_amdgcn_sched_barrier(0);
