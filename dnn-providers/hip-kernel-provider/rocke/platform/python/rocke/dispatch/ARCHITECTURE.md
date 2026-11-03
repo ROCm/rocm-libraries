@@ -439,7 +439,7 @@ class Capability:
     and non-empty, enforced in ``register()``. It fails closed, so a candidate
     that somehow reaches ``check()`` with no arches matches nothing.
     """
-    arches: tuple[str, ...] = ()          # exact gfx targets; the only arch gate
+    arches: tuple[str, ...] = ()          # listed gfx targets; the only arch gate
     dtypes: tuple[str, ...] = ()
     layouts: tuple[str, ...] = ()
     shapes: tuple[ShapeRange, ...] = ()      # per-dimension bounds
@@ -549,7 +549,10 @@ while remaining honest.
 
 **Architecture gating is mandatory, and it is an explicit list of gfx targets.**
 Every candidate names the architectures it was built and tuned for. There is no
-family-level shorthand — see below for why. Enforce it at registration:
+family-level shorthand — see below for why. A listed generic target such as
+`gfx11-generic` is not a shorthand: it is a target with facts of its own, and it
+covers exactly the processors whose `arch_specs.json` row points at it
+(`listed_arch_for`). Enforce the list at registration:
 
 ```python
 def register(self, candidate):
