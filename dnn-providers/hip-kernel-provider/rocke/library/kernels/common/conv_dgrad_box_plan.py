@@ -11,14 +11,16 @@ classes into whole tiles and merges the class remainders greedily, which
 grows the boxes of many tiles to (nearly) the full filter.
 
 ``pp_boxes`` 8 (this module) plans the records by the makespan of the
-one-round split-K launch instead: for a target slice length ``T`` (K tiles)
-every box ``B`` gets the split degree ``S_B = ceil(K tiles of B / T)``, and
-the pixels are assigned to boxes that contain their offsets so that the
-launch's workgroups, sum over the records of tiles * N tiles * S_B, fit the
-CU budget. The smallest feasible ``T`` wins; among its plans the one with the
-fewest MFMA K tiles. The assignment is solved by a small exact search over
-the candidate boxes (see :func:`plan_boxes`), so the plan is a deterministic
-function of the problem and the tile.
+split-K launch instead. For a candidate slice length ``T`` (K tiles) every
+tap box ``B`` gets the split degree ``S_B = ceil(K tiles of B / T)``; a small
+MILP (scipy's HiGHS, no time limit: at most 5 classes per axis, so <= 125
+classes x 216 boxes) assigns the pixel classes to boxes that contain their
+offsets, minimising the MFMA K tiles with the launch's workgroups (tiles x N
+tiles x S_B) within the CU budget (``pp_box_cus``). Each candidate is scored
+by the simulated greedy dispatch of its blocks on the CUs; the lowest
+makespan wins, then the fewest K tiles. The plan is a deterministic function
+of the problem, the tile and the budget (cached per process). Without scipy
+(or a feasible plan) the launch falls back to the ``pp_boxes`` 7 packing.
 
 Pure host-side planning: the binary is the ``pp_boxes`` 7 pixel-list kernel.
 """
@@ -100,7 +102,7 @@ def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, in
         A[-1, nx + bi] = cost[b] * n_tiles
     lo[-1], hi[-1] = 0, budget
     res = milp(obj, constraints=LinearConstraint(A, lo, hi), integrality=np.ones(nx + nb),
-               bounds=Bounds(0, np.inf), options={"time_limit": 30.0})
+               bounds=Bounds(0, np.inf))  # no time limit: a deterministic optimum (<= 125 classes x 216 boxes)
     if res.x is None or res.status != 0:
         return None
     x = np.round(res.x).astype(int)
