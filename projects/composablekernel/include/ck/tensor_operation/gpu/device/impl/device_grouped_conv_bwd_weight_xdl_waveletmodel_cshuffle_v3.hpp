@@ -154,7 +154,7 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         const long_index_t split_k_stride_b,
         bool split_k_offset_hack)
 {
-#if defined(__gfx9__) || defined(__gfx125__)
+#if defined(__gfx950__) || defined(__gfx125__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         const index_t g_idx = __builtin_amdgcn_readfirstlane(blockIdx.z);
