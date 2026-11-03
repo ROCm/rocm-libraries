@@ -510,6 +510,13 @@ static int make_cfg_3d_any(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec,
         spec->xwin_kord = 1;
         return 0;
     }
+    if(idx == 84 || idx == 85)
+    {
+        /* xwin_bq 1 on 72, 2 on 83 */
+        make_cfg_3d_any(idx == 84 ? 72 : 83, spec, arch);
+        spec->xwin_bq = idx == 84 ? 1 : 2;
+        return 0;
+    }
     if(idx == 82 || idx == 83)
     {
         /* xwin_aq 1 on 72, 2 on 73 */

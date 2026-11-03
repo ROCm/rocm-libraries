@@ -934,9 +934,21 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
     if(s->lds_bswz || s->ws_fuse || s->ws_tree || s->epi_quad_xpose || s->ws_lc || s->ws_gred)
         BR_REJECT("wgrad lds_bswz / ws_fuse / ws_tree / epi_quad_xpose / ws_lc / ws_gred are "
                   "Python-only (no C++ twin yet)");
-    if(s->xwin_rows != 1 || s->xwin_mrow != 1 || s->xwin_kband || s->xwin_bq)
-        BR_REJECT("wgrad xwin_rows / xwin_mrow / xwin_kband / xwin_bq are "
+    if(s->xwin_rows != 1 || s->xwin_mrow != 1 || s->xwin_kband)
+        BR_REJECT("wgrad xwin_rows / xwin_mrow / xwin_kband are "
                   "Python-only (no C++ twin yet)");
+    if(s->xwin_bq && s->xwin)
+    {
+        const int X = s->xwin;
+        const int nq = (s->tile_k + X - 1 + 3) / 4;
+        int wst = s->tile_k + X - 1;
+        while(wst % 4 || (wst / 2) % 4 != 2)
+            ++wst;
+        if(s->xwin_bq < 1 || s->xwin_bq > 2 || !s->xwin_pp || (s->tile_n / X) % 32)
+            BR_REJECT("xwin_bq is 0, 1 or 2 and needs xwin_pp (one filter row, xwin_mrow 1)");
+        if(4 * nq > wst)
+            BR_REJECT("xwin_bq: the quads overrun the window stride");
+    }
     if(s->xwin_aq && (s->xwin_aq < 1 || s->xwin_aq > 2 || s->xwin_gn != 2))
         BR_REJECT("xwin_aq is 0, 1 or 2 and needs xwin_gn 2");
     if(s->xwin_kord && (s->xwin_kord != 1 || (s->tile_k & (s->tile_k - 1))))
@@ -6007,6 +6019,7 @@ typedef struct wg_xw
     const rocke_type_t *dt_b, *i32x2, *i32x1, *bfx4;
     rocke_value_t *ash_store, *ash_lead; /* xwin_gn 2 (NULL off) */
     int xwin_aq; /* xwin_aq: leader-only dY stores (2: pinned packs) */
+    int bE; /* voxels per B load unit (xwin_bq: quads, else pairs) */
     rocke_value_t *xg_aoff, *xg_boff; /* _xg_off (NULL: None) */
     rocke_value_t *pp_upper, *pp_lower;
     /* the _tile_steps generator */
@@ -6310,9 +6323,12 @@ static void wg_xw_b_offs(
         rocke_value_t* dc = rocke_b_cmp_ult(b, dd, ctx->p_Di);
         r_ok = rocke_b_land(b, r_ok, dc);
     }
-    for(int e = 0; e < 2; ++e)
+    for(int e = 0; e < W->bE; ++e)
     {
-        rocke_value_t* off = e == 0 ? base : rocke_b_add(b, base, W->Xw);
+        rocke_value_t* off
+            = e == 0   ? base
+              : e == 1 ? rocke_b_add(b, base, W->Xw)
+                       : rocke_b_add(b, base, rocke_b_mul(b, W->Xw, rocke_b_const_i32(b, e)));
         rocke_value_t* wi = e == 0 ? wi0 : rocke_b_add(b, wi0, rocke_b_const_i32(b, e));
         rocke_value_t* wc = rocke_b_cmp_ult(b, wi, ctx->p_Wi);
         rocke_value_t* v_ok = rocke_b_land(b, r_ok, wc);
@@ -6330,7 +6346,7 @@ static void wg_xw_b_offs(
 static int wg_xw_b_load(wg_xw_t* W, rocke_value_t** vals)
 {
     int n = 0;
-    for(int i = 0; i < W->n_u; ++i, n += 2)
+    for(int i = 0; i < W->n_u; ++i, n += W->bE)
         wg_xw_b_offs(W, &W->units[i], NULL, true, vals + n);
     return n;
 }
@@ -6727,7 +6743,7 @@ static void wg_xw_pack_b(wg_xw_pp_t* P, int ui, int ci)
     rocke_conv_build_ctx_t* ctx = W->ctx;
     rocke_ir_builder_t* b = ctx->b;
     const wg_xw_unit_t* u = &W->units[ui];
-    rocke_value_t* const* vs = P->vals + P->n_a + 2 * ui;
+    rocke_value_t* const* vs = P->vals + P->n_a + W->bE * ui;
     rocke_value_t* row = u->lrow;
     rocke_value_t* col = u->j0;
     rocke_value_t* pred = NULL;
@@ -6742,13 +6758,13 @@ static void wg_xw_pack_b(wg_xw_pp_t* P, int ui, int ci)
     rocke_value_t* rr = ci ? rocke_b_add(b, row, rocke_b_const_i32(b, ci)) : row;
     rocke_value_t* pr = wg_xw_pi(W, rr);
     rr = rocke_b_add(b, pr, P->boff);
-    rocke_value_t* parts[2];
-    parts[0] = rocke_b_vec_extract(b, vs[0], ci);
-    parts[1] = rocke_b_vec_extract(b, vs[1], ci);
-    rocke_value_t* pair = rocke_b_vec_pack(b, parts, 2, W->dt_b);
+    rocke_value_t* parts[4];
+    for(int e = 0; e < W->bE; ++e)
+        parts[e] = rocke_b_vec_extract(b, vs[e], ci);
+    rocke_value_t* pair = rocke_b_vec_pack(b, parts, W->bE, W->dt_b);
     if(pred != NULL)
         pair = wg_xw_pin(b, pair);
-    P->items[P->n_items++] = (wg_xw_item_t){true, rr, col, pair, 2, pred};
+    P->items[P->n_items++] = (wg_xw_item_t){true, rr, col, pair, W->bE, pred};
 }
 
 /* _pack_items' thunk list (A packs then B packs), in Python order. */
@@ -6901,7 +6917,7 @@ static int wg_xw_offsets(wg_xw_pp_t* P, rocke_value_t** o)
             rocke_value_t* c = rocke_b_const_i32(b, 2147483647);
             o[i] = rocke_b_select(b, W->ash_lead, o[i], c);
         }
-    for(int i = 0; i < W->n_u; ++i, n += 2)
+    for(int i = 0; i < W->n_u; ++i, n += W->bE)
         wg_xw_b_offs(W, &W->units[i], o + n, false, NULL);
     return n;
 }
@@ -7071,8 +7087,8 @@ static void wg_xw_pp_loop(wg_xw_t* W, rocke_value_t* k_lo)
         {
             for(int i = 0; i < 8; ++i)
                 work[nw++] = packs[n_ap + 8 * ui + i];
-            for(int e = 0; e < 2; ++e)
-                work[nw++] = (wg_xw_work_t){WXW_LOAD, n_as + 2 * ui + e, 0, 0};
+            for(int e = 0; e < W->bE; ++e)
+                work[nw++] = (wg_xw_work_t){WXW_LOAD, n_as + W->bE * ui + e, 0, 0};
         }
         (void)n_sc;
         wg_xw_mix(P, acc, frp, 0, half, work, nw);
@@ -7144,6 +7160,9 @@ static void wgrad_emit_kloop_xwin(rocke_conv_build_ctx_t* ctx,
     W->Cb = block_n / W->X_;
     W->ncq = W->Cb / 8;
     W->n_pairs = (block_k + W->X_) / 2;
+    W->bE = spec->xwin_bq ? 4 : 2;
+    if(spec->xwin_bq)
+        W->n_pairs = (block_k + W->X_ - 1 + 3) / 4; /* quads per window */
     W->n_units = W->n_pairs * W->ncq;
     W->threads = ctx->threads;
     W->wpr = spec->warp_n;
@@ -7232,8 +7251,57 @@ static void wgrad_emit_kloop_xwin(rocke_conv_build_ctx_t* ctx,
         rocke_value_t* uu
             = i ? rocke_b_add(b, ctx->tid, rocke_b_const_i32(b, i * W->threads)) : ctx->tid;
         rocke_value_t* q = rocke_b_mod(b, uu, rocke_b_const_i32(b, W->ncq));
-        rocke_value_t* dq = rocke_b_div(b, uu, rocke_b_const_i32(b, W->ncq));
-        u->j0 = rocke_b_mul(b, dq, W->c2);
+        if(spec->xwin_bq)
+        {
+            rocke_value_t* jq_t;
+            const int ncq = W->ncq;
+            if(spec->xwin_bq == 2)
+                /* channel chunk fastest, then the quad */
+                jq_t = rocke_b_div(b, uu, rocke_b_const_i32(b, ncq));
+            else
+            {
+                /* runs of 8 quads: 4 channel chunks fastest, then the quad,
+                 * then the chunk group; the quads past the last whole run of
+                 * 8 channel-chunk fastest */
+                const int nq8 = (W->n_pairs / 8) * 8;
+                const int main_ = nq8 * ncq;
+                rocke_value_t* c_nq8 = rocke_b_const_i32(b, nq8);
+                rocke_value_t* cm = rocke_b_const_i32(b, main_);
+                rocke_value_t* um = rocke_b_sub(b, uu, cm);
+                rocke_value_t* dv = rocke_b_div(b, um, rocke_b_const_i32(b, ncq));
+                jq_t = rocke_b_add(b, c_nq8, dv);
+                rocke_value_t* um2 = rocke_b_sub(b, uu, rocke_b_const_i32(b, main_));
+                rocke_value_t* q_t = rocke_b_mod(b, um2, rocke_b_const_i32(b, ncq));
+                if(main_)
+                {
+                    rocke_value_t* blk = rocke_b_div(b, uu, rocke_b_const_i32(b, 8 * ncq));
+                    rocke_value_t* r8 = rocke_b_mod(b, uu, rocke_b_const_i32(b, 8 * ncq));
+                    rocke_value_t* t4 = rocke_b_div(b, r8, rocke_b_const_i32(b, 4));
+                    rocke_value_t* bm = rocke_b_mul(b, blk, rocke_b_const_i32(b, 8));
+                    rocke_value_t* tm = rocke_b_mod(b, t4, rocke_b_const_i32(b, 8));
+                    rocke_value_t* jq_m = rocke_b_add(b, bm, tm);
+                    rocke_value_t* r4 = rocke_b_mod(b, r8, rocke_b_const_i32(b, 4));
+                    rocke_value_t* t8 = rocke_b_div(b, t4, rocke_b_const_i32(b, 8));
+                    rocke_value_t* t84 = rocke_b_mul(b, t8, rocke_b_const_i32(b, 4));
+                    rocke_value_t* q_m = rocke_b_add(b, r4, t84);
+                    if(main_ < W->n_units)
+                    {
+                        rocke_value_t* im = rocke_b_cmp_lt(b, uu, rocke_b_const_i32(b, main_));
+                        jq_m = rocke_b_select(b, im, jq_m, jq_t);
+                        q_m = rocke_b_select(b, im, q_m, q_t);
+                    }
+                    jq_t = jq_m;
+                    q_t = q_m;
+                }
+                q = q_t;
+            }
+            u->j0 = rocke_b_mul(b, jq_t, rocke_b_const_i32(b, 4));
+        }
+        else
+        {
+            rocke_value_t* dq = rocke_b_div(b, uu, rocke_b_const_i32(b, W->ncq));
+            u->j0 = rocke_b_mul(b, dq, W->c2);
+        }
         u->jw = u->j0;
         u->inr = (i + 1) * W->threads > W->n_units
                      ? rocke_b_cmp_lt(b, uu, rocke_b_const_i32(b, W->n_units))

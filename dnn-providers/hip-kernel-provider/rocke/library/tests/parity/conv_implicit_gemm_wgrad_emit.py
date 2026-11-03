@@ -1433,6 +1433,12 @@ for _i, _b, _aq in ((82, 72, 1), (83, 73, 2)):
         _GFX942_3D_KNOBS[_b][0],
         dict(_GFX942_3D_KNOBS[_b][1], xwin_aq=_aq),
     )
+# 84-85: xwin_bq (B load units of 4 voxels) 1 on 72 and 2 on 83.
+for _i, _b, _bq in ((84, 72, 1), (85, 83, 2)):
+    _GFX942_3D_KNOBS[_i] = (
+        _GFX942_3D_KNOBS[_b][0],
+        dict(_GFX942_3D_KNOBS[_b][1], xwin_bq=_bq),
+    )
 
 
 def _gfx942_3d_knob_spec(idx: int):
