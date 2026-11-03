@@ -1118,11 +1118,6 @@ namespace TensileLite
             return internalArgsSupport.persistentLoopArgsVersion == 2;
         }
 
-        // Fraction of spatial-cluster peers that own a real output tile.
-        // Used only to rank analytical candidates; explicit solution dispatch
-        // and measured exact matches keep their selected kernel.
-        double streamKClusterUtilization(Problem const& problem) const;
-
         void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
                                           PersistentLaunchSettings const& launch) const;
 
