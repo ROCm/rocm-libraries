@@ -1040,8 +1040,13 @@ TEST_P(GPU_CandidateSelection_FP32, StaticKernelDecodes_Test)
     if(!MetadataHasKernel(meta, kernel))
         GTEST_SKIP() << "Kernel not present in metadata for " << params.solver;
 
-    ASSERT_EQ(meta.GetConditionalLayout(kernel), nullptr)
-        << "test kernel is expected to be static (no conditional layout)";
+    // The per-solver common kernel is static for most solvers, but not universally: e.g. the Bwd
+    // DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1 carries a conditional SplitK suffix. When
+    // the chosen kernel has a conditional layout it is not a static kernel for this solver, so skip
+    // -- conditional decode is exercised by the Wavelet / V3-large-tensor tests above.
+    if(meta.GetConditionalLayout(kernel) != nullptr)
+        GTEST_SKIP() << kernel << " has a conditional layout for " << params.solver
+                     << " (not a static kernel)";
 
     // Build a candidate from the static mapping (all numeric "1"s), as GenerateValidKernelParams
     // does.
