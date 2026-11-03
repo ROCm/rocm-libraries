@@ -324,9 +324,11 @@ def test_the_gfx950_3d_module_builder_is_validated_by_both_halves():
         num_segments=16,
     )
     _check_support_predicate(module, builder, good, "gfx950")
-    bad = dataclasses.replace(good, num_segments=4097)
+    bad = dataclasses.replace(
+        good, num_segments=module.reduce_max_segments("gfx950") + 1
+    )
     with pytest.raises(
-        HkpPackError, match="supports_unified_attention_3d_tiled_module.*exceeds 4096"
+        HkpPackError, match="supports_unified_attention_3d_tiled_module.*LDS"
     ):
         _check_support_predicate(module, builder, bad, "gfx950")
 
