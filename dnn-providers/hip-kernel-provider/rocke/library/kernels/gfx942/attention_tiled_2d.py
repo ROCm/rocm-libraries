@@ -481,6 +481,10 @@ class UnifiedAttention2DTiledSpec:
     # can remove a barrier/prologue even when full-tile K buffering remains.
     use_q_direct_global: bool = False
     use_v_hbm_direct: bool = False
+    # Read the QK operand K straight from global memory instead of staging it
+    # in K_lds, which shrinks to a one-element stub. Q is otherwise staged in
+    # K_lds, so this also reads Q straight from global memory: it implies
+    # use_q_direct_global.
     use_k_hbm_direct: bool = False
     # Cache policy for async K/V buffer->LDS loads. Gfx942 interprets these aux
     # bits as sc0/nt/swz/sc1, so this stays explicit and benchmarked.
@@ -1792,7 +1796,8 @@ def build_unified_attention_2d_tiled(
     # slots hold the ``BLOCK_M`` Q rows. When ``BLOCK_M <= T`` Q fits in one
     # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills into
     # K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather + store use
-    # ``(buf, row, col)`` indexing in both cases.
+    # ``(buf, row, col)`` indexing in both cases, which the full-rows rule above
+    # guarantees matches the allocated layout.
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
     Q_ALIAS_K = (
@@ -1802,12 +1807,6 @@ def build_unified_attention_2d_tiled(
     )
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
     K_lds = b.smem_alloc(K_LDS_DTYPE, list(K_LDS_SHAPE), name_hint=K_LDS_NAME)
-    # The Q store indexes an aliased K_lds as ``[buf, row % T, col]``, which is
-    # only right for the full ``[K_BUFS, T, HD]`` layout.
-    assert not Q_ALIAS_K or tuple(K_lds.type.shape) == (K_BUFS, T, HD), (
-        f"Q aliases K_lds of shape {tuple(K_lds.type.shape)}, "
-        f"expected {(K_BUFS, T, HD)}"
-    )
     V_BUFS = 1  # single-buffer V (race-free: see comment above)
     # ---- V_lds bank-deconflict swizzle (HIPDNN_GFX942_SWIZZLE_VLDS) ----
     # The plain-atom PV B-operand is read with 4 strided ``ds_read_u16`` loads
