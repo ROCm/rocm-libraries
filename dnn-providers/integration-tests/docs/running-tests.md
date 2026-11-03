@@ -214,7 +214,9 @@ not measured: the `BUILD_CPP_GRAPH_TESTS` suites, which are being retired in
 favour of bundles, and the default-built `ConvForwardSerializeRoundTrip` and
 `ResampleBackward` tests. They run their reference as normal and print no
 `[ REFERENCE BENCHMARK ]` line. A bundle test whose engine declines or fails, or
-whose support claim stops it, never reaches a reference and records nothing.
+whose support claim stops it, never reaches a reference and records nothing. With
+bundle tests off (`--no-bundles` or `HIPDNN_TEST_ALLOW_BUNDLES=0`) there is
+nothing to measure, so the binary refuses the flag.
 
 The metric is the incremental wall-clock cost of obtaining comparison-ready
 expected outputs:
@@ -237,8 +239,12 @@ the reference needs it incurs no additional transfer. They include first-use
 reference initialization or compilation where it occurs, but are not a
 cold-cache or repeated-kernel microbenchmark. Golden output files are loaded
 separately from shared inputs when this flag is enabled; filesystem cache state
-affects their loading time. An unreadable golden blob fails the test with the
-same `tensor data failed to load` message as without the flag.
+affects their loading time. With the flag, golden blobs are read only when the
+golden outputs are the reference that verifies the test; there an unreadable
+blob fails the test with the same `tensor data failed to load` message as without
+the flag. Without the flag every golden blob is read with the inputs, so a
+corrupt blob fails a `gpu` or `cpu` run that would not compare against it, and
+the same run passes with the flag.
 
 For example, compare batchnorm inference CPU and GPU references on MLOps with
 the same CPU validator, including the GPU reference's output download:
@@ -276,11 +282,18 @@ Repeat separate CPU/GPU invocations with distinct output files to estimate
 variance, and keep validator placement and input-fill settings identical.
 
 Two CTest checks cover the flag. `hipdnn_integration_tests_benchmark_reference_refusal`
-needs no plugin and checks a refused combination. A provider lane that passes
+needs no plugin and checks a refused combination; it is in the build tree and in
+the installed CTest file. A provider lane that passes
 `BENCHMARK_REFERENCE_SMOKE_FILTER` to `add_external_integration_test_target()`
 gets `<lane>-benchmark-reference-smoke`, which runs that filter with the flag on
-and fails unless at least one reference is verified and measured. The MIOpen
-lane runs `quick_BatchnormFwdInference_Inference.*` this way in the quick tier.
+and fails unless at least one reference is verified and measured and the output
+has no `[  FAILED  ]`, `FATAL:`, `Fatal error:` or `Error: zero tests ran` line.
+CTest ignores the exit code of a check with a pass pattern, so a non-zero exit
+after the summary that prints none of these still passes; a crash on a signal
+still fails. The MIOpen lane runs
+`quick_BatchnormFwdInference_Inference.*` this way in the quick tier. On a runner
+with no HIP device both checks pass without running anything, as the binary
+skips itself.
 
 ### The build reads a copy of the bundles
 
@@ -327,6 +340,8 @@ The binary refuses these flag combinations (exit 1):
 - `--benchmark` or `--benchmark-reference` together with
   `--skip-graph-validation`, `--capture-bundles` or `--write-support-claims`.
   These modes do not execute the graph or the reference.
+- `--benchmark-reference` with bundle tests off (`--no-bundles` or
+  `HIPDNN_TEST_ALLOW_BUNDLES=0`). The flag measures bundle tests only.
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run

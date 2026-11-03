@@ -1004,8 +1004,10 @@ VerificationOutcome
         });
         if(loadError.has_value())
         {
-            // The same failure prepareInputs() reports for this blob without the flag,
-            // so the flag does not change the verdict.
+            // The same failure prepareInputs() reports for this blob without the flag.
+            // Under the flag only a golden reference reads its blobs, so a corrupt blob
+            // that a gpu or cpu run never compares against fails the test only without
+            // the flag.
             _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
             return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                                FailureOrigin::HARNESS,

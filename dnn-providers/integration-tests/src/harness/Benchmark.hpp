@@ -23,26 +23,35 @@ inline bool
 }
 
 /// The --benchmark-reference flag as typed, plus the flags that stop a test before
-/// it executes.
+/// it executes and whether bundle tests, the only ones it measures, are registered.
 struct ReferenceBenchmarkRequest
 {
     bool enabled = false;
     bool skipGraphValidation = false;
     bool captureBundles = false;
     bool writeSupportClaims = false;
+    bool bundlesDisabled = false;
 };
 
 /// The reason --benchmark-reference cannot be used with the other flags, if any.
 inline std::optional<std::string>
     validateReferenceBenchmark(const ReferenceBenchmarkRequest& request)
 {
-    if(request.enabled
-       && stopsBeforeExecution(
+    if(!request.enabled)
+    {
+        return std::nullopt;
+    }
+    if(stopsBeforeExecution(
            request.skipGraphValidation, request.captureBundles, request.writeSupportClaims))
     {
         return "--benchmark-reference cannot be combined with --skip-graph-validation, "
                "--capture-bundles or --write-support-claims: those modes do not "
                "execute the reference";
+    }
+    if(request.bundlesDisabled)
+    {
+        return "--benchmark-reference measures bundle tests only, and bundle tests are "
+               "off (--no-bundles or HIPDNN_TEST_ALLOW_BUNDLES=0)";
     }
     return std::nullopt;
 }
@@ -114,7 +123,8 @@ public:
 
 /// Times one reference phase in wall-clock milliseconds. The synchronize before the
 /// start keeps outstanding engine work out of the phase; the one before the stop
-/// keeps the reference's own queued device work in it.
+/// keeps the reference's own queued device work in it. measure() adds to
+/// `elapsedMs`, so a phase measured in more than one window is their sum.
 class ReferenceBenchmarkTimer
 {
 public:

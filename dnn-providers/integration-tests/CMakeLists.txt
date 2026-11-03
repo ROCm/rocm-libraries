@@ -362,16 +362,29 @@ clang_tidy_check(${INTEGRATION_TESTS_EXE})
 # The one exception needs no plugin: --benchmark-reference with a mode that never
 # runs a reference must be refused before any engine loads. PASS_REGULAR_EXPRESSION
 # replaces the exit-code check, and the refusal message is printed only on that
-# exit. A device-less runner passes, as the binary skips itself before parsing.
-add_test(
-    NAME hipdnn_integration_tests_benchmark_reference_refusal
-    COMMAND ${INTEGRATION_TESTS_EXE} --benchmark-reference --skip-graph-validation
-)
-set_tests_properties(hipdnn_integration_tests_benchmark_reference_refusal PROPERTIES
-    PASS_REGULAR_EXPRESSION
+# exit. A device-less runner passes, as the binary skips itself before parsing, so
+# the entry is also staged into the installed CTest file below, which the GPU jobs
+# run.
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST hipdnn_integration_tests_benchmark_reference_refusal)
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS --benchmark-reference --skip-graph-validation)
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS
     "--benchmark-reference cannot be combined with --skip-graph-validation|No HIP devices available"
 )
-set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST hipdnn_integration_tests_benchmark_reference_refusal)
+add_test(
+    NAME ${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}
+    COMMAND ${INTEGRATION_TESTS_EXE} ${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS}
+)
+set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+    PASS_REGULAR_EXPRESSION "${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS}"
+)
+if(TEST_ENVIRONMENT)
+    set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+        ENVIRONMENT "${TEST_ENVIRONMENT}")
+endif()
+if(TEST_ENVIRONMENT_MODIFICATION)
+    set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+        ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+endif()
 
 set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
 set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
@@ -457,6 +470,31 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endforeach()
+
+    # The refusal check, next to the GTest suites. It is the only pre-registered check
+    # staged here: the others run python scripts from the source tree. Labelled from
+    # test_categories_external.yaml, which matches it by exact name only.
+    set(_refusal_install_cmd
+        "add_test(\"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}\" \"../hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}\""
+    )
+    foreach(_refusal_arg IN LISTS HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS)
+        string(APPEND _refusal_install_cmd " \"${_refusal_arg}\"")
+    endforeach()
+    string(APPEND _refusal_install_cmd ")\n")
+    set(_refusal_install_properties
+        "PASS_REGULAR_EXPRESSION \"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS}\"")
+    # Unescaped, as the GTest suites above write theirs: ctest splits the quoted list.
+    if(TEST_ENVIRONMENT)
+        string(APPEND _refusal_install_properties " ENVIRONMENT \"${TEST_ENVIRONMENT}\"")
+    endif()
+    if(TEST_ENVIRONMENT_MODIFICATION)
+        string(APPEND _refusal_install_properties
+               " ENVIRONMENT_MODIFICATION \"${TEST_ENVIRONMENT_MODIFICATION}\"")
+    endif()
+    file(APPEND "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+         "\n${_refusal_install_cmd}"
+         "set_tests_properties(\"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}\" PROPERTIES ${_refusal_install_properties})\n")
+    apply_ctest_category_labels("${HIPDNN_IT_CTEST_CATEGORIES_YAML}" "${HIPDNN_IT_CTEST_INSTALL_FILE}")
 
     # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.

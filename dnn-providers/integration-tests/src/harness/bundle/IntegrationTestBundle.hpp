@@ -70,7 +70,9 @@ struct TensorBlobs
 //
 // A registered bundle lives for the whole process, so it holds no tensor data itself:
 // reading every golden blob at registration kept all of it in memory for the run.
-// Each test reads what it needs with loadTensors() and owns the result.
+// Each test reads what it needs with loadTensors(), or under --benchmark-reference
+// with loadInputs() and, when golden outputs verify it, loadGoldenOutputs(), and
+// owns the result.
 struct IntegrationTestBundle
 {
     flatbuffers::DetachedBuffer graphBuffer;

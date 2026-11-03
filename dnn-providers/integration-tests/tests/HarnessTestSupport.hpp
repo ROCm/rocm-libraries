@@ -129,6 +129,9 @@ struct HarnessMocks
         deps.claimObserver = nonOwning<ISupportClaimObserver>(claimObserver);
         deps.reporter = nonOwning<IVerificationReporter>(reporter);
         deps.policy = std::move(policy);
+        // Never synchronizes, so the suites that turn on --benchmark-reference need no
+        // device; a suite that wants the real synchronize installs it itself.
+        deps.referenceTimer = ReferenceBenchmarkTimer();
         return deps;
     }
 };
