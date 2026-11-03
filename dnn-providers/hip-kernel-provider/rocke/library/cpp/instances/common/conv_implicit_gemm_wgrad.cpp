@@ -950,21 +950,12 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     if(!wgrad_streamk_gates(s, arch, reason, reason_cap))
         return false;
 
-    /* C-port-only gates, after every gate Python shares: grouped wgrad
-     * (groups > 1) and group merging are only ported on the stream-K path,
-     * which folds the group into its linear tile index; the grid-per-group
-     * path stays Python-only. This is an intentional divergence -- Python
-     * accepts these specs, the C port rejects them. */
+    /* C-port-only gate, after every gate Python shares: group merging is only
+     * ported on the stream-K path, which folds the group into its linear tile
+     * index. This is an intentional divergence -- Python accepts these specs,
+     * the C port rejects them. (Grouped wgrad itself runs grid-per-group:
+     * group = z / ks_count.) */
     const bool sk_on = wgrad_streamk_on(s);
-    if(s->problem.groups != 1 && !sk_on)
-    {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "grouped convolution (groups=%d > 1) is not supported for wgrad",
-                     s->problem.groups);
-        return false;
-    }
     if(s->group_merge != 1 && !sk_on)
     {
         if(reason && reason_cap)
@@ -3027,6 +3018,9 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * silently unreachable from wgrad. */
         fwd.async_dma = spec->async_dma;
         fwd.unroll_k = spec->unroll_k;
+        /* The LDS layout reads the explicit row pad (Python effective_lds_layout). */
+        fwd.has_lds_k_pad = spec->has_lds_k_pad;
+        fwd.lds_k_pad = spec->lds_k_pad;
         /* A temporary spec we keep alive for the duration; store pointer */
         rocke_implicit_gemm_conv_spec_t* tmp_fwd_spec
             = (rocke_implicit_gemm_conv_spec_t*)rocke_arena_alloc(
@@ -3157,6 +3151,11 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     if(!wgrad_streamk_on(spec))
     {
         rocke_value_t* z_id = rocke_b_block_id_z(b);
+        if(spec->problem.groups > 1)
+        {
+            /* Grid-per-group: group = z // ks_count, slice = z % ks_count. */
+            ctx->group_idx = rocke_b_to_sgpr_u32(b, rocke_b_div(b, z_id, ks_count_param));
+        }
         rocke_value_t* slice_id = rocke_b_mod(b, z_id, ks_count_param);
         rocke_value_t* mul_lo = rocke_b_mul(b, slice_id, ks_param);
         k_lo = rocke_b_to_sgpr_u32(b, mul_lo);

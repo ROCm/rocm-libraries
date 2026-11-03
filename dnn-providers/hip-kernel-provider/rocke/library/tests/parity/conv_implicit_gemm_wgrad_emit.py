@@ -1086,6 +1086,8 @@ def _spec(idx: int):
         return replace(base, **bad[0]), bad[1]
     if 73 <= idx <= 88:
         return _tf32_spec(idx)
+    if idx >= 55 + _GFX942_3D_OFFSET:
+        return _gfx942_3d_any(idx - _GFX942_3D_OFFSET)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -1159,6 +1161,51 @@ def _tf32_spec(idx: int):
         ),
         arch,
     )
+
+
+_GFX942_3D_OFFSET = 54
+
+
+def _gfx942_3d_any(idx: int):
+    """The gfx942 3-D configs below by their own number (from 55)."""
+    if 55 <= idx <= 58:
+        return _gfx942_3d_spec(idx)
+    raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
+
+
+# gfx942 3-D grouped (grid-per-group) configs on the 3x3x3 / pad-1 problem the
+# AOT cache builds its grouped wgrad binaries against. Keep in lockstep with
+# make_cfg_3d() in conv_implicit_gemm_wgrad_emit.c. The numbers below are
+# _gfx942_3d_spec's own; it serves parity config N as its config
+# N - _GFX942_3D_OFFSET (they follow the TF32 configs, which end at 108).
+#   55: bf16, groups=2, t256x256x32 w2x4 a16x16x16, lds_k_pad=4, mem/default
+#   56: bf16, groups=2, t128x192x32 w1x4, split_k=2 two-stage (1024 slabs),
+#       lds_k_pad=4, waves_per_eu=2
+#   57: 55 with fp16 operands, groups=1
+#   58: 56 with split_k=2 atomics (no two-stage), ws_replicas default
+def _gfx942_3d_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    groups = 1 if idx == 57 else 2
+    dt = "fp16" if idx == 57 else "bf16"
+    p = ConvProblem(
+        N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
+        sD=1, sH=1, sW=1, pD=1, pH=1, pW=1, dD=1, dH=1, dW=1, groups=groups,
+    )
+    kw = dict(
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        vector_size_a=8, vector_size_b=8, vector_size_c=1,
+        lds_k_pad=4, pipeline="mem", epilogue="default",
+    )
+    if idx in (55, 57):
+        kw.update(tile_m=256, tile_n=256, tile_k=32, warp_m=2, warp_n=4)
+    else:
+        kw.update(tile_m=128, tile_n=192, tile_k=32, warp_m=1, warp_n=4, split_k=2,
+                  waves_per_eu=2)
+        if idx == 56:
+            kw.update(two_stage=True, ws_replicas=1024)
+    data = ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
+    return WgradConvSpec(problem=p, data=data, **kw), "gfx942"
 
 
 # (problem kwargs, data dtypes (a/b, d), atom edge, streamk, reduction, ctas, arch)

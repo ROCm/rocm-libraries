@@ -311,6 +311,73 @@ static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
+/* gfx942 3-D grouped configs; mirrors _gfx942_3d_spec() in the Python
+ * emitter (the index table is there). make_cfg_3d numbers them from 55; parity
+ * config N is its config N - GFX942_3D_OFFSET (they follow the TF32 configs,
+ * which end at 108). */
+#define GFX942_3D_OFFSET 54
+
+static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
+    *arch = "gfx942";
+    const int groups = idx == 57 ? 1 : 2;
+    const char* dt = idx == 57 ? "fp16" : "bf16";
+    spec->problem = rocke_conv_problem_make_3d(
+        1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = groups;
+    spec->dtype_a = dt;
+    spec->dtype_b = dt;
+    spec->dtype_d = dt;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 1;
+    spec->has_lds_k_pad = true;
+    spec->lds_k_pad = 4;
+    spec->pipeline = "mem";
+    spec->epilogue = "default";
+    if(idx == 55 || idx == 57)
+    {
+        spec->tile_m = 256;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 4;
+    }
+    else
+    {
+        spec->tile_m = 128;
+        spec->tile_n = 192;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 4;
+        spec->split_k = 2;
+        spec->has_waves_per_eu = true;
+        spec->waves_per_eu = 2;
+        if(idx == 56)
+        {
+            spec->two_stage = true;
+            spec->ws_replicas = 1024;
+        }
+    }
+    return 0;
+}
+
+/* The gfx942 3-D configs by their own number (from 55); mirrors
+ * _gfx942_3d_any() in the Python emitter. */
+static int make_cfg_3d_any(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    if(idx >= 55 && idx <= 58)
+        return make_cfg_3d(idx, spec, arch);
+    return -1;
+}
+
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     if(idx >= 73 && idx <= 88)
@@ -340,6 +407,8 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
             spec->dtype_d = "bf16";
         return 0;
     }
+    if(idx >= 55 + GFX942_3D_OFFSET)
+        return make_cfg_3d_any(idx - GFX942_3D_OFFSET, spec, arch);
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)
         base = idx == 71 ? 11 : 15;
