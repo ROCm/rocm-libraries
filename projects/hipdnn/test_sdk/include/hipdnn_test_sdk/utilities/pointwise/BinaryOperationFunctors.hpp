@@ -94,7 +94,8 @@ struct ReluBackward
     {
         auto dyCompute = static_cast<ComputeType>(dy);
         auto xCompute = static_cast<ComputeType>(x);
-        auto localGradient = (xCompute > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
+        auto localGradient = (xCompute > static_cast<ComputeType>(0)) ? static_cast<ComputeType>(1)
+                                                                      : static_cast<ComputeType>(0);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -141,11 +142,11 @@ struct ParameterizedReluBackward
         }
         else if(xCompute > upperClip)
         {
-            localGradient = ComputeType{0};
+            localGradient = static_cast<ComputeType>(0);
         }
         else
         {
-            localGradient = ComputeType{1};
+            localGradient = static_cast<ComputeType>(1);
         }
 
         return static_cast<OutputType>(dyCompute * localGradient);
@@ -162,8 +163,9 @@ struct SigmoidBackward
         auto dyCompute = static_cast<ComputeType>(dy);
         auto xCompute = static_cast<ComputeType>(x);
 
-        ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + exp(-xCompute));
-        auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
+        ComputeType sigmoidVal
+            = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-xCompute));
+        auto localGradient = sigmoidVal * (static_cast<ComputeType>(1) - sigmoidVal);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -179,7 +181,7 @@ struct TanhBackward
         auto xCompute = static_cast<ComputeType>(x);
 
         ComputeType tanhVal = tanh(xCompute);
-        auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
+        auto localGradient = static_cast<ComputeType>(1) - (tanhVal * tanhVal);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };

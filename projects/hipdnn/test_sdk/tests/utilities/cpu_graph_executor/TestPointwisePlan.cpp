@@ -299,8 +299,97 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
+}
+
+TEST(TestPointwisePlanBuilder, PlanCarriesNodeComputeType)
+{
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(dims,
+                                   dims,
+                                   DataType::HALF,
+                                   DataType::FLOAT,
+                                   DataType::HALF,
+                                   hipdnn_frontend::PointwiseMode::ABS,
+                                   1,
+                                   TensorLayout::NCHW);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwisePlanBuilder<DataType::HALF,
+                               DataType::HALF,
+                               DataType::HALF,
+                               DataType::FLOAT,
+                               DataType::HALF>
+        patient;
+    ASSERT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    EXPECT_NE((dynamic_cast<PointwisePlan<hipdnn_data_sdk::types::half,
+                                          hipdnn_data_sdk::types::half,
+                                          hipdnn_data_sdk::types::half,
+                                          hipdnn_data_sdk::types::half,
+                                          float>*>(builtPlan.get())),
+              nullptr);
+}
+
+// 2049 is not representable in half (11-bit significand) but is in float.
+template <DataType ComputeDataTypeEnum>
+static float executeHalfAddWithCompute()
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph(dims,
+                                    dims,
+                                    dims,
+                                    DataType::HALF,
+                                    DataType::HALF,
+                                    ComputeDataTypeEnum,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+
+    auto* input0
+        = static_cast<Tensor<half>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1
+        = static_cast<Tensor<half>*>(&tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* output
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+    input0->setHostValue(static_cast<half>(2048.0f), 0, 0, 0, 0);
+    input1->setHostValue(static_cast<half>(1.0f), 0, 0, 0, 0);
+    input0->markHostModified();
+    input1->markHostModified();
+
+    const PointwisePlanBuilder<DataType::HALF,
+                               DataType::HALF,
+                               DataType::FLOAT,
+                               ComputeDataTypeEnum,
+                               DataType::FLOAT>
+        planBuilder;
+    auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    plan->execute(variantPack);
+
+    return output->getHostValue(0, 0, 0, 0);
+}
+
+TEST(TestPointwisePlanBuilder, ExecutePlanUsesNodeComputeType)
+{
+    EXPECT_EQ(executeHalfAddWithCompute<DataType::FLOAT>(), 2049.0f);
+    EXPECT_EQ(executeHalfAddWithCompute<DataType::HALF>(), 2048.0f);
 }
 
 TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
@@ -335,7 +424,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -368,7 +458,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGelu)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -401,7 +492,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGeluApproxTanh)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -434,7 +526,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnarySwish)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 

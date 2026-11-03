@@ -115,6 +115,11 @@ The following table lists all operations currently supported in the CPU Referenc
 | Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, MAX, MIN, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
 | Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
 
+The pointwise reference honors the node `compute_data_type`: a plan is only built for a registered
+(input, compute, output) tuple, and operations that perform arithmetic evaluate their intermediate
+math in that compute type before rounding to the output type. A node whose compute type has no
+registered tuple is declined.
+
 `CMP_GT` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
 pointwise output inference otherwise uses the graph's intermediate data type.
 
