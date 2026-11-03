@@ -13,14 +13,9 @@
       "default_value": 128
     },
     {
-      "name": "num_query_heads",
+      "name": "num_queries_per_kv",
       "type": "int",
-      "default_value": 32
-    },
-    {
-      "name": "num_kv_heads",
-      "type": "int",
-      "default_value": 8
+      "default_value": 4
     },
     {
       "name": "sliding_window",
@@ -41,11 +36,6 @@
       "name": "num_segments",
       "type": "int",
       "default_value": 16
-    },
-    {
-      "name": "kv_cache_policy",
-      "type": "string",
-      "default_value": "stream"
     }
   ]
 }

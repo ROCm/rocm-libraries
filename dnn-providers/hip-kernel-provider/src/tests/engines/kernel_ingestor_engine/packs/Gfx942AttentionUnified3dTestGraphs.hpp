@@ -247,19 +247,18 @@ inline bool graphMatches(const GraphSpec& spec)
     return matchesGraph(PACK, graph.context()).has_value();
 }
 
-/// The KMD fields of one shipped variant. tile_size_override follows rocKE's gfx942 rule
+/// The KMD fields of one shipped variant: one kernel per GQA ratio (num_queries_per_kv);
+/// the head counts are runtime arguments. tile_size_override follows rocKE's gfx942 rule
 /// unless a case overrides it.
 struct KernelSpec
 {
     std::string dtype = "FP16";
     int64_t headSize = 128;
-    int64_t numQueryHeads = 32;
-    int64_t numKvHeads = 8;
+    int64_t numQueriesPerKv = 4;
     int64_t slidingWindow = 0;
     int64_t blockSize = 16;
     std::optional<int64_t> tileSizeOverride;
     int64_t numSegments = 16;
-    std::string kvCachePolicy = "stream";
     unsigned idByte = 0xa1;
 };
 
@@ -289,14 +288,12 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec
     kernel.metadata = {
         {std::string("dtype"), spec.dtype},
         {std::string("head_size"), spec.headSize},
-        {std::string("num_query_heads"), spec.numQueryHeads},
-        {std::string("num_kv_heads"), spec.numKvHeads},
+        {std::string("num_queries_per_kv"), spec.numQueriesPerKv},
         {std::string("sliding_window"), spec.slidingWindow},
         {std::string("block_size"), spec.blockSize},
         {std::string("tile_size_override"),
          spec.tileSizeOverride.value_or(resolvedTile(spec.headSize, spec.blockSize))},
         {std::string("num_segments"), spec.numSegments},
-        {std::string("kv_cache_policy"), spec.kvCachePolicy},
     };
     return kernel;
 }

@@ -2,14 +2,15 @@
 
 The shared SdpaFwd sweeps carry decode cases (seqlen_q 1) that support.json claims for
 hipkernel:Gfx942AttentionUnified3d on gfx942. The engine serves a graph only through a
-kernel whose feature cell -- dtype, head size, Hq, Hkv, sliding window 0 -- equals the
-graph's, so a claimed case whose cell the catalog lacks surfaces only as a broken support
+kernel whose feature cell -- dtype, head size, GQA ratio Hq / Hkv (KMD
+num_queries_per_kv), sliding window 0 -- equals the graph's (the kernels read the head
+counts themselves at runtime), so a claimed case whose cell the catalog lacks surfaces only as a broken support
 claim on a gfx942 runner. This compares the two host-side, from the shipped descriptor
 and the sweep JSON, so every runner that builds the packaging tests sees the drift.
 
-Unlike the gfx950 dense check, the comparison runs one way. The catalog holds 138 cells
-(23 head pairs per head size x 3 head sizes x 2 dtypes); the sweeps sample them, they are
-not meant to reach each one. Only cases support.json claims for the engine on gfx942
+Unlike the gfx950 dense check, the comparison runs one way. The catalog holds one cell
+per (dtype, head size, GQA ratio); the sweeps sample them, they are not meant to reach
+each one. Only cases support.json claims for the engine on gfx942
 count: the sweeps are shared, and another engine's cases are not this catalog's to serve.
 """
 
@@ -40,21 +41,14 @@ KMD_DTYPE = {"half": "FP16", "bfloat16": "BF16"}
 
 
 def catalog_cells(kdp_path):
-    """(dtype, head_size, Hq, Hkv) of every kernel the descriptor packs with no window."""
+    """(dtype, head_size, Hq / Hkv) of every kernel the descriptor packs with no window."""
     kdp = json.loads(kdp_path.read_text(encoding="utf-8"))
     cells = set()
     for kernel in kdp["kernelDescriptors"]:
         meta = kernel["metadata"]
         if meta["sliding_window"] != 0:
             continue
-        cells.add(
-            (
-                meta["dtype"],
-                meta["head_size"],
-                meta["num_query_heads"],
-                meta["num_kv_heads"],
-            )
-        )
+        cells.add((meta["dtype"], meta["head_size"], meta["num_queries_per_kv"]))
     return cells
 
 
@@ -69,7 +63,7 @@ def claimed_case_ids(sweep_dir):
 
 
 def claimed_cells(sweep_dir):
-    """{case id: (dtype, head_size, Hq, Hkv)} of every claimed case, from Q and K dims."""
+    """{case id: (dtype, head_size, Hq // Hkv)} of every claimed case, from Q and K dims."""
     template = json.loads(
         (sweep_dir / "graph.template.json").read_text(encoding="utf-8")
     )
@@ -88,7 +82,12 @@ def claimed_cells(sweep_dir):
         dtype = KMD_DTYPE.get(
             case["values"]["io_data_type"], case["values"]["io_data_type"]
         )
-        cells[case["id"]] = (dtype, q[3], q[1], k[1])
+        # graph_match declines Hq not a multiple of Hkv before any cell is compared.
+        assert q[1] % k[1] == 0, (
+            f"{sweep_dir}: claimed case {case['id']} has Hq {q[1]} not a multiple of "
+            f"Hkv {k[1]}"
+        )
+        cells[case["id"]] = (dtype, q[3], q[1] // k[1])
     # A claim naming no sweep case would otherwise drop out of the comparison unseen.
     missing = claimed - cells.keys()
     assert not missing, f"{sweep_dir}: claims name no sweep case: {sorted(missing)}"
@@ -111,6 +110,6 @@ def test_every_claimed_case_has_a_shipped_kernel():
         assert cells, f"{sweep_dir}: no case claimed for {ENGINE} on gfx942"
         unserved = {case: cell for case, cell in cells.items() if cell not in catalog}
         assert not unserved, (
-            f"{sweep_dir}: claimed cases whose (dtype, head size, Hq, Hkv) no shipped "
+            f"{sweep_dir}: claimed cases whose (dtype, head size, Hq // Hkv) no shipped "
             f"kernel carries: {unserved}"
         )

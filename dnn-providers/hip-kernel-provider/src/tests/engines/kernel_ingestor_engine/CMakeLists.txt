@@ -34,7 +34,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
 )
 
 # The gfx942 unified 3D host tests check the engine's C++ restatements of rocKE rules
-# (admission, split rule, kernel arguments, K/V cache policy) against tables rocKE itself
+# (admission, split rule, kernel arguments) against tables rocKE itself
 # answers. Each table is generated here, in the build tree, from the rocKE source tree and
 # is never committed, so it cannot drift from rocKE. The generators need only the standard
 # library and rocKE's Python, so this runs whether or not the rocKE engine is built. The
@@ -44,8 +44,7 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(_gfx942_u3d_packs "${CMAKE_CURRENT_SOURCE_DIR}/packs")
 set(_gfx942_u3d_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_gfx942_u3d_tables)
-foreach(_table admission:Admission split_rule:SplitRule arguments:Arguments
-                kv_cache_policy:KvCachePolicy)
+foreach(_table admission:Admission split_rule:SplitRule arguments:Arguments)
     string(REPLACE ":" ";" _table "${_table}")
     list(GET _table 0 _script)
     list(GET _table 1 _name)

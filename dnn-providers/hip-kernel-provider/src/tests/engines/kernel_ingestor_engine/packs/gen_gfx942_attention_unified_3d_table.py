@@ -4,7 +4,7 @@
 """Run one gfx942 unified 3D table generator for the build.
 
 The engine's host tests check its C++ restatements of rocKE rules (admission,
-split rule, kernel arguments, K/V cache policy) against tables that rocKE itself
+split rule, kernel arguments) against tables that rocKE itself
 answers. The tables are generated into the build tree on every build that touches
 their inputs and are never committed, so they cannot go stale.
 

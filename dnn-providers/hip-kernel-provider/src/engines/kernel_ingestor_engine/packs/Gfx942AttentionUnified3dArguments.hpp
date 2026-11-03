@@ -18,10 +18,12 @@
  *        as plain data: scalar values, and which buffer each pointer argument takes.
  *
  * Restates the `seg_vals` dict `kernels/common/attention_unified.py::_run_3d_tiled_on_stream`
- * builds for a strided decode request, in the order of `_3d_signature(dtype,
- * strided_kv=True)`: 12 pointers, 4 f32, 3 i32, then `StridedKvCacheLayout.arguments()`
- * (`kernels/common/attention_kv_cache.py`) for K then V. The launch passes these values
- * unchanged, so a wrong value or order here is a wrong launch; nothing faults.
+ * builds for a strided decode request, in the order of `_tiled_3d_signatures("gfx942",
+ * dtype, strided_kv=True)`: 12 pointers, 4 f32, 3 i32, the 3 i32 runtime fields
+ * (`_runtime_kernarg_fields`: num_query_heads, num_kv_heads, sliding_window), then
+ * `StridedKvCacheLayout.arguments()` (`kernels/common/attention_kv_cache.py`) for K then V.
+ * The launch passes these values unchanged, so a wrong value or order here is a wrong
+ * launch; nothing faults.
  *
  * Header-only and HIP-free: TestGfx942AttentionUnified3dArguments.cpp checks every value
  * against a table rocKE generated (gen_gfx942_attention_unified_3d_arguments.py).
@@ -32,8 +34,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// fp16 / bf16: the only element types the strided entry admits.
 inline constexpr int64_t GFX942_UNIFIED_3D_KV_ELEMENT_BYTES = 2;
 
-/// The segment kernel's argument count with strided K/V: 19 base + 8 strided.
-inline constexpr size_t GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT = 27;
+/// The segment kernel's argument count with strided K/V: 19 base + 3 runtime + 8 strided.
+inline constexpr size_t GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT = 30;
 
 /// One K or V tensor's token stride and per-head span, in bytes.
 struct Gfx942KvHeadSpan
@@ -215,15 +217,19 @@ inline Gfx942Unified3dArgument gfx942I64(const char* name, int64_t value)
 } // namespace detail
 
 /**
- * @brief The segment launch's 27 arguments, in kernel order.
+ * @brief The segment launch's 30 arguments, in kernel order.
  *
  * Sinks, block tables, ALiBi and QQ bias are null (graph_match refuses them);
  * `block_table_stride` is 0 as the strided entry passes; k_scale = v_scale = 1 and
  * softcap = 0 (no FP8, no softcap). seq_lens_ptr is the engine's seqused_k[B] and
- * query_start_len_ptr its cu_seqlens_q[B+1].
+ * query_start_len_ptr its cu_seqlens_q[B+1]. The kernel is built for one GQA ratio and
+ * reads the graph's head counts at runtime (num_query_heads, num_kv_heads);
+ * sliding_window is 0 (graph_match refuses every window).
  */
 inline Gfx942Unified3dSegmentArguments
     gfx942Unified3dSegmentArguments(int32_t numSeqs,
+                                    int32_t numQueryHeads,
+                                    int32_t numKvHeads,
                                     float scale,
                                     const Gfx942StridedKvArguments& k,
                                     const Gfx942StridedKvArguments& v)
@@ -252,6 +258,9 @@ inline Gfx942Unified3dSegmentArguments
             gfx942I32("num_seqs", numSeqs),
             gfx942I32("block_table_stride", 0),
             gfx942I32("qq_bias_stride_0", 0),
+            gfx942I32("num_query_heads", numQueryHeads),
+            gfx942I32("num_kv_heads", numKvHeads),
+            gfx942I32("sliding_window", 0),
             gfx942I64("k_stride_batch_bytes", k.strideBatchBytes),
             gfx942I64("k_stride_head_bytes", k.strideHeadBytes),
             gfx942I32("k_stride_token_bytes", k.strideTokenBytes),

@@ -25,10 +25,11 @@
  *        grows correctly.
  *
  * The table (Gfx942AttentionUnified3dArgumentsTable.inc) is produced by
- * gen_gfx942_attention_unified_3d_arguments.py from rocKE's `_3d_signature(...,
- * strided_kv=True)` and `StridedKvCacheLayout(...).arguments()`. The build generates it from
- * the rocKE source tree (kernel_ingestor_engine/CMakeLists.txt), so a change to the signature
- * order or the stride packing fails here.
+ * gen_gfx942_attention_unified_3d_arguments.py from rocKE's `_tiled_3d_signatures("gfx942",
+ * ..., strided_kv=True)` (runtime num_query_heads, num_kv_heads, sliding_window included),
+ * `_runtime_kernarg_values(...)` and `StridedKvCacheLayout(...).arguments()`. The build
+ * generates it from the rocKE source tree (kernel_ingestor_engine/CMakeLists.txt), so a
+ * change to the signature order or the stride packing fails here.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -48,6 +49,8 @@ struct ArgumentsRow
 {
     const char* label;
     int32_t batch;
+    int32_t numQueryHeads;
+    int32_t numKvHeads;
     float scale;
     std::array<int64_t, 4> kDims;
     std::array<int64_t, 4> kStrides;
@@ -114,6 +117,8 @@ uint32_t floatBits(float value)
 Gfx942Unified3dSegmentArguments argumentsFor(const ArgumentsRow& row)
 {
     return gfx942Unified3dSegmentArguments(row.batch,
+                                           row.numQueryHeads,
+                                           row.numKvHeads,
                                            row.scale,
                                            gfx942StridedKvArguments(row.kDims, row.kStrides),
                                            gfx942StridedKvArguments(row.vDims, row.vStrides));

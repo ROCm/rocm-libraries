@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
-#include <string_view>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -76,66 +75,6 @@ inline std::optional<int64_t> gfx942TileSizeOverride(int64_t headSize, int64_t b
 inline int64_t gfx942ResolvedTileSize(int64_t headSize, int64_t blockSize)
 {
     return gfx942TileSizeOverride(headSize, blockSize).value_or(blockSize);
-}
-
-/// The last-level (Infinity Cache) capacity rocKE's decode cache policy compares against
-/// (`kernels/common/attention_unified.py::_DECODE_KV_LLC_BYTES`).
-inline constexpr int64_t GFX942_DECODE_KV_LLC_BYTES = int64_t{256} << 20;
-
-/// The cache policy of the segment kernel's K/V loads (spec `kv_cache_policy`).
-enum class Gfx942KvCachePolicy : uint8_t
-{
-    ALL,
-    STREAM,
-};
-
-/// The KMD spelling of @p policy: "all" or "stream".
-inline std::string_view gfx942KvCachePolicyName(Gfx942KvCachePolicy policy)
-{
-    return policy == Gfx942KvCachePolicy::STREAM ? "stream" : "all";
-}
-
-/**
- * @brief The cache policy rocKE builds the segment kernel with for one decode problem.
- *
- * Restates `kernels/common/attention_unified.py::_kv_cache_policy_3d(problem, "gfx942")`
- * for this file's scope (every sequence decodes, fp16/bf16 K/V):
- *
- *     kv_bytes = 2 * num_seqs * max_seqlen_k * num_kv_heads * head_size * 2
- *     return "stream" if kv_bytes > _DECODE_KV_LLC_BYTES else "all"
- *
- * "stream" keeps a K/V larger than the last-level cache from evicting other data; "all"
- * lets a K/V that fits hit in that cache on the next call. Both compute the same result. A
- * product that overflows int64 is far past the threshold, so it is "stream".
- */
-inline Gfx942KvCachePolicy
-    gfx942KvCachePolicy(int64_t batch, int64_t hkv, int64_t headSize, int64_t seqlenK)
-{
-    if(batch <= 0 || hkv <= 0 || headSize <= 0 || seqlenK < 0)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx942 unified 3d: cache policy needs positive batch, KV heads and head size, "
-            "and non-negative seqlen_k");
-    }
-    if(seqlenK == 0)
-    {
-        // No K/V bytes at all, whatever the other factors: Python's product is 0. Checked
-        // first, so a huge batch cannot overflow before the zero is reached.
-        return Gfx942KvCachePolicy::ALL;
-    }
-    constexpr int64_t KV_TENSORS = 2; // K and V
-    constexpr int64_t ELEMENT_BYTES = 2; // fp16/bf16
-    int64_t bytes = KV_TENSORS * ELEMENT_BYTES;
-    for(const int64_t factor : {batch, seqlenK, hkv, headSize})
-    {
-        if(__builtin_mul_overflow(bytes, factor, &bytes))
-        {
-            return Gfx942KvCachePolicy::STREAM;
-        }
-    }
-    return bytes > GFX942_DECODE_KV_LLC_BYTES ? Gfx942KvCachePolicy::STREAM
-                                              : Gfx942KvCachePolicy::ALL;
 }
 
 namespace detail

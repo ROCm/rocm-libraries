@@ -21,10 +21,12 @@
  * @brief Pins the two kernarg ABIs hipkernel:Gfx942AttentionUnified3d marshals against the
  *        ABIs the rocKE builder declares.
  *
- * segment = `_3d_signature(dtype, strided_kv=True)` and reduce = `_reduce_signature(dtype)`
- * (`rocke/library/kernels/common/attention_unified.py`): 19 base arguments then 8
- * strided-K/V arguments, and 5 pointers. The lists below are written out independently of
- * the pack; hkp_pack records the builder's own parameter names
+ * segment = `_tiled_3d_signatures("gfx942", dtype, strided_kv=True)` (the segment half)
+ * and reduce = its reduce half (`rocke/library/kernels/common/attention_unified.py`): 19
+ * base arguments, 3 i32 runtime fields (num_query_heads, num_kv_heads, sliding_window),
+ * then 8 strided-K/V arguments; and 5 pointers then the i32 num_query_heads. The lists
+ * below are written out independently of the pack; hkp_pack records the builder's own
+ * parameter names
  * (descriptor-packaging/tests/rocke/test_hkp_pack_gfx942_unified_3d_rocke.py), and
  * prepare() compares both launches' recorded lists before loading either.
  *
@@ -48,7 +50,7 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 constexpr const char* BUFFER = "global_buffer";
 constexpr const char* BY_VALUE = "by_value";
 
-/// `_3d_signature(dtype, strided_kv=True)`, by name and width.
+/// `_tiled_3d_signatures("gfx942", dtype, strided_kv=True)[0]`, by name and width.
 std::vector<KernelArgument> pythonSegmentAbi()
 {
     std::vector<KernelArgument> abi;
@@ -73,7 +75,10 @@ std::vector<KernelArgument> pythonSegmentAbi()
                             "softcap",
                             "num_seqs",
                             "block_table_stride",
-                            "qq_bias_stride_0"})
+                            "qq_bias_stride_0",
+                            "num_query_heads",
+                            "num_kv_heads",
+                            "sliding_window"})
     {
         abi.push_back(KernelArgument{BY_VALUE, 4, 0, name});
     }
@@ -87,14 +92,15 @@ std::vector<KernelArgument> pythonSegmentAbi()
     return abi;
 }
 
-/// `_reduce_signature(dtype)` without LSE.
+/// `_tiled_3d_signatures("gfx942", dtype)[1]`: no LSE, num_query_heads read at runtime.
 std::vector<KernelArgument> pythonReduceAbi()
 {
     return {KernelArgument{BUFFER, 8, 0, "output_ptr"},
             KernelArgument{BUFFER, 8, 0, "segm_output_ptr"},
             KernelArgument{BUFFER, 8, 0, "segm_max_ptr"},
             KernelArgument{BUFFER, 8, 0, "segm_expsum_ptr"},
-            KernelArgument{BUFFER, 8, 0, "seq_lens_ptr"}};
+            KernelArgument{BUFFER, 8, 0, "seq_lens_ptr"},
+            KernelArgument{BY_VALUE, 4, 0, "num_query_heads"}};
 }
 
 constexpr const char* SEGMENT_SYMBOL = "attention_unified_3d_segment_test";
@@ -167,8 +173,8 @@ void expectReduceRefused(const std::vector<KernelArgument>& reduce, const std::s
 
 TEST(TestGfx942AttentionUnified3dSignature, TheAbisHaveTheDeclaredShape)
 {
-    EXPECT_EQ(pythonSegmentAbi().size(), 27U); // 19 base + 8 strided-KV
-    EXPECT_EQ(pythonReduceAbi().size(), 5U);
+    EXPECT_EQ(pythonSegmentAbi().size(), 30U); // 19 base + 3 runtime + 8 strided-KV
+    EXPECT_EQ(pythonReduceAbi().size(), 6U);
 }
 
 /// The positive control: both lists accepted, so prepare() reaches the (absent) archive.
@@ -183,10 +189,23 @@ TEST(TestGfx942AttentionUnified3dSignature, AcceptsTheAbisThePythonDeclares)
 
 TEST(TestGfx942AttentionUnified3dSignature, RefusesTheNonStridedSegmentAbi)
 {
-    // `_3d_signature(dtype)` without strided_kv: the paged kernel's 19 arguments.
+    // `_3d_signature(dtype)` without strided_kv: the paged kernel's 19 base arguments
+    // and 3 runtime fields.
     auto paged = pythonSegmentAbi();
-    paged.resize(19);
+    paged.resize(22);
     expectSegmentRefused(paged, "the paged (non-strided) segment ABI");
+}
+
+TEST(TestGfx942AttentionUnified3dSignature, RefusesTheBakedHeadsAbis)
+{
+    // A kernel built before the head counts became runtime arguments: no runtime fields
+    // in the segment (27 arguments) or the reduce (5 pointers).
+    auto segment = pythonSegmentAbi();
+    segment.erase(segment.begin() + 19, segment.begin() + 22);
+    expectSegmentRefused(segment, "the baked-heads segment ABI");
+    auto reduce = pythonReduceAbi();
+    reduce.pop_back();
+    expectReduceRefused(reduce, "the baked-heads reduce ABI");
 }
 
 TEST(TestGfx942AttentionUnified3dSignature, RefusesTheLseReduceAbi)

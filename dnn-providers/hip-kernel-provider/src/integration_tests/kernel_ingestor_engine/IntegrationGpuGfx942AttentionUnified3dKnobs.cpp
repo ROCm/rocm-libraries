@@ -48,11 +48,12 @@ using namespace hip_kernel_provider::test_utilities;
  *        kernel, its segment and reduce launches compute what the CPU reference computes,
  *        and a second execute of the same plan does too.
  *
- * kv_cache_policy is not a knob: forcing (block_size, num_segments) leaves the "stream" and
- * "all" builds of that pair, and the scorer picks by rocKE's K/V-size rule ("stream" above
- * 256 MiB). Each case names the policy it expects, and one case is sized past 256 MiB so a
- * "stream" kernel runs. The expected kernel id and the candidate count are read from the
- * production descriptors, never written here.
+ * The catalog ships one kernel per GQA ratio (KMD num_queries_per_kv) and the kernels read
+ * the head counts at runtime, so forcing (block_size, num_segments) leaves exactly one
+ * kernel for a graph's (dtype, head_size, Hq / Hkv) cell. One case uses a head pair no
+ * catalog cell lists (Hq 24, Hkv 6) to prove the runtime heads end to end. Every kernel
+ * loads K/V with the "stream" cache policy (pinned in the catalog). The expected kernel id
+ * and the candidate count are read from the production descriptors, never written here.
  *
  * The cases cover BHSD, BSHD, padded-row and mixed K/V layouts. Poisoned cases fill the
  * workspace with 0xFF before every execute: the workspace is not zeroed, so a segment that
@@ -101,9 +102,6 @@ struct DecodeCase
     KvLayout vLayout;
     int64_t blockSize;
     int64_t numSegments;
-    /// The build the scorer must pick among the forced pair's: "all" at or below 256 MiB of
-    /// K/V (2 * B * Skv * Hkv * D * 2 bytes), "stream" above.
-    const char* kvCachePolicy;
     bool poisonWorkspace;
 };
 
@@ -130,7 +128,6 @@ std::vector<DecodeCase> decodeCases()
          KvLayout::BHSD,
          16,
          32,
-         "all",
          false},
         // 7.8 MiB; K token-major, V head-major.
         {"Bf16D128MixedKBshdVBhsdPoisonedWorkspace",
@@ -144,10 +141,9 @@ std::vector<DecodeCase> decodeCases()
          KvLayout::BHSD,
          16,
          38,
-         "all",
          true},
-        // 288 MiB, past the 256 MiB threshold: the scorer picks the pair's "stream" build.
-        {"Bf16D128MixedKBshdVBhsdPoisonedWorkspaceStream",
+        // 288 MiB of K/V, past the 256 MiB Infinity Cache: a large K/V read from HBM.
+        {"Bf16D128MixedKBshdVBhsdPoisonedWorkspaceLargeKv",
          BF16,
          9,
          32,
@@ -158,7 +154,20 @@ std::vector<DecodeCase> decodeCases()
          KvLayout::BHSD,
          16,
          38,
-         "stream",
+         true},
+        // Hq 24 / Hkv 6: a head pair no catalog cell lists. The ratio-4 kernel reads both
+        // head counts at runtime, so it serves this pair too.
+        {"Bf16D128Hq24Hkv6RuntimeHeadsBhsd",
+         BF16,
+         3,
+         24,
+         6,
+         777,
+         128,
+         KvLayout::BHSD,
+         KvLayout::BHSD,
+         16,
+         38,
          true},
         // MQA, K/V rows padded to D + 8.
         {"Fp16D64MqaPaddedRowPoisonedWorkspace",
@@ -172,7 +181,6 @@ std::vector<DecodeCase> decodeCases()
          KvLayout::BHSD_PADDED_ROW,
          16,
          7,
-         "all",
          true},
         // D256 at block 32, whose KV tile rocKE resolves to 16.
         {"Fp16D256Block32Bshd",
@@ -186,7 +194,6 @@ std::vector<DecodeCase> decodeCases()
          KvLayout::BSHD,
          32,
          16,
-         "all",
          false},
     };
 }
@@ -328,15 +335,15 @@ bool carries(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel,
     return value != kernel.metadata.end() && value->second == want;
 }
 
-/// The kernels a forced (block_size, num_segments) leaves for @p c's graph cell, and the id
-/// of the one carrying @p c's kv_cache_policy.
+/// The kernels a forced (block_size, num_segments) leaves for @p c's graph cell
+/// (dtype, head_size, num_queries_per_kv = Hq / Hkv), and the id of the one it must be.
 struct ExpectedSelection
 {
     std::string kernelId;
     size_t candidates;
 };
 
-/// Records a failure and returns nullopt unless exactly one candidate carries the policy.
+/// Records a failure and returns nullopt unless exactly one candidate is left.
 std::optional<ExpectedSelection> expectedSelection(const DecodeCase& c)
 {
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
@@ -351,8 +358,7 @@ std::optional<ExpectedSelection> expectedSelection(const DecodeCase& c)
     std::vector<std::string> ids;
     forEachServedKernel([&](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
         if(!carries(kernel, "dtype", dtype) || !carries(kernel, "head_size", c.headSize)
-           || !carries(kernel, "num_query_heads", c.queryHeads)
-           || !carries(kernel, "num_kv_heads", c.kvHeads)
+           || !carries(kernel, "num_queries_per_kv", c.queryHeads / c.kvHeads)
            || !carries(kernel, "sliding_window", int64_t{0})
            || !carries(kernel, "block_size", c.blockSize)
            || !carries(kernel, "num_segments", c.numSegments))
@@ -360,18 +366,15 @@ std::optional<ExpectedSelection> expectedSelection(const DecodeCase& c)
             return;
         }
         ++candidates;
-        if(carries(kernel, "kv_cache_policy", std::string(c.kvCachePolicy)))
-        {
-            ids.push_back(hipdnn_plugin_sdk::ingestor::toString(kernel.id));
-        }
+        ids.push_back(hipdnn_plugin_sdk::ingestor::toString(kernel.id));
     });
 
     if(ids.size() != 1)
     {
         ADD_FAILURE() << ids.size() << " " << ENGINE_NAME << " kernel(s) for " << SERVED_ARCH
-                      << " carry " << dtype << " D" << c.headSize << " Hq" << c.queryHeads << " Hkv"
-                      << c.kvHeads << " block_size " << c.blockSize << " num_segments "
-                      << c.numSegments << " kv_cache_policy " << c.kvCachePolicy
+                      << " carry " << dtype << " D" << c.headSize << " num_queries_per_kv "
+                      << c.queryHeads / c.kvHeads << " (Hq" << c.queryHeads << " Hkv" << c.kvHeads
+                      << ") block_size " << c.blockSize << " num_segments " << c.numSegments
                       << " under HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
                       << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR")
                       << "'; exactly one must";
@@ -481,7 +484,7 @@ protected:
 };
 
 /// The selected kernel is read from the plugin's own selection line, so a knob dropped
-/// anywhere between the frontend and the plugin's filter, or a wrong policy pick, reads as
+/// anywhere between the frontend and the plugin's filter, or a wrong ratio match, reads as
 /// another kernel; the output is then checked against the CPU reference twice through the
 /// same plan.
 TEST_P(IntegrationGpuGfx942AttentionUnified3dKnobs,

@@ -426,9 +426,34 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchComparesEveryFeatureField)
     };
     refused([](KernelSpec& k) { k.dtype = "BF16"; }, "dtype");
     refused([](KernelSpec& k) { k.headSize = 64; }, "head_size");
-    refused([](KernelSpec& k) { k.numQueryHeads = 16; }, "num_query_heads");
-    refused([](KernelSpec& k) { k.numKvHeads = 4; }, "num_kv_heads");
+    refused([](KernelSpec& k) { k.numQueriesPerKv = 2; }, "num_queries_per_kv 2 vs ratio 4");
+    refused([](KernelSpec& k) { k.numQueriesPerKv = 8; }, "num_queries_per_kv 8 vs ratio 4");
     refused([](KernelSpec& k) { k.slidingWindow = 128; }, "sliding_window");
+}
+
+// The kernel bakes only the GQA ratio and reads both head counts at runtime, so a ratio-4
+// kernel serves every ratio-4 head pair, including pairs no catalog cell ever listed.
+TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchAcceptsEveryHeadPairOfItsRatio)
+{
+    for(const auto& [hq, hkv] :
+        std::vector<std::pair<int64_t, int64_t>>{{32, 8}, {8, 2}, {4, 1}, {24, 6}, {64, 16}})
+    {
+        auto spec = base();
+        spec.numQueryHeads = hq;
+        spec.numKvHeads = hkv;
+        ASSERT_TRUE(graphMatches(spec)) << hq << "/" << hkv;
+        EXPECT_TRUE(kernelMatchesGraph(spec, KernelSpec{})) << hq << "/" << hkv;
+    }
+    for(const int64_t ratio : {1, 2, 8, 16})
+    {
+        auto spec = base();
+        spec.numKvHeads = 2;
+        spec.numQueryHeads = 2 * ratio;
+        KernelSpec kernel;
+        EXPECT_FALSE(kernelMatchesGraph(spec, kernel)) << "ratio-4 kernel, graph ratio " << ratio;
+        kernel.numQueriesPerKv = ratio;
+        EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "ratio " << ratio;
+    }
 }
 
 TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchNeverComparesBatchOrKvLength)
@@ -458,17 +483,18 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesMalformedRecords)
     kernel = KernelSpec{};
     kernel.numSegments = 0;
     EXPECT_FALSE(kernelMatchesGraph(base(), kernel)) << "num_segments 0";
-    kernel = KernelSpec{};
-    kernel.kvCachePolicy = "nt";
-    EXPECT_FALSE(kernelMatchesGraph(base(), kernel)) << "kv_cache_policy neither stream nor all";
-    kernel = KernelSpec{};
-    kernel.kvCachePolicy = "all";
-    EXPECT_TRUE(kernelMatchesGraph(base(), kernel)) << "kv_cache_policy all";
+    for(const int64_t ratio : {0, -4, 3, 32})
+    {
+        kernel = KernelSpec{};
+        kernel.numQueriesPerKv = ratio;
+        EXPECT_FALSE(kernelMatchesGraph(base(), kernel))
+            << "num_queries_per_kv " << ratio << " is not a supported GQA ratio";
+    }
 
     const auto graph = fixture(base());
     const auto bound = matchesGraph(PACK, graph.context());
     ASSERT_TRUE(bound.has_value());
-    for(const char* field : {"num_segments", "kv_cache_policy"})
+    for(const char* field : {"num_segments", "num_queries_per_kv"})
     {
         auto definition = makeKernel(KernelSpec{});
         definition.metadata.erase(field);

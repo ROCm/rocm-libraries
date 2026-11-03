@@ -10,18 +10,18 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 ## Coverage
 
 - Architecture: gfx942 only.
-- Variants: 4,566 in 138 cells (all `kind = rocke`, two launches each, compiled at pack
-  time). A cell is (dtype, head_size, query heads, KV heads): 23 head pairs per head size.
-  4,566 exceeds the selection's 1000-kernel AOT budget (`aot_budget_per_arch`), so
-  `generate.py` and `registry_enumerator.py` print a warning (an error only under `--strict`).
+- Variants: 560 in 30 cells (all `kind = rocke`, two launches each, compiled at pack
+  time). A cell is (dtype, head_size, GQA ratio): the kernels read the query and KV head
+  counts as kernel arguments and bake only their ratio, so one kernel serves every head
+  pair of its ratio. 560 is within the selection's 1000-kernel AOT budget.
 - dtype: bf16, fp16.
 - head_size: 64, 128, 256.
-- Query heads 1 to 128 and KV heads 1 to 64, varying per cell.
+- GQA ratio (`num_queries_per_kv`): 1, 2, 4, 8, 16; any head counts with that ratio.
 - block_size: 16, 32, 64. tile_size_override follows from (head_size, block_size): 16, 32, 64.
 - num_segments: 2 to 128 (16 values), varying per cell.
-- kv_cache_policy: `stream` or `all`, both shipped where rocKE picks them (it picks
-  `stream` when a decode call's K/V exceeds 256 MiB); 2,150 `stream` and 2,416 `all`
-  variants. It changes only the K/V loads' cache bits, so it is a tuning arm.
+- K/V cache policy: `stream` in every variant. rocKE's own rule picks `all` below 256 MiB
+  of K/V; a cold-memory A/B on MI300X found it never worth a second copy (AICK-2892), so
+  the manifest pins `stream` (`enumerate.spec_overrides`).
 - Fixed in every variant: strided (dense) KV, decode grid, no sliding window, no sinks,
   softcap, ALiBi or QQ bias.
 - `num_seqs` is recorded as 32 in every spec but is IR-neutral: the decode grid's code
@@ -32,7 +32,7 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx942_attention_unified3d.kdp.json` | DVC | 11.5 MB, the 4,566 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx942_attention_unified3d.kdp.json` | DVC | 1.4 MB, the 560 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx942_attention_unified3d.kmd.json` | git | variant fields |
 | `gfx942_attention_unified3d.udd.json` | git | dispatch symbol |
 | `gfx942_attention_unified3d.ued.json` | git | engine, knobs `block_size`, `num_segments` |

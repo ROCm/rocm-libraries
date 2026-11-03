@@ -182,8 +182,8 @@ TEST(TestGfx942AttentionUnified3dAdmission, KernelMatchAgreesPerBlockSize)
             KernelSpec kernel;
             kernel.dtype = row.dtype == "bf16" ? "BF16" : "FP16";
             kernel.headSize = row.headSize;
-            kernel.numQueryHeads = row.hq;
-            kernel.numKvHeads = row.hkv;
+            // graphMatches passed, so hkv divides hq with a supported ratio.
+            kernel.numQueriesPerKv = row.hq / row.hkv;
             kernel.blockSize = blocks[i];
             EXPECT_EQ(kernelMatchesGraph(spec, kernel), admitted[i])
                 << describe(row) << " block " << blocks[i];

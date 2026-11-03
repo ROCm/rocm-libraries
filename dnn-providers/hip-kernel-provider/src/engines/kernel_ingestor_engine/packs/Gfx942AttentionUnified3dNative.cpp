@@ -90,19 +90,20 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_unified3d.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx942_attention_unified3d.dispatch";
 
-// KMD fields (gfx942_attention_unified3d.kmd.json). The first five are the kernel's
-// feature cell and must equal the graph's; the last four are performance knobs the
-// scorer ranks on (block_size, num_segments, kv_cache_policy) or the build resolved from
-// them (tile_size_override).
+// KMD fields (gfx942_attention_unified3d.kmd.json). The first four are the kernel's
+// feature cell: dtype, head_size and sliding_window must equal the graph's, and
+// num_queries_per_kv (the GQA ratio the kernel bakes) must equal the graph's Hq / Hkv. The
+// head counts themselves are runtime kernel arguments, so one kernel serves every head
+// pair of its ratio. The last three are performance knobs the scorer ranks on
+// (block_size, num_segments) or the build resolved from them (tile_size_override). Every
+// kernel loads K/V with the "stream" cache policy (pinned in the catalog; not a knob).
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
-constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
-constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
+constexpr std::string_view NUM_QUERIES_PER_KV_FIELD = "num_queries_per_kv";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view TILE_SIZE_OVERRIDE_FIELD = "tile_size_override";
 constexpr std::string_view NUM_SEGMENTS_FIELD = "num_segments";
-constexpr std::string_view KV_CACHE_POLICY_FIELD = "kv_cache_policy";
 
 constexpr std::string_view Q_TOKEN = "gfx942_attention_unified3d.q.uid";
 constexpr std::string_view K_TOKEN = "gfx942_attention_unified3d.k.uid";
@@ -824,65 +825,48 @@ struct Unified3dTraits
 {
     std::string dtype;
     int64_t headSize = 0;
-    int64_t numQueryHeads = 0;
-    int64_t numKvHeads = 0;
+    int64_t numQueriesPerKv = 0;
     int64_t slidingWindow = 0;
     int64_t blockSize = 0;
     int64_t tileSize = 0;
     int64_t numSegments = 0;
-    Gfx942KvCachePolicy kvCachePolicy = Gfx942KvCachePolicy::STREAM;
 };
 
 /**
  * @brief The candidate's traits, or nullopt when its record is not one this engine can
  *        launch.
  *
- * Every KMD field must be present. block_size is one of the candidate's
- * `kv_block_size` values {16, 32, 64}; num_segments is positive (the grid's z extent and the
- * workspace's segment axis); tile_size_override is the tile rocKE resolves from
- * (head_size, block_size) on gfx942 (gfx942ResolvedTileSize), so a record whose recorded
- * tile disagrees -- a binary built for another tile than its fields say -- is declined;
- * kv_cache_policy is "stream" or "all".
+ * Every KMD field must be present. num_queries_per_kv is a supported GQA ratio
+ * (isSupportedGqaRatio); block_size is one of the candidate's `kv_block_size` values
+ * {16, 32, 64}; num_segments is positive (the grid's z extent and the workspace's segment
+ * axis); tile_size_override is the tile rocKE resolves from (head_size, block_size) on
+ * gfx942 (gfx942ResolvedTileSize), so a record whose recorded tile disagrees -- a binary
+ * built for another tile than its fields say -- is declined.
  */
 std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
 {
     Unified3dTraits traits;
     const auto dtype = stringMetadata(kernel, DTYPE_FIELD);
     const auto headSize = integerMetadata(kernel, HEAD_SIZE_FIELD);
-    const auto numQueryHeads = integerMetadata(kernel, NUM_QUERY_HEADS_FIELD);
-    const auto numKvHeads = integerMetadata(kernel, NUM_KV_HEADS_FIELD);
+    const auto numQueriesPerKv = integerMetadata(kernel, NUM_QUERIES_PER_KV_FIELD);
     const auto slidingWindow = integerMetadata(kernel, SLIDING_WINDOW_FIELD);
     const auto blockSize = integerMetadata(kernel, BLOCK_SIZE_FIELD);
     const auto tileSize = integerMetadata(kernel, TILE_SIZE_OVERRIDE_FIELD);
     const auto numSegments = integerMetadata(kernel, NUM_SEGMENTS_FIELD);
-    const auto kvCachePolicy = stringMetadata(kernel, KV_CACHE_POLICY_FIELD);
-    if(!dtype || !headSize || !numQueryHeads || !numKvHeads || !slidingWindow || !blockSize
-       || !tileSize || !numSegments || !kvCachePolicy)
+    if(!dtype || !headSize || !numQueriesPerKv || !slidingWindow || !blockSize || !tileSize
+       || !numSegments)
     {
         return std::nullopt;
     }
-    if(*headSize <= 0 || *numQueryHeads <= 0 || *numKvHeads <= 0 || *numSegments <= 0
+    if(*headSize <= 0 || !isSupportedGqaRatio(*numQueriesPerKv) || *numSegments <= 0
        || (*blockSize != 16 && *blockSize != 32 && *blockSize != 64)
        || *tileSize != gfx942ResolvedTileSize(*headSize, *blockSize))
     {
         return std::nullopt;
     }
-    if(*kvCachePolicy == gfx942KvCachePolicyName(Gfx942KvCachePolicy::STREAM))
-    {
-        traits.kvCachePolicy = Gfx942KvCachePolicy::STREAM;
-    }
-    else if(*kvCachePolicy == gfx942KvCachePolicyName(Gfx942KvCachePolicy::ALL))
-    {
-        traits.kvCachePolicy = Gfx942KvCachePolicy::ALL;
-    }
-    else
-    {
-        return std::nullopt;
-    }
     traits.dtype = *dtype;
     traits.headSize = *headSize;
-    traits.numQueryHeads = *numQueryHeads;
-    traits.numKvHeads = *numKvHeads;
+    traits.numQueriesPerKv = *numQueriesPerKv;
     traits.slidingWindow = *slidingWindow;
     traits.blockSize = *blockSize;
     traits.tileSize = *tileSize;
@@ -894,10 +878,13 @@ std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
  * @brief Kernel-scoped applicability: is THIS candidate built for the graph's cell, and
  *        can it index the graph's tensors?
  *
- * Compares the feature cell exactly -- dtype, head_size, num_query_heads, num_kv_heads --
- * and requires sliding_window 0 (graph_match refuses every window). Never batch or Skv as
- * cell fields: both are runtime (grid x and seq_lens), and the spec's baked `num_seqs` is
- * read only by the binary search the decode grid does not emit (`attention_tiled_3d.py`,
+ * Compares the feature cell exactly -- dtype, head_size, and num_queries_per_kv against
+ * the graph's Hq / Hkv (graph_match already requires Hkv | Hq) -- and requires
+ * sliding_window 0 (graph_match refuses every window). The head counts are not cell
+ * fields: the kernel reads them at runtime, so one kernel serves every head pair of its
+ * ratio. Never batch or Skv as cell fields: both are runtime (grid x and seq_lens), and
+ * the spec's baked `num_seqs` is read only by the binary search the decode grid does not
+ * emit (`attention_tiled_3d.py`,
  * `use_decode_grid`). block_size and num_segments are not taken from the graph: every
  * value serves any graph (a KV tile of any size covers any Skv; the reduce combines every
  * segment, and segments with no keys contribute nothing), so they are the scorer's to
@@ -924,8 +911,9 @@ bool kernelMatches(const MatchContext& context,
     }
     const auto dataTypeName = supportedDataTypeName(problem->dataType);
     if(!dataTypeName.has_value() || traits->dtype != *dataTypeName
-       || traits->headSize != problem->headSize || traits->numQueryHeads != problem->numQueryHeads
-       || traits->numKvHeads != problem->numKvHeads || traits->slidingWindow != 0)
+       || traits->headSize != problem->headSize || problem->numKvHeads <= 0
+       || traits->numQueriesPerKv != problem->numQueryHeads / problem->numKvHeads
+       || traits->slidingWindow != 0)
     {
         return false;
     }
@@ -961,12 +949,9 @@ constexpr double UNSUPPORTED_SCORE = 0.0;
  *  2. then num_segments nearest the count rocKE's split rule would pick for this graph at
  *     block 16 (gfx942SplitRuleSegments, with the live CU count, or rocKE's off-box 120
  *     when the device reports none);
- *  3. then the kv_cache_policy rocKE would pick for the graph's K/V size
- *     (gfx942KvCachePolicy): it only breaks a tie between equal block sizes and segment
- *     counts, whose effect is measured, never overrides them;
- *  4. ties to the smaller num_segments, then the smaller block_size.
+ *  3. ties to the smaller num_segments, then the smaller block_size.
  *
- * Every (block_size, num_segments, kv_cache_policy) triple gets a distinct score. rocKE's
+ * Every (block_size, num_segments) pair gets a distinct score. rocKE's
  * split rule is often not the fastest choice; a tuned selection, not this scorer, is the
  * place for that.
  */
@@ -995,12 +980,6 @@ double scoreKernel(const MatchContext& context,
     constexpr int64_t SEGMENT_CAP = 255;
     const int64_t segments = std::min(traits->numSegments, SEGMENT_CAP);
     const int64_t distance = std::min<int64_t>(std::abs(segments - target), SEGMENT_CAP);
-    const int64_t policyMismatch
-        = traits->kvCachePolicy
-                  == gfx942KvCachePolicy(
-                      problem->batch, problem->numKvHeads, problem->headSize, problem->seqLenKv)
-              ? 0
-              : 1;
     int64_t blockRank = 2;
     if(traits->blockSize == 32)
     {
@@ -1010,9 +989,9 @@ double scoreKernel(const MatchContext& context,
     {
         blockRank = 1;
     }
-    // Lexicographic (distance, policyMismatch, segments, blockRank); smaller is better.
-    // The largest key, ((255 * 2 + 1) * 256 + 255) * 4 + 3 = 524,287, is below KEY_SPAN.
-    const int64_t key = ((distance * 2 + policyMismatch) * 256 + segments) * 4 + blockRank;
+    // Lexicographic (distance, segments, blockRank); smaller is better.
+    // The largest key, (255 * 256 + 255) * 4 + 3 = 262,143, is below KEY_SPAN.
+    const int64_t key = (distance * 256 + segments) * 4 + blockRank;
     const double base = traits->blockSize == PREFERRED_BLOCK_SIZE ? BLOCK_16_FLOOR : 0.0;
     return base + (KEY_SPAN - static_cast<double>(key));
 }
@@ -1026,8 +1005,10 @@ constexpr const char* BY_VALUE_KIND = "by_value";
 constexpr uint32_t PTR_BYTES = 8;
 
 /**
- * @brief The segment launch's argument list: `_3d_signature(dtype, strided_kv=True)`
- *        (`kernels/common/attention_unified.py`), 19 base arguments then 8 strided-K/V.
+ * @brief The segment launch's argument list: `_tiled_3d_signatures("gfx942", dtype,
+ *        strided_kv=True)` (`kernels/common/attention_unified.py`), 19 base arguments,
+ *        3 i32 runtime fields (num_query_heads, num_kv_heads, sliding_window), then 8
+ *        strided-K/V.
  *
  * Derived from gfx942Unified3dSegmentArguments(), the list launch() passes, so the
  * recorded-signature check in prepare() also checks the launch's names, kinds and order.
@@ -1040,7 +1021,7 @@ std::vector<KernelArgument> segmentSignature()
 {
     std::vector<KernelArgument> signature;
     uint32_t offset = 0;
-    for(const auto& argument : gfx942Unified3dSegmentArguments(0, 0.0F, {}, {}))
+    for(const auto& argument : gfx942Unified3dSegmentArguments(0, 0, 0, 0.0F, {}, {}))
     {
         const uint32_t size = argument.bytes();
         offset = (offset + size - 1) / size * size;
@@ -1055,14 +1036,15 @@ std::vector<KernelArgument> segmentSignature()
 }
 
 /// The reduce launch's argument list: `_reduce_signature(dtype)` with no LSE (strided
-/// decode writes none).
+/// decode writes none). num_query_heads is the graph's, read at runtime.
 std::vector<KernelArgument> reduceSignature()
 {
     return {KernelArgument{BUFFER_KIND, PTR_BYTES, 0, "output_ptr"},
             KernelArgument{BUFFER_KIND, PTR_BYTES, 8, "segm_output_ptr"},
             KernelArgument{BUFFER_KIND, PTR_BYTES, 16, "segm_max_ptr"},
             KernelArgument{BUFFER_KIND, PTR_BYTES, 24, "segm_expsum_ptr"},
-            KernelArgument{BUFFER_KIND, PTR_BYTES, 32, "seq_lens_ptr"}};
+            KernelArgument{BUFFER_KIND, PTR_BYTES, 32, "seq_lens_ptr"},
+            KernelArgument{BY_VALUE_KIND, 4, 40, "num_query_heads"}};
 }
 
 /// gfx942StridedKvArguments for a tensor graph_match validated with stridedKvRefusal.
@@ -1285,8 +1267,20 @@ public:
         Unified3dLaunchState state;
         state.binding = binding;
         state.problem = problem;
+        // The i32-index check above bounds Hq (and so Hkv <= Hq) and batch; check the
+        // narrowing anyway so a future caller cannot truncate a head count silently.
+        if(state.problem.batch > std::numeric_limits<int32_t>::max()
+           || state.problem.numQueryHeads > std::numeric_limits<int32_t>::max()
+           || state.problem.numKvHeads > std::numeric_limits<int32_t>::max())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx942 unified 3d: batch or head counts exceed the kernels' i32 arguments");
+        }
         state.segmentArguments
             = gfx942Unified3dSegmentArguments(static_cast<int32_t>(state.problem.batch),
+                                              static_cast<int32_t>(state.problem.numQueryHeads),
+                                              static_cast<int32_t>(state.problem.numKvHeads),
                                               binding.scale,
                                               stridedKvArguments(*k),
                                               stridedKvArguments(*v));
@@ -1398,9 +1392,15 @@ public:
                     stream,
                     words,
                     std::make_index_sequence<GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT>{});
-        // Changing this list means changing reduceSignature() with it.
-        dispatch.reduceForStream(stream).launch(
-            stream, o.ptr, segmOutput, segmMax, segmExpsum, sequsedK);
+        // Changing this list means changing reduceSignature() with it. num_query_heads is
+        // passed as i32 (checked at prepare).
+        dispatch.reduceForStream(stream).launch(stream,
+                                                o.ptr,
+                                                segmOutput,
+                                                segmMax,
+                                                segmExpsum,
+                                                sequsedK,
+                                                static_cast<int32_t>(problem.numQueryHeads));
     }
 
 private:

@@ -33,26 +33,15 @@ BUILDER = "build_unified_attention_3d_module"
 PREDICATE = "supports_unified_attention_3d_module"
 
 
-# Two decode requests, one per arm of the 3D segment kernels' K/V cache
-# policy. Each expectation is a literal, worked out by hand against the 256 MiB
-# last-level-cache threshold, never read back from the selector under test.
-# K/V bytes = 2 (K and V) * batch * seqlen_k * nhead_k * hdim * 2 (fp16).
-#   4 * 4096 * 8 * 128:  2 * 4 * 4096 * 8 * 128 * 2 = 64 MiB (32 MiB each of
-#                        K and V) <= 256 MiB -> "all"
-#   4 * 65536 * 8 * 128: 2 * 4 * 65536 * 8 * 128 * 2 = 1 GiB > 256 MiB -> "stream"
-CACHE_POLICY_ARMS = [
-    pytest.param(4096, "all", "gfx942_unified_3d", id="fits_llc-all"),
-    pytest.param(65536, "stream", None, id="exceeds_llc-stream"),
-]
-
-
-def _selected_specs(seqlen_k=4096, kv_cache_policy="all"):
+def _selected_specs():
     """The segment and reduce specs rocKE's strided decode candidate selects.
 
-    D128 fp16, GQA 32/8, 16-token blocks, batch 4, one query token per
-    sequence. The candidate fills in the decode grid, the K/V cache policy and
-    `num_segments` from its split rule; the caller states the cache policy it
-    expects. The reduce spec is the runtime's own pairing
+    D128 fp16, GQA 32/8, 16-token blocks, batch 4, Skv 4096, one query token per
+    sequence. The candidate fills in the decode grid and `num_segments` from its
+    split rule. The segment's K/V cache policy is then pinned to "stream", as
+    the shipped catalog pins it for every kernel (the IngestorGenerator
+    manifest's `spec_overrides`), so what is packed here is what hipDNN ships.
+    The reduce spec is the runtime's own pairing
     (`_strided_3d_specs_from_problem`), built apart from the module builder's
     `reduce_spec_for_segment`, so it can referee that helper. Metadata only:
     no GPU tensors.
@@ -65,7 +54,7 @@ def _selected_specs(seqlen_k=4096, kv_cache_policy="all"):
             nhead_q=32,
             nhead_k=8,
             seqlen_q=1,
-            seqlen_k=seqlen_k,
+            seqlen_k=4096,
             hdim_q=128,
             hdim_v=128,
             arch=ARCH,
@@ -76,11 +65,8 @@ def _selected_specs(seqlen_k=4096, kv_cache_policy="all"):
     )
     assert result.candidate.name == "attention_strided_decode"
     spec = result.spec.kernel_spec
-    assert (spec.kv_layout, spec.use_decode_grid, spec.kv_cache_policy) == (
-        "strided",
-        True,
-        kv_cache_policy,
-    )
+    assert (spec.kv_layout, spec.use_decode_grid) == ("strided", True)
+    spec = dataclasses.replace(spec, kv_cache_policy="stream")
     return spec, result.spec.reduce_spec
 
 
@@ -133,19 +119,18 @@ def _expected_signature(kernel):
     ]
 
 
-@pytest.mark.parametrize("seqlen_k, kv_cache_policy, export", CACHE_POLICY_ARMS)
 def test_the_split_kv_module_packs_both_launches_from_one_object(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available, seqlen_k, kv_cache_policy, export
+    tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
     from kernels.gfx942.attention_tiled_3d import build_unified_attention_3d_module
 
-    spec, runtime_reduce = _selected_specs(seqlen_k, kv_cache_policy)
+    spec, runtime_reduce = _selected_specs()
     out = _pack(
         _root(tmp_path, spec),
         tmp_path,
         hipcc,
         rocm_kpack_dir,
-        export=export,
+        export="gfx942_unified_3d",
     )
     kdp = out / ARCH / "multi_launch.kdp.json"
     ukd = read_shipped(kdp)["kernelDescriptors"][0]
