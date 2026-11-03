@@ -2160,6 +2160,33 @@ namespace TensileLite
         return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK);
     }
 
+    // A leading dimension that is a multiple of this many bytes starts every row on the
+    // same DRAM channels (gfx1151).
+    constexpr size_t kStaggerAliasBytes = 2048;
+
+    static bool ldAliasesChannels(size_t ld, float bpe)
+    {
+        return static_cast<size_t>(ld * bpe) % kStaggerAliasBytes == 0;
+    }
+
+    // True if no A/B leading dimension aliases, but at least one would alias if it were
+    // packed, i.e. the caller padded the stride. Solutions are tuned on packed strides.
+    static bool callerPaddedAwayAliasing(ContractionProblemGemm const& problem)
+    {
+        bool padded = false;
+        for(auto const* t : {&problem.a(), &problem.b()})
+        {
+            if(t->dimensions() < 2 || t->sizes()[1] < 2)
+                continue;
+            size_t ld     = t->strides()[1];
+            size_t packed = t->sizes()[0];
+            if(ldAliasesChannels(ld, t->elementBytes()))
+                return false;
+            padded |= ld != packed && ldAliasesChannels(packed, t->elementBytes());
+        }
+        return padded;
+    }
+
     std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
         Problem const& problem, Hardware const* hardware, uint32_t skgrid, int32_t autoWGM) const
     {
@@ -2236,6 +2263,12 @@ namespace TensileLite
             defaultStaggerUMapping     = sizeMapping.staggerUMapping;
             defaultStaggerU            = sizeMapping.staggerU;
             defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
+
+            // The tuned stagger spreads aliased rows over DRAM channels. With the aliasing
+            // padded away it only breaks L2 sharing, so start all workgroups in phase.
+            if(pAMDGPU->processor == AMDGPU::Processor::gfx1151 && defaultStaggerU != 0
+               && callerPaddedAwayAliasing(problem))
+                defaultStaggerUMapping = 4;
         }
 
         // If values are explicitly specified at runtime, they override predictions and default values
