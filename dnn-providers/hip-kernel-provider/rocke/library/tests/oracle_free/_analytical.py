@@ -11,7 +11,7 @@ legal-key membership and exact rational rounding into the subject dtype.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import Enum
 from functools import cache
 from types import MappingProxyType
@@ -97,6 +97,9 @@ class UniformCase:
 
 UNIFORM_CAUSAL_FP16 = UniformCase(1, 256, 256, 4, 4, 64, "fp16", "causal")
 UNIFORM_WINDOW_BF16 = UniformCase(1, 256, 256, 4, 4, 64, "bf16", "window", 64)
+# The GPU lane's parameter list. A CPU contract pins it to the calibrated case set,
+# so a calibrated case cannot silently stop executing.
+UNIFORM_QUICK_CASES = (UNIFORM_CAUSAL_FP16, UNIFORM_WINDOW_BF16)
 
 
 @dataclass(frozen=True)
@@ -136,9 +139,25 @@ class CalibrationEntry:
         if not self.ratified:
             raise ValueError("only ratified calibration entries may be installed")
 
+    def mismatch(
+        self, case: UniformCase, spec: UniformSpecFingerprint
+    ) -> tuple[str, ...]:
+        """Name every reason this entry does not authorize ``case`` and ``spec``."""
+        problems: list[str] = []
+        if case.case_id not in self.case_ids:
+            problems.append(f"case {case.case_id} not in calibrated {self.case_ids}")
+        for item in fields(UniformSpecFingerprint):
+            calibrated = getattr(self.spec, item.name)
+            resolved = getattr(spec, item.name)
+            if calibrated != resolved:
+                problems.append(
+                    f"{item.name}: calibrated {calibrated!r}, resolved {resolved!r}"
+                )
+        return tuple(problems)
+
     def covers(self, case: UniformCase, spec: UniformSpecFingerprint) -> bool:
         """Return whether this entry authorizes ``case`` and resolved ``spec``."""
-        return case.case_id in self.case_ids and spec == self.spec
+        return not self.mismatch(case, spec)
 
 
 _DENSE_QUICK_SPEC_FP16 = UniformSpecFingerprint(
@@ -176,7 +195,7 @@ UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingPr
             "fp16",
         ): CalibrationEntry(
             ulp_budget=0,
-            source_revision="79b4ae8503bed9950b475759b31277f281afdda0",
+            source_revision="b64ae3c925b9e789fe6f62663e4c4d282ffd0f05",
             case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
             spec=_DENSE_QUICK_SPEC_FP16,
             ratified=True,
@@ -187,13 +206,52 @@ UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingPr
             "bf16",
         ): CalibrationEntry(
             ulp_budget=0,
-            source_revision="79b4ae8503bed9950b475759b31277f281afdda0",
+            source_revision="b64ae3c925b9e789fe6f62663e4c4d282ffd0f05",
             case_ids=(UNIFORM_WINDOW_BF16.case_id,),
             spec=_DENSE_QUICK_SPEC_BF16,
             ratified=True,
         ),
     }
 )
+
+
+_RECALIBRATION_REMEDY = (
+    "re-run the case on gfx942 with ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>, "
+    "review the records, and update UNIFORM_CALIBRATION (spec, case_ids, "
+    "source_revision) deliberately"
+)
+
+
+def require_calibration(
+    arch: str,
+    candidate_name: str,
+    case: UniformCase,
+    spec: UniformSpecFingerprint,
+    *,
+    table: Mapping[tuple[str, str, str], CalibrationEntry] = UNIFORM_CALIBRATION,
+    detail: str = "",
+) -> CalibrationEntry:
+    """Return the entry that authorizes this resolved case, or fail closed.
+
+    A missing entry or any scope mismatch is a failure rather than a skip: a
+    dispatch change that picks another variant must be re-verified on the
+    hardware, not silently dropped from the gate."""
+    key = (arch, candidate_name, case.dtype)
+    suffix = f"; {detail}" if detail else ""
+    entry = table.get(key)
+    if entry is None:
+        raise AssertionError(
+            f"no uniform-probability calibration for {key}, case={case.case_id}; "
+            f"{_RECALIBRATION_REMEDY}{suffix}"
+        )
+    problems = entry.mismatch(case, spec)
+    if problems:
+        raise AssertionError(
+            f"uniform-probability calibration {key} does not cover "
+            f"case={case.case_id}: {'; '.join(problems)}; "
+            f"{_RECALIBRATION_REMEDY}{suffix}"
+        )
+    return entry
 
 
 def _coerce_mutation(mutation: UniformMutation | str | None) -> UniformMutation | None:
@@ -367,6 +425,40 @@ def decode_bits(bits: np.ndarray | int, dtype: str) -> np.ndarray:
         return raw.copy().view(np.float16).astype(np.float64)
     widened = raw.astype(np.uint32) << np.uint32(16)
     return widened.view(np.float32).astype(np.float64)
+
+
+def encode_bits(values: np.ndarray, dtype: str) -> np.ndarray:
+    """Encode FP32 values as raw FP16/BF16 bits, refusing any value that would round.
+
+    Exactness keeps the subject's inputs independent of conversion rounding: the
+    expectations assume the kernel reads exactly these values. Each decoded value
+    must reproduce its FP32 source bit-for-bit, so signed zero survives and NaN or
+    out-of-range inputs are rejected."""
+    if dtype not in _DTYPES:
+        raise ValueError(dtype)
+    source = np.ascontiguousarray(values, dtype=np.float32)
+    # NaN and infinity survive the bit round trip below, so reject them first.
+    nonfinite = ~np.isfinite(source)
+    if np.any(nonfinite):
+        first = tuple(int(index) for index in np.argwhere(nonfinite)[0])
+        raise ValueError(
+            f"{int(np.count_nonzero(nonfinite))} value(s) are not exactly "
+            f"representable in {dtype}, first {float(source[first])!r} at {first}"
+        )
+    if dtype == "fp16":
+        with np.errstate(over="ignore"):
+            bits = source.astype(np.float16).view(np.uint16)
+    else:
+        bits = (source.view(np.uint32) >> np.uint32(16)).astype(np.uint16)
+    round_trip = decode_bits(bits, dtype).astype(np.float32)
+    inexact = round_trip.view(np.uint32) != source.view(np.uint32)
+    if np.any(inexact):
+        first = tuple(int(index) for index in np.argwhere(inexact)[0])
+        raise ValueError(
+            f"{int(np.count_nonzero(inexact))} value(s) are not exactly "
+            f"representable in {dtype}, first {float(source[first])!r} at {first}"
+        )
+    return np.ascontiguousarray(bits)
 
 
 def _deterministic_k(case: UniformCase) -> np.ndarray:

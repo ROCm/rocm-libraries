@@ -3,18 +3,28 @@
 
 """Narrow uniform-probability subject adapter for the shipped gfx942 dense kernel.
 
-Torch, dispatch, and the runner are imported only inside ``run_dense_case`` so
-CPU collection and the analytical contracts remain independent of ROCm Torch.
+Torch-free end to end: inputs and the output are raw ``uint16`` host arrays,
+device buffers are :class:`rocke.runtime.DeviceMem`, and the launch goes through
+``kernels.gfx942.attention_dense.launch_attention_dense``, the compile, cache and
+launch path that ``run_attention_dense_torch`` itself delegates to. Dispatch, the
+runner and the HIP runtime are imported only inside the functions that use them,
+so CPU collection and the analytical contracts need neither a GPU nor ROCm.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
+
+import numpy as np
 
 from ._analytical import UniformCase, UniformSpecFingerprint
 
 _POINTER_ALIGNMENT = 16
+# Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
+# invalid instead of passing as a stale zero.
+_NAN_BITS = {"fp16": 0x7E00, "bf16": 0x7FC0}
 
 
 @dataclass(frozen=True)
@@ -27,54 +37,45 @@ class ResolvedDenseSubject:
     fingerprint: UniformSpecFingerprint
 
 
-def _tensor_span(tensor) -> tuple[int, int]:
-    """Return the byte span of a validated contiguous, nonempty tensor."""
-    start = int(tensor.data_ptr())
-    return start, start + int(tensor.numel()) * int(tensor.element_size())
-
-
-def _validate_tensors(
-    case: UniformCase,
-    q,
-    k,
-    v,
-    out,
-    *,
-    expected_dtype,
-) -> None:
-    """Validate the dense ABI without importing Torch.
-
-    The duck-typed implementation makes the contract CPU-testable with small
-    fakes.  ``run_dense_case`` separately requires real ``torch.Tensor`` objects.
-    """
-    tensors = {"q": q, "k": k, "v": v, "out": out}
+def _validate_host_bits(case: UniformCase, q, k, v) -> None:
+    """Validate the dense ABI on the raw-bit host inputs."""
     expected_shapes = {
         "q": case.output_shape,
         "k": case.key_shape,
         "v": case.key_shape,
-        "out": case.output_shape,
     }
-    for name, tensor in tensors.items():
-        if tuple(tensor.shape) != expected_shapes[name]:
-            raise ValueError(
-                f"{name} shape {tuple(tensor.shape)} != {expected_shapes[name]}"
-            )
-        if tensor.dtype != expected_dtype:
-            raise ValueError(f"{name} dtype {tensor.dtype} != {expected_dtype}")
-        if not tensor.is_cuda:
-            raise ValueError(f"{name} must be a CUDA tensor")
-        if tensor.device != q.device:
-            raise ValueError(f"{name} must be on q's device")
-        if not tensor.is_contiguous():
-            raise ValueError(f"{name} must be contiguous")
-        if int(tensor.numel()) <= 0:
-            raise ValueError(f"{name} must be nonempty")
-        if int(tensor.data_ptr()) % _POINTER_ALIGNMENT:
+    for name, array in (("q", q), ("k", k), ("v", v)):
+        if not isinstance(array, np.ndarray):
+            raise TypeError(f"{name} must be a numpy array of raw bits")
+        if array.shape != expected_shapes[name]:
+            raise ValueError(f"{name} shape {array.shape} != {expected_shapes[name]}")
+        if array.dtype != np.uint16:
+            raise ValueError(f"{name} dtype {array.dtype} != uint16 raw bits")
+        if not array.flags.c_contiguous:
+            raise ValueError(f"{name} must be C-contiguous")
+
+
+def _validate_device_buffers(
+    buffers: Mapping[str, object], nbytes: Mapping[str, int]
+) -> None:
+    """Check each device buffer's size, alignment and separation.
+
+    Duck-typed on ``ptr()`` / ``nbytes()`` so the contract is CPU-testable with
+    small fakes; ``run_dense_case`` passes real ``DeviceMem`` objects."""
+    spans: dict[str, tuple[int, int]] = {}
+    for name, buffer in buffers.items():
+        size = int(buffer.nbytes())
+        if size != nbytes[name]:
+            raise ValueError(f"{name} device size {size} != host size {nbytes[name]}")
+        pointer = int(buffer.ptr())
+        if pointer == 0:
+            raise ValueError(f"{name} device pointer is null")
+        if pointer % _POINTER_ALIGNMENT:
             raise ValueError(
                 f"{name} pointer must be {_POINTER_ALIGNMENT}-byte aligned"
             )
+        spans[name] = (pointer, pointer + size)
 
-    spans = {name: _tensor_span(tensor) for name, tensor in tensors.items()}
     names = tuple(spans)
     for index, left_name in enumerate(names):
         left_start, left_end = spans[left_name]
@@ -208,26 +209,24 @@ def resolve_dense_subject(case: UniformCase) -> ResolvedDenseSubject:
 
 def run_dense_case(
     case: UniformCase,
-    q,
-    k,
-    v,
-    out,
+    q: np.ndarray,
+    k: np.ndarray,
+    v: np.ndarray,
     *,
     subject: ResolvedDenseSubject | None = None,
-):
-    """Launch one validated subject, leaving numerical judgment to the analyzer."""
-    import torch
-    from kernels.gfx942.attention_dense import run_attention_dense_torch
+) -> np.ndarray:
+    """Launch one validated subject on raw input bits and return raw output bits.
+
+    ``q``/``k``/``v`` are ``uint16`` FP16/BF16 bit arrays in the runner layout
+    (``[B, Sq, Hq, D]`` and ``[B, Sk, Hkv, D]``). The output is NaN-prefilled and
+    read back without any float conversion, so the analyzer judges exactly the
+    stored bits. Numerical judgment is left to the analyzer."""
+    from kernels.gfx942.attention_dense import launch_attention_dense
+    from rocke.runtime import DeviceMem, Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
 
     _validate_supported_case(case)
-    for name, tensor in (("q", q), ("k", k), ("v", v), ("out", out)):
-        if not isinstance(tensor, torch.Tensor):
-            raise TypeError(f"{name} must be a torch.Tensor")
-    expected_dtype = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-    }[case.dtype]
-    _validate_tensors(case, q, k, v, out, expected_dtype=expected_dtype)
+    _validate_host_bits(case, q, k, v)
     resolved = resolve_dense_subject(case) if subject is None else subject
     if resolved.case_id != case.case_id:
         raise ValueError(
@@ -238,17 +237,30 @@ def run_dense_case(
     if fingerprint != resolved.fingerprint:
         raise AssertionError("resolved subject fingerprint changed before launch")
 
-    stream = torch.cuda.current_stream(device=q.device)
-    returned = run_attention_dense_torch(
-        spec=tuning_spec.kernel_spec,
-        q=q,
-        k=k,
-        v=v,
-        out=out,
-        scale=1.0 / math.sqrt(case.head_dim),
-        stream=stream.cuda_stream,
+    # Private writable copies: ``as_u8_buffer`` views storage via ``from_buffer``,
+    # which refuses read-only arrays.
+    host = {
+        "q": q.copy(),
+        "k": k.copy(),
+        "v": v.copy(),
+        "out": np.full(case.output_shape, _NAN_BITS[case.dtype], dtype=np.uint16),
+    }
+    runtime = Runtime()
+    device = {name: DeviceMem(array.nbytes) for name, array in host.items()}
+    _validate_device_buffers(
+        device, {name: int(array.nbytes) for name, array in host.items()}
     )
-    if returned is not out:
-        raise AssertionError("dense runner did not return the caller-owned output")
-    stream.synchronize()
+    for name, array in host.items():
+        runtime.memcpy_h2d(device[name].ptr(), as_u8_buffer(array), array.nbytes)
+    # Fenced launch (LaunchConfig default): the output is complete on return.
+    launch_attention_dense(
+        spec=tuning_spec.kernel_spec,
+        q=device["q"],
+        k=device["k"],
+        v=device["v"],
+        out=device["out"],
+        scale=1.0 / math.sqrt(case.head_dim),
+    )
+    out = host["out"]
+    runtime.memcpy_d2h(as_u8_buffer(out), device["out"].ptr(), out.nbytes)
     return out
