@@ -104,9 +104,7 @@ namespace TensileLite
         {
             RNG  myrng = rng;
             auto seed  = seed_base;
-#ifdef _OPENMP
             seed += omp_get_thread_num();
-#endif
             myrng.seed(seed);
 
             std::vector<size_t> index3{0, 0, 0};

@@ -119,30 +119,6 @@ namespace TensileLite
             return fp32;
         }
 
-        // truncate lower 16 bits of IEEE float to convert to bfloat16
-        static BFloat16 float_to_bfloat16_truncate(const float v)
-        {
-            BFloat16 bf16;
-            if(std::isnan(v))
-            {
-                bf16.data = BFLOAT16_Q_NAN_VALUE;
-                return bf16;
-            }
-            union
-            {
-                float    fp32;
-                uint16_t p[2];
-            };
-            fp32 = v;
-
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            bf16.data = p[0];
-#else
-            bf16.data = p[1];
-#endif
-            return bf16;
-        }
-
         static BFloat16 float_to_bfloat16(const float v)
         {
             BFloat16 bf16;
@@ -327,4 +303,3 @@ namespace std
         return std::to_string(static_cast<float>(a));
     }
 } // namespace std
-
