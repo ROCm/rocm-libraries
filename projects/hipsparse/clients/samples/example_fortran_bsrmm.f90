@@ -126,7 +126,7 @@ program example_fortran_bsrmm
     type(c_ptr) :: handle
     type(c_ptr) :: descr
 
-    integer(c_int) :: version
+    integer :: version
 
     character(len=12) :: rev
 

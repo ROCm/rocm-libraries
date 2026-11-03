@@ -118,7 +118,7 @@ program example_fortran_csrmv
     type(c_ptr) :: handle
     type(c_ptr) :: descr
 
-    integer(c_int) :: version
+    integer :: version
 
 !   Input data
     m = 4

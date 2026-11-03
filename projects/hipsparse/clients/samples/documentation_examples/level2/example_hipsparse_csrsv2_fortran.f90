@@ -100,7 +100,7 @@ program example_fortran_csrsv2
 
     type(c_ptr) :: handle, descr, info
 
-    integer(c_int) :: version
+    integer :: version
 
 !   Input data
     m = 4
@@ -164,7 +164,7 @@ program example_fortran_csrsv2
                                                      d_csr_row_ptr, &
                                                      d_csr_col_ind, &
                                                      info, &
-                                                     buffer_size))
+                                                     c_loc(buffer_size)))
 
 !   Allocate buffer
     call HIP_CHECK(hipMalloc(d_buffer, int(buffer_size, c_size_t)))

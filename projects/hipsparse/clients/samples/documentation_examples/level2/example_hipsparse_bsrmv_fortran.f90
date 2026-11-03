@@ -98,7 +98,7 @@ program example_fortran_bsrmv
 
     type(c_ptr) :: handle, descr
 
-    integer(c_int) :: version
+    integer :: version
 
 !   BSR block dimension
     bsr_dim = 2
