@@ -5,9 +5,9 @@
 multiple MI300A GPUs, and measure whether the halo-exchange + launch overhead
 is small enough for the split to pay off.
 
-Context: the three NDHWC bf16 conv shapes in the repo-root ``results.csv``
-that run single-GPU in 1.8-3.8 ms are all compute-bound at ~495-520 TFLOPS
-(near the MI300A bf16 dense roofline). A back-of-envelope model argued that
+Context: three NDHWC bf16 conv shapes that run single-GPU in 1.8-3.8 ms are
+all compute-bound at ~495-520 TFLOPS (near the MI300A bf16 dense roofline).
+A back-of-envelope model argued that
 splitting along ``D`` (kernel depth 3, stride 1, pad 0) only needs a thin
 2-D halo (``H*W*C`` per boundary plane) against the 3-D compute volume, so
 the split should pay off. This script builds the actual multi-GPU split and
@@ -48,8 +48,7 @@ import time
 from dataclasses import dataclass
 
 
-# The three >1ms NDHWC bf16 shapes from results.csv (forward, F=1; the F=2/4
-# rows in that file are repeat timings of the same spatial problem).
+# Three >1ms NDHWC bf16 forward conv shapes (F=1).
 _SHAPES = {
     "A": dict(C=64, K=64, Di=258, Hi=130, Wi=130),
     "B": dict(C=128, K=64, Di=258, Hi=130, Wi=130),
@@ -187,7 +186,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
     X = torch.empty(1, Di, Hi, Wi, C).uniform_(-1, 1).to(torch_dtype)
     W = torch.empty(K, _Z, 3, 3, C).uniform_(-1, 1).to(torch_dtype)
 
-    # ---- P=1 baseline (sanity check against results.csv) ----
+    # ---- P=1 baseline (single-GPU sanity check) ----
     with torch.cuda.device(0):
         spec0, kernel0 = _build_fwd_spec(full_problem, a, tgt, atom)
         art0 = compile_kernel(kernel0, arch=a.arch)
