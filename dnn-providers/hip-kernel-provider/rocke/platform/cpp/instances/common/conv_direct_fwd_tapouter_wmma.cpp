@@ -41,9 +41,9 @@ typedef rocke_value_t* V;
 namespace
 {
 
-/* conv_direct_fwd_wmma.WMMA_K / CH_PAD. */
-constexpr int kWmmaK = 32;
-constexpr int kChPad = 8;
+/* conv_direct_fwd_wmma.WMMA_K / CH_PAD (conv_fwd_wmma_gate's). */
+constexpr int kWmmaK = ROCKE_FWD_WMMA_K;
+constexpr int kChPad = ROCKE_FWD_WMMA_CH_PAD;
 constexpr long long kI32Max = 2147483647LL;
 
 long long to_cdiv(long long a, long long b)
@@ -304,23 +304,8 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
         if(vgprs > ROCKE_FWD_TAPOUTER_VGPR_BUDGET)
             TO_FAIL("~%d VGPRs of accumulators and fragments", vgprs);
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-        TO_FAIL("unsupported scheduler_strategy '%s'", spec->sched);
-    {
-        const long long total_c = (long long)p->groups * p->cpg;
-        const long long total_k = (long long)p->groups * p->kpg;
-        long long bytes[3] = {2LL * p->N * p->H * p->W * total_c,
-                              2LL * total_k * p->KH * p->KW * p->cpg,
-                              2LL * p->N * Ho * Wo * total_k};
-        const long long mx = std::max(bytes[0], std::max(bytes[1], bytes[2]));
-        if(mx > kI32Max)
-            TO_FAIL("tensors of %lld B exceed the i32 byte offsets", mx);
-    }
-    {
-        const long long g = to_grid0(spec);
-        if(g > kI32Max)
-            TO_FAIL("%lld workgroups exceed the i32 block id", g);
-    }
+    if(!rocke_wmma_fwd_limits_ok(p, spec->sched, to_grid0(spec), reason, reason_cap))
+        return false;
 #undef TO_FAIL
     to_set_reason(reason, reason_cap, "ok");
     return true;
@@ -353,14 +338,13 @@ rocke_kernel_def_t* rocke_build_fwd_tapouter_wmma(rocke_ir_builder_t* b,
                                                   const char* arch)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const bool bf16 = to_is_bf16(p);
     const int KH = p->KH, KW = p->KW;
     const int DH = p->dil_h, DW = p->dil_w;
     const int PAD = p->PAD;
-    const char* ab = bf16 ? "bf16" : "f16";
+    const char* ab = rocke_wmma_ab_dtype(p->dtype);
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    const rocke_mmaop_t* mop
-        = rocke_archtarget_op_for_shape(target, "wmma", ab, ab, "fp32", 16, 16, kWmmaK, NULL);
+    const rocke_mmaop_t* mop = rocke_archtarget_op_for_shape(
+        target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, kWmmaK, NULL);
     if(mop == NULL || mop->op_id == NULL)
     {
         rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_fwd_tapouter_wmma: no WMMA atom");

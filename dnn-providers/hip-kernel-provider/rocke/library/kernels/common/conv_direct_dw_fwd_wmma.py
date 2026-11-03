@@ -70,6 +70,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import WMMA_K, WMMA_M, WMMA_N, wmma_ab_dtype
 
 DW_FWD_WMMA_ARCHES = ("gfx1250",)
 DW_FWD_WMMA_WAVE = 32
@@ -296,9 +297,15 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     oob_lane = b.const_i32(DW_DGRAD_WIN_OOB_LANE)
     oob_uniform = b.const_i32(DW_DGRAD_WIN_OOB_UNIFORM)
     zero_acc = b.zero_vec_f32(8)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
+    ab = wmma_ab_dtype(p.dtype)
     wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+        family="wmma",
+        a_dtype=ab,
+        b_dtype=ab,
+        c_dtype="fp32",
+        m=WMMA_M,
+        n=WMMA_N,
+        k=WMMA_K,
     )
     zero_f32 = b.const_f32(0.0)
     if p.dtype == "bf16":

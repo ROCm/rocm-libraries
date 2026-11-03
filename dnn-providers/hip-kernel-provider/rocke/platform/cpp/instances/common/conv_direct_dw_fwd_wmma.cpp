@@ -30,6 +30,7 @@
 #include "rocke/instance_conv_direct_dw_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* ROCKE_FWD_WMMA_*, rocke_wmma_ab_dtype */
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -340,10 +341,10 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     const int PER_PX = BLOCK_CH / CH;
     const int CH_PAD = BLOCK_CH + CH;
 
-    const char* ab = bf16 ? "bf16" : "f16";
+    const char* ab = rocke_wmma_ab_dtype(p->dtype);
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch ? arch : "gfx1250");
-    const rocke_mmaop_t* mop
-        = rocke_archtarget_op_for_shape(target, "wmma", ab, ab, "fp32", 16, 16, 32, NULL);
+    const rocke_mmaop_t* mop = rocke_archtarget_op_for_shape(
+        target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, ROCKE_FWD_WMMA_K, NULL);
     if(mop == NULL || mop->op_id == NULL)
     {
         rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_dw_fwd_wmma: no WMMA atom");

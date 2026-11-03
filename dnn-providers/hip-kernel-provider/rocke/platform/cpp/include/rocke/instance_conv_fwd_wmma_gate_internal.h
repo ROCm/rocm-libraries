@@ -2,16 +2,23 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_conv_fwd_wmma_gate_internal.h -- PRIVATE capability gate
- * shared by the C++ ports of the wave32 WMMA forward convolutions
- * (conv_direct_fwd_wmma.cpp, conv_fwd_small_wmma.cpp). Emits no IR and
- * declares no public API.
+ * and shared facts of the C++ ports of the wave32 WMMA forward convolutions
+ * (conv_direct_fwd_wmma.cpp, conv_fwd_small_wmma.cpp,
+ * conv_direct_dw_fwd_wmma.cpp, conv_direct_fwd_gstream_wmma.cpp,
+ * conv_direct_fwd_tapouter_wmma.cpp). Emits no IR and declares no public API.
  *
  *   Python (conv_fwd_wmma_gate.py)       C++ (this header)
  *   ----------------------------------   ----------------------------------
  *   WMMA_M / WMMA_N / WMMA_K             ROCKE_FWD_WMMA_M / _N / _K
+ *   conv_direct_fwd_wmma.CH_PAD          ROCKE_FWD_WMMA_CH_PAD
  *   wmma_ab_dtype(dtype)                 rocke_wmma_ab_dtype
  *   wmma_fwd_gate(p, arch, name, wave,   rocke_wmma_fwd_gate
  *                 per_axis_pad=...)
+ *   wmma_fwd_limits_reason(p, sched,     rocke_wmma_fwd_limits_ok
+ *                          n_blocks)
+ *   wmma_fwd_halo_extent(...)            rocke_wmma_fwd_halo_extent
+ *   wmma_fwd_halo_cols(...)              rocke_wmma_fwd_halo_cols
+ *   wmma_fwd_lead_cols(...)              rocke_wmma_fwd_lead_cols
  *
  * The checks run in the Python order and write the same rejection messages.
  */
@@ -27,6 +34,9 @@
 #define ROCKE_FWD_WMMA_M 16
 #define ROCKE_FWD_WMMA_N 16
 #define ROCKE_FWD_WMMA_K 32
+
+/* Channels of row skew past each LDS row of a staged X / W tile (16 bytes). */
+#define ROCKE_FWD_WMMA_CH_PAD 8
 
 /* wmma_ab_dtype: the WMMA operand dtype of a conv dtype (NULL reads as fp16). */
 const char* rocke_wmma_ab_dtype(const char* dtype);
@@ -44,5 +54,27 @@ bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
                          const rocke_archtarget_t** target_out,
                          char* reason,
                          size_t reason_cap);
+
+/* wmma_fwd_limits_reason: the checks a forward validator ends with -- a known
+ * scheduler strategy (`sched` NULL: none), i32 byte offsets into X, W and Y of
+ * `p`, and an i32 flat block id for `n_blocks` workgroups. Returns true when
+ * all hold; otherwise writes the reason and returns false. */
+bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
+                              const char* sched,
+                              long long n_blocks,
+                              char* reason,
+                              size_t reason_cap);
+
+/* wmma_fwd_halo_extent: input rows (columns) a tile of `tile` output rows
+ * (columns) reads through a `k`-tap filter axis at `stride` and `dil`. */
+int rocke_wmma_fwd_halo_extent(int stride, int tile, int k, int dil);
+
+/* wmma_fwd_halo_cols: columns of one (phase) sub-halo -- the whole halo row,
+ * or with `phase_split` one of the `p->stride` column phases. */
+int rocke_wmma_fwd_halo_cols(const rocke_direct_conv_problem_t* p, int tile_w, bool phase_split);
+
+/* wmma_fwd_lead_cols: most leading zero columns a (phase) sub-halo gets at
+ * the left edge. */
+int rocke_wmma_fwd_lead_cols(int pad_w, int stride, bool phase_split);
 
 #endif /* ROCKE_INSTANCE_CONV_FWD_WMMA_GATE_INTERNAL_H */

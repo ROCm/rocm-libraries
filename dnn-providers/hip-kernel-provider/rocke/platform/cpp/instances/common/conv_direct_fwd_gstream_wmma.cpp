@@ -41,9 +41,9 @@ typedef rocke_value_t* V;
 namespace
 {
 
-/* conv_direct_fwd_wmma.WMMA_K / CH_PAD. */
-constexpr int kWmmaK = 32;
-constexpr int kChPad = 8;
+/* conv_direct_fwd_wmma.WMMA_K / CH_PAD (conv_fwd_wmma_gate's). */
+constexpr int kWmmaK = ROCKE_FWD_WMMA_K;
+constexpr int kChPad = ROCKE_FWD_WMMA_CH_PAD;
 constexpr long long kI32Max = 2147483647LL;
 
 long long gs_cdiv(long long a, long long b)
@@ -104,13 +104,13 @@ int gs_block_p(const rocke_fwd_gstream_wmma_spec_t* s)
 int gs_halo_h(const rocke_fwd_gstream_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return p->stride * (rocke_fwd_gstream_wmma_tile_h(s) - 1) + (p->KH - 1) * p->dil_h + 1;
+    return rocke_wmma_fwd_halo_extent(p->stride, rocke_fwd_gstream_wmma_tile_h(s), p->KH, p->dil_h);
 }
 
 int gs_halo_w(const rocke_fwd_gstream_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return p->stride * (s->tile_w - 1) + (p->KW - 1) * p->dil_w + 1;
+    return rocke_wmma_fwd_halo_extent(p->stride, s->tile_w, p->KW, p->dil_w);
 }
 
 int gs_phases_w(const rocke_fwd_gstream_wmma_spec_t* s)
@@ -120,16 +120,12 @@ int gs_phases_w(const rocke_fwd_gstream_wmma_spec_t* s)
 
 int gs_halo_cols(const rocke_fwd_gstream_wmma_spec_t* s)
 {
-    const rocke_direct_conv_problem_t* p = &s->problem;
-    if(s->phase_split)
-        return s->tile_w + (int)gs_floordiv((long long)(p->KW - 1) * p->dil_w, p->stride);
-    return gs_halo_w(s);
+    return rocke_wmma_fwd_halo_cols(&s->problem, s->tile_w, s->phase_split);
 }
 
 int gs_lead_cols(const rocke_fwd_gstream_wmma_spec_t* s)
 {
-    const rocke_direct_conv_problem_t* p = &s->problem;
-    return s->phase_split ? (int)gs_cdiv(p->PAD, p->stride) : p->PAD;
+    return rocke_wmma_fwd_lead_cols(s->problem.PAD, s->problem.stride, s->phase_split);
 }
 
 int gs_x_pitch(const rocke_fwd_gstream_wmma_spec_t* s)
@@ -404,23 +400,8 @@ bool rocke_fwd_gstream_wmma_is_valid_spec(const rocke_fwd_gstream_wmma_spec_t* s
         if(vgprs > ROCKE_FWD_GSTREAM_VGPR_BUDGET)
             GS_FAIL("~%d VGPRs of weights, accumulators and fragments", vgprs);
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-        GS_FAIL("unsupported scheduler_strategy '%s'", spec->sched);
-    {
-        const long long total_c = (long long)p->groups * p->cpg;
-        const long long total_k = (long long)p->groups * p->kpg;
-        long long bytes[3] = {2LL * p->N * p->H * p->W * total_c,
-                              2LL * total_k * p->KH * p->KW * p->cpg,
-                              2LL * p->N * Ho * Wo * total_k};
-        const long long mx = std::max(bytes[0], std::max(bytes[1], bytes[2]));
-        if(mx > kI32Max)
-            GS_FAIL("tensors of %lld B exceed the i32 byte offsets", mx);
-    }
-    {
-        const long long g = gs_grid0(spec);
-        if(g > kI32Max)
-            GS_FAIL("%lld workgroups exceed the i32 block id", g);
-    }
+    if(!rocke_wmma_fwd_limits_ok(p, spec->sched, gs_grid0(spec), reason, reason_cap))
+        return false;
 #undef GS_FAIL
     gs_set_reason(reason, reason_cap, "ok");
     return true;
@@ -462,10 +443,10 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
     const int KW = p->KW;
     const int S = p->stride, PAD = p->PAD;
     const int CPG = p->cpg;
-    const char* ab = bf16 ? "bf16" : "f16";
+    const char* ab = rocke_wmma_ab_dtype(p->dtype);
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    const rocke_mmaop_t* mop
-        = rocke_archtarget_op_for_shape(target, "wmma", ab, ab, "fp32", 16, 16, kWmmaK, NULL);
+    const rocke_mmaop_t* mop = rocke_archtarget_op_for_shape(
+        target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, kWmmaK, NULL);
     if(mop == NULL || mop->op_id == NULL)
     {
         rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_fwd_gstream_wmma: no WMMA atom");

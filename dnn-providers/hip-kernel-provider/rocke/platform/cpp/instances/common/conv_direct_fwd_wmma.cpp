@@ -31,13 +31,14 @@
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
+#include "rocke/instance_conv_fwd_wmma_tdm_internal.h" /* rocke_fwd_tdm_descriptor_3d */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
 /* conv_direct_fwd_wmma.WMMA_K (conv_fwd_wmma_gate's) / CH_PAD /
  * FWD_WMMA_VGPR_BUDGET. */
 #define FWW_WMMA_K ROCKE_FWD_WMMA_K
-#define FWW_CH_PAD 8
+#define FWW_CH_PAD ROCKE_FWD_WMMA_CH_PAD
 #define FWW_VGPR_BUDGET 512
 
 namespace
@@ -142,29 +143,22 @@ int fww_phases_w(const rocke_direct_fwd_wmma_spec_t* s)
 int fww_halo_h(const rocke_direct_fwd_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t v = fww_vp(s);
-    const rocke_direct_conv_problem_t* p = &v;
-    return p->stride * (rocke_direct_fwd_wmma_tile_h(s) - 1) + (p->KH - 1) * p->dil_h + 1;
+    return rocke_wmma_fwd_halo_extent(v.stride, rocke_direct_fwd_wmma_tile_h(s), v.KH, v.dil_h);
 }
 int fww_halo_w(const rocke_direct_fwd_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t v = fww_vp(s);
-    const rocke_direct_conv_problem_t* p = &v;
-    return p->stride * (s->tile_w - 1) + (p->KW - 1) * p->dil_w + 1;
+    return rocke_wmma_fwd_halo_extent(v.stride, s->tile_w, v.KW, v.dil_w);
 }
 int fww_halo_cols(const rocke_direct_fwd_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t v = fww_vp(s);
-    const rocke_direct_conv_problem_t* p = &v;
-    if(s->phase_split)
-        return s->tile_w + (int)fww_floordiv((long long)(p->KW - 1) * p->dil_w, p->stride);
-    return fww_halo_w(s);
+    return rocke_wmma_fwd_halo_cols(&v, s->tile_w, s->phase_split);
 }
 int fww_lead_cols(const rocke_direct_fwd_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t v = fww_vp(s);
-    const rocke_direct_conv_problem_t* p = &v;
-    const int pad_w = rocke_direct_conv_problem_pad_w(p);
-    return s->phase_split ? fww_ceil_div(pad_w, p->stride) : pad_w;
+    return rocke_wmma_fwd_lead_cols(rocke_direct_conv_problem_pad_w(&v), v.stride, s->phase_split);
 }
 int fww_x_pitch(const rocke_direct_fwd_wmma_spec_t* s)
 {
@@ -604,31 +598,16 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         if(vgprs > FWW_VGPR_BUDGET)
             FWW_FAIL("~%d VGPRs of accumulators and fragments", vgprs);
     }
-    if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
-        FWW_FAIL("unsupported scheduler_strategy '%s'", spec->sched);
-    /* Global offsets are i32 bytes and the tile index is a flat block id. */
+    /* Global offsets of the real problem's tensors (p may be a view) are i32
+     * bytes and the tile index is a flat block id. */
     {
-        /* The real problem's tensors (p may be a view). */
-        const rocke_direct_conv_problem_t* r = &spec->problem;
-        long long total_k = (long long)r->groups * r->kpg;
-        long long total_c = (long long)r->groups * r->cpg;
-        long long bytes[3] = {2LL * r->N * r->H * r->W * total_c,
-                              2LL * total_k * r->KH * r->KW * r->cpg,
-                              2LL * r->N * fww_Ho(r) * fww_Wo(r) * total_k};
-        long long mx = bytes[0];
-        if(bytes[1] > mx)
-            mx = bytes[1];
-        if(bytes[2] > mx)
-            mx = bytes[2];
-        if(mx > INT32_MAX)
-            FWW_FAIL("tensors of %lld B exceed the i32 byte offsets", mx);
         const rocke_direct_conv_problem_t v = fww_vp(spec);
         long long tiles = (long long)fww_ceil_div(v.N, spec->tile_n) * fww_groups_eff(spec)
                           * fww_ceil_div((int)fww_Ho(&v), TH)
                           * fww_ceil_div((int)fww_Wo(&v), spec->tile_w)
                           * fww_ceil_div(fww_kpg_eff(spec), rocke_direct_fwd_wmma_block_k(spec));
-        if(tiles > INT32_MAX)
-            FWW_FAIL("%lld workgroups exceed the i32 block id", tiles);
+        if(!rocke_wmma_fwd_limits_ok(&spec->problem, spec->sched, tiles, reason, reason_cap))
+            return false;
     }
     fww_set_reason(reason, reason_cap, "ok");
     return true;
@@ -751,95 +730,6 @@ void if_then(fww_ctx& c, V cond, const std::function<void()>& body)
     rocke_b_region_enter(c.b, gate.then_region);
     body();
     rocke_b_region_leave(c.b);
-}
-
-/* _tdm_descriptor_3d(b, global_ptr, lds_addr, dims, strides, tile0, tile1, tile2). */
-void tdm_descriptor_3d(fww_ctx& c,
-                       V global_ptr,
-                       V lds_addr,
-                       V d0,
-                       V d1,
-                       V d2,
-                       V s1,
-                       V s2,
-                       int tile0,
-                       int tile1,
-                       V tile2,
-                       V out[5],
-                       V tile1_v = NULL);
-
-/* tile1_v (when not NULL) is a runtime tile1, as Python's ``tile1: Value``. */
-void tdm_descriptor_3d(fww_ctx& c,
-                       V global_ptr,
-                       V lds_addr,
-                       V d0,
-                       V d1,
-                       V d2,
-                       V s1,
-                       V s2,
-                       int tile0,
-                       int tile1,
-                       V tile2,
-                       V out[5],
-                       V tile1_v)
-{
-    rocke_ir_builder_t* b = c.b;
-    V c16 = ci(c, 16);
-    V gaddr = rocke_b_global_ptr_to_i64(b, global_ptr);
-    V c32 = rocke_b_const_i64(b, 32);
-    V sh = rocke_b_lshr(b, gaddr, c32);
-    V g_hi = rocke_b_trunc(b, sh, rocke_i32());
-    V g0[4];
-    V g1[8];
-    V g2[4];
-    g0[0] = ci(c, 1);
-    g0[1] = lds_addr;
-    g0[2] = rocke_b_trunc(b, gaddr, rocke_i32());
-    {
-        V m = ci(c, 0x1FFFFFF);
-        V lo = rocke_b_land(b, g_hi, m);
-        V ty = ci(c, -((int64_t)1 << 31));
-        g0[3] = rocke_b_lor(b, lo, ty);
-    }
-    g1[0] = ci(c, 1 << 16);
-    g1[1] = rocke_b_shl(b, d0, c16);
-    {
-        V x = rocke_b_lshr(b, d0, c16);
-        V y = rocke_b_shl(b, d1, c16);
-        g1[2] = rocke_b_lor(b, x, y);
-    }
-    {
-        V x = rocke_b_lshr(b, d1, c16);
-        V y = ci(c, (int64_t)tile0 << 16);
-        g1[3] = rocke_b_lor(b, x, y);
-    }
-    {
-        V x = tile1_v != NULL ? tile1_v : ci(c, tile1);
-        V y = rocke_b_shl(b, tile2, c16);
-        g1[4] = rocke_b_lor(b, x, y);
-    }
-    g1[5] = s1;
-    g1[6] = rocke_b_shl(b, s2, c16);
-    g1[7] = rocke_b_lshr(b, s2, c16);
-    g2[0] = d2;
-    g2[1] = ci(c, 0);
-    g2[2] = ci(c, 0);
-    g2[3] = ci(c, 0);
-    {
-        V r[8];
-        int i;
-        for(i = 0; i < 4; ++i)
-            r[i] = rocke_b_readfirstlane(b, g0[i]);
-        out[0] = rocke_b_vec_pack(b, r, 4, rocke_i32());
-        for(i = 0; i < 8; ++i)
-            r[i] = rocke_b_readfirstlane(b, g1[i]);
-        out[1] = rocke_b_vec_pack(b, r, 8, rocke_i32());
-        for(i = 0; i < 4; ++i)
-            r[i] = rocke_b_readfirstlane(b, g2[i]);
-        out[2] = rocke_b_vec_pack(b, r, 4, rocke_i32());
-    }
-    out[3] = rocke_b_zero_vec(b, rocke_i32(), 4);
-    out[4] = rocke_b_zero_vec(b, rocke_i32(), 8);
 }
 
 /* _chunk_ext(chunk) -> (k0, c_ext). */
@@ -968,19 +858,19 @@ void issue_halo(fww_ctx& c, V chunk, V stage)
                     src = rocke_b_select(b, n_ok, src, base);
                 }
                 V d[5];
-                tdm_descriptor_3d(c,
-                                  src,
-                                  dst,
-                                  c_ext,
-                                  w_ext_c,
-                                  h_ext,
-                                  c.xs_col,
-                                  c.xs_h,
-                                  c.XP,
-                                  c.HC,
-                                  c.x_tile2,
-                                  d,
-                                  tile1_c);
+                rocke_fwd_tdm_descriptor_3d(c.b,
+                                            src,
+                                            dst,
+                                            c_ext,
+                                            w_ext_c,
+                                            h_ext,
+                                            c.xs_col,
+                                            c.xs_h,
+                                            c.XP,
+                                            c.HC,
+                                            c.x_tile2,
+                                            d,
+                                            tile1_c);
                 rocke_b_tensor_load_to_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
             });
         }
@@ -1017,8 +907,8 @@ void issue_wei(fww_ctx& c, V chunk, V stage, V grp)
         V taps0 = ci(c, c.WTAPS);
         V taps1 = ci(c, c.WTAPS);
         V d[5];
-        tdm_descriptor_3d(
-            c, src, dst, c_ext, c.k_ext, taps0, c.w_row, c.c_cpg0, c.XP, c.BK, taps1, d);
+        rocke_fwd_tdm_descriptor_3d(
+            c.b, src, dst, c_ext, c.k_ext, taps0, c.w_row, c.c_cpg0, c.XP, c.BK, taps1, d);
         rocke_b_tensor_load_to_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
     });
 }
@@ -1445,8 +1335,8 @@ void epilogue(fww_ctx& c, V const* accs)
             }
             V th = ci(c, c.TH);
             V d[5];
-            tdm_descriptor_3d(
-                c, dst, lds_src, c.k_ext, w_ext, h_ext, c.ys_w, c.ys_h, c.EPITCH, c.TW, th, d);
+            rocke_fwd_tdm_descriptor_3d(
+                c.b, dst, lds_src, c.k_ext, w_ext, h_ext, c.ys_w, c.ys_h, c.EPITCH, c.TW, th, d);
             rocke_b_tensor_store_from_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
             rocke_b_s_wait_tensorcnt(b, 0);
         });
@@ -1548,7 +1438,8 @@ void epilogue_wave(fww_ctx& c, V const* accs)
     }
     V rows = ci(c, ROWS);
     V d[5];
-    tdm_descriptor_3d(c, dst, lds_src, k_ext_w, w_ext, h_ext, c.ys_w, c.ys_h, EP, c.TW, rows, d);
+    rocke_fwd_tdm_descriptor_3d(
+        c.b, dst, lds_src, k_ext_w, w_ext, h_ext, c.ys_w, c.ys_h, EP, c.TW, rows, d);
     rocke_b_tensor_store_from_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
     rocke_b_s_wait_tensorcnt(b, 0);
 }

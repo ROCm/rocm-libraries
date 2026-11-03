@@ -84,7 +84,13 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     emit_direct_params,
 )
-from kernels.common.conv_fwd_wmma_gate import wmma_fwd_gate, wmma_fwd_limits_reason
+from kernels.common.conv_fwd_wmma_gate import (
+    WMMA_M,
+    WMMA_N,
+    wmma_ab_dtype,
+    wmma_fwd_gate,
+    wmma_fwd_limits_reason,
+)
 
 TAPOUTER_VGPR_BUDGET = 512
 
@@ -270,9 +276,15 @@ def build_direct_fwd_tapouter_wmma(
     DH, DW = p.dil_h, p.dil_w
     PAD = p.PAD
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
+    ab = wmma_ab_dtype(p.dtype)
     wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=WMMA_K
+        family="wmma",
+        a_dtype=ab,
+        b_dtype=ab,
+        c_dtype="fp32",
+        m=WMMA_M,
+        n=WMMA_N,
+        k=WMMA_K,
     )
 
     WAVE = spec.wave_size

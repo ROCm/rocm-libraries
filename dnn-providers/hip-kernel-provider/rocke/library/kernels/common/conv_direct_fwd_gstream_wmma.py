@@ -70,7 +70,16 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     emit_direct_params,
 )
-from kernels.common.conv_fwd_wmma_gate import wmma_fwd_gate, wmma_fwd_limits_reason
+from kernels.common.conv_fwd_wmma_gate import (
+    WMMA_M,
+    WMMA_N,
+    wmma_ab_dtype,
+    wmma_fwd_gate,
+    wmma_fwd_halo_cols,
+    wmma_fwd_halo_extent,
+    wmma_fwd_lead_cols,
+    wmma_fwd_limits_reason,
+)
 
 GSTREAM_VGPR_BUDGET = 448
 
@@ -136,12 +145,12 @@ class FwdGstreamWmmaSpec:
     @property
     def halo_h(self) -> int:
         p = self.problem
-        return p.stride * (self.tile_h - 1) + (p.KH - 1) * p.dil_h + 1
+        return wmma_fwd_halo_extent(p.stride, self.tile_h, p.KH, p.dil_h)
 
     @property
     def halo_w(self) -> int:
         p = self.problem
-        return p.stride * (self.tile_w - 1) + (p.KW - 1) * p.dil_w + 1
+        return wmma_fwd_halo_extent(p.stride, self.tile_w, p.KW, p.dil_w)
 
     @property
     def phases_w(self) -> int:
@@ -149,15 +158,12 @@ class FwdGstreamWmmaSpec:
 
     @property
     def halo_cols(self) -> int:
-        p = self.problem
-        if self.phase_split:
-            return self.tile_w + ((p.KW - 1) * p.dil_w) // p.stride
-        return self.halo_w
+        return wmma_fwd_halo_cols(self.problem, self.tile_w, self.phase_split)
 
     @property
     def lead_cols(self) -> int:
         p = self.problem
-        return ceil_div(p.PAD, p.stride) if self.phase_split else p.PAD
+        return wmma_fwd_lead_cols(p.PAD, p.stride, self.phase_split)
 
     @property
     def x_pitch(self) -> int:
@@ -330,9 +336,15 @@ def build_fwd_gstream_wmma(
     S, PAD = p.stride, p.PAD
     CPG = p.cpg
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
+    ab = wmma_ab_dtype(p.dtype)
     wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=WMMA_K
+        family="wmma",
+        a_dtype=ab,
+        b_dtype=ab,
+        c_dtype="fp32",
+        m=WMMA_M,
+        n=WMMA_N,
+        k=WMMA_K,
     )
 
     WAVE = spec.wave_size

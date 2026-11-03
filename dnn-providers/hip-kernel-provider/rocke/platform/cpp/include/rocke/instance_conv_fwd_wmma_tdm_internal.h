@@ -3,8 +3,10 @@
  *
  * rocke/instance_conv_fwd_wmma_tdm_internal.h -- PRIVATE TDM descriptor helper
  * shared by the C++ ports of the wave32 WMMA forward families that stage
- * tiles with rank-3 TDM transfers (conv_direct_fwd_gstream_wmma.cpp,
- * conv_direct_fwd_tapouter_wmma.cpp). Declares no public API.
+ * tiles with rank-3 TDM transfers (conv_direct_fwd_wmma.cpp,
+ * conv_fwd_small_wmma.cpp, conv_direct_fwd_gstream_wmma.cpp,
+ * conv_direct_fwd_tapouter_wmma.cpp), as their Python ports all import the
+ * one _tdm_descriptor_3d. Declares no public API.
  *
  *   Python (conv_direct_fwd_wmma.py)               C++ (this header)
  *   ---------------------------------------------   ------------------------------
@@ -22,7 +24,8 @@
  * dimension 0 is contiguous, (s1, s2) are the element strides of dimensions
  * 1 and 2, (d0, d1, d2) the extents left from global_ptr (the hardware
  * zero-fills past them); the tile lands packed [tile2][tile1][tile0] at the
- * i32 LDS byte address lds_addr. Writes out[0..4]. */
+ * i32 LDS byte address lds_addr. tile1_v, when not NULL, is a runtime tile1
+ * (Python's ``tile1: Value``) used in place of tile1. Writes out[0..4]. */
 void rocke_fwd_tdm_descriptor_3d(rocke_ir_builder_t* b,
                                  rocke_value_t* global_ptr,
                                  rocke_value_t* lds_addr,
@@ -34,6 +37,7 @@ void rocke_fwd_tdm_descriptor_3d(rocke_ir_builder_t* b,
                                  int tile0,
                                  int tile1,
                                  rocke_value_t* tile2,
-                                 rocke_value_t* out[5]);
+                                 rocke_value_t* out[5],
+                                 rocke_value_t* tile1_v = NULL);
 
 #endif /* ROCKE_INSTANCE_CONV_FWD_WMMA_TDM_INTERNAL_H */

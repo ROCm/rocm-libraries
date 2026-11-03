@@ -5,10 +5,12 @@
 
 ``conv_direct_fwd_wmma`` and ``conv_fwd_small_wmma`` (small C / small K) run
 on the same hardware: a wave32 target with TDM and the 16x16x32 fp16 / bf16
-WMMA atom. :func:`wmma_fwd_gate` checks exactly that, once, for all three
-families, together with the one padding for both axes they all take (each
-offsets columns by ``PAD``); the other shape rules of each family stay in
-its own ``*_reason``.
+WMMA atom. :func:`wmma_fwd_gate` checks exactly that, once, for every
+forward family, together with the padding each takes (one for both axes, or
+a column padding of its own); the other shape rules of each family stay in
+its own ``*_reason``, which ends with :func:`wmma_fwd_limits_reason`. The
+halo helpers give the input window a tile of output pixels reads, for the
+families that stage one per channel chunk (direct, small-group).
 
 The C++ engine mirrors this module in
 ``platform/cpp/instances/common/conv_fwd_wmma_gate.cpp`` with the same checks
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import normalize_scheduler_strategy
+from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -32,6 +35,9 @@ __all__ = [
     "WMMA_N",
     "wmma_ab_dtype",
     "wmma_fwd_gate",
+    "wmma_fwd_halo_cols",
+    "wmma_fwd_halo_extent",
+    "wmma_fwd_lead_cols",
     "wmma_fwd_limits_reason",
 ]
 
@@ -104,3 +110,22 @@ def wmma_fwd_limits_reason(
     if n_blocks > _I32_MAX:
         return f"{n_blocks} workgroups exceed the i32 block id"
     return None
+
+
+def wmma_fwd_halo_extent(stride: int, tile: int, k: int, dil: int) -> int:
+    """Input rows (columns) a tile of ``tile`` output rows (columns) reads
+    through a ``k``-tap filter axis at ``stride`` and dilation ``dil``."""
+    return stride * (tile - 1) + (k - 1) * dil + 1
+
+
+def wmma_fwd_halo_cols(p: DirectConvProblem, tile_w: int, phase_split: bool) -> int:
+    """Columns of one (phase) sub-halo: the whole halo row, or with
+    ``phase_split`` the columns of one of the ``stride`` column phases."""
+    if phase_split:
+        return tile_w + ((p.KW - 1) * p.dil_w) // p.stride
+    return wmma_fwd_halo_extent(p.stride, tile_w, p.KW, p.dil_w)
+
+
+def wmma_fwd_lead_cols(pad_w: int, stride: int, phase_split: bool) -> int:
+    """Most leading zero columns a (phase) sub-halo gets at the left edge."""
+    return ceil_div(pad_w, stride) if phase_split else pad_w

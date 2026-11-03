@@ -20,7 +20,8 @@ void rocke_fwd_tdm_descriptor_3d(rocke_ir_builder_t* b,
                                  int tile0,
                                  int tile1,
                                  rocke_value_t* tile2,
-                                 rocke_value_t* out[5])
+                                 rocke_value_t* out[5],
+                                 rocke_value_t* tile1_v)
 {
     rocke_value_t* c16 = rocke_b_const_i32(b, 16);
     rocke_value_t* gaddr = rocke_b_global_ptr_to_i64(b, global_ptr);
@@ -52,7 +53,7 @@ void rocke_fwd_tdm_descriptor_3d(rocke_ir_builder_t* b,
         g1[3] = rocke_b_lor(b, x, y);
     }
     {
-        rocke_value_t* x = rocke_b_const_i32(b, tile1);
+        rocke_value_t* x = tile1_v != NULL ? tile1_v : rocke_b_const_i32(b, tile1);
         rocke_value_t* y = rocke_b_shl(b, tile2, c16);
         g1[4] = rocke_b_lor(b, x, y);
     }

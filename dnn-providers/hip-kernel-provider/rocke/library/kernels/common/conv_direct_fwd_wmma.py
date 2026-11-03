@@ -96,6 +96,9 @@ from kernels.common.conv_fwd_wmma_gate import (
     WMMA_N,
     wmma_ab_dtype,
     wmma_fwd_gate,
+    wmma_fwd_halo_cols,
+    wmma_fwd_halo_extent,
+    wmma_fwd_lead_cols,
     wmma_fwd_limits_reason,
 )
 
@@ -250,16 +253,13 @@ class DirectFwdWmmaSpec:
     @property
     def halo_cols(self) -> int:
         """Columns of one (phase) sub-halo."""
-        p = self.vp
-        if self.phase_split:
-            return self.tile_w + ((p.KW - 1) * p.dil_w) // p.stride
-        return self.halo_w
+        return wmma_fwd_halo_cols(self.vp, self.tile_w, self.phase_split)
 
     @property
     def lead_cols(self) -> int:
         """Most leading zero columns a (phase) sub-halo gets at the left edge."""
         p = self.vp
-        return _ceil_div(p.PAD_W, p.stride) if self.phase_split else p.PAD_W
+        return wmma_fwd_lead_cols(p.PAD_W, p.stride, self.phase_split)
 
     @property
     def phase_elems(self) -> int:
@@ -304,12 +304,12 @@ class DirectFwdWmmaSpec:
     @property
     def halo_h(self) -> int:
         p = self.vp
-        return p.stride * (self.tile_h - 1) + (p.KH - 1) * p.dil_h + 1
+        return wmma_fwd_halo_extent(p.stride, self.tile_h, p.KH, p.dil_h)
 
     @property
     def halo_w(self) -> int:
         p = self.vp
-        return p.stride * (self.tile_w - 1) + (p.KW - 1) * p.dil_w + 1
+        return wmma_fwd_halo_extent(p.stride, self.tile_w, p.KW, p.dil_w)
 
     @property
     def x_pitch(self) -> int:
