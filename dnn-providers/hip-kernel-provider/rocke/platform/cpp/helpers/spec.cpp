@@ -12,6 +12,7 @@
  */
 #include "rocke/helper_rocke.helpers.spec.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -842,4 +843,16 @@ void rocke_spec_set_reason(char* reason, size_t cap, const char* msg)
     }
     memcpy(reason, msg, n);
     reason[n] = '\0';
+}
+
+void rocke_spec_set_reasonf(char* reason, size_t cap, const char* fmt, ...)
+{
+    if(reason == NULL || cap == 0)
+    {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(reason, cap, fmt, ap);
+    va_end(ap);
 }

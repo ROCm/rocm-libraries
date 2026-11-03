@@ -282,14 +282,6 @@ bool rocke_fwd_gstream_wmma_is_valid_spec(const rocke_fwd_gstream_wmma_spec_t* s
                                           char* reason,
                                           size_t reason_cap)
 {
-    char msg[512];
-#define GS_FAIL(...)                                    \
-    do                                                  \
-    {                                                   \
-        snprintf(msg, sizeof msg, __VA_ARGS__);         \
-        rocke_spec_set_reason(reason, reason_cap, msg); \
-        return false;                                   \
-    } while(0)
     if(spec == NULL)
     {
         rocke_spec_set_reason(reason, reason_cap, "null spec");
@@ -303,53 +295,70 @@ bool rocke_fwd_gstream_wmma_is_valid_spec(const rocke_fwd_gstream_wmma_spec_t* s
            p, arch, "direct_fwd_gstream_wmma", spec->wave_size, false, &target, reason, reason_cap))
         return false;
     if(p->stride != 1 && p->stride != 2)
-        GS_FAIL("stride %d not in (1, 2)", p->stride);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stride %d not in (1, 2)", p->stride);
     if(p->dil_h != 1 || p->dil_w != 1)
-        GS_FAIL("dilation is not served");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "dilation is not served");
     if(p->KH != p->KW)
-        GS_FAIL("filter %dx%d is not square", p->KH, p->KW);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "filter %dx%d is not square", p->KH, p->KW);
     if(p->PAD < 0 || p->PAD > p->KH - 1)
-        GS_FAIL("PAD %d outside 0..K-1", p->PAD);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "PAD %d outside 0..K-1", p->PAD);
     const long long Ho = rocke_direct_conv_problem_Ho(p), Wo = rocke_direct_conv_problem_Wo(p);
     if(Ho < 1 || Wo < 1)
-        GS_FAIL("empty output %lldx%lld", Ho, Wo);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "empty output %lldx%lld", Ho, Wo);
     if(p->cpg != p->kpg)
-        GS_FAIL("cpg %d != kpg %d", p->cpg, p->kpg);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "cpg %d != kpg %d", p->cpg, p->kpg);
     if(p->cpg != 8 && p->cpg != 16 && (p->cpg < ROCKE_FWD_WMMA_K || p->cpg % 8 != 0))
-        GS_FAIL("cpg %d not 8, 16 or a multiple of 8 from 32", p->cpg);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "cpg %d not 8, 16 or a multiple of 8 from 32", p->cpg);
     if(p->cpg > 16 && p->cpg % ROCKE_FWD_WMMA_K != 0
        && rocke_align_up(p->cpg, ROCKE_FWD_WMMA_K) - p->cpg > ROCKE_FWD_WMMA_CH_PAD)
-        GS_FAIL("cpg %d: its last k-step reads past the LDS row skew", p->cpg);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "cpg %d: its last k-step reads past the LDS row skew", p->cpg);
     if(std::min(std::min(spec->waves_k, spec->waves_p), std::min(spec->tiles_k, spec->tiles_p)) < 1)
-        GS_FAIL("waves and tiles must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves and tiles must be >= 1");
     const int kpad = rocke_fwd_gstream_wmma_kpad(spec);
     const int bk = rocke_fwd_gstream_wmma_block_k(spec);
     if(bk % kpad != 0 && kpad % bk != 0)
-        GS_FAIL("block_k %d is neither whole groups nor part of one", bk);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "block_k %d is neither whole groups nor part of one", bk);
     if(((long long)p->groups * kpad) % bk != 0)
-        GS_FAIL("K %lld not a multiple of block_k %d", rocke_direct_conv_problem_total_k(p), bk);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "K %lld not a multiple of block_k %d",
+                        rocke_direct_conv_problem_total_k(p),
+                        bk);
     if(spec->pf_depth < 1 || (spec->pf_depth > 1 && !spec->prefetch))
-        GS_FAIL("pf_depth %d: >= 1, and > 1 only with prefetch", spec->pf_depth);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "pf_depth %d: >= 1, and > 1 only with prefetch", spec->pf_depth);
     if(spec->stages < 2 || spec->walk < 1)
-        GS_FAIL("stages must be >= 2 and walk >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stages must be >= 2 and walk >= 1");
     const int tw = spec->tile_w;
     if(tw < 1 || gs_block_p(spec) % tw != 0)
-        GS_FAIL("tile_w %d must divide the %d pixels of a band", tw, gs_block_p(spec));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "tile_w %d must divide the %d pixels of a band",
+                        tw,
+                        gs_block_p(spec));
     if(spec->phase_split)
     {
         if(p->stride != 2)
-            GS_FAIL("phase_split serves stride 2 only");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "phase_split serves stride 2 only");
         if(spec->waves_k * spec->waves_p < 2)
-            GS_FAIL("phase_split needs two waves (one transfer each)");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "phase_split needs two waves (one transfer each)");
     }
     if(rocke_fwd_gstream_wmma_threads_per_block(spec)
        > rocke_archtarget_max_threads_per_block(target))
-        GS_FAIL("%d threads per block", rocke_fwd_gstream_wmma_threads_per_block(spec));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "%d threads per block",
+                        rocke_fwd_gstream_wmma_threads_per_block(spec));
     if(gs_x_pitch(spec) > 0xFFFF || gs_halo_w(spec) > 0xFFFF || gs_halo_h(spec) > 0xFFFF)
-        GS_FAIL("tile too wide for a TDM descriptor");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "tile too wide for a TDM descriptor");
     if(!rocke_archtarget_fits_lds(target, rocke_fwd_gstream_wmma_lds_bytes(spec)))
-        GS_FAIL(
-            "LDS %ld B > %d", rocke_fwd_gstream_wmma_lds_bytes(spec), target->lds_capacity_bytes);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "LDS %ld B > %d",
+                        rocke_fwd_gstream_wmma_lds_bytes(spec),
+                        target->lds_capacity_bytes);
     {
         const int TM = spec->tiles_k, TN = spec->tiles_p;
         const int nks = (int)gs_k_steps(spec).size();
@@ -357,11 +366,11 @@ bool rocke_fwd_gstream_wmma_is_valid_spec(const rocke_fwd_gstream_wmma_spec_t* s
         const int vgprs
             = 8 * TM * TN + 8 * TM * nks + 8 * b_sets * (spec->prefetch ? 1 + spec->pf_depth : 1);
         if(vgprs > ROCKE_FWD_GSTREAM_VGPR_BUDGET)
-            GS_FAIL("~%d VGPRs of weights, accumulators and fragments", vgprs);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "~%d VGPRs of weights, accumulators and fragments", vgprs);
     }
     if(!rocke_wmma_fwd_limits_ok(p, spec->sched, gs_grid0(spec), reason, reason_cap))
         return false;
-#undef GS_FAIL
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }

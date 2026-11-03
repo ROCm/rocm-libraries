@@ -189,14 +189,6 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
                                            char* reason,
                                            size_t reason_cap)
 {
-    char msg[512];
-#define TO_FAIL(...)                                    \
-    do                                                  \
-    {                                                   \
-        snprintf(msg, sizeof msg, __VA_ARGS__);         \
-        rocke_spec_set_reason(reason, reason_cap, msg); \
-        return false;                                   \
-    } while(0)
     if(spec == NULL)
     {
         rocke_spec_set_reason(reason, reason_cap, "null spec");
@@ -216,57 +208,79 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
                             reason_cap))
         return false;
     if(p->stride != 1)
-        TO_FAIL("stride %d: the tap windows are dense (stride 1 only)", p->stride);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "stride %d: the tap windows are dense (stride 1 only)", p->stride);
     if(p->dil_h < 1 || p->dil_w < 1)
-        TO_FAIL("dilation %dx%d < 1", p->dil_h, p->dil_w);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "dilation %dx%d < 1", p->dil_h, p->dil_w);
     if(p->PAD < 0)
-        TO_FAIL("PAD %d < 0", p->PAD);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "PAD %d < 0", p->PAD);
     const long long Ho = rocke_direct_conv_problem_Ho(p), Wo = rocke_direct_conv_problem_Wo(p);
     if(Ho < 1 || Wo < 1)
-        TO_FAIL("empty output %lldx%lld", Ho, Wo);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "empty output %lldx%lld", Ho, Wo);
     if(p->cpg % 8 != 0 || p->kpg % 8 != 0)
-        TO_FAIL("cpg %d and kpg %d must be multiples of 8 (16-byte rows)", p->cpg, p->kpg);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "cpg %d and kpg %d must be multiples of 8 (16-byte rows)",
+                        p->cpg,
+                        p->kpg);
     if(spec->ck % ROCKE_FWD_WMMA_K != 0 || spec->ck <= 0)
-        TO_FAIL("ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "ck %d must be a positive multiple of %d",
+                        spec->ck,
+                        ROCKE_FWD_WMMA_K);
     if(std::min(std::min(spec->waves_k, spec->waves_p), std::min(spec->tiles_k, spec->tiles_p)) < 1)
-        TO_FAIL("waves and tiles must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves and tiles must be >= 1");
     if(spec->waves_k * spec->waves_p < 2)
-        TO_FAIL("needs at least two waves (one TDM issuer per operand)");
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "needs at least two waves (one TDM issuer per operand)");
     if(spec->stages < 2)
-        TO_FAIL("stages must be >= 2");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stages must be >= 2");
     const int ts = spec->tdm_split;
     if(ts < 1 || 2 * ts > spec->waves_k * spec->waves_p)
-        TO_FAIL("tdm_split %d needs 2 * %d waves", ts, ts);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "tdm_split %d needs 2 * %d waves", ts, ts);
     if(rocke_fwd_tapouter_wmma_tile_h(spec) % ts != 0
        || rocke_fwd_tapouter_wmma_block_k(spec) % ts != 0)
-        TO_FAIL("tdm_split %d must divide tile_h %d and block_k",
-                ts,
-                rocke_fwd_tapouter_wmma_tile_h(spec));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "tdm_split %d must divide tile_h %d and block_k",
+                        ts,
+                        rocke_fwd_tapouter_wmma_tile_h(spec));
     /* A slab in the top padding issues no transfer, so a wave's tensor count
      * no longer marks its steps: only a full wait is safe. */
     if(ts > 1 && spec->stages > 2)
-        TO_FAIL("tdm_split %d needs 2 stages (a skipped slab breaks the wait)", ts);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "tdm_split %d needs 2 stages (a skipped slab breaks the wait)", ts);
     if(spec->tile_w < 1 || rocke_fwd_tapouter_wmma_block_p(spec) % spec->tile_w != 0)
-        TO_FAIL("tile_w %d must divide %d", spec->tile_w, rocke_fwd_tapouter_wmma_block_p(spec));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "tile_w %d must divide %d",
+                        spec->tile_w,
+                        rocke_fwd_tapouter_wmma_block_p(spec));
     if(rocke_fwd_tapouter_wmma_threads_per_block(spec)
        > rocke_archtarget_max_threads_per_block(target))
-        TO_FAIL("%d threads per block", rocke_fwd_tapouter_wmma_threads_per_block(spec));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "%d threads per block",
+                        rocke_fwd_tapouter_wmma_threads_per_block(spec));
     if(std::max(std::max(to_x_pitch(spec), to_epi_pitch(spec)),
                 std::max(spec->tile_w, rocke_fwd_tapouter_wmma_block_k(spec)))
        > 0xFFFF)
-        TO_FAIL("tile too wide for a TDM descriptor");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "tile too wide for a TDM descriptor");
     if(!rocke_archtarget_fits_lds(target, rocke_fwd_tapouter_wmma_lds_bytes(spec)))
-        TO_FAIL(
-            "LDS %ld B > %d", rocke_fwd_tapouter_wmma_lds_bytes(spec), target->lds_capacity_bytes);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "LDS %ld B > %d",
+                        rocke_fwd_tapouter_wmma_lds_bytes(spec),
+                        target->lds_capacity_bytes);
     {
         const int vgprs = 8 * spec->tiles_k * spec->tiles_p
                           + 8 * (spec->tiles_k + spec->tiles_p) * (spec->prefetch ? 2 : 1);
         if(vgprs > ROCKE_FWD_TAPOUTER_VGPR_BUDGET)
-            TO_FAIL("~%d VGPRs of accumulators and fragments", vgprs);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "~%d VGPRs of accumulators and fragments", vgprs);
     }
     if(!rocke_wmma_fwd_limits_ok(p, spec->sched, to_grid0(spec), reason, reason_cap))
         return false;
-#undef TO_FAIL
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }

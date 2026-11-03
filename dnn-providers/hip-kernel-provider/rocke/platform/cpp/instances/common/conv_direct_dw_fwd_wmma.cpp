@@ -139,19 +139,12 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const char* dtype = rocke_direct_conv_problem_dtype(p);
-#define DFW_FAIL(...)                           \
-    do                                          \
-    {                                           \
-        if(reason != NULL && cap > 0)           \
-            snprintf(reason, cap, __VA_ARGS__); \
-        return false;                           \
-    } while(0)
     if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
-        DFW_FAIL("unsupported dtype '%s'; expected fp16 or bf16", dtype);
+        ROCKE_SPEC_FAIL(reason, cap, "unsupported dtype '%s'; expected fp16 or bf16", dtype);
     if(p->cpg != 1 || p->kpg != 1)
-        DFW_FAIL("requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
+        ROCKE_SPEC_FAIL(reason, cap, "requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
     if(p->stride != 1)
-        DFW_FAIL("requires stride=1 (got %d)", p->stride);
+        ROCKE_SPEC_FAIL(reason, cap, "requires stride=1 (got %d)", p->stride);
     if(rocke_direct_dilation_reason(p, reason, cap)
        || rocke_direct_conv_one_padding_reason(p, "", reason, cap))
         return false;
@@ -159,47 +152,62 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
         const int kmax = p->KH > p->KW ? p->KH : p->KW;
         const long long Ho = rocke_direct_conv_problem_Ho(p), Wo = rocke_direct_conv_problem_Wo(p);
         if(!(0 <= p->PAD && p->PAD < kmax) || Ho <= 0 || Wo <= 0)
-            DFW_FAIL("degenerate geometry (PAD=%d, Ho=%lld, Wo=%lld)", p->PAD, Ho, Wo);
+            ROCKE_SPEC_FAIL(
+                reason, cap, "degenerate geometry (PAD=%d, Ho=%lld, Wo=%lld)", p->PAD, Ho, Wo);
     }
     if(spec->block_h < 1)
-        DFW_FAIL("block_h must be >= 1 (got %d)", spec->block_h);
+        ROCKE_SPEC_FAIL(reason, cap, "block_h must be >= 1 (got %d)", spec->block_h);
     if(spec->block_waves < 1 || spec->block_waves > ROCKE_DW_FWD_WMMA_MAX_WAVES)
-        DFW_FAIL(
-            "block_waves must be 1..%d (got %d)", ROCKE_DW_FWD_WMMA_MAX_WAVES, spec->block_waves);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "block_waves must be 1..%d (got %d)",
+                        ROCKE_DW_FWD_WMMA_MAX_WAVES,
+                        spec->block_waves);
     if(!rocke_dw_mfma_w_fold_ok(spec->w_fold))
-        DFW_FAIL("w_fold must be one of (1, 2, 4) (got %d)", spec->w_fold);
+        ROCKE_SPEC_FAIL(reason, cap, "w_fold must be one of (1, 2, 4) (got %d)", spec->w_fold);
     if(spec->prefetch_rows < 1 || spec->prefetch_rows > ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS)
-        DFW_FAIL("prefetch_rows must be 1..%d (got %d)",
-                 ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS,
-                 spec->prefetch_rows);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "prefetch_rows must be 1..%d (got %d)",
+                        ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS,
+                        spec->prefetch_rows);
     if(p->groups % ROCKE_DW_DGRAD_MFMA_CH != 0)
-        DFW_FAIL("groups %% %d != 0 (got %d)", ROCKE_DW_DGRAD_MFMA_CH, p->groups);
+        ROCKE_SPEC_FAIL(
+            reason, cap, "groups %% %d != 0 (got %d)", ROCKE_DW_DGRAD_MFMA_CH, p->groups);
     {
         const int frag = rocke_direct_dw_fwd_wmma_frag_vgprs(spec);
         if(spec->block_waves > ROCKE_DW_FWD_WMMA_WIDE_WAVES
            && frag > ROCKE_DW_FWD_WMMA_WIDE_FRAG_VGPRS)
-            DFW_FAIL("%d waves need fragments <= %d VGPRs (got %d)",
-                     spec->block_waves,
-                     ROCKE_DW_FWD_WMMA_WIDE_FRAG_VGPRS,
-                     frag);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "%d waves need fragments <= %d VGPRs (got %d)",
+                            spec->block_waves,
+                            ROCKE_DW_FWD_WMMA_WIDE_FRAG_VGPRS,
+                            frag);
         if(frag > ROCKE_DW_FWD_WMMA_MAX_FRAG_VGPRS)
-            DFW_FAIL("fragments need %d VGPRs (> %d); lower prefetch_rows or the filter",
-                     frag,
-                     ROCKE_DW_FWD_WMMA_MAX_FRAG_VGPRS);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "fragments need %d VGPRs (> %d); lower prefetch_rows or the filter",
+                            frag,
+                            ROCKE_DW_FWD_WMMA_MAX_FRAG_VGPRS);
     }
     {
         const int u = rocke_direct_dw_fwd_wmma_unrolled_wmmas(spec);
         if(u > ROCKE_DW_FWD_WMMA_MAX_UNROLL)
-            DFW_FAIL("unrolled body too large (%d WMMAs > %d); lower block_h",
-                     u,
-                     ROCKE_DW_FWD_WMMA_MAX_UNROLL);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "unrolled body too large (%d WMMAs > %d); lower block_h",
+                            u,
+                            ROCKE_DW_FWD_WMMA_MAX_UNROLL);
     }
     {
         const long lds = rocke_direct_dw_fwd_wmma_lds_bytes(spec);
         if(lds > ROCKE_DW_DGRAD_MFMA_LDS_BUDGET)
-            DFW_FAIL("stages %ld LDS bytes per workgroup (budget %d); lower block_waves",
-                     lds,
-                     ROCKE_DW_DGRAD_MFMA_LDS_BUDGET);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "stages %ld LDS bytes per workgroup (budget %d); lower block_waves",
+                            lds,
+                            ROCKE_DW_DGRAD_MFMA_LDS_BUDGET);
     }
     {
         const long long x = (long long)p->N * p->H * p->W * p->groups * 2;
@@ -207,11 +215,12 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
                             * rocke_direct_conv_problem_Wo(p) * p->groups * 2;
         const long long mx = x > y ? x : y;
         if(mx > ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES)
-            DFW_FAIL("X/Y of %lld bytes exceed the %lld-byte sentinel addressing range",
-                     mx,
-                     (long long)ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "X/Y of %lld bytes exceed the %lld-byte sentinel addressing range",
+                            mx,
+                            (long long)ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES);
     }
-#undef DFW_FAIL
     return true;
 }
 

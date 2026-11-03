@@ -343,20 +343,11 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
  *  fwd_wmma_reason / is_valid_fwd_wmma_spec
  * ===================================================================== */
 
-#define FWW_FAIL(...)                                   \
-    do                                                  \
-    {                                                   \
-        snprintf(msg, sizeof msg, __VA_ARGS__);         \
-        rocke_spec_set_reason(reason, reason_cap, msg); \
-        return false;                                   \
-    } while(0)
-
 bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spec,
                                          const char* arch,
                                          char* reason,
                                          size_t reason_cap)
 {
-    char msg[512];
     const rocke_archtarget_t* target;
     const rocke_direct_conv_problem_t* p;
 
@@ -375,23 +366,32 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     {
         if(p->PAD || rocke_direct_conv_problem_pad_w(p) || p->dil_h != 1 || p->dil_w != 1
            || p->KH != p->KW || (p->KH != 1 && p->KH != p->stride))
-            FWW_FAIL("strided_view serves undilated 1x1 or KxK stride-K, no padding");
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "strided_view serves undilated 1x1 or KxK stride-K, no padding");
         if(p->stride < 2)
-            FWW_FAIL("strided_view serves stride > 1");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "strided_view serves stride > 1");
         if(spec->phase_split || spec->pack_groups > 1 || spec->tap_reuse)
-            FWW_FAIL("strided_view is a 1x1 stride-1 loop (no phases, packs or reuse)");
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "strided_view is a 1x1 stride-1 loop (no phases, packs or reuse)");
         /* A patch run of KW * cpg contiguous channels exists only when one
          * group holds all of a pixel's channels. */
         if(p->KH > 1 && p->groups > 1)
-            FWW_FAIL("a KxK strided_view serves ungrouped convs");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "a KxK strided_view serves ungrouped convs");
         if(p->KH > 1 && spec->ck != 0 && (p->KW * p->cpg) % spec->ck)
-            FWW_FAIL("a %d-channel patch run is not whole ck %d chunks", p->KW * p->cpg, spec->ck);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "a %d-channel patch run is not whole ck %d chunks",
+                            p->KW * p->cpg,
+                            spec->ck);
         if(spec->fold_n
            && (p->H != p->stride * rocke_direct_conv_problem_Ho(p) || spec->tile_n != 1))
-            FWW_FAIL("fold_n needs H == stride * Ho and one image per tile");
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "fold_n needs H == stride * Ho and one image per tile");
     }
     else if(spec->fold_n)
-        FWW_FAIL("fold_n builds on strided_view");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "fold_n builds on strided_view");
     rocke_direct_conv_problem_t pv_view;
     if(spec->poly_view)
     {
@@ -399,33 +399,44 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         const int pad_w = rocke_direct_conv_problem_pad_w(p);
         if(spec->strided_view || p->H != 1 || p->KH != 1 || p->PAD || p->dil_h != 1
            || p->dil_w != 1)
-            FWW_FAIL("poly_view serves 1-D (H = 1, 1 x R) undilated filters");
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "poly_view serves 1-D (H = 1, 1 x R) undilated filters");
         if(S < 2 || p->KW % S || !(0 <= pad_w && pad_w < S) || p->W % S)
-            FWW_FAIL("poly_view needs R = m * S, column padding below S and W %% S == 0");
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "poly_view needs R = m * S, column padding below S and W %% S == 0");
         /* The view's last pixel is then all input, not a trailing zero. */
         if(0 < 2 * pad_w && 2 * pad_w < S)
-            FWW_FAIL("poly_view needs column padding 0 or at least S / 2");
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "poly_view needs column padding 0 or at least S / 2");
         if(p->groups != 1)
-            FWW_FAIL("poly_view serves ungrouped convs");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "poly_view serves ungrouped convs");
         if(spec->phase_split || spec->pack_groups > 1)
-            FWW_FAIL("poly_view is a plain stride-1 1-D loop");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "poly_view is a plain stride-1 1-D loop");
         if(spec->ck == 0 || p->cpg % spec->ck || (pad_w * p->cpg) % spec->ck)
-            FWW_FAIL("a chunk must lie in one input pixel (cpg %d, ck %d)", p->cpg, spec->ck);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "a chunk must lie in one input pixel (cpg %d, ck %d)",
+                            p->cpg,
+                            spec->ck);
         /* One wave zeroes a leading-pad chunk's view pixel. */
         const int zero_ch = fww_poly_view_zero_channels(spec->wave_size);
         if(pad_w != 0 && spec->ck > zero_ch)
-            FWW_FAIL("a padded poly_view zeroes at most %d channels of a chunk (ck %d)",
-                     zero_ch,
-                     spec->ck);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "a padded poly_view zeroes at most %d channels of a chunk (ck %d)",
+                            zero_ch,
+                            spec->ck);
         if(rocke_direct_fwd_wmma_tile_h(spec) != 1)
-            FWW_FAIL("poly_view tiles one row (tile_w * tile_n == block_p)");
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "poly_view tiles one row (tile_w * tile_n == block_p)");
         pv_view = fww_vp(spec);
         p = &pv_view;
     }
     if(p->stride != 1 && p->stride != 2)
-        FWW_FAIL("stride %d not in (1, 2)", p->stride);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stride %d not in (1, 2)", p->stride);
     if(p->dil_h < 1 || p->dil_w < 1)
-        FWW_FAIL("dilation %dx%d < 1", p->dil_h, p->dil_w);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "dilation %dx%d < 1", p->dil_h, p->dil_w);
     {
         /* Non-square filters: 1 x R stride-1 rows on 1-D signals (dilated
          * or not), and undilated rectangular filters (7x1, 1x7); all
@@ -435,133 +446,179 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         if(p->KH != p->KW)
         {
             if(spec->pack_groups > 1 || spec->tap_reuse || spec->phase_split)
-                FWW_FAIL("a %dx%d filter is served unpacked, without tap_reuse or phase split",
-                         p->KH,
-                         p->KW);
+                ROCKE_SPEC_FAIL(
+                    reason,
+                    reason_cap,
+                    "a %dx%d filter is served unpacked, without tap_reuse or phase split",
+                    p->KH,
+                    p->KW);
             if(dilated && (p->KH != 1 || p->stride != 1))
-                FWW_FAIL("a dilated %dx%d filter is served only as 1 x R, stride 1", p->KH, p->KW);
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "a dilated %dx%d filter is served only as 1 x R, stride 1",
+                                p->KH,
+                                p->KW);
         }
         if(pad_w != p->PAD)
         {
             if(spec->pack_groups > 1)
-                FWW_FAIL("per-axis padding is served unpacked");
+                ROCKE_SPEC_FAIL(reason, reason_cap, "per-axis padding is served unpacked");
             if(dilated && (p->KH != 1 || p->stride != 1))
-                FWW_FAIL("per-axis padding with dilation is served only as 1 x R, stride 1");
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "per-axis padding with dilation is served only as 1 x R, stride 1");
         }
         int dmax = p->dil_h > p->dil_w ? p->dil_h : p->dil_w;
         if(p->PAD < 0 || p->PAD > (p->KH - 1) * dmax)
-            FWW_FAIL("PAD %d outside 0..(K-1)*dilation", p->PAD);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "PAD %d outside 0..(K-1)*dilation", p->PAD);
         if(pad_w < 0 || pad_w > (p->KW - 1) * dmax)
-            FWW_FAIL("PAD_W %d outside 0..(KW-1)*dilation", pad_w);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "PAD_W %d outside 0..(KW-1)*dilation", pad_w);
     }
     long long Ho = rocke_direct_conv_problem_Ho(p), Wo = rocke_direct_conv_problem_Wo(p);
     if(Ho < 1 || Wo < 1)
-        FWW_FAIL("empty output %lldx%lld", Ho, Wo);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "empty output %lldx%lld", Ho, Wo);
     int G = spec->pack_groups;
     if(G < 1)
-        FWW_FAIL("pack_groups %d < 1", G);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pack_groups %d < 1", G);
     if(G > 1)
     {
         bool cok = p->cpg == 2 || p->cpg == 4 || p->cpg == 8 || p->cpg == 16;
         bool kok = p->kpg == 2 || p->kpg == 4 || p->kpg == 8 || p->kpg == 16;
         if(p->groups % G)
-            FWW_FAIL("groups %d not a multiple of pack_groups %d", p->groups, G);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "groups %d not a multiple of pack_groups %d", p->groups, G);
         if(!cok || !kok)
-            FWW_FAIL("packed cpg %d / kpg %d not in (2, 4, 8, 16)", p->cpg, p->kpg);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "packed cpg %d / kpg %d not in (2, 4, 8, 16)", p->cpg, p->kpg);
         if(fww_cpg_eff(spec) > spec->ck)
-            FWW_FAIL("packed cpg %d > ck %d (one X chunk)", fww_cpg_eff(spec), spec->ck);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "packed cpg %d > ck %d (one X chunk)",
+                            fww_cpg_eff(spec),
+                            spec->ck);
         if(fww_kpg_eff(spec) > rocke_direct_fwd_wmma_block_k(spec))
-            FWW_FAIL("packed kpg %d > block_k %d",
-                     fww_kpg_eff(spec),
-                     rocke_direct_fwd_wmma_block_k(spec));
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "packed kpg %d > block_k %d",
+                            fww_kpg_eff(spec),
+                            rocke_direct_fwd_wmma_block_k(spec));
     }
     if(fww_cpg_eff(spec) % 8 || fww_kpg_eff(spec) % 8)
-        FWW_FAIL("cpg %d and kpg %d must be multiples of 8 (16-byte rows)",
-                 fww_cpg_eff(spec),
-                 fww_kpg_eff(spec));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "cpg %d and kpg %d must be multiples of 8 (16-byte rows)",
+                        fww_cpg_eff(spec),
+                        fww_kpg_eff(spec));
     if(spec->ck % ROCKE_FWD_WMMA_K || spec->ck <= 0)
-        FWW_FAIL("ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "ck %d must be a positive multiple of %d",
+                        spec->ck,
+                        ROCKE_FWD_WMMA_K);
     if(spec->waves_k < 1 || spec->waves_p < 1 || spec->tiles_k < 1 || spec->tiles_p < 1)
-        FWW_FAIL("waves and tiles must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves and tiles must be >= 1");
     if(spec->stages < 2)
-        FWW_FAIL("stages must be >= 2");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stages must be >= 2");
     int tw = spec->tile_w;
     int block_p = rocke_direct_fwd_wmma_block_p(spec);
     int nw = spec->waves_k * spec->waves_p;
     if(tw < 1 || spec->tile_n < 1)
-        FWW_FAIL("tile_w %d and tile_n %d must be >= 1", tw, spec->tile_n);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "tile_w %d and tile_n %d must be >= 1", tw, spec->tile_n);
     if(block_p % (tw * spec->tile_n))
-        FWW_FAIL("tile_w %d x tile_n %d must divide %d", tw, spec->tile_n, block_p);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "tile_w %d x tile_n %d must divide %d", tw, spec->tile_n, block_p);
     int TH = rocke_direct_fwd_wmma_tile_h(spec);
     if(spec->tile_n > 1 && (TH * tw) % 16)
-        FWW_FAIL("an image tile must hold whole 16-pixel tiles");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "an image tile must hold whole 16-pixel tiles");
     if(spec->tile_n > nw - 1)
-        FWW_FAIL("tile_n needs one more wave than images (one X transfer per image)");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "tile_n needs one more wave than images (one X transfer per image)");
     if(spec->pingpong)
     {
         int issuers = spec->phase_split ? 2 * spec->tile_n + 1 : spec->tile_n + 1;
         if(spec->row_ring || spec->tap_ring || spec->split_barrier || spec->prefetch)
-            FWW_FAIL("pingpong replaces the ring variants, split_barrier and prefetch");
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "pingpong replaces the ring variants, split_barrier and prefetch");
         if(nw % 2 || issuers > nw / 2)
-            FWW_FAIL("pingpong needs an even wave count with every issuer in rank 0");
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "pingpong needs an even wave count with every issuer in rank 0");
         if(spec->wave_epilogue)
-            FWW_FAIL("pingpong uses the block epilogue");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong uses the block epilogue");
     }
     if(spec->pp_group < 1 || (spec->pp_group > 1 && !spec->pingpong))
-        FWW_FAIL("pp_group %d: >= 1, and > 1 only with pingpong", spec->pp_group);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "pp_group %d: >= 1, and > 1 only with pingpong", spec->pp_group);
     if((spec->row_ring || spec->tap_ring) && (G > 1 || spec->split_barrier))
-        FWW_FAIL("row_ring / tap_ring serve unpacked tiles without split_barrier");
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "row_ring / tap_ring serve unpacked tiles without split_barrier");
     if(spec->row_ring && spec->tap_ring)
-        FWW_FAIL("row_ring and tap_ring are exclusive");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "row_ring and tap_ring are exclusive");
     if(spec->tap_reuse)
     {
         if(spec->row_ring || spec->tap_ring)
-            FWW_FAIL("tap_reuse needs all filter rows of a column in one weight slot");
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "tap_reuse needs all filter rows of a column in one weight slot");
         if(spec->pingpong)
-            FWW_FAIL("tap_reuse is not combined with pingpong");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "tap_reuse is not combined with pingpong");
         if(p->stride != 1 || spec->tile_n != 1 || spec->phase_split)
-            FWW_FAIL("tap_reuse serves stride 1, one image per block");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "tap_reuse serves stride 1, one image per block");
         if(tw % 16 || (spec->tiles_p * 16) % tw)
-            FWW_FAIL("tap_reuse needs whole 16-pixel row pieces and whole rows per wave");
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "tap_reuse needs whole 16-pixel row pieces and whole rows per wave");
     }
     if(spec->tap_shift)
     {
         if(!spec->tap_reuse)
-            FWW_FAIL("tap_shift builds on tap_reuse");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "tap_shift builds on tap_reuse");
         if(p->dil_w > 15)
-            FWW_FAIL("tap_shift rotates within a 16-lane row");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "tap_shift rotates within a 16-lane row");
     }
     if(spec->phase_split)
     {
         if(p->stride != 2)
-            FWW_FAIL("phase_split serves stride 2 only");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "phase_split serves stride 2 only");
         if(spec->tile_n * 2 + 1 > nw)
-            FWW_FAIL("phase_split needs 2 * tile_n + 1 waves (one transfer each)");
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "phase_split needs 2 * tile_n + 1 waves (one transfer each)");
     }
     if(spec->wave_epilogue)
     {
         int wpx = spec->tiles_p * 16;
         if(wpx % tw || (TH * tw) % wpx)
-            FWW_FAIL("wave_epilogue needs whole rows of one image per wave");
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "wave_epilogue needs whole rows of one image per wave");
     }
     if(rocke_direct_fwd_wmma_threads_per_block(spec)
        > rocke_archtarget_max_threads_per_block(target))
-        FWW_FAIL("%d threads per block", rocke_direct_fwd_wmma_threads_per_block(spec));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "%d threads per block",
+                        rocke_direct_fwd_wmma_threads_per_block(spec));
     if(nw < 2)
-        FWW_FAIL("needs at least two waves (one TDM issuer per operand)");
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "needs at least two waves (one TDM issuer per operand)");
     if(fww_x_pitch(spec) > 0xFFFF || fww_epi_pitch(spec) > 0xFFFF || fww_halo_w(spec) > 0xFFFF
        || fww_halo_h(spec) > 0xFFFF)
-        FWW_FAIL("tile too wide for a TDM descriptor");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "tile too wide for a TDM descriptor");
     if(!rocke_archtarget_fits_lds(target, rocke_direct_fwd_wmma_lds_bytes(spec)))
-        FWW_FAIL(
-            "LDS %ld B > %d", rocke_direct_fwd_wmma_lds_bytes(spec), target->lds_capacity_bytes);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "LDS %ld B > %d",
+                        rocke_direct_fwd_wmma_lds_bytes(spec),
+                        target->lds_capacity_bytes);
     {
         int vgprs = 8 * spec->tiles_k * spec->tiles_p
                     + 8 * (spec->tiles_k + spec->tiles_p) * (spec->prefetch ? 2 : spec->pp_group);
         if(spec->tap_reuse)
             vgprs += 8 * ((p->KH - 1) * p->dil_h * (tw / 16));
         if(vgprs > FWW_VGPR_BUDGET)
-            FWW_FAIL("~%d VGPRs of accumulators and fragments", vgprs);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "~%d VGPRs of accumulators and fragments", vgprs);
     }
     /* Global offsets of the real problem's tensors (p may be a view) are i32
      * bytes and the tile index is a flat block id. */
@@ -577,8 +634,6 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
-
-#undef FWW_FAIL
 
 /* ===================================================================== *
  *  Builder

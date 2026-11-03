@@ -386,6 +386,22 @@ long long rocke_align_up(long long n, long long mult);
  * so the family validators do not each carry an identical local copy. */
 void rocke_spec_set_reason(char* reason, size_t cap, const char* msg);
 
+/* printf-style twin of rocke_spec_set_reason: format straight into the
+ * caller's buffer (same truncation and NULL/zero-capacity rules). */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 3, 4)))
+#endif
+void rocke_spec_set_reasonf(char* reason, size_t cap, const char* fmt, ...);
+
+/* Shared refusal macro for spec validators that take (reason, cap): records
+ * the formatted reason and returns false from the enclosing validator. */
+#define ROCKE_SPEC_FAIL(reason, cap, ...)                     \
+    do                                                        \
+    {                                                         \
+        rocke_spec_set_reasonf((reason), (cap), __VA_ARGS__); \
+        return false;                                         \
+    } while(0)
+
 #ifdef __cplusplus
 }
 #endif
