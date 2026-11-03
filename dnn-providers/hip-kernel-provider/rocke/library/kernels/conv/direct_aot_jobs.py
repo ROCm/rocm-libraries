@@ -1064,8 +1064,8 @@ class DirectCaps:
     dil_h: int = 1
     dil_w: int = 1
     # Filter width and column padding where they differ from KH / PAD (0 and
-    # -1: the same); only the rotated-filter depthwise dgrad and the small-K
-    # forward rows use them.
+    # -1: the same); only the rows of PER_AXIS_PAD_VARIANTS
+    # (kernels.conv.direct_variants) use them.
     kw: int = 0
     pad_w: int = -1
 

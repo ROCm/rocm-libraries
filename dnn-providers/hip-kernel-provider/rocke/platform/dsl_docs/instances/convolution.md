@@ -888,11 +888,12 @@ tiles `H x W` (`out_hw`), and the kernel name gains the `dg` flag (and a
 `p{PAD}x{PAD_W}` part when the two paddings differ). Only one
 filter row is register-resident, so the mode takes filters up to
 `_DW_TILED_DGRAD_MAX_K = 64` on a side, including non-square ones such as
-51x5 / 5x51, and it is the one direct kernel that accepts a per-axis padding
+51x5 / 5x51, and it accepts a per-axis padding
 (`DirectConvProblem.pad_w`, -1 meaning `PAD`; `PAD_W` is the effective column
 padding and `Wo` uses it; a `pad_w` below -1 is refused). It requires stride 1,
 one channel per lane (`cpl = 1`), `PAD <= KH-1` and `PAD_W <= KW-1`; the forward mode refuses a problem whose `PAD_W != PAD`, and
-`direct_spec_for_problem` refuses such a problem for every other variant. AOT
+`direct_spec_for_problem` refuses such a problem for every variant outside
+`PER_AXIS_PAD_VARIANTS` (`kernels/conv/direct_variants.py`). AOT
 variant `direct_depthwise_tiled_dgrad` (`DIRECT_WAVE_PARAMETRIC`): 13x13 to
 31x31 and 51x5 / 5x51 at "same" padding, `DW_TILED_DGRAD_BLOCK_W` x
 `DW_TILED_DGRAD_BLOCK_H`. Like `conv_direct_dgrad_wmma` it is served by the

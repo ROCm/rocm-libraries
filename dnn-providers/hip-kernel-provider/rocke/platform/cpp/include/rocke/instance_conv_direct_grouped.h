@@ -113,10 +113,11 @@ typedef struct rocke_direct_conv_problem
     int dil_h; /* default 1; filter dilation, honoured by the non-grouped */
     int dil_w; /* forward kernel only (every other variant rejects it)   */
     int pad_w; /* default -1 (= PAD); column padding where it differs from
-                * PAD. Only the rotated-filter depthwise dgrad
-                * (rocke_direct_depthwise_tiled_spec_t.dgrad) takes such a
-                * problem; the forward tiled spec rejects one. Values below
-                * -1 are no padding: the depthwise dgrad specs reject them. */
+                * PAD. Only the variants of Python's PER_AXIS_PAD_VARIANTS
+                * (library/kernels/conv/direct_variants.py) take such a
+                * problem (direct_spec_for_problem refuses it for every other
+                * variant). Values below -1 are no padding
+                * (rocke_direct_conv_pad_w_reason). */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the

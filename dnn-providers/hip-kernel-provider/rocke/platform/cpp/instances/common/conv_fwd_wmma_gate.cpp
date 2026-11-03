@@ -3,7 +3,8 @@
 /*
  * conv_fwd_wmma_gate.cpp -- C++ port of library/kernels/common/
  * conv_fwd_wmma_gate.py: the capability gate, validator tail and halo
- * geometry the wave32 WMMA forward convolutions share.
+ * geometry of the wave32 WMMA forward convolutions (the users of each are
+ * listed in rocke/instance_conv_fwd_wmma_gate_internal.h).
  */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h"
 

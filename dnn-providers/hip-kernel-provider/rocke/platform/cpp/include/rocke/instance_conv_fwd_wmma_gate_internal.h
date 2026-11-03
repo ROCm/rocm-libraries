@@ -2,10 +2,17 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_conv_fwd_wmma_gate_internal.h -- PRIVATE capability gate
- * and shared facts of the C++ ports of the wave32 WMMA forward convolutions
- * (conv_direct_fwd_wmma.cpp, conv_fwd_small_wmma.cpp,
- * conv_direct_dw_fwd_wmma.cpp, conv_direct_fwd_gstream_wmma.cpp,
- * conv_direct_fwd_tapouter_wmma.cpp). Emits no IR and declares no public API.
+ * and shared facts of the C++ ports of the wave32 WMMA forward convolutions.
+ * Emits no IR and declares no public API. Its users, as in Python:
+ *   - rocke_wmma_fwd_gate: conv_direct_fwd_wmma.cpp, conv_fwd_small_wmma.cpp,
+ *     conv_direct_fwd_gstream_wmma.cpp, conv_direct_fwd_tapouter_wmma.cpp;
+ *   - rocke_wmma_fwd_limits_ok (the validator tail): conv_direct_fwd_wmma.cpp,
+ *     conv_direct_fwd_gstream_wmma.cpp, conv_direct_fwd_tapouter_wmma.cpp;
+ *   - the halo helpers: conv_direct_fwd_wmma.cpp,
+ *     conv_direct_fwd_gstream_wmma.cpp;
+ *   - the WMMA atom (ROCKE_FWD_WMMA_*, rocke_wmma_ab_dtype): all of the above
+ *     and conv_direct_dw_fwd_wmma.cpp, which uses neither the gate nor the
+ *     validator tail.
  *
  *   Python (conv_fwd_wmma_gate.py)       C++ (this header)
  *   ----------------------------------   ----------------------------------

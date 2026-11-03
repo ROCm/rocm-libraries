@@ -1,16 +1,28 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The capability gate shared by the wave32 WMMA forward convolutions.
+"""The capability gate and shared facts of the wave32 WMMA forward convolutions.
 
-``conv_direct_fwd_wmma`` and ``conv_fwd_small_wmma`` (small C / small K) run
-on the same hardware: a wave32 target with TDM and the 16x16x32 fp16 / bf16
-WMMA atom. :func:`wmma_fwd_gate` checks exactly that, once, for every
-forward family, together with the padding each takes (one for both axes, or
-a column padding of its own); the other shape rules of each family stay in
-its own ``*_reason``, which ends with :func:`wmma_fwd_limits_reason`. The
-halo helpers give the input window a tile of output pixels reads, for the
-families that stage one per channel chunk (direct, small-group).
+What each family reads from here:
+
+- :func:`wmma_fwd_gate` (a wave32 target with TDM and the 16x16x32 fp16 /
+  bf16 WMMA atom, plus the padding a family takes: one for both axes, or a
+  column padding of its own): ``conv_direct_fwd_wmma``,
+  ``conv_fwd_small_wmma`` (small C / small K),
+  ``conv_direct_fwd_gstream_wmma`` (small groups) and
+  ``conv_direct_fwd_tapouter_wmma`` (large dilations);
+- :func:`wmma_fwd_limits_reason`, the end of a validator (scheduler, i32
+  byte offsets, i32 block id): ``conv_direct_fwd_wmma``,
+  ``conv_direct_fwd_gstream_wmma`` and ``conv_direct_fwd_tapouter_wmma``;
+- the halo helpers (the input window a tile of output pixels reads, for the
+  families that stage one per channel chunk): ``conv_direct_fwd_wmma`` and
+  ``conv_direct_fwd_gstream_wmma``;
+- the WMMA atom (``WMMA_M`` / ``WMMA_N`` / ``WMMA_K``, :func:`wmma_ab_dtype`):
+  all of the above and ``conv_direct_dw_fwd_wmma`` (depthwise), which uses
+  neither the gate nor the validator tail: it checks its arch and shapes
+  itself.
+
+The other shape rules of each family stay in its own ``*_reason``.
 
 The C++ engine mirrors this module in
 ``platform/cpp/instances/common/conv_fwd_wmma_gate.cpp`` with the same checks

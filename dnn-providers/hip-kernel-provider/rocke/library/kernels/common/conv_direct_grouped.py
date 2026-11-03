@@ -328,7 +328,7 @@ class DirectConvProblem:
     dil_h: int = 1
     dil_w: int = 1
     # Column padding when it differs from the row padding (-1: PAD). Only the
-    # rotated-filter depthwise dgrad kernel and the small-K WMMA forward take
+    # variants of PER_AXIS_PAD_VARIANTS (kernels.conv.direct_variants) take
     # such a problem; every other variant is refused one in
     # direct_spec_for_problem. Values below -1 are no padding (pad_w_reason).
     pad_w: int = -1
