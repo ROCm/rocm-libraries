@@ -173,8 +173,6 @@ void case_gfx1250_standalone_bridge()
     const std::string ir = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
     const std::string ir24
         = lower_one("gfx1250_bridge", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM24);
-    if(ir24 != ir)
-        fail("LLVM24 bridge output differs from its shared LLVM23 profile", __LINE__);
 
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.signal(i32 1)");
@@ -187,6 +185,11 @@ void case_gfx1250_standalone_bridge()
     EXPECT_IR(ir, "call <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.load.to.lds(");
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
+    EXPECT_IR(ir24, "addrspacecast ptr addrspace(3)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.barrier.init(ptr addrspace(15)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.barrier.signal.var(ptr addrspace(15)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.barrier.join(ptr addrspace(15)");
+    EXPECT_IR(ir24, "call void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15)");
 }
 
 void case_inline_asm_rejects_non_string_minimum_flavor()
@@ -3914,10 +3917,12 @@ void case_wmma_result_count()
             }
             else
             {
+                /* The integer WMMA is a matrix call, which names its op_id. */
                 char expected[80];
                 snprintf(expected,
                          sizeof(expected),
-                         "tile.mma: expected exactly one result, got %d",
+                         "%s: expected exactly one result, got %d",
+                         integer ? "tile.wmma_i32_16x16x16_iu8" : "tile.mma",
                          count);
                 if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
                     fail("malformed WMMA did not return its result-count error", __LINE__);
@@ -3951,6 +3956,15 @@ void case_lowbit_dtype_aliases()
                &arch->mma, "mfma_scaled", pair[0], pair[1], "fp32", 32, 32, 64, &e8m0_k32))
             fail("low-bit aliases must resolve native catalog rows", __LINE__);
     }
+    /* gfx950 has no fp6 16x16x96 MFMA instruction; its unscaled fp4 16x16x128
+     * MFMA is the f8f6f4 instruction, reached through the short name too. */
+    const auto* gfx950 = rocke_arch_target_from_gfx("gfx950");
+    if(rocke_mma_catalog_has_shape(&gfx950->mma, "mma", "fp6", "fp6", "fp32", 16, 16, 96))
+        fail("gfx950 must not list an fp6 16x16x96 MFMA", __LINE__);
+    const rocke_mma_op_t* fp4
+        = rocke_mma_catalog_op_for_shape(&gfx950->mma, "mma", "fp4", "fp4", "fp32", 16, 16, 128);
+    if(!fp4 || strcmp(fp4->op_id, "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1") != 0)
+        fail("gfx950 fp4 16x16x128 must select the f8f6f4 MFMA", __LINE__);
 }
 
 /* wave_all compares ballot.i64 against the full-wave mask: -1 on wave64 but

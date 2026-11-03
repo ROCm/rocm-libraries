@@ -50,6 +50,9 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
         const int64_t bbEntryAccum = m_phase1.accumByte.at(bp);
         const bool allowIns =
             !m_skipSwPrefetchInNaturalLoopBodies || (findLoopForBB(m_loops, &bb) == nullptr);
+        // XNACK replay is what the drain before each prefetch guards against; where the driver
+        // has it off there is nothing to replay and nothing to pay for.
+        const bool emitXnackWait = passCtx.getAsmCapsConfig().enableXnackReplay;
         int inserted = 0;
         if (m_usePerBbAnchorPrefetchGrid) {
             // Real first post-CP byte from Phase 1 (honors alignment gaps), shifted from pre-insert
@@ -62,11 +65,12 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
                     : firstPostCp + (blockGlobalStart - m_phase1.layoutStart.at(bp));
             inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(
                 bb, blockGlobalStart, bbEntryAccum, anchor, 0, archId,
-                m_debug ? m_debugStream : nullptr, &m_asmSetSymbols, allowIns, getName());
+                m_debug ? m_debugStream : nullptr, &m_asmSetSymbols, emitXnackWait, allowIns,
+                getName());
         } else {
-            inserted = insertSwPrefetchLabelsDynamic(bb, blockGlobalStart, bbEntryAccum, 0, archId,
-                                                     m_debug ? m_debugStream : nullptr,
-                                                     &m_asmSetSymbols, allowIns, getName());
+            inserted = insertSwPrefetchLabelsDynamic(
+                bb, blockGlobalStart, bbEntryAccum, 0, archId, m_debug ? m_debugStream : nullptr,
+                &m_asmSetSymbols, emitXnackWait, allowIns, getName());
         }
         m_totalPrefetchInserted += inserted;
 

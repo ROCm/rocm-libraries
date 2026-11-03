@@ -1910,6 +1910,40 @@ def cases():
             32,
         ),
     )
+    # Every other member of gfx11-generic / gfx12-generic has a row of its own
+    # that points at its generic's facts; one case each, the gfx1151 / gfx1201
+    # t32x32x16 configuration, shows it lowers under its own name.
+    for member in (
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1152",
+        "gfx1153",
+        "gfx1154",
+        "gfx1200",
+    ):
+        add(
+            "gemm",
+            f"gemm/{member}/t32x32x16",
+            member,
+            build_gemm(
+                f"irhash_gemm_{member[3:]}_a",
+                member,
+                32,
+                32,
+                16,
+                2,
+                2,
+                16,
+                16,
+                16,
+                "mem",
+                "default",
+                32,
+            ),
+        )
     # gfx90a is wave64/MFMA like gfx942; mirror its 16x16x16 atom variants.
     add(
         "gemm",
@@ -1948,6 +1982,27 @@ def cases():
             8,
             "compv4",
             "cshuffle",
+            64,
+        ),
+    )
+    # gfx908 is wave64/MFMA with the same f16 16x16x16 atom as gfx90a.
+    add(
+        "gemm",
+        "gemm/gfx908/t64x64x16",
+        "gfx908",
+        build_gemm(
+            "irhash_gemm_908_a",
+            "gfx908",
+            64,
+            64,
+            16,
+            2,
+            2,
+            16,
+            16,
+            16,
+            "mem",
+            "default",
             64,
         ),
     )
@@ -3537,6 +3592,37 @@ def cases():
             emit_lse=True,
         ),
     )
+    # Tiled 2D with LSE output, one case per epilogue branch (each branch has
+    # its own LSE store site).
+    for _branch, _branch_kw in (
+        (
+            "transposed32",
+            dict(
+                use_mfma_32x32=True,
+                block_m_per_warp=32,
+                use_transposed_qk_32x32=True,
+                use_transposed_scalar_state=True,
+            ),
+        ),
+        ("mfma32", dict(use_mfma_32x32=True, block_m_per_warp=32)),
+        ("striped16", {}),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/2d_lse_{_branch}_bf16_d128",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_2d_lse_{_branch}_bf16",
+                "gfx950",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                emit_lse=True,
+                **_branch_kw,
+            ),
+        )
     add(
         "attention",
         "attention/gfx942/2d_fp16_d128_b64",
@@ -3586,6 +3672,37 @@ def cases():
             use_i64_kv_addr=True,
         ),
     )
+    # LSE-on tiled 2D, one case per epilogue branch (transposed 32x32x8 direct
+    # store, non-transposed 32x32x8 via Acc_lds, narrow 16x16 striped). The
+    # LSE-off cases above stay byte-identical.
+    for _branch, _branch_kw in (
+        (
+            "transposed32",
+            dict(
+                use_mfma_32x32x8=True,
+                use_transposed_qk_32x32=True,
+                block_m_per_warp=32,
+            ),
+        ),
+        ("mfma32", dict(use_mfma_32x32x8=True, block_m_per_warp=32)),
+        ("striped16", {}),
+    ):
+        add(
+            "attention",
+            f"attention/gfx942/2d_lse_{_branch}_bf16_d128",
+            "gfx942",
+            build_attention_2d(
+                f"irhash_attn_942_2d_lse_{_branch}_bf16",
+                "gfx942",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                emit_lse=True,
+                **_branch_kw,
+            ),
+        )
     add(
         "attention",
         "attention/gfx942/3d_fp16_d128_b64",
@@ -5319,6 +5436,45 @@ def cases():
             f"conv_winograd_fwd/gfx1250/{_case_id}",
             "gfx1250",
             build_winograd_fwd_case(_stage, **_over),
+        )
+
+    # --- conv_winograd_fwd_rt: shape-generic (AOT) Winograd transforms ---
+    # Every extent a kernel argument: K1, K2a, K2 (register path with the fused
+    # and the split prescale, LDS path) and K4. The full matrix (and the C++
+    # twin) lives in library/tests/parity/conv_winograd_fwd_rt_emit.*.
+    def build_winograd_rt_case(cls, **spec_kw):
+        def _build():
+            from kernels.common import conv_winograd_fwd_rt as wr
+
+            return wr.build_stage(getattr(wr, cls)(**spec_kw), arch="gfx1250")
+
+        return _build
+
+    for _case_id, _cls, _over in (
+        ("f4_k1", "RtFilterSpec", dict(filter_rows=2)),
+        ("bf16_k2a", "RtPrescaleSpec", dict(io_dtype="bf16")),
+        ("f4_k2", "RtInputSpec", dict(vec=4)),
+        (
+            "f4_bf16_fused_prescale_k2",
+            "RtInputSpec",
+            dict(io_dtype="bf16", prescale=True, fused=True, vec=4),
+        ),
+        (
+            "f2_lds_k2",
+            "RtInputSpec",
+            dict(mh=2, mw=2, lds=(4, 8), tiles_per_thread=4),
+        ),
+        (
+            "f6x4_bf16_prescale_k4",
+            "RtOutputSpec",
+            dict(mh=6, mw=4, io_dtype="bf16", prescale=True, vec=4),
+        ),
+    ):
+        add(
+            "conv_winograd_fwd_rt",
+            f"conv_winograd_fwd_rt/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_rt_case(_cls, **_over),
         )
 
     # --- conv_winograd_gemm_wmma: the Winograd batched GEMM (K3, gfx1250) ---
