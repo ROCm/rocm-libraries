@@ -279,6 +279,9 @@
           "X4_2d_i14x14_n1c2048k64_f3x3_fp32_cl"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]

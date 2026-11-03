@@ -31,6 +31,9 @@
           "S9_3d_i16x8x4_n8c16k32_f1x1x1_bf16_cf"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ]

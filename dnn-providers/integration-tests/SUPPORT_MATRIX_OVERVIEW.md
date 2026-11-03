@@ -36,7 +36,7 @@ Generated from the committed support claims (15508 graphs, 512 catalogued option
 | **[Attention](#group-attention)** (63) | 🟡 15% | ❌ | 🟡 22% |
 | **[Batchnorm](#group-batchnorm)** (54) | 🟡 79% | 🟡 79% | 🟡 79% |
 | **[Block scale](#group-block-scale)** (39) | ❌ | ❌ | ❌ |
-| **[Convolution](#group-convolution)** (75) | 🟡 53% | 🟡 34% | 🟡 34% |
+| **[Convolution](#group-convolution)** (75) | 🟡 53% | 🟡 53% | 🟡 34% |
 | **[CustomOp](#group-customop)** (8) | ❌ | ❌ | ❌ |
 | **[Layernorm](#group-layernorm)** (45) | 🟡 71% | 🟡 71% | 🟡 35% |
 | **[Linear attention](#group-linear-attention)** (37) | ❌ | ❌ | ❌ |
@@ -92,7 +92,7 @@ An op appears under an engine that claims at least one of its graphs somewhere.
 | **[BatchnormInference](#op-batchnorminference)** (10) | 🟡 80% | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% | ❌ | 🟡 80% | 🟡 80% | 🟡 80% | ❌ | 🟡 80% |
 | **[BatchnormInferenceVarianceExt](#op-batchnorminferencevarianceext)** (12) | 🟡 83% | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% | ❌ | 🟡 83% | 🟡 83% | 🟡 83% | ❌ | 🟡 83% |
 | **[ConvolutionBwd](#op-convolutionbwd)** (25) | 🟡 52% | 🟡 52% | 🟡 52% | 🟡 52% | ❌ | 🟡 52% | ❌ | 🟡 52% | 🟡 52% | 🟡 52% | ❌ | 🟡 52% |
-| **[ConvolutionFwd](#op-convolutionfwd)** (25) | ❌ | 🟡 56% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[ConvolutionFwd](#op-convolutionfwd)** (25) | 🟡 56% | 🟡 56% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **[ConvolutionWrw](#op-convolutionwrw)** (25) | 🟡 52% | 🟡 52% | 🟡 52% | 🟡 52% | ❌ | 🟡 52% | ❌ | 🟡 52% | 🟡 52% | 🟡 52% | ❌ | 🟡 52% |
 | **[Pointwise](#op-pointwise)** (58) | 🟡 13% | 🟡 17% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% | ❌ | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% |
 
