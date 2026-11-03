@@ -141,8 +141,9 @@ builds the graph. Examples:
 - `F-SCALE-TENSOR-BY-VALUE`: a scale tensor must be passed by value, so a
   scale in device memory cannot be stated.
 
-The research for Layer 2 added 10 frontend rules. They leave about 7.4 × 10³⁰ combinations and
-33,314 valid pairs.
+The research for Layer 2 added 10 frontend rules. In the research's settings they leave about
+7.4 × 10³⁰ combinations and 33,314 valid pairs. The model in section 4 keeps fewer settings than the
+research did, so its own count is lower: 30,559 valid pairs (section 5).
 
 A removed combination is not lost. When the frontend accepts a meaningless
 request, that request comes back as a **rejection probe** in
