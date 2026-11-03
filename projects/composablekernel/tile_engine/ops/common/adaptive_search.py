@@ -1,0 +1,1105 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Adaptive kernel search: an op-agnostic coordinator for the tile_engine drivers.
+
+Instead of building and measuring every eligible (problem, kernel) pair, one
+search strategy per problem (from the vendored ``ck_search`` package) proposes
+which eligible kernel to measure next and learns from each verified result.
+The coordinator owns the bookkeeping around that ask/tell loop:
+
+- ``BudgetLedger``: per-problem trial attempts, a run-level cap on new builds
+  and a deadline that stops admission (running work is drained);
+- ``ArtifactRegistry``: one build per kernel per run, shared by every problem;
+  a failed build is never retried and charges one physical build;
+- ``SearchCoordinator``: synchronous rounds (ask, admit, build the union of
+  misses, measure, reconcile, tell), then confirmation of the finalists with
+  fresh verified calls; only confirmed winners are exported;
+- ``RunWriter``: winners.json (a --pairs file), run.json, trials.jsonl and
+  summary.json, all strict JSON.
+
+The operation itself (which kernels fit a problem, how to build and measure
+them) lives behind ``OperationAdapter``; the GEMM one is
+``tile_engine/ops/gemm/gemm_search.py``. Importing this module imports neither
+``ck_search`` nor numpy: the search core is loaded when a search runs.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import statistics
+import sys
+import time
+import traceback
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence
+
+SCHEMA_VERSION = 1
+STATUSES = (
+    "ok",
+    "compile_error",
+    "numeric_fail",
+    "timeout",
+    "run_error",
+    "invalid_measurement",
+    "unattempted",
+    "cancelled",
+)
+# Outcome status -> ck_search ``Status`` attribute told to the strategy. The two
+# scheduler events are never told: ``unattempted`` is re-queued once (then it is
+# a run_error) and ``cancelled`` is dropped (it stays pending in its strategy, so
+# a strategy that waits for it ends that problem's search).
+TELLABLE = {
+    "ok": "OK",
+    "compile_error": "COMPILE_ERROR",
+    "numeric_fail": "NUMERIC_FAIL",
+    "timeout": "TIMEOUT",
+    "run_error": "RUN_ERROR",
+    "invalid_measurement": "RUN_ERROR",
+}
+SEED_POLICIES = ("shared", "per_problem")
+MEASUREMENT_POLICIES = ("full",)
+PRIOR_STRATEGIES = ("tpe", "gp", "portfolio")  # the strategies that read a prior
+NO_WARM_STRATEGIES = ("random", "exhaustive")  # the strategies that ignore warm starts
+EXIT_OK, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
+OUTPUT_FILES = ("run.json", "trials.jsonl", "winners.json", "summary.json")
+_DISPATCHER_PY = Path(__file__).resolve().parents[3] / "dispatcher" / "python"
+
+
+def _ck_search():
+    """The vendored search core, imported on first use."""
+    path = str(_DISPATCHER_PY)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    import ck_search
+
+    return ck_search
+
+
+class SettingsError(ValueError):
+    """Invalid search settings or options (the driver exits with code 2)."""
+
+
+class AdapterError(RuntimeError):
+    """An adapter call failed: the search ends, what it measured is still
+    confirmed, and the run exits 1."""
+
+
+class ContractError(AdapterError):
+    """An adapter broke its contract (a lost, repeated or unknown outcome, a
+    wrong build map): none of its results are trusted, nothing is confirmed."""
+
+
+# ---------------------------------------------------------------- contract
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One eligible kernel. ``record`` holds only the scalar config fields the
+    search space is built from (no names, dtype or arch strings);
+    ``canonical_key`` equals ``kernel_name`` within one run (one build context)."""
+
+    canonical_key: str
+    kernel_name: str
+    record: dict
+    original_config: object
+
+
+@dataclass(frozen=True)
+class BuildResult:
+    """``path`` of the run-owned artifact, or None when the build failed."""
+
+    path: Optional[str]
+    reason: str = ""
+    digest: str = ""
+
+
+@dataclass(frozen=True)
+class PairRequest:
+    problem_key: str
+    candidate_key: str
+    kernel_name: str
+    trial_uid: str
+    call_id: str
+
+
+@dataclass(frozen=True)
+class PairOutcome:
+    request: PairRequest
+    status: str
+    latency_ms: Optional[float]
+    diag: str = ""
+
+
+class OperationAdapter(Protocol):
+    def enumerate_eligible(self) -> Dict[str, List[Candidate]]:
+        """problem_key -> eligible candidates, in a stable order."""
+
+    def build_missing(self, cands: Sequence[Candidate]) -> Dict[str, BuildResult]:
+        """canonical_key -> BuildResult, one per candidate."""
+
+    def measure_pairs(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
+        """Exactly one outcome per request."""
+
+    def confirm(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
+        """Fresh verified calls, exactly one outcome per request."""
+
+    def context(self) -> dict:
+        """arch/dtype/layout/variant/sources, recorded in run.json."""
+
+
+# ---------------------------------------------------------------- settings
+
+_REQUIRED = object()
+
+
+def _check_keys(data, allowed, where):
+    if not isinstance(data, Mapping):
+        raise SettingsError(f"{where}: expected a JSON object, got {data!r}")
+    unknown = sorted(set(data) - set(allowed))
+    if unknown:
+        raise SettingsError(
+            f"{where}: unknown key(s) {unknown}, expected some of {sorted(allowed)}"
+        )
+
+
+def _get(data, where, name, kind, default=_REQUIRED, ok=None, want=""):
+    """``data[name]`` checked against ``kind`` (bools are not ints) and ``ok``."""
+    if name not in data:
+        if default is _REQUIRED:
+            raise SettingsError(f"{where}.{name}: required")
+        return default
+    v = data[name]
+    if kind is float:
+        good = isinstance(v, (int, float)) and math.isfinite(v)
+    else:
+        good = isinstance(v, kind)
+    if not good or (kind is not bool and isinstance(v, bool)):
+        raise SettingsError(f"{where}.{name}={v!r}: expected type {kind.__name__}")
+    if ok is not None and not ok(v):
+        raise SettingsError(f"{where}.{name}={v!r}: expected {want}")
+    return float(v) if kind is float else v
+
+
+def _get_file(data, where, name, base):
+    v = _get(data, where, name, str, None, bool, "a path")
+    if v is None:
+        return None
+    p = Path(v) if base is None else base / v  # an absolute v ignores base
+    if not p.is_file():
+        raise SettingsError(f"{where}.{name}={v!r}: no such file ({p})")
+    return str(p)
+
+
+def _positive(v):
+    return v >= 1
+
+
+def _strict_json(text, where):
+    def no_constant(c):
+        raise SettingsError(f"{where}: {c} is not valid JSON")
+
+    def no_duplicates(pairs):
+        keys = [k for k, _ in pairs]
+        dup = sorted({k for k in keys if keys.count(k) > 1})
+        if dup:
+            raise SettingsError(f"{where}: duplicate key(s) {dup}")
+        return dict(pairs)
+
+    try:
+        return json.loads(
+            text, parse_constant=no_constant, object_pairs_hook=no_duplicates
+        )
+    except ValueError as e:
+        if isinstance(e, SettingsError):
+            raise
+        raise SettingsError(f"{where}: invalid JSON ({e})") from None
+
+
+@dataclass(frozen=True)
+class WarmStartSettings:
+    pairs_file: Optional[str] = None
+    ranked_csv: Optional[str] = None
+    top_k: int = 5
+    use_prior: bool = False
+
+
+@dataclass(frozen=True)
+class ConfirmSettings:
+    finalists: int = 2
+    fresh_calls: int = 3
+
+
+@dataclass(frozen=True)
+class SearchSettings:
+    """A validated ``--search-config`` (schema_version 1).
+
+    Relative warm-start paths are resolved against the settings file's directory
+    (against the working directory when the settings come as a dict).
+    """
+
+    strategy: str
+    trials_per_problem: int
+    new_builds_per_run: int
+    schema_version: int = SCHEMA_VERSION
+    seed: int = 0
+    seed_policy: str = "shared"
+    deadline_s: float = 3600.0
+    batch_per_problem: int = 4
+    max_stall_rounds: int = 8
+    warm_start: Optional[WarmStartSettings] = None
+    confirm: ConfirmSettings = field(default_factory=ConfirmSettings)
+    measurement_policy: str = "full"
+
+    @classmethod
+    def from_json(cls, source) -> "SearchSettings":
+        base = None
+        if isinstance(source, Mapping):
+            data = source
+        elif isinstance(source, (str, os.PathLike)):
+            path = Path(source)
+            try:
+                text = path.read_text()
+            except (OSError, UnicodeDecodeError) as e:
+                raise SettingsError(f"search settings {path}: {e}") from None
+            data = _strict_json(text, f"search settings {path}")
+            base = path.resolve().parent
+        else:
+            raise SettingsError(f"search settings={source!r}: expected a path or dict")
+        w = "settings"
+        _check_keys(data, [f.name for f in cls.__dataclass_fields__.values()], w)
+        _get(data, w, "schema_version", int, ok=lambda v: v == SCHEMA_VERSION,
+             want=str(SCHEMA_VERSION))
+        names = tuple(_ck_search().STRATEGY_NAMES)
+        strategy = _get(data, w, "strategy", str, ok=lambda v: v in names,
+                        want=f"one of {names}")
+        trials = _get(data, w, "trials_per_problem", int, ok=_positive, want=">= 1")
+        warm = None
+        if "warm_start" in data:
+            wd, ww = data["warm_start"], w + ".warm_start"
+            _check_keys(wd, [f for f in WarmStartSettings.__dataclass_fields__], ww)
+            warm = WarmStartSettings(
+                pairs_file=_get_file(wd, ww, "pairs_file", base),
+                ranked_csv=_get_file(wd, ww, "ranked_csv", base),
+                top_k=_get(wd, ww, "top_k", int, 5, _positive, ">= 1"),
+                use_prior=_get(wd, ww, "use_prior", bool, False),
+            )
+            if warm.pairs_file is None and warm.ranked_csv is None:
+                raise SettingsError(f"{ww}: expected pairs_file and/or ranked_csv")
+            if warm.use_prior != (warm.ranked_csv is not None):
+                raise SettingsError(
+                    f"{ww}: ranked_csv is read only as a prior: give both "
+                    "ranked_csv and use_prior=true, or neither"
+                )
+            if warm.pairs_file is not None and strategy in NO_WARM_STRATEGIES:
+                raise SettingsError(f"{ww}.pairs_file: strategy {strategy!r} ignores it")
+            if warm.use_prior and strategy not in PRIOR_STRATEGIES:
+                raise SettingsError(
+                    f"{ww}.use_prior: only {PRIOR_STRATEGIES} read a prior, "
+                    f"strategy is {strategy!r}"
+                )
+        cd, cw = data.get("confirm", {}), w + ".confirm"
+        _check_keys(cd, [f for f in ConfirmSettings.__dataclass_fields__], cw)
+        return cls(
+            strategy=strategy,
+            trials_per_problem=trials,
+            new_builds_per_run=_get(
+                data, w, "new_builds_per_run", int, ok=lambda v: v >= trials,
+                want=f">= trials_per_problem ({trials})",
+            ),
+            seed=_get(data, w, "seed", int, 0),
+            seed_policy=_get(data, w, "seed_policy", str, "shared",
+                             lambda v: v in SEED_POLICIES, f"one of {SEED_POLICIES}"),
+            deadline_s=_get(data, w, "deadline_s", float, 3600.0, lambda v: v > 0, "> 0"),
+            batch_per_problem=_get(data, w, "batch_per_problem", int, 4, _positive, ">= 1"),
+            max_stall_rounds=_get(data, w, "max_stall_rounds", int, 8, _positive, ">= 1"),
+            warm_start=warm,
+            confirm=ConfirmSettings(
+                finalists=_get(cd, cw, "finalists", int, 2, _positive, ">= 1"),
+                fresh_calls=_get(cd, cw, "fresh_calls", int, 3, _positive, ">= 1"),
+            ),
+            measurement_policy=_get(
+                data, w, "measurement_policy", str, "full",
+                lambda v: v in MEASUREMENT_POLICIES, f"one of {MEASUREMENT_POLICIES}",
+            ),
+        )
+
+    def to_json(self) -> dict:
+        """The settings as accepted by ``from_json`` (paths resolved)."""
+        d = {f: getattr(self, f) for f in self.__dataclass_fields__}
+        d["confirm"] = vars(self.confirm).copy()
+        if self.warm_start is None:
+            del d["warm_start"]
+        else:
+            d["warm_start"] = {
+                k: v for k, v in vars(self.warm_start).items() if v is not None
+            }
+        return d
+
+    def problem_seed(self, index: int) -> int:
+        return self.seed + (index if self.seed_policy == "per_problem" else 0)
+
+
+# ---------------------------------------------------------- budgets, artifacts
+
+
+class BudgetLedger:
+    """Trial attempts per problem, new builds per run, confirmation calls and
+    the deadline. A trial is charged when admitted and refunded only when it
+    never ran (unattempted, cancelled); a build is charged once per distinct
+    kernel attempted, failures included."""
+
+    def __init__(self, trials_per_problem, new_builds_per_run, deadline_s, clock):
+        self.trials_per_problem = int(trials_per_problem)
+        self.new_builds_per_run = int(new_builds_per_run)
+        self.deadline_s = float(deadline_s)
+        self.clock = clock
+        self.start = clock()
+        self.trials: Dict[str, int] = {}
+        self.builds = 0
+        self.confirm_calls = 0
+
+    def trials_left(self, problem: str) -> int:
+        return self.trials_per_problem - self.trials.get(problem, 0)
+
+    def admit(self, problem: str) -> None:
+        if self.trials_left(problem) <= 0:
+            raise RuntimeError(f"trial budget of {problem!r} overspent")
+        self.trials[problem] = self.trials.get(problem, 0) + 1
+
+    def refund(self, problem: str) -> None:
+        self.trials[problem] -= 1
+
+    def builds_left(self) -> int:
+        return self.new_builds_per_run - self.builds
+
+    def charge_builds(self, n: int) -> None:
+        if n > self.builds_left():
+            raise RuntimeError(f"{n} builds overspend the cap ({self.builds_left()} left)")
+        self.builds += n
+
+    def elapsed(self) -> float:
+        return self.clock() - self.start
+
+    def deadline_passed(self) -> bool:
+        return self.elapsed() >= self.deadline_s
+
+    def to_json(self) -> dict:
+        return {
+            "trials_per_problem": self.trials_per_problem,
+            "trials_charged": dict(self.trials),
+            "new_builds_per_run": self.new_builds_per_run,
+            "builds_charged": self.builds,
+            "confirm_calls": self.confirm_calls,
+            "deadline_s": self.deadline_s,
+        }
+
+
+class ArtifactRegistry:
+    """canonical_key -> BuildResult of this run. Entries are never replaced: a
+    built kernel serves every problem, a failed build is not retried."""
+
+    def __init__(self):
+        self._results: Dict[str, BuildResult] = {}
+
+    def get(self, key: str) -> Optional[BuildResult]:
+        return self._results.get(key)
+
+    def missing(self, cands: Sequence[Candidate]) -> List[Candidate]:
+        """The candidates without a result, deduplicated, in first-seen order."""
+        out: Dict[str, Candidate] = {}
+        for c in cands:
+            if c.canonical_key not in self._results:
+                out.setdefault(c.canonical_key, c)
+        return list(out.values())
+
+    def publish(self, results: Mapping[str, BuildResult]) -> None:
+        for key, res in results.items():
+            if key in self._results:
+                raise RuntimeError(f"artifact {key!r} is already published")
+            self._results[key] = res
+
+    def to_json(self) -> dict:
+        return {k: vars(r).copy() for k, r in self._results.items()}
+
+
+# ------------------------------------------------------------------ outputs
+
+
+def _jsonable(x):
+    """``x`` as strict-JSON data: non-finite floats become null."""
+    if isinstance(x, float):
+        return x if math.isfinite(x) else None
+    if x is None or isinstance(x, (bool, int, str)):
+        return x
+    if isinstance(x, Mapping):
+        return {str(k): _jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple, set, frozenset)):
+        return [_jsonable(v) for v in x]
+    return str(x)
+
+
+def _dumps(obj, indent=None) -> str:
+    return json.dumps(_jsonable(obj), allow_nan=False, indent=indent)
+
+
+class RunWriter:
+    """The run's output directory: trials.jsonl is appended and flushed event by
+    event; the JSON files are written atomically (temp file + rename)."""
+
+    def __init__(self, out_dir):
+        self.out_dir = Path(out_dir)
+        self._fh = None
+        self._seq = 0
+
+    def check_fresh(self) -> None:
+        old = [n for n in OUTPUT_FILES if (self.out_dir / n).exists()]
+        if old:
+            raise SettingsError(
+                f"search output dir {self.out_dir} already holds a run ({old}); "
+                "use a new directory"
+            )
+
+    def event(self, kind: str, **fields) -> None:
+        if self._fh is None:
+            self.out_dir.mkdir(parents=True, exist_ok=True)
+            self._fh = open(self.out_dir / "trials.jsonl", "a")
+        self._seq += 1
+        self._fh.write(_dumps({"seq": self._seq, "event": kind, **fields}) + "\n")
+        self._fh.flush()
+
+    def write_json(self, name: str, data) -> Path:
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / name
+        tmp = path.with_name(f".{name}.tmp")
+        with open(tmp, "w") as f:
+            f.write(_dumps(data, indent=1) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return path
+
+    def close(self) -> None:
+        if self._fh is not None:
+            self._fh.close()
+            self._fh = None
+
+
+# -------------------------------------------------------------- coordinator
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    status: str  # complete | partial | no_winner
+    exit_code: int  # 0 only when complete: every problem has a winner, no error
+    stop_reason: str
+    winners: Dict[str, str]
+    unresolved: Dict[str, str]
+    counts: Dict[str, Any]
+    wall_s: float
+    error: str = ""
+
+
+def valid_latency(v) -> bool:
+    """A measured latency: a finite positive number (a bool is not one)."""
+    return (
+        isinstance(v, (int, float)) and not isinstance(v, bool)
+        and math.isfinite(v) and v > 0
+    )
+
+
+def _checked(outcome: PairOutcome):
+    """(status, latency_ms, diag): the single acceptance rule. An ``ok`` without
+    a finite positive latency is an invalid_measurement, never evidence."""
+    status, lat, diag = outcome.status, outcome.latency_ms, outcome.diag
+    if status != "ok":
+        return status, None, diag
+    if not valid_latency(lat):
+        return "invalid_measurement", None, f"ok with latency {lat!r} {diag}".strip()
+    return status, float(lat), diag
+
+
+def _load_warm(path, loader, what: str, loader_name: str):
+    """``loader(path)`` for the warm-start file ``what``; no loader, or a file
+    the loader cannot read, is a SettingsError."""
+    if loader is None:
+        raise SettingsError(f"warm_start.{what} needs a {loader_name}")
+    try:
+        return loader(path)
+    except (OSError, ValueError) as e:  # SettingsError and UnicodeDecodeError too
+        raise SettingsError(f"warm_start.{what}: {e}") from None
+
+
+class _Problem:
+    """Per-problem search state."""
+
+    def __init__(self, key: str, index: int, cands: Sequence[Candidate]):
+        self.key = key
+        self.index = index
+        self.cands = list(cands)
+        self.by_key = {c.canonical_key: c for c in self.cands}
+        self.space = None
+        self.members: Dict[str, int] = {}
+        self.strategy = None
+        self.strategy_name = ""
+        self.seed = 0
+        self.warm: List[str] = []
+        self.prior_entries = 0
+        self.requeue: list = []  # trials to re-admit (unattempted once)
+        self.retried: set = set()  # uids already re-queued once
+        self.deferred: list = []  # same-round duplicates of an in-flight key
+        self.seen: dict = {}  # space key -> Observation told for it
+        self.best: Dict[str, tuple] = {}  # canonical_key -> (latency_ms, trial uid)
+        self.asked_empty = False
+        self.finished = ""  # why the problem stopped asking ("" = active)
+
+    def cand(self, key: str) -> Candidate:
+        """The candidate a space key names (``members`` maps it to its row)."""
+        return self.cands[self.members[key]]
+
+
+StrategyFactory = Callable[[str, Any, int, Sequence[Mapping], Any], Any]
+
+
+def _default_factory(name, space, seed, warm_records, prior):
+    return _ck_search().make_strategy(
+        name, space, seed, warm_records=warm_records, prior=prior
+    )
+
+
+class SearchCoordinator:
+    """Runs the search over every problem of ``adapter`` and writes ``out_dir``.
+
+    ``strategy_factory(name, space, seed, warm_records, prior)`` defaults to
+    ``ck_search.make_strategy``. The op reads its warm-start files:
+    ``pair_loader(path) -> {problem: [names] | "*"}`` reads
+    ``warm_start.pairs_file`` (the GEMM driver passes its ``load_pair_list``),
+    ``prior_loader(path) -> {problem: {kernel name: predicted latency ms}}``
+    reads ``warm_start.ranked_csv``. Invalid options raise ``SettingsError``
+    here, before any work.
+
+    Rounds: each active problem in turn (the first one rotates) re-admits its
+    re-queued trials, then asks its strategy for at most ``batch_per_problem``
+    trials in total, capped by its trials left and by the new-build capacity
+    left once the distinct new builds this round already needs are subtracted,
+    so a round never plans more builds than the cap allows. Every trial is told
+    before the strategy is asked again; a problem stops at its trial budget, or
+    when its strategy is done or asks nothing while waiting for no result (or
+    only for cancelled trials, which are never told). The
+    run stops when no problem is active, at the deadline (checked before every
+    ask), at the build cap, or after ``max_stall_rounds`` rounds in a row
+    without a new result. Any error ends the search; the finalists measured
+    so far are still confirmed, unless the adapter broke its contract.
+    """
+
+    def __init__(
+        self,
+        adapter: OperationAdapter,
+        settings,
+        out_dir,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        strategy_factory: Optional[StrategyFactory] = None,
+        pair_loader: Optional[Callable[[str], Mapping]] = None,
+        prior_loader: Optional[Callable[[str], Mapping]] = None,
+    ):
+        if not isinstance(settings, SearchSettings):
+            settings = SearchSettings.from_json(settings)
+        self.adapter = adapter
+        self.settings = settings
+        self.clock = clock
+        self.strategy_factory = strategy_factory or _default_factory
+        self.writer = RunWriter(out_dir)
+        self.writer.check_fresh()
+        warm = settings.warm_start
+        self.warm_pairs: Mapping = {}
+        self.ranked: Mapping = {}
+        if warm is not None and warm.pairs_file is not None:
+            self.warm_pairs = _load_warm(warm.pairs_file, pair_loader, "pairs_file",
+                                         "pair_loader")
+        if warm is not None and warm.use_prior:
+            self.ranked = _load_warm(warm.ranked_csv, prior_loader, "ranked_csv",
+                                     "prior_loader")
+        self.ledger = None
+        self.registry = ArtifactRegistry()
+        self.problems: List[_Problem] = []
+        self.counts: Dict[str, Any] = dict.fromkeys(
+            ("rounds", "proposed", "admitted", "cached", "invalid", "built",
+             "build_failed", "measured", "ok", "requeued", "cancelled",
+             "confirm_calls"), 0
+        )
+        self.counts["failed_by_status"] = {}
+        self.unresolved: Dict[str, str] = {}
+        self._calls = 0
+        self._round = 0
+        self._ck = None
+        self._run_json = None
+
+    # ------------------------------------------------------------ public
+
+    def run(self) -> RunSummary:
+        if self.ledger is not None:
+            raise RuntimeError("SearchCoordinator.run() runs once; make a new one")
+        self.ledger = BudgetLedger(
+            self.settings.trials_per_problem, self.settings.new_builds_per_run,
+            self.settings.deadline_s, self.clock,
+        )
+        self._ck = _ck_search()
+        stop, error, winners, broken = "error", "", {}, False
+        try:
+            try:
+                self._setup()
+                stop = self._search() if self.problems else "no_problems"
+            except Exception as e:  # noqa: BLE001 - recorded, the run exits 1
+                error, broken = self._error(e), isinstance(e, ContractError)
+            for p in self.problems:  # re-queued trials that never ran again
+                for t in p.requeue:
+                    self.counts["cancelled"] += 1
+                    self._event("cancel", problem=p.key, trial_uid=t.uid,
+                                diag="search stopped before re-admission")
+            if not broken:  # what was measured before an error is still confirmed
+                try:
+                    winners = self._confirm(stop)
+                except Exception as e:  # noqa: BLE001 - recorded, the run exits 1
+                    why = "confirmation: " + self._error(e)
+                    error = f"{error}; {why}" if error else why
+                    for p in self.problems:
+                        self.unresolved.setdefault(p.key, why)
+            return self._finish(winners, stop, error)
+        finally:
+            self.writer.close()
+
+    def _error(self, e: Exception) -> str:
+        """Record ``e`` (an error event with its traceback); its message."""
+        msg = str(e) if isinstance(e, AdapterError) else f"{type(e).__name__}: {e}"
+        self._event("error", message=msg, traceback=traceback.format_exc())
+        return msg
+
+    # ------------------------------------------------------------- setup
+
+    def _call(self, what: str, fn, *args):
+        try:
+            return fn(*args)
+        except AdapterError:
+            raise
+        except Exception as e:  # noqa: BLE001 - an adapter failure ends the run
+            raise AdapterError(f"{what} failed: {type(e).__name__}: {e}") from e
+
+    def _setup(self) -> None:
+        s = self.settings
+        context = self._call("context", self.adapter.context)
+        eligible = self._call("enumerate_eligible", self.adapter.enumerate_eligible)
+        if not isinstance(eligible, Mapping):
+            raise ContractError(f"enumerate_eligible returned {type(eligible).__name__}")
+        names: Dict[str, str] = {}
+        for i, (pkey, cands) in enumerate(eligible.items()):
+            cands = list(cands)
+            for c in cands:
+                if not isinstance(c, Candidate):
+                    raise ContractError(f"{pkey}: candidate {c!r} is not a Candidate")
+                if names.setdefault(c.canonical_key, c.kernel_name) != c.kernel_name:
+                    raise ContractError(
+                        f"candidate key {c.canonical_key!r} names two kernels")
+            p = _Problem(str(pkey), i, cands)
+            if len(p.by_key) != len(p.cands):
+                raise ContractError(f"{pkey}: a candidate key repeats")
+            self.problems.append(p)
+            if not p.cands:
+                p.finished = "no eligible candidates"
+                continue
+            try:
+                p.space = self._ck.SearchSpace.from_configs(
+                    [dict(c.record) for c in p.cands], name=p.key
+                )
+            except ValueError as e:
+                raise ContractError(f"{p.key}: candidate records: {e}") from None
+            p.members = p.space.members
+            p.seed = s.problem_seed(i)
+            p.strategy_name = s.strategy
+            warm, prior = (), None
+            if len(p.cands) < s.trials_per_problem:
+                p.strategy_name = "exhaustive"
+            else:
+                warm = self._warm_records(p)
+                prior = self._prior(p)
+            p.strategy = self.strategy_factory(p.strategy_name, p.space, p.seed, warm, prior)
+        self._run_json = {
+            "schema_version": SCHEMA_VERSION,
+            "sampling_policy": "adaptive",
+            "exhaustive": False,
+            "settings": s.to_json(),
+            "context": context,
+            "ck_search": {
+                "origin_sha": getattr(self._ck, "ORIGIN_SHA", ""),
+                "strategies": list(getattr(self._ck, "STRATEGY_NAMES", ())),
+            },
+            "problems": {
+                p.key: {
+                    "index": p.index,
+                    "eligible": len(p.cands),
+                    "params": 0 if p.space is None else len(p.space.params),
+                    "strategy": p.strategy_name or None,
+                    "seed": p.seed,
+                    "warm_start": p.warm,
+                    "prior_entries": p.prior_entries,
+                    "note": p.finished or (
+                        "exhaustive: fewer eligible candidates than trials_per_problem"
+                        if p.strategy_name != s.strategy else ""
+                    ),
+                }
+                for p in self.problems
+            },
+            "domain": [
+                "candidates of a problem are exactly the adapter's eligible list; "
+                "the search never proposes a config outside it",
+                "problems with fewer eligible candidates than trials_per_problem "
+                "are searched exhaustively (no warm start, no prior)",
+                f"measurement_policy {s.measurement_policy}: every discovery and "
+                "confirmation call is a full verified measurement",
+                "new builds are capped per run; a failed build is charged once",
+            ],
+        }
+        self.writer.write_json("run.json", self._run_json)
+
+    def _warm_records(self, p: _Problem):
+        """The first ``top_k`` listed names that are eligible, in listed order."""
+        names = self.warm_pairs.get(p.key, ())
+        if names == "*":
+            names = [c.kernel_name for c in p.cands]
+        by_name = {c.kernel_name: c for c in p.cands}
+        picks = [by_name[n] for n in names if n in by_name]
+        if picks:
+            picks = picks[: self.settings.warm_start.top_k]
+        p.warm = [c.kernel_name for c in picks]
+        return tuple(dict(c.record) for c in picks)
+
+    def _prior(self, p: _Problem):
+        pred = self.ranked.get(p.key, {})
+        table = {
+            k: pred[p.cands[i].kernel_name]
+            for k, i in p.members.items() if p.cands[i].kernel_name in pred
+        }
+        p.prior_entries = len(table)
+        if not table:
+            return None
+        space = p.space  # strategies predict decoded configs: key them like members
+        return self._ck.TablePrior(
+            table, lambda cfg: space.key(space.encode(cfg)), higher_is_better=False,
+            scale="log",
+        )
+
+    # ------------------------------------------------------------ rounds
+
+    def _event(self, kind: str, **fields) -> None:
+        elapsed = self.ledger.elapsed() if self.ledger is not None else 0.0
+        self.writer.event(kind, round=self._round, t=round(elapsed, 6), **fields)
+
+    def _call_id(self, prefix: str) -> str:
+        self._calls += 1
+        return f"{prefix}{self._calls}"
+
+    def _search(self) -> str:
+        stall = 0
+        while True:
+            active = [p for p in self.problems if not p.finished]
+            if not active:
+                return "searched"
+            if stall >= self.settings.max_stall_rounds:
+                return "stalled"
+            if self.ledger.deadline_passed():
+                return "deadline"
+            if self.ledger.builds_left() <= 0:
+                return "build_cap"
+            self._round += 1
+            self.counts["rounds"] += 1
+            stall = 0 if self._one_round(active) else stall + 1
+
+    def _one_round(self, active: List[_Problem]) -> bool:
+        """Ask, admit, build, measure, tell. True when a trial got a result."""
+        admitted = []  # (problem, trial, space key, candidate)
+        planned = set()  # canonical keys this round needs built
+        inflight = set()  # (problem, space key) admitted this round
+        told: Dict[str, list] = {p.key: [] for p in active}
+        batch = self.settings.batch_per_problem
+
+        def place(p, t, kind):
+            """Admit ``t`` (charged), or answer it without spending: a config the
+            space refuses, or one this problem already has a result for (cached).
+            A second trial of a key in flight waits for that result (deferred)."""
+            key = p.space.key(t.genome)
+            ev = dict(problem=p.key, trial_uid=t.uid, origin=t.origin)
+            if key is None:
+                self.counts["invalid"] += 1
+                told[p.key].append(self._ck.Observation(
+                    trial=t, key=None, status=self._ck.Status.INVALID,
+                    detail="refused by the space"))
+                self._event("trial", admission="invalid", **ev)
+                return
+            c = p.cand(key)
+            if key in p.seen:
+                self.counts["cached"] += 1
+                told[p.key].append(p.seen[key].replace_trial(t, cached=True))
+                self._event("trial", kernel=c.kernel_name, admission="cached", **ev)
+            elif (p.key, key) in inflight:
+                p.deferred.append(t)
+            else:
+                self.ledger.admit(p.key)
+                self.counts["admitted"] += 1
+                inflight.add((p.key, key))
+                admitted.append((p, t, key, c))
+                if self.registry.get(c.canonical_key) is None:
+                    planned.add(c.canonical_key)
+                self._event("trial", kernel=c.kernel_name, admission=kind, **ev)
+
+        start = (self._round - 1) % len(active)
+        for p in active[start:] + active[:start]:
+            if self.ledger.deadline_passed():
+                break  # the deadline stops admission; admitted work is drained
+            p.asked_empty = False
+            room = batch
+            while p.requeue and room > 0 and self.ledger.trials_left(p.key) > 0:
+                place(p, p.requeue.pop(0), "readmitted")
+                room -= 1
+            n = min(room, self.ledger.trials_left(p.key),
+                    self.ledger.builds_left() - len(planned))
+            if n <= 0:
+                continue
+            trials = list(p.strategy.ask(n))
+            if len(trials) > n:
+                raise RuntimeError(f"{p.key}: strategy asked {len(trials)} > {n} trials")
+            self.counts["proposed"] += len(trials)
+            # An empty ask means done only when every trial was told before it;
+            # a trial re-admitted just above is still pending in the strategy.
+            p.asked_empty = not trials and room == batch
+            for t in trials:
+                place(p, t, "admitted")
+
+        progress = False
+        missing = self.registry.missing([c for _, _, _, c in admitted])
+        if missing:
+            self._build(missing, admitted)
+        requests, waiting = [], {}
+        for p, t, key, c in admitted:
+            res = self.registry.get(c.canonical_key)
+            if res.path is None:
+                progress |= self._settle(p, t, key, c, told, "compile_error", None,
+                                         res.reason or "build failed", None)
+                continue
+            req = PairRequest(p.key, c.canonical_key, c.kernel_name, t.uid,
+                              self._call_id("d"))
+            requests.append(req)
+            waiting[req.call_id] = (p, t, key, c)
+        if requests:
+            self.counts["measured"] += len(requests)
+            outcomes = self._exchange("measure_pairs", self.adapter.measure_pairs, requests)
+            for req in requests:
+                status, lat, diag = _checked(outcomes[req.call_id])
+                p, t, key, c = waiting[req.call_id]
+                progress |= self._settle(p, t, key, c, told, status, lat, diag, req.call_id)
+        for p in active:
+            for t in p.deferred:  # resolved by the in-flight trial of the same key
+                key = p.space.key(t.genome)
+                if key in p.seen:
+                    self.counts["cached"] += 1
+                    told[p.key].append(p.seen[key].replace_trial(t, cached=True))
+                else:
+                    p.requeue.append(t)
+            p.deferred = []
+            if told[p.key]:
+                p.strategy.tell(told[p.key])
+            if not p.requeue:
+                if self.ledger.trials_left(p.key) <= 0:
+                    p.finished = "trial budget"
+                elif p.strategy.done:
+                    p.finished = "strategy done"
+                elif p.asked_empty:
+                    # Every trial is told by now except cancelled ones, which
+                    # never are: a strategy waiting for one asks nothing more.
+                    waiting = len(getattr(p.strategy, "pending", None) or ())
+                    p.finished = (f"strategy waits for {waiting} cancelled trial(s)"
+                                  if waiting else "strategy done")
+        return progress
+
+    def _build(self, missing: List[Candidate], admitted) -> None:
+        results = self._call("build_missing", self.adapter.build_missing, missing)
+        want = {c.canonical_key for c in missing}
+        if not isinstance(results, Mapping) or set(results) != want or not all(
+            isinstance(r, BuildResult) for r in results.values()
+        ):
+            raise ContractError(
+                f"build_missing must return one BuildResult per requested key "
+                f"{sorted(want)}, got {results!r}"
+            )
+        self.ledger.charge_builds(len(missing))
+        self.registry.publish({c.canonical_key: results[c.canonical_key] for c in missing})
+        for c in missing:
+            r = results[c.canonical_key]
+            self.counts["built" if r.path is not None else "build_failed"] += 1
+            self._event(
+                "build", kernel=c.kernel_name, candidate_key=c.canonical_key,
+                ok=r.path is not None, path=r.path, reason=r.reason, digest=r.digest,
+                waiting=sorted({p.key for p, _, _, a in admitted
+                                if a.canonical_key == c.canonical_key}),
+            )
+
+    def _exchange(self, what: str, fn, requests: List[PairRequest]) -> dict:
+        """``fn(requests)`` checked to return exactly one outcome per request."""
+        outcomes = self._call(what, fn, list(requests))
+        expected = {r.call_id: r for r in requests}
+        got: Dict[str, PairOutcome] = {}
+        for o in outcomes if isinstance(outcomes, (list, tuple)) else [outcomes]:
+            if not isinstance(o, PairOutcome) or o.status not in STATUSES:
+                raise ContractError(f"{what} returned {o!r}, expected a PairOutcome")
+            cid = o.request.call_id
+            if expected.get(cid) != o.request or cid in got:
+                raise ContractError(f"{what} returned an unrequested or repeated {o!r}")
+            got[cid] = o
+        lost = [r for cid, r in expected.items() if cid not in got]
+        if lost:
+            raise ContractError(f"{what} returned no outcome for {len(lost)} request(s), "
+                               f"first {lost[0]!r}")
+        return got
+
+    def _settle(self, p, t, key, c, told, status, lat, diag, call_id) -> bool:
+        """Turn one outcome into a told observation or a scheduler event."""
+        base = dict(problem=p.key, trial_uid=t.uid, kernel=c.kernel_name,
+                    call_id=call_id, diag=diag)
+        if status == "unattempted" and t.uid not in p.retried:
+            p.retried.add(t.uid)
+            p.requeue.append(t)
+            self.ledger.refund(p.key)
+            self.counts["requeued"] += 1
+            self._event("requeue", **base)
+            return False
+        if status == "cancelled":
+            self.ledger.refund(p.key)
+            self.counts["cancelled"] += 1
+            self._event("cancel", **base)
+            return False
+        if status == "unattempted":
+            status, diag = "run_error", f"unattempted twice: {diag}".strip()
+        rocke = getattr(self._ck.Status, TELLABLE[status])
+        if status == "ok":
+            ob = self._ck.Observation(trial=t, key=key, status=rocke, value=lat,
+                                      samples=(lat,), detail=diag)
+            self.counts["ok"] += 1
+            if c.canonical_key not in p.best or lat < p.best[c.canonical_key][0]:
+                p.best[c.canonical_key] = (lat, t.uid)
+        else:
+            detail = diag if status == rocke else f"{status}: {diag}"
+            ob = self._ck.Observation(trial=t, key=key, status=rocke, detail=detail)
+            fails = self.counts["failed_by_status"]
+            fails[status] = fails.get(status, 0) + 1
+        told[p.key].append(ob)
+        p.seen[key] = ob
+        self._event("result", **{**base, "status": status, "told": rocke,
+                                 "latency_ms": lat})
+        return True
+
+    # ------------------------------------------------------- confirmation
+
+    def _confirm(self, stop: str) -> Dict[str, dict]:
+        """Re-measure each problem's finalists with ``fresh_calls`` fresh verified
+        calls. Call j of every surviving finalist goes into one adapter call, so
+        competing kernels interleave; a finalist is dropped at its first failed
+        call. The winner is the lowest median among the finalists whose calls all
+        passed: there is no fallback to unconfirmed discovery results."""
+        cf = self.settings.confirm
+        fins = {
+            p: sorted(p.best.items(), key=lambda kv: (kv[1][0], kv[0]))[: cf.finalists]
+            for p in self.problems
+        }
+        calls = {(p.key, ck): [] for p, best in fins.items() for ck, _ in best}
+        for j in range(cf.fresh_calls):
+            reqs = [
+                PairRequest(p.key, ck, p.by_key[ck].kernel_name, uid, self._call_id("c"))
+                for p, best in fins.items() for ck, (_lat, uid) in best
+                if all(st == "ok" for st, _ in calls[(p.key, ck)])
+            ]
+            if not reqs:
+                break
+            self.counts["confirm_calls"] += len(reqs)
+            self.ledger.confirm_calls += len(reqs)
+            got = self._exchange("confirm", self.adapter.confirm, reqs)
+            for r in reqs:
+                status, lat, diag = _checked(got[r.call_id])
+                calls[(r.problem_key, r.candidate_key)].append((status, lat))
+                self._event("confirm", problem=r.problem_key, kernel=r.kernel_name,
+                            trial_uid=r.trial_uid, call_id=r.call_id, call=j,
+                            status=status, latency_ms=lat, diag=diag)
+        winners = {}
+        for p, best in fins.items():
+            passed = []
+            for ck, (lat, _uid) in best:
+                res = calls[(p.key, ck)]
+                if len(res) == cf.fresh_calls and all(st == "ok" for st, _ in res):
+                    vals = [v for _, v in res]
+                    name = p.by_key[ck].kernel_name
+                    passed.append((statistics.median(vals), name, vals, lat))
+            if passed:
+                med, name, vals, lat = min(passed)
+                winners[p.key] = {"kernel": name, "median_ms": med, "calls_ms": vals,
+                                  "discovery_ms": lat}
+                self._event("final", problem=p.key, kernel=name, median_ms=med)
+                continue
+            if best:
+                why = "no finalist passed confirmation (" + "; ".join(
+                    p.by_key[ck].kernel_name + ": "
+                    + ",".join(st for st, _ in calls[(p.key, ck)]) for ck, _ in best
+                ) + ")"
+            elif not p.cands:
+                why = p.finished
+            else:
+                why = f"no verified discovery measurement (search: {p.finished or stop})"
+            self.unresolved[p.key] = why
+            self._event("final", problem=p.key, unresolved=why)
+        return winners
+
+    # ------------------------------------------------------------ finish
+
+    def _finish(self, winners: Dict[str, dict], stop: str, error: str) -> RunSummary:
+        for p in self.problems:
+            if p.key not in winners and p.key not in self.unresolved:
+                self.unresolved[p.key] = f"search ended: {stop}"
+        # A run that hit an error is never complete, even when its finalists
+        # were confirmed: the search did not run to its stop.
+        if self.problems and len(winners) == len(self.problems) and not error:
+            status = "complete"
+        else:
+            status = "partial" if winners else "no_winner"
+        exit_code = EXIT_OK if status == "complete" else EXIT_FAIL
+        wall = self.ledger.elapsed()
+        self._event("stop", stop_reason=stop, status=status)
+        if self._run_json is None:  # setup failed: still say what was asked
+            self.writer.write_json("run.json", {
+                "schema_version": SCHEMA_VERSION, "sampling_policy": "adaptive",
+                "exhaustive": False, "settings": self.settings.to_json(),
+                "error": error,
+            })
+        self.writer.write_json("winners.json", {k: [w["kernel"]] for k, w in winners.items()})
+        self.writer.write_json("summary.json", {
+            "status": status,
+            "exit_code": exit_code,
+            "stop_reason": stop,
+            "error": error,
+            "winners": winners,
+            "unresolved": self.unresolved,
+            "counts": self.counts,
+            "budget": self.ledger.to_json(),
+            "artifacts": self.registry.to_json(),
+            "problems": {
+                p.key: {"strategy": p.strategy_name or None,
+                        "trials": self.ledger.trials.get(p.key, 0),
+                        "ok": len(p.best), "finished": p.finished or stop}
+                for p in self.problems
+            },
+            "wall_s": wall,
+        })
+        return RunSummary(
+            status=status, exit_code=exit_code, stop_reason=stop,
+            winners={k: w["kernel"] for k, w in winners.items()},
+            unresolved=dict(self.unresolved), counts=self.counts, wall_s=wall,
+            error=error,
+        )
