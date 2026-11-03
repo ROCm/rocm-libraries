@@ -46,6 +46,8 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
 * Changed `CCCL_MINIMUM_VERSION` to `3.2.0` to align with CUB.
 * `::hipcub::extents` now points to `::hip::std::extents` from libhipcxx for rocPRIM's backend.
+* Removed deprecated `hipcub::DivideAndRoundUp` in favor of `hip::ceil_div`.
+* Fixed handling of invalid inputs ($\leq 0$) in `hipcub::GridEvenShare::DispatchInit()`, which now sets all relevant members to 0 when any of the inputs is invalid.
 
 ### Removed
 
@@ -67,6 +69,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * The block merge sort and thread sort algorithms now perform optional loop unrolling via `_CCCL_SORT_MAYBE_UNROLL()`.
 
 ### Removed
+
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:
   * Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
   * Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
