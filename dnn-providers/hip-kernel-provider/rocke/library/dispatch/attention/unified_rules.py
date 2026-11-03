@@ -224,7 +224,8 @@ def _sets_dead_end(spec: AttentionTuningSpec) -> bool:
 
 # gfx950 2D LDS rules. The tiled 2D validator does not model LDS, so an
 # over-budget spec only fails at codegen. These mirror attention_tiled_2d.py;
-# whether the KQ pad is laid out comes from the spec itself.
+# whether the KQ pad is laid out and whether Q is staged in K_lds come from
+# the spec itself.
 _KQ_PAD_KNOBS = ("use_kq_lds_pad", "kq_lds_pad_halves")
 
 
@@ -233,14 +234,6 @@ def _k_schedule_bufs(spec) -> int:
         return 1
     depth = int(spec.kv_ring_depth)
     return depth if depth > 2 else 2
-
-
-def _q_aliases_k(spec) -> bool:
-    """Whether Q is staged in K_lds rather than its own slab."""
-    if spec.use_q_reread or spec.use_q_direct_reg or spec.fp8_k_in_lds:
-        return False
-    tile, head = int(spec.tile_size_eff), int(spec.head_size)
-    return int(spec.block_m) * head * 2 <= 2 * tile * head * 2
 
 
 def _gfx950_2d_lds_bytes(spec) -> int:
@@ -270,7 +263,9 @@ def _gfx950_2d_lds_bytes(spec) -> int:
         if spec.use_register_pv or transposed
         else block_m * (tile + (16 if fp8_pv else 8)) * v_elem_bytes
     )
-    q_bytes = 0 if spec.use_q_direct_reg or _q_aliases_k(spec) else block_m * head * 2
+    q_bytes = (
+        0 if spec.use_q_direct_reg or spec.q_staged_in_k_lds else block_m * head * 2
+    )
     acc_bytes = block_m * (32 if head <= 64 else head) * 2
     fp8_staging_bytes = 3 * tile * head if fp8_qk else 0
     loop_bytes = k_bytes + v_bytes + p_bytes + q_bytes + fp8_staging_bytes
