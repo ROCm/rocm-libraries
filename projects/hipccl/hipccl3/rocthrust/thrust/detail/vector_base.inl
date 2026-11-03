@@ -37,6 +37,7 @@
 #include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #include _THRUST_STD_INCLUDE(__algorithm/min.h)
 #include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 #include _THRUST_STD_INCLUDE(__iterator/advance.h)
 #include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #include _THRUST_STD_INCLUDE(__iterator/next.h)
@@ -47,8 +48,6 @@
 #include _THRUST_STD_INCLUDE(__type_traits/is_trivially_constructible.h)
 #include _THRUST_STD_INCLUDE(__utility/move.h)
 #include _THRUST_STD_INCLUDE(initializer_list)
-
-#include <stdexcept>
 
 THRUST_NAMESPACE_BEGIN
 
