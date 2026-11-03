@@ -4279,6 +4279,8 @@ ExactLogic:
   - [18, 28.493913043478262]
 - - [16, 33, 1, 128, 16, 16, 128, 128]
   - [4, 22.291156462585032]
+- - [16, 17, 1, 128, 16, 16, 128, 128]
+  - [1, 11.95912408759124]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
