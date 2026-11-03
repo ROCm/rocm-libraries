@@ -1931,7 +1931,8 @@ def _knob_grid(
     elif variant == "direct_depthwise_wgrad":
         from rocke.core.arch import ArchTarget
 
-        # Built and verified on wave32 (gfx1250) only.
+        # Cached for the wave32 targets (gfx1151, gfx1201, gfx1250) only; the
+        # VALU kernel also builds at wave64, but the cache does not carry it.
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
         for cpl, waves, rpw, woc, rs, wsr, pf, cy in DW_WGRAD_CONFIGS:
