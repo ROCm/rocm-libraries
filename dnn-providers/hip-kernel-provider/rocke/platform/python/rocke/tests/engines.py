@@ -35,6 +35,10 @@ C++ engine, and skip as a whole when the binding is not built. Their refusal
 checks compare the C++ engine's message but not its status, which some older
 refusals do not yet share with the Python engine's exception type.
 
+``hip_outcomes_of_both_engines`` returns each engine's HIP source, or its
+refusal as a ``HipRefusal`` (error type and message), for a test that accepts
+either as long as the two agree.
+
 A test that loops over the engines itself, rather than through ``pytest``
 parameters, iterates ``available_engines()``: the part of :data:`ENGINES` this
 run can drive. The installed wheel has no ``rocke_engine`` binding, so such a
@@ -46,7 +50,9 @@ same engines through ``compile_kernel`` and similar entry points.
 from __future__ import annotations
 
 import importlib.util
+import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from types import ModuleType
 from typing import Literal
 
@@ -54,19 +60,21 @@ import pytest
 
 from rocke.core.backend import _lower_via_cpp_engine
 from rocke.core.ir import KernelDef
-from rocke.core.ir_serialize import serialize
+from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
 __all__ = [
     "ENGINES",
     "Engine",
+    "HipRefusal",
     "all_engines_backend",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
     "assert_engine_rejects",
     "assert_engine_rejects_hip",
     "available_engines",
+    "hip_outcomes_of_both_engines",
     "lower_hip_with_both_engines",
     "lower_hip_with_engine",
     "lower_with_both_engines",
@@ -85,6 +93,10 @@ _NATIVE_STATUS: dict[type[Exception], int] = {
     KeyError: 3,
     NotImplementedError: 5,
 }
+
+# The binding's refusal text: "<entry point>: lower failed for arch '<gfx>'
+# (status <code>): <message>".
+_NATIVE_REFUSAL = re.compile(r"\(status (\d+)\): (.*)", re.DOTALL)
 
 
 def available_engines() -> tuple[Engine, ...]:
@@ -129,9 +141,11 @@ def _native_status(error_type: type[Exception]) -> int:
 def _assert_python_rejects(
     lower: Callable[[], str], error_type: type[Exception], message: str
 ) -> None:
+    """Assert ``lower`` raises ``error_type`` with exactly ``message`` as its
+    first argument, so a ``KeyError`` compares unquoted."""
     with pytest.raises(error_type) as python_error:
         lower()
-    assert str(python_error.value) == message
+    assert python_error.value.args[0] == message
 
 
 def _assert_native_rejects(
@@ -292,3 +306,53 @@ def assert_both_engines_reject_hip(
         lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
     )
     _assert_native_rejects(lambda: _native_hip(kernel, arch), message, None)
+
+
+@dataclass(frozen=True)
+class HipRefusal:
+    """One engine's refusal to lower a kernel to HIP source.
+
+    ``error_type_name`` is the Python exception's type name -- for the C++
+    engine, the name of the type its status code stands for, or
+    ``"status <code>"`` for a code that stands for none.
+    """
+
+    error_type_name: str
+    message: str
+
+
+def hip_outcomes_of_both_engines(
+    ir_text: str, arch: str
+) -> tuple[str | HipRefusal, str | HipRefusal]:
+    """Each engine's HIP source for the serialized kernel ``ir_text``, or its refusal.
+
+    The text is what the C++ engine reads; the Python engine lowers it parsed.
+    Two outcomes are equal exactly when both engines emit the same source, or
+    refuse with the same error type and message. Any exception the Python
+    lowering raises is its refusal, so a crash shows as a refusal that the C++
+    engine does not share.
+    """
+    engine = _require_native_engine()
+    python_outcome: str | HipRefusal
+    native_outcome: str | HipRefusal
+    try:
+        python_outcome = lower_kernel_to_hip(parse(ir_text), arch=arch)
+    except Exception as error:  # noqa: BLE001 -- a refusal is an outcome
+        error_type = next(
+            (kind for kind in _NATIVE_STATUS if isinstance(error, kind)), type(error)
+        )
+        message = error.args[0] if error.args else ""
+        python_outcome = HipRefusal(error_type.__name__, message)
+    try:
+        native_outcome = engine.lower_serialized_ir_hip(ir_text, arch)
+    except RuntimeError as error:
+        refusal = _NATIVE_REFUSAL.search(str(error))
+        if refusal is None:
+            raise
+        status, message = int(refusal.group(1)), refusal.group(2)
+        error_type = next(
+            (kind for kind, code in _NATIVE_STATUS.items() if code == status), None
+        )
+        type_name = error_type.__name__ if error_type else f"status {status}"
+        native_outcome = HipRefusal(type_name, message)
+    return python_outcome, native_outcome
