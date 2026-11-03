@@ -72,6 +72,7 @@ def _mapped_lib(stem: str, *, require_unique: bool = False) -> Optional[str]:
 def _rocm_sdk_core_dirs() -> List[str]:
     """Owned SDK payload roots, including suffixes; never import payload packages."""
     from ._sdk_comgr import candidates, hip_candidates
+
     paths = candidates(windows=_IS_WINDOWS) + hip_candidates(windows=_IS_WINDOWS)
     return sorted({os.path.dirname(os.path.dirname(path)) for path in paths})
 
@@ -90,6 +91,7 @@ def _rocm_sdk_core_lib(stem: str) -> Optional[str]:
     if _IS_WINDOWS:
         return None
     from ._sdk_comgr import candidates, hip_candidates
+
     paths = hip_candidates() if stem == "amdhip64" else candidates()
     return paths[0] if paths else None
 
