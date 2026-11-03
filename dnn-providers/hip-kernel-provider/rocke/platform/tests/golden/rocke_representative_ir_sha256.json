@@ -84,10 +84,10 @@
         },
         "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo": {
           "arch": "gfx950",
-          "bytes": 117643,
+          "bytes": 117790,
           "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
-          "sha256": "432a3a0e06306671a74040c843ab8bbd7a081782a82c39bd013a705987002670",
+          "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_h64kv8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
+          "sha256": "5e6ac1abe5f83dbb53ee0d0dbb0e796204a229b5f9a7d08c64ace181a06e8806",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
@@ -2473,10 +2473,10 @@
         },
         "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo": {
           "arch": "gfx950",
-          "bytes": 117739,
+          "bytes": 117886,
           "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
-          "sha256": "d057697b25b64f6ecba89858ed2741f318e83949b6508f72280ffc1e9128c84c",
+          "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_h64kv8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
+          "sha256": "86fa538e17e4ff0549251cfe3c1781d0386cfbf9b1a3f1bf6fc7e01edc9aa6dc",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
@@ -4862,10 +4862,10 @@
         },
         "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo": {
           "arch": "gfx950",
-          "bytes": 117803,
+          "bytes": 117950,
           "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
-          "sha256": "8fb8a0a31e09dd29ee5a38f1de625c4fc198f47b7180af37299ae26788bd8eb8",
+          "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_h64kv8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
+          "sha256": "8fd094b334a261b8eeb0e8ca4a7c35b354b859279cb85164569cf34e3694e8ab",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
