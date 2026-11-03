@@ -391,11 +391,16 @@ namespace rocalution
                 delete this->op_level_[i];
                 delete this->restrict_op_level_[i];
                 delete this->prolong_op_level_[i];
+
+                // Clear transfer mapping
+                delete this->trans_level_[i];
             }
 
             delete[] this->op_level_;
             delete[] this->restrict_op_level_;
             delete[] this->prolong_op_level_;
+            delete[] this->trans_level_;
+            this->trans_level_ = NULL;
 
             // De-allocate smoothers, if not allocated by the user
             if(this->set_sm_ == false)

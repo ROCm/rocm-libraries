@@ -58,6 +58,8 @@ namespace rocalution
         this->restrict_op_level_ = NULL;
         this->prolong_op_level_  = NULL;
 
+        this->trans_level_ = NULL;
+
         this->d_level_ = NULL;
         this->r_level_ = NULL;
         this->t_level_ = NULL;
@@ -367,14 +369,6 @@ namespace rocalution
 
         if(this->build_ == true)
         {
-            // Clear transfer mapping
-            for(int i = 0; i < this->levels_ - 1; ++i)
-            {
-                delete this->trans_level_[i];
-            }
-
-            delete[] this->trans_level_;
-
             // Clear temporary VectorTypes
             for(int i = 0; i < this->levels_; ++i)
             {

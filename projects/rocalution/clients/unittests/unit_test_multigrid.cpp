@@ -1043,28 +1043,21 @@ TYPED_TEST(multigrid_backends, an_unscaled_v_cycle_moves_before_and_after_its_bu
 
 TYPED_TEST(multigrid_lifetime, clear_after_build_releases_the_levels)
 {
-    using T = typename TypeParam::value_type;
-    KNOWN_BUG("MultiGrid deletes transfer maps that it never allocated");
-    EXPECT_EXIT(
-        {
-            const Hierarchy<T> h = geometric_hierarchy<T>(3);
-            UserLevels<T>      user(Backend::Host, h);
-            Smoothers<T>       smoothers(2, 0.5);
-            CG<T>              coarse;
-            init_exact(coarse);
-            {
-                MultiGrid<T> mg;
-                user.attach(mg);
-                mg.SetSmoother(smoothers.levels.data());
-                mg.SetSolver(coarse);
-                mg.Verbose(0);
-                mg.Build();
-                mg.Clear();
-            }
-            std::exit(0);
-        },
-        testing::ExitedWithCode(0),
-        "");
+    using T              = typename TypeParam::value_type;
+    const Hierarchy<T> h = geometric_hierarchy<T>(3);
+    UserLevels<T>      user(Backend::Host, h);
+    Smoothers<T>       smoothers(2, 0.5);
+    CG<T>              coarse;
+    init_exact(coarse);
+    {
+        MultiGrid<T> mg;
+        user.attach(mg);
+        mg.SetSmoother(smoothers.levels.data());
+        mg.SetSolver(coarse);
+        mg.Verbose(0);
+        mg.Build();
+        mg.Clear();
+    }
 }
 
 TYPED_TEST(multigrid_lifetime, build_of_a_built_multigrid_rebuilds_it)
