@@ -22,9 +22,9 @@
 # THE SOFTWARE.
 # ############################################################################
 
-# Cray toolchain (ftn and cc wrappers; the loaded PrgEnv module picks the compiler).
-# Usage, from projects/hipfft/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
+# AMD ROCm toolchain (amdflang).
+# Usage, from bindings/fortran/hipfft:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
 
-set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER amdflang CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       amdclang CACHE FILEPATH "C compiler")

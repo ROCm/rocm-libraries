@@ -66,7 +66,7 @@ program hipfft_example
   call hipfftCheck(hipfftPlan1d(plan, N, HIPFFT_Z2Z, 1))
 
   call hipfftCheck(hipfftExecZ2Z(plan, dx, dx, direction))
-  
+
   call hipCheck(hipDeviceSynchronize())
 
   call hipCheck(hipMemcpy(hx,dx,hipMemcpyDeviceToHost))
