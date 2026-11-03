@@ -123,7 +123,7 @@ LaneVerdict judgeLane(const IntegrationTestBundle& bundle,
                                                                   : bundle.metadata.noCpuReference;
     if(disabled)
     {
-        return findKnownReferenceGap(reference, bundleId) != nullptr
+        return findKnownReferenceGap(gaps, reference, bundleId) != nullptr
                    ? LaneVerdict::DISABLED_WITH_GAP_ENTRY
                    : LaneVerdict::DISABLED_BY_METADATA;
     }

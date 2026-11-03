@@ -337,17 +337,15 @@ TEST(TestGoldenDataPlanDisabledLane, ADisabledLaneIsAVisibleSkipNotAnUnvalidated
 // be consulted again and could never go stale. That has to be loud.
 TEST(TestGoldenDataPlanDisabledLane, AFlagBesideAKnownGapEntryFailsNamingBoth)
 {
-    auto bundle
-        = loaded("quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small", "Small", buildSdpaGraph(256));
+    auto bundle = loaded("quick_SdpaFwd_gpu_gap_Small", "Small", buildSdpaGraph(256));
     bundle.bundle->metadata.noGpuReference = true;
 
     const auto plan = planGoldenDataValidation({bundle}, session(true, true, true));
 
+    // fixtureGaps() lists the GPU lane of this bundle only, so the CPU lane is unaffected.
     const std::vector<Planned> expected{
-        {PlannedKind::EXPECT_DECLINE,
-         "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small_CpuRef",
-         "Small"},
-        {PlannedKind::FAIL, "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small_GpuRef", "Small"},
+        {PlannedKind::VALIDATE, "quick_SdpaFwd_gpu_gap_Small_CpuRef", "Small"},
+        {PlannedKind::FAIL, "quick_SdpaFwd_gpu_gap_Small_GpuRef", "Small"},
     };
     EXPECT_EQ(kindsAndNames(plan), expected);
     const auto& failure = plan.tests.back();
@@ -373,10 +371,10 @@ TEST(TestGoldenDataPlanJudgeLane, ADisabledReferenceIsJudgedBeforeItsOpSetOrCost
 
     auto gap = graphBundle(buildSdpaGraph(256), true);
     gap->metadata.noGpuReference = true;
-    EXPECT_EQ(judgeLane(*gap,
-                        "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
-                        ReferenceExecutorType::GPU),
-              LaneVerdict::DISABLED_WITH_GAP_ENTRY);
+    EXPECT_EQ(
+        judgeLane(
+            *gap, "quick_SdpaFwd_gpu_gap_Small.Small", ReferenceExecutorType::GPU, fixtureGaps()),
+        LaneVerdict::DISABLED_WITH_GAP_ENTRY);
 }
 
 // NOLINTEND(readability-identifier-naming)
