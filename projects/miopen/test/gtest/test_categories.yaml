@@ -633,11 +633,12 @@ exclude_gpu:
 
   exclude_gpu_gfx120X_linux:
     test_patterns:
-      # Hangs until the 60-min ctest timeout after "Testing solution functions..." on the Linux gfx1201 hosts CS-RORDMZ-DT87
-      # and CS-RORDMZ-DT81 (ALMIOPEN-3130, issue #14874): TheRock PR #9651 run 41113572856 attempts 1-2 and PR #9680 run
-      # 41405101044, 3 of 3 executions on Linux gfx1201. Passes in < 1.2 s on Linux gfx1200 and on Windows gfx1201 (5 of 5
-      # runs). Remove when ALMIOPEN-3130 closes.
-      - "GPU_SoftmaxFind20_FP16.softmaxBackward_log_channel_mode_fp16"
+      # Both FP16 backward log-softmax cases hang after "Testing solution functions..." until the 60-min ctest timeout on the
+      # Linux gfx1201 hosts CS-RORDMZ-DT87 and CS-RORDMZ-DT81 (ALMIOPEN-3130, issue #14874). channel_mode: 3 of 3 executions
+      # (TheRock PR #9651 run 41113572856 attempts 1-2, PR #9680 run 41405101044). instance_mode: hung on DT87 and took 27 s
+      # on DT81 (normally < 1.3 s) in PR #14882 run 41516836287. BFP16/FP32 cases pass in ~0.3 s on Linux gfx1201; both FP16
+      # cases pass in < 1.3 s on Linux gfx1200 and Windows gfx1201. Remove when ALMIOPEN-3130 closes.
+      - "GPU_SoftmaxFind20_FP16.*"
     labels:
       - "quick"
       - "standard"
