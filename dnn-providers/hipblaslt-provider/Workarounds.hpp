@@ -114,4 +114,5 @@
         }                                                                           \
     } while(0)
 
+// NOLINTNEXTLINE(modernize-macro-to-enum)
 #define WORKAROUND_ISSUE_14286 1
