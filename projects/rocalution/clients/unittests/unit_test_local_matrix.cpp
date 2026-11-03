@@ -3137,6 +3137,30 @@ TEST(local_matrix_preconditions, violations_end_the_program)
                         "B.GetM");
 }
 
+// As on the host (host_matrix_csr_DeathTest), IC(0) of a row without a diagonal
+// ends the program, either in the HIP backend or in the host fallback
+TEST(local_matrix_preconditions, ic_factorize_of_a_row_without_a_diagonal_ends_the_program)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    KNOWN_BUG("the HIP ICFactorize does not check the zero pivot, so a row without a diagonal "
+              "leaves 0 in the inverse diagonal and the factorization succeeds");
+    for(double upper : {-1.0, 0.0})
+    {
+        SCOPED_TRACE(upper != 0.0 ? "an entry above the diagonal" : "only an entry below it");
+        // clang-format off
+        const std::vector<double> D = {
+             4, -1,     0,
+            -1,  0, upper,
+             0, upper,  4,
+        };
+        // clang-format on
+        auto A   = make_local_matrix(Backend::Accelerator, from_dense(3, 3, D));
+        auto inv = make_local_vector(Backend::Accelerator, std::vector<double>(3, 0.0));
+        EXPECT_LOGGED_EXIT(A->ICFactorize(inv.get()),
+                           "Fatal error - the program will be terminated");
+    }
+}
+
 // LocalStencil, the other local Operator, keeps the async moves and Sync of
 // BaseRocalution
 
