@@ -255,7 +255,7 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
 
     // cpu_gemm needs hW size nq*nq.
     I ldw = nq;
-    std::vector<T> hW(ldw * nq);
+    std::vector<T> hW(rocblas_stride(ldw) * nq);
 
     // initialize data
     ormtr_unmtr_hb2st_initData<true, true, T, I>(handle, side, trans, m, n, kd, // opts
@@ -320,8 +320,8 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
     // || op(Q#) C - op(Q) C ||_1 / (nq || C ||_1) for left
     // || C op(Q#) - C op(Q) ||_1 / (nq || C ||_1) for right
     // Normalize by nq. LAWN 41 sec 7.1.3 normalizes m in all 4 cases.
-    CHECK_HIP_ERROR(hipMemcpy2DAsync(dR[0], ldr * sizeof(T), // R
-                                     dC[0], ldc * sizeof(T), // C
+    CHECK_HIP_ERROR(hipMemcpy2DAsync(dR[0], rocblas_stride(ldr) * sizeof(T), // R
+                                     dC[0], rocblas_stride(ldc) * sizeof(T), // C
                                      m * sizeof(T), n, hipMemcpyDefault, stream));
 
     // R = op(Q#) C  or  C op(Q#)  using implicit Q# via unmtr.

@@ -402,7 +402,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
             {
                 for(I i = 0 + ii_start; i < n; i += ii_inc)
                 {
-                    auto const ij = i + j * ldb;
+                    auto const ij = idx2D(i, j, ldb);
                     B_lds[ij] = B_bid[idx2D(i, j, ldb_arg)];
                 }
             }
@@ -997,7 +997,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRS_MAX_THDS) sytrs_kernel(bool const 
             {
                 for(I i = 0 + ii_start; i < n; i += ii_inc)
                 {
-                    auto const ij = i + j * ldb;
+                    auto const ij = idx2D(i, j, ldb);
                     B_bid[idx2D(i, j, ldb_arg)] = B_lds[ij];
                 }
             }

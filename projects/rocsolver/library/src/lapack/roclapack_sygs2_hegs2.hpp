@@ -43,11 +43,11 @@ ROCSOLVER_BEGIN_NAMESPACE
 template <typename T, typename U>
 ROCSOLVER_KERNEL void sygs2_set_diag1(const rocblas_int k,
                                       U AA,
-                                      const rocblas_int shiftA,
+                                      const rocblas_stride shiftA,
                                       const rocblas_int lda,
                                       const rocblas_stride strideA,
                                       U BB,
-                                      const rocblas_int shiftB,
+                                      const rocblas_stride shiftB,
                                       const rocblas_int ldb,
                                       const rocblas_stride strideB,
                                       T* work,
@@ -63,10 +63,10 @@ ROCSOLVER_KERNEL void sygs2_set_diag1(const rocblas_int k,
         T* B = load_ptr_batch<T>(BB, b, shiftB, strideB);
         T* W = work + b * strideW;
 
-        T akk = A[k + k * lda];
-        T bkk = B[k + k * ldb];
+        T akk = A[idx2D(k, k, lda)];
+        T bkk = B[idx2D(k, k, ldb)];
         akk /= bkk * bkk;
-        A[k + k * lda] = akk;
+        A[idx2D(k, k, lda)] = akk;
 
         W[0] = T(1.0) / bkk;
         W[1] = T(-0.5) * akk;
@@ -75,11 +75,11 @@ ROCSOLVER_KERNEL void sygs2_set_diag1(const rocblas_int k,
 template <typename T, typename U>
 ROCSOLVER_KERNEL void sygs2_set_diag2(const rocblas_int k,
                                       U AA,
-                                      const rocblas_int shiftA,
+                                      const rocblas_stride shiftA,
                                       const rocblas_int lda,
                                       const rocblas_stride strideA,
                                       U BB,
-                                      const rocblas_int shiftB,
+                                      const rocblas_stride shiftB,
                                       const rocblas_int ldb,
                                       const rocblas_stride strideB,
                                       T* work,
@@ -95,8 +95,8 @@ ROCSOLVER_KERNEL void sygs2_set_diag2(const rocblas_int k,
         T* B = load_ptr_batch<T>(BB, b, shiftB, strideB);
         T* W = work + b * strideW;
 
-        T akk = A[k + k * lda];
-        T bkk = B[k + k * ldb];
+        T akk = A[idx2D(k, k, lda)];
+        T bkk = B[idx2D(k, k, ldb)];
 
         W[0] = bkk;
         W[1] = T(0.5) * akk;
@@ -106,7 +106,7 @@ ROCSOLVER_KERNEL void sygs2_set_diag2(const rocblas_int k,
 template <typename T, typename U>
 ROCSOLVER_KERNEL void sygs2_set_diag3(const rocblas_int k,
                                       U AA,
-                                      const rocblas_int shiftA,
+                                      const rocblas_stride shiftA,
                                       const rocblas_int lda,
                                       const rocblas_stride strideA,
                                       T* work,
@@ -121,7 +121,7 @@ ROCSOLVER_KERNEL void sygs2_set_diag3(const rocblas_int k,
         T* A = load_ptr_batch<T>(AA, b, shiftA, strideA);
         T* W = work + b * strideW;
 
-        A[k + k * lda] = W[2];
+        A[idx2D(k, k, lda)] = W[2];
     }
 }
 
@@ -209,11 +209,11 @@ rocblas_status rocsolver_sygs2_hegs2_template(rocblas_handle handle,
                                               const rocblas_fill uplo,
                                               const rocblas_int n,
                                               U A,
-                                              const rocblas_int shiftA,
+                                              const rocblas_stride shiftA,
                                               const rocblas_int lda,
                                               const rocblas_stride strideA,
                                               U B,
-                                              const rocblas_int shiftB,
+                                              const rocblas_stride shiftB,
                                               const rocblas_int ldb,
                                               const rocblas_stride strideB,
                                               const rocblas_int batch_count,

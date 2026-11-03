@@ -164,9 +164,9 @@ void labrd_initData(const rocblas_handle handle,
             for(rocblas_int j = 0; j < n; j++)
             {
                 if(i == j || (m >= n && j == i + 1) || (m < n && i == j + 1))
-                    hA[0][i + j * lda] += 400;
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
                 else
-                    hA[0][i + j * lda] -= 4;
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
             }
         }
     }
@@ -269,8 +269,8 @@ void labrd_getPerfData(const rocblas_handle handle,
 
         // cpu-lapack performance
         *cpu_time_used = get_time_us_no_sync();
-        memset(hX[0], 0, ldx * nb * sizeof(T));
-        memset(hY[0], 0, ldy * nb * sizeof(T));
+        memset(hX[0], 0, rocblas_stride(ldx) * nb * sizeof(T));
+        memset(hY[0], 0, rocblas_stride(ldy) * nb * sizeof(T));
         cpu_labrd(m, n, nb, hA[0], lda, hD[0], hE[0], hTauq[0], hTaup[0], hX[0], ldx, hY[0], ldy);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
@@ -337,13 +337,13 @@ void testing_labrd(Arguments& argus)
     // N/A
 
     // determine sizes
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     size_t size_D = nb;
     size_t size_E = nb;
     size_t size_Q = nb;
     size_t size_P = nb;
-    size_t size_X = ldx * nb;
-    size_t size_Y = ldy * nb;
+    size_t size_X = rocblas_stride(ldx) * nb;
+    size_t size_Y = rocblas_stride(ldy) * nb;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;

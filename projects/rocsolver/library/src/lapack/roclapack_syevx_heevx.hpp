@@ -132,7 +132,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS1) syevx_sort_eigs(const rocblas_int n
                                                              S* WW,
                                                              const rocblas_stride strideW,
                                                              U ZZ,
-                                                             const rocblas_int shiftZ,
+                                                             const rocblas_stride shiftZ,
                                                              const rocblas_int ldz,
                                                              const rocblas_stride strideZ,
                                                              rocblas_int* ifailA,
@@ -153,16 +153,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS1) syevx_sort_eigs(const rocblas_int n
     auto const nev = nevA[bid];
     auto const info = infoA[bid];
 
-    S* W = WW + (bid * strideW);
+    S* W = WW + (rocblas_stride(bid) * strideW);
     T* Z = load_ptr_batch<T>(ZZ, bid, shiftZ, strideZ);
     rocblas_int* ifail = nullptr;
     if(ifailA)
-        ifail = ifailA + (bid * strideIfail);
+        ifail = ifailA + (rocblas_stride(bid) * strideIfail);
 
     assert(nev <= n);
     assert(isplit_map != nullptr);
 
-    auto const map = isplit_map + (bid * n);
+    auto const map = isplit_map + (rocblas_stride(bid) * n);
     bool constexpr use_shell_sort = true;
 
     __syncthreads();
@@ -320,7 +320,7 @@ rocblas_status rocsolver_syevx_heevx_template(rocblas_handle handle,
                                               const rocblas_fill uplo,
                                               const rocblas_int n,
                                               U A,
-                                              const rocblas_int shiftA,
+                                              const rocblas_stride shiftA,
                                               const rocblas_int lda,
                                               const rocblas_stride strideA,
                                               const S vl,
@@ -332,7 +332,7 @@ rocblas_status rocsolver_syevx_heevx_template(rocblas_handle handle,
                                               S* W,
                                               const rocblas_stride strideW,
                                               U Z,
-                                              const rocblas_int shiftZ,
+                                              const rocblas_stride shiftZ,
                                               const rocblas_int ldz,
                                               const rocblas_stride strideZ,
                                               rocblas_int* ifail,

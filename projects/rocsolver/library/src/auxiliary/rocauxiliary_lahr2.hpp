@@ -53,15 +53,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
                           const rocblas_int k,
                           const rocblas_int c,
                           U __restrict__ AA,
-                          const rocblas_int shiftA,
+                          const rocblas_stride shiftA,
                           const rocblas_int lda,
                           const rocblas_stride strideA,
                           T* __restrict__ YA,
-                          const rocblas_int shiftY,
+                          const rocblas_stride shiftY,
                           const rocblas_int ldy,
                           const rocblas_stride strideY,
                           T* __restrict__ FA,
-                          const rocblas_int shiftF,
+                          const rocblas_stride shiftF,
                           const rocblas_int ldf,
                           const rocblas_stride strideF,
                           T* __restrict__ tauA,
@@ -123,13 +123,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
         for(int j = idc; j < n1; j += totalthsc)
         {
             // A1 * x1
-            ac += A1[i + j * lda1] * x1[j];
+            ac += A1[idx2D(i, j, lda1)] * x1[j];
         }
 
         for(int j = idc; j < n2; j += totalthsc)
         {
             // A2 * x2
-            ac -= A2[i + j * lda2] * x2[j];
+            ac -= A2[idx2D(i, j, lda2)] * x2[j];
         }
 
         acs[tidr + tidc * DIM_X] = ac;
@@ -272,7 +272,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                         const rocblas_int k,
                                         const rocblas_int nb,
                                         U A,
-                                        const rocblas_int shiftA,
+                                        const rocblas_stride shiftA,
                                         const rocblas_int lda,
                                         const rocblas_stride strideA,
                                         T* tau,
@@ -281,7 +281,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                         const rocblas_int ldf,
                                         const rocblas_stride strideF,
                                         T* Y,
-                                        const rocblas_int shiftY,
+                                        const rocblas_stride shiftY,
                                         const rocblas_int ldy,
                                         const rocblas_stride strideY,
                                         const rocblas_int batch_count,

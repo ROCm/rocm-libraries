@@ -55,7 +55,7 @@ ROCSOLVER_KERNEL void latrd_reduce_kernel(const rocblas_fill uplo,
                                           const rocblas_int ldd,
                                           const rocblas_stride strideD,
                                           U yA,
-                                          const rocblas_int shiftY,
+                                          const rocblas_stride shiftY,
                                           const rocblas_int ldy,
                                           const rocblas_stride strideY,
                                           T* workA,
@@ -105,7 +105,7 @@ ROCSOLVER_KERNEL void latrd_reduce_kernel(const rocblas_fill uplo,
         if(i < m)
         {
             for(int j = idc; j < n; j += totalthsc)
-                val += dac[i + j * ldd];
+                val += dac[idx2D(i, j, ldd)];
         }
         tmp[tidr + tidc * threadsr] = val;
         __syncthreads();
@@ -134,11 +134,11 @@ ROCSOLVER_KERNEL void latrd_upper_updateA_kernel(const rocblas_int mm,
                                                  const rocblas_int k,
                                                  const rocblas_int c,
                                                  U AA,
-                                                 const rocblas_int shiftA,
+                                                 const rocblas_stride shiftA,
                                                  const rocblas_int lda,
                                                  const rocblas_stride strideA,
                                                  T* WA,
-                                                 const rocblas_int shiftW,
+                                                 const rocblas_stride shiftW,
                                                  const rocblas_int ldw,
                                                  const rocblas_stride strideW)
 {
@@ -219,7 +219,7 @@ ROCSOLVER_KERNEL void latrd_upper_updateA_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();
@@ -245,11 +245,11 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
                                                  const rocblas_int c,
                                                  U AA,
-                                                 const rocblas_int shiftA,
+                                                 const rocblas_stride shiftA,
                                                  const rocblas_int lda,
                                                  const rocblas_stride strideA,
                                                  T* WA,
-                                                 const rocblas_int shiftW,
+                                                 const rocblas_stride shiftW,
                                                  const rocblas_int ldw,
                                                  const rocblas_stride strideW)
 {
@@ -328,7 +328,7 @@ ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();
@@ -357,15 +357,15 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
                                                         const rocblas_int k,
                                                         const rocblas_int c,
                                                         U AA,
-                                                        const rocblas_int shiftA,
+                                                        const rocblas_stride shiftA,
                                                         const rocblas_int lda,
                                                         const rocblas_stride strideA,
                                                         T* WA,
-                                                        const rocblas_int shiftW,
+                                                        const rocblas_stride shiftW,
                                                         const rocblas_int ldw,
                                                         const rocblas_stride strideW,
                                                         T* yA,
-                                                        const rocblas_int shiftY,
+                                                        const rocblas_stride shiftY,
                                                         const rocblas_int ldy,
                                                         const rocblas_stride strideY,
                                                         T* workA,
@@ -437,15 +437,15 @@ template <int NB_X, typename T, typename U>
 ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
                                                         const rocblas_int c,
                                                         U AA,
-                                                        const rocblas_int shiftA,
+                                                        const rocblas_stride shiftA,
                                                         const rocblas_int lda,
                                                         const rocblas_stride strideA,
                                                         T* WA,
-                                                        const rocblas_int shiftW,
+                                                        const rocblas_stride shiftW,
                                                         const rocblas_int ldw,
                                                         const rocblas_stride strideW,
                                                         T* yA,
-                                                        const rocblas_int shiftY,
+                                                        const rocblas_stride shiftY,
                                                         const rocblas_int ldy,
                                                         const rocblas_stride strideY,
                                                         T* workA,
@@ -519,11 +519,11 @@ ROCSOLVER_KERNEL void latrd_upper_updateW_kernel(const rocblas_int mm,
                                                  const rocblas_int k,
                                                  const rocblas_int c,
                                                  U AA,
-                                                 const rocblas_int shiftA,
+                                                 const rocblas_stride shiftA,
                                                  const rocblas_int lda,
                                                  const rocblas_stride strideA,
                                                  T* WA,
-                                                 const rocblas_int shiftW,
+                                                 const rocblas_stride shiftW,
                                                  const rocblas_int ldw,
                                                  const rocblas_stride strideW,
                                                  T* workA,
@@ -610,7 +610,7 @@ ROCSOLVER_KERNEL void latrd_upper_updateW_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();
@@ -636,11 +636,11 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void latrd_lower_updateW_kernel(const rocblas_int mm,
                                                  const rocblas_int c,
                                                  U AA,
-                                                 const rocblas_int shiftA,
+                                                 const rocblas_stride shiftA,
                                                  const rocblas_int lda,
                                                  const rocblas_stride strideA,
                                                  T* WA,
-                                                 const rocblas_int shiftW,
+                                                 const rocblas_stride shiftW,
                                                  const rocblas_int ldw,
                                                  const rocblas_stride strideW,
                                                  T* workA,
@@ -725,7 +725,7 @@ ROCSOLVER_KERNEL void latrd_lower_updateW_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();
@@ -848,7 +848,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                                                  const rocblas_int n,
                                                  const rocblas_int k,
                                                  U A,
-                                                 const rocblas_int shiftA,
+                                                 const rocblas_stride shiftA,
                                                  const rocblas_int lda,
                                                  const rocblas_stride strideA,
                                                  S* E,
@@ -856,7 +856,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                                                  T* tau,
                                                  const rocblas_stride strideP,
                                                  T* W,
-                                                 const rocblas_int shiftW,
+                                                 const rocblas_stride shiftW,
                                                  const rocblas_int ldw,
                                                  const rocblas_stride strideW,
                                                  const rocblas_int batch_count,

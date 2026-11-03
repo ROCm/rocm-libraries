@@ -81,11 +81,11 @@ ROCSOLVER_KERNEL void gemm_kernel(const I m,
     {
         for(I idx = 0; idx < k; idx++)
         {
-            const auto Aval = conjA ? conj(A[i * inca + idx * lda]) : A[i * inca + idx * lda];
-            const auto Bval = conjB ? conj(B[idx * incb + j * ldb]) : B[idx * incb + j * ldb];
+            const auto Aval = conjA ? conj(A[idx2D(i, idx, inca, lda)]) : A[idx2D(i, idx, inca, lda)];
+            const auto Bval = conjB ? conj(B[idx2D(idx, j, incb, ldb)]) : B[idx2D(idx, j, incb, ldb)];
             temp += Aval * Bval;
         }
-        C[i * incc + j * ldc] = a * temp + b * C[i * incc + j * ldc];
+        C[idx2D(i, j, incc, ldc)] = a * temp + b * C[idx2D(i, j, incc, ldc)];
     }
 }
 
@@ -153,7 +153,7 @@ ROCSOLVER_KERNEL void mfma_gemm_kernel(rocblas_operation transA,
 
     // C(bid_x,bid_y) += A(bid_x,:) * B(:,bid_y)
     gemm_16x16xp(transA, transB, m_bar, n_bar, p, a, A, inca, lda, B, incb, ldb, b,
-                 C + (block_col * ldc + block_row * incc), incc, ldc);
+                 C + idx2D(block_row, block_col, incc, ldc), incc, ldc);
 }
 
 #else // ROCSOLVER_MFMA_ENABLED

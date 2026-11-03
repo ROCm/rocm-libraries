@@ -181,9 +181,10 @@ void syev_heev_initData(const rocblas_handle handle,
                 for(I j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -193,7 +194,8 @@ void syev_heev_initData(const rocblas_handle handle,
                 for(I i = 0; i < n; i++)
                 {
                     for(I j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -235,7 +237,7 @@ void syev_heev_getError(const rocblas_handle handle,
     int lwork = (COMPLEX ? 2 * n - 1 : 0);
     std::vector<T> work(lwork);
     std::vector<S> hE(sizeE);
-    std::vector<T> A(lda * n * bc);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
 
     // input data initialization
     syev_heev_initData<true, true, T>(handle, evect, n, dA, lda, bc, hA, A);
@@ -299,8 +301,9 @@ void syev_heev_getError(const rocblas_handle handle,
                 for(I j = 0; j < n; j++)
                 {
                     alpha = T(1) / hDres[b][j];
-                    cpu_symv_hemv(uplo, n, alpha, A.data() + b * lda * n, lda, hAres[b] + j * lda,
-                                  1, beta, hA[b] + j * lda, 1);
+                    cpu_symv_hemv(uplo, n, alpha, A.data() + rocblas_stride(b) * lda * n, lda,
+                                  hAres[b] + rocblas_stride(j) * lda, 1, beta,
+                                  hA[b] + rocblas_stride(j) * lda, 1);
                 }
 
                 // error is ||hA - hARes|| / ||hA||
@@ -410,7 +413,7 @@ void testing_syev_heev(Arguments& argus)
     char uploC = argus.get<char>("uplo");
     I n = argus.get<rocblas_int>("n");
     I lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n);
 

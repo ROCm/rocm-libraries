@@ -128,17 +128,17 @@ void latrd_forsytrd_initData(const rocblas_handle handle,
             {
                 if(j == i)
                 {
-                    hA[0][i + j * lda] += 400;
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
                 }
                 else if(j == i + 1)
                 {
-                    hA[0][i + j * lda] += 400;
-                    hA[0][j + i * lda] = hA[0][i + j * lda];
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
+                    hA[0][j + rocblas_stride(i) * lda] = hA[0][i + rocblas_stride(j) * lda];
                 }
                 else
                 {
-                    hA[0][i + j * lda] -= 4;
-                    hA[0][j + i * lda] = hA[0][i + j * lda];
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
+                    hA[0][j + rocblas_stride(i) * lda] = hA[0][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -171,17 +171,20 @@ void latrd_forsytrd_initData(const rocblas_handle handle,
             {
                 if(j == i)
                 {
-                    hA[0][i + j * lda] = hA[0][i + j * lda].real() + 400;
+                    hA[0][i + rocblas_stride(j) * lda]
+                        = hA[0][i + rocblas_stride(j) * lda].real() + 400;
                 }
                 else if(j == i + 1)
                 {
-                    hA[0][i + j * lda] += 400;
-                    hA[0][j + i * lda] = std::conj(hA[0][i + j * lda]);
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
+                    hA[0][j + rocblas_stride(i) * lda]
+                        = std::conj(hA[0][i + rocblas_stride(j) * lda]);
                 }
                 else
                 {
-                    hA[0][i + j * lda] -= 4;
-                    hA[0][j + i * lda] = std::conj(hA[0][i + j * lda]);
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
+                    hA[0][j + rocblas_stride(i) * lda]
+                        = std::conj(hA[0][i + rocblas_stride(j) * lda]);
                 }
             }
         }
@@ -266,7 +269,7 @@ void latrd_forsytrd_getPerfData(const rocblas_handle handle,
 
         // cpu-lapack performance
         *cpu_time_used = get_time_us_no_sync();
-        memset(hW[0], 0, ldw * k * sizeof(T));
+        memset(hW[0], 0, rocblas_stride(ldw) * k * sizeof(T));
         cpu_latrd(uplo, n, k, hA[0], lda, hE[0], hTau[0], hW[0], ldw);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
@@ -339,10 +342,10 @@ void testing_latrd_forsytrd(Arguments& argus)
     }
 
     // determine sizes
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     size_t size_E = n;
     size_t size_tau = n;
-    size_t size_W = ldw * k;
+    size_t size_W = rocblas_stride(ldw) * k;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;

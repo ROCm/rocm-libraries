@@ -92,7 +92,7 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
                                            S* WW,
                                            const rocblas_stride strideW,
                                            U CC,
-                                           const rocblas_int shiftC,
+                                           const rocblas_stride shiftC,
                                            const rocblas_int ldc,
                                            const rocblas_stride strideC,
                                            T* VV,
@@ -150,7 +150,7 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
             if(vectors)
             {
                 for(auto i = myrow; i < n; i += step_row)
-                    C[i + (j - in) * ldc] = V[i + j * ldv];
+                    C[idx2D(i, j - in, ldc)] = V[idx2D(i, j, ldv)];
             }
         }
 
@@ -194,7 +194,7 @@ void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
                                                  size_tmpz, size_splits, size_workArr);
 
     // extra requirements for partial decomposition
-    *size_tmpT = sizeof(T) * (n * n) * batch_count;
+    *size_tmpT = sizeof(T) * (rocblas_stride(n) * n) * batch_count;
 }
 
 //--------------------------------------------------------------------------------------//
@@ -267,7 +267,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                                          S* W,
                                          const rocblas_stride strideW,
                                          U C,
-                                         const rocblas_int shiftC,
+                                         const rocblas_stride shiftC,
                                          const rocblas_int ldc,
                                          const rocblas_stride strideC,
                                          rocblas_int* info,
@@ -321,7 +321,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     // Compute values and vectors with divide & conquer
     constexpr bool ISBATCHED = BATCHED || STRIDED;
     rocblas_int ldt = n;
-    rocblas_stride strideT = n * n;
+    rocblas_stride strideT = rocblas_stride(n) * n;
     /** TODO: Although stedc accepts batched calls (with C as an array of pointers), in practice it
             only works for strided-batched (a simple array C). This was never caught in tests because
             syevd always calls stedc as strided-batched. For this reason, we cannot call stedc using C

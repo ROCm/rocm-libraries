@@ -142,9 +142,11 @@ void trtri_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = hA[b][i + j * lda] / 10.0 + 1;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda] / 10.0 + 1;
                     else
-                        hA[b][i + j * lda] = (hA[b][i + j * lda] - 4) / 10.0;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = (hA[b][i + rocblas_stride(j) * lda] - 4) / 10.0;
                 }
             }
 
@@ -156,13 +158,13 @@ void trtri_initData(const rocblas_handle handle,
                 // matrices in the batch that are singular
                 rocblas_int i = n / 4 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
                 i = n / 2 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
                 i = n - 1 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
             }
         }
     }
@@ -310,7 +312,7 @@ void testing_trtri(Arguments& argus)
     rocblas_local_handle handle;
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     char uploC = argus.get<char>("uplo");
     rocblas_fill uplo = char2rocblas_fill(uploC);
     char diagC = argus.get<char>("diag");

@@ -43,7 +43,7 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void invdiag(const rocblas_diagonal diag,
                               const rocblas_int n,
                               U A,
-                              const rocblas_int shiftA,
+                              const rocblas_stride shiftA,
                               const rocblas_int lda,
                               const rocblas_stride strideA,
                               T* alphas)
@@ -54,12 +54,12 @@ ROCSOLVER_KERNEL void invdiag(const rocblas_diagonal diag,
     if(i < n)
     {
         T* a = load_ptr_batch<T>(A, b, shiftA, strideA);
-        T* d = alphas + b * n;
+        T* d = alphas + rocblas_stride(b) * n;
 
-        if(a[i + i * lda] != 0 && diag == rocblas_diagonal_non_unit)
+        if(a[idx2D(i, i, lda)] != 0 && diag == rocblas_diagonal_non_unit)
         {
-            a[i + i * lda] = 1.0 / a[i + i * lda];
-            d[i] = -a[i + i * lda];
+            a[idx2D(i, i, lda)] = 1.0 / a[idx2D(i, i, lda)];
+            d[i] = -a[idx2D(i, i, lda)];
         }
         else
             d[i] = -1.0;
@@ -228,7 +228,7 @@ void trti2(rocblas_handle handle,
            const rocblas_diagonal diag,
            const rocblas_int n,
            U A,
-           const rocblas_int shiftA,
+           const rocblas_stride shiftA,
            const rocblas_int lda,
            const rocblas_stride strideA,
            const rocblas_int batch_count,
@@ -289,7 +289,7 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
                                         const rocblas_diagonal diag,
                                         const rocblas_int n,
                                         U A,
-                                        const rocblas_int shiftA,
+                                        const rocblas_stride shiftA,
                                         const rocblas_int lda,
                                         const rocblas_stride strideA,
                                         rocblas_int* info,

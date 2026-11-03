@@ -140,10 +140,10 @@ void testing_sb2st_hb2st_bad_arg()
     I nv = 1;
 
     // memory allocations
-    device_strided_batch_vector<T> dAband(ldab * n, 1, ldab * n, 1);
+    device_strided_batch_vector<T> dAband(rocblas_stride(ldab) * n, 1, rocblas_stride(ldab) * n, 1);
     device_strided_batch_vector<S> dD(n, 1, n, 1);
     device_strided_batch_vector<S> dE(n - 1, 1, n - 1, 1);
-    device_strided_batch_vector<T> dV(ldv * nv, 1, ldv * nv, 1);
+    device_strided_batch_vector<T> dV(rocblas_stride(ldv) * nv, 1, rocblas_stride(ldv) * nv, 1);
     device_strided_batch_vector<T> dTau(nv, 1, nv, 1);
     CHECK_HIP_ERROR(dAband.memcheck());
     CHECK_HIP_ERROR(dD.memcheck());
@@ -208,7 +208,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         // Check that diag is real to working precision.
         for(I j = 0; j < n; ++j)
         {
-            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + j * ldab])));
+            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + rocblas_stride(j) * ldab])));
         }
         *max_err = rocblas_max_nan(err, *max_err);
 
@@ -216,7 +216,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         err = 0;
         for(I j = 0; j < n - 1; ++j)
         {
-            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + 1 + j * ldab])));
+            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + 1 + rocblas_stride(j) * ldab])));
         }
         *max_err = rocblas_max_nan(err, *max_err);
     }
@@ -225,7 +225,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     err = 0;
     for(I j = 0; j < n; ++j)
     {
-        err += hDRes[0][j] != real(hAbandRes[0][idiag + j * ldab]);
+        err += hDRes[0][j] != real(hAbandRes[0][idiag + rocblas_stride(j) * ldab]);
     }
     *max_err = rocblas_max_nan(err, *max_err);
 
@@ -233,7 +233,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     err = 0;
     for(I j = 0; j < n - 1; ++j)
     {
-        err += hERes[0][j] != real(hAbandRes[0][idiag + 1 + j * ldab]);
+        err += hERes[0][j] != real(hAbandRes[0][idiag + 1 + rocblas_stride(j) * ldab]);
     }
     *max_err = rocblas_max_nan(err, *max_err);
 
@@ -288,7 +288,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
     {
         // cpu-lapack performance (only if not in perf mode)
         using S = decltype(std::real(T{}));
-        std::vector<T> hAband_cpu(hAband[0], hAband[0] + ldab * n);
+        std::vector<T> hAband_cpu(hAband[0], hAband[0] + rocblas_stride(ldab) * n);
         std::vector<S> hD_cpu(n);
         std::vector<S> hE_cpu(n - 1);
         std::vector<T> work_cpu(n);
@@ -371,8 +371,8 @@ void testing_sb2st_hb2st(Arguments& argus)
 #endif
 
     // determine sizes
-    size_t size_Aband = ldab * n;
-    size_t size_V = ldv * nv;
+    size_t size_Aband = rocblas_stride(ldab) * n;
+    size_t size_V = rocblas_stride(ldv) * nv;
     size_t size_Tau = nv;
     size_t size_D = n;
     size_t size_E = n - 1;

@@ -225,13 +225,13 @@ __device__ void gemm_16x16xp(rocblas_operation transA,
         {
             // read col major 16x4 A
             if(cmajor_i_16x4 < m && (kb + cmajor_j_16x4) < p)
-                amk = A[(kb + cmajor_j_16x4) * lda + cmajor_i_16x4 * inc_A];
+                amk = A[idx2D(cmajor_i_16x4, kb + cmajor_j_16x4, inc_A, lda)];
         }
         else
         {
             // read col major 4x16 op(A)
             if(cmajor_j_4x16 < m && (kb + cmajor_i_4x16) < p)
-                amk = A[cmajor_j_4x16 * lda + (kb + cmajor_i_4x16) * inc_A];
+                amk = A[idx2D(kb + cmajor_i_4x16, cmajor_j_4x16, inc_A, lda)];
 
             // transpose op(A) to 16x4
             amk = shfl(amk, c2r_src);
@@ -242,7 +242,7 @@ __device__ void gemm_16x16xp(rocblas_operation transA,
         {
             // read col major 4x16 B
             if(cmajor_j_4x16 < n && (kb + cmajor_i_4x16) < p)
-                bkn = B[cmajor_j_4x16 * ldb + (kb + cmajor_i_4x16) * inc_B];
+                bkn = B[idx2D(kb + cmajor_i_4x16, cmajor_j_4x16, inc_B, ldb)];
 
             // transpose B to row major
             bkn = shfl(bkn, c2r_src);
@@ -251,7 +251,7 @@ __device__ void gemm_16x16xp(rocblas_operation transA,
         {
             // read col major 16x4 op(B)
             if(cmajor_i_16x4 < n && (kb + cmajor_j_16x4) < p)
-                bkn = B[(kb + cmajor_j_16x4) * ldb + cmajor_i_16x4 * inc_B];
+                bkn = B[idx2D(cmajor_i_16x4, kb + cmajor_j_16x4, inc_B, ldb)];
         }
 
         if constexpr(rocblas_is_complex<T>)
@@ -270,7 +270,7 @@ __device__ void gemm_16x16xp(rocblas_operation transA,
     {
         const I c_col = get_c_col<T>(cmajor_i_4x16, cmajor_j_4x16, i, inc_C, ldc);
         const I c_row = get_c_row<T>(cmajor_i_4x16, cmajor_j_4x16, i, inc_C, ldc);
-        const I idx = (c_col * ldc) + (c_row * inc_C);
+        const int64_t idx = idx2D(c_row, c_col, inc_C, ldc);
 
         // transpose C to col major
         dmn[i] = shfl(dmn[i], r2c_src);

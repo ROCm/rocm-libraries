@@ -76,7 +76,7 @@ void gerand(rocblas_int m,
     {
         for(rocblas_int i = 0; i < m; ++i)
         {
-            A[i + j * lda] = rand_value<T>(dist);
+            A[i + rocblas_stride(j) * lda] = rand_value<T>(dist);
         }
     }
 }
@@ -111,10 +111,10 @@ void herand(rocblas_fill uplo,
     {
         for(rocblas_int j = 0; j < n; ++j)
         {
-            A[j + j * lda] = rand_value<S>(dist); // diagonal real
+            A[j + rocblas_stride(j) * lda] = rand_value<S>(dist); // diagonal real
             for(rocblas_int i = j + 1; i < n; ++i) // strictly lower
             {
-                A[i + j * lda] = rand_value<T>(dist);
+                A[i + rocblas_stride(j) * lda] = rand_value<T>(dist);
             }
         }
     }
@@ -124,20 +124,20 @@ void herand(rocblas_fill uplo,
         {
             for(rocblas_int i = 0; i < j; ++i) // strictly upper
             {
-                A[i + j * lda] = rand_value<T>(dist);
+                A[i + rocblas_stride(j) * lda] = rand_value<T>(dist);
             }
-            A[j + j * lda] = rand_value<S>(dist); // diagonal real
+            A[j + rocblas_stride(j) * lda] = rand_value<S>(dist); // diagonal real
         }
     }
     else if(uplo == rocblas_fill_full)
     {
         for(rocblas_int j = 0; j < n; ++j)
         {
-            A[j + j * lda] = rand_value<S>(dist); // diagonal real
+            A[j + rocblas_stride(j) * lda] = rand_value<S>(dist); // diagonal real
             for(rocblas_int i = j + 1; i < n; ++i) // strictly lower
             {
-                A[i + j * lda] = rand_value<T>(dist);
-                A[j + i * lda] = sconj(A[i + j * lda]);
+                A[i + rocblas_stride(j) * lda] = rand_value<T>(dist);
+                A[j + rocblas_stride(i) * lda] = sconj(A[i + rocblas_stride(j) * lda]);
             }
         }
     }
@@ -179,7 +179,7 @@ void syrand(rocblas_fill uplo,
         {
             for(rocblas_int i = j; i < n; ++i) // lower
             {
-                A[i + j * lda] = rand_value<T>(dist);
+                A[i + rocblas_stride(j) * lda] = rand_value<T>(dist);
             }
         }
     }
@@ -189,7 +189,7 @@ void syrand(rocblas_fill uplo,
         {
             for(rocblas_int i = 0; i <= j; ++i) // upper
             {
-                A[i + j * lda] = rand_value<T>(dist);
+                A[i + rocblas_stride(j) * lda] = rand_value<T>(dist);
             }
         }
     }
@@ -197,11 +197,11 @@ void syrand(rocblas_fill uplo,
     {
         for(rocblas_int j = 0; j < n; ++j)
         {
-            A[j + j * lda] = rand_value<T>(dist); // diagonal
+            A[j + rocblas_stride(j) * lda] = rand_value<T>(dist); // diagonal
             for(rocblas_int i = j + 1; i < n; ++i) // strictly lower
             {
-                A[i + j * lda] = rand_value<T>(dist);
-                A[j + i * lda] = A[i + j * lda];
+                A[i + rocblas_stride(j) * lda] = rand_value<T>(dist);
+                A[j + rocblas_stride(i) * lda] = A[i + rocblas_stride(j) * lda];
             }
         }
     }
@@ -254,7 +254,7 @@ void hbrand(rocblas_int n,
     {
         // Diagonal is real.
         // Random on [-1, 1].
-        Aband[idiag + j * ldab] = rand_value<S>(dist);
+        Aband[idiag + rocblas_stride(j) * ldab] = rand_value<S>(dist);
 
         if(kl >= ku)
         {
@@ -264,13 +264,14 @@ void hbrand(rocblas_int n,
             for(rocblas_int k = 1; k < kl + 1 && k + j < n; ++k)
             {
                 // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-                Aband[idiag + k + j * ldab] = rand_value<T>(dist);
+                Aband[idiag + k + rocblas_stride(j) * ldab] = rand_value<T>(dist);
 
                 // Within the requested ku bandwidth, copy conj of lower band
                 // to upper band, A{j, j+k} = conj( A{j+k, j} ).
                 if(k <= ku)
                 {
-                    Aband[idiag - k + (j + k) * ldab] = sconj(Aband[idiag + k + j * ldab]);
+                    Aband[idiag - k + rocblas_stride(j + k) * ldab]
+                        = sconj(Aband[idiag + k + rocblas_stride(j) * ldab]);
                 }
             }
         }
@@ -280,13 +281,14 @@ void hbrand(rocblas_int n,
             for(rocblas_int k = 1; k < ku + 1 && k + j < n; ++k)
             {
                 // Random on complex [-1, 1] x [-1, 1]i or real [-1, 1].
-                Aband[idiag - k + (j + k) * ldab] = rand_value<T>(dist);
+                Aband[idiag - k + rocblas_stride(j + k) * ldab] = rand_value<T>(dist);
 
                 // Within the requested kl bandwidth, copy conj of upper band
                 // to lower band, A{j, j+k} = conj( A{j+k, j} ).
                 if(k <= kl)
                 {
-                    Aband[idiag + k + j * ldab] = sconj(Aband[idiag - k + (j + k) * ldab]);
+                    Aband[idiag + k + rocblas_stride(j) * ldab]
+                        = sconj(Aband[idiag - k + rocblas_stride(j + k) * ldab]);
                 }
             }
         }
@@ -297,7 +299,7 @@ void hbrand(rocblas_int n,
         {
             for(rocblas_int k = 0; k < ku - j; ++k)
             {
-                Aband[k + j * ldab] = nan;
+                Aband[k + rocblas_stride(j) * ldab] = nan;
             }
         }
 
@@ -306,7 +308,7 @@ void hbrand(rocblas_int n,
         {
             for(rocblas_int k = n - 1 - j; k < kl; ++k)
             {
-                Aband[idiag + 1 + k + j * ldab] = nan;
+                Aband[idiag + 1 + k + rocblas_stride(j) * ldab] = nan;
             }
         }
     }

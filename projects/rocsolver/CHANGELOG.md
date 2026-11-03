@@ -3,6 +3,21 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+
+* Fixed memory access faults and wrong results for matrices with more than 2^31 elements (for example in GETRF, GEQLF, ORGQL/UNGQL, GELQF, SYTRF, SYEV, SYGV and GEHRD), caused by 32-bit internal matrix offsets and indices.
+
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.38.0 for ROCm 10.2.0
 
 ### Added

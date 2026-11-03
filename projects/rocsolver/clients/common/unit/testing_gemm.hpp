@@ -231,9 +231,9 @@ void testing_gemm(Arguments& argus)
     I lda = argus.get<I>("lda", mk);
     I ldb = argus.get<I>("ldb", kn);
     I ldc = argus.get<I>("ldc", m);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * km);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nk);
-    rocblas_stride stC = argus.get<rocblas_stride>("strideC", ldc * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * km);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nk);
+    rocblas_stride stC = argus.get<rocblas_stride>("strideC", rocblas_stride(ldc) * n);
 
     T alpha = argus.get<T>("alpha", 1);
     T beta = argus.get<T>("beta", 1);

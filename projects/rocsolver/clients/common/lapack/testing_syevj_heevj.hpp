@@ -199,9 +199,10 @@ void syevj_heevj_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -211,7 +212,8 @@ void syevj_heevj_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < n; i++)
                 {
                     for(rocblas_int j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -258,7 +260,7 @@ void syevj_heevj_getError(const rocblas_handle handle,
     int lrwork = 3 * n - 1;
     std::vector<T> work(lwork);
     std::vector<S> rwork(lrwork);
-    std::vector<T> A(lda * n * bc);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
 
     // input data initialization
     syevj_heevj_initData<true, true, T>(handle, evect, n, dA, lda, bc, hA, A);
@@ -299,7 +301,7 @@ void syevj_heevj_getError(const rocblas_handle handle,
             *max_err += 1;
         else
         {
-            S threshold = snorm('F', n, n, A.data() + b * lda * n, lda) * atol;
+            S threshold = snorm('F', n, n, A.data() + rocblas_stride(b) * lda * n, lda) * atol;
             EXPECT_LE(hResidualRes[b][0], threshold) << "where b = " << b;
             if(hResidualRes[b][0] > threshold)
                 *max_err += 1;
@@ -343,8 +345,9 @@ void syevj_heevj_getError(const rocblas_handle handle,
                 for(int j = 0; j < n; j++)
                 {
                     alpha = T(1) / hWRes[b][j];
-                    cpu_symv_hemv(uplo, n, alpha, A.data() + b * lda * n, lda, hARes[b] + j * lda,
-                                  1, beta, hA[b] + j * lda, 1);
+                    cpu_symv_hemv(uplo, n, alpha, A.data() + rocblas_stride(b) * lda * n, lda,
+                                  hARes[b] + rocblas_stride(j) * lda, 1, beta,
+                                  hA[b] + rocblas_stride(j) * lda, 1);
                 }
 
                 // error is ||hA - hARes|| / ||hA||
@@ -455,7 +458,7 @@ void testing_syevj_heevj(Arguments& argus)
     char uploC = argus.get<char>("uplo");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stW = argus.get<rocblas_stride>("strideD", n);
 
     S abstol = S(argus.get<double>("abstol", 0));

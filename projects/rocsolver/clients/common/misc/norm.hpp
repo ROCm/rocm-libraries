@@ -41,10 +41,10 @@ template <typename T>
 double norm_error(char norm_type,
                   rocblas_int M,
                   rocblas_int N,
-                  rocblas_int lda_gold,
+                  rocblas_int lda_gold_arg,
                   T* gold,
                   T* comp,
-                  rocblas_int lda_comp = 0)
+                  rocblas_int lda_comp_arg = 0)
 {
     using DoublePrecisionType
         = std::conditional_t<rocblas_is_complex<T>, rocblas_double_complex, double>;
@@ -53,9 +53,10 @@ double norm_error(char norm_type,
     // Frobenius norm one norm is max column sum infinity norm is max row sum
     // Frobenius is l2 norm of matrix entries
 
-    rocblas_int lda = M;
-    if(lda_comp <= 0)
-        lda_comp = lda_gold;
+    // (64-bit leading dimensions, so that the index arithmetic below is done in 64 bits)
+    const int64_t lda = M;
+    const int64_t lda_gold = lda_gold_arg;
+    const int64_t lda_comp = (lda_comp_arg > 0) ? lda_comp_arg : lda_gold_arg;
 
     std::vector<DoublePrecisionType> gold_double(N * lda);
     std::vector<DoublePrecisionType> comp_double(N * lda);
@@ -72,11 +73,12 @@ double norm_error(char norm_type,
     std::vector<double> work(M);
     rocblas_int incx = 1;
     DoublePrecisionType alpha = -1.0;
-    rocblas_int size = lda * N;
 
-    double gold_norm = cpu_lange(norm_type, M, N, gold_double.data(), lda, work.data());
-    cpu_axpy(size, alpha, gold_double.data(), incx, comp_double.data(), incx);
-    double error = cpu_lange(norm_type, M, N, comp_double.data(), lda, work.data());
+    double gold_norm = cpu_lange(norm_type, M, N, gold_double.data(), M, work.data());
+    // (comp - gold, a column at a time, as M * N can exceed the 32-bit size of AXPY)
+    for(rocblas_int j = 0; j < N; j++)
+        cpu_axpy(M, alpha, gold_double.data() + j * lda, incx, comp_double.data() + j * lda, incx);
+    double error = cpu_lange(norm_type, M, N, comp_double.data(), M, work.data());
     if(gold_norm > 0)
         error /= gold_norm;
 
@@ -84,8 +86,10 @@ double norm_error(char norm_type,
 }
 
 template <typename T>
-double norm_error_upperTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_int lda, T* gold, T* comp)
+double
+    norm_error_upperTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_int lda_arg, T* gold, T* comp)
 {
+    const int64_t lda = lda_arg;
     for(rocblas_int i = 0; i < M; ++i)
     {
         for(rocblas_int j = 0; j < N; ++j)
@@ -97,12 +101,14 @@ double norm_error_upperTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_
             }
         }
     }
-    return norm_error(norm_type, M, N, lda, gold, comp);
+    return norm_error(norm_type, M, N, lda_arg, gold, comp);
 }
 
 template <typename T>
-double norm_error_lowerTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_int lda, T* gold, T* comp)
+double
+    norm_error_lowerTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_int lda_arg, T* gold, T* comp)
 {
+    const int64_t lda = lda_arg;
     for(rocblas_int i = 0; i < M; ++i)
     {
         for(rocblas_int j = 0; j < N; ++j)
@@ -114,7 +120,7 @@ double norm_error_lowerTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_
             }
         }
     }
-    return norm_error(norm_type, M, N, lda, gold, comp);
+    return norm_error(norm_type, M, N, lda_arg, gold, comp);
 }
 
 template <typename T, typename S = decltype(std::real(T{}))>

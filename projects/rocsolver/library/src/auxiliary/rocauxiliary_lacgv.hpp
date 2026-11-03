@@ -63,7 +63,7 @@ ROCSOLVER_KERNEL void conj_in_place(const I m,
     T* Ap = load_ptr_batch<T>(A, b, shifta, stridea);
 
     if(i < m && j < n)
-        Ap[i + j * lda] = conj(Ap[i + j * (int64_t)lda]);
+        Ap[idx2D(i, j, lda)] = conj(Ap[i + j * (int64_t)lda]);
 }
 
 template <typename T, typename I>
@@ -108,7 +108,7 @@ rocblas_status rocsolver_lacgv_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // handle negative increments
-    rocblas_stride offset = incx < 0 ? shiftx - (n - 1) * incx : shiftx;
+    rocblas_stride offset = incx < 0 ? shiftx - rocblas_stride(n - 1) * incx : shiftx;
 
     // conjugate x
     constexpr int LACGV_NTHREADS = 64;
