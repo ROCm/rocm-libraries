@@ -1035,7 +1035,9 @@ fragment holds two one-hot weight chunks, B is two `ds_load_b128` reads, and
 D is one 16-byte LDS store of the wave's 8 channels per lane. The fragments
 take twice the wave64 VGPRs (`mfma_frag_vgprs()`), so 9x9 and larger filters
 exceed `DW_DGRAD_MFMA_MAX_FRAG_VGPRS` at wave32. The AOT build gives this form
-the target's wave size (`direct_variants.make_direct_spec`); the VALU form
+the target's wave size and records it in the cache entry
+(`direct_variants.direct_spec_takes_target_wave`, the one rule for the spec,
+the record and the run-side guard `direct_entry_wave_reason`); the VALU form
 keeps its logical wave64. The non-finite semantics are those of the MFMA form.
 The WMMA form has no forward pass: both engines reject `fwd` (and so
 `out_stride=2` and the grouped form) at `wave_size=32`.

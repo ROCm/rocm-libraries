@@ -33,7 +33,7 @@ from kernels.conv.direct_variants import (
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
-    DIRECT_WAVE_PARAMETRIC,
+    direct_spec_takes_target_wave,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     direct_wgrad_fold_knobs,
@@ -2458,11 +2458,13 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
-    # The wave size the binary is built at, which the run side checks against
-    # the identity before it derives a launch geometry from it
-    # (direct_entry_wave_reason).
+    # The wave size the binary is built at, for every spec that takes the
+    # target's: the run side checks it against the identity before it derives
+    # a launch geometry from it (direct_entry_wave_reason).
     meta = (
-        {"spec_wave_size": spec.wave_size} if variant in DIRECT_WAVE_PARAMETRIC else {}
+        {"spec_wave_size": spec.wave_size}
+        if direct_spec_takes_target_wave(variant, job.spec_kwargs)
+        else {}
     )
     return _build_kernel(variant, spec, arch), meta
 

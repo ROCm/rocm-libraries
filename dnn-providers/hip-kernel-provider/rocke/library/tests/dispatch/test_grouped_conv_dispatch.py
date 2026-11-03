@@ -32,7 +32,7 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
-from kernels.conv.direct_variants import DIRECT_WAVE_PARAMETRIC
+from kernels.conv.direct_variants import direct_spec_takes_target_wave
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
@@ -414,7 +414,8 @@ def _direct_plan(spec, req):
     # The meta a fresh --compile-all entry carries: a wave-parametric build
     # records the wave size it was built at, the identity's.
     meta = {"kernel_name": "k"}
-    if spec.algorithm in DIRECT_WAVE_PARAMETRIC:
+    knobs = json.loads(spec.identity.knobs) if spec.identity.knobs else {}
+    if direct_spec_takes_target_wave(spec.algorithm, knobs):
         meta["spec_wave_size"] = spec.identity.wave_size
     plan, why = dks.plan_for(
         cache,

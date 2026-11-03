@@ -504,10 +504,10 @@ def plan_for(
     if not meta.get("kernel_name"):
         return None, "cache entry has no kernel_name (rebuild the cache)"
     variant = identity.algorithm
-    why = direct_entry_wave_reason(variant, identity.wave_size, meta)
+    knobs = json.loads(identity.knobs) if identity.knobs else {}
+    why = direct_entry_wave_reason(variant, identity.wave_size, meta, knobs)
     if why is not None:
         return None, why
-    knobs = json.loads(identity.knobs) if identity.knobs else {}
     if variant in _HALO_VARIANTS and identity.direction == "direct_fwd":
         chunks = _batch_chunks(problem)
         if chunks is not None:
