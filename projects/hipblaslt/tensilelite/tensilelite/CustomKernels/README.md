@@ -109,8 +109,14 @@ it off, hipBLASLt refuses an external kernel unless its `CustomKernel` block
 sets `uniformSummationOrder: true` (default `false`). Set it only for a kernel
 that reduces every row of D in the same order, so that identical rows of A give
 bitwise-identical rows of D, and that has no compiled-in StaggerU, which
-hipBLASLt still refuses. `AddCustomConfig` copies the key from the kernel's
-`CustomKernel` entry in the test YAML.
+hipBLASLt still refuses. The declaration has to hold for every problem the
+kernel's predicates admit, including partial tiles, any K, and padded leading
+dimensions; hipBLASLt has no way to check it. A kernel that declares it also
+needs a case in `clients/tests/src/row_uniformity_gtest.cpp` (see the
+`SkinnyTn` cases): a shape library logic routes to it, checked row-uniform on
+the device, with the kernel asserted as the default pick on its architecture.
+`AddCustomConfig` copies the key from the kernel's `CustomKernel` entry in the
+test YAML.
 
 ## Adding a new external kernel
 

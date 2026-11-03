@@ -278,6 +278,18 @@ namespace
         return sign * std::ldexp(mantissa, exponent);
     }
 
+    // The small values of the cancelling fill used with a 16-bit D, in
+    // [2^-4, 2^3) and of either sign.
+    float smallSample(std::mt19937& rng)
+    {
+        std::uniform_int_distribution<int>    exponentOf{-4, 2};
+        std::uniform_real_distribution<float> mantissaOf{0.0f, 1.0f};
+        std::uniform_int_distribution<int>    signOf{0, 1};
+
+        const float magnitude = std::ldexp(1.0f + mantissaOf(rng), exponentOf(rng));
+        return signOf(rng) ? magnitude : -magnitude;
+    }
+
     // The A/B storage type is a parameter because the only shipped shape known
     // to reach the newly admitted StreamK split regime through a public API
     // attribute is a bf16-in / f32-out entry; every pre-existing case stays on
@@ -294,6 +306,11 @@ namespace
         // vector of length m. Needed to select the gfx942 GridBased Bias exact
         // size that reaches the newly admitted Stream-K split (report 09).
         bool useBias = false;
+        // HIPBLAS_OP_T stores A as k x m (lda = k), the layout the gfx950
+        // skinny custom kernels take.
+        hipblasOperation_t transA = HIPBLAS_OP_N;
+        // The type of C and D. The skinny custom kernels write D in A's type.
+        hipDataType dType = HIP_R_32F;
     };
 
     size_t elementSizeOf(hipDataType type)
@@ -306,8 +323,9 @@ namespace
     // reference below must see the same numbers the kernel does, or its
     // order-sensitivity self-check describes a different problem.
     //
-    // HIP_R_16BF uses hip_bfloat16. hipBLASLt leaves mxDataGenerator off on
-    // Windows, so this harness cannot depend on DGen headers.
+    // HIP_R_16BF uses hip_bfloat16 and HIP_R_16F _Float16. hipBLASLt leaves
+    // mxDataGenerator off on Windows, so this harness cannot depend on DGen
+    // headers.
     std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
     {
         std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
@@ -320,6 +338,13 @@ namespace
         auto* out = reinterpret_cast<uint16_t*>(bytes.data());
         for(size_t idx = 0; idx < values.size(); ++idx)
         {
+            if(type == HIP_R_16F)
+            {
+                const _Float16 half = static_cast<_Float16>(values[idx]);
+                std::memcpy(&out[idx], &half, sizeof(half));
+                values[idx] = static_cast<float>(half);
+                continue;
+            }
             const hip_bfloat16 packed{values[idx]};
             out[idx]     = packed.data;
             values[idx]  = static_cast<float>(packed);
@@ -378,9 +403,10 @@ namespace
             }
 
             const size_t abBytes = elementSizeOf(m_problem.abType);
+            const size_t dBytes  = elementSizeOf(m_problem.dType);
             if(hipMalloc(&m_deviceA, static_cast<size_t>(m * k) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceB, static_cast<size_t>(k * n) * abBytes) != hipSuccess
-               || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * sizeof(float)) != hipSuccess
+               || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * dBytes) != hipSuccess
                || hipMalloc(&m_deviceWorkspace, kWorkspaceBytes) != hipSuccess)
             {
                 skipReason = "hipMalloc failed: not enough device memory for " + std::to_string(m)
@@ -399,13 +425,15 @@ namespace
             if(!uploadOperands(skipReason))
                 return false;
 
-            m_hostD.resize(static_cast<size_t>(m * n));
+            m_hostD.resize(static_cast<size_t>(m * n) * dBytes);
 
-            if(hipblasLtMatrixLayoutCreate(&m_layoutA, m_problem.abType, m, k, m)
+            const bool transA = m_problem.transA == HIPBLAS_OP_T;
+            if(hipblasLtMatrixLayoutCreate(
+                   &m_layoutA, m_problem.abType, transA ? k : m, transA ? m : k, transA ? k : m)
                    != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatrixLayoutCreate(&m_layoutB, m_problem.abType, k, n, k)
                       != HIPBLAS_STATUS_SUCCESS
-               || hipblasLtMatrixLayoutCreate(&m_layoutD, HIP_R_32F, m, n, m)
+               || hipblasLtMatrixLayoutCreate(&m_layoutD, m_problem.dType, m, n, m)
                       != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatmulDescCreate(&m_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
                       != HIPBLAS_STATUS_SUCCESS)
@@ -414,9 +442,10 @@ namespace
                 return false;
             }
 
+            const int32_t opA = m_problem.transA;
             const int32_t opN = HIPBLAS_OP_N;
             hipblasLtMatmulDescSetAttribute(
-                m_desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
+                m_desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA));
             hipblasLtMatmulDescSetAttribute(
                 m_desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
 
@@ -477,18 +506,39 @@ namespace
         }
 
         // The fill only means something if fp32 summation of this data actually
-        // depends on the order; otherwise every assertion below is vacuous.
+        // depends on the order, as D holds it; otherwise every assertion below is
+        // vacuous.
         bool referenceOrderMatters() const
         {
+            auto product = [&](int64_t idx) {
+                return m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+            };
+
             float forward = 0.0f;
             for(int64_t idx = 0; idx < m_problem.k; ++idx)
-                forward += m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                forward += product(idx);
 
             float reverse = 0.0f;
             for(int64_t idx = m_problem.k - 1; idx >= 0; --idx)
-                reverse += m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                reverse += product(idx);
 
-            return std::memcmp(&forward, &reverse, sizeof(float)) != 0;
+            if(m_problem.dType == HIP_R_32F)
+                return std::memcmp(&forward, &reverse, sizeof(float)) != 0;
+
+            // A 16-bit D must still tell some orders apart once rounded to it:
+            // these two, or K split over 64 lanes, as the skinny kernels split it.
+            float strided = 0.0f;
+            for(int64_t lane = 0; lane < 64; ++lane)
+            {
+                float part = 0.0f;
+                for(int64_t idx = lane; idx < m_problem.k; idx += 64)
+                    part += product(idx);
+                strided += part;
+            }
+            std::vector<float>         sums{forward, reverse, strided};
+            const std::vector<uint8_t> held = encodeOperand(sums, m_problem.dType);
+            return std::memcmp(held.data(), held.data() + 2, 2) != 0
+                   || std::memcmp(held.data(), held.data() + 4, 2) != 0;
         }
 
         std::vector<hipblasLtMatmulHeuristicResult_t> candidateAlgos(
@@ -527,12 +577,12 @@ namespace
             std::vector<hipblasLtMatmulHeuristicResult_t> enumerated;
             hipblaslt_ext::getAllAlgos(m_handle,
                                        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
-                                       HIPBLAS_OP_N,
+                                       m_problem.transA,
                                        HIPBLAS_OP_N,
                                        m_problem.abType,
                                        m_problem.abType,
-                                       HIP_R_32F,
-                                       HIP_R_32F,
+                                       m_problem.dType,
+                                       m_problem.dType,
                                        HIPBLAS_COMPUTE_32F,
                                        enumerated);
             enumeratedCount = static_cast<int>(enumerated.size());
@@ -570,8 +620,7 @@ namespace
             if(setStatus != HIPBLAS_STATUS_SUCCESS)
                 return setStatus;
 
-            static_cast<void>(
-                hipMemsetAsync(m_deviceD, 0, m_hostD.size() * sizeof(float), m_stream));
+            static_cast<void>(hipMemsetAsync(m_deviceD, 0, m_hostD.size(), m_stream));
 
             const float           alpha = 1.0f;
             const float           beta  = 0.0f;
@@ -599,8 +648,7 @@ namespace
             if(hipStreamSynchronize(m_stream) != hipSuccess)
                 return HIPBLAS_STATUS_EXECUTION_FAILED;
 
-            if(hipMemcpy(
-                   m_hostD.data(), m_deviceD, m_hostD.size() * sizeof(float), hipMemcpyDeviceToHost)
+            if(hipMemcpy(m_hostD.data(), m_deviceD, m_hostD.size(), hipMemcpyDeviceToHost)
                != hipSuccess)
                 return HIPBLAS_STATUS_EXECUTION_FAILED;
 
@@ -615,22 +663,17 @@ namespace
         // column at memcmp speed.
         int64_t firstNonUniformRowOfLastRun() const
         {
-            const int64_t m = m_problem.m;
+            const int64_t m    = m_problem.m;
+            const size_t  size = elementSizeOf(m_problem.dType);
             for(int64_t col = 0; col < m_problem.n; ++col)
             {
-                const float* base = m_hostD.data() + col * m;
-                if(std::memcmp(base, base + 1, static_cast<size_t>(m - 1) * sizeof(float)) == 0)
+                const uint8_t* base = m_hostD.data() + static_cast<size_t>(col * m) * size;
+                if(std::memcmp(base, base + size, static_cast<size_t>(m - 1) * size) == 0)
                     continue;
 
-                uint32_t row0 = 0;
-                std::memcpy(&row0, base, sizeof(row0));
                 for(int64_t row = 1; row < m; ++row)
-                {
-                    uint32_t bits = 0;
-                    std::memcpy(&bits, base + row, sizeof(bits));
-                    if(bits != row0)
+                    if(std::memcmp(base + static_cast<size_t>(row) * size, base, size) != 0)
                         return row;
-                }
             }
             return -1;
         }
@@ -699,12 +742,36 @@ namespace
             std::mt19937 rng(0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k));
 
             m_aVector.resize(static_cast<size_t>(k));
-            for(auto& value : m_aVector)
-                value = wideRangeSample(rng);
-
             m_hostB.resize(static_cast<size_t>(k * n));
-            for(auto& value : m_hostB)
-                value = wideRangeSample(rng);
+            if(m_problem.dType == HIP_R_32F)
+            {
+                for(auto& value : m_aVector)
+                    value = wideRangeSample(rng);
+                for(auto& value : m_hostB)
+                    value = wideRangeSample(rng);
+            }
+            else
+            {
+                // Sums of the wide-range fill differ between orders only in bits
+                // a 16-bit D rounds away. Instead, each column pairs one large
+                // product, at k = 0, with its exact negation at k / 2, among
+                // small ones: what the large product absorbs of the small ones
+                // while it is pending depends on the order, by far more than D's
+                // precision.
+                for(auto& value : m_aVector)
+                    value = smallSample(rng);
+                for(auto& value : m_hostB)
+                    value = smallSample(rng);
+                std::uniform_real_distribution<float> mantissaOf{1.0f, 2.0f};
+                m_aVector[0] = m_aVector[static_cast<size_t>(k / 2)]
+                    = std::ldexp(mantissaOf(rng), 12);
+                for(int64_t col = 0; col < n; ++col)
+                {
+                    const float large                             = std::ldexp(mantissaOf(rng), 12);
+                    m_hostB[static_cast<size_t>(col * k)]         = large;
+                    m_hostB[static_cast<size_t>(col * k + k / 2)] = -large;
+                }
+            }
 
             const std::vector<uint8_t> bBytes = encodeOperand(m_hostB, m_problem.abType);
             if(hipMemcpy(m_deviceB, bBytes.data(), bBytes.size(), hipMemcpyHostToDevice)
@@ -714,9 +781,28 @@ namespace
                 return false;
             }
 
+            const size_t abBytes = elementSizeOf(m_problem.abType);
+            if(m_problem.transA == HIPBLAS_OP_T)
+            {
+                // Every column of a k x m A is the vector itself. encodeOperand
+                // rounds the reference vector to what the device will hold.
+                const std::vector<uint8_t> aColumn = encodeOperand(m_aVector, m_problem.abType);
+                std::vector<uint8_t>       aBytes(aColumn.size() * static_cast<size_t>(m));
+                for(int64_t col = 0; col < m; ++col)
+                    std::memcpy(aBytes.data() + static_cast<size_t>(col) * aColumn.size(),
+                                aColumn.data(),
+                                aColumn.size());
+                if(hipMemcpy(m_deviceA, aBytes.data(), aBytes.size(), hipMemcpyHostToDevice)
+                   != hipSuccess)
+                {
+                    skipReason = "hipMemcpy of A failed";
+                    return false;
+                }
+                return true;
+            }
+
             // Column k of a column-major A is M copies of a[k], so A goes up one
             // column at a time and never needs an M*K host buffer.
-            const size_t         abBytes = elementSizeOf(m_problem.abType);
             std::vector<float>   column(static_cast<size_t>(m));
             std::vector<uint8_t> aColumn;
             for(int64_t idx = 0; idx < k; ++idx)
@@ -753,7 +839,7 @@ namespace
         void*                   m_deviceWorkspace = nullptr;
         std::vector<float>      m_aVector;
         std::vector<float>      m_hostB;
-        std::vector<float>      m_hostD;
+        std::vector<uint8_t>    m_hostD;
     };
 
     // A fixture rather than bare TEST() only so the shared drivers can reach
@@ -976,8 +1062,10 @@ namespace
 
         // Unlike checkRowUniformity, needs no witness with the mode off: the
         // default heuristic picks run once with the mode on and must either be
-        // row-uniform or refused cleanly.
-        void checkDefaultPicksUniform(const Problem& problem)
+        // row-uniform or refused cleanly. With gfx950Pick, the first pick on
+        // gfx950 must be a kernel whose name starts with it; elsewhere a
+        // problem with no pick is skipped.
+        void checkDefaultPicksUniform(const Problem& problem, const char* gfx950Pick = nullptr)
         {
             RowUniformityHarness harness(problem);
             prepare(harness);
@@ -986,7 +1074,16 @@ namespace
 
             int        enumeratedCount = 0;
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
+            const bool gfx950          = gpuArchName().rfind("gfx950", 0) == 0;
+            if(candidates.empty() && gfx950Pick != nullptr && !gfx950)
+                GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
+            if(gfx950Pick != nullptr && gfx950)
+            {
+                const std::string pick = harness.solutionName(candidates.front());
+                ASSERT_EQ(pick.rfind(gfx950Pick, 0), 0u)
+                    << "The default pick is " << pick << ", not a " << gfx950Pick << " kernel";
+            }
 
             for(const auto& candidate : candidates)
             {
@@ -1012,6 +1109,39 @@ namespace
     TEST_F(RowUniformity_pre_checkin, HybridDynamicStagger_1536x1536x2048_SmCount160)
     {
         checkDefaultPicksUniform({1536, 1536, 2048, HIP_R_32F, 160});
+    }
+
+    // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
+    // custom.config. Library logic routes these shapes to them, so on gfx950
+    // the default pick must be one of them: when uniform summation order
+    // refused them (#14010), nothing failed, they just stopped being picked.
+    // A is TN and D takes A's type, as the kernels require.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16_4096x1x4096)
+    {
+        checkDefaultPicksUniform({4096, 1, 4096, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+                                 "wvSplitK_vllm_bf16_tn_n1_");
+    }
+
+    // m % 3 != 0: the last YTILE = 3 row tile shifts down over rows the
+    // previous one wrote.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnF16Tail_8191x5x1024)
+    {
+        checkDefaultPicksUniform({8191, 5, 1024, HIP_R_16F, 0, false, HIPBLAS_OP_T, HIP_R_16F},
+                                 "wvSplitK_vllm_f16_tn_n5_y3");
+    }
+
+    // n * K past the 80K-element LDS stage: K is staged in chunks.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16LdsChunked_1024x3x28672)
+    {
+        checkDefaultPicksUniform({1024, 3, 28672, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+                                 "wvSplitK_vllm_bf16_tn_n3_");
+    }
+
+    // The rocBLAS kernel that reads n from its arguments.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16Rocblas_4096x3x256)
+    {
+        checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+                                 "wvSpltK_bf16_tn_m4");
     }
 
     // Measured non-uniform on gfx950 with the default heuristic path.
