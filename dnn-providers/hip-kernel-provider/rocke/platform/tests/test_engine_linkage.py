@@ -214,6 +214,54 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         )
 
 
+def test_relocated_launcher_suite_has_its_test_assets(tmp_path):
+    """Exercise installed tests without borrowing helpers from the source tree."""
+    build = os.environ.get("ROCKE_LINK_TEST_BUILD_DIR")
+    if not build:
+        pytest.skip("set ROCKE_LINK_TEST_BUILD_DIR to a fresh engine build")
+    prefix = tmp_path / "install"
+    subprocess.run(
+        ["cmake", "--install", build, "--prefix", str(prefix)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    relocated = tmp_path / "relocated"
+    prefix.rename(relocated)
+    modules = list(relocated.rglob("tests/test_comgr_test_launcher.py"))
+    assert len(modules) == 1
+    test_file = modules[0]
+    helper = test_file.parent / "tools" / "run_with_comgr.py"
+    assert helper.read_bytes() == (PLATFORM / "tools/run_with_comgr.py").read_bytes()
+    launchers = list(relocated.rglob("rocke/tests/subprocess_launcher.py"))
+    assert len(launchers) == 1
+    # Invoke the relocated launcher, not the parent package's helper: this lane
+    # deliberately tests a separately selected, source-less package identity.
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("PYTHON", "ROCKE_"))
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            str(launchers[0]),
+            "-m",
+            "pytest",
+            str(test_file),
+            "-q",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "7 passed" in result.stdout
+
+
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):
     """Run against a fresh build supplied by the host validation lane."""
     build = os.environ.get("ROCKE_LINK_TEST_BUILD_DIR")

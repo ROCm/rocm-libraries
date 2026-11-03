@@ -466,6 +466,10 @@ if(ROCKE_INSTALL_TESTS)
 
     endblock()
 
+    # The installed launcher regression suite imports this test-only copy.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/run_with_comgr.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+
     # The top-level developer runner is not part of the standalone platform
     # component, but its command-plan regression tests run in the relocated
     # full-repository pytest suite. Stage a test-only copy when the sibling

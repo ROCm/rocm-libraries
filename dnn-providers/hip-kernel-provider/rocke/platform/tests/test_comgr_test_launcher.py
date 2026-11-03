@@ -11,9 +11,20 @@ import pytest
 from rocke.runtime import comgr
 
 
+def _launcher_path(test_file: Path) -> Path:
+    candidates = (
+        test_file.parents[1] / "tools" / "run_with_comgr.py",
+        test_file.parent / "tools" / "run_with_comgr.py",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError("compiler test asset run_with_comgr.py is absent")
+
+
 @pytest.fixture
 def launcher(monkeypatch):
-    path = Path(__file__).resolve().parents[1] / "tools/run_with_comgr.py"
+    path = _launcher_path(Path(__file__).resolve())
     spec = importlib.util.spec_from_file_location("compiler_test_launcher", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -72,3 +83,19 @@ def test_explicit_offline_command_does_not_acquire_compiler(launcher, monkeypatc
     )
     assert launcher.main() == 0
     query.assert_not_called()
+
+
+@pytest.mark.parametrize("layout", ["source", "installed"])
+def test_launcher_path_resolves_both_layouts(tmp_path, layout):
+    test_file = tmp_path / "tests" / "test_comgr_test_launcher.py"
+    tool_root = tmp_path if layout == "source" else test_file.parent
+    helper = tool_root / "tools" / "run_with_comgr.py"
+    helper.parent.mkdir(parents=True)
+    helper.touch()
+    assert _launcher_path(test_file) == helper
+
+
+def test_launcher_path_rejects_missing_test_asset(tmp_path):
+    test_file = tmp_path / "tests" / "test_comgr_test_launcher.py"
+    with pytest.raises(FileNotFoundError, match="run_with_comgr.py is absent"):
+        _launcher_path(test_file)
