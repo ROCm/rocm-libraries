@@ -12,6 +12,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
 
 ### Removed
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
@@ -30,6 +31,10 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalVector::Amax()` on the accelerator returning the index and value of the entry after the largest one, and reading past the end of the vector when the largest entry is the last one. This also affected the Linf residual norm and `GetAmaxResidualIndex()` of the iterative solvers on the accelerator.
+* Fixed wrong results of the iterative triangular solves on the accelerator when both `LocalMatrix::ItLAnalyse()` and `LocalMatrix::ItUAnalyse()` are called on the same matrix, as the SGS preconditioner does with `TriSolverAlg_Iterative`.
+* Fixed `ItILU0::GetConvergenceHistory()` on the accelerator returning an unwritten history and an undefined iteration count when rocSPARSE rejects the history query. The history is now empty in this case. Also fixed a memory leak when building ItILU0 with a convergence history in single precision.
+* Fixed `ItILU0Algorithm::SyncSplit` on the accelerator stopping after the first sweep and returning zero factors, so the preconditioner is the identity, when `ItILU0Option::StoppingCriteria` or `ItILU0Option::ConvergenceHistory` is set without a norm option. `ItILU0Algorithm::AsyncSplit` failed with an illegal memory access in that case. The residual norm is now computed whenever the stopping criteria or the convergence history is requested, or when a history buffer is passed to `LocalMatrix::ItILU0Factorize()`. With only `ItILU0Option::ComputeNrmCorrection` set, the SyncSplit stopping test now also takes the residual into account.
 
 ## (Unreleased) rocALUTION 4.1.1
 
