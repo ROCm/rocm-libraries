@@ -62,7 +62,7 @@ conv = rocke_engine.conv_direct_nongrouped_lower_llvm(conv_spec, arch="gfx950")
 assert lower_llvm._datalayout_for_flavor("llvm23") in conv
 
 # Paged and strided attention bindings use the same compiler, including both
-# modules emitted by the gfx950 segment/reduce path.
+# modules (segment, then reduce) that each tiled 3D binding emits.
 attention_spec = {"head_size": 64, "block_size": 16, "num_query_heads": 8,
                   "num_kv_heads": 2, "num_segments": 2, "num_seqs": 1,
                   "dtype": "fp16"}
@@ -70,8 +70,7 @@ for arch in ("gfx942", "gfx950"):
     for layout in ("paged", "strided"):
         text = getattr(rocke_engine, arch + "_attention_tiled_3d_lower_llvm")(
             dict(attention_spec, kv_layout=layout), arch=arch)
-        expected_modules = 2 if arch == "gfx950" else 1
-        assert text.count(lower_llvm._datalayout_for_flavor("llvm23")) == expected_modules
+        assert text.count(lower_llvm._datalayout_for_flavor("llvm23")) == 2
         assert ("k_stride_batch_bytes" in text) == (layout == "strided")
 
 # The direct serialized-IR binding also delegates AUTO, but explicit emission
@@ -163,8 +162,8 @@ for lower, spec, arch in cases:
         else:
             raise AssertionError(lower.__name__ + " did not propagate resolver failure")
 
-# A failure in the second gfx950 stage must release its reduce builder too.
-calls = 0
+# A failure in the second (reduce) stage must propagate and release its
+# builder too.
 def fail_reduce():
     global calls
     calls += 1
@@ -173,12 +172,15 @@ def fail_reduce():
     return unavailable()
 
 lower_llvm._resolve_llvm_flavor = fail_reduce
-try:
-    rocke_engine.gfx950_attention_tiled_3d_lower_llvm(attention, arch="gfx950")
-except ComgrError:
-    assert calls == 2
-else:
-    raise AssertionError("reduce resolver failure did not propagate")
+for arch in ("gfx942", "gfx950"):
+    calls = 0
+    try:
+        getattr(rocke_engine, arch + "_attention_tiled_3d_lower_llvm")(
+            attention, arch=arch)
+    except ComgrError:
+        assert calls == 2
+    else:
+        raise AssertionError(arch + " reduce resolver failure did not propagate")
 
 # Keep spec validation ahead of automatic compiler selection.
 lower_llvm._resolve_llvm_flavor = unavailable
