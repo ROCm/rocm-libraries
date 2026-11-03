@@ -6928,9 +6928,9 @@ class Solution(collections.abc.Mapping):
       if _bRotReason is not None:
         reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
         return
-    # Tight layouts pair each component's ping/pong buffers, including persistent kernels.
-    # Persistent kernels that cannot afford the swap-mask SGPRs skip this block and
-    # keep their interleave offsets and buffer swaps; rejecting would drop them.
+    # Tight layouts pair each component's ping/pong buffers when supported. Persistent
+    # kernels retain their existing unpaired interleave if pairing is unavailable;
+    # those that cannot afford the swap-mask SGPRs skip the attempt entirely.
     if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned \
         and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
       _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
@@ -6943,14 +6943,14 @@ class Solution(collections.abc.Mapping):
         state["LDSSegInterleaveOffsets"] = _pairedOffsets
         state["StoreSwapAddr"] = True
         ldsNumBytesAB = _pairedOffsets["pairedUsedBytes"]
-      elif state["LDSSegmentBRotate"] or _segRequested == 1:
-        # Explicit tight interleave and tight B rotation require a valid paired layout.
+      elif state["LDSSegmentBRotate"] or (_segRequested == 1 and not isPersistent(state)):
+        # Non-persistent explicit tight interleave and tight B rotation require pairing.
         _parameter = "LDSSegmentBRotate" if state["LDSSegmentBRotate"] else "LDSSegmentInterleave=1"
         reject(state, printRejectionReason, "%s requires paired LDS placement: %s" % (_parameter, _pairedReason))
         return
-      else:
-        # Pairing failed in auto mode. Keep the ordinary LDS offsets, buffer
-        # swap policy and byte count calculated above.
+      elif not isPersistent(state):
+        # Non-persistent auto mode disables interleave when pairing fails. Persistent
+        # kernels keep the unpaired interleave offsets, swaps and byte count above.
         state["LDSSegmentInterleave"] = 0
     if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
       state["LDSSegInterleaveOffsets"] = {}

@@ -251,6 +251,43 @@ def test_streamk_pairs_unless_mx_with_shadow_init(derive, mode, mx, shadow_init,
         assert sol["LdsNumBytes"] == 235520
 
 
+@pytest.mark.parametrize("mode", [-1, 1])
+@pytest.mark.parametrize("mx", [False, True], ids=["fp8", "mxfp8"])
+@pytest.mark.parametrize("strategy", ["StreamK", "DataParallel"])
+def test_persistent_prefetch_keeps_unpaired_interleave(derive, mode, mx, strategy):
+    # Disable shadow init so MX kernels exercise the pairing attempt too.
+    sol, out = _derive_shipped_streamk(
+        derive, mode, mx, ForceDisableShadowInit=True, PrefetchAcrossPersistent=1,
+        StreamKForceDPOnly=int(strategy == "DataParallel"))
+    assert sol["Valid"], out
+    assert sol["LDSSegmentInterleave"] == 1
+    assert sol["TileProcessingStrategy"] == strategy
+    assert sol["NumLdsBlk"] == 2
+    assert sol["StoreSwapAddr"] is False
+    expected = {
+        "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
+        "bBaseline": True,
+    }
+    if mx:
+        expected.update(ldsBaseMXSA=101376, ldsBaseMXSB=101888)
+    assert sol["LDSSegInterleaveOffsets"] == expected
+    assert sol["LdsNumBytes"] == (235520 if mx else 232448)
+
+
+@pytest.mark.parametrize("mode", [-1, 1])
+def test_persistent_paired_budget_failure_keeps_unpaired_interleave(derive, monkeypatch, mode):
+    import importlib
+    solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
+    # The same persistent geometry can keep its existing layout if pairing exceeds MaxLDS.
+    reference, out = _derive_shipped_streamk(derive, mode, mx=False, PrefetchAcrossPersistent=1)
+    assert reference["Valid"], out
+    monkeypatch.setattr(solution_module, "segPairedOffsets", lambda state: None)
+    sol, out = _derive_shipped_streamk(derive, mode, mx=False)
+    assert sol["Valid"], out
+    assert sol["LDSSegmentInterleave"] == 1
+    assert _lds_configuration(sol) == _lds_configuration(reference)
+
+
 @pytest.mark.parametrize("problem_index", [0, 1, 2], ids=["bf16", "fp8-shared-B", "mxfp8"])
 def test_persistent_yaml_reaches_paired_tail_reset(problem_index):
     from pathlib import Path
@@ -277,11 +314,18 @@ def test_persistent_yaml_reaches_paired_tail_reset(problem_index):
     assert len(emitted) == 4
     for name, source, error in emitted:
         assert error == 0, name
-        assert "Reset to paired ping buffer" in source, name
-        resets = [line for line in source.splitlines()
-                  if "Compute the other paired LDS buffer address" in line]
-        # Scale descriptors swap with their own mask; using the data mask moves them.
-        for line in resets:
-            assert ("sgprtdmMXS" in line) == ("sgprPairedTDMScaleSwap" in line), line
+        instructions = [line.split("//", 1)[0].replace(",", " ").split()
+                        for line in source.splitlines()]
+        instructions = [inst for inst in instructions if inst]
+        resets = [(instructions[i - 1], inst) for i, inst in enumerate(instructions)
+                  if i and inst[0] == "s_min_u32" and inst[1].startswith("s[sgprtdm")]
+        assert resets, name
+        for swap, reset in resets:
+            opcode, tmp, descriptor, mask = swap
+            assert opcode == "s_xor_b32", swap
+            assert reset[1:] == [descriptor, descriptor, tmp], reset
+            is_scale = descriptor.startswith("s[sgprtdmMXS")
+            expected_mask = "PairedTDMScaleSwap" if is_scale else "PairedTDMSwap"
+            assert mask == f"s[sgpr{expected_mask}]", swap
         if problem_index == 2:
-            assert any("sgprPairedTDMScaleSwap" in line for line in resets), name
+            assert any(reset[1].startswith("s[sgprtdmMXS") for _, reset in resets), name
