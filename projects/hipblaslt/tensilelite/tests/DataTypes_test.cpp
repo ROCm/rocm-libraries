@@ -30,6 +30,35 @@
 
 #include <Tensile/DataTypes.hpp>
 
+TEST(DataTypesTest, BFloat16ToFloat)
+{
+    // Decode the sign, exponent and significand independently of the bit-copy conversion.
+    // All encodings are cheap to cover, including subnormals, signed zero and both NaN kinds.
+    for(uint32_t bits = 0; bits <= 0xffff; ++bits)
+    {
+        TensileLite::BFloat16 value;
+        value.data           = static_cast<uint16_t>(bits);
+        const float actual   = static_cast<float>(value);
+        const bool  negative = (bits & 0x8000) != 0;
+        const int   exponent = (bits >> 7) & 0xff;
+        const int   fraction = bits & 0x7f;
+
+        EXPECT_EQ(std::signbit(actual), negative) << bits;
+        if(exponent == 255)
+        {
+            EXPECT_EQ(std::isnan(actual), fraction != 0) << bits;
+            EXPECT_EQ(std::isinf(actual), fraction == 0) << bits;
+        }
+        else
+        {
+            const float magnitude = exponent == 0
+                                        ? std::ldexp(float(fraction), -133)
+                                        : std::ldexp(float(128 + fraction), exponent - 134);
+            EXPECT_EQ(actual, negative ? -magnitude : magnitude) << bits;
+        }
+    }
+}
+
 template <typename Tuple>
 struct TypedDataTypesTest : public ::testing::Test
 {
