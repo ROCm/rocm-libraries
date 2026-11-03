@@ -31,10 +31,9 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
-from ..ir import BF16, F16, F32, I32, I64
-from ..wmma import validate_scaled_wmma_sources, validate_unscaled_wmma
-from ..ir import I32, Op, VectorType
+from ..ir import BF16, F16, F32, I32, I64, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
+from ..wmma import validate_scaled_wmma_sources, validate_unscaled_wmma
 from .wmma_scale import ScaledWmmaLLVM
 
 
@@ -504,7 +503,7 @@ class Gfx11RdnaBackend(ISABackend):
         """
         decl_key, intrinsic, op_vec, acc_vec = spec
         validate_unscaled_wmma(op, I32, acc_vec, source_elem=I32, source_count=op_vec)
-        a, b, c = op.operands
+        c = op.operands[2]
         lowerer._need(decl_key)
         a_arg = lowerer._mma_operand(op, "a", VectorType(I32, op_vec))
         b_arg = lowerer._mma_operand(op, "b", VectorType(I32, op_vec))
@@ -689,7 +688,7 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         """
         decl_key, intrinsic = spec
         validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8)
-        a, b, c = op.operands
+        c = op.operands[2]
         lowerer._need(decl_key)
         a_arg = lowerer._mma_operand(op, "a", VectorType(I32, 8))
         b_arg = lowerer._mma_operand(op, "b", VectorType(I32, 8))
