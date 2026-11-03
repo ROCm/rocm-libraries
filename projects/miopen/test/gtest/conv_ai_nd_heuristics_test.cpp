@@ -934,12 +934,11 @@ TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 // Keras 3 export against a Keras 2-era fdeep). Without this, such a breakage only surfaces
 // indirectly downstream -- and because the runtime now degrades gracefully to the non-AI
 // heuristic on a load failure, it would otherwise be masked in CI. The .tn.model and .ktn.model
-// files are frugally-deep models (immediate-mode heuristics, tuning encoders and decoders) EXCEPT
-// the "*_metadata.tn.model" siblings, which are plain JSON read by MIOpen directly (not by fdeep).
-// Loading also verifies the embedded TensorFlow reference predictions. Pure CPU fdeep load -- the handle is only used to identify the
-// device. An arch that ships no bundled models (e.g. gfx1250) is skipped only when the system db
-// holds no models at all; models present for other archs (a multi-arch install, a dev build tree)
-// are still loaded.
+// files are frugally-deep models EXCEPT the "*_metadata.tn.model" siblings, which are plain JSON
+// read by MIOpen directly (not by fdeep). Pure CPU fdeep load -- the handle is only used to
+// identify the device. An arch that ships no bundled models (e.g. gfx1250) is skipped only when
+// the system db holds no models at all; models present for other archs (a multi-arch install, a
+// dev build tree) are still loaded.
 TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
 {
     const auto db = GetSystemDbPath();
