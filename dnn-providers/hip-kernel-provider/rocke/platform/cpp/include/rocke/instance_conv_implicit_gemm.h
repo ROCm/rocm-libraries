@@ -160,6 +160,29 @@ typedef struct rocke_implicit_gemm_conv_spec
     bool k0_k1_split; /* default false */
     int groups; /* default 1     */
 
+    /* Merged groups: fold `group_merge` conv groups into a single GEMM so the
+     * per-group channel count the vector-width picker sees becomes group_merge
+     * rather than 1. Depthwise only -- see rocke_conv_fwd_group_merge_available
+     * for the full admission rule. Default 1 is inert: every merged-aware site
+     * reduces to the unmerged expression, and no extra IR is emitted, so the
+     * default path stays byte-identical. */
+    int group_merge; /* default 1     */
+
+    /* Split-K forward (WMMA only). split_k > 1 builds the split-K binary, not a
+     * fixed degree: the degree and the slice width arrive as the ks_count / ks
+     * kernargs (as in wgrad), after a ws_ptr / ws_bytes fp32 workspace pair.
+     * Every CTA reduces one slice of the [Z*]Y*X*cpg reduction and stores its
+     * fp32 partial tile into slab `slice` of the [ks_count][M][K] workspace;
+     * Stage 2 (instance_conv_fwd_split_k_reduce.h) folds the slabs into D.
+     * Default 1 emits none of this. Mirrors Python ImplicitGemmConvSpec.split_k. */
+    int split_k; /* default 1     */
+    /* Single-launch split-K through a gfx1250 workgroup cluster (0 = off). The
+     * split_k_cluster slices of one output tile form one (1, 1, S) cluster;
+     * after a cluster barrier each slice folds 1/S of the tile's rows across
+     * the S slabs into D. Requires split_k > 1. Mirrors
+     * ImplicitGemmConvSpec.split_k_cluster. */
+    int split_k_cluster; /* default 0     */
+
     /* #8624 vector-sizes-as-args: per-operand load/store vector widths
      * (elements). has_* false => Python None => auto-select (choose_load_vec /
      * CShuffleEpilogue.from_grid default). When set they override the per-A/B
@@ -211,6 +234,57 @@ int rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(const rocke_implicit_gemm_con
 
 /* spec.mfmas_per_warp_n: tile_n / (warp_n * warp_tile_n). */
 int rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(const rocke_implicit_gemm_conv_spec_t* s);
+
+/* spec.merged_problem: the problem the *tile* covers. Folds `group_merge` conv
+ * groups into one by dividing `groups`, so the merged cpg/kpg become
+ * cpg*Gm / kpg*Gm. Writes through `out` (never NULL). At group_merge <= 1 this
+ * is a plain copy of spec->problem, which is what keeps the default inert.
+ *
+ * Mirrors Python ImplicitGemmConvSpec.merged_problem. Callers hold the result
+ * by value; the conv build ctx stores it once and exposes it as ctx->p_load. */
+void rocke_implicit_gemm_conv_spec_merged_problem(const rocke_implicit_gemm_conv_spec_t* s,
+                                                  rocke_conv_problem_t* out);
+
+/* spec.grid_M / grid_N_gemm / grid_K_gemm / grid_groups -- the merged-aware
+ * launch dims. grid_groups is the conv-group count actually launched
+ * (gridDim.z), i.e. groups / group_merge. Each equals its unmerged counterpart
+ * at group_merge 1. */
+int rocke_implicit_gemm_conv_spec_grid_m(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_implicit_gemm_conv_spec_grid_n_gemm(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_implicit_gemm_conv_spec_grid_k_gemm(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_implicit_gemm_conv_spec_grid_groups(const rocke_implicit_gemm_conv_spec_t* s);
+
+/* The single admission gate for spec.group_merge, called from BOTH
+ * rocke_implicit_gemm_conv_spec_validate and
+ * rocke_implicit_gemm_conv_is_valid_spec so the dispatcher cannot hand the
+ * builder a spec the builder then rejects. Returns true when the degree is
+ * admissible (including the inert default of 1); on false writes the reason.
+ *
+ * Mirrors Python fwd_group_merge_available. `arch` is accepted for signature
+ * parity with the Python gate and is currently unused. */
+bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                          const char* arch,
+                                          char* reason,
+                                          size_t reason_cap);
+
+/* Admission gate for spec.split_k != 1 / spec.split_k_cluster, called from
+ * rocke_implicit_gemm_conv_is_valid_spec after the WMMA gates. `family` is the
+ * MMA family ("wmma" / "mma"); `arch` (NULL = unchecked, Python target=None)
+ * gates the cluster form on workgroup-cluster launch. Returns true when the
+ * split-K forward can be built; on false writes the reason. Mirrors Python
+ * fwd_split_k_reason. */
+bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                      const char* family,
+                                      const char* arch,
+                                      char* reason,
+                                      size_t reason_cap);
+
+/* The cluster split-K forward's problem rule (K and kpg multiples of 4), on
+ * the build problem and on every launched one. Mirrors Python
+ * fwd_split_k_cluster_problem_reason; returns true when `p` can run. */
+bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
+                                               char* reason,
+                                               size_t reason_cap);
 
 /* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). Returns
  * ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */

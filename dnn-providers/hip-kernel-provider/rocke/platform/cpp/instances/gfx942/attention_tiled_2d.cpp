@@ -128,6 +128,8 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.kv_cache_policy = "stream";
     s.use_global_load_lds_k = false;
     s.use_q_major_grid = false;
+    s.use_qblock_reverse = false;
+    s.emit_lse = false;
     return s;
 }
 
@@ -525,8 +527,8 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
-    if(!(rocke_streq(s->kv_cache_policy, "all") || rocke_streq(s->kv_cache_policy, "global")
-         || rocke_streq(s->kv_cache_policy, "stream") || rocke_streq(s->kv_cache_policy, "nt")))
+    rocke_cache_policy_t kv_cache_bits;
+    if(!rocke_cache_policy_from_name(s->kv_cache_policy, &kv_cache_bits))
     {
         rocke_attn2d_set_err(
             b, ROCKE_ERR_VALUE, "kv_cache_policy must be one of {all, global, stream, nt}");

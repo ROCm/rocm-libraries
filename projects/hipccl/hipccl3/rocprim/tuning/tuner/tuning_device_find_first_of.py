@@ -51,12 +51,6 @@ class Tuner(BaseTuner):
         
         return params
 
-    def _get_key_type_name(self) -> str:
-        return "value_type"
-
-    def _get_value_type_name(self):
-        return ""
-
     def _get_restrictions(self, types):
 
         def validate(params):

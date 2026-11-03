@@ -9,7 +9,7 @@ No GPU required -- exercises pure Python logic.
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+from tensilelite.SolutionStructs.Utilities import isSubtileIterateMode
 
 pytestmark = pytest.mark.unit
 

@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Host-only coverage for the shim's public note-filter behavior. The triage is
-// intentionally inline in Graph methods; these tests assert the observable
-// contracts, not helper internals.
+// Host-only coverage for the shim's public note-filter behavior.
 #include "CudnnShimTestSupport.hpp"
 #include "fake_backend/MockBackendFixture.hpp"
 
@@ -17,6 +15,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -25,9 +24,13 @@ namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 using NumNote = fe::NumericalNote_t;
 using BehNote = fe::BehaviorNote_t;
+using hipdnn_shim_test::expectGraphNotSupported;
 
 using ::testing::_;
 using ::testing::AnyNumber;
+
+// A plugin-style engine id with no registered name.
+constexpr int64_t UNREGISTERED_ENGINE_ID = 0x0123456789ABCDEF;
 
 void addPointwiseGraph(fe::graph::Graph& graph)
 {
@@ -48,18 +51,25 @@ protected:
     std::vector<hipdnnBackendDescriptor_t> _executionPlanDescs;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByDesc;
     std::unordered_map<int64_t, std::vector<hipdnnBackendBehaviorNote_t>> _behaviorNotesByEngineId;
-    std::array<int64_t, 2> _rankedEngineIds{10, 20};
+    std::vector<int64_t> _rankedEngineIds{10, 20};
     std::array<char, 16> _engineDescs{};
     size_t _nextEngineDesc = 0;
     size_t _nextEngineIdLookup = 0;
+    // When set, heuristics given a policy order (modes A/B) rank the engines in reverse.
+    bool _policyOrderReversesRanking = false;
+    std::unordered_set<hipdnnBackendDescriptor_t> _policyOrderedHeuristics;
+    std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByConfig;
+    int64_t _lastStampedEngineId = -1;
 
-    void installTwoEnginePlanMocks()
+    void installRankedEnginePlanMocks()
     {
         ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
             .WillByDefault(
                 [this](hipdnnBackendDescriptorType_t type, hipdnnBackendDescriptor_t* desc) {
                     *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(
                         &_fakeDescs[_nextFakeDescIdx++ % _fakeDescs.size()]);
+                    _policyOrderedHeuristics.erase(*desc);
+                    _engineIdsByConfig.erase(*desc);
                     if(type == HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR)
                     {
                         _executionPlanDescs.push_back(*desc);
@@ -77,7 +87,12 @@ protected:
                                   const void* arrayOfElements) {
                 if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX && arrayOfElements != nullptr)
                 {
-                    _engineIdsByDesc[descriptor] = *static_cast<const int64_t*>(arrayOfElements);
+                    _lastStampedEngineId = *static_cast<const int64_t*>(arrayOfElements);
+                    _engineIdsByDesc[descriptor] = _lastStampedEngineId;
+                }
+                if(attribute == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                {
+                    _policyOrderedHeuristics.insert(descriptor);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -91,16 +106,40 @@ protected:
                                   void* arrayOfElements) {
                 if(attribute == HIPDNN_ATTR_ENGINEHEUR_RESULTS)
                 {
+                    // Each ranked-engine pass starts with this count query, so
+                    // restarting here gives every pass the same id order.
+                    if(requestedElementCount == 0)
+                    {
+                        _nextEngineIdLookup = 0;
+                    }
                     if(elementCount != nullptr)
                     {
-                        *elementCount = requestedElementCount == 0 ? 2 : requestedElementCount;
+                        *elementCount = requestedElementCount == 0
+                                            ? static_cast<int64_t>(_rankedEngineIds.size())
+                                            : requestedElementCount;
+                    }
+                    if(_policyOrderReversesRanking && arrayOfElements != nullptr)
+                    {
+                        const bool reversed = _policyOrderedHeuristics.count(descriptor) != 0;
+                        auto* configs = static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements);
+                        const auto filled = std::min(static_cast<size_t>(requestedElementCount),
+                                                     _rankedEngineIds.size());
+                        for(size_t rank = 0; rank < filled; ++rank)
+                        {
+                            _engineIdsByConfig[configs[rank]]
+                                = reversed ? _rankedEngineIds[_rankedEngineIds.size() - 1 - rank]
+                                           : _rankedEngineIds[rank];
+                        }
                     }
                     return HIPDNN_STATUS_SUCCESS;
                 }
                 if(attribute == HIPDNN_ATTR_ENGINECFG_ENGINE)
                 {
+                    const auto ranked = _engineIdsByConfig.find(descriptor);
                     const int64_t engineId
-                        = _rankedEngineIds[_nextEngineIdLookup++ % _rankedEngineIds.size()];
+                        = ranked != _engineIdsByConfig.end()
+                              ? ranked->second
+                              : _rankedEngineIds[_nextEngineIdLookup++ % _rankedEngineIds.size()];
                     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(
                         &_engineDescs[_nextEngineDesc++ % _engineDescs.size()]);
                     _engineIdsByDesc[engineDesc] = engineId;
@@ -142,14 +181,20 @@ protected:
             });
     }
 
-    // The shim maps a candidate plan back to its engine through the engine-name
-    // registry, so tests that exercise plan narrowing need ids that round-trip
-    // through it; the default synthetic ids only resolve to a hex fallback.
+    // Tests that assert a plan by name need registered engines.
     void installRegisteredEnginePlanMocks()
     {
         _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
                             hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID};
-        installTwoEnginePlanMocks();
+        installRankedEnginePlanMocks();
+    }
+
+    void createPlans(fe::graph::Graph& graph)
+    {
+        addPointwiseGraph(graph);
+        ASSERT_TRUE(graph.validate().is_good());
+        ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+        ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
     }
 
     const std::vector<hipdnnBackendBehaviorNote_t>*
@@ -165,16 +210,12 @@ protected:
     }
 };
 
-TEST(TestCudnnShimNoteTriage, DeselectNondeterministicPoisonsValidate)
+TEST(TestCudnnShimNoteTriage, DeselectNondeterministicDoesNotPoisonValidate)
 {
     fe::graph::Graph graph;
     graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
 
-    auto err = graph.validate();
-
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
-    EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+    EXPECT_TRUE(graph.validate().is_good());
 }
 
 TEST(TestCudnnShimNoteTriage, DeselectReducedPrecisionReductionPoisonsValidate)
@@ -182,14 +223,39 @@ TEST(TestCudnnShimNoteTriage, DeselectReducedPrecisionReductionPoisonsValidate)
     fe::graph::Graph graph;
     graph.deselect_numeric_notes({NumNote::REDUCED_PRECISION_REDUCTION});
 
-    auto err = graph.validate();
-
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
-    EXPECT_NE(err.get_message().find("REDUCED_PRECISION_REDUCTION"), std::string::npos);
+    expectGraphNotSupported(graph.validate(), "REDUCED_PRECISION_REDUCTION");
 }
 
-TEST(TestCudnnShimNoteTriage, SelectCorrectnessCriticalNotesLeavesGraphUsable)
+TEST(TestCudnnShimNoteTriage, DeselectDownConvertInputsPoisonsValidate)
+{
+    fe::graph::Graph graph;
+    graph.deselect_numeric_notes({NumNote::DOWN_CONVERT_INPUTS});
+
+    expectGraphNotSupported(graph.validate(), "DOWN_CONVERT_INPUTS");
+}
+
+TEST(TestCudnnShimNoteTriage, SelectStrictNanPropPoisonsValidate)
+{
+    fe::graph::Graph graph;
+    graph.select_numeric_notes({NumNote::STRICT_NAN_PROP});
+
+    expectGraphNotSupported(graph.validate(), "STRICT_NAN_PROP");
+}
+
+TEST(TestCudnnShimNoteTriage, OutOfRangeNumericalNotePoisonsValidate)
+{
+    const auto outOfRange = static_cast<NumNote>(1000);
+
+    fe::graph::Graph selectGraph;
+    selectGraph.select_numeric_notes({outOfRange});
+    expectGraphNotSupported(selectGraph.validate(), "unknown (1000)");
+
+    fe::graph::Graph deselectGraph;
+    deselectGraph.deselect_numeric_notes({outOfRange});
+    expectGraphNotSupported(deselectGraph.validate(), "unknown (1000)");
+}
+
+TEST(TestCudnnShimNoteTriage, SelectDeterminismAndPrecisionNotesLeavesGraphUsable)
 {
     fe::graph::Graph graph;
     graph.select_numeric_notes({NumNote::NONDETERMINISTIC, NumNote::REDUCED_PRECISION_REDUCTION});
@@ -233,14 +299,11 @@ TEST(TestCudnnShimNoteTriage, SelectCudnnOnlyBehaviorNotePoisonsValidate)
     {
         fe::graph::Graph graph;
         EXPECT_EQ(&graph.select_behavior_notes({note}), &graph);
-        auto err = graph.validate();
-
-        EXPECT_TRUE(err.is_bad());
-        EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+        expectGraphNotSupported(graph.validate(), hipdnn_frontend::to_string(note));
     }
 }
 
-TEST(TestCudnnShimNoteTriage, DeselectCudnnOnlyBehaviorNoteIsSafeNoOp)
+TEST(TestCudnnShimNoteTriage, DeselectCudnnOnlyBehaviorNoteWarnsAndLeavesGraphUsable)
 {
     const std::vector<BehNote> notes = {BehNote::REQUIRES_FILTER_INT8x32_REORDER,
                                         BehNote::REQUIRES_BIAS_INT8x32_REORDER,
@@ -277,11 +340,7 @@ TEST(TestCudnnShimNoteTriage, NonzeroSharedMemoryFilterPoisonsValidate)
     fe::graph::Graph graph;
 
     EXPECT_EQ(&graph.deselect_shared_mem_greater_than(1), &graph);
-    auto err = graph.validate();
-
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
-    EXPECT_NE(err.get_message().find("shared-memory metadata"), std::string::npos);
+    expectGraphNotSupported(graph.validate(), "shared-memory metadata");
 }
 
 TEST(TestCudnnShimNoteTriage, EmptyAndNotSetNoteVectorsAreNoOps)
@@ -321,25 +380,21 @@ TEST(TestCudnnShimNoteTriage, FiltersReturnSameGraphForChaining)
 TEST(TestCudnnShimNoteTriage, ErrorNoteAfterAdvisoryNoteStillPoisonsValidate)
 {
     fe::graph::Graph graph;
-    graph.deselect_numeric_notes({NumNote::TENSOR_CORE, NumNote::NONDETERMINISTIC});
+    graph.deselect_numeric_notes({NumNote::TENSOR_CORE, NumNote::REDUCED_PRECISION_REDUCTION});
 
-    auto err = graph.validate();
-
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+    expectGraphNotSupported(graph.validate(), "REDUCED_PRECISION_REDUCTION");
 }
 
 TEST(TestCudnnShimNoteTriage, FirstRecordedNoteErrorWins)
 {
     fe::graph::Graph graph;
-    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
     graph.deselect_numeric_notes({NumNote::REDUCED_PRECISION_REDUCTION});
+    graph.deselect_numeric_notes({NumNote::DOWN_CONVERT_INPUTS});
 
     auto err = graph.validate();
 
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
-    EXPECT_EQ(err.get_message().find("REDUCED_PRECISION_REDUCTION"), std::string::npos);
+    expectGraphNotSupported(err, "REDUCED_PRECISION_REDUCTION");
+    EXPECT_EQ(err.get_message().find("DOWN_CONVERT_INPUTS"), std::string::npos);
 }
 
 TEST(TestCudnnShimNoteTriage, CreateExecutionPlansAcceptsUnhonoredHeurModes)
@@ -361,13 +416,10 @@ TEST(TestCudnnShimNoteTriage, CreateExecutionPlansAcceptsUnhonoredHeurModes)
 TEST(TestCudnnShimNoteTriage, CreateExecutionPlansStillSurfacesRecordedNoteError)
 {
     fe::graph::Graph graph;
-    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
+    graph.deselect_numeric_notes({NumNote::REDUCED_PRECISION_REDUCTION});
 
-    auto err = graph.create_execution_plans({fe::HeurMode_t::A});
-
-    EXPECT_TRUE(err.is_bad());
-    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
-    EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+    expectGraphNotSupported(graph.create_execution_plans({fe::HeurMode_t::A}),
+                            "REDUCED_PRECISION_REDUCTION");
 }
 
 // T-U6 regression: index-based deselect_engines on a Native (unbuilt) graph must
@@ -414,13 +466,10 @@ TEST(TestCudnnShimNoteTriage, DeselectEngineIndicesBeforeBuildDoesNotPoisonNativ
 
 TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationAppliesBeforeBuildAll)
 {
-    installTwoEnginePlanMocks();
+    installRankedEnginePlanMocks();
 
     fe::graph::Graph graph;
-    addPointwiseGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
-    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
     ASSERT_EQ(_executionPlanDescs.size(), 2u);
 
     EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
@@ -450,13 +499,10 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationApp
 
 TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationBarsBuildPlanAtIndex)
 {
-    installTwoEnginePlanMocks();
+    installRankedEnginePlanMocks();
 
     fe::graph::Graph graph;
-    addPointwiseGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
-    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
     ASSERT_EQ(_executionPlanDescs.size(), 2u);
 
     EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
@@ -477,6 +523,53 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationBar
     EXPECT_NE(err.get_message().find("barred"), std::string::npos);
 }
 
+// Every index-taking call resolves an engine index through the same order, whatever
+// heuristic modes created the plans. Under mode A the mock ranks engine 20 before 10,
+// so plan 0 runs engine 20 and plan 1 runs engine 10; index 0 is engine 10 throughout.
+TEST_F(TestCudnnShimNoteTriageBackend, EngineIndicesFollowOneOrderAcrossHeuristicModes)
+{
+    installRankedEnginePlanMocks();
+    _policyOrderReversesRanking = true;
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    int64_t engineCount = 0;
+    ASSERT_TRUE(graph.get_engine_count(engineCount).is_good());
+    EXPECT_EQ(engineCount, 2);
+    std::vector<fe::Knob> knobs;
+    ASSERT_TRUE(graph.get_knobs_for_engine(0, knobs).is_good());
+    EXPECT_EQ(_lastStampedEngineId, 10);
+
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_executionPlanDescs[0],
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .Times(1);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_executionPlanDescs[1],
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .Times(0);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::ALL);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), 0);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
+}
+
 // Regression: create_execution_plans() pins the active plan before the shim's
 // filters run, and native build_plans(HEURISTICS_CHOICE) inspects only that
 // plan — so barring the top-ranked engine used to turn a satisfiable build into
@@ -488,10 +581,7 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnTopEngineNarrowsToS
         = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
 
     fe::graph::Graph graph;
-    addPointwiseGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
-    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
     ASSERT_EQ(_executionPlanDescs.size(), 2u);
 
     EXPECT_EQ(&graph.deselect_behavior_notes({BehNote::RUNTIME_COMPILATION}), &graph);
@@ -516,10 +606,7 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnEveryEngineFailsBui
         = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
 
     fe::graph::Graph graph;
-    addPointwiseGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
-    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
     ASSERT_EQ(_executionPlanDescs.size(), 2u);
 
     EXPECT_EQ(&graph.deselect_behavior_notes({BehNote::RUNTIME_COMPILATION}), &graph);
@@ -528,6 +615,7 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnEveryEngineFailsBui
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_NE(err.get_message().find("behavior notes"), std::string::npos);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
 }
@@ -537,10 +625,7 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectTopEngineIndexNarrowsToSurvivingP
     installRegisteredEnginePlanMocks();
 
     fe::graph::Graph graph;
-    addPointwiseGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
-    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
     ASSERT_EQ(_executionPlanDescs.size(), 2u);
 
     EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
@@ -563,10 +648,7 @@ TEST_F(TestCudnnShimNoteTriageBackend, UnfilteredHeuristicsChoiceBuildsTopRanked
     installRegisteredEnginePlanMocks();
 
     fe::graph::Graph graph;
-    addPointwiseGraph(graph);
-    ASSERT_TRUE(graph.validate().is_good());
-    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
-    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
     ASSERT_EQ(_executionPlanDescs.size(), 2u);
 
     auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
@@ -578,6 +660,173 @@ TEST_F(TestCudnnShimNoteTriageBackend, UnfilteredHeuristicsChoiceBuildsTopRanked
     EXPECT_EQ(planName, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), 0);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectNondeterministicNarrowsToDeterministicEngine)
+{
+    _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                        hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID};
+    installRankedEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    EXPECT_EQ(&graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC}), &graph);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    std::string planName;
+    EXPECT_TRUE(graph.get_plan_name(planName).is_good());
+    EXPECT_EQ(planName, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_NAME);
+}
+
+// Plugin engines resolve to a hex-id plan name, not a registered one; they must
+// still count as barred rather than be picked as the surviving plan.
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectNondeterministicSkipsBarredUnregisteredEngine)
+{
+    ASSERT_EQ(hipdnn_data_sdk::utilities::getEngineIdToNameMap().count(UNREGISTERED_ENGINE_ID), 0u);
+    _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                        UNREGISTERED_ENGINE_ID,
+                        hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID};
+    installRankedEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    ASSERT_EQ(_executionPlanDescs.size(), 3u);
+    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    std::string planName;
+    EXPECT_TRUE(graph.get_plan_name(planName).is_good());
+    EXPECT_EQ(planName, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_NAME);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectNondeterministicBuildAllBuildsOnlyDeterministicPlan)
+{
+    _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                        hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID};
+    installRankedEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::ALL);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), 0);
+}
+
+// Canonical cuDNN order: the filter lands after plan creation and check_support
+// is the first call that must report it, as upstream does.
+TEST_F(TestCudnnShimNoteTriageBackend,
+       DeselectNondeterministicWithoutDeterministicEngineFailsCheckSupport)
+{
+    installRegisteredEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
+
+    auto err = graph.check_support();
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend,
+       DeselectNondeterministicWithoutDeterministicEngineFailsPlanCreation)
+{
+    installRegisteredEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    auto err = graph.create_execution_plans({fe::HeurMode_t::A});
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectedDeterministicEngineLeavesNoDeterministicSurvivor)
+{
+    _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                        hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID};
+    installRankedEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    graph.deselect_engines(
+        std::vector<std::string>{hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_NAME});
+    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+    EXPECT_NE(err.get_message().find("deselect_engines"), std::string::npos);
+}
+
+// create_execution_plan(index) creates one plan; a deterministic engine elsewhere
+// in the ranked list must not count as a survivor for it.
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectNondeterministicOnSingleCreatedPlanFailsCheckSupport)
+{
+    _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                        hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID};
+    installRankedEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(addPointwiseGraph(graph));
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    auto createErr = graph.create_execution_plan(0, {});
+    ASSERT_TRUE(createErr.is_good()) << createErr.get_message();
+    ASSERT_EQ(graph.get_execution_plan_count(), 1);
+    graph.deselect_numeric_notes({NumNote::NONDETERMINISTIC});
+
+    expectGraphNotSupported(graph.check_support(), "NONDETERMINISTIC");
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectEnginesBarringEveryPlanFailsCheckSupport)
+{
+    installRegisteredEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    graph.deselect_engines(
+        std::vector<std::string>{hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME,
+                                 hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME});
+
+    auto err = graph.check_support();
+
+    expectGraphNotSupported(err, "deselect_engines");
+    EXPECT_EQ(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, BehaviorNotesForPlanAtIndexResolvesUnregisteredEngine)
+{
+    ASSERT_EQ(hipdnn_data_sdk::utilities::getEngineIdToNameMap().count(UNREGISTERED_ENGINE_ID), 0u);
+    _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID, UNREGISTERED_ENGINE_ID};
+    _behaviorNotesByEngineId[UNREGISTERED_ENGINE_ID] = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+    installRankedEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+
+    std::vector<BehNote> notes;
+    auto err = graph.get_behavior_notes_for_plan_at_index(1, notes);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(notes, std::vector<BehNote>{BehNote::RUNTIME_COMPILATION});
 }
 
 } // namespace

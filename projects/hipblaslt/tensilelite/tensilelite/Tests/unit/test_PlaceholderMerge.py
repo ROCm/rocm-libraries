@@ -31,7 +31,7 @@ Two invariants must hold together; either alone is insufficient:
 
 Sibling-DeviceNames consistency is the enforcement point in CI: it runs
 unconditionally inside ``TensileLogic --check-all`` via
-``Tensile.TensileLogic.ValidCorpusConsistency.check_corpus_invariants``. The
+``tensilelite.TensileLogic.ValidCorpusConsistency.check_corpus_invariants``. The
 chip-ID-arch-lock check is *not* wired into ``--check-all`` (it guards a
 future source-policy change, not the artifact any one build selects -- see
 ``check_corpus_invariants``'s docstring); its enforcement point is this
@@ -46,9 +46,9 @@ from pathlib import Path
 
 import pytest
 
-from Tensile import SolutionLibrary
-from Tensile.Common.Architectures import supportsChipIdPredicate
-from Tensile.TensileLogic.ValidCorpusConsistency import (
+from tensilelite import SolutionLibrary
+from tensilelite.Common.Architectures import supportsChipIdPredicate
+from tensilelite.TensileLogic.ValidCorpusConsistency import (
     find_chip_id_arch_lock_violations,
     find_sibling_device_names_violations,
 )

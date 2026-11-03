@@ -18,8 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __SPIRV__
-
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_complex.h"
@@ -207,5 +205,3 @@ TEST_P(change_type, short_to_float)
     }
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
-
-#endif

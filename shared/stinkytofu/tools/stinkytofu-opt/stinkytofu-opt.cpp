@@ -131,6 +131,19 @@ std::unique_ptr<Pass> createPassByName(const std::string& passName,
     return nullptr;
 }
 
+// Flags of the removed cap / throttle ds_load pacing and hide-budget prescan. Still accepted,
+// no longer read.
+static bool isRemovedDsPacingFlag(const std::string& a) {
+    for (const char* flag : {"--ds-read-throttle-latency", "--ds-read-throttle-transition-factor",
+                             "--ds-read-throttle-transition-entries", "--ds-read-per-cap",
+                             "--ds-issue-cap-span-cycles", "--ds-issue-cap-mode", "--ds-slot-first",
+                             "--enable-wmma-hide-budget-prescan", "--barrier-half-slack"}) {
+        const std::string f = flag;
+        if (a == f || a.starts_with(f + "=")) return true;
+    }
+    return false;
+}
+
 static void trimWhitespace(std::string& s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
         s.erase(0, 1);
@@ -186,16 +199,22 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-issue-cap-mode=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
-                arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-queue-depth=") ||
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
+                arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
+                arg == "--ds-spread" || arg == "--no-ds-spread" ||
+                arg.starts_with("--barrier-half-slack=") ||
+                arg.starts_with("--wmma-barrier-cover-cycles=") ||
+                arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
+                arg.starts_with("--ds-read-cycles-per-load=") ||
+                arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
                 arg == "--enable-wmma-hide-budget-prescan" ||
                 arg == "--enable-esm2-track-valu-vsrc" ||
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
-                arg.starts_with("--prefetch-lead-wmmas=") ||
+                arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
@@ -327,6 +346,12 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
+        std::cerr << "                   May carry target ID qualifiers (xnack+, xnack-,\n";
+        std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
+        std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
+        std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
+        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
@@ -389,6 +414,12 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
+        std::cerr << "                   May carry target ID qualifiers (xnack+, xnack-,\n";
+        std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
+        std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
+        std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
+        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
@@ -434,6 +465,8 @@ int main(int argc, char** argv) {
     // triple-based getGfxArchID() first-matches v1. When the user names a stepping, resolve the
     // GfxArchID by identity instead. Empty => no name given, keep the legacy triple behavior.
     std::string resolvedArchName;
+    // Set by a `:xnack-` qualifier on --arch; see the target ID split below.
+    bool xnackReplayOff = false;
     int irFileIdx = 1;
     int passStartIdx = 2;
 
@@ -447,6 +480,41 @@ int main(int argc, char** argv) {
         }
 
         std::string archStr = argv[2];
+        // A target ID may carry qualifiers (gfx1250:xnack-), spelled as TensileLite and the
+        // hipBLASLt/hipSPARSELt builds spell them. A qualifier names a driver configuration, not
+        // a different architecture, so split it off before resolving the arch and let it stand in
+        // for the rocisa archCaps only TensileLite can supply. An unrecognized qualifier is an
+        // error rather than ignored: a typo that quietly left replay protection on would look
+        // exactly like a successful run.
+        const std::string archSpec = archStr;
+        if (const auto colon = archStr.find(':'); colon != std::string::npos) {
+            std::stringstream qualifiers(archStr.substr(colon + 1));
+            archStr = archStr.substr(0, colon);
+            std::string qualifier;
+            // A target ID settles each feature once. Seeing one twice means the
+            // spec contradicts itself (gfx1250:xnack-:xnack+) or repeats itself,
+            // and first-one-wins would quietly pick a replay mode for a spec that
+            // never named one -- the same silent-wrong-answer an unknown
+            // qualifier is rejected to avoid.
+            bool sawXnack = false, sawSramecc = false;
+            while (std::getline(qualifiers, qualifier, ':')) {
+                const bool isXnack = qualifier == "xnack+" || qualifier == "xnack-";
+                const bool isSramecc = qualifier == "sramecc+" || qualifier == "sramecc-";
+                if (!isXnack && !isSramecc) {
+                    std::cerr << "Error: Unknown target ID qualifier '" << qualifier << "' in '"
+                              << archSpec << "'. Supported: xnack+, xnack-, sramecc+, sramecc-\n";
+                    return 1;
+                }
+                if ((isXnack && sawXnack) || (isSramecc && sawSramecc)) {
+                    std::cerr << "Error: Repeated target ID qualifier '" << qualifier << "' in '"
+                              << archSpec << "'; a target ID names each feature at most once.\n";
+                    return 1;
+                }
+                sawXnack = sawXnack || isXnack;
+                sawSramecc = sawSramecc || isSramecc;
+                if (qualifier == "xnack-") xnackReplayOff = true;
+            }
+        }
         // Resolve by concrete identity name first so a stepping variant sharing a triple
         // (e.g. gfx1250v0) is selectable at runtime. getArchInfo(name) returns nullptr on a name
         // not registered as an identity in this build (no assert), so a plain triple spelling
@@ -457,13 +525,13 @@ int main(int argc, char** argv) {
                     static_cast<int>(namedInfo->stepping)};
             resolvedArchName = archStr;
         } else if (!BackendRegistry::parseArchKey(archStr, arch)) {
-            std::cerr << "Error: Invalid architecture format '" << archStr
+            std::cerr << "Error: Invalid architecture format '" << archSpec
                       << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
             return 1;
         }
 
         if (!BackendRegistry::getArchPipeline(arch)) {
-            std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
+            std::cerr << "Error: Unsupported architecture '" << archSpec << "'\n";
             std::cerr << "Supported architectures:";
             for (const auto& key : BackendRegistry::getRegisteredArchKeys())
                 std::cerr << " " << key;
@@ -473,7 +541,7 @@ int main(int argc, char** argv) {
 
         irFileIdx = 3;
         passStartIdx = 4;
-        std::cout << "Target architecture: " << archStr << "\n";
+        std::cout << "Target architecture: " << archSpec << "\n";
     }
 
     std::string filename = argv[irFileIdx];
@@ -526,70 +594,65 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadQueueDepth = std::stoi(a.substr(22));
         } else if (a.starts_with("--ds-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
-        } else if (a.starts_with("--ds-read-throttle-latency=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
-        } else if (a.starts_with("--ds-read-throttle-transition-factor=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
-                std::stod(a.substr(std::string("--ds-read-throttle-transition-factor=").size()));
-        } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
-                std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
-        } else if (a.starts_with("--ds-read-per-cap=")) {
-            // Length taken from the flag rather than hardcoded: the literal 19
-            // here was the length of the old --ds-read-per-cap=, and renaming
-            // the flag to an 18-character one silently made this parse the '='.
-            passFeatureConfig.dagFeatures.dsReadPerCap =
-                std::stoi(a.substr(std::string("--ds-read-per-cap=").size()));
-        } else if (a.starts_with("--ds-issue-cap-span-cycles=")) {
-            // The other half of the rule (4) cap: the ceiling is
-            // dsReadPerCap ds_loads per this many cycles. Neither number means
-            // anything alone, so both are reachable from the CLI.
-            passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
-                std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
-        } else if (a.starts_with("--ds-issue-cap-mode=")) {
-            const std::string val = a.substr(std::string("--ds-issue-cap-mode=").size());
-            if (val == "sliding")
-                passFeatureConfig.dagFeatures.dsIssueCapMode =
-                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Sliding;
-            else if (val == "periodic")
-                passFeatureConfig.dagFeatures.dsIssueCapMode =
-                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Periodic;
-            else {
-                std::cerr << "error: --ds-issue-cap-mode must be sliding or periodic\n";
-                return 1;
-            }
+        } else if (isRemovedDsPacingFlag(a)) {
+            std::cerr << "warning: " << a.substr(0, a.find('=')) << " was removed with the legacy "
+                      << "ds_load pacing and is ignored\n";
         } else if (a.starts_with("--tensor-load-wmma-space=")) {
             passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
-        } else if (a.starts_with("--barrier-half-slack=")) {
-            passFeatureConfig.dagFeatures.barrierHalfSlack =
-                std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
         } else if (a.starts_with("--wmma-queue-depth=")) {
             passFeatureConfig.dagFeatures.wmmaQueueDepth =
                 std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
+        } else if (a == "--wmma-barrier-cover-cycles" ||
+                   a.starts_with("--wmma-barrier-cover-cycles=")) {
+            std::cerr << "warning: --wmma-barrier-cover-cycles was removed; a barrier issues "
+                      << "when its threshold is met, and the flag is ignored\n";
+        } else if (a == "--ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = true;
+        } else if (a == "--no-ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = false;
+        } else if (a.starts_with("--ds-batch-wmmas=")) {
+            passFeatureConfig.dagFeatures.dsBatchWmmas =
+                std::stoi(a.substr(std::string("--ds-batch-wmmas=").size()));
+        } else if (a.starts_with("--ds-catch-up-pace=")) {
+            passFeatureConfig.dagFeatures.dsCatchUpPace =
+                std::stoi(a.substr(std::string("--ds-catch-up-pace=").size()));
+        } else if (a.starts_with("--ds-read-cycles-per-load=")) {
+            passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
+                std::stoi(a.substr(std::string("--ds-read-cycles-per-load=").size()));
+        } else if (a.starts_with("--wmma-refill-mode=")) {
+            const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
+            passFeatureConfig.dagFeatures.wmmaRefillMode =
+                (v == "dynamic" || v == "1")
+                    ? stinkytofu::PassFeatureConfig::WmmaRefillMode::Dynamic
+                    : stinkytofu::PassFeatureConfig::WmmaRefillMode::Fixed;
+        } else if (a.starts_with("--wmma-batch-size=")) {
+            passFeatureConfig.dagFeatures.wmmaBatchSize =
+                std::max(1, std::stoi(a.substr(std::string("--wmma-batch-size=").size())));
+        } else if (a.starts_with("--wmma-refill-to-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaRefillToCycles =
+                std::stoi(a.substr(std::string("--wmma-refill-to-cycles=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
-        } else if (a == "--enable-wmma-hide-budget-prescan") {
-            passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
         } else if (a == "--enable-esm2-track-valu-vsrc") {
             passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
         } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
             passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
+        } else if (a == "--wait-alu-scoreboard") {
+            passFeatureConfig.dagFeatures.waitAluScoreboard = true;
         } else if (a.starts_with("--prefetch-lead-wmmas=")) {
             passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
         } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {
             passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
         } else if (a.starts_with("--war-gate-wmmas=")) {
             passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
-        } else if (a == "--ds-slot-first") {
-            passFeatureConfig.dagFeatures.dsSlotFirst = true;
         } else if (a.starts_with("--merge-barrier-threshold=")) {
             passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
@@ -874,6 +937,16 @@ int main(int argc, char** argv) {
             moduleOpts.NumGRM = gemmTileConfig.NumGRM;
             moduleOpts.WaveGroup0 = static_cast<int>(gemmTileConfig.NumWaves);
             moduleOpts.WaveGroup1 = 1;
+            // Stand in for rocisa's archCaps, as the individual-pass branch below
+            // does. ModuleOptions zero-initialises, so leaving these unset is not
+            // "unknown" but an explicit no: pipeline mode would report gfx1250 as
+            // having neither XNACK replay nor the volatile-VMEM requirement, and
+            // every pass that drains on those would go quiet. Both branches have
+            // to answer alike, or -O<N> and the same passes named individually
+            // optimise two different machines.
+            const bool isGfx1250 = arch == std::array<int, 3>{12, 5, 0};
+            moduleOpts.RequiresXCntForVolatileVMEM = isGfx1250;
+            moduleOpts.EnableXnackReplay = isGfx1250 && !xnackReplayOff;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -917,7 +990,7 @@ int main(int argc, char** argv) {
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
             caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
-            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
+            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0} && !xnackReplayOff;
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 

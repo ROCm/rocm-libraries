@@ -53,7 +53,7 @@ namespace stinkytofu {
 /// over one physical register would be unsound.
 inline constexpr std::array<RegType, 2> kLiftableRegClasses{RegType::V, RegType::S};
 
-inline bool isLiftableRegClass(RegType type) {
+inline constexpr bool isLiftableRegClass(RegType type) {
     for (RegType liftable : kLiftableRegClasses) {
         if (type == liftable) return true;
     }
@@ -74,14 +74,14 @@ class RegClassSet {
    public:
     /// Every class the lifter can model. The default for a lift, so a caller that
     /// does not care sees the behaviour that predates scoping.
-    static RegClassSet all() {
+    static constexpr RegClassSet all() {
         RegClassSet classes;
         for (RegType type : kLiftableRegClasses) classes.add(type);
         return classes;
     }
 
     /// A default-constructed value is the empty set, which lifting rejects.
-    static RegClassSet only(RegType type) {
+    static constexpr RegClassSet only(RegType type) {
         RegClassSet classes;
         classes.add(type);
         return classes;
@@ -90,7 +90,7 @@ class RegClassSet {
     /// Adds \p type when lifting can model it and ignores it otherwise, so the
     /// set is always a subset of the capability and no other method has to
     /// re-check.
-    RegClassSet& add(RegType type) {
+    constexpr RegClassSet& add(RegType type) {
         if (isLiftableRegClass(type)) mask_ |= bitFor(type);
         return *this;
     }
@@ -122,7 +122,7 @@ class RegClassSet {
     }
 
    private:
-    static uint32_t bitFor(RegType type) {
+    static constexpr uint32_t bitFor(RegType type) {
         return 1u << static_cast<unsigned>(type);
     }
 

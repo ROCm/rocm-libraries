@@ -36,7 +36,7 @@ def test_attention_strided_kv_golden(flavor):
             str(tests.parent),
         ]
     )
-    assert set(golden[flavor]) == {str(i) for i in range(12)}
+    assert set(golden[flavor]) == {str(i) for i in range(14)}
     for idx, expected in golden[flavor].items():
         data = subprocess.check_output(
             [
@@ -295,9 +295,14 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     assert (selected.kernel_spec, selected.reduce_spec) == (segment, reduce)
     assert segment.waves_per_eu is None
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
-    paged = au._tiled_3d_spec_from_problem(problem)
+    paged = au._tiled_3d_spec_from_problem(problem, arch)
     assert segment == replace(
-        paged, kv_layout="strided", use_wide_kv_load=False, use_i64_kv_addr=False
+        paged,
+        kv_layout="strided",
+        use_wide_kv_load=False,
+        use_i64_kv_addr=False,
+        use_kv_lds_swizzle=False,
+        use_wave_page_id_load=False,
     )
     explicit, explicit_reduce = au._strided_3d_specs_from_problem(
         replace(problem, waves_per_eu=3), arch=arch
@@ -306,45 +311,215 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_strided_selection_ignores_hoist_environment(arch, monkeypatch):
-    from dispatch.attention import dispatch_attention
+def test_strided_dispatch_follows_the_kernel_gate(arch):
+    """Head size and GQA ratio are the kernel's decision: dispatch admits a
+    shape exactly when the strided runner's own 3D gate does."""
     from dispatch.attention.common import _problem
+    from dispatch.attention.strided_decode import make_candidate
     from kernels.common import attention_unified as au
 
-    req = _strided_request(arch)
-    problem = _problem(req)
-    monkeypatch.delenv("HIPDNN_GFX942_3D_HOIST", raising=False)
-    expected = dispatch_attention(req).spec
-    for value in ("0", "1"):
-        monkeypatch.setenv("HIPDNN_GFX942_3D_HOIST", value)
-        selected = dispatch_attention(req).spec
-        assert selected == expected
-        assert not selected.kernel_spec.use_invariant_hoist
-        assert au._strided_3d_specs_from_problem(problem, arch=arch) == (
-            expected.kernel_spec,
-            expected.reduce_spec,
-        )
-    # Explicit tuning retains the existing knob.
-    explicit = replace(
-        expected, kernel_spec=replace(expected.kernel_spec, use_invariant_hoist=True)
-    )
-    au._validate_strided_3d_spec(problem, explicit)
+    candidate = make_candidate()
+    for ratio in (*range(1, 17), 32):
+        for head_size in (64, 96, 128, 192, 256):
+            req = replace(
+                _strided_request(arch),
+                nhead_q=2 * ratio,
+                hdim_q=head_size,
+                hdim_v=head_size,
+            )
+            ok, why = au._explicit_path_supported(_problem(req), None, "3d", arch)
+            assert candidate.admits(req) == (ok, "supported" if ok else why), (
+                ratio,
+                head_size,
+            )
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_strided_spec_policy_rejects_conflicting_clamp_arch(arch):
+@pytest.mark.parametrize(
+    "changes",
+    [
+        dict(nhead_q=10),
+        dict(nhead_q=12),
+        dict(nhead_q=24),
+        dict(hdim_q=192, hdim_v=192),
+    ],
+)
+def test_strided_dispatch_admits_what_the_kernel_gate_admits(
+    arch, changes, monkeypatch
+):
+    """GQA 5/6/12 and D192 reach the strided kernel through dispatch as soon
+    as the kernel gate admits them; dispatch keeps no list of its own."""
+    from dispatch.attention import dispatch_attention
+    from dispatch.attention import strided_decode
+
+    req = replace(_strided_request(arch), **changes)
+    monkeypatch.setattr(
+        strided_decode, "_explicit_path_supported", lambda *a: (True, "kernel ok")
+    )
+    result = dispatch_attention(req)
+    assert result.candidate.name == "attention_strided_decode"
+    segment = result.spec.kernel_spec
+    assert segment.kv_layout == "strided"
+    assert segment.head_size == req.hdim_q
+    assert segment.num_query_heads == req.nhead_q
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_strided_dispatch_rejects_what_the_kernel_gate_rejects(arch, monkeypatch):
+    from dispatch.attention import dispatch_attention
+    from dispatch.attention import strided_decode
+
+    req = _strided_request(arch)
+    gate_calls = []
+
+    def gate(problem, tuning_spec, kind, gate_arch):
+        gate_calls.append((tuning_spec, kind, gate_arch))
+        return False, "kernel declines this shape"
+
+    monkeypatch.setattr(strided_decode, "_explicit_path_supported", gate)
+    assert strided_decode.make_candidate().admits(req) == (
+        False,
+        "kernel declines this shape",
+    )
+    assert gate_calls == [(None, "3d", arch)]
+    with pytest.raises(ValueError):
+        dispatch_attention(req)
+
+
+def _dense_decode_request(arch, **changes):
+    return replace(_strided_request(arch), kv_layout="paged", layout="dense", **changes)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("tensor_layout", ["auto", "bshd", "bhsd"])
+@pytest.mark.parametrize("mask", [0, 2])
+def test_dense_decode_dispatches_to_strided(arch, tensor_layout, mask):
+    """A single-row contiguous request takes the strided decode kernel with
+    the spec a ``kv_layout='strided'`` request of the same shape gets."""
+    from dispatch.attention import (
+        attention_candidates,
+        attention_execution_candidates,
+        dispatch_attention,
+    )
+
+    req = _dense_decode_request(arch, tensor_layout=tensor_layout, mask_type=mask)
+    result = dispatch_attention(req)
+    assert result.candidate.name == "attention_strided_decode"
+    strided = dispatch_attention(replace(_strided_request(arch), mask_type=mask))
+    assert result.spec == strided.spec
+    assert result.spec.kernel_spec.kv_layout == "strided"
+    for candidates in (attention_candidates(), attention_execution_candidates()):
+        assert [c.name for c in candidates if c.admits(req)[0]] == [
+            "attention_strided_decode"
+        ]
+    replay = dispatch_attention(result.request)
+    assert replay.candidate is result.candidate
+    assert replay.spec == result.spec
+    assert replay.kernel_id == result.kernel_id
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_dense_decode_route_keeps_strided_limits(arch):
+    from dispatch.attention.strided_decode import make_candidate
+
+    candidate = make_candidate()
+    req = _dense_decode_request(arch)
+    assert candidate.admits(req)[0]
+    for changes in (
+        dict(seqlen_q=2),
+        dict(mask_type=1),
+        dict(use_sinks=True),
+        dict(use_fp8=True),
+        dict(layout="paged"),
+        dict(layout="ragged"),
+        dict(arch="gfx1250"),
+    ):
+        assert not candidate.admits(replace(req, **changes))[0], changes
+    # Without the contiguous layout a paged request stays on the paged kernels.
+    assert not candidate.admits(replace(req, layout="auto"))[0]
+
+
+def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, dim=128):
+    import torch
+
+    def make(heads, rows):
+        shape = (
+            (batch, rows, heads, dim) if order == "bshd" else (batch, heads, rows, dim)
+        )
+        return torch.zeros(shape, dtype=torch.bfloat16)
+
+    return {
+        "q": make(heads_q, 1),
+        "k": make(heads_k, seqlen),
+        "v": make(heads_k, seqlen),
+        "out": make(heads_q, 1),
+    }
+
+
+@pytest.mark.parametrize("order", ["bshd", "bhsd"])
+def test_dense_decode_binding_passes_strided_views(order, monkeypatch):
+    import torch
+
+    from dispatch.attention import dispatch_attention
+    from kernels.common import attention_unified as au
+
+    req = _dense_decode_request("gfx950", tensor_layout=order)
+    result = dispatch_attention(req)
+    tensors = _dense_decode_tensors(order)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    binding = result.candidate.bind_torch(result.request, result.spec, tensors)
+    binding.launch()
+    (call,) = calls
+    assert call["kv_layout"] == "strided"
+    assert call["block_table"] is None
+    assert call["tuning_spec"] == result.spec
+    for name in ("q", "out"):
+        assert tuple(call[name].shape) == (3, 8, 128)
+        assert call[name].data_ptr() == tensors[name].data_ptr()
+    for name in ("k", "v"):
+        view = call[name]
+        assert tuple(view.shape) == (3, 2, 65, 128)
+        assert view.data_ptr() == tensors[name].data_ptr()
+        expected = tensors[name].transpose(1, 2) if order == "bshd" else tensors[name]
+        assert view.stride() == expected.stride()
+    assert call["cu_seqlens_q"].dtype == torch.int32
+    assert call["cu_seqlens_q"].tolist() == [0, 1, 2, 3]
+    assert call["seqused_k"].dtype == torch.int32
+    assert call["seqused_k"].tolist() == [65, 65, 65]
+
+
+@pytest.mark.parametrize(
+    "mutate, match",
+    [
+        (lambda t: t.pop("v"), "missing attention tensors: v"),
+        (lambda t: t.update(seqused_k=t["q"]), "unsupported dense decode tensors"),
+        (lambda t: t.update(k=t["k"][:, :64]), "k must have BSHD shape"),
+        (lambda t: t.update(out=t["out"][:2]), "out must have the shape of q"),
+        (lambda t: t.update(q=t["q"][:, :, :4]), "q shape must be"),
+    ],
+)
+def test_dense_decode_binding_rejects_bad_tensors(mutate, match):
+    from dispatch.attention import dispatch_attention
+
+    req = _dense_decode_request("gfx950", tensor_layout="bshd")
+    result = dispatch_attention(req)
+    tensors = _dense_decode_tensors("bshd")
+    mutate(tensors)
+    with pytest.raises(ValueError, match=match):
+        result.candidate.bind_torch(result.request, result.spec, tensors)
+
+
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
+def test_strided_spec_policy_rejects_other_arches(arch):
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au
 
-    problem = _problem(_strided_request(arch))
-    expected = au._strided_3d_specs_from_problem(problem, arch=arch)
-    assert (
-        au._strided_3d_specs_from_problem(replace(problem, clamp_arch=None), arch=arch)
-        == expected
-    )
-    other = "gfx950" if arch == "gfx942" else "gfx942"
-    with pytest.raises(ValueError, match="clamp_arch.*conflicts"):
-        au._strided_3d_specs_from_problem(replace(problem, clamp_arch=other), arch=arch)
+    problem = _problem(_strided_request("gfx942"))
+    with pytest.raises(ValueError, match="targets gfx942/gfx950"):
+        au._strided_3d_specs_from_problem(problem, arch=arch)
 
 
 @pytest.fixture
@@ -506,6 +681,46 @@ def test_strided_runtime_rejects_ignored_scaling(
         )
 
 
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
+def test_strided_runtime_rejects_other_launch_arches(
+    strided_binding_case, monkeypatch, arch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    with pytest.raises(ValueError, match="targets gfx942/gfx950"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            kv_layout="strided",
+        )
+
+
+@pytest.mark.parametrize(
+    "spec_arch,live_arch", [("gfx942", "gfx950"), ("gfx950", "gfx942")]
+)
+def test_strided_runtime_rejects_spec_arch_mismatch(
+    strided_binding_case, monkeypatch, spec_arch, live_arch
+):
+    from kernels.common import attention_unified as au
+
+    _, result, tensors = strided_binding_case
+    spec = replace(result.spec, arch=spec_arch)
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: live_arch)
+    with pytest.raises(ValueError, match="tuning spec targets"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            tuning_spec=spec,
+            kv_layout="strided",
+        )
+
+
 @pytest.mark.parametrize("missing", ["kv_layout", "kv_storage_dtype"])
 def test_strided_runtime_rejects_missing_semantic_field(
     strided_binding_case, monkeypatch, missing
@@ -549,7 +764,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     factory = (
         au._tiled_3d_spec_from_problem if path == "3d" else au._tiled_spec_from_problem
     )
-    kernel = factory(problem)
+    kernel = factory(problem, arch)
     assert not hasattr(kernel, "kv_layout")
     spec = AttentionTuningSpec(
         path=path,
@@ -563,7 +778,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     )
     calls = []
 
-    def stop_before_launch(problem, tuning_spec, kind):
+    def stop_before_launch(problem, tuning_spec, kind, arch):
         calls.append((tuning_spec.kernel_spec, kind))
         return False, "paged contract reached"
 
@@ -585,23 +800,3 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
             tuning_spec=spec,
         )
     assert calls == [(kernel, path)]
-
-
-@pytest.mark.parametrize("explicit", [False, True])
-def test_strided_runtime_rejects_conflicting_clamp_arch(
-    strided_binding_case, monkeypatch, explicit
-):
-    from kernels.common import attention_unified as au
-
-    _, result, tensors = strided_binding_case
-    tensors = dict(tensors, problem=replace(tensors["problem"], clamp_arch="gfx950"))
-    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
-    with pytest.raises(ValueError, match="clamp_arch.*conflicts"):
-        au.run_unified_attention_torch(
-            **tensors,
-            block_table=None,
-            softmax_scale=0.125,
-            softcap=0,
-            tuning_spec=result.spec if explicit else None,
-            kv_layout="strided",
-        )

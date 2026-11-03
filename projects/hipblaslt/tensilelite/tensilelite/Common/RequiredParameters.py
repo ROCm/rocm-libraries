@@ -66,6 +66,10 @@ def getRequiredParametersMin() -> set:
         'ISA',
         'InitCIterWmma',
         'InnerUnroll',
+        # InterleaveAlpha=2 defers the alpha multiply into the per-element pack, so it
+        # produces different assembly than 0/1. It must be in the kernel name, otherwise
+        # 0 and 2 kernels collide and one is dropped as a duplicate (see Naming._getName).
+        'InterleaveAlpha',
         'Kernel',
         'LdsBlockSizePerPadA',
         'LdsBlockSizePerPadB',
@@ -77,6 +81,7 @@ def getRequiredParametersMin() -> set:
         'LdsPadMetadata',
         'LdsPadMXSA',
         'LdsPadMXSB',
+        'LDSSegmentBRotate',
         'LDSSegmentInterleave',
         'LDSTrInst',
         'LocalReadVectorWidth',
@@ -109,6 +114,7 @@ def getRequiredParametersMin() -> set:
         'NumLoadsCoalescedA',
         'NumLoadsCoalescedB',
         'OptNoLoadLoop',
+        'PostLoopStoreInNll',
         'PrefetchAcrossPersistent',
         'PrefetchGlobalRead',
         'PrefetchGlobalReadA',
@@ -144,6 +150,7 @@ def getRequiredParametersMin() -> set:
         "MXScaleFormat",
         "MXLoadInst",
         'SwInstructionPrefetch',
+        'StinkyTofuRegisterAllocation',
         'HalfPLR',
         'TemporalHint',
         'TemporalHintA',
@@ -175,4 +182,5 @@ def getRequiredParametersMin() -> set:
         'UsePLRPack',
         'UseSubtileImpl',
         'ClusterDim',
+        'ClusterAIDMapping',
     })

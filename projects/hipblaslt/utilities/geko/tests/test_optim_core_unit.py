@@ -56,7 +56,7 @@ def test_run_validates_inputs_and_empty_configs(monkeypatch: pytest.MonkeyPatch,
     with pytest.raises(ValueError, match="n_slots must be >= 1"):
         ocore.run(hip, tmp_path, n_slots=0)
 
-    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p: [])
+    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p, *_a: [])
     called = {"build": False}
     monkeypatch.setattr(ocore, "build_tensilelite_client", lambda *_a, **_k: called.__setitem__("build", True))
     ocore.run(hip, tmp_path)
@@ -95,7 +95,7 @@ def test_run_passes_gpu_targets_from_configs(monkeypatch: pytest.MonkeyPatch, tm
     cfg = tuning / "job_1.yaml"
     cfg.write_text("LibraryLogic:\n  ArchitectureName: gfx950\n", encoding="utf-8")
 
-    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p: [str(cfg)])
+    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p, *_a: [str(cfg)])
 
     captured = {}
 
@@ -129,7 +129,7 @@ def test_run_worker_flow_updates_config_and_timing(monkeypatch: pytest.MonkeyPat
     cfg = tuning / "job_1.yaml"
     cfg.write_text("Device: 0\n", encoding="utf-8")
 
-    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p: [str(cfg)])
+    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p, *_a: [str(cfg)])
     monkeypatch.setattr(ocore, "build_tensilelite_client", lambda *_a, **_k: None)
     monkeypatch.setattr(ocore, "parse_devices", lambda d: list(d))
     state = {"n": 0}
@@ -152,7 +152,7 @@ def test_run_worker_flow_updates_config_and_timing(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(ocore.subprocess, "Popen", lambda *a, **k: _Proc())
 
     class _Runner:
-        def __init__(self, items, worker_impl, devices, n_slots, estimate_workload_fn, job_logger_fn):
+        def __init__(self, items, worker_impl, devices, n_slots, estimate_workload_fn, job_logger_fn, **_kw):
             self.items = items
             self.worker_impl = worker_impl
             self.device = devices[0]
@@ -291,7 +291,7 @@ def test_run_worker_resumable_no_retry_skips_subprocess(
     cfg = tuning / "job_2.yaml"
     cfg.write_text("Device: 0\n", encoding="utf-8")
 
-    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p: [str(cfg)])
+    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p, *_a: [str(cfg)])
     monkeypatch.setattr(ocore, "build_tensilelite_client", lambda *_a, **_k: None)
     monkeypatch.setattr(ocore, "parse_devices", lambda d: list(d))
     monkeypatch.setattr(ocore, "get_build_state", lambda _p: "resumable")
@@ -303,7 +303,7 @@ def test_run_worker_resumable_no_retry_skips_subprocess(
     monkeypatch.setattr(ocore.subprocess, "Popen", lambda *a, **k: called.__setitem__("popen", called["popen"] + 1))
 
     class _Runner:
-        def __init__(self, items, worker_impl, devices, n_slots, estimate_workload_fn, job_logger_fn):
+        def __init__(self, items, worker_impl, devices, n_slots, estimate_workload_fn, job_logger_fn, **_kw):
             self.items = items
             self.worker_impl = worker_impl
             self.device = devices[0]
@@ -335,7 +335,7 @@ def test_run_worker_running_state_and_nonzero_subprocess(
     build_dir.mkdir()
     (build_dir / ".running").write_text("device=0\nslot=0\n", encoding="utf-8")
 
-    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p: [str(cfg)])
+    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p, *_a: [str(cfg)])
     monkeypatch.setattr(ocore, "build_tensilelite_client", lambda *_a, **_k: None)
     monkeypatch.setattr(ocore, "parse_devices", lambda d: list(d))
 
@@ -353,7 +353,7 @@ def test_run_worker_running_state_and_nonzero_subprocess(
     monkeypatch.setattr(ocore.subprocess, "Popen", lambda *a, **k: _Proc())
 
     class _Runner:
-        def __init__(self, items, worker_impl, devices, n_slots, estimate_workload_fn, job_logger_fn):
+        def __init__(self, items, worker_impl, devices, n_slots, estimate_workload_fn, job_logger_fn, **_kw):
             self.items = items
             self.worker_impl = worker_impl
             self.device = devices[0]

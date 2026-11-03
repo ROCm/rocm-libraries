@@ -14,6 +14,7 @@ import jinja2
 
 log = logging.getLogger("confgen.generate")
 
+MERGE_SORT_BLOCK_MERGE_MAX_MERGEPATH_ITEMS = 1024
 
 def annotate_type(type_id, type_name):
     """Creates annotations for types to simplify jinja templating."""
@@ -174,6 +175,18 @@ def main():
             filter_dif = len(data["cache"]) - len(data_filter)
             if filter_dif > 0:
                 log.warning(f"Skipping failed compilations: {filter_dif}")
+
+            
+            if data['algo_name'] == 'device_merge_sort_block_merge':
+                temp = [c for c in data_filter if int(c['block_size_x']) * int(c['ipt']) <= MERGE_SORT_BLOCK_MERGE_MAX_MERGEPATH_ITEMS]
+                if len(temp) < len(data_filter):
+                     log.info( f"Dropped {len(data_filter) - len(temp)} constraint-violating configs: {file_path}")
+                data_filter = temp
+
+            if not data_filter:
+                log.warning(f"No valid configs left, skipping: {file_path}")
+                continue
+
             # Find best config
             config_data = min(data_filter, key=lambda c: c["time"])
             # Drop unrelated entries
@@ -204,6 +217,7 @@ def main():
 
             # Add config entry
             algs[alg][target_hash][type_hash] = config
+
     log.info(f"Parsed {len(algs)} different algorithm(s)!")
 
     script_dir = pathlib.Path(__file__).parent.absolute()
@@ -246,7 +260,6 @@ def main():
     output_dir = pathlib.Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
     for alg_name, targets in algs.items():
-
         default_target = min(
             (dict(t) for t in targets.keys() if dict(t)["gen"] != "gcn5"),
             key=lambda t: int(re.sub("gfx", "", t["arch"]), base=16),

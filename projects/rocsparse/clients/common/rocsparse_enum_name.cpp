@@ -358,6 +358,7 @@ const char* rocsparse_gpsv_interleaved_alg_name(rocsparse_gpsv_interleaved_alg v
     RETURN_INVALID;
 }
 
+#if defined(ROCSPARSE_WITH_SPSORT)
 const char* rocsparse_spsort_alg_name(rocsparse_spsort_alg value)
 {
     switch(value)
@@ -367,6 +368,7 @@ const char* rocsparse_spsort_alg_name(rocsparse_spsort_alg value)
     }
     RETURN_INVALID;
 }
+#endif
 
 #undef CASE
 #undef RETURN_INVALID

@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-"""Characterization tests for Tensile.TensileCreateLibrary.Run — orchestration layer.
+"""Characterization tests for tensilelite.TensileCreateLibrary.Run — orchestration layer.
 
 Targets methodology-A missing ranges:
   152-173  : _stinky_asm_verify_wanted, _stinky_out, _verify_stinky_asm_comment_vs_elf_text
@@ -49,8 +49,8 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Module imports (deferred so rocisa import happens only once per process)
 # ---------------------------------------------------------------------------
-M = importlib.import_module("Tensile.TensileCreateLibrary.Run")
-SL = importlib.import_module("Tensile.SolutionLibrary")
+M = importlib.import_module("tensilelite.TensileCreateLibrary.Run")
+SL = importlib.import_module("tensilelite.SolutionLibrary")
 
 _DATA_DIR = Path(__file__).parent / "data"
 _LOGIC_YAML = _DATA_DIR / "logic_gfx942_HSS_BH_tiny.yaml"
@@ -66,8 +66,8 @@ def _make_isa_info_map(arch: str = "gfx942"):
     makeIsaInfoMap calls rocisa which returns SupportedISA=0 in CI (no GPU).
     We patch the one field needed to pass Solution.__init__'s assertion.
     """
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Common.Architectures import gfxToIsa
 
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     isa = gfxToIsa(arch)
@@ -78,7 +78,7 @@ def _make_isa_info_map(arch: str = "gfx942"):
 
 def _make_assembler():
     """Return a real Assembler wrapping the system clang++."""
-    from Tensile.Toolchain.Component import Assembler
+    from tensilelite.Toolchain.Component import Assembler
 
     clang = shutil.which("clang++") or "/opt/rocm/lib/llvm/bin/clang++"
     return Assembler(Path(clang), "4")

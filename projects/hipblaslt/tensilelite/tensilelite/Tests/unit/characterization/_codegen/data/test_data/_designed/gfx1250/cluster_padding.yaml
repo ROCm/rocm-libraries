@@ -6,6 +6,7 @@
 # padded-WG edge-size path. The problem size gives a prime tile count (23x23
 # with MT32x32) that is not a multiple of ClusterDim, so the grid is padded and
 # the kernel emits the padded-WG early-exit plus the reduced multicast mask.
+# ClusterAIDMapping forks over -1 (off) and -2 (cluster-to-AID remap).
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -79,6 +80,7 @@ BenchmarkProblems:
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
         - ClusterDim: [[2, 2]]
+        - ClusterAIDMapping: [-1, -2]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

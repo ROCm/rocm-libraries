@@ -40,7 +40,7 @@ decision is the MMA Kernel Expert's.
 |---|---|---|
 | **Whole kernel dataflow** (global load → … → C store) | "visualize my kernel pipeline" (+ the build fn) | Workflow A: `record_build` → block diagram → per-flow panels, correctness gates run in code |
 | **Kernel structure** (transactions/ops in order) | "show the block diagram" | a Level-0 node/edge **block diagram** (mem↔reg transactions + ops; K-loop as ×N) |
-| **MMA wave-tile flow** (A × B → derived C) | "MMA flow" / "wave-tile flow" | the **MmaTee** — A (M×K), B (K×N) → C (M×N) + the static distribution |
+| **MMA wave-tile flow** (A × B → derived C) | "MMA flow" / "wave-tile flow" | the **MmaTee** — A drawn M x K, B drawn K x N (a drawing orientation; B's axes are `(N, K)`) → C drawn M x N + the static distribution |
 | **A distribution → registers** | "how does this dist lay a tile into registers?" | a **RegisterFile** (tid×reg) beside a **LogicalTile** (owner `T{l}R{r}`) + text maps |
 | **A register file after a transform** | "what's this after `<transform>`?" | before/after files + tiles, arrow classified (**reposition / reorder / cross_lane**; relabel only on C-reuse) |
 | **LDS → C-shuffle flow** | "LDS through the C-shuffle" | LDS view → wave-read A/B → tee → C-shuffle → final C, each hop named |
@@ -327,8 +327,10 @@ and is enforced IN CODE — obey it, don't restate it.
    override). Only the MMA tee transposes its own **B & C** wings.
 6. **Logical / thread-tile views show LOGICAL coords by default** (`label_coords="logical"`); owner
    `T{lane}R{reg}` only when the user asks to inspect ownership.
-7. **Logical axes are natural, per tensor: A=M×K, B=K×N, C=M×N.** ✗ never draw B as N×K (B's free N is
-   horizontal).
+7. **Drawing orientation in the tee: A drawn M x K, B drawn K x N, C drawn M x N** (B's free N runs
+   horizontal, so the tee reads as a matrix product). This is a DRAWING orientation only: B's logical axes are
+   `(N, K)` (the one axis convention, `docs/tiling_api_surface.md` sec 3) -- NEVER state the drawing as B's
+   axis order, and NEVER draw B as N x K in the tee.
 8. **Macro register stage = N per-wave 64-lane files SIDE BY SIDE** (`WaveStrip`), ✗ never one `n_waves*64`
    monolith. Always state whether a tile is part of a MACRO tile.
 9. **dpi ≥ 200.** To shrink a big figure, reduce SCOPE (wave scope, fewer stages) — ✗ never lower dpi.

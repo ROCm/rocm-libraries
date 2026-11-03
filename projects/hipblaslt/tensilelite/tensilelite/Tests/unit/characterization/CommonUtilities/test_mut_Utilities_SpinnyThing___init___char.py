@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.SpinnyThing.__init__``.
+``tensilelite.Common.Utilities.SpinnyThing.__init__``.
 
 These pin the exact attribute initialization performed by the constructor so
 that survivor mutants altering the spinner-char list or the initial index are
@@ -15,7 +15,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 

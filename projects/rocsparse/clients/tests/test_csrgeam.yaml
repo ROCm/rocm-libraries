@@ -209,3 +209,22 @@ Tests:
   baseC: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+
+# AISPARSE-678 regression. The nnz kernel used to form
+# row = hipBlockIdx_x * 256 / WFSIZE in unsigned 32-bit arithmetic, which wraps
+# at 2^24 blocks. The launch now clamps grid.x to (2^32 - 1) / 256 and
+# grid-strides. m = 2^27 + 8 is past the wavefront-32 one-pass coverage
+# (2^27 - 8 rows), so the last rows are counted only by the stride loop.
+#
+# A and B share one nonzero per row. With 32-bit rocsparse_int the device holds
+# about 1.5 GiB (row pointers, column indices, and C's row pointers) and the host
+# about 1 GiB (the source row pointers and the result). An ILP64 client build
+# doubles every buffer to about 3 GiB on the device and 2 GiB on the host. The
+# guards are sized for the ILP64 case and leave about 1 GiB of headroom for the
+# exclusive-scan workspace and the process. A machine with less free memory
+# skips this case.
+- name: csrgeam_extra
+  category: nightly
+  function: csrgeam_extra
+  host_memory_gb: 3
+  device_memory_gb: 4

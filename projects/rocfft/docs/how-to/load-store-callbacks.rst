@@ -250,28 +250,11 @@ functionality will be removed in a future release.
    architecture and :cpp:func:`rocfft_execute` will return an error
    on this architecture if they are specified.
 
-   Function pointer callbacks also cannot be used on transforms that
-   have fields or bricks also specified on the same plan description.
-
-Legacy callback functions are passed as arrays of function pointers, with
-one function per brick in the :ref:`input or output field<input_output_fields>`.  For example, to
-specify a load callback on a transform with 4 input bricks, pass an
-array of 4 function pointers to
-:cpp:func:`rocfft_execution_info_set_load_callback`.  Or, to specify
-a store callback on a transform with 6 output bricks, pass an array of
-6 function pointers to
-:cpp:func:`rocfft_execution_info_set_store_callback`.  The order of
-the function pointers must match the order that the bricks were added
-to the input or output fields with
-:cpp:func:`rocfft_field_add_brick`.  If the input or output field of
-a transform is unspecified, the input or output is considered to have
-one brick.
-
-All functions in an array must perform the same logical operation.
-That is, any function in an array must be substitutable for any other
-function in the array if the data being loaded or stored were moved
-to another brick.  Behavior of the transform is not defined if
-functions in an array do not behave the same.
+Legacy callback functions and their callback data are passed as
+arrays with exactly one entry.  Function pointer callbacks cannot be
+used on transforms that have :ref:`input or output fields<input_output_fields>`
+specified on the plan description: :cpp:func:`rocfft_execute` returns
+``rocfft_status_invalid_arg_value`` in that case.
 
 .. note::
 

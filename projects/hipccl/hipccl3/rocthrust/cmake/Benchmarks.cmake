@@ -39,13 +39,12 @@ function(add_thrust_benchmark BENCHMARK_NAME BENCHMARK_SOURCE NOT_INTERNAL)
               roc::rocprim_hip
         )
     endif()
-    # Internal benchmark does not use Google Benchmark nor rocRAND.
+    # Internal benchmark does not use rocRAND.
     # This can be omited when that benchmark is removed.
     if(NOT_INTERNAL)
         target_link_libraries(${BENCHMARK_TARGET}
             PRIVATE
                 roc::rocrand
-                benchmark::benchmark
     )
     endif()
     foreach(gpu_target ${GPU_TARGETS})

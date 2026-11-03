@@ -37,7 +37,7 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.TensileCreateLibrary.Run import (
+from tensilelite.TensileCreateLibrary.Run import (
     _baseArchs,
     libraryDir,
     libraryRoot,

@@ -195,6 +195,8 @@ else()
       gfx1151
       gfx1152
       gfx1153
+      gfx1170
+      gfx1171
       gfx12-generic
       gfx1200
       gfx1201

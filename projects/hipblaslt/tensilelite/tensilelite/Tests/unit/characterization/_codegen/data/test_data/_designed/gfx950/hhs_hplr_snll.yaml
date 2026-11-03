@@ -4,7 +4,7 @@
 ################################################################################
 # R6 DESIGNED config — gfx950 HHS GEMM: HalfPLR + SuppressNoLoadLoop.
 #
-# Targets uncovered arms in Tensile/KernelWriterAssembly.py for gfx950:
+# Targets uncovered arms in tensilelite/KernelWriterAssembly.py for gfx950:
 #
 #   ~7109-7118  (SuppressNoLoadLoop + HalfPLR, MIWaveGroup product == 1):
 #     Lines inside the else-branch of `if prod(kernel["MIWaveGroup"]) > 1:`

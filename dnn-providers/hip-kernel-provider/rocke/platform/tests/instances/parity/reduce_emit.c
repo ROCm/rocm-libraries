@@ -83,6 +83,46 @@ static int make_spec(int idx, rocke_reduce2d_spec_t* spec)
         spec->dtype = "f16";
         spec->wave_size = 32;
         break;
+    case 8: /* f64: accumulates natively (block_tile_reduce_sync, vec=2) */
+        spec->n_per_block = 4096;
+        spec->op = "sum";
+        spec->block_size = 256;
+        spec->vec = 2;
+        spec->dtype = "f64";
+        spec->wave_size = 64;
+        break;
+    case 9:
+        spec->n_per_block = 2048;
+        spec->op = "max";
+        spec->block_size = 256;
+        spec->vec = 2;
+        spec->dtype = "f64";
+        spec->wave_size = 64;
+        break;
+    case 10:
+        spec->n_per_block = 2048;
+        spec->op = "mean";
+        spec->block_size = 128;
+        spec->vec = 2;
+        spec->dtype = "f64";
+        spec->wave_size = 64;
+        break;
+    case 11: /* f64 min / prod take the wave-XOR prologue path */
+        spec->n_per_block = 4096;
+        spec->op = "min";
+        spec->block_size = 256;
+        spec->vec = 2;
+        spec->dtype = "f64";
+        spec->wave_size = 64;
+        break;
+    case 12:
+        spec->n_per_block = 4096;
+        spec->op = "prod";
+        spec->block_size = 256;
+        spec->vec = 2;
+        spec->dtype = "f64";
+        spec->wave_size = 64;
+        break;
     default:
         return -1;
     }
@@ -103,7 +143,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..7> [mode]\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..12> [mode]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

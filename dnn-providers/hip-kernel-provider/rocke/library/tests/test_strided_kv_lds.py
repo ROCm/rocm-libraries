@@ -64,32 +64,25 @@ def _run(problem, spec=None):
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-def test_oversized_default_rejected_at_every_strided_entry(dtype, monkeypatch):
+def test_oversized_tile_rejected_at_every_strided_entry(dtype, monkeypatch):
+    # With one V slot and no P tile the gfx942 default for D256 / block 64
+    # (tile 32) fits; a block-sized tile 64 still exceeds the 64 KiB LDS.
     req = _request(dtype=dtype)
     problem = _problem(req)
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
     monkeypatch.setattr(
         au, "compile_kernel", lambda *a, **kw: pytest.fail("must reject before compile")
     )
-    ok, reason = make_candidate().admits(req)
-    assert not ok
-    assert "74752 B LDS" in reason and "65536 B" in reason
-    assert "tile_size=32" in reason
-    for pinned in (False, True):
-        request = replace(req, spec_id="strided_decode") if pinned else req
-        with pytest.raises(ValueError, match="74752 B LDS"):
-            dispatch_attention(request)
-    with pytest.raises(ValueError, match="74752 B LDS"):
-        au._strided_3d_specs_from_problem(problem, arch="gfx942")
-    with pytest.raises(ValueError, match="74752 B LDS"):
-        _run(problem)
+    assert make_candidate().admits(req)[0]
+    segment, _ = au._strided_3d_specs_from_problem(problem, arch="gfx942")
+    assert au._tiled_3d_segment_lds_bytes(segment) == 57344
     for allow_unsupported in (False, True):
-        spec = replace(_explicit(req, 32), allow_unsupported=allow_unsupported)
-        with pytest.raises(ValueError, match="74752 B LDS"):
+        spec = replace(_explicit(req, 64), allow_unsupported=allow_unsupported)
+        with pytest.raises(ValueError, match="106496 B LDS"):
             au._validate_strided_3d_spec(problem, spec)
-        with pytest.raises(ValueError, match="74752 B LDS"):
+        with pytest.raises(ValueError, match="106496 B LDS"):
             _run(problem, spec)
-        with pytest.raises(ValueError, match="74752 B LDS"):
+        with pytest.raises(ValueError, match="106496 B LDS"):
             make_candidate().bind_torch(req, spec, {})
 
 
@@ -101,7 +94,7 @@ def test_explicit_smaller_tile_uses_actual_footprint(dtype, monkeypatch):
     spec = _explicit(req, 16)
     problem = _problem(req)
     au._validate_strided_3d_spec(problem, spec)
-    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec) == 41472
+    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec) == 32768
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
 
     def stop_at_tensor_validation(*args):
@@ -143,7 +136,7 @@ def test_lds_estimate_matches_lowered_pools(arch, dtype, head, block, monkeypatc
 
 def test_lds_width_comes_from_allocation_dtype():
     spec = SimpleNamespace(block_m=16, head_size=256, tile_size=32, dtype_ir=F32)
-    assert au._tiled_3d_segment_lds_bytes(spec) == 149504
+    assert au._tiled_3d_segment_lds_bytes(spec) == 114688
     spec.dtype_ir = FP4E2M1
     with pytest.raises(ValueError, match="byte-addressable"):
         au._tiled_3d_segment_lds_bytes(spec)

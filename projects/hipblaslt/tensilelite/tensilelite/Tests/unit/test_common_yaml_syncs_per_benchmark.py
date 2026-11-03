@@ -100,8 +100,24 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "LibraryLogic requires benchmark data to build the library table",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/streamk/gfx1250/sk_hgemm_debug_modes.yaml",
+        "DebugStreamK modes require one benchmark enqueue for launch coverage",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/streamk/gfx950/sk_sgemm_debug_modes.yaml",
+        "DebugStreamK modes require one benchmark enqueue for launch coverage",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/sparse/gfx94x/libray_logic.yaml",
         "LibraryLogic requires benchmark data to build the library table",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/streamk/sk_hybrid.yaml",
+        "validates output and synchronizer after back-to-back launches",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/streamk/sk_queue_selfclean.yaml",
+        "validates output and synchronizer after back-to-back launches",
     ),
 }
 _SYNCSPERBENCHMARK_OPT_OUT_PATHS = {

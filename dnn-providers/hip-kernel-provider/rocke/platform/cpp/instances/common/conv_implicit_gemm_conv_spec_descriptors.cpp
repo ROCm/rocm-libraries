@@ -299,6 +299,9 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
 
     s.k0_k1_split = false;
     s.groups = 1;
+    s.group_merge = 1; /* inert: every merged-aware site reduces to the unmerged form */
+    s.split_k = 1; /* inert: the plain (unsplit) forward binary */
+    s.split_k_cluster = 0;
 
     /* #8624 vector-sizes-as-args: default None => auto-select. */
     s.has_vector_size_a = false;
@@ -381,16 +384,21 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),
      *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
-     *            "unroll": self.unroll_k}) */
+     *            "unroll": self.unroll_k,
+     *            f"gm{group_merge}": group_merge > 1,
+     *            "splitk": split_k > 1,
+     *            f"skc{split_k_cluster}": split_k_cluster > 0}) */
     char short_buf[128];
     char t_buf[48];
     char w_buf[32];
     char a_buf[48];
     char pe_buf[64];
     char tag_buf[256];
+    char gm_buf[24];
+    char skc_buf[24];
     const char* parts[6];
-    const char* flag_names[3];
-    int flag_on[3];
+    const char* flag_names[6];
+    int flag_on[6];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -432,8 +440,354 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* unroll_k: a different K-loop body under the same name otherwise. */
     flag_names[2] = "unroll";
     flag_on[2] = s->unroll_k ? 1 : 0;
+    /* Gm changes the emitted body, so it must reach the symbol: without it two
+     * degrees collide on one name and the compile cache hands the second the
+     * first's binary. Off at group_merge 1, so the default name is unchanged. */
+    snprintf(gm_buf, sizeof(gm_buf), "gm%d", s->group_merge);
+    flag_names[3] = gm_buf;
+    flag_on[3] = s->group_merge > 1 ? 1 : 0;
+    /* The split-K binary has its own ABI and epilogue; the degree is a kernarg,
+     * so only the variant reaches the name. The cluster form bakes its degree. */
+    flag_names[4] = "splitk";
+    flag_on[4] = s->split_k > 1 ? 1 : 0;
+    snprintf(skc_buf, sizeof(skc_buf), "skc%d", s->split_k_cluster);
+    flag_names[5] = skc_buf;
+    flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 6, out, out_cap, NULL);
+}
+
+/* ---- group merging (Gm) -------------------------------------------------- *
+ *
+ * `problem.M` / `.N_gemm` / `.K_gemm` stay the TRUE per-group dims: they size
+ * the tensors, which do not merge. The grid_* accessors below are the dims the
+ * *tile* covers. At group_merge == 1 the two are equal, which is what keeps the
+ * default path byte-identical.
+ *
+ * Mirrors Python ImplicitGemmConvSpec.merged_problem / grid_M / grid_N_gemm /
+ * grid_K_gemm / grid_groups (conv_implicit_gemm.py:312-350).
+ * ------------------------------------------------------------------------- */
+
+void rocke_implicit_gemm_conv_spec_merged_problem(const rocke_implicit_gemm_conv_spec_t* s,
+                                                  rocke_conv_problem_t* out)
+{
+    if(s == NULL || out == NULL)
+    {
+        return;
+    }
+    *out = s->problem;
+    if(s->group_merge <= 1)
+    {
+        return;
+    }
+    /* cpg/kpg are derived as C/groups and K/groups, so dividing the group count
+     * multiplies both -- and nothing else moves. That is the whole trick: every
+     * consumer that asks the problem how wide a channel run is then sees Gm
+     * instead of 1. */
+    out->groups = s->problem.groups / s->group_merge;
+}
+
+int rocke_implicit_gemm_conv_spec_grid_m(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    /* GEMM-M the tile covers: N*Ho*Wo, unchanged by merging. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(s, &merged);
+    return rocke_conv_problem_m(&merged);
+}
+
+int rocke_implicit_gemm_conv_spec_grid_n_gemm(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    /* GEMM-N the tile covers: kpg*Gm (== Gm on depthwise). */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(s, &merged);
+    return rocke_conv_problem_n_gemm(&merged);
+}
+
+int rocke_implicit_gemm_conv_spec_grid_k_gemm(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    /* GEMM-K the tile reduces over: [Z*]Y*X*cpg*Gm. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(s, &merged);
+    return rocke_conv_problem_k_gemm(&merged);
+}
+
+int rocke_implicit_gemm_conv_spec_grid_groups(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    /* Conv groups actually launched; gridDim.z is grid_groups. */
+    int gm = s->group_merge > 1 ? s->group_merge : 1;
+    return s->problem.groups / gm;
+}
+
+/* Mirrors Python fwd_split_k_cluster_problem_reason: the cluster fold walks
+ * 4-channel quads bounded by their first channel, so K and kpg must be
+ * multiples of 4. Checked on the build problem and on every launched one. */
+bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
+                                               char* reason,
+                                               size_t reason_cap)
+{
+    const int groups = p->groups > 1 ? p->groups : 1;
+    const int kpg = p->K / groups;
+    if(p->K % 4 != 0 || kpg % 4 != 0)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "split_k_cluster folds 4-channel quads: K (%d) and the "
+                     "per-group channels (%d) must be multiples of 4",
+                     p->K,
+                     kpg);
+        }
+        return false;
+    }
+    return true;
+}
+
+/* ---- split-K forward admission ------------------------------------------ *
+ *
+ * Mirrors Python fwd_split_k_reason: the split-K body is the plain WMMA K loop
+ * (mem / wavelet) run over one slice, with an fp32 store into the workspace
+ * slab. The paths that drive the K loop differently, remap the grid, merge
+ * groups, or take the pointwise fast path are not wired for it. */
+bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                      const char* family,
+                                      const char* arch,
+                                      char* reason,
+                                      size_t reason_cap)
+{
+#define ROCKE_SPLITK_REJECT(...)                       \
+    do                                                 \
+    {                                                  \
+        if(reason != NULL && reason_cap > 0)           \
+        {                                              \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        }                                              \
+        return false;                                  \
+    } while(0)
+
+    if(s->split_k < 1)
+    {
+        ROCKE_SPLITK_REJECT("split_k must be >= 1 (got %d)", s->split_k);
+    }
+    if(family == NULL || strcmp(family, "wmma") != 0)
+    {
+        ROCKE_SPLITK_REJECT("split-K forward is WMMA-only (built and tested on wave32)");
+    }
+    if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
+    {
+        ROCKE_SPLITK_REJECT("split-K forward supports only the identity acc_epilogue: the "
+                            "partial sums are reduced after the per-slice accumulation");
+    }
+    {
+        const struct
+        {
+            bool on;
+            const char* label;
+        } flags[] = {
+            {s->async_dma, "async_dma"},
+            {s->unroll_k, "unroll_k"},
+            {s->chiplet_swizzle, "chiplet_swizzle"},
+            {s->group_merge > 1, "group_merge"},
+            {rocke_conv_problem_is_pointwise(&s->problem), "the pointwise fast path"},
+            {s->problem.is_3d, "3-D convolution"},
+        };
+        for(size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i)
+        {
+            if(flags[i].on)
+            {
+                ROCKE_SPLITK_REJECT("split-K forward does not support %s", flags[i].label);
+            }
+        }
+    }
+    if(s->epilogue != NULL && strcmp(s->epilogue, "default") == 0 && s->has_vector_size_c
+       && s->vector_size_c > 1)
+    {
+        ROCKE_SPLITK_REJECT("split-K forward with the default epilogue stores scalars "
+                            "(vector_size_c must be 1)");
+    }
+    if(s->split_k_cluster)
+    {
+        if(s->split_k < 2)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster needs the split-K binary (split_k > 1)");
+        }
+        if(s->split_k_cluster < 2 || s->split_k_cluster > 15)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster must be 2..15 (got %d)", s->split_k_cluster);
+        }
+        if(s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster is wired for the mem pipeline only");
+        }
+        if(s->tile_n % 4)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster folds 4-channel quads (tile_n %% 4 == 0)");
+        }
+        if(arch != NULL)
+        {
+            const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+            if(target != NULL && !target->memory.has_cluster_launch)
+            {
+                ROCKE_SPLITK_REJECT(
+                    "split_k_cluster needs workgroup-cluster launch, which %s lacks", target->gfx);
+            }
+        }
+        if(!rocke_conv_fwd_split_k_cluster_problem_ok(&s->problem, reason, reason_cap))
+        {
+            return false;
+        }
+    }
+    return true;
+#undef ROCKE_SPLITK_REJECT
+}
+
+bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                          const char* arch,
+                                          char* reason,
+                                          size_t reason_cap)
+{
+    static const int kDegrees[] = {2, 4, 8, 16, 32, 64};
+    int gm;
+    int cpg;
+    int kpg;
+    size_t i;
+    bool degree_ok = false;
+
+    (void)arch; /* accepted for signature parity with the Python gate */
+
+#define ROCKE_GM_REJECT(...)                           \
+    do                                                 \
+    {                                                  \
+        if(reason != NULL && reason_cap > 0)           \
+        {                                              \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        }                                              \
+        return false;                                  \
+    } while(0)
+
+    if(s == NULL)
+    {
+        ROCKE_GM_REJECT("spec is NULL");
+    }
+
+    gm = s->group_merge;
+    if(gm == 1)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "ok");
+        }
+        return true;
+    }
+
+    for(i = 0; i < sizeof(kDegrees) / sizeof(kDegrees[0]); ++i)
+    {
+        if(kDegrees[i] == gm)
+        {
+            degree_ok = true;
+            break;
+        }
+    }
+    if(!degree_ok)
+    {
+        ROCKE_GM_REJECT("group_merge must be 1 or one of (2, 4, 8, 16, 32, 64); got %d", gm);
+    }
+
+    if(s->problem.groups % gm != 0)
+    {
+        ROCKE_GM_REJECT("group_merge %d does not divide groups %d: a workgroup would own a "
+                        "partial group",
+                        gm,
+                        s->problem.groups);
+    }
+
+    cpg = rocke_conv_problem_cpg(&s->problem);
+    kpg = rocke_conv_problem_kpg(&s->problem);
+    if(cpg != 1 || kpg != 1)
+    {
+        ROCKE_GM_REJECT("group_merge is implemented for depthwise only (cpg == kpg == 1); got "
+                        "cpg=%d kpg=%d. Wider groups need the merged group index to ride "
+                        "alongside a real channel index on both N and K, which is not covered, "
+                        "so it is gated off.",
+                        cpg,
+                        kpg);
+    }
+
+    /* No wave-size term: the merge lives in the A/B addressing, the diagonal
+     * mask on the B load and the epilogue's N bound, none of which depend on
+     * the MMA family, so MFMA (wave64) and WMMA (wave32) build it alike. */
+
+    if(s->async_dma)
+    {
+        ROCKE_GM_REJECT("group_merge is incompatible with async_dma=True: AsyncTileLoader takes "
+                        "no load_vec and its predicate is chunk-granular (>= 1 dword), so it "
+                        "cannot express the per-element diagonal mask the merged B load needs");
+    }
+
+    if(s->has_vector_size_b && s->vector_size_b != 1)
+    {
+        /* The builder forces B scalar under merge (the merged B tile is 1/Gm
+         * dense and the mask is per-element). Rejecting here rather than
+         * silently overriding keeps the spec an honest description of the
+         * emitted kernel -- a spec that says vec_b=8 and emits vec_b=1 makes
+         * every sweep row and every ISA review a lie. */
+        ROCKE_GM_REJECT("group_merge forces a scalar B load; got vector_size_b=%d. Leave it "
+                        "unset (or 1).",
+                        s->vector_size_b);
+    }
+
+    /* The merged A load and D store both run over exactly Gm consecutive NHWC
+     * channels -- a build-time extent, so an explicit width can be checked
+     * here rather than per problem. A width that does not divide Gm straddles
+     * the merged run: the A load crosses into the next filter tap and the
+     * store fails the epilogue's whole-vector bound and is dropped. */
+    if(s->has_vector_size_a && gm % s->vector_size_a != 0)
+    {
+        ROCKE_GM_REJECT("vector_size_a=%d does not divide group_merge %d: the merged channel "
+                        "run is Gm wide",
+                        s->vector_size_a,
+                        gm);
+    }
+    if(s->has_vector_size_c && gm % s->vector_size_c != 0)
+    {
+        ROCKE_GM_REJECT("vector_size_c=%d does not divide group_merge %d: the merged channel "
+                        "run is Gm wide",
+                        s->vector_size_c,
+                        gm);
+    }
+
+    if(rocke_conv_problem_is_pointwise(&s->problem))
+    {
+        ROCKE_GM_REJECT("group_merge is not implemented for the pointwise (1x1) fast path: it "
+                        "builds its bounds predicate from scratch and has no slot for the "
+                        "diagonal term");
+    }
+
+    if(s->problem.is_3d)
+    {
+        ROCKE_GM_REJECT("group_merge is not implemented for 3-D convolution: the merged "
+                        "addressing lives in the 2-D split address form, and the 3-D "
+                        "descriptor path has no slot for the merged channel decode or the "
+                        "diagonal mask");
+    }
+
+    /* The merged GEMM-N must fit one tile, or a tile would straddle group pairs
+     * the diagonal mask cannot separate. Mirrors CK's GemmN <= NPerBlock gate. */
+    if(rocke_implicit_gemm_conv_spec_grid_n_gemm(s) > s->tile_n)
+    {
+        ROCKE_GM_REJECT("merged GEMM-N %d (kpg*%d) exceeds tile_n %d",
+                        rocke_implicit_gemm_conv_spec_grid_n_gemm(s),
+                        gm,
+                        s->tile_n);
+    }
+
+#undef ROCKE_GM_REJECT
+
+    if(reason != NULL && reason_cap > 0)
+    {
+        snprintf(reason, reason_cap, "ok");
+    }
+    return true;
 }
 
 /* ===================================================================== *
@@ -670,6 +1024,15 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
         ROCKE_CSPEC_REJECT("acc_epilogue clamp_min must be <= clamp_max (got %s > %s)", lo, hi);
     }
 
+    /* Last, matching Python's ordering. The SAME gate also backs
+     * rocke_implicit_gemm_conv_is_valid_spec -- two copies of a merge gate is
+     * exactly how the dispatcher came to hand the builder a spec the builder
+     * then rejected, so both delegate here. */
+    if(!rocke_conv_fwd_group_merge_available(s, NULL, reason, reason_cap))
+    {
+        return false;
+    }
+
     return true;
 
 #undef ROCKE_CSPEC_REJECT
@@ -749,6 +1112,15 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         return false;
     }
 
+    /* The SAME gate that backs rocke_implicit_gemm_conv_spec_validate. Both
+     * delegate here so the dispatcher cannot admit a spec the builder rejects.
+     * Positioned to match Python is_valid_spec: after the block-size cap,
+     * before the wave-size/catalog checks. */
+    if(!rocke_conv_fwd_group_merge_available(s, arch, reason, reason_cap))
+    {
+        return false;
+    }
+
     /* family = "wmma" if target.wave_size == 32 else "mma" */
     family = (target->wave_size == 32) ? "wmma" : "mma";
     /* if spec.wave_size != target.wave_size: return False, ... */
@@ -817,7 +1189,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {
-            int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+            /* The split-K binary stages its fp32 partial tile, whatever dtype_d is. */
+            int c_dtype_bytes
+                = ((s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) || s->split_k > 1) ? 4 : 2;
             c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
         }
         {
@@ -896,6 +1270,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
+    if(s->split_k != 1 || s->split_k_cluster)
+    {
+        if(!rocke_conv_fwd_split_k_available(s, family, arch, reason, reason_cap))
+        {
+            return false;
+        }
+    }
+
     /* The tile loaders (Python: the async_tile_loaders / _sync_load_vecs block
      * at the end of is_valid_spec). An explicit vector width, or the async
      * chunk width the tile admits, has to split the tile evenly over the
@@ -939,7 +1321,8 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                                 block_size);
         }
         const int vec_a = s->has_vector_size_a ? s->vector_size_a : def_vec;
-        const int vec_b = s->has_vector_size_b ? s->vector_size_b : def_vec;
+        const int vec_b
+            = s->has_vector_size_b ? s->vector_size_b : rocke_conv_default_load_vec_b(s);
         if(!rocke_conv_coalesced_load_ok(
                "A", s->tile_m, s->tile_k, block_size, vec_a, reason, reason_cap)
            || !rocke_conv_coalesced_load_ok(
@@ -1541,7 +1924,9 @@ struct rocke_dynamic_tensor_descriptor*
     {
         const rocke_transform_t* xforms[12];
         int n_x = 0;
-        bool grouped = (ctx->p->groups > 1);
+        /* ctx->grouped carries the fwd merge override; wgrad/dgrad contexts
+         * leave it unset, so keep the groups test alongside it. */
+        bool grouped = ctx->grouped || (ctx->p->groups > 1);
 
         /* unmerge_magic_dynamic("m" -> ["n",["do",]"ho","wo"]) if decompose_m */
         if(decompose_m)

@@ -62,7 +62,7 @@ extern "C" {
  *     op: ReduceOp = "sum"          # "sum"|"max"|"min"|"mean"|"prod"
  *     block_size: int = 256
  *     vec: int = 4
- *     dtype: DType = "f16"          # "f16"|"bf16"
+ *     dtype: DType = "f16"          # "f16"|"bf16"|"f64"
  *     wave_size: int = 64
  *     name: str = "rocke_reduce2d"
  */
@@ -100,7 +100,8 @@ rocke_status_t
  *
  * Gate (mirrors reduce.is_valid_spec):
  *   - op in ("sum","max","min","mean","prod")
- *   - validate_io(IOSpecRule(dtype, block_size, vec, n_per_block))
+ *   - validate_io(IOSpecRule(dtype, block_size, vec, n_per_block)); f64 allows
+ *     only vec=2
  *
  * On reject, `reason` (if non-NULL, capacity reason_cap) receives the structured
  * message and false is returned. On accept returns true and writes "ok". */

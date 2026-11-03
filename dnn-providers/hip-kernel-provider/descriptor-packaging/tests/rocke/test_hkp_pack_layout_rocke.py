@@ -6,7 +6,6 @@ producers.
 
 import hashlib
 
-from hkp_pack.pipeline import run_pipeline
 from pack_helpers import (
     ARCH,
     EXAMPLE_ROOT,
@@ -16,6 +15,7 @@ from pack_helpers import (
     _read,
     _run,
     read_shipped,
+    run_pipeline,
 )
 
 
