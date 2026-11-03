@@ -1393,6 +1393,49 @@ COMP_TDM_PC_WARP_K_REJECT_REASON = (
     "comp_tdm_pc requires warp_k=1: the consumer waves have no K-wave reduction"
 )
 
+# Stream-K (StreamKKernel). Atomic reduction adds every workgroup's partial tile into C
+# through the epilogue, so it needs an epilogue that accumulates (CShuffle); the TDM
+# epilogue overwrites C. Linear and tree reduction sum the partials in a workspace and
+# store C once, so either epilogue works; the TDM one also clips a ragged N/M tile.
+# comp_tdm_pc is the only gfx1250-only pipeline StreamKKernel has been validated with.
+STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
+STREAMK_GFX1250_PIPELINES = ("comp_tdm_pc",)
+
+
+def streamk_trait_reject_reason(
+    pipeline: str,
+    epilogue: str,
+    reduction_strategy: str,
+    pads: Optional[Tuple[bool, bool, bool]] = None,
+) -> str:
+    """Why a Stream-K (pipeline, epilogue, reduction strategy) is rejected ("" when accepted).
+
+    Single source of truth for the Stream-K trait rules shared by unified_gemm_codegen and
+    python/gemm_utils; gfx1250_pipeline_reject_reason applies the arch and pipeline rules.
+    ``pads`` is (pad_m, pad_n, pad_k); None skips the pad rule.
+    """
+    if reduction_strategy not in STREAMK_REDUCTION_STRATEGIES:
+        return (
+            f"stream_k reduction_strategy={reduction_strategy} is not one of "
+            f"{STREAMK_REDUCTION_STRATEGIES}"
+        )
+    if pipeline in GFX1250_ONLY_PIPELINES and pipeline not in STREAMK_GFX1250_PIPELINES:
+        return f"pipeline={pipeline} is not supported for stream_k"
+    if reduction_strategy == "atomic":
+        if epilogue != "cshuffle":
+            return (
+                "stream_k atomic reduction adds partial tiles into C and needs "
+                f"epilogue=cshuffle, got {epilogue} (the TDM store overwrites C)"
+            )
+    elif epilogue not in ("cshuffle", "tdm"):
+        return (
+            f"stream_k {reduction_strategy} reduction requires epilogue=cshuffle or tdm, "
+            f"got {epilogue}"
+        )
+    if pipeline in TDM_PIPELINES and pads is not None and any(pads):
+        return TDM_PAD_REJECT_REASON
+    return ""
+
 
 def comp_tdm_pc_acc_reject_reason(tile_m: int, tile_n: int, num_waves: int) -> str:
     """Why a comp_tdm_pc tile exceeds the accumulator budget ("" when accepted)."""
@@ -1513,6 +1556,7 @@ def gfx1250_pipeline_reject_reason(
     batched: bool = False,
     tile_mn: Optional[Tuple[int, int]] = None,
     warp_k: Optional[int] = None,
+    streamk: bool = False,
 ) -> str:
     """Why a comp_async / comp_tdm* / tdm-epilogue (or gfx1250 compv5) GEMM config is rejected.
 
@@ -1527,6 +1571,9 @@ def gfx1250_pipeline_reject_reason(
     pad rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
     (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
     ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it).
+    ``streamk`` marks the Stream-K variant: only STREAMK_GFX1250_PIPELINES are
+    accepted, and the epilogue rules are streamk_trait_reject_reason's (they depend
+    on the reduction strategy); Stream-K has no persistence restriction.
     An empty ``layout`` skips the comp_async layout rule and empty dtypes skip
     the 8-bit warp_tile_k and warp_tile_m/n rules. ``warp_tile_m``/
     ``warp_tile_n`` of 0 (unknown) skip the 8-bit warp_tile_m/n rule.
@@ -1542,12 +1589,16 @@ def gfx1250_pipeline_reject_reason(
         return f"pipeline={pipeline} requires {GFX1250_ARCH}, got {gpu_target}"
     if scheduler != "intrawave":
         return f"pipeline={pipeline} requires scheduler=intrawave"
+    if streamk and pipeline not in STREAMK_GFX1250_PIPELINES:
+        return f"pipeline={pipeline} is not supported for stream_k"
     if not variant_supported:
         return f"pipeline={pipeline} is not supported for {variant_name}"
     if is_tdm:
-        if epilogue != "tdm":
+        # StreamKKernel takes a TDM pipeline with either epilogue and persistent or not;
+        # streamk_trait_reject_reason decides the epilogue per reduction strategy.
+        if not streamk and epilogue != "tdm":
             return f"pipeline={pipeline} requires epilogue=tdm"
-        if persistent:
+        if not streamk and persistent:
             return f"pipeline={pipeline} does not support the persistent kernel"
         if pads is not None and any(pads):
             return TDM_PAD_REJECT_REASON

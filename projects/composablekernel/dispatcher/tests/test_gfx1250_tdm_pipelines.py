@@ -45,6 +45,8 @@ from codegen_common import (  # noqa: E402
     gfx1250_comp_async_8bit_warp_tile_k_rejected,
     gfx1250_comp_async_8bit_warp_tile_mn_rejected,
     gfx1250_pipeline_reject_reason,
+    streamk_trait_reject_reason,
+    TDM_PAD_REJECT_REASON,
 )
 
 TE_GEMM_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
@@ -816,10 +818,164 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         self.assertTrue(names)
         self.assertFalse(any("comp_async" in n or "comp_tdm" in n for n in names))
 
-    def test_stream_k_no_comp_async(self):
+    def test_stream_k_gfx1250_pipelines(self):
+        # Without a streamk_config only atomic reduction is built, which needs the
+        # cshuffle epilogue. comp_tdm_pc is the only gfx1250 pipeline StreamKKernel takes.
         _, names = self._gen("gfx1250", "stream_k")
         self.assertTrue(names)
-        self.assertFalse(any("comp_async" in n or "comp_tdm" in n for n in names))
+        self.assertFalse(any("comp_async" in n for n in names))
+        self.assertFalse(
+            any("_comp_tdm_cshuffle_" in n or "_comp_tdm_tdm_" in n for n in names)
+        )
+        self.assertFalse(any("_comp_tdm_v2_" in n for n in names))
+        tdm_pc = [n for n in names if "_comp_tdm_pc_" in n]
+        self.assertTrue(tdm_pc)
+        for n in tdm_pc:
+            self.assertIn("_comp_tdm_pc_cshuffle_intrawave_False_False_False_", n)
+            self.assertTrue(n.endswith("_streamk.hpp"), n)
+        # Stream-K's persistent kernel hosts the ring too.
+        self.assertTrue(any("_False_False_False_True_" in n for n in tdm_pc))
+
+
+class TestStreamKCodegen(unittest.TestCase):
+    """comp_tdm_pc Stream-K kernels: the epilogue follows the reduction strategy."""
+
+    CONFIG = {
+        "tile_config": {
+            "tile_m": [128],
+            "tile_n": [128],
+            "tile_k": [64],
+            "warp_m": [2],
+            "warp_n": [2],
+            "warp_k": [1],
+            "warp_tile_m": [16],
+            "warp_tile_n": [16],
+            "warp_tile_k": [32],
+        },
+        "trait_config": {
+            "pipeline": ["comp_tdm_pc"],
+            "epilogue": ["tdm", "cshuffle"],
+            "scheduler": ["intrawave"],
+            "pad_m": [False, True],
+            "pad_n": [False],
+            "pad_k": [False],
+            "persistent": [False],
+        },
+        "streamk_config": {"reduction_strategy": ["atomic", "linear", "tree"]},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="tdm_pc_streamk_"))
+        cfg = cls.tmp / "cfg.json"
+        cfg.write_text(json.dumps(cls.CONFIG))
+        cls.out = cls.tmp / "out"
+        cls.names = _run_codegen(cls.out, "gfx1250", "stream_k", cfg)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_kernel_set(self):
+        # atomic: cshuffle only; linear/tree: both epilogues; padded TDM never.
+        self.assertEqual(len(self.names), 5, self.names)
+        self.assertEqual(sum(n.endswith("_streamk.hpp") for n in self.names), 1)
+        self.assertIn(
+            "_cshuffle_", next(n for n in self.names if n.endswith("_streamk.hpp"))
+        )
+        for strategy in ("linear", "tree"):
+            epilogues = sorted(
+                "tdm" if "_comp_tdm_pc_tdm_" in n else "cshuffle"
+                for n in self.names
+                if n.endswith(f"_streamk_{strategy}.hpp")
+            )
+            self.assertEqual(epilogues, ["cshuffle", "tdm"], strategy)
+        self.assertFalse(any("_intrawave_True_" in n for n in self.names), self.names)
+
+    def test_tdm_epilogue_header(self):
+        name = next(
+            n
+            for n in self.names
+            if "_comp_tdm_pc_tdm_" in n and n.endswith("_linear.hpp")
+        )
+        text = (self.out / name).read_text()
+        self.assertIn("GemmPipelineAgBgCrCompTDMProducerConsumer", text)
+        self.assertIn("TdmEpilogue<EpilogueProblem>", text)
+        self.assertIn("StreamKReductionStrategy::Linear", text)
+
+
+class TestStreamKTraitRejectReason(unittest.TestCase):
+    def test_epilogue_follows_reduction(self):
+        self.assertEqual(
+            streamk_trait_reject_reason("compv3", "cshuffle", "atomic"), ""
+        )
+        self.assertIn(
+            "cshuffle", streamk_trait_reject_reason("compv3", "default", "atomic")
+        )
+        self.assertEqual(
+            streamk_trait_reject_reason("comp_tdm_pc", "cshuffle", "atomic"), ""
+        )
+        self.assertIn(
+            "overwrites C", streamk_trait_reject_reason("comp_tdm_pc", "tdm", "atomic")
+        )
+        for strategy in ("linear", "tree"):
+            self.assertEqual(
+                streamk_trait_reject_reason("comp_tdm_pc", "tdm", strategy), ""
+            )
+            self.assertEqual(
+                streamk_trait_reject_reason("comp_tdm_pc", "cshuffle", strategy), ""
+            )
+            self.assertTrue(streamk_trait_reject_reason("compv3", "default", strategy))
+
+    def test_only_comp_tdm_pc_among_gfx1250_pipelines(self):
+        for pipeline in ("comp_tdm", "comp_tdm_v2", "comp_async"):
+            self.assertIn(
+                "not supported for stream_k",
+                streamk_trait_reject_reason(pipeline, "cshuffle", "linear"),
+            )
+
+    def test_tdm_pads_and_unknown_strategy(self):
+        self.assertEqual(
+            streamk_trait_reject_reason(
+                "comp_tdm_pc", "cshuffle", "linear", pads=(True, False, False)
+            ),
+            TDM_PAD_REJECT_REASON,
+        )
+        self.assertEqual(
+            streamk_trait_reject_reason(
+                "compv3", "cshuffle", "linear", pads=(True,) * 3
+            ),
+            "",
+        )
+        self.assertIn(
+            "reduction_strategy", streamk_trait_reject_reason("compv3", "cshuffle", "x")
+        )
+
+    def test_gfx1250_gate_for_stream_k(self):
+        def reason(pipeline, epilogue, persistent=False, **kw):
+            return gfx1250_pipeline_reject_reason(
+                "gfx1250",
+                pipeline,
+                epilogue,
+                "intrawave",
+                num_waves=4,
+                warp_tile_k=32,
+                dtype_a="fp16",
+                dtype_b="fp16",
+                layout="rcr",
+                variant_supported=True,
+                variant_name="stream_k",
+                persistent=persistent,
+                pads=(False, False, False),
+                streamk=True,
+                **kw,
+            )
+
+        for epilogue in ("cshuffle", "tdm"):
+            for persistent in (False, True):
+                self.assertEqual(reason("comp_tdm_pc", epilogue, persistent), "")
+        for pipeline in ("comp_tdm", "comp_tdm_v2", "comp_async"):
+            self.assertIn("not supported for stream_k", reason(pipeline, "cshuffle"))
 
 
 class TestGemmUtilsSweepGate(unittest.TestCase):
@@ -859,6 +1015,14 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertFalse(self._ok("comp_tdm", "tdm", sched="interwave"))
         for variant in ("multi_d", "grouped", "multi_abd", "stream_k"):
             self.assertFalse(self._ok("comp_tdm", "tdm", variant=variant), variant)
+        # Stream-K takes comp_tdm_pc with either epilogue, persistent or not; the
+        # epilogue is checked per reduction strategy by streamk_trait_reject_reason.
+        for epi in ("tdm", "cshuffle"):
+            for persist in (False, True):
+                self.assertTrue(
+                    self._ok("comp_tdm_pc", epi, persist=persist, variant="stream_k"),
+                    (epi, persist),
+                )
         self.assertFalse(self._ok("comp_tdm_v2", "tdm", waves=(4, 2, 1)))
         self.assertFalse(self._ok("compv3", "tdm"))
 
