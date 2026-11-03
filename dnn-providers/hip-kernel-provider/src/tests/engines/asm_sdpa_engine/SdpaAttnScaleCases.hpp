@@ -59,20 +59,45 @@ inline std::vector<std::pair<float, std::string>> unsupportedAttnScales()
         {1e-40F, "subnormal 1e-40"},
         {std::nextafter(std::numeric_limits<float>::min(), 0.0F), "largest subnormal"},
         {std::numeric_limits<float>::denorm_min(), "smallest subnormal"},
+        {-std::numeric_limits<float>::denorm_min(), "negative smallest subnormal"},
         {std::numeric_limits<float>::quiet_NaN(), "NaN"},
+        {-std::numeric_limits<float>::quiet_NaN(), "negative NaN"},
         {std::numeric_limits<float>::infinity(), "+inf"},
         {-std::numeric_limits<float>::infinity(), "-inf"},
     };
 }
 
-// Finite, positive, normal scales, down to a tiny normal one (1e-37 is correct on
-// gfx942).
+// Values accepted by the scale guard, including its inclusive endpoints. These
+// test applicability and argument validation, not numerical correctness at large
+// scales (see the separate large-finite-scale limitation in isSupportedAttnScale).
 inline std::vector<std::pair<float, std::string>> supportedAttnScales()
 {
     return {
+        {std::numeric_limits<float>::min(), "FLT_MIN"},
         {1e-37F, "tiny normal 1e-37"},
         {0.088388F, "1/sqrt(128)"},
         {1.0F, "1"},
+        {std::numeric_limits<float>::max(), "FLT_MAX"},
+    };
+}
+
+// The first double above FLT_MAX can round back to FLT_MAX if cast unchecked.
+// Include it as well as much larger values to distinguish validation before and
+// after narrowing. Nonfinite and tiny values also exercise the DOUBLE read path.
+inline std::vector<std::pair<double, std::string>> unsupportedDoubleAttnScales()
+{
+    return {
+        {std::nextafter(static_cast<double>(std::numeric_limits<float>::max()),
+                        std::numeric_limits<double>::infinity()),
+         "first double above FLT_MAX"},
+        {std::numeric_limits<double>::max(), "DBL_MAX"},
+        {-std::numeric_limits<double>::max(), "-DBL_MAX"},
+        {std::numeric_limits<double>::infinity(), "+inf"},
+        {-std::numeric_limits<double>::infinity(), "-inf"},
+        {std::numeric_limits<double>::quiet_NaN(), "NaN"},
+        {-std::numeric_limits<double>::quiet_NaN(), "negative NaN"},
+        {std::numeric_limits<double>::min(), "underflows to zero"},
+        {-std::numeric_limits<double>::denorm_min(), "negative subnormal"},
     };
 }
 
@@ -185,21 +210,35 @@ inline flatbuffers::FlatBufferBuilder
     return withScaleTensor(base, std::move(tensor));
 }
 
+inline flatbuffers::FlatBufferBuilder withDoubleScaleTensor(
+    const flatbuffers::FlatBufferBuilder& base, double scale, bool runtimeWithDefault)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    auto tensor = std::make_unique<TensorAttributesT>();
+    tensor->name = "attn_scale";
+    tensor->data_type = DataType::DOUBLE;
+    tensor->dims = {1};
+    tensor->strides = {1};
+    tensor->value.Set(Float64Value(scale));
+    tensor->is_runtime_pass_by_value = runtimeWithDefault;
+    return withScaleTensor(base, std::move(tensor));
+}
+
 // Runs plan.execute with the pure runtime pass-by-value scale tensor scaleUid
 // holding `scale`, every uid in tensorUids pointing at host memory, and a host
 // workspace of workspaceSize bytes (none when 0). Only for plans that throw before
 // any kernel reads that memory. Returns the status execute throws with, or
 // HIPDNN_PLUGIN_STATUS_SUCCESS when it returns.
-template <typename PlanT>
+template <typename PlanT, typename ScaleT>
 hipdnnPluginStatus_t executeWithRuntimeScale(const PlanT& plan,
                                              const std::vector<int64_t>& tensorUids,
                                              int64_t scaleUid,
-                                             float scale,
+                                             ScaleT scale,
                                              size_t workspaceSize)
 {
     std::vector<std::byte> tensorMemory(16);
     std::vector<std::byte> workspace(workspaceSize);
-    float hostScale = scale;
+    ScaleT hostScale = scale;
     std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
     deviceBuffers.reserve(tensorUids.size() + 1);
     for(const int64_t uid : tensorUids)
