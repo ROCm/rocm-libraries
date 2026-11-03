@@ -687,43 +687,33 @@ TYPED_TEST(hip_blas_wrapper, dense_mat_mat_mult_is_the_product)
 {
     using T = typename TypeParam::value_type;
 
-    auto checks = [] {
-        Csr<T> a(3, 4), b(4, 2), c(3, 2);
-        for(int i = 0; i < 3; ++i)
-        {
-            for(int j = 0; j < 4; ++j)
-            {
-                a.add(j, from_int<T>(i * 4 + j + 1));
-            }
-            a.end_row();
-            c.add(0, from_int<T>(7));
-            c.add(1, from_int<T>(7));
-            c.end_row();
-        }
-        for(int i = 0; i < 4; ++i)
-        {
-            b.add(0, from_int<T>(i - 2));
-            b.add(1, from_int<T>(2 * i + 1));
-            b.end_row();
-        }
-
-        const Format dense_format = {rocalution::DENSE, 1};
-        auto         A            = make_matrix(Backend::Accelerator, dense_format, *a.host_csr());
-        auto         B            = make_matrix(Backend::Accelerator, dense_format, *b.host_csr());
-        auto         C            = make_matrix(Backend::Accelerator, dense_format, *c.host_csr());
-        ASSERT_NE(A, nullptr);
-        ASSERT_NE(B, nullptr);
-        ASSERT_NE(C, nullptr);
-
-        ASSERT_TRUE(C->MatMatMult(*A, *B));
-        expect_all_near(dense(csr_of(*C)), dense_product(dense(a), dense(b), 3, 4, 2), tol<T>());
-    };
-
-    if constexpr(is_complex_v<T>)
+    Csr<T> a(3, 4), b(4, 2), c(3, 2);
+    for(int i = 0; i < 3; ++i)
     {
-        KNOWN_BUG("the complex rocblasTgemm of HIP DENSE MatMatMult is a FATAL_ERROR stub");
-        expect_in_child(checks);
-        return;
+        for(int j = 0; j < 4; ++j)
+        {
+            a.add(j, from_int<T>(i * 4 + j + 1));
+        }
+        a.end_row();
+        c.add(0, from_int<T>(7));
+        c.add(1, from_int<T>(7));
+        c.end_row();
     }
-    checks();
+    for(int i = 0; i < 4; ++i)
+    {
+        b.add(0, from_int<T>(i - 2));
+        b.add(1, from_int<T>(2 * i + 1));
+        b.end_row();
+    }
+
+    const Format dense_format = {rocalution::DENSE, 1};
+    auto         A            = make_matrix(Backend::Accelerator, dense_format, *a.host_csr());
+    auto         B            = make_matrix(Backend::Accelerator, dense_format, *b.host_csr());
+    auto         C            = make_matrix(Backend::Accelerator, dense_format, *c.host_csr());
+    ASSERT_NE(A, nullptr);
+    ASSERT_NE(B, nullptr);
+    ASSERT_NE(C, nullptr);
+
+    ASSERT_TRUE(C->MatMatMult(*A, *B));
+    expect_all_near(dense(csr_of(*C)), dense_product(dense(a), dense(b), 3, 4, 2), tol<T>());
 }
