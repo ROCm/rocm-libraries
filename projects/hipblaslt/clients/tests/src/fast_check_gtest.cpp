@@ -1362,11 +1362,27 @@ namespace
         ASSERT_EQ(hipMemset(live.get(), 42, live.bytes()), hipSuccess);
         auto cached = memory_pool<d_memory>::Get(size_t(16) << 20);
         ASSERT_NE(cached.get(), nullptr);
-        const size_t capacity = cached.capacity();
+        const size_t          capacity = cached.capacity();
+        const void*           idle     = cached.get();
+        hipPointerAttribute_t attr{};
+        ASSERT_EQ(hipPointerGetAttributes(&attr, idle), hipSuccess);
+        ASSERT_EQ(attr.type, hipMemoryTypeDevice);
         memory_pool<d_memory>::Restore(cached);
-        size_t free_bytes = 0, total_bytes = 0;
-        ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
-        EXPECT_EQ(fast_check_memory_shortfall(free_bytes + capacity / 2, 0), "");
+        const size_t cached_bytes = memory_pool<d_memory>::CachedBytes();
+        ASSERT_GE(cached_bytes, capacity);
+        // Free device memory as only the pool changes it: nothing until it releases its idle
+        // buffers. hipMemGetInfo would also count other processes on the GPU (e.g. parallel test
+        // shards) allocating between two reads, which made this test flaky.
+        auto released = [&](size_t& free) {
+            free = cached_bytes - memory_pool<d_memory>::CachedBytes();
+            return true;
+        };
+        EXPECT_EQ(fast_check_memory_shortfall(capacity / 2, 0, released), "");
+        EXPECT_EQ(memory_pool<d_memory>::CachedBytes(), 0u);
+        // Released means returned to the device, not just dropped from the pool's list.
+        attr = {};
+        EXPECT_TRUE(hipPointerGetAttributes(&attr, idle) != hipSuccess
+                    || attr.type != hipMemoryTypeDevice);
         unsigned char value = 0;
         ASSERT_EQ(hipMemcpy(&value, live.get(), 1, hipMemcpyDeviceToHost), hipSuccess);
         EXPECT_EQ(value, 42);
