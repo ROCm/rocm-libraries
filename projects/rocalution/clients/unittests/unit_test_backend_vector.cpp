@@ -293,40 +293,34 @@ TYPED_TEST(backend_vector, asum_sums_the_magnitudes)
     using T = typename TypeParam::value_type;
     REQUIRE_DEFINED("Asum");
 
-    auto checks = [this] {
-        const std::vector<T> a    = x<T>();
-        const T              asum = this->vec(a)->Asum();
+    const std::vector<T> a    = x<T>();
+    const T              asum = this->vec(a)->Asum();
 
-        if constexpr(is_complex_v<T>)
-        {
-            // As BLAS scasum: the real sum of |re| + |im|
-            real_t<T> expected = 0;
-            for(const T& e : a)
-            {
-                expected += std::abs(e.real()) + std::abs(e.imag());
-            }
-            EXPECT_EQ(asum.real() + asum.imag(), expected);
-            KNOWN_BUG("the host returns (sum |re|, sum |im|) instead of the real sum");
-            EXPECT_EQ(asum, T(expected, 0));
-        }
-        else
-        {
-            T expected = T(0);
-            for(const T& e : a)
-            {
-                expected += std::abs(e);
-            }
-            EXPECT_EQ(asum, expected);
-        }
-    };
-
-    if(is_complex_v<T> && TypeParam::backend == Backend::Accelerator)
+    if constexpr(is_complex_v<T>)
     {
-        KNOWN_BUG("the complex rocblasTasum is a FATAL_ERROR stub");
-        expect_in_child(checks);
-        return;
+        // The 1-norm: the real sum of the moduli |z|, not the |re| + |im| of BLAS scasum
+        double expected = 0;
+        for(const T& e : a)
+        {
+            expected += std::abs(std::complex<double>(e));
+        }
+        EXPECT_EQ(asum.imag(), 0);
+        expect_near(asum, T(static_cast<real_t<T>>(expected)));
+
+        // The squares of the parts overflow, the modulus does not
+        using R     = real_t<T>;
+        const R big = std::ldexp(R(1), std::numeric_limits<R>::max_exponent - 4);
+        expect_near(this->vec(std::vector<T>{T(3 * big, 4 * big)})->Asum(), T(5 * big));
     }
-    checks();
+    else
+    {
+        T expected = T(0);
+        for(const T& e : a)
+        {
+            expected += std::abs(e);
+        }
+        EXPECT_EQ(asum, expected);
+    }
 }
 
 // The index is zero based. The largest magnitude may be negative.

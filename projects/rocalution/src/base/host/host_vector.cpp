@@ -969,41 +969,37 @@ namespace rocalution
     template <>
     std::complex<float> HostVector<std::complex<float>>::Asum(void) const
     {
-        float asum_real = 0.0f;
-        float asum_imag = 0.0f;
+        float asum = 0.0f;
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : asum_real, asum_imag)
+#pragma omp parallel for reduction(+ : asum)
 #endif
         for(int64_t i = 0; i < this->size_; ++i)
         {
-            asum_real += std::abs(this->vec_[i].real());
-            asum_imag += std::abs(this->vec_[i].imag());
+            asum += std::abs(this->vec_[i]);
         }
 
-        return std::complex<float>(asum_real, asum_imag);
+        return std::complex<float>(asum);
     }
 
     template <>
     std::complex<double> HostVector<std::complex<double>>::Asum(void) const
     {
-        double asum_real = 0.0;
-        double asum_imag = 0.0;
+        double asum = 0.0;
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : asum_real, asum_imag)
+#pragma omp parallel for reduction(+ : asum)
 #endif
         for(int64_t i = 0; i < this->size_; ++i)
         {
-            asum_real += std::abs(this->vec_[i].real());
-            asum_imag += std::abs(this->vec_[i].imag());
+            asum += std::abs(this->vec_[i]);
         }
 
-        return std::complex<double>(asum_real, asum_imag);
+        return std::complex<double>(asum);
     }
 
     // LCOV_EXCL_START
