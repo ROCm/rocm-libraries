@@ -183,9 +183,10 @@ class UnifiedAttention3DTiledSpec:
     use_decode_grid: bool = False
     # Cache policy of the async K/V copies, one of ``CACHE_POLICY_NAMES`` (as
     # attention 2D's ``kv_cache_policy``). The dispatcher sets "stream" (NT)
-    # for all-decode batches, whose K/V bytes are each read once
-    # (``_kv_cache_policy_3d``). The fp8 K/V loader is synchronous and keeps
-    # "all".
+    # for all-decode batches whose K/V is larger than the last-level cache,
+    # since each K/V byte is read once per call; smaller K/V keeps "all" so the
+    # next call can hit in the cache (``_kv_cache_policy_3d``). The fp8 K/V
+    # loader is synchronous and keeps "all".
     kv_cache_policy: str = "all"
     # K/V LDS tiles store each row's 16-byte chunks XOR-permuted by the row
     # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK

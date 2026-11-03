@@ -247,6 +247,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()
 
+    # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
+    # unit tree. The fixed-arch roots pack only for their arch (_hkp_wire_fixed_arch_root);
+    # the test decides from the staged shards, so no define follows GPU_TARGETS. rocKE is
+    # the only thing it is told.
+    foreach(_hkp_slotted hkp_packaging_slotted hkp_packaging_slotted_hsaco
+                         hkp_packaging_slotted_multi_launch)
+        if(TARGET ${_hkp_slotted})
+            add_dependencies(hip_kernel_provider_tests ${_hkp_slotted})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_ENABLE_ROCKE)
+    endif()
+
     # The census binary additionally reads the production shard, which is wired only
     # where a production root holds descriptors this build packs for. Absent, there is
     # nothing to depend on and no entry is registered against it either.

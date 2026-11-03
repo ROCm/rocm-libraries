@@ -35,6 +35,18 @@ void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& i
     }
 }
 
+void BatchnormValidator::validateDimensionCount(size_t numDims)
+{
+    constexpr size_t MIN_SUPPORTED_DIMS = 3;
+    constexpr size_t MAX_SUPPORTED_DIMS = 5;
+
+    if(numDims < MIN_SUPPORTED_DIMS || numDims > MAX_SUPPORTED_DIMS)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Only 3D, 4D or 5D tensors supported.");
+    }
+}
+
 // --- Component Validators ---
 
 void BatchnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
@@ -303,6 +315,18 @@ void BatchnormValidator::checkInferenceTensorConfigSupported(
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
@@ -315,6 +339,18 @@ void BatchnormValidator::checkInferenceVarianceExtTensorConfigSupported(
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
@@ -333,6 +369,18 @@ void BatchnormValidator::checkInferenceActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupported(
@@ -351,6 +399,18 @@ void BatchnormValidator::checkInferenceVarianceExtActivationTensorConfigSupporte
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, false);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnInfAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference requires that x and y are the same type or that y is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
@@ -377,6 +437,18 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     }
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.y_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires that x and y are the same type or that y is of "
+            "type float");
+    }
 }
 
 void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
@@ -409,6 +481,18 @@ void BatchnormValidator::checkFwdTrainingActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnAttr.x_tensor_uid()).data_type();
+    auto yDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.out_0_tensor_uid()).data_type();
+    if(xDataType != yDataType && yDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward training requires that x and y are the same type or that y is of "
+            "type float");
+    }
 }
 
 void BatchnormValidator::checkBwdTensorConfigSupported(
@@ -435,6 +519,27 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
     }
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
+    auto dyDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dy_tensor_uid()).data_type();
+    auto dxDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
+    if(xDataType != dxDataType)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dx are the same type");
+    }
+    if(xDataType != dyDataType
+       && dyDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dy are the same type or that dy is of type "
+            "float");
+    }
 }
 
 void BatchnormValidator::checkBwdActivationTensorConfigSupported(
@@ -481,6 +586,27 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
+
+    auto xDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type();
+    auto dyDataType
+        = core::utils::findTensorAttributes(_tensorMap, actAttr.in_0_tensor_uid()).data_type();
+    auto dxDataType
+        = core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type();
+    if(xDataType != dxDataType)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dx are the same type");
+    }
+    if(xDataType != dyDataType
+       && dyDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dy are the same type or that dy is of type "
+            "float");
+    }
 }
 
 // --- Activation Mode Validators ---

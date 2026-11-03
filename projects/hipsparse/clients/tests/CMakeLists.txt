@@ -24,6 +24,7 @@ add_executable(hipsparse-test)
 
 target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_device_malloc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_axpyi.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gthr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gthrz.cpp"
