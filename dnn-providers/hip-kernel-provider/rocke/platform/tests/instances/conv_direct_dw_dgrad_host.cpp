@@ -34,7 +34,8 @@
  *     as Python does (floor, not truncation);
  *   - the forward WMMA validator tail's refusal of an unknown scheduler, which
  *     must carry normalize_scheduler_strategy's text, choices included (and
- *     so must the dgrad WMMA and Winograd GEMM validators);
+ *     so must the dgrad WMMA and Winograd GEMM validators), the name quoted
+ *     as Python's repr (rocke_py_str_repr);
  *   - the direct wgrad validators' refusal of a dilated problem, which must
  *     carry conv_direct_grouped.dilation_reason's text.
  */
@@ -509,6 +510,47 @@ static void test_fwd_wmma_scheduler_reason(void)
     CHECK(rocke_scheduler_strategy_is_valid(NULL), "NULL strategy refused");
 }
 
+/* rocke_py_str_repr is Python's repr() of a str: the quote choice, the
+ * escapes, the snprintf-style length and truncation. The scheduler refusal
+ * quotes the name with it, as Python's {value!r}. */
+static void test_py_str_repr(void)
+{
+    const char* cases[][2] = {
+        {"bogus", "'bogus'"},
+        {"it's", "\"it's\""},
+        {"a\\b", "'a\\\\b'"},
+        {"x'\"y", "'x\\'\"y'"},
+        {"say \"hi\"", "'say \"hi\"'"},
+        {"t\tn\nr\r", "'t\\tn\\nr\\r'"},
+        {"\x01\x1f\x7f", "'\\x01\\x1f\\x7f'"},
+        {"caf\xc3\xa9", "'caf\xc3\xa9'"},
+        {"", "''"},
+    };
+    char out[64];
+    for(const auto& c : cases)
+    {
+        const size_t n = rocke_py_str_repr(c[0], out, sizeof out);
+        CHECK(strcmp(out, c[1]) == 0 && n == strlen(c[1]), "repr(%s) = %s", c[0], out);
+    }
+    CHECK(rocke_py_str_repr("abcdef", out, 4) == 8 && strcmp(out, "'ab") == 0,
+          "truncated repr: %s",
+          out);
+    CHECK(rocke_py_str_repr("abc", NULL, 0) == 5, "repr length without a buffer");
+    char reason[ERR_CAP];
+    CHECK(rocke_scheduler_strategy_reason("it's", reason, sizeof reason)
+              && strcmp(reason,
+                        "unsupported scheduler_strategy \"it's\"; expected one of: iterative-ilp, "
+                        "iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause, or None")
+                     == 0,
+          "sched it's: %s",
+          reason);
+    const char* prefix = "unsupported scheduler_strategy 'a\\\\b'; expected";
+    CHECK(rocke_scheduler_strategy_reason("a\\b", reason, sizeof reason)
+              && strncmp(reason, prefix, strlen(prefix)) == 0,
+          "sched a\\b: %s",
+          reason);
+}
+
 /* `spec` is accepted without a scheduler and refused, with Python's
  * ValueError text, with the unknown "bogus" one. */
 template <typename Spec, typename Valid>
@@ -801,6 +843,7 @@ int main(void)
     test_problem_output_extents();
     test_fwd_wmma_scheduler_reason();
     test_dgrad_wmma_scheduler_reason();
+    test_py_str_repr();
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();
     test_stream_refuses_per_axis_padding();
