@@ -30,6 +30,10 @@
 #include <gtest/gtest.h>
 #include <rocalution/rocalution.hpp>
 
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+#include <omp.h>
+#endif
+
 using namespace rocalution;
 
 template <typename T>
@@ -1199,6 +1203,12 @@ void testing_amax_ties(void)
     set_omp_threads_rocalution(2);
     set_omp_threshold_rocalution(0);
 
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    // With dynamic teams the runtime may run the scan on one thread, which hides the race
+    int def_dynamic = omp_get_dynamic();
+    omp_set_dynamic(0);
+#endif
+
     LocalVector<T> vec;
     vec.Allocate("TestVector", size);
 
@@ -1233,6 +1243,10 @@ void testing_amax_ties(void)
     max_index     = vec.Amax(max_value);
     EXPECT_EQ(max_index, half - 1);
     EXPECT_EQ(max_value, static_cast<T>(2));
+
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    omp_set_dynamic(def_dynamic);
+#endif
 
     // Default threshold; the thread count is reset by the next init_rocalution()
     set_omp_threshold_rocalution(10000);

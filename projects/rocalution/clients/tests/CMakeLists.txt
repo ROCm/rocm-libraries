@@ -171,14 +171,16 @@ target_include_directories(rocalution-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CUR
 # Link rocALUTION library
 target_link_libraries(rocalution-test PRIVATE roc::rocalution)
 
-# The OpenMP state checks in test_backend.cpp need the OpenMP runtime of the library.
-# Only that source is compiled with OpenMP: the pragma in gen_3d_laplacian() (utility.hpp)
-# is not thread-safe. An OpenMP toolchain is not enough: TheRock's Linux library is
-# built without OpenMP, and compiling the test with it then observes the test's own ICVs.
+# The OpenMP state checks in test_backend.cpp and test_local_vector.cpp need the OpenMP
+# runtime of the library. Only these sources are compiled with OpenMP: the pragma in
+# gen_3d_laplacian() (utility.hpp) is not thread-safe, and neither source instantiates it.
+# An OpenMP toolchain is not enough: TheRock's Linux library is built without OpenMP, and
+# compiling the test with it then observes the test's own ICVs.
 if(SUPPORT_OMP AND TARGET OpenMP::OpenMP_CXX)
   separate_arguments(ROCALUTION_TEST_OMP_FLAGS NATIVE_COMMAND "${OpenMP_CXX_FLAGS}")
   get_target_property(ROCALUTION_TEST_OMP_LIBS OpenMP::OpenMP_CXX INTERFACE_LINK_LIBRARIES)
-  set_source_files_properties(test_backend.cpp PROPERTIES COMPILE_OPTIONS "${ROCALUTION_TEST_OMP_FLAGS}")
+  set_source_files_properties(test_backend.cpp test_local_vector.cpp
+    PROPERTIES COMPILE_OPTIONS "${ROCALUTION_TEST_OMP_FLAGS}")
   if(ROCALUTION_TEST_OMP_LIBS)
     target_link_libraries(rocalution-test PRIVATE ${ROCALUTION_TEST_OMP_LIBS})
   endif()
