@@ -940,6 +940,167 @@ static void rocke_conv_emit_cluster_fold(rocke_conv_build_ctx_t* ctx)
  * Python if/elif chain. Reads ctx->final_accs; builds ctx->D_desc as the
  * per-epilogue helpers need it.
  * ===================================================================== */
+/* Python _emit_fwd_epilogue_qx (epi_quad_xpose): register-only store of the
+ * 16x16-atom accumulators through a lane transpose (DPP + v_perm). */
+static void conv_emit_fwd_epilogue_qx(rocke_conv_build_ctx_t* ctx, rocke_value_t* const* accs)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    const int mfmas_m = ctx->mfmas_m, mfmas_n = ctx->mfmas_n;
+    const int eqx = spec->epi_quad_xpose;
+    const bool bf = spec->dtype_d != NULL && strcmp(spec->dtype_d, "bf16") == 0;
+    const rocke_type_t* dt = bf ? rocke_bf16() : rocke_f16();
+    const bool x3 = eqx == 3 || eqx == 4;
+    const bool fast_cvt = eqx == 4 && bf;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* lane = ctx->lane;
+    rocke_value_t* c1_ = rocke_b_const_i32(b, x3 ? 4 : 1);
+    rocke_value_t* c2_ = rocke_b_const_i32(b, x3 ? 8 : 2);
+    rocke_value_t* q_hi = rocke_b_cmp_ne(b, rocke_b_land(b, lane, c2_), c0);
+    rocke_value_t* q_odd = rocke_b_cmp_ne(b, rocke_b_land(b, lane, c1_), c0);
+    rocke_value_t* s0 = rocke_b_const_i32(b, 0x05040100);
+    rocke_value_t* sel_s = rocke_b_select(b, q_odd, s0, rocke_b_const_i32(b, 0x07060302));
+    rocke_value_t* s1 = rocke_b_const_i32(b, 0x03020504);
+    rocke_value_t* sel_o0 = rocke_b_select(b, q_odd, s1, rocke_b_const_i32(b, 0x05040100));
+    rocke_value_t* s2 = rocke_b_const_i32(b, 0x03020706);
+    rocke_value_t* sel_o1 = rocke_b_select(b, q_odd, s2, rocke_b_const_i32(b, 0x07060100));
+    rocke_value_t *row_in, *col_in;
+    if(x3)
+    {
+        rocke_value_t* l16 = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+        rocke_value_t* r4 = rocke_b_mul(b, l16, rocke_b_const_i32(b, 4));
+        rocke_value_t* l4 = rocke_b_div(b, lane, rocke_b_const_i32(b, 4));
+        row_in = rocke_b_add(b, r4, rocke_b_land(b, l4, rocke_b_const_i32(b, 3)));
+        rocke_value_t* l3 = rocke_b_land(b, lane, rocke_b_const_i32(b, 3));
+        col_in = rocke_b_mul(b, l3, rocke_b_const_i32(b, 4));
+    }
+    else
+    {
+        rocke_value_t* l16 = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+        rocke_value_t* r4 = rocke_b_mul(b, l16, rocke_b_const_i32(b, 4));
+        row_in = rocke_b_add(b, r4, rocke_b_land(b, lane, rocke_b_const_i32(b, 3)));
+        col_in = rocke_b_land(b, lane, rocke_b_const_i32(b, 12));
+    }
+    rocke_value_t* wmo = rocke_warp_grid_warp_m_off(b, &ctx->grid);
+    rocke_value_t* m_base = rocke_b_add(b, rocke_b_add(b, ctx->block_m_off_v, wmo), row_in);
+    rocke_value_t* wno = rocke_warp_grid_warp_n_off(b, &ctx->grid);
+    rocke_value_t* n_base = rocke_b_add(b, rocke_b_add(b, ctx->block_n_off_v, wno), col_in);
+    rocke_value_t* c_eb_d = rocke_b_const_i32(b, 2);
+    rocke_value_t* oob = rocke_b_const_i32(b, 0x7FFFFFFF);
+    const rocke_type_t* wt2 = rocke_vector_type(b, rocke_i32(), 2);
+    const bool wide = eqx == 2 || eqx == 3 || eqx == 4;
+    rocke_value_t* c_lsb_sh = rocke_b_const_i32(b, 16);
+    rocke_value_t* c1_one = rocke_b_const_i32(b, 1);
+    rocke_value_t* c_7fff = rocke_b_const_i32(b, 0x7FFF);
+    rocke_value_t* c_qnan = rocke_b_const_i32(b, 0x7FC00000);
+    rocke_value_t* s_hi2 = rocke_b_const_i32(b, 0x07060302);
+    auto cvt_pair = [&](rocke_value_t* acc, int i0) -> rocke_value_t* {
+        rocke_value_t* ts[2];
+        for(int k = 0; k < 2; ++k)
+        {
+            rocke_value_t* fv = rocke_b_vec_extract(b, acc, i0 + k);
+            rocke_value_t* uv = rocke_b_bitcast(b, fv, rocke_i32());
+            rocke_value_t* lsb = rocke_b_land(b, rocke_b_lshr(b, uv, c_lsb_sh), c1_one);
+            rocke_value_t* t = rocke_b_add(b, rocke_b_add(b, uv, c_7fff), lsb);
+            rocke_value_t* nan = rocke_b_fcmp(b, "uno", fv, fv);
+            ts[k] = rocke_b_select(b, nan, c_qnan, t);
+        }
+        return rocke_b_perm_b32(b, ts[1], ts[0], s_hi2);
+    };
+    if(wide)
+    {
+        rocke_value_t* wn2 = rocke_warp_grid_warp_n_off(b, &ctx->grid);
+        rocke_value_t* bw = rocke_b_add(b, ctx->block_n_off_v, wn2);
+        n_base = rocke_b_add(b, bw, rocke_b_add(b, col_in, col_in));
+    }
+    rocke_value_t* m_str = NULL;
+    if(spec->xh_stride_m)
+    {
+        rocke_value_t* wm2 = rocke_warp_grid_warp_m_off(b, &ctx->grid);
+        rocke_value_t* m_wave = rocke_b_add(b, ctx->block_m_off_v, wm2);
+        m_str = rocke_b_add(b, m_wave, rocke_b_mul(b, row_in, rocke_b_const_i32(b, mfmas_m)));
+    }
+    rocke_conv_d_addr_ctx_t dctx;
+    dctx.D_desc = ctx->D_desc;
+    dctx.k_out_group_base = ctx->d_k_out_group_base;
+    dctx.slab_base = NULL;
+    rocke_value_t* n_bound = ctx->merged ? ctx->c_gm : ctx->p_kpg;
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* m_val = rocke_b_add(b, m_base, rocke_b_const_i32(b, mi * 16));
+        if(spec->xh_stride_m)
+        {
+            rocke_value_t* ms = rocke_b_add(b, m_str, rocke_b_const_i32(b, mi));
+            m_val = rocke_b_select(b, ctx->xsm_ok, ms, m_val);
+        }
+        rocke_value_t* valid = NULL;
+        rocke_value_t* off0 = rocke_conv_d_addr(b, m_val, n_base, &valid, &dctx);
+        rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->p_M);
+        if(valid != NULL)
+            m_ok = rocke_b_land(b, m_ok, valid);
+        rocke_value_t* pend[2] = {NULL, NULL};
+        for(int ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = accs[mi * mfmas_n + ni];
+            rocke_value_t *w0, *w1;
+            if(fast_cvt)
+            {
+                w0 = cvt_pair(acc, 0);
+                w1 = cvt_pair(acc, 2);
+            }
+            else
+            {
+                rocke_value_t* w = rocke_b_vec_bitcast(b, rocke_b_vec_cast_f32_to(b, acc, dt), wt2);
+                w0 = rocke_b_vec_extract(b, w, 0);
+                w1 = rocke_b_vec_extract(b, w, 1);
+            }
+            rocke_value_t* snd = rocke_b_select(b, q_hi, w0, w1);
+            rocke_value_t* rcv = rocke_b_dpp_xor(b, snd, x3 ? 8 : 2);
+            rocke_value_t* a_ = rocke_b_select(b, q_hi, rcv, w0);
+            rocke_value_t* bv = rocke_b_select(b, q_hi, w1, rcv);
+            rocke_value_t* pm = rocke_b_perm_b32(b, bv, a_, sel_s);
+            rocke_value_t* t_;
+            if(!x3)
+                t_ = rocke_b_dpp_xor(b, pm, 1);
+            else
+            {
+                rocke_value_t* sr = rocke_b_mov_dpp(b, pm, 4, -1, false);
+                rocke_value_t* sl = rocke_b_mov_dpp(b, pm, -1, 4, false);
+                t_ = rocke_b_select(b, q_odd, sr, sl);
+            }
+            rocke_value_t* o0 = rocke_b_perm_b32(b, t_, a_, sel_o0);
+            rocke_value_t* o1 = rocke_b_perm_b32(b, t_, bv, sel_o1);
+            if(wide && ni % 2 == 0)
+            {
+                pend[0] = o0;
+                pend[1] = o1;
+                continue;
+            }
+            rocke_value_t* words[4];
+            int nw = 0;
+            if(wide)
+            {
+                words[nw++] = pend[0];
+                words[nw++] = pend[1];
+            }
+            words[nw++] = o0;
+            words[nw++] = o1;
+            const int n_rel = wide ? 32 * (ni / 2) : 16 * ni;
+            rocke_value_t* n_val = rocke_b_add(b, n_base, rocke_b_const_i32(b, n_rel));
+            rocke_value_t* ne = rocke_b_add(b, n_val, rocke_b_const_i32(b, 2 * nw));
+            rocke_value_t* ok = rocke_b_land(b, m_ok, rocke_b_cmp_le(b, ne, n_bound));
+            rocke_value_t* off = rocke_b_add(b, off0, rocke_b_const_i32(b, n_rel));
+            rocke_value_t* safe = rocke_b_select(b, ok, rocke_b_mul(b, off, c_eb_d), oob);
+            rocke_value_t* pk = rocke_b_vec_pack(b, words, nw, rocke_i32());
+            rocke_value_t* v = rocke_b_vec_bitcast(b, pk, rocke_vector_type(b, dt, 2 * nw));
+            if(bf)
+                rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe, c0, v, nw);
+            else
+                rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe, c0, v, nw);
+        }
+    }
+}
+
 void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -966,6 +1127,11 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                    ctx->d_rsrc,
                                    ctx->extra_context,
                                    ctx->ov->user);
+    }
+    /* epi_quad_xpose: the register-only store (Python _emit_fwd_epilogue_qx). */
+    else if(spec->epi_quad_xpose)
+    {
+        conv_emit_fwd_epilogue_qx(ctx, final_accs);
     }
     /* The store's N bound is Python's c_N_bound: kpg, or kpg*Gm == Gm under
      * merge (the true kpg, 1 on depthwise, would clamp away Gm-1 of every Gm

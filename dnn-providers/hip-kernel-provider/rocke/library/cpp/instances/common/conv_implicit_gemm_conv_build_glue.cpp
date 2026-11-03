@@ -214,6 +214,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
     }
+    if(spec->no_agpr && b->kernel != NULL)
+        rocke_attr_set_str(b, &b->kernel->attrs, "agpr_alloc", "0,0");
 
     /* ---- params (A/B/D + extra_params + *_bytes) ---- (797-803) */
     {
@@ -909,9 +911,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         int a_shape[2];
         int b_shape[2];
-        a_shape[0] = ctx->block_m;
+        a_shape[0] = rocke_conv_xhalo_a_rows(spec);
         a_shape[1] = ctx->lds_layout.row_stride;
-        b_shape[0] = ctx->block_n;
+        b_shape[0] = rocke_conv_xhalo_b_rows(spec);
         b_shape[1] = ctx->lds_layout.row_stride;
         ctx->A_smem = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem");
         ctx->B_smem = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem");
@@ -931,8 +933,10 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         else if(ctx->double_buffer)
         {
-            ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem2");
-            ctx->B_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem2");
+            int a2_shape[2] = {ctx->block_m, ctx->lds_layout.row_stride};
+            int b2_shape[2] = {ctx->block_n, ctx->lds_layout.row_stride};
+            ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a2_shape, 2, "A_smem2");
+            ctx->B_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b2_shape, 2, "B_smem2");
         }
         else
         {

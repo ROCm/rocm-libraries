@@ -22,6 +22,7 @@
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 #include "rocke/arena.h"
 #include "rocke/helper_rocke.helpers.schedule.h"
+#include "rocke/helper_rocke.helpers.mfma_gemm_inner.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -701,6 +702,34 @@ static rocke_value_t* conv_uk_a_desc(rocke_ir_builder_t* b,
     return rocke_b_add(b, rocke_b_add(b, base, col), u->a_off);
 }
 
+/* Python _eqx_chan (epi_quad_xpose 2/3/4): the output channel (tile-relative)
+ * whose weights the B LDS row r holds; identity otherwise. */
+rocke_value_t* rocke_conv_eqx_chan(rocke_conv_build_ctx_t* ctx, rocke_value_t* r)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int eqx = ctx->spec->epi_quad_xpose;
+    if(eqx != 2 && eqx != 3 && eqx != 4)
+        return r;
+    rocke_value_t* p32 = rocke_b_land(b, r, rocke_b_const_i32(b, ~31));
+    rocke_value_t* ni_lo = rocke_b_land(b, r, rocke_b_const_i32(b, 16));
+    rocke_value_t* j = rocke_b_land(b, r, rocke_b_const_i32(b, 15));
+    rocke_value_t* jj;
+    if(eqx == 2)
+    {
+        rocke_value_t* jl = rocke_b_land(b, j, rocke_b_const_i32(b, 12));
+        rocke_value_t* a = rocke_b_mul(b, jl, rocke_b_const_i32(b, 2));
+        jj = rocke_b_add(b, a, rocke_b_land(b, j, rocke_b_const_i32(b, 3)));
+    }
+    else
+    {
+        rocke_value_t* jl = rocke_b_land(b, j, rocke_b_const_i32(b, 3));
+        rocke_value_t* a = rocke_b_mul(b, jl, rocke_b_const_i32(b, 8));
+        jj = rocke_b_add(b, a, rocke_b_div(b, j, rocke_b_const_i32(b, 4)));
+    }
+    rocke_value_t* q = rocke_b_div(b, ni_lo, rocke_b_const_i32(b, 4));
+    return rocke_b_add(b, rocke_b_add(b, p32, q), jj);
+}
+
 /* Python b_uk(b_, row, col) (epi_quad_xpose's channel permutation: identity). */
 static rocke_value_t* conv_uk_b_desc(rocke_ir_builder_t* b,
                                      rocke_value_t* row,
@@ -710,7 +739,7 @@ static rocke_value_t* conv_uk_b_desc(rocke_ir_builder_t* b,
 {
     conv_uk_t* u = (conv_uk_t*)user;
     rocke_conv_build_ctx_t* ctx = u->ctx;
-    rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, row);
+    rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, rocke_conv_eqx_chan(ctx, row));
     if(ctx->k_out_group_base != NULL)
         k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
     rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->p_B_stride_k), col);
@@ -1453,7 +1482,7 @@ static void conv_run_loop(rocke_conv_build_ctx_t* ctx,
 
     /* Prologue: tile `lo` into buffer 0, published. The fallback loop of a
      * fb_skip_empty kernel only runs it when its range is not empty. */
-    if(spec->fb_skip_empty && strcmp(tag, "fb") == 0)
+    if(spec->uk_xhalo || (spec->fb_skip_empty && strcmp(tag, "fb") == 0))
     {
         rocke_if_t if_op = rocke_b_scf_if(b, rocke_b_cmp_lt(b, lo, hi));
         rocke_b_region_enter(b, if_op.then_region);
@@ -1589,6 +1618,558 @@ static void conv_run_loop(rocke_conv_build_ctx_t* ctx,
         out_accs[i] = t.op->results[i];
 }
 
+/* ===================================================================== *
+ * The uk_xhalo loop (Python _emit_xhalo_loop) with the wave-private DMA
+ * staging of _emit_xhalo_dma (fxh_dma >= 1000; xh_stride_m, lds_kpack_read,
+ * lds_xor, tile_k 32). Returns xh_ok; the accumulators after it in out.
+ * ===================================================================== */
+#define CONV_XH_TAPS 3
+
+typedef struct
+{
+    rocke_conv_build_ctx_t* ctx;
+    conv_uk_t* u;
+    rocke_value_t* m0;
+} conv_xh_t;
+
+/* lin_of(m): input pixel index of output pixel m at tap 0 (pad 0, sW 1). */
+static rocke_value_t* conv_xh_lin_of(rocke_conv_build_ctx_t* ctx, rocke_value_t* m_val)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_wo, *wo, *q_ho, *ho, *n_, *do_;
+    rocke_conv_magic_divmod(b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &q_ho, &ho);
+    rocke_conv_magic_divmod(b, q_ho, ctx->p_magic_m_Do_mult, ctx->p_magic_m_Do_shift, ctx->p_Do, false, &n_, &do_);
+    rocke_value_t* nd = rocke_b_mul(b, n_, ctx->p_Di);
+    rocke_value_t* ds = rocke_b_mul(b, do_, ctx->p_sD);
+    rocke_value_t* d_ = rocke_b_add(b, nd, ds);
+    rocke_value_t* dh = rocke_b_mul(b, d_, ctx->p_Hi);
+    rocke_value_t* hs = rocke_b_mul(b, ho, ctx->p_sH);
+    rocke_value_t* h_ = rocke_b_add(b, dh, hs);
+    return rocke_b_add(b, rocke_b_mul(b, h_, ctx->p_Wi), wo);
+}
+
+/* xh_uniforms(st): (a_off, b_off, t_ok) of the (c, y, z) step. */
+static void conv_xh_uniforms(conv_xh_t* x, rocke_value_t* const* st, rocke_value_t** a_off,
+                             rocke_value_t** b_off, rocke_value_t** t_ok)
+{
+    rocke_conv_build_ctx_t* ctx = x->ctx;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* ay = rocke_b_mul(b, st[1], x->u->a_ystep);
+    rocke_value_t* az = rocke_b_mul(b, st[2], x->u->a_zstep);
+    *a_off = rocke_b_add(b, rocke_b_add(b, ay, az), st[0]);
+    rocke_value_t* by = rocke_b_mul(b, st[1], ctx->p_B_stride_y);
+    rocke_value_t* bz = rocke_b_mul(b, st[2], ctx->p_B_stride_z);
+    *b_off = rocke_b_add(b, rocke_b_add(b, by, bz), st[0]);
+    *t_ok = rocke_b_cmp_lt(b, st[2], ctx->p_Z);
+}
+
+/* xh_adv(st): the next (c, y, z) step. */
+static void conv_xh_adv(conv_xh_t* x, rocke_value_t* const* st, rocke_value_t** out)
+{
+    rocke_conv_build_ctx_t* ctx = x->ctx;
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* c1 = ctx->uk_c1;
+    rocke_value_t *c_t = st[0], *y_t = st[1], *z_t = st[2];
+    if(spec->uk_tap_fast)
+    {
+        const int g = spec->uk_chunk_group;
+        rocke_value_t *c_gspan, *nc, *ny;
+        if(g)
+        {
+            c_gspan = rocke_b_const_i32(b, g * ctx->block_k);
+            rocke_value_t* c_gmask = rocke_b_const_i32(b, g * ctx->block_k - 1);
+            nc = rocke_b_add(b, c_t, ctx->c_block_k);
+            rocke_value_t* e1 = rocke_b_cmp_eq(b, rocke_b_land(b, nc, c_gmask), c0);
+            rocke_value_t* w_c = rocke_b_lor(b, e1, rocke_b_cmp_ge(b, nc, ctx->p_cpg));
+            nc = rocke_b_select(b, w_c, rocke_b_sub(b, c_t, rocke_b_land(b, c_t, c_gmask)), nc);
+            ny = rocke_b_add(b, y_t, rocke_b_select(b, w_c, c1, c0));
+        }
+        else
+        {
+            c_gspan = ctx->c_block_k;
+            nc = c_t;
+            ny = rocke_b_add(b, y_t, c1);
+        }
+        rocke_value_t* w_y = rocke_b_cmp_ge(b, ny, ctx->p_Y);
+        ny = rocke_b_select(b, w_y, c0, ny);
+        rocke_value_t* nz = rocke_b_add(b, z_t, rocke_b_select(b, w_y, c1, c0));
+        rocke_value_t* w_z = rocke_b_cmp_ge(b, nz, ctx->p_Z);
+        nz = rocke_b_select(b, w_z, c0, nz);
+        nc = rocke_b_add(b, nc, rocke_b_select(b, w_z, c_gspan, c0));
+        nz = rocke_b_select(b, rocke_b_cmp_ge(b, nc, ctx->p_cpg), ctx->p_Z, nz);
+        out[0] = nc;
+        out[1] = ny;
+        out[2] = nz;
+        return;
+    }
+    rocke_value_t* nc = rocke_b_add(b, c_t, ctx->c_block_k);
+    rocke_value_t* w_c = rocke_b_cmp_ge(b, nc, ctx->p_cpg);
+    nc = rocke_b_select(b, w_c, c0, nc);
+    rocke_value_t* ny = rocke_b_add(b, y_t, rocke_b_select(b, w_c, c1, c0));
+    rocke_value_t* w_y = rocke_b_cmp_ge(b, ny, ctx->p_Y);
+    ny = rocke_b_select(b, w_y, c0, ny);
+    rocke_value_t* nz = rocke_b_add(b, z_t, rocke_b_select(b, w_y, c1, c0));
+    out[0] = nc;
+    out[1] = ny;
+    out[2] = nz;
+}
+
+static void conv_xh_hint_interleave(rocke_ir_builder_t* b, int n_first, int n_other, int other, int n_mf, int per)
+{
+    if(n_first)
+        rocke_b_sched_group_barrier(b, other, n_first, 0);
+    int n_o = n_other;
+    while(n_mf > 0)
+    {
+        const int take = per < n_mf ? per : n_mf;
+        rocke_b_sched_group_barrier(b, ROCKE_SCHED_MFMA, take, 0);
+        n_mf -= take;
+        if(n_o)
+        {
+            rocke_b_sched_group_barrier(b, other, 1, 0);
+            n_o -= 1;
+        }
+    }
+    if(n_o)
+        rocke_b_sched_group_barrier(b, other, n_o, 0);
+}
+
+typedef struct
+{
+    rocke_value_t* lds;
+    rocke_value_t* voff;
+} conv_dma_t;
+
+static rocke_value_t* conv_xh_emit(conv_xh_t* x,
+                                   rocke_value_t* uk_ok_,
+                                   rocke_value_t* const* accs_in,
+                                   rocke_value_t** out_accs)
+{
+    rocke_conv_build_ctx_t* ctx = x->ctx;
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    conv_uk_t* u = x->u;
+    const int XT = CONV_XH_TAPS;
+    const int block_m = ctx->block_m, block_n = ctx->block_n, block_k = ctx->block_k;
+    const int mfmas_m = ctx->mfmas_m, mfmas_n = ctx->mfmas_n, k_atoms = ctx->k_atoms;
+    const int n_acc = ctx->num_accs;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* c1 = ctx->uk_c1;
+    const int R = block_m + spec->uk_xhalo;
+    rocke_value_t* c_R = rocke_b_const_i32(b, R);
+    rocke_value_t* c_XT = rocke_b_const_i32(b, XT);
+    rocke_value_t* m0 = ctx->block_m_off_v;
+    x->m0 = m0;
+    rocke_value_t* s_n = ctx->p_A_stride_n;
+    rocke_value_t* s_hi = ctx->p_A_stride_hi;
+    rocke_value_t* s_wi = ctx->p_A_stride_wi;
+    rocke_value_t* s_di = ctx->p_A_stride_di;
+
+    rocke_value_t* c_bm = rocke_b_const_i32(b, block_m);
+    rocke_value_t* m_end = rocke_b_add(b, m0, c_bm);
+    rocke_value_t* m_lt = rocke_b_cmp_lt(b, m_end, ctx->p_M);
+    rocke_value_t* m_last = rocke_b_sub(b, rocke_b_select(b, m_lt, m_end, ctx->p_M), c1);
+    rocke_value_t* lin0 = conv_xh_lin_of(ctx, m0);
+    rocke_value_t* lin_l = conv_xh_lin_of(ctx, m_last);
+    rocke_value_t* span = rocke_b_add(b, rocke_b_sub(b, lin_l, lin0), c_XT);
+    rocke_value_t* conds[24];
+    int nc = 0;
+    conds[nc++] = uk_ok_;
+    conds[nc++] = rocke_b_cmp_le(b, span, c_R);
+    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pD, c0);
+    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pH, c0);
+    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_pW, c0);
+    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_sW, c1);
+    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_dW, c1);
+    conds[nc++] = rocke_b_cmp_eq(b, ctx->p_X, c_XT);
+    conds[nc++] = rocke_b_cmp_eq(b, s_hi, rocke_b_mul(b, ctx->p_Wi, s_wi));
+    conds[nc++] = rocke_b_cmp_eq(b, s_di, rocke_b_mul(b, ctx->p_Hi, s_hi));
+    conds[nc++] = rocke_b_cmp_eq(b, s_n, rocke_b_mul(b, ctx->p_Di, s_di));
+    if(spec->xh_stride_m)
+    {
+        rocke_value_t* md = rocke_b_mod(b, ctx->p_Wo, rocke_b_const_i32(b, mfmas_m));
+        conds[nc++] = rocke_b_cmp_eq(b, md, c0);
+    }
+    if(spec->fxh_dma >= 1000)
+    {
+        rocke_value_t* md = rocke_b_mod(b, ctx->p_Wo, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
+        conds[nc++] = rocke_b_cmp_eq(b, md, c0);
+    }
+    rocke_value_t* xh_ok = conds[0];
+    for(int i = 1; i < nc; ++i)
+        xh_ok = rocke_b_land(b, xh_ok, conds[i]);
+    ctx->xsm_ok = xh_ok;
+    /* (chunk, z, y) tiles: Z*Y*cpg / tile_k of them. */
+    rocke_value_t* zy = rocke_b_mul(b, ctx->p_Z, ctx->p_Y);
+    rocke_value_t* xh_hi = rocke_b_select(b, xh_ok, rocke_b_mul(b, zy, ctx->p_cpg), c0);
+    rocke_value_t* a_base0 = rocke_b_mul(b, lin0, s_wi);
+    if(u->a_gbase != NULL)
+        a_base0 = rocke_b_add(b, a_base0, u->a_gbase);
+    (void)a_base0;
+    (void)rocke_b_const_i32(b, 0x7FFFFFFF); /* c_oob_a */
+    (void)rocke_b_const_i32(b, (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0) ? 4 : 2); /* c_eb */
+
+    /* chunks(rows, vec, cap_row): the plain x-halo loader slots (emitted by
+     * Python ahead of the loop dispatch even though the DMA loop never reads
+     * them). */
+    const int threads = ctx->threads;
+    const int lva = ctx->a_sync_loader.load_vec, lvb = ctx->b_sync_loader.load_vec;
+    const int rows_l[2] = {R, XT * block_n};
+    const int vecs_l[2] = {lva, lvb};
+    for(int w = 0; w < 2; ++w)
+    {
+        const int rows = rows_l[w], vec = vecs_l[w], cap_row = rows_l[w];
+        const int cpv = block_k / vec;
+        const int total = rows * cpv;
+        const int n_e = (total + threads - 1) / threads;
+        for(int e = 0; e < n_e; ++e)
+        {
+            rocke_value_t* v = rocke_b_add(b, rocke_b_const_i32(b, e * threads), ctx->tid);
+            const bool surplus = (e + 1) * threads > total;
+            rocke_value_t* row = rocke_b_div(b, v, rocke_b_const_i32(b, cpv));
+            if(spec->xh_stride_m && cap_row == R && cpv == 4)
+            {
+                rocke_value_t* hs = rocke_b_lshr(b, row, rocke_b_const_i32(b, 2));
+                row = rocke_b_xor(b, row, rocke_b_land(b, hs, c1));
+            }
+            rocke_value_t* cm = rocke_b_mod(b, v, rocke_b_const_i32(b, cpv));
+            (void)rocke_b_mul(b, cm, rocke_b_const_i32(b, vec));
+            if(surplus)
+            {
+                rocke_value_t* live = rocke_b_cmp_lt(b, v, rocke_b_const_i32(b, total));
+                (void)rocke_b_select(b, live, row, rocke_b_const_i32(b, cap_row));
+            }
+        }
+    }
+
+    /* The MFMA A rows: lin(m0 + row) - lin0, then + x per tap. */
+    rocke_lane_decode_t dec = rocke_decode_mfma_lanes(b, ctx->atom, ctx->lane);
+    rocke_value_t* wm_off = rocke_warp_grid_warp_m_off(b, &ctx->grid);
+    const int WR = rocke_conv_fxd_wave_rows(spec);
+    rocke_value_t* base_rows[ROCKE_CONV_MAX_ACCS];
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* a_row;
+        if(spec->xh_stride_m)
+        {
+            rocke_value_t* mm = rocke_b_mul(b, dec.m_in_atom, rocke_b_const_i32(b, mfmas_m));
+            a_row = rocke_b_add(b, wm_off, rocke_b_add(b, mm, rocke_b_const_i32(b, mi)));
+        }
+        else
+        {
+            rocke_value_t* mc = rocke_b_const_i32(b, mi * spec->warp_tile_m);
+            a_row = rocke_b_add(b, wm_off, rocke_b_add(b, mc, dec.m_in_atom));
+        }
+        /* fxh_dma >= 1000: the wave's private range. */
+        rocke_value_t* wr = rocke_b_mul(b, ctx->grid.warp_m_idx, rocke_b_const_i32(b, WR));
+        rocke_value_t* la = conv_xh_lin_of(ctx, rocke_b_add(b, m0, a_row));
+        rocke_value_t* lw = conv_xh_lin_of(ctx, rocke_b_add(b, m0, wm_off));
+        base_rows[mi] = rocke_b_add(b, wr, rocke_b_sub(b, la, lw));
+    }
+
+    /* ---- _emit_xhalo_dma (wave-private A) ---- */
+    rocke_value_t* c64 = rocke_b_const_i32(b, 64);
+    const int n_waves = spec->warp_m * spec->warp_n;
+    rocke_value_t* lane_ = rocke_b_mod(b, ctx->tid, c64);
+    rocke_value_t* wave_ = rocke_b_to_sgpr_u32(b, rocke_b_div(b, ctx->tid, c64));
+    rocke_value_t* l16 = rocke_b_div(b, lane_, rocke_b_const_i32(b, 16));
+    rocke_value_t* lm16 = rocke_b_mod(b, lane_, rocke_b_const_i32(b, 16));
+    rocke_value_t* lch = rocke_b_div(b, lm16, rocke_b_const_i32(b, 4));
+    rocke_value_t* ldw = rocke_b_mod(b, lane_, rocke_b_const_i32(b, 4));
+    rocke_value_t* c_oob = rocke_b_const_i32(b, 0x7FFFFFFF);
+    rocke_value_t* c2 = rocke_b_const_i32(b, 2);
+    rocke_value_t* c_eb = c2;
+    const int row_bytes = block_k * 2;
+    rocke_value_t* A_addr = rocke_b_smem_addr_of(b, ctx->A_smem);
+    rocke_value_t* B_addr = rocke_b_smem_addr_of(b, ctx->B_smem);
+    const rocke_type_t* i64 = rocke_i64();
+
+    conv_dma_t a_dma[64];
+    int n_adma = 0;
+    {
+        rocke_value_t* wq = rocke_b_mul(b, wave_, rocke_b_const_i32(b, spec->tile_m / spec->warp_m));
+        rocke_value_t* w_m0 = rocke_b_add(b, m0, wq);
+        rocke_value_t* a_base_w = rocke_b_mul(b, conv_xh_lin_of(ctx, w_m0), s_wi);
+        if(u->a_gbase != NULL)
+            a_base_w = rocke_b_add(b, a_base_w, u->a_gbase);
+        const int hp = spec->tile_m / spec->warp_m + XT - 1;
+        rocke_value_t* w_seg = rocke_b_mul(b, wave_, rocke_b_const_i32(b, WR / 4));
+        rocke_value_t* p_rel[4];
+        rocke_value_t* p_o[4];
+        for(int k = 0; k < 4; ++k)
+        {
+            rocke_value_t* g = rocke_b_add(b, w_seg, rocke_b_const_i32(b, k));
+            rocke_value_t* rel0 = rocke_b_xor(b, l16, rocke_b_land(b, g, c1));
+            rocke_value_t* chunk = rocke_b_xor(b, lch, rocke_b_land(b, g, rocke_b_const_i32(b, 3)));
+            rocke_value_t* rw = rocke_b_mul(b, rel0, s_wi);
+            rocke_value_t* ch8 = rocke_b_mul(b, chunk, rocke_b_const_i32(b, 8));
+            rocke_value_t* inner = rocke_b_add(b, ch8, rocke_b_mul(b, ldw, c2));
+            rocke_value_t* o = rocke_b_add(b, rw, inner);
+            p_rel[k] = rel0;
+            p_o[k] = rocke_b_mul(b, o, c_eb);
+        }
+        for(int j = 0; j < WR / 4; ++j)
+        {
+            rocke_value_t* sg = rocke_b_add(b, w_seg, rocke_b_const_i32(b, j));
+            rocke_value_t* rel0 = p_rel[j % 4];
+            rocke_value_t* o = p_o[j % 4];
+            rocke_value_t* r4 = rocke_b_mul(b, rocke_b_const_i32(b, 4 * j), s_wi);
+            rocke_value_t* ubase = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_add(b, a_base_w, r4), c_eb));
+            rocke_value_t* voff = rocke_b_add(b, o, ubase);
+            if(4 * j + 3 >= hp)
+            {
+                rocke_value_t* rr = rocke_b_add(b, rel0, rocke_b_const_i32(b, 4 * j));
+                rocke_value_t* okr = rocke_b_cmp_lt(b, rr, rocke_b_const_i32(b, hp));
+                voff = rocke_b_select(b, okr, voff, c_oob);
+            }
+            rocke_value_t* sb = rocke_b_mul(b, sg, rocke_b_const_i32(b, 4 * row_bytes));
+            rocke_value_t* lds = rocke_b_smem_ptr_add(b, A_addr, rocke_b_zext(b, sb, i64));
+            a_dma[n_adma].lds = lds;
+            a_dma[n_adma++].voff = voff;
+        }
+    }
+    /* B: rows (x, n) of the lds_xor layout; chunk = pchunk ^ (key(row) & 3). */
+    const int _sh = spec->lds_xor_rowkey ? 0 : 1;
+    conv_dma_t b_dma[256];
+    int n_bdma = 0;
+    rocke_value_t* c_tn = rocke_b_const_i32(b, block_n);
+    const bool bcheap = n_waves == 4 && block_n == 64;
+    if(bcheap)
+    {
+        rocke_value_t* key;
+        if(_sh)
+        {
+            rocke_value_t* w4 = rocke_b_add(b, rocke_b_mul(b, wave_, rocke_b_const_i32(b, 4)), l16);
+            key = rocke_b_lshr(b, w4, rocke_b_const_i32(b, _sh));
+        }
+        else
+            key = l16;
+        rocke_value_t* chunk = rocke_b_xor(b, lch, rocke_b_land(b, key, rocke_b_const_i32(b, 3)));
+        rocke_value_t* ch8 = rocke_b_mul(b, chunk, rocke_b_const_i32(b, 8));
+        rocke_value_t* col = rocke_b_add(b, ch8, rocke_b_mul(b, ldw, c2));
+        rocke_value_t* bpats[4];
+        for(int k = 0; k < 4; ++k)
+        {
+            rocke_value_t* c16 = rocke_b_const_i32(b, 16 * k);
+            rocke_value_t* w4 = rocke_b_add(b, rocke_b_mul(b, wave_, rocke_b_const_i32(b, 4)), l16);
+            rocke_value_t* nloc = rocke_b_add(b, c16, w4);
+            rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, rocke_conv_eqx_chan(ctx, nloc));
+            if(ctx->k_out_group_base != NULL)
+                k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
+            rocke_value_t* ks = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+            bpats[k] = rocke_b_mul(b, rocke_b_add(b, ks, col), c_eb);
+        }
+        for(int j = 0; j < XT * block_n / 16; ++j)
+        {
+            rocke_value_t* sg = rocke_b_add(b, rocke_b_const_i32(b, 4 * j), wave_);
+            rocke_value_t* jx = rocke_b_mul(b, rocke_b_const_i32(b, j / 4), ctx->p_B_stride_x);
+            rocke_value_t* ub = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, jx, c_eb));
+            rocke_value_t* sb = rocke_b_mul(b, sg, rocke_b_const_i32(b, 4 * row_bytes));
+            rocke_value_t* lds = rocke_b_smem_ptr_add(b, B_addr, rocke_b_zext(b, sb, i64));
+            b_dma[n_bdma].lds = lds;
+            b_dma[n_bdma++].voff = rocke_b_add(b, bpats[j % 4], ub);
+        }
+    }
+    else
+    {
+        const int n_seg = XT * block_n / 4;
+        for(int jj = 0; jj < (n_seg + n_waves - 1) / n_waves; ++jj)
+        {
+            rocke_value_t* sg = rocke_b_add(b, rocke_b_const_i32(b, jj * n_waves), wave_);
+            if((jj + 1) * n_waves > n_seg)
+                sg = rocke_b_smin(b, sg, rocke_b_const_i32(b, n_seg - 1));
+            rocke_value_t* prow = rocke_b_add(b, rocke_b_mul(b, sg, rocke_b_const_i32(b, 4)), l16);
+            rocke_value_t* key = _sh ? rocke_b_lshr(b, prow, rocke_b_const_i32(b, _sh)) : prow;
+            rocke_value_t* chunk = rocke_b_xor(b, lch, rocke_b_land(b, key, rocke_b_const_i32(b, 3)));
+            rocke_value_t* ch8 = rocke_b_mul(b, chunk, rocke_b_const_i32(b, 8));
+            rocke_value_t* col = rocke_b_add(b, ch8, rocke_b_mul(b, ldw, c2));
+            rocke_value_t* x_ = rocke_b_div(b, prow, c_tn);
+            rocke_value_t* pm = rocke_b_mod(b, prow, c_tn);
+            rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, rocke_conv_eqx_chan(ctx, pm));
+            if(ctx->k_out_group_base != NULL)
+                k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
+            rocke_value_t* ks = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+            rocke_value_t* xs = rocke_b_mul(b, x_, ctx->p_B_stride_x);
+            rocke_value_t* off = rocke_b_add(b, rocke_b_add(b, ks, xs), col);
+            rocke_value_t* sb = rocke_b_mul(b, sg, rocke_b_const_i32(b, 4 * row_bytes));
+            rocke_value_t* lds = rocke_b_smem_ptr_add(b, B_addr, rocke_b_zext(b, sb, i64));
+            b_dma[n_bdma].lds = lds;
+            b_dma[n_bdma++].voff = rocke_b_mul(b, off, c_eb);
+        }
+    }
+
+    /* prologue: dma(st0) under xh_ok */
+    rocke_value_t* st0[3] = {c0, c0, c0};
+    {
+        rocke_if_t g = rocke_b_scf_if(b, xh_ok);
+        rocke_b_region_enter(b, g.then_region);
+        rocke_value_t *ao, *bo, *to;
+        conv_xh_uniforms(x, st0, &ao, &bo, &to);
+        rocke_value_t* sa = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ao, c_eb));
+        rocke_value_t* sb = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, bo, c_eb));
+        for(int i = 0; i < n_adma; ++i)
+            rocke_b_async_buffer_load_lds_addr(b, ctx->a_rsrc, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
+        for(int i = 0; i < n_bdma; ++i)
+            rocke_b_async_buffer_load_lds_addr(b, ctx->b_rsrc, b_dma[i].lds, b_dma[i].voff, sb, 1, 0);
+        rocke_b_region_leave(b);
+    }
+    rocke_b_sync(b);
+    const int n_mf = k_atoms * mfmas_m * mfmas_n;
+    const int n_pre_mf = spec->fxh_dma % 1000;
+    int na_pre = n_adma;
+    if(spec->fxh_dma >= 2000)
+        na_pre = (n_pre_mf / 2) < n_adma ? n_pre_mf / 2 : n_adma;
+    const int n_rb = XT * mfmas_n;
+
+    rocke_iter_arg_t it[ROCKE_CONV_MAX_ACCS + 3];
+    char nbuf[64];
+    for(int i = 0; i < n_acc; ++i)
+    {
+        snprintf(nbuf, sizeof(nbuf), "xd_%s", ctx->acc_names[i]);
+        it[i].name = rocke_arena_strdup(&b->arena, nbuf);
+        it[i].init = accs_in[i];
+    }
+    it[n_acc].name = "xd_c";
+    it[n_acc].init = c0;
+    it[n_acc + 1].name = "xd_y";
+    it[n_acc + 1].init = c0;
+    it[n_acc + 2].name = "xd_z";
+    it[n_acc + 2].init = c0;
+    rocke_for_t f = rocke_b_scf_for_iter(b, c0, xh_hi, ctx->c_block_k, it, n_acc + 3, "xd_k", false, false);
+    rocke_b_region_enter(b, f.body);
+    {
+        rocke_value_t* iv[ROCKE_CONV_MAX_ACCS + 3];
+        for(int i = 0; i < f.num_iter_vars; ++i)
+            iv[i] = f.iter_vars[i];
+        rocke_value_t* st[3] = {iv[n_acc], iv[n_acc + 1], iv[n_acc + 2]};
+        rocke_value_t* st1[3];
+        conv_xh_adv(x, st, st1);
+        if(spec->rpf_setprio)
+            rocke_b_s_setprio(b, spec->rpf_setprio);
+        /* reads_part(True) / reads_part(False): the 3 taps' A then B fragments. */
+        rocke_conv_frag_t* fa = (rocke_conv_frag_t*)rocke_arena_alloc(&b->arena, (size_t)XT * k_atoms * sizeof(rocke_conv_frag_t));
+        rocke_conv_frag_t* fb = (rocke_conv_frag_t*)rocke_arena_alloc(&b->arena, (size_t)XT * k_atoms * sizeof(rocke_conv_frag_t));
+        rocke_conv_frag_t* frs = (rocke_conv_frag_t*)rocke_arena_alloc(&b->arena, (size_t)XT * k_atoms * sizeof(rocke_conv_frag_t));
+        typedef rocke_value_t* recrow_t[ROCKE_CONV_MAX_ACCS];
+        recrow_t* recs = (recrow_t*)rocke_arena_alloc(&b->arena, (size_t)XT * k_atoms * sizeof(recrow_t));
+        rocke_value_t* dummy[ROCKE_CONV_MAX_ACCS];
+        for(int part = 1; part >= 0; --part)
+        {
+            for(int xx = 0; xx < XT; ++xx)
+            {
+                rocke_value_t* rows[ROCKE_CONV_MAX_ACCS];
+                for(int mi = 0; mi < mfmas_m; ++mi)
+                    rows[mi] = xx == 0 ? base_rows[mi] : rocke_b_add(b, base_rows[mi], rocke_b_const_i32(b, xx));
+                ctx->xh_a_rows = rows;
+                ctx->xh_b_row_off = xx * block_n;
+                if(part)
+                {
+                    ctx->pp_b_from_p1 = 1; /* b_from = 0 */
+                    ctx->xh_prev = xx == 0 ? NULL : recs + (size_t)(xx - 1) * k_atoms;
+                    ctx->xh_rec = recs + (size_t)xx * k_atoms;
+                }
+                else
+                {
+                    ctx->pp_b_only = true;
+                    ctx->xh_prev = NULL;
+                    ctx->xh_rec = NULL;
+                }
+                ctx->pp_read = (part ? fa : fb) + (size_t)xx * k_atoms;
+                ctx->pp_read_n = 0;
+                rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, accs_in, n_acc, dummy);
+                ctx->pp_read = NULL;
+                ctx->pp_b_from_p1 = 0;
+                ctx->pp_b_only = false;
+                ctx->xh_prev = NULL;
+                ctx->xh_rec = NULL;
+                ctx->xh_a_rows = NULL;
+                ctx->xh_b_row_off = 0;
+            }
+            if(part)
+                rocke_b_sched_barrier(b, 0);
+        }
+        for(int xx = 0; xx < XT; ++xx)
+            for(int kk = 0; kk < k_atoms; ++kk)
+            {
+                rocke_conv_frag_t* d = &frs[xx * k_atoms + kk];
+                const rocke_conv_frag_t* sa_ = &fa[xx * k_atoms + kk];
+                const rocke_conv_frag_t* sb_ = &fb[xx * k_atoms + kk];
+                for(int i = 0; i < sa_->na; ++i)
+                    d->a[i] = sa_->a[i];
+                d->na = sa_->na;
+                for(int i = 0; i < sb_->nb; ++i)
+                    d->b[i] = sb_->b[i];
+                d->nb = sb_->nb;
+            }
+        rocke_b_s_waitcnt(b, -1, n_rb, -1);
+        rocke_value_t* nk = rocke_b_add(b, f.iv, ctx->c_block_k);
+        rocke_value_t* has_next = rocke_b_cmp_lt(b, nk, xh_hi);
+        rocke_value_t* sel[3];
+        for(int i = 0; i < 3; ++i)
+            sel[i] = rocke_b_select(b, has_next, st1[i], st[i]);
+        rocke_value_t *ao, *bo, *to;
+        conv_xh_uniforms(x, sel, &ao, &bo, &to);
+        rocke_value_t* sa = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ao, c_eb));
+        rocke_value_t* sb = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, bo, c_eb));
+        for(int i = 0; i < na_pre; ++i)
+            rocke_b_async_buffer_load_lds_addr(b, ctx->a_rsrc, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
+        rocke_value_t* acc[ROCKE_CONV_MAX_ACCS];
+        for(int i = 0; i < n_acc; ++i)
+            acc[i] = iv[i];
+        auto run_mf = [&](int lo, int hi) {
+            for(int xx = 0; xx < XT; ++xx)
+            {
+                const int a_ = lo > xx * n_mf ? lo : xx * n_mf;
+                const int b_ = hi < (xx + 1) * n_mf ? hi : (xx + 1) * n_mf;
+                if(a_ < b_)
+                {
+                    rocke_value_t* o[ROCKE_CONV_MAX_ACCS];
+                    ctx->pp_use = frs + (size_t)xx * k_atoms;
+                    ctx->pp_i0 = a_ - xx * n_mf;
+                    ctx->pp_i1 = b_ - xx * n_mf;
+                    rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, acc, n_acc, o);
+                    ctx->pp_use = NULL;
+                    for(int i = 0; i < n_acc; ++i)
+                        acc[i] = o[i];
+                }
+            }
+        };
+        run_mf(0, n_pre_mf);
+        {
+            const int per = n_pre_mf / (na_pre > 1 ? na_pre : 1);
+            conv_xh_hint_interleave(b, 0, na_pre, ROCKE_SCHED_VMEM_READ, n_pre_mf, per > 1 ? per : 1);
+        }
+        rocke_b_sync_lds_only_fence(b, "compiler");
+        for(int i = na_pre; i < n_adma; ++i)
+            rocke_b_async_buffer_load_lds_addr(b, ctx->a_rsrc, a_dma[i].lds, a_dma[i].voff, sa, 1, 0);
+        for(int i = 0; i < n_bdma; ++i)
+            rocke_b_async_buffer_load_lds_addr(b, ctx->b_rsrc, b_dma[i].lds, b_dma[i].voff, sb, 1, 0);
+        run_mf(n_pre_mf, XT * n_mf);
+        {
+            const int n_post = n_adma - na_pre + n_bdma;
+            const int rest = XT * n_mf - n_pre_mf;
+            int per = rest / (n_post > 1 ? n_post : 1) - 1;
+            conv_xh_hint_interleave(b, 0, n_post, ROCKE_SCHED_VMEM_READ, rest, per > 1 ? per : 1);
+        }
+        if(spec->rpf_setprio)
+            rocke_b_s_setprio(b, 0);
+        rocke_b_sync_fence(b, "compiler");
+        rocke_value_t* y[ROCKE_CONV_MAX_ACCS + 3];
+        for(int i = 0; i < n_acc; ++i)
+            y[i] = acc[i];
+        for(int i = 0; i < 3; ++i)
+            y[n_acc + i] = st1[i];
+        rocke_b_scf_yield(b, y, n_acc + 3);
+    }
+    rocke_b_region_leave(b);
+    for(int i = 0; i < n_acc; ++i)
+        out_accs[i] = f.op->results[i];
+    return xh_ok;
+}
+
 void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -1647,7 +2228,23 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
     {
         for(int i = 0; i < n_state; ++i)
             state[i] = c0;
-        conv_run_loop(ctx, c0, uk_hi, accs0, uk_names, state, n_state, u, "uk", uk_accs);
+        rocke_value_t* accs_in0[ROCKE_CONV_MAX_ACCS] = {};
+        for(int i = 0; i < n_acc; ++i)
+            accs_in0[i] = accs0[i];
+        if(spec->uk_xhalo)
+        {
+            conv_xh_t xx;
+            xx.ctx = ctx;
+            xx.u = u;
+            xx.m0 = NULL;
+            rocke_value_t* xo[ROCKE_CONV_MAX_ACCS] = {};
+            rocke_value_t* xh_ok = conv_xh_emit(&xx, uk_ok, accs_in0, xo);
+            for(int i = 0; i < n_acc; ++i)
+                accs_in0[i] = xo[i];
+            rocke_value_t* nx = rocke_b_land(b, uk_ok, rocke_b_lnot(b, xh_ok));
+            uk_hi = rocke_b_select(b, nx, ctx->c_K_gemm, c0);
+        }
+        conv_run_loop(ctx, c0, uk_hi, accs_in0, uk_names, state, n_state, u, "uk", uk_accs);
         rocke_value_t* fb_lo = rocke_b_select(b, uk_ok, ctx->c_K_gemm, c0);
         conv_run_loop(ctx, fb_lo, ctx->c_K_gemm, uk_accs, NULL, NULL, 0, NULL, "fb", res);
         rocke_conv_set_final_accs(ctx, res, n_acc);

@@ -1007,6 +1007,14 @@ _GFX942_3D_OFFSET = 32
 #  111: 83 without xcd_remap + split_hybrid=4, split_det=1
 #  112: 110 + split_det=2: rejected by both engines
 #  113: 108 with split_streamk in place of split_hybrid: rejected by both engines
+#  114: 55 + uniform_k_decode, reg_prefetch=1, xcd_remap=6, lds_xor, uk_xhalo=8,
+#       rpf_setprio=2, lds_xor_rowkey, xh_wait_smem, epi_quad_xpose=4, xh_stride_m,
+#       fxh_dma=1036, lds_kpack_read (the wave-private x-halo DMA loop and the
+#       quad-transpose epilogue)
+#  115: 114 with uk_xhalo=4, rpf_setprio=1, no_agpr, m_band=32, fxh_dma=2016
+#  116: 114 + uk_tap_fast
+#  117: 114 with epi_quad_xpose=3
+#  118: 55 + xh_stride_m without uk_xhalo: rejected by both engines
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1131,6 +1139,15 @@ def _gfx942_3d_spec(idx: int):
     knobs[108] = (55, _s8)
     knobs[109] = (55, dict(_s8, split_hybrid=8, split_det=2))
     knobs[113] = (55, dict(_s8, split_hybrid=0, split_streamk=True, split_det=0))
+    _s4 = dict(uniform_k_decode=True, reg_prefetch=1, xcd_remap=6, lds_xor=True, uk_xhalo=8,
+               rpf_setprio=2, lds_xor_rowkey=True, xh_wait_smem=True, epi_quad_xpose=4,
+               xh_stride_m=True, fxh_dma=1036, lds_kpack_read=True)
+    knobs[114] = (55, _s4)
+    knobs[115] = (55, dict(_s4, uk_xhalo=4, rpf_setprio=1, no_agpr=True, m_band=32,
+                           fxh_dma=2016))
+    knobs[116] = (55, dict(_s4, uk_tap_fast=True))
+    knobs[117] = (55, dict(_s4, epi_quad_xpose=3))
+    knobs[118] = (55, dict(xh_stride_m=True))
     _pp.update({
         110: dict(_p84, xcd_remap=0, split_streamk=True),
         111: dict(xcd_remap=0, split_hybrid=4, split_det=1),

@@ -1057,6 +1057,33 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->split_hybrid = idx == 111 ? 4 : 0;
         spec->split_det = idx == 111 ? 1 : idx == 112 ? 2 : 0;
         return 0;
+    case 114:
+    case 115:
+    case 116:
+    case 117:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->xcd_remap = 6;
+        spec->lds_xor = true;
+        spec->uk_xhalo = idx == 115 ? 4 : 8;
+        spec->rpf_setprio = idx == 115 ? 1 : 2;
+        spec->lds_xor_rowkey = true;
+        spec->xh_wait_smem = true;
+        spec->epi_quad_xpose = idx == 117 ? 3 : 4;
+        spec->xh_stride_m = true;
+        spec->fxh_dma = idx == 115 ? 2016 : 1036;
+        spec->lds_kpack_read = true;
+        spec->no_agpr = idx == 115;
+        spec->m_band = idx == 115 ? 32 : 0;
+        spec->uk_tap_fast = idx == 116;
+        return 0;
+    case 118:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->xh_stride_m = true;
+        return 0;
     case 102:
         if(make_cfg_3d_base(55, spec, arch) != 0)
             return -1;

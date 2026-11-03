@@ -631,6 +631,16 @@ typedef struct rocke_conv_build_ctx
     int pp_b_from_p1; /* _pp_part["b_from"] + 1; 0 => None */
     int pp_kk_from;
     int vmi_pending;
+    /* x-halo emit_mfma_phase arguments (NULL / 0 off): a_lds_rows, b_row_off,
+     * a_shift_prev (the previous tap's A fragments per kk) and a_rec (this
+     * tap's, recorded); xa_ring_off: the xh_yring region base row. */
+    rocke_value_t** xh_a_rows;
+    int xh_b_row_off;
+    rocke_value_t* (*xh_prev)[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* (*xh_rec)[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* xa_ring_off;
+    /* xh_stride_m: whether this workgroup ran the x-halo loop (epilogue map). */
+    rocke_value_t* xsm_ok;
     /* _fetch_part (pp_split_fetch): skip an operand's global reads. */
     bool fetch_skip_a;
     bool fetch_skip_b;
@@ -705,6 +715,11 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  * with split_atomic -- the atomic split-K forward rather than the two-stage
  * workspace split. */
 bool rocke_conv_fwd_split_k_atomic(const rocke_implicit_gemm_conv_spec_t* s);
+/* Python _fxd_wave_rows / _xhalo_a_rows / _xhalo_b_rows. */
+int rocke_conv_fxd_wave_rows(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_conv_xhalo_a_rows(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_conv_xhalo_b_rows(const rocke_implicit_gemm_conv_spec_t* s);
+
 /* fwd_split_k_conflict(spec) for the wave64 MFMA atomic split-K forward (the
  * knobs the C port carries): false with the reason when Python's returns a
  * non-empty string. */
@@ -890,6 +905,9 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * reg_prefetch 1 (one LDS buffer) and 2 (x2-unrolled ping-pong + tail), with
  * the lds_xor stores. Writes ctx->final_accs. */
 void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx);
+
+/* Python _eqx_chan: the B LDS row's output channel (epi_quad_xpose 2/3/4). */
+rocke_value_t* rocke_conv_eqx_chan(rocke_conv_build_ctx_t* ctx, rocke_value_t* r);
 
 /* lds_xor column of tile element (row, col) (Python lds_swz). */
 rocke_value_t* rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx,

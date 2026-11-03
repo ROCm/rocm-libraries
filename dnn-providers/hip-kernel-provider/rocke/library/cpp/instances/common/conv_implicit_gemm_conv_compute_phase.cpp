@@ -354,6 +354,25 @@ rocke_value_t* rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx, rocke_value_t* ro
  * K-atom loop, honours the a_operand_override hook, and emits the compv3/compv4
  * sched_group_barrier hints at each kk step's tail.
  * ====================================================================== */
+/* Python _xa (xh_stride_m): the LDS (row, col) of x-halo A element (row,
+ * col): row bit 0 flipped by row bit 2 and the 16-byte chunk XOR (row/4) % 4
+ * (+ the xh_yring region base row). */
+static void conv_xa(rocke_conv_build_ctx_t* ctx,
+                    rocke_value_t* row,
+                    rocke_value_t* col,
+                    rocke_value_t** prow_out,
+                    rocke_value_t** col_out)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* hi = rocke_b_lshr(b, row, rocke_b_const_i32(b, 2));
+    rocke_value_t* prow = rocke_b_xor(b, row, rocke_b_land(b, hi, rocke_b_const_i32(b, 1)));
+    rocke_value_t* key = rocke_b_land(b, hi, rocke_b_const_i32(b, 3));
+    if(ctx->xa_ring_off != NULL)
+        prow = rocke_b_add(b, prow, ctx->xa_ring_off);
+    *prow_out = prow;
+    *col_out = rocke_b_xor(b, col, rocke_b_shl(b, key, rocke_b_const_i32(b, 3)));
+}
+
 /* Python emit_mfma_phase's load_frags(kk): the A rows and B columns one kk
  * step of MFMAs consumes (k-packed, lds_xor and the rpf_pingpong partial
  * reads included). */
@@ -414,15 +433,38 @@ static void conv_load_frags(conv_frag_env_t* e,
         int npa = 0, npb = 0;
         for(int mi = 0; mi < (skip_a ? 0 : ctx->mfmas_m); ++mi)
         {
-            rocke_value_t* mc = rocke_b_const_i32(b, mi * spec->warp_tile_m);
-            rocke_value_t* a_row = rocke_b_add(b, e->warp_m_off, rocke_b_add(b, mc, e->m_in_atom));
+            if(ctx->xh_prev != NULL && mi < ctx->mfmas_m - 1)
+            {
+                /* xh_stride_m: the previous tap's fragment mi + 1 is this one. */
+                pa[npa++] = ctx->xh_prev[kk][mi + 1];
+                continue;
+            }
+            rocke_value_t* a_row;
+            if(ctx->xh_a_rows != NULL)
+                a_row = ctx->xh_a_rows[mi];
+            else
+            {
+                rocke_value_t* mc = rocke_b_const_i32(b, mi * spec->warp_tile_m);
+                a_row = rocke_b_add(b, e->warp_m_off, rocke_b_add(b, mc, e->m_in_atom));
+            }
+            if(spec->xh_stride_m && ctx->xh_a_rows != NULL)
+            {
+                rocke_value_t *pr, *pc;
+                conv_xa(ctx, a_row, cb, &pr, &pc);
+                pa[npa++] = rocke_conv_emit_smem_load(
+                    b, e->A_src, pr, pc, 2 * ctx->a_per_lane, ctx->smem_dtype);
+                continue;
+            }
             rocke_value_t* col = spec->lds_xor ? rocke_conv_lds_swz(ctx, a_row, cb) : cb;
             pa[npa++] = rocke_conv_emit_smem_load(
                 b, e->A_src, a_row, col, 2 * ctx->a_per_lane, ctx->smem_dtype);
         }
+        if(ctx->xh_rec != NULL)
+            for(int i = 0; i < npa; ++i)
+                ctx->xh_rec[kk][i] = pa[i];
         for(int ni = 0; ni < (skip_b ? 0 : ctx->mfmas_n); ++ni)
         {
-            rocke_value_t* nc = rocke_b_const_i32(b, ni * spec->warp_tile_n);
+            rocke_value_t* nc = rocke_b_const_i32(b, ni * spec->warp_tile_n + ctx->xh_b_row_off);
             rocke_value_t* b_row = rocke_b_add(b, e->warp_n_off, rocke_b_add(b, nc, e->n_in_atom));
             rocke_value_t* col = spec->lds_xor ? rocke_conv_lds_swz(ctx, b_row, cb) : cb;
             pb[npb++] = rocke_conv_emit_smem_load(
@@ -502,11 +544,26 @@ static void conv_load_frags(conv_frag_env_t* e,
             continue;
         }
         /* a_row = warp_m_off + (mi*warp_tile_m + m_in_atom) */
-        rocke_value_t* a_row = rocke_b_add(
-            b,
-            e->warp_m_off,
-            rocke_b_add(b, rocke_b_const_i32(b, mi * spec->warp_tile_m), e->m_in_atom));
-        if(has_ov)
+        rocke_value_t* a_row;
+        if(ctx->xh_a_rows != NULL)
+            a_row = ctx->xh_a_rows[mi];
+        else
+            a_row = rocke_b_add(
+                b,
+                e->warp_m_off,
+                rocke_b_add(b, rocke_b_const_i32(b, mi * spec->warp_tile_m), e->m_in_atom));
+        if(!has_ov && ctx->xh_prev != NULL && mi < ctx->mfmas_m - 1)
+        {
+            a_rows[(*na)++] = ctx->xh_prev[kk][mi + 1];
+        }
+        else if(!has_ov && spec->xh_stride_m && ctx->xh_a_rows != NULL)
+        {
+            rocke_value_t *pr, *pc;
+            conv_xa(ctx, a_row, col_base, &pr, &pc);
+            a_rows[(*na)++] = rocke_conv_emit_smem_load(
+                b, e->A_src, pr, pc, ctx->a_per_lane, ctx->smem_dtype);
+        }
+        else if(has_ov)
         {
             a_rows[(*na)++] = ov->a_operand_override(b,
                                                      spec,
@@ -526,6 +583,10 @@ static void conv_load_frags(conv_frag_env_t* e,
                 b, e->A_src, a_row, a_col, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
         }
     }
+
+    if(ctx->xh_rec != NULL)
+        for(int i = 0; i < *na; ++i)
+            ctx->xh_rec[kk][i] = a_rows[i];
 
     for(int ni = 0; ni < (np_skip_b ? 0 : ctx->mfmas_n); ++ni)
     {
@@ -547,11 +608,13 @@ static void conv_load_frags(conv_frag_env_t* e,
                                                  ctx->tr_dtype);
             continue;
         }
-        /* b_row = warp_n_off + (ni*warp_tile_n + n_in_atom) */
+        /* b_row = warp_n_off + (ni*warp_tile_n + b_row_off + n_in_atom) */
         rocke_value_t* b_row = rocke_b_add(
             b,
             e->warp_n_off,
-            rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), e->n_in_atom));
+            rocke_b_add(b,
+                        rocke_b_const_i32(b, ni * spec->warp_tile_n + ctx->xh_b_row_off),
+                        e->n_in_atom));
         rocke_value_t* b_col = spec->lds_xor ? rocke_conv_lds_swz(ctx, b_row, col_base) : col_base;
         b_cols[(*nb)++] = rocke_conv_load_mma_operand(
             b, e->B_src, b_row, b_col, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
@@ -649,9 +712,10 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
          *     b, ds_read_count=_n_dsr(kk) * _ds_reads_per_frag,
          *     mfma_count=mfmas_m * mfmas_n * _mfmas_per_mma) */
         /* _n_dsr(kk): k-packed reads issue both steps' reads at the even kk. */
-        const int n_dsr = (e->kprd && (kk % 2)) ? 0 : ctx->mfmas_m + ctx->mfmas_n;
+        const int na_r = (spec->xh_stride_m && ctx->xh_prev != NULL) ? 1 : ctx->mfmas_m;
+        const int n_dsr = (e->kprd && (kk % 2)) ? 0 : na_r + ctx->mfmas_n;
         int n_ld = ctx->vmi_pending;
-        if(n_ld && ctx->schedule.emit_hints)
+        if(n_ld && (ctx->schedule.emit_hints || spec->uk_xhalo))
         {
             /* vmem_interleave: the next tile's buffer_loads, issued just before
              * this phase, go one per vmem_interleave MFMAs. */

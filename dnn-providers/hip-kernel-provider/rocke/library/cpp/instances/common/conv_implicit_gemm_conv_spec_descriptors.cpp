@@ -468,7 +468,9 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* (lah, dfr: Python-only, off.) */
     ROCKE_FLAG(s->vmem_interleave > 0, "vmi%d", s->vmem_interleave);
     ROCKE_FLAG(s->lds_kpack_read, "kprd");
-    /* (lbar, flate, uxh, xdpp: Python-only, off.) */
+    /* (lbar, flate: Python-only, off.) */
+    ROCKE_FLAG(s->uk_xhalo > 0, "uxh%d", s->uk_xhalo);
+    /* (xdpp: Python-only, off.) */
     ROCKE_FLAG(s->rpf_setprio > 0, "prio%d", s->rpf_setprio);
     ROCKE_FLAG(s->rpf_pingpong > 0, "pp%d", s->rpf_pingpong);
     ROCKE_FLAG(s->pp_pre_mfma > 0, "ppm%d", s->pp_pre_mfma);
@@ -478,7 +480,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
         const int mch = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
         ROCKE_FLAG(mch > 1, "mch%d", mch);
     }
-    /* (xws, saa: Python-only knobs, off.) */
+    ROCKE_FLAG(s->xh_wait_smem, "xws");
+    /* (saa: Python-only, off.) */
     ROCKE_FLAG(s->split_atomic_pairs, "sapl");
     /* (sapf, esf: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_xcd_remap > 0, "skx%d", s->split_xcd_remap);
@@ -491,9 +494,12 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* (mss, stc: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_det > 0, "sdet%d", s->split_det);
     ROCKE_FLAG(s->pp_split_fetch > 0, "psf%d", s->pp_split_fetch);
-    /* (nag: Python-only, off.) */
+    ROCKE_FLAG(s->no_agpr, "nag");
     ROCKE_FLAG(s->m_band > 0, "mb%d", s->m_band);
-    /* (xsm, fxd, xyr, eqx: Python-only knobs, off here.) */
+    ROCKE_FLAG(s->xh_stride_m, "xsm");
+    ROCKE_FLAG(s->fxh_dma > 0, "fxd%d", s->fxh_dma);
+    ROCKE_FLAG(s->xh_yring > 0, "xyr%d", s->xh_yring);
+    ROCKE_FLAG(s->epi_quad_xpose > 0, "eqx%d", s->epi_quad_xpose);
     ROCKE_FLAG(s->uk_nopad, "nopad");
     /* (dpw: Python-only, off.) */
     /* The occupancy target changes the register allocation. */
@@ -1091,6 +1097,33 @@ bool rocke_conv_fwd_split_k_atomic(const rocke_implicit_gemm_conv_spec_t* s)
     return s->split_k > 1 && s->wave_size == 64 && (s->problem.is_3d || s->split_atomic);
 }
 
+/* Python _fxd_wave_rows / _xhalo_a_rows / _xhalo_b_rows: the A / B LDS rows
+ * of the (x-halo) forward tile. */
+int rocke_conv_fxd_wave_rows(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    const int r = s->tile_m / s->warp_m + 3 - 1;
+    return (r + 3) / 4 * 4;
+}
+
+int rocke_conv_xhalo_a_rows(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    if(s->uk_xhalo && s->xh_stride_m && s->fxh_dma >= 1000)
+        return s->warp_m * rocke_conv_fxd_wave_rows(s) + (s->xh_yring ? 4 : 0);
+    if(s->uk_xhalo && s->xh_stride_m)
+        return (s->tile_m + s->uk_xhalo + 1 + 3) / 4 * 4;
+    return s->uk_xhalo ? s->tile_m + s->uk_xhalo + 1 : s->tile_m;
+}
+
+int rocke_conv_xhalo_b_rows(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    if(!s->uk_xhalo)
+        return s->tile_n;
+    const int rows = 3 * s->tile_n;
+    const int vb = s->has_vector_size_b ? s->vector_size_b : rocke_conv_default_load_vec_b(s);
+    const int bs = rocke_implicit_gemm_conv_spec_block_size(s);
+    return rows + (((rows * (s->tile_k / vb)) % bs) ? 1 : 0);
+}
+
 /* fwd_split_k_conflict(spec), wave64 MFMA atomic split (split_k > 1). */
 bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                        char* reason,
@@ -1218,7 +1251,7 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         const bool hints
             = s->pipeline != NULL
               && (strcmp(s->pipeline, "compv3") == 0 || strcmp(s->pipeline, "compv4") == 0);
-        if(!(hints || s->rpf_pingpong))
+        if(!(hints || s->uk_xhalo || s->rpf_pingpong))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "vmem_interleave needs a hint-emitting pipeline (compv3/compv4)");
@@ -1337,6 +1370,72 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         ROCKE_SPEC_FAIL(reason, reason_cap, "pp_split_fetch 5-9 are not ported to the C engine");
     if(s->pp_pre_mfma < 0)
         ROCKE_SPEC_FAIL(reason, reason_cap, "pp_pre_mfma must be >= 0");
+    if(s->uk_xhalo && s->split_k > 1)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "uk_xhalo does not combine with split_k (the slices run the uk loop)");
+    if(s->uk_xhalo)
+    {
+        if(s->uk_xhalo < 0 || s->uk_xhalo % 4)
+            ROCKE_SPEC_FAIL(reason, reason_cap, "uk_xhalo must be a positive multiple of 4");
+        if(!(s->uniform_k_decode && s->reg_prefetch == 1 && s->lds_xor && s->problem.is_3d))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "uk_xhalo is implemented in the 3-D uniform_k_decode + "
+                            "reg_prefetch=1 lds_xor loop only");
+        /* C port: the wave-private DMA staging form only (Python-only otherwise). */
+        if(s->fxh_dma < 1000 || s->rpf_pingpong || s->xh_yring)
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "uk_xhalo: the C port carries the fxh_dma >= 1000 loop only");
+    }
+    if(s->rpf_pingpong && s->uk_xhalo && s->rpf_pingpong < 4)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "rpf_pingpong has its own schedule (no lah/dfr/vmi/flate/lbar/adir/uxh)");
+    if(s->xh_wait_smem && !s->uk_xhalo)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "xh_wait_smem shapes the uk_xhalo loop");
+    {
+        const char* dd = s->dtype_d ? s->dtype_d : "fp16";
+        if(s->epi_quad_xpose
+           && !(s->epilogue && strcmp(s->epilogue, "cshuffle") == 0 && s->split_k <= 1
+                && !(s->pipeline && strcmp(s->pipeline, "wavelet") == 0) && s->warp_tile_m == 16
+                && s->warp_tile_n == 16 && (strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0)))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "epi_quad_xpose replaces the unsplit cshuffle store of the 16x16 MFMA "
+                            "atom (bf16/f16 output)");
+        if(s->epi_quad_xpose < 0 || s->epi_quad_xpose > 4
+           || (s->epi_quad_xpose >= 2
+               && ((s->tile_n / s->warp_n) % 32 || !s->uniform_k_decode || s->reg_prefetch != 1
+                   || s->rpf_pingpong)))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "epi_quad_xpose is 1..4 (2-4: the uniform_k_decode reg_prefetch=1 "
+                            "loops, an even number of N atoms per wave)");
+    }
+    if(s->xh_stride_m)
+    {
+        const int mpw = s->tile_m / s->warp_m / s->warp_tile_m;
+        if(!(s->uk_xhalo && s->uk_xhalo % 4 == 0
+             && (s->epi_quad_xpose == 3 || s->epi_quad_xpose == 4) && !s->rpf_pingpong && mpw >= 2))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "xh_stride_m needs uk_xhalo (a multiple of 4), epi_quad_xpose 3/4, "
+                            "mfmas_per_warp_m >= 2 and no xh_dpp / rpf_pingpong");
+    }
+    if(s->fxh_dma < 0
+       || (s->fxh_dma
+           && !(s->xh_stride_m && s->lds_kpack_read && s->lds_xor && s->tile_k == 32
+                && !s->vmem_interleave && s->split_k <= 1)))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "fxh_dma needs xh_stride_m, lds_kpack_read, lds_xor, tile_k 32 and no "
+                        "defer_mfma / vmem_interleave / split_k");
+    if(s->fxh_dma >= 1000 && !(s->xh_wait_smem && s->warp_n == 1))
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fxh_dma >= 1000 (wave-private A) needs xh_wait_smem and warp_n 1");
+    if(s->xh_yring)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "xh_yring is not ported to the C engine");
     if(s->lds_xor_rowkey && !(s->lds_xor && s->lds_kpack_read && s->tile_k == 32))
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
@@ -1675,13 +1774,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
 
         ab_dtype_bytes = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
         /* storage_shape(rows) = (rows, row_stride) */
-        ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
+        ab_bytes = (rocke_conv_xhalo_a_rows(s) * lds_layout.row_stride
+                    + rocke_conv_xhalo_b_rows(s) * lds_layout.row_stride)
                    * ab_dtype_bytes;
 
         double_buf = (s->async_dma || s->unroll_k || s->reg_prefetch == 2) ? 1 : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
         if(s->pp_b_double)
-            ab_lds += s->tile_n * lds_layout.row_stride * ab_dtype_bytes;
+            ab_lds += rocke_conv_xhalo_b_rows(s) * lds_layout.row_stride * ab_dtype_bytes;
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {

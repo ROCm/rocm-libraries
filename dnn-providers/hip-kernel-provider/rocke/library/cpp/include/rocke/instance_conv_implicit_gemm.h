@@ -312,6 +312,18 @@ typedef struct rocke_implicit_gemm_conv_spec
      * remainder workgroups (E: the remainder's extra K tiles of balance). */
     int split_hybrid; /* default 0 */
 
+    /* The fwd 3-D x-halo loop family (uniform_k_decode + reg_prefetch=1 +
+     * lds_xor): uk_xhalo stages tile_m + uk_xhalo input pixels once per
+     * (chunk, z, y) and serves the 3 x taps from LDS. The C port carries the
+     * wave-private DMA staging form (fxh_dma >= 1000, xh_stride_m). */
+    int uk_xhalo; /* default 0 */
+    bool xh_wait_smem; /* retire scalar loads before the x-halo loop */
+    int epi_quad_xpose; /* 1..4: register-only quad-transpose store (16x16 atom) */
+    bool no_agpr; /* agpr_alloc "0,0" */
+    bool xh_stride_m; /* x-halo A rows M-strided across a wave's MFMAs */
+    int fxh_dma; /* x-halo DMA staging schedule (>= 1000: wave-private A) */
+    int xh_yring; /* x-halo input-row ring across the y taps (Python-only) */
+
     /* cshuffle_m_chunks: stage the cshuffle C tile in that many row slabs
      * (bf16 wave64 MFMA cshuffle). Default 1 (0 reads as 1). */
     int cshuffle_m_chunks; /* default 1 */
