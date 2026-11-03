@@ -260,7 +260,7 @@ std::vector<at::Tensor> mha_varlen_bwd(
 
     CK_TILE_FMHA_CHECK_DEVICE(q);
     at::cuda::CUDAGuard device_guard{q.device()};
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    auto stream = detail::current_stream();
     CK_TILE_FMHA_CHECK_DEVICE(k);
     CK_TILE_FMHA_CHECK_DEVICE(v);
     CK_TILE_FMHA_CHECK_DEVICE(out);
@@ -434,16 +434,8 @@ std::vector<at::Tensor> mha_varlen_bwd(
     else if(is_dropout)
     {
         rng_state = torch::empty({2}, opts.dtype(torch::kInt64));
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        auto philox_args = gen->philox_cuda_state(counter_offset);
-        hipLaunchKernelGGL(detail::ParsePhiloxCudaState,
-                           dim3(1),
-                           dim3(64),
-                           0,
-                           stream,
-                           philox_args,
-                           reinterpret_cast<uint64_t*>(rng_state.data_ptr()));
+        detail::init_philox_state(
+            gen, counter_offset, stream, reinterpret_cast<uint64_t*>(rng_state.data_ptr()));
     }
     else
     {

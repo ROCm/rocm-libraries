@@ -555,7 +555,7 @@ std::vector<at::Tensor> mha_fwd_kvcache(
     auto out_accum = torch::empty({num_splits, batch_size, num_heads, seqlen_q, head_size_8x},
                                   opts.dtype(at::kFloat));
 
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    auto stream = detail::current_stream();
     ck_tile::stream_config stream_config{stream};
 
     if(seqlen_knew > 0 || rotary_dim > 0)
