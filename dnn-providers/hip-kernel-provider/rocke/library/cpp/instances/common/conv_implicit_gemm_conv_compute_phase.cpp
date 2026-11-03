@@ -657,6 +657,10 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
     e->k_blk = decoded.k_blk;
     e->warp_m_off = rocke_warp_grid_warp_m_off(b, &ctx->grid);
     e->warp_n_off = rocke_warp_grid_warp_n_off(b, &ctx->grid);
+    if(ctx->wg_a_row_off != NULL)
+        e->warp_m_off = rocke_b_add(b, e->warp_m_off, ctx->wg_a_row_off);
+    if(ctx->wg_b_row_off != NULL)
+        e->warp_n_off = rocke_b_add(b, e->warp_n_off, ctx->wg_b_row_off);
     const rocke_conv_build_overrides_t* ov = ctx->ov;
     e->kprd = spec->lds_kpack_read && !(ov != NULL && ov->a_operand_override != NULL);
     e->ir_dtype_a = conv_ir_dtype_a(spec);

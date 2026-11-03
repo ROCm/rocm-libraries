@@ -1170,6 +1170,8 @@ def _gfx942_3d_any(idx: int):
     """The gfx942 3-D configs below by their own number (from 55)."""
     if 55 <= idx <= 58:
         return _gfx942_3d_spec(idx)
+    if idx in _GFX942_3D_KNOBS:
+        return _gfx942_3d_knob_spec(idx)
     raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
 
 
@@ -1206,6 +1208,46 @@ def _gfx942_3d_spec(idx: int):
             kw.update(two_stage=True, ws_replicas=1024)
     data = ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
     return WgradConvSpec(problem=p, data=data, **kw), "gfx942"
+
+
+# Register-prefetch / addressing / workspace knobs on the 3-D grouped configs:
+# (base index, overrides). Keep in lockstep with make_cfg_3d_knobs() in
+# conv_implicit_gemm_wgrad_emit.c.
+_GFX942_3D_KNOBS = {
+    # 59: 56 + pfr1 kp2 xcd6 pfs1 wss1
+    59: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1)),
+    # 60: 59 on w2x2 (wpe3) + m_band 1
+    60: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1,
+                  warp_m=2, warp_n=2, waves_per_eu=3, m_band=1)),
+    # 61: 55 + pfr1 kp2 sepa2 kpl8 ppp3
+    61: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=3)),
+    # 62: 61 on w4x2, split_k=2 two-stage (8 slabs) + xcd6 wss1
+    62: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=3,
+                  warp_m=4, warp_n=2, split_k=2, two_stage=True, xcd_remap=6, ws_store=1)),
+    # 63: 61 on w4x2 + epi_store_fast
+    63: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=3,
+                  warp_m=4, warp_n=2, epi_store_fast=True)),
+    # 64: 56 + pfr2 (double-buffered tile) kp2
+    64: (56, dict(prefetch_regs=2, lds_kpack=2)),
+    # 65: 55 + pfr3 (two tiles in flight) sepa1 ilv4
+    65: (55, dict(prefetch_regs=3, sep_addr=1, pfr_sched=4)),
+    # 66: 61 with plain_pp=1
+    66: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=1)),
+    # 67: 61 with plain_pp=2, no kp_line
+    67: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, plain_pp=2)),
+    # 68: 59 with ws_store=2 (bf16 slabs)
+    68: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=2)),
+    # 69: 61 with plain_pp=4, pfr3-free sepa1
+    69: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=1, plain_pp=4)),
+}
+
+
+def _gfx942_3d_knob_spec(idx: int):
+    from dataclasses import replace
+
+    base, kw = _GFX942_3D_KNOBS[idx]
+    spec, arch = _gfx942_3d_spec(base)
+    return replace(spec, **kw), arch
 
 
 # (problem kwargs, data dtypes (a/b, d), atom edge, streamk, reduction, ctas, arch)

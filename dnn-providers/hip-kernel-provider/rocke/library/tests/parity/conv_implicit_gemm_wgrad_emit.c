@@ -369,12 +369,80 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     return 0;
 }
 
+/* Register-prefetch / addressing / workspace knobs on the 3-D grouped configs
+ * 59-69; mirrors _GFX942_3D_KNOBS in the Python emitter (the table is there). */
+static int make_cfg_3d_knobs(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    const bool on56 = idx == 59 || idx == 60 || idx == 68;
+    make_cfg_3d(on56 || idx == 64 ? 56 : 55, spec, arch);
+    spec->prefetch_regs = idx == 64 ? 2 : idx == 65 ? 3 : 1;
+    spec->lds_kpack = idx == 65 ? 1 : 2;
+    if(idx == 64)
+        return 0;
+    if(on56)
+    {
+        spec->xcd_remap = 6;
+        spec->pfr_sched = 1;
+        spec->ws_store = idx == 68 ? 2 : 1;
+        if(idx == 60)
+        {
+            spec->warp_m = 2;
+            spec->warp_n = 2;
+            spec->waves_per_eu = 3;
+            spec->m_band = 1;
+        }
+        return 0;
+    }
+    switch(idx)
+    {
+    case 61:
+    case 62:
+    case 63:
+    case 66:
+        spec->sep_addr = 2;
+        spec->kp_line = 8;
+        spec->plain_pp = idx == 66 ? 1 : 3;
+        if(idx == 62 || idx == 63)
+        {
+            spec->warp_m = 4;
+            spec->warp_n = 2;
+        }
+        if(idx == 62)
+        {
+            spec->split_k = 2;
+            spec->two_stage = true;
+            spec->xcd_remap = 6;
+            spec->ws_store = 1;
+        }
+        if(idx == 63)
+            spec->epi_store_fast = true;
+        break;
+    case 65:
+        spec->sep_addr = 1;
+        spec->pfr_sched = 4;
+        break;
+    case 67:
+        spec->sep_addr = 2;
+        spec->plain_pp = 2;
+        break;
+    case 69:
+        spec->sep_addr = 1;
+        spec->plain_pp = 4;
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
 /* The gfx942 3-D configs by their own number (from 55); mirrors
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     if(idx >= 55 && idx <= 58)
         return make_cfg_3d(idx, spec, arch);
+    if(idx >= 59 && idx <= 69)
+        return make_cfg_3d_knobs(idx, spec, arch);
     return -1;
 }
 

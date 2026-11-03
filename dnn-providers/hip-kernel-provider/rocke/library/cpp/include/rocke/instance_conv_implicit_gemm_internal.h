@@ -384,6 +384,16 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* shy_H;
     rocke_value_t* shy_s;
     rocke_value_t* shy_prim;
+    /* wgrad: the logical split-K slice (Python slice_id, after m_band). */
+    rocke_value_t* wgrad_slice_id;
+    /* wgrad sep_addr (1/2): the separable dY / X descriptors; wg_inc: the
+     * sep_addr=2 carried-address state (wgrad.cpp), NULL off. */
+    int wg_sep_addr;
+    bool wg_is3d; /* the true (not stub) wgrad problem is 3-D */
+    void* wg_inc;
+    /* wgrad emit_mfma_phase a_row_off / b_row_off (prefetch_regs=2), NULL off. */
+    rocke_value_t* wg_a_row_off;
+    rocke_value_t* wg_b_row_off;
     rocke_value_t* fwd_p_ws;
     rocke_value_t* fwd_p_ws_bytes;
     rocke_value_t* fwd_p_ks;

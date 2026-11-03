@@ -130,6 +130,12 @@ typedef struct rocke_coalesced_tile_loader
      * has_col_xor. */
     bool has_col_xor;
     int col_xor[4];
+    /* Python row_kpack (row mode only): pack row_kpack adjacent columns (K
+     * steps) into one LDS write; 0/1 keeps the historical decode and store. */
+    int row_kpack;
+    /* Python kp_line (row_kpack > 1): line-major lane decode of the packed
+     * units (0 = column-group fastest). */
+    int kp_line;
 } rocke_coalesced_tile_loader_t;
 
 /* lds_col_xor_params(tile_cols, chunk=8): the conflict-free XOR swizzle of an
@@ -323,6 +329,14 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
                                                    rocke_value_t* ptr,
                                                    rocke_value_t* num_bytes,
                                                    int coherency);
+/* CoalescedTileLoader.kp_col0(): first column of this thread's packed column group. */
+rocke_value_t* rocke_coalesced_tile_loader_kp_col0(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid);
+
+/* CoalescedTileLoader.kpack_ok() staticmethod. */
+bool rocke_coalesced_tile_loader_kpack_ok(
+    int tile_rows, int tile_cols, int block_size, int load_vec, int kpack);
 
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot

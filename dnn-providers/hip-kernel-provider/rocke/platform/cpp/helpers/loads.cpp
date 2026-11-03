@@ -9,6 +9,7 @@
  * call sequence byte-faithfully so the downstream IR is identical to the Python.
  */
 #include "rocke/helper_rocke.helpers.loads.h"
+#include "rocke/arena.h"
 
 #include <string.h>
 
@@ -97,6 +98,8 @@ rocke_status_t rocke_coalesced_tile_loader_from_tile(int tile_rows,
         out->has_col_xor = false; /* col_xor default None */
         memset(out->col_xor, 0, sizeof(out->col_xor));
         out->elem_dtype = NULL; /* elem_dtype default F16 */
+        out->row_kpack = 1;
+        out->kp_line = 0;
     }
     return ROCKE_OK;
 }
@@ -200,6 +203,11 @@ rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_load
     long long group;
 
     if(self == NULL || col_xor == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* Python __post_init__: row_kpack > 1 does not support col_xor. */
+    if(self->row_kpack > 1)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -394,6 +402,59 @@ static void ctl_decode_row_col(rocke_ir_builder_t* b,
     }
 }
 
+/* Python _chunk_row_col: tile-local (row, col) of per-thread chunk e. */
+static void ctl_chunk_row_col(rocke_ir_builder_t* b,
+                              const rocke_coalesced_tile_loader_t* self,
+                              int e,
+                              rocke_value_t* tid,
+                              rocke_value_t* c_threads,
+                              rocke_value_t* c_span,
+                              rocke_value_t* c_load_vec,
+                              rocke_value_t** out_row,
+                              rocke_value_t** out_col)
+{
+    if(self->row_kpack <= 1)
+    {
+        rocke_value_t* vec_idx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
+        ctl_decode_row_col(b, self, vec_idx, c_span, c_load_vec, out_row, out_col);
+        return;
+    }
+    const int kp = self->row_kpack;
+    const int g = e / kp, j = e % kp;
+    rocke_value_t* unit = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, g), c_threads), tid);
+    rocke_value_t* c_groups = rocke_b_const_i32(b, self->tile_cols / kp);
+    rocke_value_t *colg, *rowc;
+    if(self->kp_line)
+    {
+        const int cgl = 64 / self->kp_line;
+        const int nb = (self->tile_cols / kp) / cgl;
+        rocke_value_t* lane = rocke_b_mod(b, unit, rocke_b_const_i32(b, 64));
+        rocke_value_t* grp = rocke_b_div(b, unit, rocke_b_const_i32(b, 64));
+        colg = rocke_b_mod(b, lane, rocke_b_const_i32(b, cgl));
+        rowc = rocke_b_div(b, lane, rocke_b_const_i32(b, cgl));
+        if(nb > 1)
+        {
+            rocke_value_t* gm = rocke_b_mod(b, grp, rocke_b_const_i32(b, nb));
+            rocke_value_t* gmc = rocke_b_mul(b, gm, rocke_b_const_i32(b, cgl));
+            colg = rocke_b_add(b, gmc, colg);
+            grp = rocke_b_div(b, grp, rocke_b_const_i32(b, nb));
+        }
+        rocke_value_t* gk = rocke_b_mul(b, grp, rocke_b_const_i32(b, self->kp_line));
+        rowc = rocke_b_add(b, gk, rowc);
+    }
+    else
+    {
+        colg = rocke_b_mod(b, unit, c_groups);
+        rowc = rocke_b_div(b, unit, c_groups);
+    }
+    rocke_value_t* row = rocke_b_mul(b, rowc, c_load_vec);
+    rocke_value_t* col = rocke_b_mul(b, colg, rocke_b_const_i32(b, kp));
+    if(j)
+        col = rocke_b_add(b, col, rocke_b_const_i32(b, j));
+    *out_row = row;
+    *out_col = col;
+}
+
 /* Python CoalescedTileLoader._store_tile: write a loaded chunk to LDS.
  *   row mode + load_vec>1: scatter load_vec f16 elements to [row+i, col].
  *   otherwise: one smem_store (f16 scalar for load_vec==1, else vN).
@@ -475,6 +536,17 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
     if(self == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader.load: NULL loader");
+        return;
+    }
+    if(self->row_kpack > 1)
+    {
+        /* Python load(): staged = load_global(...); store_lds(...). */
+        rocke_ctl_staged_t* st
+            = (rocke_ctl_staged_t*)rocke_arena_alloc(&b->arena, sizeof(rocke_ctl_staged_t));
+        if(st == NULL)
+            return;
+        rocke_coalesced_tile_loader_load_global(b, self, tid, descriptor, descriptor_user, rsrc, ptr, st);
+        rocke_coalesced_tile_loader_store_lds(b, self, smem_dst, st);
         return;
     }
 
@@ -672,8 +744,8 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
         rocke_value_t* valid;
         rocke_value_t* v;
 
-        vec_idx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
-        ctl_decode_row_col(b, self, vec_idx, c_span, c_load_vec, &row, &col);
+        (void)vec_idx;
+        ctl_chunk_row_col(b, self, e, tid, c_threads, c_span, c_load_vec, &row, &col);
 
         valid = NULL;
         off_elems = descriptor(b, row, col, &valid, descriptor_user);
@@ -708,6 +780,28 @@ void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
     if(self == NULL || staged == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "store_lds: NULL loader or staged");
+        return;
+    }
+    if(self->row_kpack > 1)
+    {
+        /* Python _store_staged: groups of row_kpack chunks (same rows,
+         * adjacent columns) transposed in registers into row_kpack-wide writes. */
+        const int kp = self->row_kpack;
+        const rocke_type_t* et = self->elem_dtype ? self->elem_dtype : rocke_f16();
+        for(int g = 0; g < staged->count; g += kp)
+        {
+            rocke_value_t* row = staged->vecs[g].row;
+            rocke_value_t* col = staged->vecs[g].col;
+            for(int i = 0; i < self->load_vec; ++i)
+            {
+                rocke_value_t* r = i ? rocke_b_add(b, row, rocke_b_const_i32(b, i)) : row;
+                rocke_value_t* parts[16];
+                for(int q = 0; q < kp; ++q)
+                    parts[q] = rocke_b_vec_extract(b, staged->vecs[g + q].v, i);
+                rocke_value_t* idx[2] = {r, col};
+                rocke_b_smem_store_vN(b, smem_dst, idx, 2, rocke_b_vec_pack(b, parts, kp, et), kp);
+            }
+        }
         return;
     }
     for(e = 0; e < staged->count; ++e)
@@ -765,12 +859,9 @@ void rocke_coalesced_tile_loader_plan_slots(rocke_ir_builder_t* b,
 
     for(int e = 0; e < vecs_per_thread; ++e)
     {
-        /* Python: vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid) */
-        rocke_value_t* c_e = rocke_b_const_i32(b, e);
-        rocke_value_t* scaled = rocke_b_mul(b, c_e, c_threads);
-        rocke_value_t* vec_idx = rocke_b_add(b, scaled, tid);
-        ctl_decode_row_col(
-            b, self, vec_idx, c_span, c_load_vec, &slots->vecs[e].row, &slots->vecs[e].col);
+        /* Python: self._chunk_row_col(b, e, tid, ...) */
+        ctl_chunk_row_col(
+            b, self, e, tid, c_threads, c_span, c_load_vec, &slots->vecs[e].row, &slots->vecs[e].col);
         slots->vecs[e].v = NULL;
     }
     slots->count = vecs_per_thread;
@@ -1314,4 +1405,41 @@ int rocke_async_tile_loader_slot_required_lds_bytes(const rocke_async_tile_loade
         return 0;
     }
     return self->loader.passes * rocke_async_tile_loader_pass_bytes(&self->loader);
+}
+
+rocke_value_t* rocke_coalesced_tile_loader_kp_col0(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid)
+{
+    const int kp = self->row_kpack;
+    const int ncg = self->tile_cols / kp;
+    if(!self->kp_line)
+    {
+        rocke_value_t* m = rocke_b_mod(b, tid, rocke_b_const_i32(b, ncg));
+        return rocke_b_mul(b, m, rocke_b_const_i32(b, kp));
+    }
+    const int cgl = 64 / self->kp_line;
+    const int nb = ncg / cgl;
+    rocke_value_t* colg = rocke_b_mod(b, tid, rocke_b_const_i32(b, cgl));
+    if(nb > 1)
+    {
+        rocke_value_t* d = rocke_b_div(b, tid, rocke_b_const_i32(b, 64));
+        rocke_value_t* hi = rocke_b_mod(b, d, rocke_b_const_i32(b, nb));
+        rocke_value_t* hm = rocke_b_mul(b, hi, rocke_b_const_i32(b, cgl));
+        colg = rocke_b_add(b, hm, colg);
+    }
+    return rocke_b_mul(b, colg, rocke_b_const_i32(b, kp));
+}
+
+bool rocke_coalesced_tile_loader_kpack_ok(
+    int tile_rows, int tile_cols, int block_size, int load_vec, int kpack)
+{
+    if(kpack == 1)
+        return true;
+    if(load_vec <= 1 || tile_cols % kpack || tile_rows % load_vec)
+        return false;
+    const int chunks = tile_rows * tile_cols / load_vec;
+    if(chunks % block_size)
+        return false;
+    return (chunks / block_size) % kpack == 0;
 }
