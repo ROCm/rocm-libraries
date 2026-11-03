@@ -81,9 +81,9 @@ API correctness tests live in `rocfft-test`. GoogleTest names use the `rocfft_Un
 
 Internal library correctness tests use an internal CTest framework. Enable it with the CMake option
 `ROCFFT_BUILD_INTERNAL_TESTS`. The executable is `library/src/tests/rocfft-internal-test`, which can
-be called either directly or via `ctest` from the build directory. More expensive array format
-validation tests run in `rocfft-test` under the GoogleTest filter
-`reference_test/valid_length_stride.*`.
+be called either directly or via `ctest` from the build directory.  Note that `rocfft-internal-test`
+is not copied to the final install directory.  More expensive array format validation tests run in
+`rocfft-test` under the GoogleTest filter `reference_test/valid_length_stride.*`.
 
 ### Integration test strategy
 
