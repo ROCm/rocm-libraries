@@ -12,9 +12,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-
 from rocke.core.ir import KernelDef, Region
-from rocke.runtime.comgr import ComgrTimings
+from rocke.runtime.comgr import ComgrTimings, CompilerInfo
 
 compile_module = importlib.import_module("rocke.helpers.compile")
 
@@ -32,11 +31,26 @@ def forbid_device_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
 
+def _comgr(llvm_major: int | None):
+    """COMGR loading an LLVM ``llvm_major`` compiler (``None``: one whose
+    version could not be queried)."""
+    version = None if llvm_major is None else (llvm_major, 0, 0)
+    return mock.patch.object(
+        compile_module,
+        "loaded_compiler_info",
+        return_value=CompilerInfo(version, "test", None, None, None),
+    )
+
+
 @pytest.fixture(autouse=True)
 def llvm23_compiler():
-    """The compile target depends on the compiler's LLVM flavor; these cases are
-    written for llvm23, whose compiler accepts gfx1250 but not gfx1154."""
-    with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm23"}):
+    """The compile target depends on the compiler COMGR loads; these cases are
+    written for an LLVM 23 compiler, which accepts gfx1250 but not gfx1154. The
+    emitted IR's flavor is pinned too, so lowering never asks COMGR."""
+    with (
+        _comgr(23),
+        mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm23"}),
+    ):
         yield
 
 
@@ -154,7 +168,7 @@ def test_a_target_the_compiler_cannot_take_is_refused_before_lowering(
     kernel: KernelDef,
 ) -> None:
     with (
-        mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm20"}),
+        _comgr(20),
         mock.patch.object(compile_module, "_lower_llvm_via_backend") as lower,
         pytest.raises(
             ValueError, match="llvm20 compiler does not accept the processor 'gfx1250'"
@@ -162,6 +176,47 @@ def test_a_target_the_compiler_cannot_take_is_refused_before_lowering(
     ):
         compile_module.compile_kernel(kernel, arch="gfx1250")
     lower.assert_not_called()
+
+
+def test_the_loaded_compiler_routes_the_processor_not_the_emission_flavor(
+    kernel: KernelDef,
+) -> None:
+    """ROCKE_LLVM_FLAVOR chooses the emitted IR's conventions, not the compiler
+    that runs: with an LLVM 23 COMGR and an llvm24 emission override, gfx1154
+    compiles as gfx11-generic, because the LLVM 23 compiler rejects gfx1154
+    even though the llvm24 column accepts it."""
+    with (
+        mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm24"}),
+        mock.patch.object(compile_module, "_lower_llvm_via_backend", return_value="ll"),
+        mock.patch.object(
+            compile_module,
+            "build_hsaco_from_llvm_ir",
+            return_value=(b"hsaco", ComgrTimings()),
+        ) as build,
+        _falls_back(),
+    ):
+        compile_module.compile_kernel(kernel, arch="gfx1154")
+    assert build.call_args.kwargs["isa"] == "amdgcn-amd-amdhsa--gfx11-generic"
+
+
+@pytest.mark.parametrize(
+    "llvm_major", [None, 25], ids=["unknown", "newer_than_every_lane"]
+)
+def test_an_unmeasured_comgr_compiler_keeps_the_processor(
+    kernel: KernelDef, llvm_major: int | None
+) -> None:
+    """A compiler whose version is unknown or newer than every qualified lane
+    was never measured: the processor keeps its name (profile removed) and
+    COMGR decides."""
+    with (
+        _comgr(llvm_major),
+        mock.patch.object(compile_module, "_lower_llvm_via_backend", return_value="ll"),
+        _no_warning(),
+    ):
+        comgr_input = compile_module.lower_kernel_for_comgr(
+            kernel, arch="gfx1154-strict:xnack-"
+        )
+    assert comgr_input.isa == "amdgcn-amd-amdhsa--gfx1154:xnack-"
 
 
 @contextlib.contextmanager
@@ -191,6 +246,26 @@ def test_hipcc_chooses_the_target_for_its_own_clang(kernel: KernelDef) -> None:
     ):
         compile_module.compile_kernel_via_hipcc(kernel, arch="gfx1250")
     lower.assert_not_called()
+
+
+@pytest.mark.parametrize("target_id", ["gfx1154", "gfx1250-strict"])
+def test_a_hipcc_newer_than_every_lane_keeps_the_processor(
+    kernel: KernelDef, target_id: str
+) -> None:
+    """A clang 25 hipcc was never measured, so the HIP paths pass the processor
+    (profile removed) and let hipcc decide instead of refusing every kernel."""
+    with (
+        mock.patch.object(compile_module, "lower_kernel_to_hip", return_value="hip"),
+        mock.patch.object(
+            compile_module.subprocess, "run", side_effect=_hipcc(25, "hsaco")
+        ) as run,
+        _no_warning(),
+    ):
+        artifact = compile_module.compile_kernel_via_hipcc(kernel, arch=target_id)
+        compile_module.emit_device_llvm_ir_via_hipcc(kernel, arch=target_id)
+    processor = target_id.removesuffix("-strict")
+    assert f"--offload-arch={processor}" in run.call_args.args[0]
+    assert artifact.isa == f"amdgcn-amd-amdhsa--{processor}"
 
 
 def test_an_unreadable_hipcc_version_is_refused(kernel: KernelDef) -> None:

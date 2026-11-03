@@ -79,20 +79,22 @@ from ..core.arch import (
     arch_from_isa,
     base_arch_from_target_id,
     compiler_target_for_flavor,
+    compiler_target_from_target_id,
     known_arches,
     target_id_from_isa,
 )
 from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
+from ..core.llvm_profile import _measured_flavor_for_llvm
 from ..core.lower_hip import lower_kernel_to_hip
-from ..core.lower_llvm import (
-    _flavor_for_llvm,
-    _lower_kernel_to_llvm_python,
-    _resolve_llvm_flavor,
-)
+from ..core.lower_llvm import _lower_kernel_to_llvm_python
 from ..core.passes import PassStats, optimize_kernel
-from ..runtime.comgr import build_hsaco_from_llvm_ir, build_hsaco_from_llvm_modules
+from ..runtime.comgr import (
+    build_hsaco_from_llvm_ir,
+    build_hsaco_from_llvm_modules,
+    loaded_compiler_info,
+)
 
 # Kernel attribute (bool) a builder sets on a kernel whose code generation
 # depends on what the compiling process compiled before (it emits
@@ -148,10 +150,12 @@ def compile_kernel(
 
     The target helpers remove profile suffixes such as ``-strict`` from the
     compiler target and retain features such as ``:sramecc+:xnack-``. The base
-    architecture selects rocKE lowering. A processor that the loaded compiler's
-    LLVM flavor was measured not to accept is compiled for the generic target
-    its catalog row points at, with a warning, or refused with ``ValueError``
-    when there is none (see :func:`~rocke.core.arch.compiler_target_for_flavor`). The resulting
+    architecture selects rocKE lowering. A processor that the compiler COMGR
+    loads was measured not to accept is compiled for the generic target its
+    catalog row points at, with a warning, or refused with ``ValueError`` when
+    there is none (see :func:`~rocke.core.arch.compiler_target_for_flavor`).
+    The loaded compiler decides this, not ``ROCKE_LLVM_FLAVOR``, which only
+    chooses the emitted IR's conventions. The resulting
     COMGR ISA name is passed to `build_hsaco_from_llvm_ir` and recorded in
     `KernelArtifact.isa`. COMGR checks compiler support when compilation runs.
 
@@ -387,23 +391,49 @@ def compile_module(
     )
 
 
+def _compiler_target(target_id: str, llvm_major: int | None) -> str:
+    """The compiler target for ``target_id`` when the compiler that will run is
+    LLVM ``llvm_major``.
+
+    Routed by the arch-domain column of that compiler's qualified lane
+    (:func:`~rocke.core.arch.compiler_target_for_flavor`). A compiler newer
+    than every lane, or one whose version is unknown (``None``), was never
+    measured, so the processor keeps its name
+    (:func:`~rocke.core.arch.compiler_target_from_target_id`) and that compiler
+    has the last word.
+    """
+    flavor = None if llvm_major is None else _measured_flavor_for_llvm(llvm_major)
+    if flavor is None:
+        return compiler_target_from_target_id(target_id)
+    return compiler_target_for_flavor(target_id, llvm_flavor=flavor)
+
+
+def _comgr_llvm_major() -> int | None:
+    """The LLVM major of the compiler COMGR loads, or ``None`` when COMGR cannot
+    be loaded or queried (building then fails with COMGR's own error)."""
+    info = loaded_compiler_info()
+    if info is None or info.llvm_version is None:
+        return None
+    return info.llvm_version[0]
+
+
 def _resolve_compile_target(arch: Optional[str], isa: str):
     """``(lowering arch, COMGR ISA name)`` for :func:`compile_kernel` inputs.
 
-    The compiler target is chosen for the flavor of the compiler COMGR loads,
-    the same flavor the lowering resolves.
+    The compiler target is chosen by the compiler COMGR loads
+    (:func:`_compiler_target`), whatever flavor the IR is emitted for.
     """
-    llvm_flavor = _resolve_llvm_flavor()
+    llvm_major = _comgr_llvm_major()
     if arch is not None:
         lower_arch = base_arch_from_target_id(arch)
-        compiler_target = compiler_target_for_flavor(arch, llvm_flavor=llvm_flavor)
+        compiler_target = _compiler_target(arch, llvm_major)
         base_isa = ArchTarget.from_gfx(lower_arch).isa_triple
         return lower_arch, f"{base_isa[: -len(lower_arch)]}{compiler_target}"
     # Derive both names from the caller's ISA name. Use the base architecture
     # for lowering and preserve compiler features in the COMGR ISA name.
     target_id = target_id_from_isa(isa)
     gfx = arch_from_isa(isa)
-    compiler_target = compiler_target_for_flavor(target_id, llvm_flavor=llvm_flavor)
+    compiler_target = _compiler_target(target_id, llvm_major)
     isa = f"{isa[: -len(target_id)]}{compiler_target}"
     return (gfx if gfx in known_arches() else None), isa
 
@@ -547,9 +577,10 @@ def compile_kernel_via_hipcc(
     ``arch`` accepts the same target IDs as :func:`compile_kernel`. The base
     architecture is passed to ``lower_kernel_to_hip``; the compiler target
     is passed to hipcc as ``--offload-arch``. Neither is discovered from a GPU.
-    The compiler target is chosen for the LLVM flavor of hipcc's own clang
-    (:func:`~rocke.core.arch.compiler_target_for_flavor`), as
-    :func:`compile_kernel` does for the compiler COMGR loads.
+    The compiler target is chosen by hipcc's own clang (see
+    :func:`_compiler_target`), as :func:`compile_kernel` does for the compiler
+    COMGR loads: a clang newer than every qualified lane keeps the processor
+    name and decides for itself.
 
     Requires hipcc on ``PATH`` and a kernel supported by the HIP lowerer.
     An explicit scheduler policy is rejected because this path does not emit
@@ -570,7 +601,7 @@ def compile_kernel_via_hipcc(
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
     lower_arch = base_arch_from_target_id(arch)
-    compiler_target = compiler_target_for_flavor(arch, llvm_flavor=_hipcc_llvm_flavor())
+    compiler_target = _compiler_target(arch, _hipcc_llvm_major())
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     t2 = time.perf_counter()
     flags = ["-O3"]
@@ -619,8 +650,8 @@ def compile_kernel_via_hipcc(
     )
 
 
-def _hipcc_llvm_flavor() -> str:
-    """The LLVM flavor of the clang that ``hipcc`` on ``PATH`` runs.
+def _hipcc_llvm_major() -> int:
+    """The LLVM major of the clang that ``hipcc`` on ``PATH`` runs.
 
     Read from ``hipcc --version``: the compiler COMGR loads and
     ``ROCKE_LLVM_FLAVOR`` describe a different compiler, so they say nothing
@@ -636,7 +667,7 @@ def _hipcc_llvm_flavor() -> str:
             f"exited {proc.returncode}, expected a line 'clang version "
             f"<major>.<minor>...'; output:\n{proc.stdout[-2000:]}{proc.stderr[-2000:]}"
         )
-    return _flavor_for_llvm(int(match.group(1)))
+    return int(match.group(1))
 
 
 def emit_device_llvm_ir_via_hipcc(
@@ -670,7 +701,7 @@ def emit_device_llvm_ir_via_hipcc(
         subprocess.TimeoutExpired: If hipcc exceeds ``timeout_s``.
     """
     lower_arch = base_arch_from_target_id(arch)
-    compiler_target = compiler_target_for_flavor(arch, llvm_flavor=_hipcc_llvm_flavor())
+    compiler_target = _compiler_target(arch, _hipcc_llvm_major())
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     flags = ["-O3"]
     if extra_flags:
