@@ -155,6 +155,38 @@ nightly builds for ROCm and its components, including rocALUTION. See
 `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
+.. _verify-rocalution-install:
+
+Verify your installation
+========================
+
+After installing the runtime and development packages (or the ROCm HPC SDK), you
+can verify your installation by compiling and running a minimal smoke test.
+
+1. Create a file named ``test_rocalution.cpp``:
+
+   .. code-block:: cpp
+
+      #include <rocalution/rocalution.hpp>
+
+      int main() {
+          rocalution::init_rocalution();
+          rocalution::info_rocalution();
+          rocalution::stop_rocalution();
+          return 0;
+      }
+
+2. Compile and run the program:
+
+   .. code-block:: bash
+
+      hipcc test_rocalution.cpp -lrocalution -o test_rocalution
+      ./test_rocalution
+
+   If rocALUTION is installed properly, the program prints the rocALUTION
+   version, confirms that the platform and ``HIP`` accelerator backend are
+   initialized, and lists your detected AMD GPU.
+
 .. _uninstall-rocalution:
 
 Uninstall rocALUTION
