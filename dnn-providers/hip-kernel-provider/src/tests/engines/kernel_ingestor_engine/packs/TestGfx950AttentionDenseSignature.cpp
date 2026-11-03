@@ -40,10 +40,12 @@
  * the matcher exist to stop, one layer lower down.
  *
  * Every variant in gfx950_attention_dense.kdp.json declares `persistent: false`,
- * `use_sinks: false`, `varlen: false` and `paged: false`, so the 8-argument form is the
- * only one that ships and the sink / cu_seqlens / page-table tails of
- * attention_dense_signature are unreachable from this catalog. The 5-argument form is
- * covered here only as a shape the pack must refuse.
+ * `use_sinks: false`, `varlen: false` and `paged: false`, so the 10-argument form -- four
+ * pointers, scale, then batch, seqlen_q, seqlen_kv, num_query_heads and num_kv_heads -- is
+ * the only one the catalog ships, and the sink / cu_seqlens / page-table tails of
+ * attention_dense_signature are unreachable from this catalog. The five-argument form of a
+ * baked persistent body (the pointers and scale, no shape) is covered here only as a shape
+ * the pack must refuse.
  *
  * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry
  * one. The name comparison is the only one that tells the four pointers apart, or `scale`
@@ -105,8 +107,8 @@ std::vector<KernelArgument> pythonAbi()
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
-/// The form a persistent body would take: the same four pointers and scale, with the
-/// shape and head tail dropped because `num_persistent` bakes the work-item space.
+/// The form a baked persistent body (ragged, or a gqa_pair order) takes: the four pointers
+/// and scale with no shape tail. None ships in this catalog.
 std::vector<KernelArgument> persistentAbi()
 {
     auto signature = pythonAbi();

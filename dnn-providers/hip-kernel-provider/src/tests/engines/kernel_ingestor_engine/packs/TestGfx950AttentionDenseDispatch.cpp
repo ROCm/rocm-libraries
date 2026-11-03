@@ -396,7 +396,7 @@ TEST(TestGfx950AttentionDenseDispatch, DispatchSymbolResolves)
 // Workspace
 // =============================================================================
 
-/// This kernel's only scratch is LDS and registers, and the shipped 8-argument ABI has no
+/// This kernel's only scratch is LDS and registers, and the shipped 10-argument ABI has no
 /// workspace pointer to hand global scratch through, so there is nowhere for a non-zero
 /// answer to be used. This is the only place the zero is pinned.
 TEST(TestGfx950AttentionDenseDispatch, WorkspaceBytesIsAlwaysZero)

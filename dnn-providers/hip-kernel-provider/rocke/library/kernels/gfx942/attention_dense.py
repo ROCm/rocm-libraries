@@ -1403,7 +1403,7 @@ def supports_attention_dense(
     # (row_has_key), so both are exempt. The zero-trip guard above still applies with
     # emit_lse (it exempts sinks only); on tile-divisible shapes every shape it rejects
     # is also one of these. The hipDNN gfx942 dense pack restates this rule
-    # (Gfx942AttentionDenseNative.cpp maskFor).
+    # (packs/AttentionDenseNative.cpp maskFor).
     if (
         spec.sliding_window
         and spec.causal

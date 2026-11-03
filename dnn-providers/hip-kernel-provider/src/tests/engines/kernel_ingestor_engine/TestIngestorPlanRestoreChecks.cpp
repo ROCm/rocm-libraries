@@ -28,6 +28,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
@@ -155,6 +156,28 @@ IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
     IngestorPlanPayload payload = validConvFwdPayload();
     payload.dispatchSymbol = std::string(dispatchSymbol);
     payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.symbol = "attention_dense";
+    payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
+    return payload;
+}
+
+// A gfx942 dense-attention payload under its one contract that passes every check before the
+// module load when `withHeads` is true: gfx942 launches the same ten arguments as gfx950's v2.
+IngestorPlanPayload gfx942AttentionDensePayload(bool withHeads)
+{
+    const AttentionDenseBinding binding{1, 2, 3, 4, 1, 128, 0.125F};
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::HALF;
+
+    IngestorPlanPayload payload = validConvFwdPayload();
+    payload.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
     return payload;
@@ -326,6 +349,39 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsAcceptTheirOw
         payload.launchValues["block_m"] = int64_t{64};
         expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
     }
+}
+
+// gfx942's one contract restores only the 10-argument code object it launches.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractRefusesTheEightArgumentSignature)
+{
+    expectRefusal(gfx942AttentionDensePayload(/*withHeads=*/false),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+}
+
+// The matching signature passes: the plan reaches the launch-value check, which a block_m
+// gfx942 does not build, or a window that leaves query rows no key, then refuses. No case
+// reaches the module load, so no device is needed.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractAcceptsItsOwnSignature)
+{
+    auto unbuiltTile = gfx942AttentionDensePayload(/*withHeads=*/true);
+    unbuiltTile.launchValues["block_m"] = int64_t{48};
+    expectRefusal(unbuiltTile, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+
+    auto keylessRows = gfx942AttentionDensePayload(/*withHeads=*/true);
+    keylessRows.launchValues["seqlen_kv"] = int64_t{256};
+    keylessRows.launchValues["sliding_window"] = int64_t{256};
+    expectRefusal(
+        keylessRows, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'sliding_window'");
+}
+
+// The unversioned gfx942 name resolves to the gfx942 handler, which reads only v1.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesItsUnversionedAlias)
+{
+    auto payload = gfx942AttentionDensePayload(/*withHeads=*/true);
+    payload.dispatchSymbol = "hipkernel.gfx942_attention_dense.dispatch";
+
+    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "names no launch-value contract");
 }
 
 TEST_F(TestIngestorPlanRestoreChecks, RefusesAnUnversionedAlias)

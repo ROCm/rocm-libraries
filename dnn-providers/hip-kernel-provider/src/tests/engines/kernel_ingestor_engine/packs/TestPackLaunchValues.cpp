@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <variant>
 #include <vector>
@@ -17,6 +18,7 @@
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
@@ -429,6 +431,351 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAStringValueOfAnotherType)
     expectReadRefusal(&readGfx950AttentionDenseLaunchInputs,
                       floatLayout,
                       mustBeString + toString(MetadataType::FLOAT));
+}
+
+// ---------------------------------------------------------------------------
+// gfx942 dense attention
+//
+// One contract, v1, with gfx950's value set. Its reader holds the restore to what the
+// gfx942 graph and kernel match bind: any finite scale, a block_m gfx942 builds, causal 0
+// or 1, a causal window that leaves no query row without a key, grouped heads, head_size
+// 64 or 128, operands within 32-bit offsets, and seqlen_q a multiple of block_m.
+// ---------------------------------------------------------------------------
+
+// A shape the gfx942 match serves, with distinct values. seqlen_q 1536 is a multiple of
+// every block_m from 32 to 512 as well as of 96.
+Gfx942AttentionDenseLaunchInputs gfx942AttentionDenseInputs()
+{
+    Gfx942AttentionDenseLaunchInputs launch;
+    launch.binding.q = 61;
+    launch.binding.k = 62;
+    launch.binding.v = 63;
+    launch.binding.o = 64;
+    launch.binding.causal = 1;
+    launch.binding.slidingWindow = 160;
+    launch.binding.scale = 0.1F;
+    launch.problem.batch = 71;
+    launch.problem.seqLenQ = 1536;
+    launch.problem.seqLenKv = 1600;
+    launch.problem.numQueryHeads = 8;
+    launch.problem.numKvHeads = 4;
+    launch.problem.headSize = 128;
+    launch.problem.dataType = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
+    launch.blockM = 96;
+    return launch;
+}
+
+SavedLaunchInputs savedGfx942AttentionDense()
+{
+    const auto launch = gfx942AttentionDenseInputs();
+    return {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+            gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
+}
+
+TEST(TestPackLaunchValues, Gfx942AttentionDenseValuesMatchTheV1Contract)
+{
+    const auto launch = gfx942AttentionDenseInputs();
+
+    const MetadataValues values
+        = gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM);
+
+    const MetadataValues expected{{"q.uid", int64_t{61}},
+                                  {"k.uid", int64_t{62}},
+                                  {"v.uid", int64_t{63}},
+                                  {"o.uid", int64_t{64}},
+                                  {"causal", int64_t{1}},
+                                  {"sliding_window", int64_t{160}},
+                                  {"batch", int64_t{71}},
+                                  {"seqlen_q", int64_t{1536}},
+                                  {"seqlen_kv", int64_t{1600}},
+                                  {"num_query_heads", int64_t{8}},
+                                  {"num_kv_heads", int64_t{4}},
+                                  {"head_size", int64_t{128}},
+                                  {"block_m", int64_t{96}},
+                                  {"scale", static_cast<double>(0.1F)},
+                                  {"data_type", std::string("HALF")},
+                                  {"stride_layout", std::string("bshd")}};
+    EXPECT_EQ(values, expected);
+    EXPECT_EQ(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
+              "hipkernel.gfx942_attention_dense.dispatch.v1");
+}
+
+TEST(TestPackLaunchValues, Gfx942AttentionDenseInputsRoundTripThroughTheirValues)
+{
+    const auto expected = gfx942AttentionDenseInputs();
+
+    const auto read = readGfx942AttentionDenseLaunchInputs(savedGfx942AttentionDense());
+
+    EXPECT_EQ(read.binding.q, expected.binding.q);
+    EXPECT_EQ(read.binding.k, expected.binding.k);
+    EXPECT_EQ(read.binding.v, expected.binding.v);
+    EXPECT_EQ(read.binding.o, expected.binding.o);
+    EXPECT_EQ(read.binding.causal, expected.binding.causal);
+    EXPECT_EQ(read.binding.slidingWindow, expected.binding.slidingWindow);
+    uint32_t readScaleBits = 0;
+    uint32_t expectedScaleBits = 0;
+    std::memcpy(&readScaleBits, &read.binding.scale, sizeof(readScaleBits));
+    std::memcpy(&expectedScaleBits, &expected.binding.scale, sizeof(expectedScaleBits));
+    EXPECT_EQ(readScaleBits, expectedScaleBits);
+    EXPECT_EQ(read.problem.batch, expected.problem.batch);
+    EXPECT_EQ(read.problem.seqLenQ, expected.problem.seqLenQ);
+    EXPECT_EQ(read.problem.seqLenKv, expected.problem.seqLenKv);
+    EXPECT_EQ(read.problem.numQueryHeads, expected.problem.numQueryHeads);
+    EXPECT_EQ(read.problem.numKvHeads, expected.problem.numKvHeads);
+    EXPECT_EQ(read.problem.headSize, expected.problem.headSize);
+    EXPECT_EQ(read.problem.dataType, expected.problem.dataType);
+    EXPECT_EQ(read.blockM, expected.blockM);
+}
+
+// gfx942 has one contract. gfx950's version names, and its values under them, are not it.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsV1Contract)
+{
+    for(const char* other : {"hipkernel.gfx942_attention_dense.dispatch.v2",
+                             "hipkernel.gfx950_attention_dense.dispatch.v1",
+                             "hipkernel.gfx950_attention_dense.dispatch.v2"})
+    {
+        SCOPED_TRACE(other);
+        auto saved = savedGfx942AttentionDense();
+        saved.dispatchSymbol = other;
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, saved, "names no launch-value contract");
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                          saved,
+                          "the handler reads the contract "
+                          "'hipkernel.gfx942_attention_dense.dispatch.v1'");
+    }
+}
+
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesMalformedValues)
+{
+    const auto valid = savedGfx942AttentionDense();
+    expectCommonReadRefusals(&readGfx942AttentionDenseLaunchInputs,
+                             valid,
+                             "hipkernel.gfx942_attention_dense.dispatch",
+                             "batch");
+
+    SavedLaunchInputs wideBatch = valid;
+    wideBatch.values["batch"] = int64_t{2147483648};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, wideBatch, "launch value 'batch'");
+
+    // 0.1 as a double is not a float value, so no float scale was saved as it.
+    SavedLaunchInputs doubleScale = valid;
+    doubleScale.values["scale"] = 0.1;
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, doubleScale, "launch value 'scale'");
+
+    SavedLaunchInputs floatType = valid;
+    floatType.values["data_type"] = std::string("FLOAT");
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, floatType, "launch value 'data_type'");
+
+    SavedLaunchInputs otherLayout = valid;
+    otherLayout.values["stride_layout"] = std::string("bhsd");
+    expectReadRefusal(
+        &readGfx942AttentionDenseLaunchInputs, otherLayout, "launch value 'stride_layout'");
+}
+
+// The gfx942 body scales the scores before the row max, so every finite scale the graph
+// match binds restores; NaN and the infinities never reach a float launch argument.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRestoresAnyFiniteScale)
+{
+    const auto valid = savedGfx942AttentionDense();
+
+    for(const float scale : {1e30F, 0x1p-100F, 0x1p5F, 0.0F, -1.0F})
+    {
+        SCOPED_TRACE(scale);
+        SavedLaunchInputs finite = valid;
+        finite.values["scale"] = static_cast<double>(scale);
+        EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(finite).binding.scale, scale);
+    }
+
+    for(const double scale : {std::numeric_limits<double>::quiet_NaN(),
+                              std::numeric_limits<double>::infinity(),
+                              -std::numeric_limits<double>::infinity()})
+    {
+        SCOPED_TRACE(scale);
+        SavedLaunchInputs notFinite = valid;
+        notFinite.values["scale"] = scale;
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, notFinite, "launch value 'scale'");
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, notFinite, "must be a finite double");
+    }
+}
+
+// block_m is a positive multiple of 32 within a 1024-thread CTA. block_n is not saved, so
+// the rest of the tile rule is not re-run.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesABlockMGfx942DoesNotBuild)
+{
+    const auto valid = savedGfx942AttentionDense();
+
+    for(const int64_t blockM : {int64_t{48}, int64_t{0}, int64_t{-64}, int64_t{544}, int64_t{1024}})
+    {
+        SCOPED_TRACE(blockM);
+        SavedLaunchInputs unbuilt = valid;
+        unbuilt.values["block_m"] = blockM;
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, unbuilt, "launch value 'block_m'");
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                          unbuilt,
+                          "is not a tile the kernel is built with");
+    }
+
+    for(const int64_t blockM : {int64_t{32}, int64_t{64}, int64_t{128}, int64_t{256}, int64_t{512}})
+    {
+        SCOPED_TRACE(blockM);
+        SavedLaunchInputs built = valid;
+        built.values["block_m"] = blockM;
+        EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(built).blockM, blockM);
+    }
+}
+
+// causal and sliding_window are baked into the code object, so the launch never reads them;
+// a plan holding a mask the graph match never binds is refused rather than launched.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAMaskTheGraphMatchNeverBinds)
+{
+    const auto valid = savedGfx942AttentionDense();
+
+    for(const int64_t causal : {int64_t{2}, int64_t{-1}})
+    {
+        SCOPED_TRACE(causal);
+        SavedLaunchInputs badCausal = valid;
+        badCausal.values["causal"] = causal;
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, badCausal, "launch value 'causal'");
+    }
+
+    SavedLaunchInputs negativeWindow = valid;
+    negativeWindow.values["sliding_window"] = int64_t{-1};
+    expectReadRefusal(
+        &readGfx942AttentionDenseLaunchInputs, negativeWindow, "launch value 'sliding_window'");
+
+    SavedLaunchInputs windowWithoutCausal = valid;
+    windowWithoutCausal.values["causal"] = int64_t{0};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      windowWithoutCausal,
+                      "launch value 'sliding_window'");
+
+    // A 512-key window over seqlen_q 1536 and seqlen_kv 1024: row 1535 sees (1023, 1535], no
+    // key.
+    SavedLaunchInputs keylessRows = valid;
+    keylessRows.values["seqlen_q"] = int64_t{1536};
+    keylessRows.values["seqlen_kv"] = int64_t{1024};
+    keylessRows.values["sliding_window"] = int64_t{512};
+    expectReadRefusal(
+        &readGfx942AttentionDenseLaunchInputs, keylessRows, "launch value 'sliding_window'");
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, keylessRows, "no key");
+
+    // One key wider and the last row sees the last key.
+    SavedLaunchInputs lastRowReaches = keylessRows;
+    lastRowReaches.values["sliding_window"] = int64_t{513};
+    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(lastRowReaches).binding.slidingWindow, 513);
+
+    // No window, causal or not, always restores.
+    for(const int64_t causal : {int64_t{0}, int64_t{1}})
+    {
+        SCOPED_TRACE(causal);
+        SavedLaunchInputs noWindow = keylessRows;
+        noWindow.values["causal"] = causal;
+        noWindow.values["sliding_window"] = int64_t{0};
+        EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(noWindow).binding.causal, causal);
+    }
+}
+
+// Each of the next five refuses a shape the graph and kernel match never bind. All but
+// head_size would launch out of bounds; the launch does not read head_size, but the size
+// limits are computed from it.
+
+// The kernel's kv head is the query head over num_query_heads / num_kv_heads: a group of 0
+// for 2 over 4, and a kv head past the last for 6 over 4.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesQueryHeadsNotAMultipleOfKvHeads)
+{
+    const auto valid = savedGfx942AttentionDense();
+
+    for(const int64_t numQueryHeads : {int64_t{2}, int64_t{6}})
+    {
+        SCOPED_TRACE(numQueryHeads);
+        SavedLaunchInputs ungrouped = valid;
+        ungrouped.values["num_query_heads"] = numQueryHeads;
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, ungrouped, "launch value 'num_query_heads'");
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                          ungrouped,
+                          "must be a multiple of 'num_kv_heads' 4");
+    }
+}
+
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAHeadSizeTheKernelIsNotBuiltFor)
+{
+    const auto valid = savedGfx942AttentionDense();
+
+    for(const int64_t headSize : {int64_t{32}, int64_t{96}, int64_t{256}})
+    {
+        SCOPED_TRACE(headSize);
+        SavedLaunchInputs unbuilt = valid;
+        unbuilt.values["head_size"] = headSize;
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, unbuilt, "launch value 'head_size'");
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, unbuilt, "must be 64 or 128");
+    }
+
+    SavedLaunchInputs built = valid;
+    built.values["head_size"] = int64_t{64};
+    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(built).problem.headSize, 64);
+}
+
+// One batch of 4 kv heads of 128 halves is 1024 bytes per key, so 2^21 keys is 2^31 bytes.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesKvOf2To31BytesOrMore)
+{
+    auto valid = savedGfx942AttentionDense();
+    valid.values["batch"] = int64_t{1};
+
+    SavedLaunchInputs tooLong = valid;
+    tooLong.values["seqlen_kv"] = int64_t{2097152};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      tooLong,
+                      "launch values 'batch', 'seqlen_kv', 'num_kv_heads' and 'head_size'");
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, tooLong, "2^31 bytes or more");
+
+    SavedLaunchInputs fits = valid;
+    fits.values["seqlen_kv"] = int64_t{2097151};
+    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(fits).problem.seqLenKv, 2097151);
+}
+
+// One batch of 8 query heads of 128 elements is 1024 elements per query row, so 2^31
+// elements is 2^21 rows. 2097216 is the first multiple of block_m 96 at or past that.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesQoOf2To31ElementsOrMore)
+{
+    auto valid = savedGfx942AttentionDense();
+    valid.values["batch"] = int64_t{1};
+    valid.values["sliding_window"] = int64_t{0};
+
+    SavedLaunchInputs tooLong = valid;
+    tooLong.values["seqlen_q"] = int64_t{2097216};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      tooLong,
+                      "launch values 'batch', 'seqlen_q', 'num_query_heads' and 'head_size'");
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, tooLong, "2^31 elements or more");
+
+    SavedLaunchInputs fits = valid;
+    fits.values["seqlen_q"] = int64_t{2097120};
+    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(fits).problem.seqLenQ, 2097120);
+}
+
+// The grid is ceil(seqlen_q / block_m), and the last query tile is read and written whole.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesASeqLenQNotAMultipleOfBlockM)
+{
+    const auto valid = savedGfx942AttentionDense();
+
+    for(const int64_t seqLenQ : {int64_t{32}, int64_t{1568}})
+    {
+        SCOPED_TRACE(seqLenQ);
+        SavedLaunchInputs ragged = valid;
+        ragged.values["seqlen_q"] = seqLenQ;
+        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, ragged, "launch value 'seqlen_q'");
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, ragged, "must be a multiple of 'block_m' 96");
+    }
+
+    SavedLaunchInputs oneTile = valid;
+    oneTile.values["seqlen_q"] = int64_t{96};
+    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(oneTile).problem.seqLenQ, 96);
 }
 
 } // namespace

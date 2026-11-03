@@ -40,8 +40,8 @@ batch when `seq_len_q/kv` are set).
     the boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
     and backward, hip_flash2), and `Gfx1151WmmaAttentionNative.cpp` `maskFor` passes `left_bound - 1` as
     `window_left`. The gfx942 dense pack's kernel counts the diagonal too (it keeps
-    `(q - W, q]`), so `Gfx942AttentionDenseNative.cpp` `maskFor` passes `left_bound` itself as
-    `sliding_window`. The gfx950 dense pack declines windows.
+    `(q - W, q]`), so `AttentionDenseNative.cpp` `maskFor`, which both dense packs share, passes
+    `left_bound` itself as `sliding_window` for gfx942. The gfx950 dense pack declines windows.
   - `TestCpuFpReferenceSdpaFp64.LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn` pins the count.
 - **Other use cases:**
   - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`.
