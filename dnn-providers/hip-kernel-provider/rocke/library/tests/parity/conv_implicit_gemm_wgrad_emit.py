@@ -1419,12 +1419,21 @@ _GFX942_3D_KNOBS = {
 }
 
 
+# 79-81: xwin_kord (row-fastest K tiles of a plane) on 73 (ping-pong),
+# 70 (plain loop) and 78 (2-D).
+for _i, _b in ((79, 73), (80, 70), (81, 78)):
+    _GFX942_3D_KNOBS[_i] = (
+        _GFX942_3D_KNOBS[_b][0],
+        dict(_GFX942_3D_KNOBS[_b][1], xwin_kord=1),
+    )
+
+
 def _gfx942_3d_knob_spec(idx: int):
     from dataclasses import replace
 
     base, kw = _GFX942_3D_KNOBS[idx]
     spec, arch = _gfx942_3d_spec(base)
-    if idx == 78:
+    if idx in (78, 81):
         # the 2-D twin of the 3-D grouped probe
         kw = dict(
             kw,

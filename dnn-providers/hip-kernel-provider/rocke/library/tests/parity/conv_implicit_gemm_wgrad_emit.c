@@ -502,6 +502,14 @@ static int make_cfg_3d_xwin(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 79 && idx <= 81)
+    {
+        /* xwin_kord on 73 (ping-pong), 70 (plain loop) and 78 (2-D) */
+        static const int kb[3] = {73, 70, 78};
+        make_cfg_3d_xwin(kb[idx - 79], spec, arch);
+        spec->xwin_kord = 1;
+        return 0;
+    }
     if(idx >= 70 && idx <= 78)
         return make_cfg_3d_xwin(idx, spec, arch);
     if(idx >= 55 && idx <= 58)

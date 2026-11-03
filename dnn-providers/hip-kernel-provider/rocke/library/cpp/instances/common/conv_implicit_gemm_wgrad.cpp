@@ -934,10 +934,11 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
     if(s->lds_bswz || s->ws_fuse || s->ws_tree || s->epi_quad_xpose || s->ws_lc || s->ws_gred)
         BR_REJECT("wgrad lds_bswz / ws_fuse / ws_tree / epi_quad_xpose / ws_lc / ws_gred are "
                   "Python-only (no C++ twin yet)");
-    if(s->xwin_rows != 1 || s->xwin_mrow != 1 || s->xwin_kband || s->xwin_bq || s->xwin_aq
-       || s->xwin_kord)
-        BR_REJECT("wgrad xwin_rows / xwin_mrow / xwin_kband / xwin_bq / xwin_aq / xwin_kord are "
+    if(s->xwin_rows != 1 || s->xwin_mrow != 1 || s->xwin_kband || s->xwin_bq || s->xwin_aq)
+        BR_REJECT("wgrad xwin_rows / xwin_mrow / xwin_kband / xwin_bq / xwin_aq are "
                   "Python-only (no C++ twin yet)");
+    if(s->xwin_kord && (s->xwin_kord != 1 || (s->tile_k & (s->tile_k - 1))))
+        BR_REJECT("xwin_kord is 0 or 1 (xwin_mrow 1, no xwin_kband, power-of-two tile_k)");
     if(s->xwin)
     {
         /* Python _xwin_conflict, for the ported subset (one filter row). */
@@ -6008,6 +6009,10 @@ typedef struct wg_xw
     /* the _tile_steps generator */
     int gs;
     rocke_value_t *g_k, *g_q, *g_t, *g_wo, *g_ho, *g_n, *g_do;
+    /* xwin_kord: log2(block_k) (NULL off); the generator's pending column
+     * segment (its shl opens the next step). */
+    rocke_value_t* c_tks;
+    rocke_value_t *g_j, *g_seg;
 } wg_xw_t;
 
 static void wg_xw_dm(wg_xw_t* W,
@@ -6029,6 +6034,18 @@ static void wg_xw_tile(wg_xw_t* W, rocke_value_t* k)
     rocke_value_t *q, *wo, *ho, *n_, *do_ = NULL;
     wg_xw_dm(W, k, ctx->p_magic_k_Wo_mult, ctx->p_magic_k_Wo_shift, ctx->p_Wo, &q, &wo);
     wg_xw_dm(W, q, ctx->p_magic_k_Ho_mult, ctx->p_magic_k_Ho_shift, ctx->p_Ho, &q, &ho);
+    if(W->c_tks != NULL)
+    {
+        /* _kord_map: tile j of the plane is (column segment j / Ho, row j % Ho). */
+        rocke_value_t* wt = rocke_b_lshr(b, ctx->p_Wo, W->c_tks);
+        rocke_value_t* hw = rocke_b_mul(b, ho, wt);
+        rocke_value_t* ws = rocke_b_lshr(b, wo, W->c_tks);
+        rocke_value_t* j = rocke_b_add(b, hw, ws);
+        rocke_value_t *seg, *h;
+        wg_xw_dm(W, j, ctx->p_magic_k_Ho_mult, ctx->p_magic_k_Ho_shift, ctx->p_Ho, &seg, &h);
+        ho = h;
+        wo = rocke_b_shl(b, seg, W->c_tks);
+    }
     if(W->is3)
         wg_xw_dm(W, q, ctx->p_magic_k_Do_mult, ctx->p_magic_k_Do_shift, ctx->p_Do, &n_, &do_);
     else
@@ -6091,8 +6108,35 @@ static void wg_xw_gen_next(wg_xw_t* W)
         return;
     W->gs++;
     /* 3-D steps: 0 dm1a 1 dm1b 2 dm2a 3 dm2b 4 dm3a 5 dm3b 6 hi/wib 7 xb1 8 xb2
-     * 9 yb1 10 yb2/ok 11 di + done; 2-D skips 4 and 5. */
+     * 9 yb1 10 yb2/ok 11 di + done; 2-D skips 4 and 5. xwin_kord inserts
+     * three steps after 3 (j, its dm1, its dm2) and opens the next with the
+     * column segment's shl. */
     int st = s;
+    if(W->c_tks != NULL && st >= 4)
+    {
+        if(st == 4)
+        {
+            rocke_value_t* wt = rocke_b_lshr(b, ctx->p_Wo, W->c_tks);
+            rocke_value_t* hw = rocke_b_mul(b, W->g_ho, wt);
+            rocke_value_t* ws = rocke_b_lshr(b, W->g_wo, W->c_tks);
+            W->g_j = rocke_b_add(b, hw, ws);
+            return;
+        }
+        if(st == 5)
+        {
+            wg_xw_dm1(W, W->g_j, ctx->p_magic_k_Ho_mult, ctx->p_magic_k_Ho_shift);
+            return;
+        }
+        if(st == 6)
+        {
+            W->g_seg = W->g_t;
+            W->g_ho = wg_xw_dm2(W, W->g_j, ctx->p_Ho);
+            return;
+        }
+        st -= 3;
+        if(st == 4) /* the first step after the kord steps, 2-D or 3-D */
+            W->g_wo = rocke_b_shl(b, W->g_seg, W->c_tks);
+    }
     if(!W->is3 && st >= 4)
         st += 2;
     switch(st)
@@ -7089,6 +7133,14 @@ static void wgrad_emit_kloop_xwin(rocke_conv_build_ctx_t* ctx,
     {
         rocke_value_t* g = rocke_b_mul(b, ctx->group_idx, ctx->wgrad_c_kpg);
         W->k_out0 = rocke_b_add(b, W->k_out0, g);
+    }
+    W->c_tks = NULL;
+    if(spec->xwin_kord)
+    {
+        int lg = 0;
+        while((1 << (lg + 1)) <= ctx->block_k)
+            ++lg;
+        W->c_tks = rocke_b_const_i32(b, lg);
     }
     rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
     if(spec->xwin_rot)
