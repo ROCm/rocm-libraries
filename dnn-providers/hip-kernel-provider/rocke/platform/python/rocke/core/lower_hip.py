@@ -2639,14 +2639,23 @@ class _Lowerer:
             self._emit(f"{nice}[{i}] = {_name(a)}[{i}] << {_name(bb)}[{i}];")
 
     def _op_vector_lshr(self, op: Op) -> None:
+        # A logical shift in the element's own width, as LLVM's lshr: each lane
+        # is read through the unsigned type of that width, so no sign bit is
+        # shifted in and no bit above the element is dropped.
         a, bb = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
+        elem = (
+            op.result.type.elem
+            if isinstance(op.result.type, VectorType)
+            else op.result.type
+        )
+        unsigned = _HIP_UNSIGNED_INT_TYPE[elem.name]
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
         for i in range(n):
             self._emit(
-                f"{nice}[{i}] = ((uint32_t){_name(a)}[{i}]) >> {_name(bb)}[{i}];"
+                f"{nice}[{i}] = (({unsigned}){_name(a)}[{i}]) >> {_name(bb)}[{i}];"
             )
 
     def _op_vector_smax(self, op: Op) -> None:
