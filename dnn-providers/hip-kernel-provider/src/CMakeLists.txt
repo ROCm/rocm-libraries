@@ -398,14 +398,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         list(GET _gfx950_engine 0 _snake)
         list(GET _gfx950_engine 1 _local)
         string(REPLACE "_" "-" _dash "${_snake}")
-        string(TOUPPER "${_snake}" _upper)
         set(_target ${PROJECT_NAME}-gfx950-attention-${_dash}-external-integration-check)
 
         set(_category_args "")
         if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
-           AND DEFINED HIPKERNELPROVIDER_GFX950_ATTENTION_${_upper}_INTEGRATION_CATEGORIES_YAML)
+           AND DEFINED HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML)
             list(APPEND _category_args
-                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_ATTENTION_${_upper}_INTEGRATION_CATEGORIES_YAML}"
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
                 INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
                 TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-${_dash}-external-integration
             )
@@ -418,7 +417,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
            AND _available
            AND TARGET hipdnn_integration_tests)
-            set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_${_local}.toml")
+            set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950Attention.toml")
             hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950 FILES "${_config}")
 
             add_external_integration_test_target(
