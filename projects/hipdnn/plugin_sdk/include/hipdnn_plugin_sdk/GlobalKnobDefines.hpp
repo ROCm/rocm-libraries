@@ -58,6 +58,14 @@ inline std::optional<bool> benchmarkingOverrideFromEnv()
 /// Process-wide cap on how many of the best-ranked candidates the kernel ingestor builds a
 /// plan from. Read by GenericPlanBuilder only; an engine with thousands of applicable
 /// kernels otherwise loads and benchmarks every one of them on a cold plan build.
+///
+/// Two effects worth knowing before setting it: (1) if every kernel in the shortlist fails
+/// to prepare, the build throws rather than falling through to a lower-ranked kernel outside
+/// the limit -- a build that would otherwise have succeeded can now fail outright. (2) any
+/// limit, even one larger than the knob-filtered candidate set, makes a benchmarked winner
+/// record that only covers that (smaller) set serve the build instead of being ignored as
+/// partial coverage -- so turning the limit on and off changes whether an existing record is
+/// trusted, not just how many candidates are tried.
 static constexpr const char* INGESTOR_CANDIDATE_LIMIT_ENV_NAME = "HIPDNN_INGESTOR_CANDIDATE_LIMIT";
 
 /// Reads and parses HIPDNN_INGESTOR_CANDIDATE_LIMIT per call, never cached. A positive

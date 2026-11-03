@@ -793,8 +793,14 @@ public:
         // One snapshot: the catalog carries the record that ordered it, so a winner-cache
         // eviction cannot split plan build and this prediction.
         auto catalog = _stateManager.measuredCatalog(context);
-        const auto filtered
-            = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        auto filtered = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        // Mirrors buildPlan: under a limit, the configuration this answers must be one plan
+        // build would actually shortlist, not a candidate beyond it (RFC 0019 §11.4). This
+        // does not yet mirror buildPlan's ad-hoc per-graph winner-record lookup under a
+        // limit (serveRecordedOrder / orderIfFullyCovered): when no catalog-wide
+        // measuredRecord exists, a covering winner-cache record can still make buildPlan
+        // serve a configuration this prediction does not know about.
+        applyCandidateLimit(filtered, executionSettings.ingestorSettings.candidateLimit);
         std::string modelId;
         // The full catalog decides the order source and ranking; `filtered` only limits what
         // the answer may name, so a pin changes neither (RFC 0019 §9.2, §5 steps 8-9).
