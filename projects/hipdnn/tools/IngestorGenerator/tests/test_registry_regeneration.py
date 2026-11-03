@@ -435,6 +435,22 @@ def _matcher_source(manifest: dict) -> Path:
     return enumerator._REPO / mirrors[0]
 
 
+#: A pack-local header the matcher source includes (``packs/<name>.hpp``).
+_PACK_HEADER_INCLUDE = re.compile(
+    r'#include "(engines/kernel_ingestor_engine/packs/\w+\.hpp)"'
+)
+
+
+def _matcher_text(source: Path) -> str:
+    """The matcher source and the pack-local headers it includes: a helper shared by
+    several packs (e.g. ``UnifiedAttentionGraphMatch.hpp``) is still that engine's
+    matcher."""
+    text = source.read_text()
+    src_root = source.parents[3]  # .../src/engines/kernel_ingestor_engine/packs/X.cpp
+    headers = [src_root / rel for rel in _PACK_HEADER_INCLUDE.findall(text)]
+    return "\n".join([text] + [h.read_text() for h in headers if h.is_file()])
+
+
 def _vocabulary_gaps(vocabulary: set, matcher_text: str) -> tuple:
     """``(spellings the matcher never produces, spellings it produces that no
     vocabulary entry carries)``; both empty when they agree. The second direction
@@ -451,13 +467,13 @@ def test_g5_the_dtype_vocabulary_is_what_the_cpp_matcher_compares(manifest):
     source = _matcher_source(manifest)
     assert source.is_file(), f"matcher source not readable: {source}"
     vocabulary = set(manifest["specialization"]["vocabulary"]["dtype"].values())
-    assert _vocabulary_gaps(vocabulary, source.read_text()) == ([], [])
+    assert _vocabulary_gaps(vocabulary, _matcher_text(source)) == ([], [])
 
 
 def test_g5_catches_a_misspelled_and_an_unclaimed_dtype(manifest):
     """The positive control: each direction fails on its own, and a matcher whose
     literals cannot be read fails rather than passing on an empty set."""
-    text = _matcher_source(manifest).read_text()
+    text = _matcher_text(_matcher_source(manifest))
     vocabulary = set(manifest["specialization"]["vocabulary"]["dtype"].values())
     missing, unclaimed = _vocabulary_gaps(vocabulary | {"BFLOAT16"}, text)
     assert (missing, unclaimed) == (["BFLOAT16"], [])
