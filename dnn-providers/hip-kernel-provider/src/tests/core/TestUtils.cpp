@@ -91,6 +91,36 @@ TEST(TestFindTensorAttributes, ThrowsWhenMapIsEmpty)
 }
 
 // ============================================================================
+// isChannelLastLayout - 3D
+// ============================================================================
+
+TEST(TestIsChannelLastLayout, ReturnsTrueForNlc3D)
+{
+    const std::vector<int64_t> dims = {1, 3, 224};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(
+        dims, hipdnn_data_sdk::utilities::TensorLayout::NLC.strideOrder);
+
+    auto builder = createSingleTensorGraph(dims, strides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(isChannelLastLayout(getTensor(graph)));
+}
+
+TEST(TestIsChannelLastLayout, ReturnsFalseForNcl3D)
+{
+    const std::vector<int64_t> dims = {1, 3, 224};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(
+        dims, hipdnn_data_sdk::utilities::TensorLayout::NCL.strideOrder);
+
+    auto builder = createSingleTensorGraph(dims, strides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(isChannelLastLayout(getTensor(graph)));
+}
+
+// ============================================================================
 // isChannelLastLayout - 4D
 // ============================================================================
 
@@ -154,10 +184,10 @@ TEST(TestIsChannelLastLayout, ReturnsFalseForNcdhw5D)
 // isChannelLastLayout - error cases
 // ============================================================================
 
-TEST(TestIsChannelLastLayout, ThrowsFor3DTensor)
+TEST(TestIsChannelLastLayout, ThrowsFor2DTensor)
 {
-    const std::vector<int64_t> dims = {1, 3, 224};
-    const std::vector<int64_t> strides = {672, 224, 1};
+    const std::vector<int64_t> dims = {3, 224};
+    const std::vector<int64_t> strides = {224, 1};
 
     auto builder = createSingleTensorGraph(dims, strides);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
