@@ -56,12 +56,23 @@ def detector_archive(build_root):
 
 def build_library(root, text, name="libamd_comgr.so.3", extra=()):
     root.mkdir(parents=True, exist_ok=True)
+    windows = sys.platform == "win32"
+    if windows and name == "libamd_comgr.so.3":
+        name = "amd_comgr.dll"
     output = root / name
+    compiler = os.environ.get("CXX") or ("clang" if windows else "cc")
+    if windows:
+        text = (
+            "#include <stddef.h>\n"
+            "__declspec(dllexport) void amd_comgr_get_version(size_t*,size_t*);\n"
+            "__declspec(dllexport) int amd_comgr_do_action(int,void*,void*,void*);\n"
+            "__declspec(dllexport) void LLVMGetVersion(unsigned*,unsigned*,unsigned*);\n"
+        ) + text
     subprocess.run(
         [
-            "cc",
+            compiler,
             "-shared",
-            "-fPIC",
+            *([] if windows else ["-fPIC"]),
             "-x",
             "c",
             "-",
@@ -213,6 +224,7 @@ def test_source_native_ctest_uses_effective_build_comgr(tmp_path, selection):
         "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         "-DHIPKERNELPROVIDER_ENABLE_TESTS=ON",
         "-DBUILD_TESTING=ON",
+        "-DCMAKE_BUILD_TYPE=Release",
         "-DROCKE_INSTALL_TESTS=OFF",
         "-DROCKE_BUILD_PYBIND=OFF",
         f"-DPython3_EXECUTABLE={sys.executable}",
@@ -226,7 +238,8 @@ def test_source_native_ctest_uses_effective_build_comgr(tmp_path, selection):
             if selection == "relative-environment"
             else str(library)
         )
-    subprocess.run(command, env=env, check=True, capture_output=True, text=True)
+    configured = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert configured.returncode == 0, configured.stdout + configured.stderr
     assert not list(build.rglob("rocke_sdk_*.txt"))
     inventory = json.loads(
         subprocess.run(
@@ -238,24 +251,28 @@ def test_source_native_ctest_uses_effective_build_comgr(tmp_path, selection):
         ).stdout
     )["tests"]
     assert any(test["name"] == "rocke_compiler_discovery_source" for test in inventory)
-    subprocess.run(
+    compiled = subprocess.run(
         [
             "cmake",
             "--build",
             str(build),
+            "--config",
+            "Release",
             "--target",
             "rocke_ir_serialize_roundtrip",
             "-j",
             "2",
         ],
         env=env,
-        check=True,
         capture_output=True,
         text=True,
     )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
     env.pop("ROCKE_COMGR_LIB", None)
     ctest = [
         "ctest",
+        "--build-config",
+        "Release",
         "--test-dir",
         str(build),
         "-R",

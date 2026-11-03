@@ -573,7 +573,10 @@ def test_configure_and_pack_preserve_comgr_parent_traversal(
     proc = env.configure(comgr_lib="", success=loadable)
     if not loadable:
         diagnostic = " ".join((proc.stdout + proc.stderr).split())
-        assert str(anchored) in diagnostic
+        # CMake may render separators and a leading './' differently. Compare
+        # spelling only; never normpath/resolve away the meaningful '..'.
+        diagnostic_path = diagnostic.replace("\\", "/").replace("/./", "/")
+        assert str(anchored).replace("\\", "/") in diagnostic_path
         assert "1 candidate(s) failed" in diagnostic
         return
 

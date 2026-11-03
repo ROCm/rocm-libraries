@@ -24,6 +24,10 @@ from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subproce
 
 @pytest.fixture(autouse=True)
 def owner(monkeypatch):
+    # Build/installed launchers deliberately forward real ownership. Unit
+    # fixtures must declare their own configuration, not inherit that owner.
+    for key in ("ROCKE_COMGR_LIB", "ROCKE_HIP_LIB", "ROCKE_LLVM_FLAVOR"):
+        monkeypatch.delenv(key, raising=False)
     session = _session.RuntimeSession()
     monkeypatch.setattr(_session, "session", session)
     return session
@@ -128,10 +132,13 @@ def test_incompatible_new_hip_pair_is_refused_before_load(owner, tmp_path, monke
     selected = tmp_path / "selected/compiler.so"
     selected.parent.mkdir()
     selected.touch()
-    foreign = tmp_path / "artifact/libamd_comgr.so.3"
+    windows = sys.platform == "win32"
+    foreign = (
+        tmp_path / "artifact" / ("amd_comgr.dll" if windows else "libamd_comgr.so.3")
+    )
     foreign.parent.mkdir()
     foreign.touch()
-    hip = foreign.parent / "libamdhip64.so.7"
+    hip = foreign.parent / ("amdhip64.dll" if windows else "libamdhip64.so.7")
     hip.touch()
     owner.compiler = SimpleNamespace(_name=str(selected))
     monkeypatch.setenv("ROCKE_HIP_LIB", str(hip))
@@ -153,7 +160,7 @@ def test_preloaded_hip_alias_uses_existing_handle(owner, tmp_path, monkeypatch):
     path.touch()
     alias = tmp_path / "alias.so"
     os.link(path, alias)
-    handle = SimpleNamespace(_name=str(path))
+    handle = SimpleNamespace(_name=str(path), _handle=0)
     mapped = LoadedLibrary(handle, str(path), file_signature(path))
     monkeypatch.setenv("ROCKE_HIP_LIB", str(alias))
     monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", lambda: [mapped])

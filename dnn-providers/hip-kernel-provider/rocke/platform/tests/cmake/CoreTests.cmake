@@ -23,7 +23,7 @@ if(BUILD_TESTING)
     set_tests_properties(rocke_compiler_discovery_source PROPERTIES
       LABELS "ckc;python;host;quick;standard;comprehensive;full"
       TIMEOUT 600
-      ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python;ROCKE_TEST_ENGINE_ARCHIVE=$<TARGET_FILE:rocke_core>")
+      ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python;ROCKE_TEST_ENGINE_ARCHIVE=$<TARGET_FILE:rocke_core>;CXX=${CMAKE_CXX_COMPILER};CMAKE_GENERATOR=${CMAKE_GENERATOR}")
   endif()
   # Build-tree artifact-reproduction gate, deliberately separate from pytest.
   # It re-probes the full intrinsic/architecture matrix and therefore has a
