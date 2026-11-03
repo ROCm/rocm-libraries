@@ -30,6 +30,7 @@ target_compile_definitions(
 
 target_include_directories(hip_kernel_provider_integration_tests PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}/..
 )
 
 target_link_libraries(

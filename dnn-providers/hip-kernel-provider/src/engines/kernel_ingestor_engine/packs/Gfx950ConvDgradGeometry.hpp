@@ -547,22 +547,32 @@ inline Problem implicitLaunchProblem(const Problem& p)
     return folded;
 }
 
+/// Test seam: the per-image byte limit batchChunks() slices at, in place of the kernels'
+/// real 32-bit ABI limit (I32_MAX) -- reproducing the chunked-batch device path needs
+/// multi-GiB images otherwise. Production code never touches this; it stays at I32_MAX.
+inline int64_t& batchChunkByteLimitForTesting()
+{
+    static int64_t limit = I32_MAX;
+    return limit;
+}
+
 /// gfx950_conv_dgrad_aot_batch_chunks: the (n0, n) batch slices one implicit-GEMM launch
 /// each covers, one slice when dY and dX fit the 32-bit kernel ABI whole. std::nullopt
 /// when one image does not.
 inline std::optional<std::vector<std::pair<int64_t, int64_t>>> batchChunks(const Problem& p,
                                                                            const Geometry& g)
 {
+    const auto limit = batchChunkByteLimitForTesting();
     const auto perImage = std::max(g.dyImageBytes, g.dxImageBytes);
-    if(perImage > I32_MAX)
+    if(perImage > limit)
     {
         return std::nullopt;
     }
-    if(perImage * p.n <= I32_MAX)
+    if(perImage * p.n <= limit)
     {
         return std::vector<std::pair<int64_t, int64_t>>{{0, p.n}};
     }
-    const auto chunks = ceilDiv(p.n, I32_MAX / perImage);
+    const auto chunks = ceilDiv(p.n, limit / perImage);
     const auto step = ceilDiv(p.n, chunks);
     std::vector<std::pair<int64_t, int64_t>> out;
     for(int64_t n0 = 0; n0 < p.n; n0 += step)

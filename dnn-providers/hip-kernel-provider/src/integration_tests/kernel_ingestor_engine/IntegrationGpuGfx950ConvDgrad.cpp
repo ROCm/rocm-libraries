@@ -45,6 +45,8 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <nlohmann/json.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
+
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "ScopedPluginLogCapture.hpp"
 
@@ -1026,6 +1028,46 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, CappedBenchmarkMatchesCpuReference)
     ASSERT_NO_FATAL_FAILURE(executeAndVerify(*recreated, variant.dtype, reference));
 }
 
+/// RAII: lowers gfx950_conv_dgrad::batchChunkByteLimitForTesting() so a small batch
+/// exercises the chunked-launch device path (DeviceTables, views into dY/dX), which no
+/// test otherwise reaches -- the kernels' real 32-bit ABI limit needs a multi-GiB image
+/// per batch element to trigger naturally.
+class ScopedBatchChunkLimit
+{
+public:
+    explicit ScopedBatchChunkLimit(int64_t limit)
+        : _previous(gfx950_conv_dgrad::batchChunkByteLimitForTesting())
+    {
+        gfx950_conv_dgrad::batchChunkByteLimitForTesting() = limit;
+    }
+    ~ScopedBatchChunkLimit()
+    {
+        gfx950_conv_dgrad::batchChunkByteLimitForTesting() = _previous;
+    }
+    ScopedBatchChunkLimit(const ScopedBatchChunkLimit&) = delete;
+    ScopedBatchChunkLimit& operator=(const ScopedBatchChunkLimit&) = delete;
+
+private:
+    int64_t _previous;
+};
+
+// The batch-chunk device path (DeviceTables, step.views into dY/dX at an n0/n offset)
+// never otherwise runs: every other case's images fit the kernels' 32-bit ABI whole. With
+// the chunk limit lowered for the test alone, N=3 of a 64x64x64 fp16 image (one image
+// 524288 bytes; the limit below fits one but not two) splits into three single-image
+// launches, each checked against the CPU reference.
+TEST_F(IntegrationGpuGfx950ConvDgradAot, ABatchPastTheChunkLimitRunsAsSlicesOnDevice)
+{
+    const DgradVariant variant{"BatchChunk", DataType::HALF, std::nullopt};
+    const DgradProblem problem{3, 64, 64, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 1};
+    const ScopedBatchChunkLimit chunkLimit(600000);
+    auto reference = makeReference(variant, problem, 97);
+
+    auto graph = buildDgradGraph(variant.dtype, problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(false)}));
+    ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
+}
+
 // ---- Per dtype: every catalog instance pinned and checked ----
 
 class IntegrationGpuGfx950ConvDgradAotCatalog : public IntegrationGpuGfx950ConvDgrad
@@ -1034,8 +1076,7 @@ class IntegrationGpuGfx950ConvDgradAotCatalog : public IntegrationGpuGfx950ConvD
 
 // Every selectable instance of the dtype is pinned on every graph whose capability it
 // could serve; the engine must accept exactly the counts above, each accepted instance
-// must match the reference, and every instance must run at least once. On the graphs
-// with groups > 1 the coalesced-weight MFMA rows of the graph's tuple must refuse.
+// must match the reference, and every instance must run at least once.
 TEST_P(IntegrationGpuGfx950ConvDgradAotCatalog, EveryInstanceMatchesCpuReference)
 {
     const auto& variant = GetParam();
