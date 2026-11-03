@@ -1,18 +1,5 @@
-/*
- *  Copyright 2008-2020 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2020, NVIDIA Corporation. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file thrust/system/cuda/memory.h
  *  \brief Managing memory associated with Thrust's Standard C++ system.
@@ -82,7 +69,7 @@ using pointer = thrust::pointer<T, thrust::cuda_cub::tag, thrust::tagged_referen
 //! \see cuda::universal_allocator
 //! \see raw_pointer_cast
 template <typename T>
-using universal_pointer = thrust::pointer<T, thrust::cuda_cub::tag, _THRUST_STD::add_lvalue_reference_t<T>>;
+using universal_pointer = thrust::pointer<T, thrust::cuda_cub::tag, ::cuda::std::add_lvalue_reference_t<T>>;
 
 //! \p cuda::universal_host_pinned_pointer stores a pointer to an object allocated in memory accessible by the \p cuda
 //! system and host systems. Algorithms dispatching based on this pointer type will prefer the host system.
