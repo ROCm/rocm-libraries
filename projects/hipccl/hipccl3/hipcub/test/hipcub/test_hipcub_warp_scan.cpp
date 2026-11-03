@@ -199,7 +199,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
 
-    // logical warp side for warp primitive
+    // logical warp size for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
