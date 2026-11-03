@@ -15,8 +15,9 @@ window mask and cannot change it, so the start-tile clamp itself is pinned by th
 representative IR golden (attention_dense/gfx950/bias_*window*), not by this file.
 
 Specs come from the dispatch factory (block_m 256); the hipDNN catalog ships the
-bias at 128/64, so the per-mask test also runs that tile. The launch packs the
-kernargs the way ``run_attention_dense_torch`` does, minus its host checks.
+bias at 128/64, so the per-mask test also runs block_m 128 (at the factory's block
+order; the torch matrix runs the catalog's exact configuration). The launch packs
+the kernargs the way ``run_attention_dense_torch`` does, minus its host checks.
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_dense_bias_gfx950_gpu.py
 

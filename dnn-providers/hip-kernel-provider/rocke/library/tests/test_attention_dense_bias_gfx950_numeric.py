@@ -11,6 +11,11 @@ bottom-right with Sq != Skv, sliding window), then dtype x head size, then the
 sub-modes the bias composes with (ragged lengths, packed varlen, sinks, LSE, a padded
 bias row pitch, ``-inf`` entries).
 
+Every case runs at two tiles, both built by the dispatch factory: ``factory-tile``,
+the ``gfx950_dense_grid`` candidate's default spec (block_m 256 except under a
+window), and ``catalog-tile``, the configuration the hipDNN catalog ships its bias
+kernels at (the ``gfx950_dense_qbminor`` candidate at block_m 128 / block_n 64).
+
 Every test is marked ``gpu`` and skips without a gfx950 and ROCm torch:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_dense_bias_gfx950_numeric.py
@@ -60,8 +65,20 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _spec(dtype, d, hq, hkv, *, batch, sq, skv, mask, sinks=False, lse=False):
-    """The shipped grid-body spec for a bias request, from the dispatch factory."""
+# The tiles every case runs at: (candidate, knobs on top of its default spec).
+_TILES = {
+    "factory-tile": ("gfx950_dense_grid", {}),
+    "catalog-tile": ("gfx950_dense_qbminor", {"block_m": 128, "block_n": 64}),
+}
+
+
+@pytest.fixture(params=list(_TILES))
+def tile(request):
+    return request.param
+
+
+def _spec(dtype, d, hq, hkv, *, batch, sq, skv, mask, tile, sinks=False, lse=False):
+    """The grid-body spec for a bias request at ``tile``, from the dispatch factory."""
     from dispatch.attention import AttentionRequest, attention_tuning_spec
 
     extra = {"sliding_window": _WINDOW, "right_bound": 0} if mask == "window" else {}
@@ -81,8 +98,12 @@ def _spec(dtype, d, hq, hkv, *, batch, sq, skv, mask, sinks=False, lse=False):
         use_attn_bias=True,
         **extra,
     )
-    spec = attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
+    spec_id, knobs = _TILES[tile]
+    spec = attention_tuning_spec(req, spec_id, knobs=knobs).kernel_spec
     assert spec.use_additive_bias and not spec.persistent
+    if tile == "catalog-tile":
+        assert (spec.block_m, spec.block_n) == (128, 64)
+        assert spec.nonpersist_decode == "qb_minor"
     return spec
 
 
@@ -146,12 +167,12 @@ def _run(spec, q, k, v, bias, scale, **kw):
 
 @pytest.mark.parametrize("bias_name", list(_BIAS_SHAPES))
 @pytest.mark.parametrize("mask", list(_MASK_TYPES))
-def test_bias_shape_x_mask(bias_name, mask):
+def test_bias_shape_x_mask(bias_name, mask, tile):
     """Every bias shape under every mask, bf16 D128 GQA-4, B=2. Bottom-right runs
     Sq != Skv so its diagonal moves; the window runs past one KV tile."""
     dtype, d, hq, hkv, batch = "bf16", 128, 8, 2, 2
     sq, skv = (256, 512) if mask == "bottom_right" else (512, 512)
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
     shape = _BIAS_SHAPES[bias_name](batch, hq, sq, skv)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
     scale = 1.0 / math.sqrt(d)
@@ -178,13 +199,13 @@ _SHAPE_FOR_MASK = {
     "d,hq,hkv", [(64, 16, 16), (128, 32, 4)], ids=["d64-mha", "d128-gqa"]
 )
 @pytest.mark.parametrize("mask", list(_MASK_TYPES))
-def test_dtype_x_head_size(dtype, d, hq, hkv, mask):
+def test_dtype_x_head_size(dtype, d, hq, hkv, mask, tile):
     """Both dtypes and both head sizes (64, 128: all the dense kernel serves) under
     every mask, each with a different bias shape; B=2 so a batch broadcast is
     distinguishable from a full bias."""
     batch = 2
     sq, skv = (256, 512) if mask == "bottom_right" else (512, 512)
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
     shape = _BIAS_SHAPES[_SHAPE_FOR_MASK[mask]](batch, hq, sq, skv)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
     scale = 1.0 / math.sqrt(d)
@@ -202,12 +223,12 @@ def test_dtype_x_head_size(dtype, d, hq, hkv, mask):
         ("bottom_right", "key_row"),
     ],
 )
-def test_ragged_lengths(mask, bias_name):
+def test_ragged_lengths(mask, bias_name, tile):
     """Non-tile-multiple lengths take the ragged body, whose padded query rows and keys
     must not read past the bias (its loads are masked there), with full and
     broadcast (stride-0) biases. The factory refuses ragged + window."""
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 8, 8, 2, 300, 700
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
     assert spec.ragged
     shape = _BIAS_SHAPES[bias_name](batch, hq, sq, skv)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
@@ -217,11 +238,13 @@ def test_ragged_lengths(mask, bias_name):
     assert _max_abs(out, ref) < _tolerance(dtype)
 
 
-def test_padded_bias_row_pitch():
+def test_padded_bias_row_pitch(tile):
     """A bias view with a padded Skv row pitch and a non-packed batch stride: the
     kernel reads the strides it is given, not the packed ones."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 64, 4, 4, 2, 256, 256
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left")
+    spec = _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="top_left"
+    )
     q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
     storage = torch.randn(
         batch, hq + 1, sq, skv + 40, device="cuda", dtype=torch.float32
@@ -236,13 +259,13 @@ def test_padded_bias_row_pitch():
 
 @pytest.mark.parametrize("d", [64, 128])
 @pytest.mark.parametrize("mask", ["none", "top_left"])
-def test_misaligned_bias_view(mask, d):
+def test_misaligned_bias_view(mask, d, tile):
     """The aligned body loads four consecutive keys with one 16-byte load that is
     only element-aligned: a view one element into its storage, with an odd row
     pitch, puts most of those loads off a 16-byte boundary. ``-inf`` entries ride
     along so a lane mix-up inside a load shows."""
     dtype, hq, hkv, batch, sq, skv = "bf16", 4, 2, 2, 256, 512
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
     assert not spec.ragged
     q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
     pitch = skv + 5
@@ -263,12 +286,12 @@ def test_misaligned_bias_view(mask, d):
     assert _max_abs(out, ref) < _tolerance(dtype)
 
 
-def test_minus_inf_entries_mask_keys():
+def test_minus_inf_entries_mask_keys(tile):
     """A float mask spelled with ``-inf`` (what PyTorch SDPA makes of a boolean mask)
     hides those keys: here every odd key of every row, plus whole key blocks for one
     head."""
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 512
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="none")
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="none")
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     bias[..., 1::2] = float("-inf")
     bias[:, 2, :, 128:384] = float("-inf")
@@ -279,7 +302,7 @@ def test_minus_inf_entries_mask_keys():
 
 
 @pytest.mark.parametrize("mask", ["none", "top_left"])
-def test_bias_below_the_mask_sentinel(mask):
+def test_bias_below_the_mask_sentinel(mask, tile):
     """A bias below the kernel's -2**99 mask sentinel must not hand the row max to
     masked keys. Every key at -1e30 counts as masked (below about -1.1e29 the kernel
     treats a bias as -inf): causal rows 0..3 see only such keys and, with no mask,
@@ -290,7 +313,7 @@ def test_bias_below_the_mask_sentinel(mask):
     reference (like PyTorch) gives a row of finite scores the softmax over them, here
     the uniform one, so the expected rows are set to 0 by hand below."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 256, 256
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     bias[..., :4] = -1e30
     if mask == "none":
@@ -306,12 +329,12 @@ def test_bias_below_the_mask_sentinel(mask):
     assert _max_abs(out, ref) < _tolerance(dtype)
 
 
-def test_a_finfo_min_mask_matches_the_reference():
+def test_a_finfo_min_mask_matches_the_reference(tile):
     """HF-style float masks use finfo(float32).min, which the kernel treats as -inf.
     Here every odd key and the whole first KV tile are masked for every row; each
     row keeps live keys later on."""
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 512
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="none")
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="none")
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     lowest = torch.finfo(torch.float32).min
     bias[..., 1::2] = lowest
@@ -324,13 +347,22 @@ def test_a_finfo_min_mask_matches_the_reference():
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
-def test_a_row_with_no_finite_score_outputs_zero(lse):
+def test_a_row_with_no_finite_score_outputs_zero(lse, tile):
     """sdpa_reference (hipDNN semantics): a row whose every visible key has a -inf
     bias outputs O = 0 and LSE = -inf. Rows 0..63 see only keys 0..q under the
     causal mask and all of them are -inf; rows 64.. keep live keys."""
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 256
     spec = _spec(
-        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left", lse=lse
+        dtype,
+        d,
+        hq,
+        hkv,
+        batch=batch,
+        sq=sq,
+        skv=skv,
+        tile=tile,
+        mask="top_left",
+        lse=lse,
     )
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     bias[:, :, :64, :64] = float("-inf")
@@ -354,7 +386,7 @@ def test_a_row_with_no_finite_score_outputs_zero(lse):
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
-def test_window_rows_past_the_keys(lse):
+def test_window_rows_past_the_keys(lse, tile):
     """Sq > Skv + W - 1: q-blocks past the keys have no visible key, so their first
     window tile would lie past the last KV tile, and the start tile is clamped to the
     last real one. Rows q >= Skv + W - 1 store O = 0 (and LSE = -inf), the rest match
@@ -363,7 +395,18 @@ def test_window_rows_past_the_keys(lse):
     output (the values are masked), so the IR golden is the clamp's regression
     gate."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 1024, 256
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="window", lse=lse)
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        batch=batch,
+        sq=sq,
+        skv=skv,
+        tile=tile,
+        mask="window",
+        lse=lse,
+    )
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1, 1, 1, skv))
     scale = 1.0 / math.sqrt(d)
     kw = {}
@@ -383,7 +426,7 @@ def test_window_rows_past_the_keys(lse):
         assert live < _tolerance(dtype)
 
 
-def test_varlen_window_sequences_past_their_keys():
+def test_varlen_window_sequences_past_their_keys(tile):
     """Varlen with a window: each sequence's q-blocks past its own keys clamp to its
     last KV tile, not the spec maxima's; its rows past its keys + W - 1 store exact
     zeros."""
@@ -394,7 +437,15 @@ def test_varlen_window_sequences_past_their_keys():
     q_offsets = [0, *np.cumsum(q_lens).tolist()]
     k_offsets = [0, *np.cumsum(kv_lens).tolist()]
     base = _spec(
-        dtype, d, hq, hkv, batch=2, sq=max(q_lens), skv=max(kv_lens), mask="window"
+        dtype,
+        d,
+        hq,
+        hkv,
+        batch=2,
+        sq=max(q_lens),
+        skv=max(kv_lens),
+        tile=tile,
+        mask="window",
     )
     spec = replace(base, varlen=True, ragged=False)
     torch.manual_seed(7)
@@ -423,12 +474,12 @@ def test_varlen_window_sequences_past_their_keys():
         assert out[dead : q_offsets[s + 1]].abs().max().item() == 0.0, s
 
 
-def test_nan_entries_mask_keys():
+def test_nan_entries_mask_keys(tile):
     """A NaN bias entry masks its key (the floor clamp returns the non-NaN operand),
     like -inf: every odd key here. The output stays finite and matches the reference
     with NaN read as -inf."""
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 512
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="none")
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="none")
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     bias[..., 1::2] = float("nan")
     scale = 1.0 / math.sqrt(d)
@@ -441,10 +492,12 @@ def test_nan_entries_mask_keys():
 
 
 @pytest.mark.parametrize("mask", ["top_left", "window"])
-def test_lse_includes_the_bias(mask):
+def test_lse_includes_the_bias(mask, tile):
     """The natural-log LSE the kernel writes is that of the biased scores."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 8, 2, 2, 512, 512
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask, lse=True)
+    spec = _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask, lse=True
+    )
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, 1, sq, skv))
     lse = torch.full(
         (batch, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32
@@ -456,11 +509,20 @@ def test_lse_includes_the_bias(mask):
     assert (lse[..., 0].cpu() - lse_ref).abs().max().item() < _tolerance(dtype), mask
 
 
-def test_sinks_with_bias():
+def test_sinks_with_bias(tile):
     """Sinks join the softmax denominator next to the biased scores."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 8, 2, 1, 512, 512
     spec = _spec(
-        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left", sinks=True
+        dtype,
+        d,
+        hq,
+        hkv,
+        batch=batch,
+        sq=sq,
+        skv=skv,
+        tile=tile,
+        mask="top_left",
+        sinks=True,
     )
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     sinks = torch.randn(hq, device="cuda", dtype=_TORCH_DT[dtype])
@@ -487,7 +549,7 @@ def test_sinks_with_bias():
 )
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
 def test_varlen_indexes_the_bias_by_in_sequence_position(
-    q_lens, kv_lens, bias_name, lse
+    q_lens, kv_lens, bias_name, lse, tile
 ):
     """Packed varlen: sequence ``s`` reads bias rows ``[s|0, h, 0:len_q, 0:len_kv]``;
     a zero-length query sequence writes nothing. Checked against the oracle's ragged
@@ -501,7 +563,16 @@ def test_varlen_indexes_the_bias_by_in_sequence_position(
     k_offsets = [0, *np.cumsum(kv_lens).tolist()]
     max_q, max_kv = max(q_lens), max(kv_lens)
     base = _spec(
-        dtype, d, hq, hkv, batch=nseq, sq=max_q, skv=max_kv, mask="top_left", lse=lse
+        dtype,
+        d,
+        hq,
+        hkv,
+        batch=nseq,
+        sq=max_q,
+        skv=max_kv,
+        tile=tile,
+        mask="top_left",
+        lse=lse,
     )
     spec = replace(base, varlen=True, ragged=False)
     torch.manual_seed(5)
@@ -536,12 +607,13 @@ def test_varlen_indexes_the_bias_by_in_sequence_position(
         assert np.abs(got - lse_ref).max() < _tolerance(dtype)
 
 
-def test_dispatcher_binding_passes_the_bias():
+def test_dispatcher_binding_passes_the_bias(tile):
     """``dispatch_attention(...).bind_torch`` hands ``tensors['attn_bias']`` to the
     runner; leaving it out is refused rather than launched with a null pointer."""
     from dispatch.attention import AttentionRequest, dispatch_attention
 
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 8, 2, 2, 512, 512
+    spec_id, knobs = _TILES[tile]
     result = dispatch_attention(
         AttentionRequest(
             batch=batch,
@@ -555,9 +627,13 @@ def test_dispatcher_binding_passes_the_bias():
             mask_type=1,
             dtype=dtype,
             algorithm="attention_dense_grid",
-            spec_id="gfx950_dense_grid",
+            spec_id=spec_id,
+            tuning_knobs=knobs,
             use_attn_bias=True,
         )
+    )
+    assert result.spec.kernel_spec == _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="top_left"
     )
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     out = torch.full_like(q, float("nan"))
@@ -573,12 +649,14 @@ def test_dispatcher_binding_passes_the_bias():
     assert _max_abs(out, ref) < _tolerance(dtype)
 
 
-def test_runtime_shape_bias_kernel_serves_another_shape():
+def test_runtime_shape_bias_kernel_serves_another_shape(tile):
     """The aligned bias kernel takes its shape and bias strides at run time, so one
     compiled binary serves a second batch and length."""
     dtype, d, hq, hkv = "fp16", 64, 8, 8
     for batch, seq in ((1, 256), (3, 768)):
-        spec = _spec(dtype, d, hq, hkv, batch=batch, sq=seq, skv=seq, mask="top_left")
+        spec = _spec(
+            dtype, d, hq, hkv, batch=batch, sq=seq, skv=seq, tile=tile, mask="top_left"
+        )
         assert spec.runtime_shape
         q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, seq, seq, (batch, 1, 1, seq))
         scale = 1.0 / math.sqrt(d)

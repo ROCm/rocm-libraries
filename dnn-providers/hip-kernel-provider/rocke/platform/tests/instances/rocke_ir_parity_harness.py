@@ -3988,8 +3988,19 @@ def cases():
         # windowed bodies that clamp the start tile because the bias load is plain
         # (LSE on: baked tile count; varlen: per-sequence tile count). Numerics
         # cannot observe that clamp (the window mask overwrites the read), so these
-        # hashes are its only CI pin.
+        # hashes are its only CI pin. bias_catalog_tile is the configuration the
+        # hipDNN catalog ships (block_m 128 / block_n 64 at the qb_minor block
+        # order); the others run the spec's default 256/64 tile.
         ("bias_sq512", {"use_additive_bias": True}),
+        (
+            "bias_catalog_tile_sq512",
+            {
+                "use_additive_bias": True,
+                "block_m": 128,
+                "block_n": 64,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
         (
             "bias_ragged_bottom_right_sq500",
             {

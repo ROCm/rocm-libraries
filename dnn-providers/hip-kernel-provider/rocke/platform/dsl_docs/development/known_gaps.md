@@ -216,9 +216,11 @@ on every problem the provider can express.
 
 The gfx950 `attention_dense` grid body also takes `use_additive_bias` through
 the same helper. It is not a new gap: the dense family has no C++ builder mirror
-by design (see §6). Its four bias-on harness cases (`bias_sq512`,
-`bias_ragged_bottom_right_sq500`, `bias_lse_window_past_keys_sq512`,
-`bias_varlen_window_sq512`) are pinned in the representative-IR golden.
+by design (see §6). Its five bias-on harness cases (`bias_sq512`,
+`bias_catalog_tile_sq512`, `bias_ragged_bottom_right_sq500`,
+`bias_lse_window_past_keys_sq512`, `bias_varlen_window_sq512`) are pinned in
+the representative-IR golden; `bias_catalog_tile_sq512` is the tile and block
+order the hipDNN catalog ships.
 `library/tests/test_attention_ir_cpp_parity.py` lowers the same cases through the
 C++ engine for byte-identity; it needs the `rocke_engine` binding, which the CI
 lanes do not build, so run it locally with `ROCKE_CPP_STRICT=1`.
