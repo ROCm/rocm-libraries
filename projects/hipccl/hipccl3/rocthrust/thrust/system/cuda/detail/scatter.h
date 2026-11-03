@@ -87,4 +87,4 @@ void _CCCL_HOST_DEVICE scatter_if(
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

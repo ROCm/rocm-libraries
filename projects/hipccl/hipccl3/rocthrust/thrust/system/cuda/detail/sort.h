@@ -151,7 +151,7 @@ THRUST_RUNTIME_FUNCTION void merge_sort(
 {
   using size_type = thrust::detail::it_difference_t<KeysIt>;
 
-  size_type count = static_cast<size_type>(_THRUST_STD::distance(keys_first, keys_last));
+  size_type count = static_cast<size_type>(::cuda::std::distance(keys_first, keys_last));
 
   size_t storage_size = 0;
   cudaStream_t stream = cuda_cub::stream(policy);
@@ -470,4 +470,4 @@ stable_sort_by_key(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt 
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

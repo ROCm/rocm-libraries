@@ -143,14 +143,14 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
 template <class Derived, class InputIt, class Predicate>
 InputIt _CCCL_HOST_DEVICE find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-  return cuda_cub::find_if_n(policy, first, _THRUST_STD::distance(first, last), predicate);
+  return cuda_cub::find_if_n(policy, first, ::cuda::std::distance(first, last), predicate);
 }
 
 template <class Derived, class InputIt, class Predicate>
 InputIt _CCCL_HOST_DEVICE
 find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-  return cuda_cub::find_if(policy, first, last, _THRUST_STD::not_fn(predicate));
+  return cuda_cub::find_if(policy, first, last, ::cuda::std::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>
@@ -162,4 +162,4 @@ InputIt _CCCL_HOST_DEVICE find(execution_policy<Derived>& policy, InputIt first,
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()
