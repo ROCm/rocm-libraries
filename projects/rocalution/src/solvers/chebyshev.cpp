@@ -183,9 +183,6 @@ namespace rocalution
 
             this->iter_ctrl_.Clear();
 
-            this->build_       = false;
-            this->init_lambda_ = false;
-
             if(this->precond_ != NULL)
             {
                 this->precond_->ReBuildNumeric();

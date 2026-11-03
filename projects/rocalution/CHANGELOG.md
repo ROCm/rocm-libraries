@@ -48,7 +48,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `FixedPoint::SolveZeroSol()` returning the previous solution instead of zero when it does not iterate. This also fixes the multigrid cycles without pre-smoothing, where the coarse levels started from their previous correction.
 * Fixed the minimum iteration count being ignored at the restarts of GMRES and FGMRES and in the BiCG part of BiCGStab(l).
 * Fixed the residual history file dropping the last residual and, after a second solve, holding the residuals of the first solve.
-* Fixed `ReBuildNumeric()` of the IDR solver clearing its shadow space, so that the next solve failed.
+* Fixed `ReBuildNumeric()` of the IDR solver clearing its shadow space and of the Chebyshev iteration un-building it, so that the next solve failed.
 * Fixed the IDR solver ending the program at a breakdown. It now stops and returns the last iterate.
 
 ## (Unreleased) rocALUTION 4.1.1

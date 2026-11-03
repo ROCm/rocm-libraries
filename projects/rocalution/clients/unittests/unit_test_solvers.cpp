@@ -920,13 +920,6 @@ namespace
         return m.name.rfind("BiCGStab(", 0) == 0;
     }
 
-    // Solvers whose ReBuildNumeric of a built solver is broken
-    template <typename T>
-    bool rebuild_breaks(const Method<T>& m)
-    {
-        return m.name.rfind("IDR", 0) == 0 || m.name == "Chebyshev";
-    }
-
     template <typename T>
     void set_up(Iterative<T>&            solver,
                 const Method<T>&         m,
@@ -2418,10 +2411,6 @@ TYPED_TEST(solvers, rebuild_numeric_takes_new_matrix_values)
     const int n = 16;
     for(const Problem<T>& p : problems<T>(n))
     {
-        if(rebuild_breaks(p.method))
-        {
-            continue;
-        }
         const Csr<T> changed = transformed(
             p.A, [](int i, int j, T v) { return i == j ? v + static_cast<T>(1 + i % 4) : v; });
         for(bool precond : {false, true})
@@ -2501,47 +2490,28 @@ TYPED_TEST(solvers, rebuild_numeric_keeps_idr_and_chebyshev_able_to_solve)
     const Vec<T> b = rhs<T>(n);
     const Vec<T> x = dense_solve(dense(shifted), b);
 
-    struct Case
-    {
-        std::string                   name;
-        std::unique_ptr<Matrix<T>>    A;
-        std::unique_ptr<Jacobi<T>>    jacobi;
-        std::unique_ptr<Iterative<T>> solver;
-        double                        tolerance;
-    };
-    std::vector<Case> cases;
     for(const Method<T>& m : {idr<T>(2), chebyshev<T>(n)})
     {
         for(bool precond : {false, true})
         {
             SCOPED_TRACE(trace(m, precond));
-            Case c{trace(m, precond),
-                   this->make(ref),
-                   std::make_unique<Jacobi<T>>(),
-                   m.make(),
-                   solution_tol(dense(shifted), b, Vec<T>(n, 0), solver_tol<T>(1e-12), 2, precond)};
-            c.solver->Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
-            set_up(*c.solver, m, *c.A, precond ? c.jacobi.get() : nullptr);
+            auto      A = this->make(ref);
+            Jacobi<T> jacobi;
+            auto      solver = m.make();
+            solver->Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
+            set_up(*solver, m, *A, precond ? &jacobi : nullptr);
             expect_near(
-                solve(*c.solver, *c.A, b, Vec<T>(n, 0)).x,
+                solve(*solver, *A, b, Vec<T>(n, 0)).x,
                 dense_solve(dense(ref), b),
                 solution_tol(dense(ref), b, Vec<T>(n, 0), solver_tol<T>(1e-12), 2, precond));
 
-            c.A->AddScalarDiagonal(1.0);
-            c.solver->ReBuildNumeric();
-            cases.push_back(std::move(c));
+            A->AddScalarDiagonal(1.0);
+            solver->ReBuildNumeric();
+            expect_near(
+                solve(*solver, *A, b, Vec<T>(n, 0)).x,
+                x,
+                solution_tol(dense(shifted), b, Vec<T>(n, 0), solver_tol<T>(1e-12), 2, precond));
         }
-    }
-
-    KNOWN_BUG("IDR zeros its shadow space, which ends the next solve, and Chebyshev marks itself "
-              "as not built, which fails an assert in the next solve");
-    for(Case& c : cases)
-    {
-        SCOPED_TRACE(c.name);
-        expect_completes([&] {
-            const Outcome<T> out = solve(*c.solver, *c.A, b, Vec<T>(n, 0));
-            return near(out.x, x, c.tolerance);
-        });
     }
 }
 
