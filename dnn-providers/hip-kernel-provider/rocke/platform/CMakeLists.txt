@@ -404,6 +404,36 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "reference_bundles" EXCLUDE
               PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
+
+      # The SDPA contract tests cross-check from_hipdnn against hipDNN's SDPA
+      # graph template and every SdpaFwd golden graph. Those live outside rocke,
+      # so install a copy beside the tests (tests/sdpa/hipdnn_assets.py reads it)
+      # when configuring from a monorepo checkout; rocke_library_sdpa_pytest then
+      # fails, instead of skipping, if the copy is missing.
+      set(_ROCKE_MONOREPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
+      set(_ROCKE_SDPA_TEMPLATE
+          "${_ROCKE_MONOREPO_ROOT}/projects/hipdnn/tools/IngestorGenerator/configs/templates/attention_sdpa_fwd.graph.json")
+      set(_ROCKE_SDPA_BUNDLES
+          "${_ROCKE_MONOREPO_ROOT}/dnn-providers/integration-tests/integration-test-bundles")
+      set(_ROCKE_SDPA_HIPDNN_DEST "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/sdpa/hipdnn")
+      set(_ROCKE_SDPA_HIPDNN_ASSETS OFF)
+      if(EXISTS "${_ROCKE_SDPA_TEMPLATE}" AND IS_DIRECTORY "${_ROCKE_SDPA_BUNDLES}")
+        file(GLOB_RECURSE _rocke_sdpa_graphs CONFIGURE_DEPENDS
+             RELATIVE "${_ROCKE_SDPA_BUNDLES}" "${_ROCKE_SDPA_BUNDLES}/*.json")
+        # hipdnn_assets.sdpa_fwd_golden_graphs()'s selection.
+        list(FILTER _rocke_sdpa_graphs INCLUDE REGEX "^[^/]+/SdpaFwd[^/]*/.+\\.json$")
+        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(meta|support|sweep)\\.json$")
+        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(^|/)Default/")
+        if(_rocke_sdpa_graphs)
+          install(FILES "${_ROCKE_SDPA_TEMPLATE}" DESTINATION "${_ROCKE_SDPA_HIPDNN_DEST}")
+          foreach(_rocke_sdpa_graph IN LISTS _rocke_sdpa_graphs)
+            get_filename_component(_rocke_sdpa_graph_dir "${_rocke_sdpa_graph}" DIRECTORY)
+            install(FILES "${_ROCKE_SDPA_BUNDLES}/${_rocke_sdpa_graph}"
+                    DESTINATION "${_ROCKE_SDPA_HIPDNN_DEST}/integration-test-bundles/${_rocke_sdpa_graph_dir}")
+          endforeach()
+          set(_ROCKE_SDPA_HIPDNN_ASSETS ON)
+        endif()
+      endif()
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -782,6 +812,26 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 300)\n")
+
+    # Library SDPA CPU tests (no GPU): the hipDNN SDPA request contract and
+    # from_hipdnn, the request-driven and array oracles, and the forward/backward
+    # case tables. Pointed at the DIRECTORY so a new file there runs automatically;
+    # a GPU test added there must be --ignore'd here and enrolled in the GPU lane.
+    # Distinct from rocke_sdpa_reference_unit_pytest below, which runs only
+    # tests/test_sdpa_reference_contract.py.
+    set(_ROCKE_SDPA_PYTEST_ARGS "")
+    if(_ROCKE_SDPA_HIPDNN_ASSETS)
+      set(_ROCKE_SDPA_PYTEST_ARGS " --rocke-require-hipdnn-assets")
+    endif()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_sdpa_pytest python -m pytest"
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
+           "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;sdpa\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
 
     # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
     # the golden IR hashes, the performance knobs, dispatch selection, and the

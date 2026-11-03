@@ -439,7 +439,7 @@ class Capability:
     and non-empty, enforced in ``register()``. It fails closed, so a candidate
     that somehow reaches ``check()`` with no arches matches nothing.
     """
-    arches: tuple[str, ...] = ()          # exact gfx targets; the only arch gate
+    arches: tuple[str, ...] = ()          # listed gfx targets; the only arch gate
     dtypes: tuple[str, ...] = ()
     layouts: tuple[str, ...] = ()
     shapes: tuple[ShapeRange, ...] = ()      # per-dimension bounds
@@ -549,7 +549,10 @@ while remaining honest.
 
 **Architecture gating is mandatory, and it is an explicit list of gfx targets.**
 Every candidate names the architectures it was built and tuned for. There is no
-family-level shorthand — see below for why. Enforce it at registration:
+family-level shorthand — see below for why. A listed generic target such as
+`gfx11-generic` is not a shorthand: it is a target with facts of its own, and it
+covers exactly the processors whose `arch_specs.json` row points at it
+(`listed_arch_for`). Enforce the list at registration:
 
 ```python
 def register(self, candidate):
@@ -870,9 +873,9 @@ Hand the same candidate a shape that *does* tile evenly and the predicate alone
 answers:
 
 ```
-universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1151, gfx1201
+universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1201
   _supports(req)   -> (True, 'ok')
-  capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1151', 'gfx1201')")
+  capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1201')")
   admits(req)      -> (False, "capability: arch 'gfx950' not in (...)")
 ```
 
@@ -1204,7 +1207,7 @@ ABI version. A module per arch mirrors the kernel tree one for one.
 The platform families are the opposite case. Every dispatched conv candidate
 builds through one `build_implicit_gemm_conv`, every GEMM candidate through one
 `build_universal_gemm`, with arch passed as an argument. The only thing that
-varies per architecture is a cohort tuple (`_CDNA_MEM`, `_RDNA_WMMA`,
+varies per architecture is a cohort tuple (`_CDNA_MEM`, `RDNA_WMMA_GEMM_ARCHES`,
 `_GFX1250_WMMA`). Splitting those into per-arch modules would put a tuple in
 each file and separate no code, while scattering a cohort list that currently
 reads at a glance.
@@ -1323,7 +1326,9 @@ dependence.
 Steps 1–6 touch no existing file except the one-line `__init__` addition. That is
 the open/closed property, and section 10 makes it an executable invariant. Step 7
 is the deliberate exception: because there is no family wildcard, a new target
-inherits a generic kernel only when someone opts it in.
+inherits a generic kernel only when someone opts it in. A processor whose
+`arch_specs.json` row points at a generic target is not a new target in this
+sense: a list that names the generic already covers it (`listed_arch_for`).
 
 ---
 
@@ -1558,14 +1563,14 @@ the unified paths.
 
 Seven invariants, one test module per family.
 
-**Arch gate.** Every candidate rejects every architecture it does not declare.
-Parametrize over `known_arches()` and the registry — this catches a missing gate
-on a kernel added years later.
+**Arch gate.** Every candidate rejects every architecture it does not declare,
+directly or through a declared generic target. Parametrize over `known_arches()`
+and the registry — this catches a missing gate on a kernel added years later.
 
 ```python
 for cand in registry.candidates():
     for arch in known_arches():
-        if arch in cand.capability.arches:
+        if listed_arch_for(arch, cand.capability.arches) is not None:
             continue
         ok, why = cand.admits(request_for(arch))
         assert not ok, f"{cand.name} wrongly admits {arch}"

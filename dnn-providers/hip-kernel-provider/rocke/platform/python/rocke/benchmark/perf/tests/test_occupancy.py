@@ -1,14 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the occupancy primitive's pure logic (no GPU)."""
-import re
-import shutil
-import subprocess
 import unittest
 from types import SimpleNamespace
 
 from rocke.benchmark.perf import occupancy
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.llc import find_llvm_tool, llc_code_object, llc_occupancy
 
 _CDNA_ARCHS = ("gfx942", "gfx950")
 
@@ -216,68 +214,6 @@ class TestEstimateOccupancyDetail(unittest.TestCase):
                 self.assertEqual(occupancy.estimate_occupancy_detail(b"x", arch), {})
 
 
-def _find_llvm_tool(name):
-    """The ROCm LLVM tool ``name`` (llc, llvm-readelf), or None when absent."""
-    for candidate in (f"/opt/rocm/llvm/bin/{name}", name):
-        path = shutil.which(candidate)
-        if path:
-            return path
-    return None
-
-
-def _vgpr_kernel_ir(vgprs, wave_size=32):
-    """An AMDGPU kernel that uses exactly ``vgprs`` VGPRs (it clobbers the top one).
-
-    The workgroup is capped at 64 lanes so the workgroup size never limits the
-    occupancy the compiler reports; only the VGPR count does.
-    """
-    features = ' "target-features"="+wavefrontsize64"' if wave_size == 64 else ""
-    return (
-        "define amdgpu_kernel void @k() #0 {\n"
-        f'  call void asm sideeffect "", "~{{v{vgprs - 1}}}"()\n'
-        "  ret void\n"
-        "}\n"
-        f'attributes #0 = {{ "amdgpu-flat-work-group-size"="1,64"{features} }}\n'
-    )
-
-
-def _run_llc(llc, processor, ir, *extra_args):
-    """Run llc on ``ir``; None when this llc does not know ``processor``."""
-    out = subprocess.run(
-        [llc, "-mtriple=amdgcn-amd-amdhsa", f"-mcpu={processor}", *extra_args],
-        input=ir.encode(),
-        capture_output=True,
-        timeout=120,
-        check=True,
-    )
-    if b"not a recognized processor" in out.stderr:
-        return None
-    return out.stdout
-
-
-def _llc_occupancy(llc, processor, vgprs):
-    """The waves per SIMD llc reports for a kernel using ``vgprs`` VGPRs."""
-    asm = _run_llc(llc, processor, _vgpr_kernel_ir(vgprs), "-o", "-")
-    if asm is None:
-        return None
-    return int(re.search(rb"; Occupancy: (\d+)", asm).group(1))
-
-
-def _llc_code_object(llc, processor, vgprs, wave_size=32):
-    """A real relocatable code object (ELF with AMDGPU notes) built by llc."""
-    obj = _run_llc(
-        llc,
-        processor,
-        _vgpr_kernel_ir(vgprs, wave_size),
-        "-filetype=obj",
-        "-o",
-        "-",
-    )
-    if obj is None:
-        raise unittest.SkipTest(f"this llc does not know {processor}")
-    return obj
-
-
 # VGPR counts at which the two register-file sizes give distinct wave counts.
 _VGPR_SWEEP = (24, 64, 72, 84, 96, 104, 120, 128, 168, 176, 200, 256)
 # Waves per SIMD at each _VGPR_SWEEP count, as the compiler reports them.
@@ -332,13 +268,13 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
         self.assertEqual(rdna, set(_MEASURED_RDNA_WAVES))
 
     def test_model_matches_the_local_compiler(self):
-        llc = _find_llvm_tool("llc")
+        llc = find_llvm_tool("llc")
         if llc is None:
             self.skipTest("llc not found")
         checked = 0
         for processor in _MEASURED_RDNA_WAVES:
             for vgprs in _VGPR_SWEEP:
-                reported = _llc_occupancy(llc, processor, vgprs)
+                reported = llc_occupancy(llc, processor, vgprs)
                 if reported is None:
                     break  # this llc predates the processor; the pinned test covers it
                 checked += 1
@@ -351,18 +287,18 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
     def test_code_object_target_selects_the_processor(self):
         # Real code objects: the notes name the processor (a generic target too),
         # and that processor's register file sets the estimate.
-        llc = _find_llvm_tool("llc")
-        if llc is None or _find_llvm_tool("llvm-readelf") is None:
+        llc = find_llvm_tool("llc")
+        if llc is None or find_llvm_tool("llvm-readelf") is None:
             self.skipTest("llc or llvm-readelf not found")
         for processor in ("gfx1100", "gfx1102", "gfx11-generic", "gfx12-generic"):
             for arch in _CDNA_ARCHS:
                 with self.subTest(processor=processor, arch=arch):
-                    code_object = _llc_code_object(llc, processor, 128)
+                    code_object = llc_code_object(llc, processor, 128)
                     res = occupancy.resources(code_object, arch)
                     self.assertEqual(res["target_arch"], processor)
                     self.assertEqual(res["vgpr"], 128)
                     self.assertEqual(
-                        res["occupancy"], _llc_occupancy(llc, processor, 128)
+                        res["occupancy"], llc_occupancy(llc, processor, 128)
                     )
 
 
@@ -378,13 +314,13 @@ class TestUnmodelledCodeIsRefused(unittest.TestCase):
             occupancy._occupancy_estimate(64, "gfx1100", 64)
 
     def test_real_code_objects(self):
-        llc = _find_llvm_tool("llc")
-        if llc is None or _find_llvm_tool("llvm-readelf") is None:
+        llc = find_llvm_tool("llc")
+        if llc is None or find_llvm_tool("llvm-readelf") is None:
             self.skipTest("llc or llvm-readelf not found")
-        unknown = _llc_code_object(llc, "gfx1030", 64)
+        unknown = llc_code_object(llc, "gfx1030", 64)
         with self.assertRaisesRegex(ValueError, "processor 'gfx1030'"):
             occupancy.resources(unknown, "gfx1100")
-        wave64 = _llc_code_object(llc, "gfx1100", 64, wave_size=64)
+        wave64 = llc_code_object(llc, "gfx1100", 64, wave_size=64)
         with self.assertRaisesRegex(ValueError, "wave64 code on gfx1100"):
             occupancy.resources(wave64, "gfx1100")
 

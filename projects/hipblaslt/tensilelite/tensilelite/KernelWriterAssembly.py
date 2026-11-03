@@ -3611,13 +3611,11 @@ class KernelWriterAssembly(KernelWriter):
       # remapped PersistentWorkGroupIndex % numQueues skews the per-queue home-workgroup count
       # and the counter drifts off 0. We snapshot the raw id (== physical XCD
       # rank) into the persistent StreamKTileIdx SGPR -- an ALREADY-allocated
-      # slot that is provably dead in the [prologue, queue-read) window on both
-      # the SK4 and SK5 dynamic paths (its first real write is after the queue
-      # read in graWorkGroup; for SK5 it aliases PersistentIteration, whose only
-      # in-window writes live on the mutually-exclusive SK3-static path). Reusing
-      # it costs ZERO additional persistent SGPRs (unlike a dedicated StreamKQueue
-      # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
-      # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
+      # slot that is dead until initialize() (for Hybrid it aliases
+      # PersistentIteration, written only by the static sub-mode). Reusing it
+      # costs ZERO additional persistent SGPRs (a dedicated SGPR overflows the
+      # SGPR file on tuned high-register SKXCC kernels). initialize() then moves
+      # it to PersistentWorkGroupIndex (emitRawRankRestore).
       # Once-per-workgroup setup only -- no steady-state instructions added.
       # The occupancy probe's ProbeGrid test reads the same snapshot.
       if Component.WorkAssignment.usesRawQueueRank(self, kernel) or self.states.probeKernArgOffset >= 0:
@@ -3822,21 +3820,48 @@ class KernelWriterAssembly(KernelWriter):
               #   d@16 c@24 a@32 b@40 |
               #   strideD@48 strideC@56 strideA@64 strideB@72 |
               #   alpha@80 (beta@96 is handled below).
+              # The MX record inserts the scale pointers and strides after
+              # their operands:
+              #   d@16 c@24 a@32 mxsa@40 b@48 mxsb@56 |
+              #   strideD@64 strideC@72 strideA@80 strideMXSA@88 strideB@96
+              #   strideMXSB@104 | alpha@112 (beta@128 is handled below).
               base = self.externalArgLoader.getOffset()
               numSgprAddress = self.states.rpga
+              mxA = bool(kernel["ProblemType"]["MXBlockA"])
+              mxB = bool(kernel["ProblemType"]["MXBlockB"])
+              mx  = mxA or mxB
               def _loadUserArg(name, structOffset, dword):
                 if dword > 0:
                   moduleExternalArgs.add(self.externalArgLoader.loadKernArg(
                       name, "KernArgAddress", sgprOffset=hex(base + structOffset), dword=dword))
-              _loadUserArg("AddressD", 16, numSgprAddress)
-              _loadUserArg("AddressC", 24, numSgprAddress)
-              _loadUserArg("AddressA", 32, numSgprAddress)
-              _loadUserArg("AddressB", 40, numSgprAddress)
-              _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
-              _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
-              _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
-              _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
-              _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
+              if mx:
+                _loadUserArg("AddressD", 16, numSgprAddress)
+                _loadUserArg("AddressC", 24, numSgprAddress)
+                _loadUserArg("AddressA", 32, numSgprAddress)
+                if mxA:
+                  _loadUserArg("AddressMXSA", 40, numSgprAddress)
+                _loadUserArg("AddressB", 48, numSgprAddress)
+                if mxB:
+                  _loadUserArg("AddressMXSB", 56, numSgprAddress)
+                _loadUserArg("StridesD", 64, self.states.d.numSgprStrides)
+                _loadUserArg("StridesC", 72, self.states.c.numSgprStrides)
+                _loadUserArg("StridesA", 80, self.states.a.numSgprStrides)
+                if mxA:
+                  _loadUserArg("StridesMXSA", 88, self.states.mxsa.numSgprStrides)
+                _loadUserArg("StridesB", 96, self.states.b.numSgprStrides)
+                if mxB:
+                  _loadUserArg("StridesMXSB", 104, self.states.mxsb.numSgprStrides)
+                _loadUserArg("Alpha", 112, self.states.numSgprAlpha)
+              else:
+                _loadUserArg("AddressD", 16, numSgprAddress)
+                _loadUserArg("AddressC", 24, numSgprAddress)
+                _loadUserArg("AddressA", 32, numSgprAddress)
+                _loadUserArg("AddressB", 40, numSgprAddress)
+                _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
+                _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
+                _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
+                _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
+                _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
               # Restore the running offset to where a sequential load would have
               # left it, so the Beta / scale bookkeeping below stays unchanged.
               self.externalArgLoader.setOffset(base + load * 4)
