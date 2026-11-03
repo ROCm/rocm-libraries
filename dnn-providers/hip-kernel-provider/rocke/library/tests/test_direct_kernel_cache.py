@@ -2012,6 +2012,33 @@ def test_w32_wgrad_rows_are_built_with_their_reduce_helpers(w32_jobs):
         assert dks.direct_job_for_identity(job.identity) == job
 
 
+def test_grid_caches_variant_matches_the_enumerated_jobs(w32_jobs):
+    """``grid_caches_variant`` (what the depthwise wgrad numeric test gates
+    on) answers exactly what the enumeration builds."""
+    from kernels.conv.direct_aot_jobs import grid_caches_variant
+
+    built = {j.identity.algorithm for j in w32_jobs}
+    for variant in _W32_WGRAD:
+        assert grid_caches_variant(variant, _W32) == (variant in built), variant
+
+
+@pytest.mark.parametrize(
+    "arch, cached",
+    [
+        ("gfx1151", True),
+        ("gfx1201", True),
+        ("gfx1250", True),
+        ("gfx950", False),
+        ("gfx942", False),
+        ("gfx_unknown", False),
+    ],
+)
+def test_grid_caches_depthwise_wgrad_on_the_wave32_targets(arch, cached):
+    from kernels.conv.direct_aot_jobs import grid_caches_variant
+
+    assert grid_caches_variant("direct_depthwise_wgrad", arch) is cached
+
+
 def test_w32_wgrad_grid_skips_the_spilling_16_wave_register_staged_tiles(w32_jobs):
     """A block of more than 8 waves caps a wave at 256 VGPRs, which the
     register-staged multi-tile image body needs more than: those direct-epilogue

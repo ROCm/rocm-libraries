@@ -3161,54 +3161,6 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
                         )
         self._assert_ran()
 
-    def test_wgrad_depthwise(self):
-        """Direct depthwise wgrad: channels across the lanes, every tap in
-        fp32 registers, filter rows split over wave groups, the X window
-        carried across wo chunks and the next chunk prefetched.
-
-        The shapes cover 3x3 at strides 1 and 2, 5x5 and 7x7 filters (7 rows
-        split over 2 and 4 groups do not divide evenly), odd extents whose
-        last wo chunk and last row block are partial, and a channel count that
-        leaves the last lane chunk partly empty.
-        """
-        shapes = [
-            _Shape("dw_3x3s1", N=2, H=11, W=13, groups=72, cpg=1),
-            _Shape("dw_3x3s2", N=3, H=12, W=17, groups=128, cpg=1, stride=2),
-            _Shape(
-                "dw_5x5s2",
-                N=2,
-                H=10,
-                W=9,
-                groups=40,
-                cpg=1,
-                KH=5,
-                KW=5,
-                PAD=2,
-                stride=2,
-            ),
-            _Shape("dw_7x7s1", N=2, H=9, W=15, groups=96, cpg=1, KH=7, KW=7, PAD=3),
-        ]
-        knobs = [
-            dict(waves=4, rows_per_wave=2, wo_chunk=4, ws_replicas=4),
-            dict(chan_per_lane=4, waves=8, rows_per_wave=1, wo_chunk=8, prefetch=False),
-            dict(waves=4, rows_per_wave=3, wo_chunk=8, r_split=2, carry=False),
-            dict(chan_per_lane=4, waves=8, rows_per_wave=4, wo_chunk=4, r_split=4),
-            dict(chan_per_lane=8, waves=2, rows_per_wave=8, wo_chunk=3, ws_replicas=1),
-        ]
-        ran = 0
-        for dtype in ("fp16", "bf16"):
-            for s in shapes:
-                for extra in knobs:
-                    with self.subTest(shape=s.id, dtype=dtype, **extra):
-                        passed, reason = _run_dw_wgrad_one(GPU_ARCH, s, dtype, extra)
-                        if reason.startswith("skip"):
-                            continue
-                        ran += 1
-                        self.assertTrue(
-                            passed, f"FAIL dw wgrad {s.id} {dtype} {extra}: {reason}"
-                        )
-        self.assertGreater(ran, 0, f"no depthwise wgrad case ran on {GPU_ARCH}")
-
     def test_wgrad(self):
         """Every shape on the default single-wave spread."""
         for s in _WGRAD_SHAPES:
@@ -3439,6 +3391,97 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     synchronize_and_release(0)
     diff = (out.float() - ref.float()).abs().max()
     return float(diff / ref.float().abs().max().clamp(min=1.0))
+
+
+def _dw_wgrad_skip_reason(arch: Optional[str], has_torch: bool) -> str:
+    """Why the depthwise wgrad numeric test cannot run on ``arch`` ("" when it
+    can). It runs wherever the direct-conv AOT grid caches the kernel (asked
+    of the grid, not listed here: the wave32 targets), and on the
+    ``_WGRAD_ARCHES``, where it ran before."""
+    if not arch:
+        return "no ROCm GPU detected"
+    if not has_torch:
+        return "torch not importable"
+    from kernels.conv.direct_aot_jobs import grid_caches_variant
+
+    if arch in _WGRAD_ARCHES or grid_caches_variant("direct_depthwise_wgrad", arch):
+        return ""
+    return f"the AOT grid caches no direct_depthwise_wgrad kernel for {arch!r}"
+
+
+_DW_WGRAD_SKIP_REASON = _dw_wgrad_skip_reason(GPU_ARCH, _HAS_TORCH)
+
+
+class TestDirectDepthwiseWgradGate(unittest.TestCase):
+    """CPU: the depthwise wgrad numeric test runs on every arch the cache
+    ships the kernel for (gfx1151 and gfx1201 included), not only on the
+    arches of the other wgrad tests."""
+
+    def test_runs_where_the_grid_caches_it(self):
+        for arch in ("gfx1151", "gfx1201", "gfx1250", "gfx950"):
+            with self.subTest(arch=arch):
+                self.assertEqual(_dw_wgrad_skip_reason(arch, True), "")
+
+    def test_skips_elsewhere_with_a_reason(self):
+        self.assertIn("caches no", _dw_wgrad_skip_reason("gfx942", True))
+        self.assertEqual(_dw_wgrad_skip_reason(None, True), "no ROCm GPU detected")
+        self.assertEqual(
+            _dw_wgrad_skip_reason("gfx1151", False), "torch not importable"
+        )
+
+
+@unittest.skipUnless(not _DW_WGRAD_SKIP_REASON, _DW_WGRAD_SKIP_REASON or "no GPU")
+class TestDirectDepthwiseWgradCorrectness(unittest.TestCase):
+    """The depthwise VALU wgrad kernel on every arch the AOT cache ships it
+    for, not only on the arches of :class:`TestDirectConvWgradCorrectness`."""
+
+    def test_wgrad_depthwise(self):
+        """Direct depthwise wgrad: channels across the lanes, every tap in
+        fp32 registers, filter rows split over wave groups, the X window
+        carried across wo chunks and the next chunk prefetched.
+
+        The shapes cover 3x3 at strides 1 and 2, 5x5 and 7x7 filters (7 rows
+        split over 2 and 4 groups do not divide evenly), odd extents whose
+        last wo chunk and last row block are partial, and a channel count that
+        leaves the last lane chunk partly empty.
+        """
+        shapes = [
+            _Shape("dw_3x3s1", N=2, H=11, W=13, groups=72, cpg=1),
+            _Shape("dw_3x3s2", N=3, H=12, W=17, groups=128, cpg=1, stride=2),
+            _Shape(
+                "dw_5x5s2",
+                N=2,
+                H=10,
+                W=9,
+                groups=40,
+                cpg=1,
+                KH=5,
+                KW=5,
+                PAD=2,
+                stride=2,
+            ),
+            _Shape("dw_7x7s1", N=2, H=9, W=15, groups=96, cpg=1, KH=7, KW=7, PAD=3),
+        ]
+        knobs = [
+            dict(waves=4, rows_per_wave=2, wo_chunk=4, ws_replicas=4),
+            dict(chan_per_lane=4, waves=8, rows_per_wave=1, wo_chunk=8, prefetch=False),
+            dict(waves=4, rows_per_wave=3, wo_chunk=8, r_split=2, carry=False),
+            dict(chan_per_lane=4, waves=8, rows_per_wave=4, wo_chunk=4, r_split=4),
+            dict(chan_per_lane=8, waves=2, rows_per_wave=8, wo_chunk=3, ws_replicas=1),
+        ]
+        ran = 0
+        for dtype in ("fp16", "bf16"):
+            for s in shapes:
+                for extra in knobs:
+                    with self.subTest(shape=s.id, dtype=dtype, **extra):
+                        passed, reason = _run_dw_wgrad_one(GPU_ARCH, s, dtype, extra)
+                        if reason.startswith("skip"):
+                            continue
+                        ran += 1
+                        self.assertTrue(
+                            passed, f"FAIL dw wgrad {s.id} {dtype} {extra}: {reason}"
+                        )
+        self.assertGreater(ran, 0, f"no depthwise wgrad case ran on {GPU_ARCH}")
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")

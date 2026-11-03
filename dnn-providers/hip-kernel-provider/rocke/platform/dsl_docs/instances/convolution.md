@@ -1518,7 +1518,7 @@ target at its wave size, but the AOT cache carries it for the wave32 targets onl
 |---|---|---|---|---|
 | `DirectConvWgradSpec(image_per_block=True)` / `direct_wgrad` | gfx1250 | dense and grouped, stride 1, `KH, KW <= 8` within the `_wgrad_image_reason` register estimate, `8 * (KH*KW*tk*tc + KH*tk + rows_per_sync*KW*tc) <= 224` VGPRs (`tk`, `tc` = `wave_tiles_k`, `wave_tiles_c`): square filters up to 4x4 at one tile per wave, so 5x5 and 7x7 are refused | 3x3, `PAD` 0 and 1 | `ws_replicas` fp32 scratch slabs, or the zeroed fp32 `dW` at one replica |
 | `DirectConvWgradSpec(small_c=True)` / `direct_wgrad_small_c` | gfx1250 | ungrouped, `kpg` a multiple of 8, any filter, stride and padding (channel counts baked) | 3-channel stems 3x3/s1 `PAD` 1, 3x3/s2 `PAD` 0 and 1, 7x7/s2, 4x4/s4, 14x14/s14, 16x16/s16; 4-channel 3x3/s1 `PAD` 1 | `ws_replicas` fp32 scratch slabs |
-| `DirectDepthwiseWgradSpec` / `direct_depthwise_wgrad` | every target (wave64 on gfx942 / gfx950, wave32 on gfx1151 / gfx1201 / gfx1250) | depthwise (`cpg = kpg = 1`, channel count from the kernargs, a multiple of `chan_per_lane`), any stride and padding | gfx1151, gfx1201 and gfx1250: 3x3, 5x5 and 7x7, stride 1 and 2, `PAD` 0 and "same" | `ws_replicas` fp32 scratch slabs |
+| `DirectDepthwiseWgradSpec` / `direct_depthwise_wgrad` | every target at its wave size (wave64 on gfx9, wave32 on gfx11 / gfx12 / gfx1250) | depthwise (`cpg = kpg = 1`, channel count from the kernargs, a multiple of `chan_per_lane`), any stride and padding | every wave32 target (gfx11, gfx12, gfx1250): 3x3, 5x5 and 7x7, stride 1 and 2, `PAD` 0 and "same" | `ws_replicas` fp32 scratch slabs |
 
 The plain wave32 port of `DirectConvWgradSpec` (`image_per_block=False`,
 `small_c=False`) also builds for gfx1250 (dense and grouped, stride 1, filters up
@@ -1553,7 +1553,9 @@ C++ engine twins: `rocke_dconv_wgrad_build_image`
 byte-identity gated by `library/tests/parity/conv_direct_grouped_emit.{c,py}`
 (configs 201..241), Python IR golden `conv_direct_wgrad/gfx1250/*`. Served by the
 direct-conv AOT cache (`--directions wgrad`), not the dispatcher.
-On-GPU numeric coverage: `TestDirectConvWgradCorrectness` in
+On-GPU numeric coverage: `TestDirectConvWgradCorrectness` (gfx950, gfx1250) and
+`TestDirectDepthwiseWgradCorrectness` (every arch the AOT grid caches the
+depthwise kernel for, by `grid_caches_variant`, plus gfx950) in
 `library/tests/test_direct_conv_correctness.py`; the launch plans:
 `library/tests/test_direct_kernel_cache.py`.
 

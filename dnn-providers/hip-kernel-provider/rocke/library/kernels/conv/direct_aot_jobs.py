@@ -1931,7 +1931,7 @@ def _knob_grid(
     elif variant == "direct_depthwise_wgrad":
         from rocke.core.arch import ArchTarget
 
-        # Cached for the wave32 targets (gfx1151, gfx1201, gfx1250) only; the
+        # Cached for the wave32 targets (gfx11, gfx12, gfx1250) only; the
         # VALU kernel also builds at wave64, but the cache does not carry it.
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
@@ -2638,6 +2638,29 @@ def count_direct_jobs(
         sum(1 for _ in _knob_grid(variant, arch, dtype, caps))
         for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
         if direction in directions
+        for caps in caps_list
+    )
+
+
+def grid_caches_variant(variant: str, arch: str, dtype: str = DIRECT_DTYPE) -> bool:
+    """Whether the direct-conv AOT grid has a valid job of ``variant`` for
+    ``arch``: some capability of :data:`DIRECT_CAPABILITIES` with a tuning
+    knob there that the variant's validator accepts.
+
+    The grid and the validators are where each variant's arch scope lives
+    (the depthwise wgrad one, for example, is the wave32 targets), so a test
+    that should run wherever the cache ships a kernel asks this rather than
+    keeping its own arch list. An arch rocke has no target for has no job.
+    """
+    from rocke.core.arch import ArchTarget
+
+    try:
+        wave_size = ArchTarget.from_gfx(arch).wave_size
+    except KeyError:
+        return False
+    direction, caps_list = DIRECT_CAPABILITIES[variant]
+    return any(
+        _caps_jobs(arch, wave_size, variant, direction, caps, dtype)[1]
         for caps in caps_list
     )
 
