@@ -1071,7 +1071,7 @@ the decline cause in brackets is the one a refused graph reports.
 | Heads | unequal Dqk and Dv (DT-5); any GQA group size (DT-6); head dims that are not a multiple of 8 (4 for f32) when the smallest stride is at least the rounded-up dim (DT-8) | max(Dqk, Dv) above 512 (DT-4) [head_size]; a query head count that is not a multiple of the key/value heads (DT-6) [gqa] |
 | Layout | packed Q/K/V views and shared dQ/dK/dV buffers (LY-4) | alignment below 16 bytes (LY-1) [operand]; overlapping outputs (LY-5), strides that are not multiples of 8 elements (LY-3) [layout] |
 | Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8, MW-9a); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); left bound 0 with right bound 0 or unbounded (MW-9b, MW-9c) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
-| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1) | the flag without the tensors or the reverse (PV-2); ragged offsets on any operand (PV-3, PV-8) [varlen] |
+| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are not written, see 9.2) | the flag without the tensors or the reverse (PV-2); ragged offsets on any operand (PV-3, PV-8) [varlen] |
 | Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen] |
 | Dropout | probability in [0, 1) with INT32 or INT64 seed and offset, device or pass-by-value (DR-1 to DR-6); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
 | Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
@@ -1101,3 +1101,8 @@ correct only when the forward pass drew its mask with the same layout.
 - **gfx11-generic is verified on device on gfx1100 only.** The other members it ships to
   (gfx1101 to gfx1103, gfx1150 to gfx1153) run the same object and have no device run of
   their own.
+- **Padded graphs leave rows past the lengths unwritten.** With `padding_mask`, dQ rows at
+  or past `seq_len_q` and dK/dV rows at or past `seq_len_kv` are not written; they keep the
+  buffers' previous contents, while hipDNN's references hold zeros. Rows inside the lengths
+  are correct. The padded SdpaBackward bundles (`*_padneq_*`) are skipped in both engine
+  TOMLs until the engines write zeros.

@@ -377,9 +377,8 @@ Rules:
   this rule. The run treats a missing sidecar as "no claims", and
   `verify_support_claims.py` checks the sidecars that exist, not the missing
   ones. Older bundles break the rule: most SDPA single-graph bundles and a few
-  sweeps (`quick/Reduction/Default`, `quick/Pointwise/Binary`,
-  `{quick,full}/BlockScaleDequantizeMatmul/Default`)
-  have none.
+  sweeps (`BlockScaleDequantizeMatmul/Default`, `Reduction/Default`,
+  `Pointwise/Binary` and `Pointwise/Activation`, in every tier that has them) have none.
 - Sidecars are **machine-written** by `--write-support-claims`. The form is
   stricter than valid JSON: sorted keys, 2-space indent, one array element per
   line, trailing newline, LF line endings, sorted platforms and case ids, and
@@ -423,7 +422,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 |---|---|
 | miopen-provider | `config/MIOPEN_ENGINE.toml` |
 | hipblaslt-provider | `config/HIPBLASLT_ENGINE.toml` |
-| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml` |
+| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_flydsl_sdpa_bwd_split.toml`, `config/hipkernel_flydsl_sdpa_bwd_merged.toml` |
 
 ```toml
 [meta]

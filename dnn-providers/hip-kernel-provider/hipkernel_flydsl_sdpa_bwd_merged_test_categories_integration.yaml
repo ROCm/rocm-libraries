@@ -9,7 +9,8 @@
 # a name pattern would miss the cases it adds. The *_fwd_pair bundles beside them are the
 # forward halves of golden pairs and are excluded. Engine pinning and support claims do the
 # rest: a claimed case the engine declines fails its lane, an unclaimed one it declines
-# skips, and an unclaimed one it accepts runs and is reported as unclaimed support.
+# skips, and an unclaimed one it accepts runs; it is reported as unclaimed support only
+# when its bundle has a sidecar.
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick +
 # standard + comprehensive; only "full" runs the full-tier bundles.
 
