@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "d5c00000-0000-4000-8000-000000000008",
+  "name": "prep dispatch",
+  "dispatch_symbol": "hipkernel.slotted_hsaco.prep_dispatch"
+}

@@ -12,7 +12,9 @@ per-case ranking, not into ``_run_from_cache``.)
 
 So each sweep writes one JSON object per case as the case finishes --
 :class:`ResultsWriter`, one call site per script, next to the ``Best:`` print --
-and :func:`merge` joins the two engines' rows into one table.
+and :func:`merge` joins the engines' rows into one table. The engines are the
+direct-conv and implicit-GEMM sweeps, and the AOT Winograd pipeline
+(``benchmark_winograd_aot.py``) on the 3x3 stride-1 forward cases it runs.
 
 The join key is :func:`benchmarks.common.early_stop.case_key`: the normalised
 geometry plus dtype and direction, the key ``--early-stop-seed`` already uses to
@@ -49,8 +51,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from benchmarks.common.batched_timing import BLOCK_TIMING, TIMINGS
 
-#: The two sweeps, by the name their rows carry.
-ENGINES = ("direct", "implicit")
+#: The sweeps, by the name their rows carry.
+ENGINES = ("direct", "implicit", "winograd")
 
 #: How many kernels below the winner each engine records, per case.
 #:
@@ -81,6 +83,7 @@ MERGED_FIELDS = (
     "direction",
     *_engine_fields("direct"),
     *_engine_fields("implicit"),
+    *_engine_fields("winograd"),
     "winner",
     "winner_ms",
     "winner_kernel",
@@ -97,15 +100,17 @@ MERGED_FIELDS = (
 #:
 #: The implicit side lists its whole ranking because that is where near-ties
 #: live -- the three names are what re-picking the winner would cost you. The
-#: direct side lists only its winner: the two tables are joined per case, and
-#: a row wide enough to hold both rankings is one nobody reads.
+#: direct and Winograd sides list only their winner: the tables are joined per
+#: case, and a row wide enough to hold every ranking is one nobody reads.
 CSV_FIELDS = (
     "miopen_cmd",
     "direct_kernel",
     "implicit_kernel",
     *(f"implicit_kernel_{rank}" for rank in range(2, RUNNERS_UP + 2)),
+    "winograd_kernel",
     "direct_ms",
     "implicit_ms",
+    "winograd_ms",
     "winner_ms",
     "winner_kernel",
     "timing",
@@ -121,19 +126,19 @@ def add_results_arg(parser, *, merged: bool) -> None:
     """
     if merged:
         what = (
-            "carrying the best direct-conv and implicit-GEMM kernel side by "
-            f"side (plus the next {RUNNERS_UP} kernels of each by name, which "
-            "is what a near-tie costs you), and a .csv of the same rows next "
-            "to it -- the .csv narrowed to the reading columns: the "
+            "carrying the best direct-conv, implicit-GEMM and Winograd kernel "
+            f"side by side (plus the next {RUNNERS_UP} kernels of each by name, "
+            "which is what a near-tie costs you), and a .csv of the same rows "
+            "next to it -- the .csv narrowed to the reading columns: the "
             "MIOpenDriver command, each engine's pick, their times, and the "
-            "winner. Written once both sweeps have finished, from the rows "
+            "winner. Written once every sweep has finished, from the rows "
             "each of them recorded."
         )
     else:
         what = (
             f"carrying the best kernel, its time, the next {RUNNERS_UP} "
             "kernels by name, and the key benchmark_conv_compare.py joins the "
-            "two sweeps on. Rows are appended as each case finishes, so an "
+            "sweeps on. Rows are appended as each case finishes, so an "
             "interrupted run keeps what it measured."
         )
     parser.add_argument(
@@ -200,7 +205,7 @@ def measured_keys(path, engine: str, timing: str = BLOCK_TIMING) -> set:
 def expand_merged_for_skip(rows: Iterable[dict]) -> List[dict]:
     """Per-engine skip rows from already-merged (:data:`MERGED_FIELDS`) rows.
 
-    A merged row carries both engines' times under ``{engine}_ms`` and no
+    A merged row carries every engine's time under ``{engine}_ms`` and no
     ``engine`` field of its own, so it is not what :func:`measured_keys` (and
     the sweeps' own ``--skip-measured`` reader) looks for. One output row per
     engine side the merged row actually has a time for -- :func:`merge` leaves
@@ -460,8 +465,8 @@ def merge(
 ) -> List[dict]:
     """Join per-engine rows into one row per case.
 
-    Rows may come from both engines and from several shards. A key only one
-    engine reached still gets a row with the other side left ``None`` -- that
+    Rows may come from every engine and from several shards. A key only one
+    engine reached still gets a row with the other sides left ``None`` -- that
     is the common and interesting case (a shape the direct kernels do not
     cover), not an error. Within one engine and key, the faster row wins, so
     merging a case measured twice is idempotent.
@@ -535,32 +540,38 @@ def merge(
         for field in MERGED_FIELDS:
             merged.setdefault(field, None)
         merged["winner"], merged["speedup"] = _verdict(
-            merged["direct_ms"], merged["implicit_ms"]
+            {engine: merged[f"{engine}_ms"] for engine in ENGINES}
         )
         if merged["winner"] is not None:
             merged["winner_ms"] = merged[f"{merged['winner']}_ms"]
             merged["winner_kernel"] = merged[f"{merged['winner']}_kernel"]
-        # A row the other engine never reached keeps both empty, as ``winner``
-        # does: one time is not a comparison, and the engine that did run it is
+        # A row only one engine reached keeps both empty, as ``winner`` does:
+        # one time is not a comparison, and the engine that did run it is
         # already on the row under its own name.
         merged["miopen_cmd"] = (miopen_cmds or {}).get(key) or miopen_cmd_from_key(key)
         out.append({field: merged[field] for field in MERGED_FIELDS})
     return out
 
 
-def _verdict(direct_ms, implicit_ms):
-    """``(winner, speedup)``: which engine was faster and by how much.
+def _verdict(times: Dict[str, Optional[float]]):
+    """``(winner, speedup)``: which engine was fastest and by how much.
 
-    ``speedup`` is the loser's time over the winner's, so it reads as "the
-    winner is N times faster" whichever side won. Both ``None`` when only one
+    ``times`` is each engine's time, ``None`` where it did not reach the case.
+    ``speedup`` is the runner-up's time over the winner's, so it reads as "the
+    winner is N times faster than the next best" whichever side won; a tie goes
+    to the engine listed first in :data:`ENGINES`. Both ``None`` when only one
     engine reached the case -- a one-sided row is a fact about coverage, not a
     comparison.
     """
-    if direct_ms is None or implicit_ms is None:
+    timed = sorted(
+        (ms, ENGINES.index(engine), engine)
+        for engine, ms in times.items()
+        if ms is not None
+    )
+    if len(timed) < 2:
         return None, None
-    if direct_ms <= implicit_ms:
-        return "direct", round(implicit_ms / direct_ms, 3) if direct_ms else None
-    return "implicit", round(direct_ms / implicit_ms, 3) if implicit_ms else None
+    (best_ms, _, winner), (next_ms, _, _) = timed[:2]
+    return winner, round(next_ms / best_ms, 3) if best_ms else None
 
 
 def write(rows: Sequence[dict], path) -> Path:
@@ -587,7 +598,7 @@ def write(rows: Sequence[dict], path) -> Path:
 
 
 def summary(rows: Sequence[dict]) -> str:
-    """One line: how many cases, and how the two engines split them."""
+    """One line: how many cases, and how the engines split them."""
     both = sum(1 for r in rows if r["direct_ms"] is not None and r["implicit_ms"])
     direct_only = sum(
         1 for r in rows if r["direct_ms"] is not None and r["implicit_ms"] is None
@@ -595,10 +606,21 @@ def summary(rows: Sequence[dict]) -> str:
     implicit_only = sum(
         1 for r in rows if r["direct_ms"] is None and r["implicit_ms"] is not None
     )
-    wins = sum(1 for r in rows if r["winner"] == "direct")
+    wins = sum(
+        1
+        for r in rows
+        if r["direct_ms"] is not None
+        and r["implicit_ms"] is not None
+        and r["direct_ms"] <= r["implicit_ms"]
+    )
     timing = f" ({rows[0].get('timing')} timing)" if rows else ""
-    return (
+    line = (
         f"{len(rows)} case(s){timing}: {both} measured by both "
         f"(direct faster on {wins}), {direct_only} direct-only, "
         f"{implicit_only} implicit-only"
     )
+    winograd = sum(1 for r in rows if r.get("winograd_ms") is not None)
+    if winograd:
+        fastest = sum(1 for r in rows if r["winner"] == "winograd")
+        line += f"; Winograd measured {winograd} (fastest on {fastest})"
+    return line
