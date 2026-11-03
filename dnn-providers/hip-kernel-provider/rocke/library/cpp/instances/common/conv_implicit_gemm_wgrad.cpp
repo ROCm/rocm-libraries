@@ -1804,6 +1804,50 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
     }
 
+    /* Python is_valid_wgrad_spec charges the xwin tiles (the window, not a
+     * tile_n-row B tile, one A/B pair per group) and prefetch_regs 2's second
+     * buffer; the forward adapter above charges neither. */
+    if(s->xwin && s->xwin_groups > 1 && !s->lds_k_outer)
+    {
+        rocke_implicit_gemm_conv_spec_t lf = fwd;
+        lf.has_lds_k_pad = s->has_lds_k_pad;
+        lf.lds_k_pad = s->lds_k_pad;
+        rocke_conv_lds_layout_t lay;
+        char lr[256];
+        const rocke_archtarget_t* tg = rocke_archtarget_from_gfx(arch);
+        if(tg != NULL
+           && rocke_implicit_gemm_conv_spec_effective_lds_layout(&lf, &lay, lr, sizeof lr))
+        {
+            const long eb = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
+            const long b0 = s->tile_n / s->xwin + 8;
+            long st = s->tile_k + s->xwin - 1;
+            while(st % 4 || (st / 2) % 4 != 2)
+                ++st;
+            const long ab = ((long)s->tile_m * lay.row_stride + b0 * st) * eb * s->xwin_groups;
+            const bool dbl = s->async_dma || s->unroll_k || s->prefetch_regs == 2;
+            const long abl = ab * (dbl ? 2 : 1);
+            const long cb = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+            const long cl = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0)
+                                ? (long)s->tile_m * s->tile_n * cb
+                                : 0;
+            const long tot = abl > cl ? abl : cl;
+            if(!rocke_archtarget_fits_lds(tg, tot))
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "LDS budget %ld bytes (A/B=%s%ld, C=%ld, aliased) > %d cap on %s",
+                             tot,
+                             dbl ? "x2 " : "",
+                             ab,
+                             cl,
+                             tg->lds_capacity_bytes,
+                             arch);
+                return false;
+            }
+        }
+    }
+
     /* The forward validator has pinned wave_size to the arch, so wave32 is the
      * WMMA family here. Its WMMA subset is the forward conv's, which is wider
      * than wgrad's (it also admits cshuffle, wavelet and 16x16x4); mirror the
