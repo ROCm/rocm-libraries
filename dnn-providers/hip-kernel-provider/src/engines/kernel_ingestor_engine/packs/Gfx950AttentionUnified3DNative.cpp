@@ -1014,10 +1014,11 @@ constexpr double UNSUPPORTED_SCORE = 0.0;
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
  * A stable fallback order for cold selection, not a performance model: fewer segments
- * first (less scratch, a smaller reduce). The shipped catalog carries one candidate per
- * graph configuration, so this only decides between geometries a future catalog adds; each
- * distinct segment count gets a distinct score, so the selector's descriptor-id tie-break
- * never decides between two geometries.
+ * first (less scratch, a smaller reduce). Where a cell ships more than one segment count
+ * (the bf16 bottom-right causal D128 cells), cold selection picks 16; the wider variants
+ * are reached through autotuning or the num_segments knob. Each distinct segment count
+ * gets a distinct score, so the selector's descriptor-id tie-break never decides between
+ * two geometries.
  */
 double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,

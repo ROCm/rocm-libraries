@@ -539,6 +539,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryShippedKernelsGeometryIsOneTheEngineLaunches
                 EveryEntryLaunchesItsSegmentAndReduceKernels
         )
+
+        # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
+        # every 2D cell that rule hands off must have a 3D kernel.
+        if(_hkp_gfx950_attention_unified_2d)
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES gfx950
+                SUITES TestGfx950AttentionUnified2DDecodeHandoff
+                EXPECTED_CASES
+                    EveryDecodeCellHandedToUnified3DHasAUnified3DKernel
+            )
+        endif()
     else()
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx950AttentionUnified3D for "

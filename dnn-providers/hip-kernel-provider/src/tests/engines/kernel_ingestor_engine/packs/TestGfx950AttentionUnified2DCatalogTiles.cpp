@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <variant>
 
 #include <gtest/gtest.h>
@@ -15,6 +17,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DGeometry.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -35,9 +38,16 @@
  * binaries that quietly serve fewer sequences than the shipped ones. Raise the floor below
  * deliberately, with the manifest.
  *
+ * TestGfx950AttentionUnified2DDecodeHandoff checks the decode boundary between the two
+ * unified engines: Unified2D declines every decode graph whose GQA group divides
+ * GFX950_UNIFIED_3D_BLOCK_M and leaves it to Unified3D, so every such cell the 2D catalog
+ * ships must have a Unified3D kernel with the same head_size, head counts and dtype. A
+ * reduction that drops the 3D cell would otherwise leave those graphs with no unified engine.
+ *
  * Hand-written, not generated: it belongs to the census binary beside the generated
  * TestGfx950AttentionUnified2DPacks, and is registered with its own
- * hkp_register_census_tests() call in src/tests/CMakeLists.txt.
+ * hkp_register_census_tests() calls in src/tests/CMakeLists.txt (the handoff suite only
+ * when both engines ship).
  */
 namespace
 {
@@ -64,6 +74,39 @@ std::optional<int64_t> integerField(const ingestor::KernelDescriptor& kernel, co
         return std::nullopt;
     }
     return *value;
+}
+
+/// A kernel's string metadata field, or nullopt when it is absent or another type.
+std::optional<std::string> stringField(const ingestor::KernelDescriptor& kernel, const char* field)
+{
+    const auto it = kernel.metadata.find(field);
+    if(it == kernel.metadata.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<std::string>(&it->second);
+    if(value == nullptr)
+    {
+        return std::nullopt;
+    }
+    return *value;
+}
+
+/// (head_size, num_query_heads, num_kv_heads, dtype): the cell a decode graph is served in.
+using HeadCell = std::tuple<int64_t, int64_t, int64_t, std::string>;
+
+/// A kernel's head cell, or nullopt when it does not carry all four fields.
+std::optional<HeadCell> headCell(const ingestor::KernelDescriptor& kernel)
+{
+    const auto headSize = integerField(kernel, "head_size");
+    const auto numQueryHeads = integerField(kernel, "num_query_heads");
+    const auto numKvHeads = integerField(kernel, "num_kv_heads");
+    const auto dtype = stringField(kernel, "dtype");
+    if(!headSize || !numQueryHeads || !numKvHeads || !dtype)
+    {
+        return std::nullopt;
+    }
+    return HeadCell{*headSize, *numQueryHeads, *numKvHeads, *dtype};
 }
 
 TEST(TestGfx950AttentionUnified2DCatalogTiles, EveryShippedKernelsGeometryIsOneTheEngineLaunches)
@@ -125,6 +168,47 @@ TEST(TestGfx950AttentionUnified2DCatalogTiles, EveryShippedKernelServesTheManife
         }
     }
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
+}
+
+TEST(TestGfx950AttentionUnified2DDecodeHandoff, EveryDecodeCellHandedToUnified3DHasAUnified3DKernel)
+{
+    std::set<HeadCell> unified3dCells;
+    for(const auto& pack : loadedSet(GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto cell = headCell(kernel);
+            ASSERT_TRUE(cell.has_value())
+                << "Unified3D kernel '" << kernel.name << "' does not carry its head cell";
+            unified3dCells.insert(*cell);
+        }
+    }
+    ASSERT_FALSE(unified3dCells.empty()) << "the Unified3D set holds no kernels";
+
+    std::size_t handedOff = 0;
+    for(const auto& pack : loadedSet(GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto cell = headCell(kernel);
+            ASSERT_TRUE(cell.has_value())
+                << "Unified2D kernel '" << kernel.name << "' does not carry its head cell";
+            const auto& [headSize, numQueryHeads, numKvHeads, dtype] = *cell;
+            ASSERT_GT(numKvHeads, 0) << "kernel '" << kernel.name << "'";
+            // The same rule Unified2D's graph match applies before declining decode.
+            if(GFX950_UNIFIED_3D_BLOCK_M % (numQueryHeads / numKvHeads) != 0)
+            {
+                continue;
+            }
+            ++handedOff;
+            EXPECT_TRUE(unified3dCells.count(*cell) != 0)
+                << "Unified2D declines decode for head_size " << headSize << ", " << numQueryHeads
+                << "/" << numKvHeads << " heads, " << dtype << " (kernel '" << kernel.name
+                << "') and hands it to Unified3D, which ships no kernel for that cell";
+        }
+    }
+    // Most shipped GQA groups divide 16; none handed off means the rule or catalog changed.
+    EXPECT_GT(handedOff, 0U) << "no Unified2D cell is handed to Unified3D at decode";
 }
 
 } // namespace

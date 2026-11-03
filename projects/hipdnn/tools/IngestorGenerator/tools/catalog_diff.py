@@ -710,6 +710,13 @@ def main(argv=None) -> int:
     if args.shipped_descriptors:
         try:
             shipped_symbols = _load_symbols(args.shipped_descriptors, "shipped")
+            # An empty shipped side would compare clean against anything: a wrong
+            # directory, a renamed suffix or a non-native UHD would all pass.
+            if not shipped_symbols:
+                raise CatalogDiffError(
+                    f"no native symbols under {args.shipped_descriptors}; "
+                    "nothing to compare"
+                )
             regenerated_symbols = _load_symbols(
                 args.regenerated_descriptors, "regenerated"
             )

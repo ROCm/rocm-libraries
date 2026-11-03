@@ -809,6 +809,33 @@ class TestNativeSymbolsAreComparedWhenDirectoriesAreGiven:
         }
         assert self._run(run, tmp_path, noisy) == 0
 
+    @pytest.mark.parametrize(
+        "files",
+        [
+            {},
+            {"e.uhd.json": {"adapter": "rule", "native": {"symbol": "x"}}},
+            {"e.ued.v2.json": {"graph_match": {"native": "hipkernel.e.graph_match"}}},
+        ],
+        ids=["wrong_directory", "non_native_uhd", "renamed_suffix"],
+    )
+    def test_a_shipped_side_with_no_symbols_is_an_error(self, run, tmp_path, files):
+        """Nothing shipped compares clean against nothing regenerated, so a wrong
+        ``--shipped-descriptors`` directory would pass the orphaned-pack check."""
+        kdp = _kdp([_entry("k0")])
+        shipped = self._write(tmp_path / "shipped", files)
+        regenerated = self._write(tmp_path / "regenerated", files)
+        assert (
+            run(
+                kdp,
+                kdp,
+                "--shipped-descriptors",
+                str(shipped),
+                "--regenerated-descriptors",
+                str(regenerated),
+            )
+            == 2
+        )
+
     def test_without_the_directories_symbols_are_not_read(self, run):
         kdp = _kdp([_entry("k0")])
         assert run(kdp, kdp) == 0
