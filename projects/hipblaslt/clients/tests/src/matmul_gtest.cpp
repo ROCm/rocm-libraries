@@ -536,6 +536,37 @@ namespace
         EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
     }
 
+    // A pointer-array f16 GEMM whose batches start at the given element offsets, as in the
+    // matmul_batch_offset cases.
+    Arguments batch_offset_case(int64_t offset_a, int64_t offset_b, int64_t offset_c)
+    {
+        Arguments arg = unit_check_case(1024, 1024, 256, HIP_R_16F);
+        strcpy(arg.function, "matmul_batch_offset");
+        arg.batch_mode     = 1;
+        arg.batch_count    = 2;
+        arg.batch_offset_a = offset_a;
+        arg.batch_offset_b = offset_b;
+        arg.batch_offset_c = offset_c;
+        arg.batch_offset_d = 4097;
+        return arg;
+    }
+
+    void run_short_batch_offset_case()
+    {
+        static const Arguments arg = batch_offset_case(4096, 4097, 4098);
+        testing_matmul_batch_offset(arg);
+    }
+
+    TEST(MatmulMemory_pre_checkin, preflight_stops_a_batch_offset_case_that_does_not_fit)
+    {
+        // matmul_batch_offset cases have their own test function; it needs the same preflight.
+        // This one needs about 14 MiB of host memory.
+        ScopedVariable limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "1M");
+        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        EXPECT_FATAL_FAILURE(run_short_batch_offset_case(),
+                             MEMORY_SHORTAGE_STRING "this case needs");
+    }
+
     // Runs one case with the estimate check on and returns what it measured.
     MemoryEstimateMeasurement measure_estimate(const Arguments& arg)
     {
