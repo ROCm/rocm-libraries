@@ -2004,6 +2004,8 @@ namespace
                                                          N,
                                                          nullptr,
                                                          emu);
+            if(_d_adpx_ws)
+                (void)hipFree(_d_adpx_ws);
             if(st == rocblaslt_status_success)
             {
                 free_bufs();
@@ -2011,8 +2013,6 @@ namespace
             }
             EXPECT_EQ(st, rocblaslt_status_invalid_value)
                 << "ADP should return invalid_value for 1e16/1e-16 extreme scale";
-            if(_d_adpx_ws)
-                (void)hipFree(_d_adpx_ws);
         }
 
         /* ── Step 2: hipblasLtMatmul falls back transparently ───────────────── */
@@ -2078,10 +2078,17 @@ namespace
                                                        0,
                                                        nullptr);
 
-        /* m_handle has emulation+ADP enabled → falls back to native internally */
+        /* Emulated compute type (EAGER, from the fixture) with an emulation
+         * workspace: the call enters emulation, ADP overflows, and
+         * hipblasLtMatmul falls back to the native GEMM internally.          */
         ASSERT_EQ(hipMemset(dD_emul, 0, bytes), hipSuccess);
+        const size_t emul_ws_sz
+            = hipblasLtEmulationWorkspaceSize(m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
+        void* d_emul_ws = nullptr;
+        if(emul_ws_sz > 0)
+            ASSERT_EQ(hipMalloc(&d_emul_ws, emul_ws_sz), hipSuccess);
         const hipblasStatus_t emul_st = hipblasLtMatmul(m_handle,
-                                                        desc,
+                                                        m_emul_desc,
                                                         &alpha,
                                                         dA,
                                                         la,
@@ -2093,17 +2100,26 @@ namespace
                                                         dD_emul,
                                                         ld,
                                                         nullptr,
-                                                        nullptr,
-                                                        0,
+                                                        d_emul_ws,
+                                                        emul_ws_sz,
                                                         nullptr);
+        (void)hipDeviceSynchronize();
+        if(d_emul_ws)
+            (void)hipFree(d_emul_ws);
 
         destroy_handles();
 
-        if(nat_st != HIPBLAS_STATUS_SUCCESS || emul_st != HIPBLAS_STATUS_SUCCESS)
+        if(nat_st != HIPBLAS_STATUS_SUCCESS)
         {
             free_bufs();
-            GTEST_SKIP() << "hipblasLtMatmul failed (nat=" << static_cast<int>(nat_st)
-                         << " emul=" << static_cast<int>(emul_st) << ")";
+            GTEST_SKIP() << "Native hipblasLtMatmul failed (" << static_cast<int>(nat_st) << ")";
+        }
+        if(emul_st != HIPBLAS_STATUS_SUCCESS)
+        {
+            free_bufs();
+            FAIL() << "hipblasLtMatmul with the emulated compute type did not fall back to the "
+                      "native GEMM after the ADP overflow (status "
+                   << static_cast<int>(emul_st) << ")";
         }
 
         std::vector<double> hD_nat(N2), hD_emul_h(N2);
