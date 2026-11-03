@@ -259,8 +259,9 @@ into the live process. Successful handles and version evidence remain retained.
 Native C++ IR lowering does not acquire a compiler. Its owner must pass the queried
 LLVM flavor or set `ROCKE_LLVM_FLAVOR`; native AUTO without that evidence fails.
 There is no native SDK-prefix/RECORD discovery or build sidecar/enrollment protocol.
-Source CTest uses the selected Python interpreter to forward the build compiler's
-flavor; installed launchers supply deployment-valid evidence. Explicit offline
+Source CTest explicitly marks native AUTO-lowering commands that require the
+selected Python interpreter to forward the build compiler's flavor; compiler-free
+host tests do not acquire COMGR. Installed launchers supply deployment-valid evidence. Explicit offline
 flavors bypass compiler/session acquisition.
 
 HIP honors `ROCKE_HIP_LIB`, then an already-imported framework runtime, then the

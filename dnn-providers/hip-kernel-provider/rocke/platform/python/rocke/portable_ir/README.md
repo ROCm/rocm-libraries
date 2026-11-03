@@ -757,9 +757,16 @@ Notes that matter in practice:
   mismatch on the first line.
 
 If you just want `.ll` and would rather not manage the builder, `rocke/online.h`
-collapses steps 3–4 into one call (`rocke_online_bundle_cbor_to_llvm`, plus
-`_recipe_cbor_` and `_ir_json_` variants). That is also what `src/online.py`
-binds over ctypes, and what the parity drivers use.
+collapses steps 3–4 into one call. Use the `_to_llvm_ex` recipe, bundle and IR-JSON
+exports to pass the compilation owner's explicit `rocke_llvm_flavor_t`. The native
+engine does not discover or load COMGR. Legacy `_to_llvm` exports keep their
+signatures and consume native AUTO, which requires `ROCKE_LLVM_FLAVOR`.
+
+The `src/online.py` ctypes converters use the explicit-flavor exports. Their
+optional `llvm_flavor` argument selects compiler-free offline emission; with no
+argument (or `"auto"`), Python resolves the shared compiler owner's queried
+profile and passes it per call. No process-global environment mutation is needed.
+An older native image missing these exports is rejected with a rebuild diagnostic.
 
 ### Trying it without writing C
 

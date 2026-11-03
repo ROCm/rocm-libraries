@@ -146,9 +146,11 @@ Native IR consumers do not discover or load COMGR. The compilation owner must
 query its actual compiler and pass that LLVM flavor to the lowering API, or supply
 `ROCKE_LLVM_FLAVOR`. Native AUTO without that setting fails with an actionable
 message; an explicit flavor continues to support offline compiler-free emission.
-Source CTest's selected Python launcher forwards the effective build compiler's
-flavor while preserving caller overrides. Installed native launchers must forward
-deployment evidence separately. There is no build SDK sidecar, output enrollment
+Source CTest marks native AUTO-lowering tests explicitly; their selected Python
+launcher forwards the effective build compiler's flavor while preserving caller
+overrides. Other host binaries do not acquire COMGR. Python test commands retain
+their own session policy. Installed native launchers must forward deployment
+evidence separately. There is no build SDK sidecar, output enrollment
 or inferred interpreter-prefix search to leak into a relocated deployment.
 
 ## The rocke_engine Python binding (optional)

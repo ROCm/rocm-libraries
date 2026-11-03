@@ -253,17 +253,22 @@ links its modules in-process, so it refuses a kernel carrying the attribute
 
 ### Library loading
 
-The HIP module loader retains its runtime discovery order:
-`$ROCKE_HIP_LIB` override, then, if torch is already imported, the
-`libamdhip64` torch uses (an unambiguous mapped copy, else
-`<torch>/lib/libamdhip64.so`, else `_rocm_sdk_core/lib/libamdhip64.so*` when
-`rocm_sdk` is imported), then the ROCm installs (`libamdhip64.so` and the
-`.so.7` SONAME), then bare `libamdhip64.so` via the dynamic linker.
-Preferring the copy torch loaded keeps rocke and torch on the same HIP
-runtime instance. Linux HIP does not add a standalone SDK tier; Windows also
-looks for SDK runtime DLLs and under `HIP_PATH`, `ROCM_PATH`, or `ROCM_HOME`
-before a bare DLL name. COMGR's env-or-SDK policy does not change these HIP
-candidates.
+An already retained session handle is returned first. Initial selection honors
+`$ROCKE_HIP_LIB`, then an already-imported framework's HIP runtime, then the SDK
+distribution's owned HIP payload on **both Linux and Windows**, followed by system
+roots and the platform loader's bare name. Selection never imports torch for a
+side effect. Automatic acquisition reuses an unambiguous already mapped runtime
+rather than introducing another copy; a conflicting explicit runtime is refused.
+
+Before opening a new HIP runtime, cold admission checks any existing COMGR
+provider, including one loaded outside rocKE, against the runtime's declared
+companion. Unknown, ambiguous or changed identities fail before another compiler
+can be loaded. This does not bootstrap COMGR for precompiled HSACO launching.
+The owner guards its own acquisitions, not arbitrary later third-party loads.
+
+With an owned SDK installed, `ROCM_PATH` alone does not outrank SDK HIP. Artifact
+validation must explicitly select the tested artifact's coherent HIP/COMGR pair;
+using SDK HIP instead would not validate the artifact runtime.
 
 Failure raises `HipError`.
 
