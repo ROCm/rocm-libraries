@@ -11,14 +11,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <atomic>
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <iostream>
+#include <random>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 #ifndef TO_STR2
@@ -42,7 +47,11 @@ namespace rocblaslt
             constexpr const char* kObjectsDir    = "objects";
             constexpr const char* kJournalPrefix = "journal-";
             constexpr const char* kZlibSuffix    = ".zlib";
+            constexpr const char* kTempPrefix    = ".tmp.";
             constexpr int         kFormat        = 1;
+            // No copy takes this long, so an older temporary file is a crashed writer's.
+            constexpr time_t kStaleTempSeconds = 60 * 60;
+            constexpr auto   kLockTimeout      = std::chrono::seconds(10);
 
             void setError(std::string* error, std::string const& message)
             {
@@ -80,9 +89,39 @@ namespace rocblaslt
                 return stamp;
             }
 
-            std::string versionLine()
+            // The V line up to its journal id.
+            std::string versionPrefix()
             {
-                return "V " + std::to_string(kFormat) + " " + buildStamp();
+                return "V " + std::to_string(kFormat) + " " + buildStamp() + " ";
+            }
+
+            std::string newVersionLine()
+            {
+                uint64_t id = 0;
+                try
+                {
+                    std::random_device random;
+                    id = (uint64_t(random()) << 32) ^ random();
+                }
+                catch(std::exception const&)
+                {
+                }
+                id ^= uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())
+                      ^ (uint64_t(::getpid()) << 40);
+                char text[17];
+                std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(id));
+                return versionPrefix() + text;
+            }
+
+            bool isVersionLine(std::string const& line)
+            {
+                const std::string prefix = versionPrefix();
+                if(line.size() != prefix.size() + 16 || line.compare(0, prefix.size(), prefix) != 0)
+                    return false;
+                for(size_t i = prefix.size(); i < line.size(); ++i)
+                    if(!std::isxdigit(static_cast<unsigned char>(line[i])))
+                        return false;
+                return true;
             }
 
             class Fd
@@ -298,23 +337,19 @@ namespace rocblaslt
             }
 
             /**
-             * Copies `from` into `dir` under a temporary name unique to this
-             * process, hashing the bytes as they are written, and renames the
-             * copy to <hash><suffix>. Concurrent writers of one object never
-             * see a partial file, and the name always matches the contents: an
-             * object already there is replaced by one with the same contents.
+             * Copies `from` to a new file in `dir` whose name starts with
+             * kTempPrefix, has a random part, and ends in `suffix`, hashing the
+             * bytes as they are written. Writers in other processes, including
+             * ones in other containers sharing the directory, never pick the
+             * same name.
              */
-            bool copyHashed(std::string const& from,
+            bool copyToTemp(std::string const& from,
                             fs::path const&    dir,
                             std::string const& suffix,
+                            std::string*       temp,
                             std::string*       hash,
                             std::string*       error)
             {
-                static std::atomic<unsigned> counter{0};
-                const std::string            unique
-                    = std::to_string(::getpid()) + "." + std::to_string(counter++);
-                const fs::path temp = dir / (".tmp." + unique);
-
                 Fd in(::open(from.c_str(), O_RDONLY | O_CLOEXEC));
                 if(in.get() < 0)
                 {
@@ -322,54 +357,85 @@ namespace rocblaslt
                     return false;
                 }
 
-                std::error_code ec;
-                ObjectHash      written;
+                std::string name = (dir / (kTempPrefix + std::string("XXXXXX") + suffix)).string();
+                Fd out(::mkostemps(name.data(), static_cast<int>(suffix.size()), O_CLOEXEC));
+                if(out.get() < 0)
                 {
-                    Fd out(::open(temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644));
-                    if(out.get() < 0)
-                    {
-                        setError(error, errnoText("cannot create", temp.string()));
-                        return false;
-                    }
-
-                    std::vector<unsigned char> buffer(1 << 20);
-                    for(;;)
-                    {
-                        const ssize_t got = ::read(in.get(), buffer.data(), buffer.size());
-                        if(got < 0 && errno == EINTR)
-                            continue;
-                        if(got < 0
-                           || (got > 0
-                               && !writeAll(out.get(),
-                                            reinterpret_cast<char const*>(buffer.data()),
-                                            static_cast<size_t>(got))))
-                        {
-                            setError(error, errnoText("cannot copy to", temp.string()));
-                            fs::remove(temp, ec);
-                            return false;
-                        }
-                        if(got == 0)
-                            break;
-                        written.update(buffer.data(), static_cast<size_t>(got));
-                    }
-
-                    if(::fsync(out.get()) != 0)
-                    {
-                        setError(error, errnoText("cannot sync", temp.string()));
-                        fs::remove(temp, ec);
-                        return false;
-                    }
-                }
-
-                const fs::path to = dir / (written.hex() + suffix);
-                if(::rename(temp.c_str(), to.c_str()) != 0)
-                {
-                    setError(error, errnoText("cannot publish", to.string()));
-                    fs::remove(temp, ec);
+                    setError(error, errnoText("cannot create a temporary file in", dir.string()));
                     return false;
                 }
-                syncDirectory(dir);
+                static_cast<void>(::fchmod(out.get(), 0644));
+
+                ObjectHash                 written;
+                std::vector<unsigned char> buffer(1 << 20);
+                for(;;)
+                {
+                    const ssize_t got = ::read(in.get(), buffer.data(), buffer.size());
+                    if(got < 0 && errno == EINTR)
+                        continue;
+                    if(got < 0
+                       || (got > 0
+                           && !writeAll(out.get(),
+                                        reinterpret_cast<char const*>(buffer.data()),
+                                        static_cast<size_t>(got))))
+                    {
+                        setError(error, errnoText("cannot copy to", name));
+                        static_cast<void>(::unlink(name.c_str()));
+                        return false;
+                    }
+                    if(got == 0)
+                        break;
+                    written.update(buffer.data(), static_cast<size_t>(got));
+                }
+
+                if(::fsync(out.get()) != 0)
+                {
+                    setError(error, errnoText("cannot sync", name));
+                    static_cast<void>(::unlink(name.c_str()));
+                    return false;
+                }
+                *temp = name;
                 *hash = written.hex();
+                return true;
+            }
+
+            /** Removes temporary files older than any copy takes. */
+            void removeStaleTemps(fs::path const& dir)
+            {
+                const time_t    cutoff = ::time(nullptr) - kStaleTempSeconds;
+                std::error_code ec;
+                for(auto const& entry : fs::directory_iterator(dir, ec))
+                {
+                    if(entry.path().filename().string().rfind(kTempPrefix, 0) != 0)
+                        continue;
+                    struct stat st
+                    {
+                    };
+                    if(::lstat(entry.path().c_str(), &st) == 0 && S_ISREG(st.st_mode)
+                       && st.st_mtime < cutoff)
+                        static_cast<void>(::unlink(entry.path().c_str()));
+                }
+            }
+
+            /**
+             * Sets `line` to the file's first line and `complete` to whether it
+             * ends in a newline. A first line too long to be a V line counts as
+             * complete, so that it is rejected rather than taken for an
+             * unfinished one.
+             */
+            bool readFirstLine(int fd, std::string* line, bool* complete)
+            {
+                char    buffer[512];
+                ssize_t got;
+                do
+                    got = ::pread(fd, buffer, sizeof(buffer), 0);
+                while(got < 0 && errno == EINTR);
+                if(got < 0)
+                    return false;
+
+                auto const* newline = static_cast<char const*>(std::memchr(buffer, '\n', got));
+                *line     = std::string(buffer, newline ? size_t(newline - buffer) : size_t(got));
+                *complete = newline || got == ssize_t(sizeof(buffer));
                 return true;
             }
 
@@ -436,11 +502,11 @@ namespace rocblaslt
                         *end = 0;
                         return true;
                     }
-                    if(text.compare(0, newline, versionLine()) != 0)
+                    if(!isVersionLine(text.substr(0, newline)))
                     {
                         setError(error,
-                                 path + " does not start with \"" + versionLine()
-                                     + "\"; it was not written by this build of hipBLASLt");
+                                 path + " does not start with \"" + versionPrefix()
+                                     + "<id>\"; it was not written by this build of hipBLASLt");
                         return false;
                     }
                     start = newline + 1;
@@ -467,6 +533,10 @@ namespace rocblaslt
              * writer that crashed, is terminated first so the new record starts
              * on its own line; its checksum keeps the partial line from being
              * read as a record.
+             *
+             * A failed append is truncated away. Its bytes would otherwise stay,
+             * and the next append would complete them, which for a record
+             * missing only its newline is the record reported as not saved.
              */
             bool appendLine(int fd, std::string const& path, std::string line, std::string* error)
             {
@@ -489,6 +559,7 @@ namespace rocblaslt
                 if(!writeAll(fd, line.data(), line.size()) || ::fsync(fd) != 0)
                 {
                     setError(error, errnoText("cannot append to", path));
+                    static_cast<void>(::ftruncate(fd, st.st_size));
                     return false;
                 }
                 return true;
@@ -497,7 +568,9 @@ namespace rocblaslt
             /**
              * Opens and flocks a journal: exclusively for appending, creating it
              * if absent, or shared for reading. A missing journal opened for
-             * reading succeeds and leaves `out` empty.
+             * reading succeeds and leaves `out` empty. Gives up after
+             * kLockTimeout, so a process stopped while holding the lock makes
+             * this one fail instead of waiting for it.
              */
             bool openJournal(std::string const& path, bool exclusive, Fd* out, std::string* error)
             {
@@ -524,13 +597,26 @@ namespace rocblaslt
                 if(!checkStat(path, st, error))
                     return false;
 
-                while(::flock(fd, exclusive ? LOCK_EX : LOCK_SH) != 0)
+                const auto deadline = std::chrono::steady_clock::now() + kLockTimeout;
+                auto       pause    = std::chrono::milliseconds(1);
+                while(::flock(fd, (exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) != 0)
                 {
-                    if(errno != EINTR)
+                    if(errno == EINTR)
+                        continue;
+                    if(errno != EWOULDBLOCK)
                     {
                         setError(error, errnoText("cannot lock", path));
                         return false;
                     }
+                    if(std::chrono::steady_clock::now() >= deadline)
+                    {
+                        setError(error,
+                                 path + " stayed locked by another process for "
+                                     + std::to_string(kLockTimeout.count()) + " s");
+                        return false;
+                    }
+                    std::this_thread::sleep_for(pause);
+                    pause = std::min(pause * 2, std::chrono::milliseconds(50));
                 }
                 return true;
             }
@@ -621,6 +707,7 @@ namespace rocblaslt
             if(!makePrivateDirectory(rootPath, error)
                || !makePrivateDirectory(rootPath / kObjectsDir, error))
                 return nullptr;
+            removeStaleTemps(rootPath / kObjectsDir);
 
             return new Store(rootPath.string());
         }
@@ -656,26 +743,98 @@ namespace rocblaslt
             return (fs::path(m_root) / scope / (kJournalPrefix + buildStamp())).string();
         }
 
-        bool Store::storeObjects(std::string const& shardFile,
+        StagedObjects::~StagedObjects()
+        {
+            for(auto const* object : {&m_shard, &m_co})
+                if(!object->temp.empty())
+                    static_cast<void>(::unlink(object->temp.c_str()));
+        }
+
+        bool Store::stageObjects(std::string const& shardFile,
                                  std::string const& coPath,
                                  PayloadRecord*     record,
+                                 StagedObjects*     staged,
                                  std::string*       error) const
         {
             if(!checkLayout(error))
                 return false;
 
-            // Both objects are durable before any record names them.
             const fs::path objects = fs::path(m_root) / kObjectsDir;
-            PayloadId      id;
-            if(!copyHashed(shardFile,
-                           objects,
-                           std::string(".dat") + (record->compressed ? kZlibSuffix : ""),
-                           &id.datHash,
-                           error)
-               || !copyHashed(coPath, objects, ".co", &id.coHash, error))
-                return false;
-            record->id = id;
+            auto           stage   = [&](std::string const&     from,
+                             std::string const&     suffix,
+                             std::string&           hash,
+                             StagedObjects::Object& object) {
+                const fs::path saved = objects / (hash + suffix);
+                struct stat st
+                {
+                };
+                if(::lstat(saved.c_str(), &st) == 0)
+                {
+                    std::string actual;
+                    if(S_ISREG(st.st_mode) && checkStat(saved.string(), st, nullptr)
+                       && hashFile(saved.string(), &actual, nullptr) && actual == hash)
+                    {
+                        object.final = saved.string();
+                        return true;
+                    }
+                    object.replace = true;
+                }
+
+                std::string copied;
+                if(!copyToTemp(from, objects, suffix, &object.temp, &copied, error))
+                    return false;
+                hash         = copied;
+                object.final = (objects / (copied + suffix)).string();
+                return true;
+            };
+            return stage(shardFile,
+                         std::string(".dat") + (record->compressed ? kZlibSuffix : ""),
+                         record->id.datHash,
+                         staged->m_shard)
+                   && stage(coPath, ".co", record->id.coHash, staged->m_co);
+        }
+
+        bool Store::publishObjects(StagedObjects* staged, std::string* error) const
+        {
+            // Both objects are durable before any record names them.
+            for(auto* object : {&staged->m_shard, &staged->m_co})
+            {
+                if(object->temp.empty())
+                    continue;
+                // A hard link fails if another writer published the object
+                // first, which keeps theirs; rename replaces a damaged one.
+                if(object->replace)
+                {
+                    if(::rename(object->temp.c_str(), object->final.c_str()) != 0)
+                    {
+                        setError(error, errnoText("cannot publish", object->final));
+                        return false;
+                    }
+                }
+                else if(::link(object->temp.c_str(), object->final.c_str()) == 0)
+                    object->created = true;
+                else if(errno != EEXIST
+                        && ::rename(object->temp.c_str(), object->final.c_str()) != 0)
+                {
+                    setError(error, errnoText("cannot publish", object->final));
+                    return false;
+                }
+                static_cast<void>(::unlink(object->temp.c_str()));
+                object->temp.clear();
+            }
+            syncDirectory(fs::path(m_root) / kObjectsDir);
             return true;
+        }
+
+        void Store::unpublishObjects(StagedObjects* staged) const
+        {
+            for(auto* object : {&staged->m_shard, &staged->m_co})
+                if(object->created)
+                {
+                    static_cast<void>(::unlink(object->final.c_str()));
+                    object->created = false;
+                }
+            syncDirectory(fs::path(m_root) / kObjectsDir);
         }
 
         bool Store::verifyObjects(PayloadRecord const& record, std::string* error) const
@@ -718,46 +877,46 @@ namespace rocblaslt
             struct stat st
             {
             };
-            if(::fstat(fd.get(), &st) != 0)
-            {
-                setError(error, errnoText("cannot stat", path));
-                return false;
-            }
-
-            // Re-read under the lock: another process may have appended.
-            JournalState& state = m_journals[scope];
-            if(state.device != uint64_t(st.st_dev) || state.inode != uint64_t(st.st_ino)
-               || uint64_t(st.st_size) < state.offset)
-            {
-                state        = JournalState{};
-                state.device = st.st_dev;
-                state.inode  = st.st_ino;
-            }
-
-            std::string text;
-            if(!readFrom(fd.get(), state.offset, &text))
+            std::string first;
+            bool        complete = false;
+            if(::fstat(fd.get(), &st) != 0 || !readFirstLine(fd.get(), &first, &complete))
             {
                 setError(error, errnoText("cannot read", path));
                 return false;
             }
 
-            std::string prefix;
-            if(state.offset == 0 && text.find('\n') == std::string::npos)
+            // Re-read under the lock: another process may have appended, or
+            // replaced the journal.
+            JournalState& state = m_journals[scope];
+            std::string   prefix;
+            if(!complete)
             {
                 // New, or left without a complete V line by a writer that
                 // crashed creating it. Either way it holds no records.
-                if(!text.empty() && ::ftruncate(fd.get(), 0) != 0)
+                if(st.st_size > 0 && ::ftruncate(fd.get(), 0) != 0)
                 {
                     setError(error, errnoText("cannot truncate", path));
                     return false;
                 }
-                text.clear();
-                prefix = versionLine() + "\n";
+                state  = JournalState{};
+                prefix = newVersionLine() + "\n";
+            }
+            else if(first != state.cursor.journal || uint64_t(st.st_size) < state.cursor.offset)
+            {
+                state                = JournalState{};
+                state.cursor.journal = first;
+            }
+
+            std::string text;
+            if(complete && !readFrom(fd.get(), state.cursor.offset, &text))
+            {
+                setError(error, errnoText("cannot read", path));
+                return false;
             }
 
             std::vector<JournalEntry> entries;
-            uint64_t                  end = state.offset;
-            if(!parseJournal(text, state.offset, path, &entries, &end, error))
+            uint64_t                  end = state.cursor.offset;
+            if(!parseJournal(text, state.cursor.offset, path, &entries, &end, error))
                 return false;
             for(auto const& entry : entries)
             {
@@ -766,7 +925,7 @@ namespace rocblaslt
                 else
                     state.lastExact[shapeOf(entry.exact)] = entry.exact;
             }
-            state.offset = end;
+            state.cursor.offset = end;
 
             const std::string line = makeLine(state);
             if(line.empty())
@@ -803,13 +962,11 @@ namespace rocblaslt
         }
 
         bool Store::read(std::string const&         scope,
-                         uint64_t                   offset,
+                         JournalCursor*             cursor,
                          std::vector<JournalEntry>* entries,
-                         uint64_t*                  end,
                          std::string*               error) const
         {
             entries->clear();
-            *end = offset;
 
             const std::string path = journalPath(scope, error);
             if(path.empty() || !checkLayout(error))
@@ -818,7 +975,10 @@ namespace rocblaslt
             std::error_code ec;
             const fs::path  dir = fs::path(path).parent_path();
             if(!fs::exists(dir, ec))
+            {
+                *cursor = JournalCursor{};
                 return true;
+            }
             if(!checkPrivate(dir, error))
                 return false;
 
@@ -826,15 +986,43 @@ namespace rocblaslt
             if(!openJournal(path, false, &fd, error))
                 return false;
             if(fd.get() < 0)
+            {
+                *cursor = JournalCursor{};
                 return true;
+            }
 
-            std::string text;
-            if(!readFrom(fd.get(), offset, &text))
+            struct stat st
+            {
+            };
+            std::string first;
+            bool        complete = false;
+            if(::fstat(fd.get(), &st) != 0 || !readFirstLine(fd.get(), &first, &complete))
             {
                 setError(error, errnoText("cannot read", path));
                 return false;
             }
-            return parseJournal(text, offset, path, entries, end, error);
+            if(!complete)
+            {
+                *cursor = JournalCursor{};
+                return true;
+            }
+
+            JournalCursor next = *cursor;
+            if(first != next.journal || uint64_t(st.st_size) < next.offset)
+                next = JournalCursor{first, 0};
+
+            std::string text;
+            uint64_t    end = next.offset;
+            if(!readFrom(fd.get(), next.offset, &text))
+            {
+                setError(error, errnoText("cannot read", path));
+                return false;
+            }
+            if(!parseJournal(text, next.offset, path, entries, &end, error))
+                return false;
+            next.offset = end;
+            *cursor     = next;
+            return true;
         }
     } // namespace local_kernel_store
 } // namespace rocblaslt

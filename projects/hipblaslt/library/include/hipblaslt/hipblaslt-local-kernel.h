@@ -65,10 +65,14 @@ extern "C" {
  *  Indices are valid only in the current process. A payload is identified by
  *  the contents of both files: registering one already registered in this
  *  process, or loaded from the local kernel library, returns the indices it
- *  already has.
+ *  already has. That includes one registered through a device of another
+ *  architecture or compute unit count, if every kernel can also run on the
+ *  handle's device; otherwise the call fails as for any payload not built for
+ *  the device.
  *
  *  With a local kernel library, both files are copied into it and the copies
- *  are what is loaded, so the originals may be removed afterwards.
+ *  are what is loaded, so the originals may be removed afterwards. Files
+ *  already saved there with the same contents are not copied again.
  *
  *  A device loads a code object path at most once and keeps it loaded for the
  *  life of the process, including after a registration that then failed.
@@ -142,7 +146,8 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  mapping is saved, then applied together with what other processes saved
  *  before it, as \ref hipblasLtLocalKernelRefresh would. If another process
  *  mapped the same shape and types in between, its kernel is the one
- *  selected, here and in every later process.
+ *  selected, here and in every later process. The mapping is saved for the
+ *  handle's device's architecture and compute unit count.
  *
  *  @param[in]
  *  handle       Pointer to the allocated hipBLASLt handle.
