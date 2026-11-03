@@ -26,19 +26,16 @@
 #include <vector>
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
 #include "rocke/instance_conv_fwd_wmma_tdm_internal.h" /* rocke_fwd_tdm_descriptor_3d */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
-/* conv_direct_fwd_wmma.WMMA_K (conv_fwd_wmma_gate's) / CH_PAD /
- * FWD_WMMA_VGPR_BUDGET / POLY_ZERO_LANE_CH. */
-#define FWW_WMMA_K ROCKE_FWD_WMMA_K
-#define FWW_CH_PAD ROCKE_FWD_WMMA_CH_PAD
+/* conv_direct_fwd_wmma.FWD_WMMA_VGPR_BUDGET / POLY_ZERO_LANE_CH. */
 #define FWW_VGPR_BUDGET 512
 #define FWW_POLY_ZERO_LANE_CH 8
 
@@ -123,11 +120,11 @@ int fww_lead_cols(const rocke_direct_fwd_wmma_spec_t* s)
 }
 int fww_x_pitch(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    return s->ck + FWW_CH_PAD;
+    return s->ck + ROCKE_FWD_WMMA_CH_PAD;
 }
 int fww_epi_pitch(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    return rocke_direct_fwd_wmma_block_k(s) + FWW_CH_PAD;
+    return rocke_direct_fwd_wmma_block_k(s) + ROCKE_FWD_WMMA_CH_PAD;
 }
 int fww_phase_elems(const rocke_direct_fwd_wmma_spec_t* s)
 {
@@ -238,7 +235,7 @@ long rocke_direct_fwd_wmma_lds_bytes(const rocke_direct_fwd_wmma_spec_t* spec)
     if(spec->wave_epilogue)
     {
         long n_waves = (long)spec->waves_k * spec->waves_p;
-        epi = n_waves * spec->tiles_p * 16 * (spec->tiles_k * 16 + FWW_CH_PAD);
+        epi = n_waves * spec->tiles_p * 16 * (spec->tiles_k * 16 + ROCKE_FWD_WMMA_CH_PAD);
     }
     return 2 * (ring > epi ? ring : epi);
 }
@@ -482,8 +479,8 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         FWW_FAIL("cpg %d and kpg %d must be multiples of 8 (16-byte rows)",
                  fww_cpg_eff(spec),
                  fww_kpg_eff(spec));
-    if(spec->ck % FWW_WMMA_K || spec->ck <= 0)
-        FWW_FAIL("ck %d must be a positive multiple of %d", spec->ck, FWW_WMMA_K);
+    if(spec->ck % ROCKE_FWD_WMMA_K || spec->ck <= 0)
+        FWW_FAIL("ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
     if(spec->waves_k < 1 || spec->waves_p < 1 || spec->tiles_k < 1 || spec->tiles_p < 1)
         FWW_FAIL("waves and tiles must be >= 1");
     if(spec->stages < 2)
@@ -893,20 +890,12 @@ void issue(fww_ctx& c, V chunk)
 /* _read16(stage_base, off, const_off). */
 V read16(fww_ctx& c, V stage_base, V off, int64_t const_off)
 {
-    rocke_ir_builder_t* b = c.b;
-    V t = addk(c, off, const_off);
-    V addr = add(c, stage_base, t);
-    V idx0[2] = {c.c0, addr};
-    V lo = rocke_b_smem_load_vN(b, c.lds, idx0, 2, c.io_type, 8);
-    V addr8 = add(c, addr, c.c8);
-    V idx1[2] = {c.c0, addr8};
-    V hi = rocke_b_smem_load_vN(b, c.lds, idx1, 2, c.io_type, 8);
-    return rocke_b_vec_concat(b, lo, hi);
+    return rocke_fwd_lds_frag16(c.b, c.lds, stage_base, off, const_off, c.c0, c.c8, c.io_type);
 }
 
 int64_t tap_off0(fww_ctx& c, int ks, int s)
 {
-    return (int64_t)s * c.DW * c.XP + (int64_t)ks * FWW_WMMA_K;
+    return (int64_t)s * c.DW * c.XP + (int64_t)ks * ROCKE_FWD_WMMA_K;
 }
 
 /* _shift(frag, stage_base, off): the fragment one filter column to the right. */
@@ -932,21 +921,7 @@ V shift(fww_ctx& c, V frag, V stage_base, int64_t off)
 /* _wait_landed(kc). */
 void wait_landed(fww_ctx& c, V kc)
 {
-    rocke_ir_builder_t* b = c.b;
-    if(c.NS == 2)
-    {
-        rocke_b_s_wait_tensorcnt(b, 0);
-        return;
-    }
-    V y = addk(c, kc, c.NS - 2);
-    V more = rocke_b_cmp_lt(b, y, c.n_chunks);
-    rocke_if_else_t ie = rocke_b_scf_if_else(b, more);
-    rocke_b_region_enter(b, ie.then_region);
-    rocke_b_s_wait_tensorcnt(b, c.NS - 2);
-    rocke_b_region_leave(b);
-    rocke_b_region_enter(b, ie.else_region);
-    rocke_b_s_wait_tensorcnt(b, 0);
-    rocke_b_region_leave(b);
+    rocke_fwd_tdm_ring_wait(c.b, kc, c.NS, c.n_chunks);
 }
 
 /* _signal_next(kc). */
@@ -975,12 +950,12 @@ void frags(fww_ctx& c,
     {
         int a = (s * c.DW) % c.S, j = (s * c.DW) / c.S;
         tap_off = (int64_t)a * c.PSTR + ((int64_t)r * c.DH * c.HC + j) * c.XP
-                  + (int64_t)ks * FWW_WMMA_K;
+                  + (int64_t)ks * ROCKE_FWD_WMMA_K;
     }
     else
     {
-        tap_off
-            = ((int64_t)r * c.DH * c.HALO_W + (int64_t)s * c.DW) * c.XP + (int64_t)ks * FWW_WMMA_K;
+        tap_off = ((int64_t)r * c.DH * c.HALO_W + (int64_t)s * c.DW) * c.XP
+                  + (int64_t)ks * ROCKE_FWD_WMMA_K;
     }
     bf.assign(c.TN, NULL);
     af.assign(c.TM, NULL);
@@ -1017,7 +992,7 @@ void frags(fww_ctx& c,
             bf[tn] = read16(c, halo_base, c.px_off[tn], tap_off);
     }
     int tap = (r * c.KW + s) % c.WTAPS;
-    int64_t w_off = (int64_t)tap * c.BK * c.XP + (int64_t)ks * FWW_WMMA_K;
+    int64_t w_off = (int64_t)tap * c.BK * c.XP + (int64_t)ks * ROCKE_FWD_WMMA_K;
     for(int m = 0; m < c.TM; ++m)
         af[m] = read16(c, wei_base, c.wei_off[m], w_off);
 }
@@ -1120,18 +1095,18 @@ void chunk_pp(fww_ctx& c, V kc, std::vector<V>& accs)
             {
                 int a = (st.s * c.DW) % c.S, jj = (st.s * c.DW) / c.S;
                 tap_off = (int64_t)a * c.PSTR + ((int64_t)st.r * c.DH * c.HC + jj) * c.XP
-                          + (int64_t)st.ks * FWW_WMMA_K;
+                          + (int64_t)st.ks * ROCKE_FWD_WMMA_K;
             }
             else
             {
                 tap_off = ((int64_t)st.r * c.DH * c.HALO_W + (int64_t)st.s * c.DW) * c.XP
-                          + (int64_t)st.ks * FWW_WMMA_K;
+                          + (int64_t)st.ks * ROCKE_FWD_WMMA_K;
             }
             std::vector<V> bf(c.TN), af(c.TM);
             for(int tn = 0; tn < c.TN; ++tn)
                 bf[tn] = read16(c, halo_base, c.px_off[tn], tap_off);
             int tap = (st.r * c.KW + st.s) % c.WTAPS;
-            int64_t w_off = (int64_t)tap * c.BK * c.XP + (int64_t)st.ks * FWW_WMMA_K;
+            int64_t w_off = (int64_t)tap * c.BK * c.XP + (int64_t)st.ks * ROCKE_FWD_WMMA_K;
             for(int m = 0; m < c.TM; ++m)
                 af[m] = read16(c, wei_base, c.wei_off[m], w_off);
             fa.push_back(af);
@@ -1175,24 +1150,7 @@ void chunk_rr(fww_ctx& c, V kc, std::vector<V>& accs)
         {
             V x = ci(c, c.NB);
             V cond = rocke_b_cmp_eq(b, c.wave_id, x);
-            if_then(c, cond, [&]() {
-                if(c.NS == 2)
-                {
-                    rocke_b_s_wait_tensorcnt(b, 0);
-                }
-                else
-                {
-                    V y = addk(c, u, c.NS - 2);
-                    V more = rocke_b_cmp_lt(b, y, c.n_steps);
-                    rocke_if_else_t ie = rocke_b_scf_if_else(b, more);
-                    rocke_b_region_enter(b, ie.then_region);
-                    rocke_b_s_wait_tensorcnt(b, c.NS - 2);
-                    rocke_b_region_leave(b);
-                    rocke_b_region_enter(b, ie.else_region);
-                    rocke_b_s_wait_tensorcnt(b, 0);
-                    rocke_b_region_leave(b);
-                }
-            });
+            if_then(c, cond, [&]() { rocke_fwd_tdm_ring_wait(b, u, c.NS, c.n_steps); });
         }
         if(r == 0)
         {
@@ -1222,7 +1180,7 @@ void chunk_rr(fww_ctx& c, V kc, std::vector<V>& accs)
         }
         V wslot = modk(c, u, c.NS);
         std::vector<fww_step> row_steps;
-        for(int ks = 0; ks < c.CK / FWW_WMMA_K; ++ks)
+        for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
             for(int t = r * c.WTAPS; t < (r + 1) * c.WTAPS; ++t)
                 row_steps.push_back(fww_step{ks, t / c.KW, t % c.KW});
         V wb = mulk(c, wslot, c.WEI);
@@ -1319,7 +1277,7 @@ void epilogue_wave(fww_ctx& c, V const* accs)
     if(!c.SB)
         rocke_b_sync_lds_only(b);
     int WPX = c.TN * 16;
-    int EP = c.TM * 16 + FWW_CH_PAD;
+    int EP = c.TM * 16 + ROCKE_FWD_WMMA_CH_PAD;
     int ROWS = WPX / c.TW;
     V base = mulk(c, c.wave_id, (int64_t)WPX * EP);
     for(int m = 0; m < c.TM; ++m)
@@ -1515,18 +1473,10 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     c.io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(&spec->problem));
     if(c.io_type == NULL)
         return NULL;
-    {
-        const char* ab = rocke_wmma_ab_dtype(rocke_direct_conv_problem_dtype(&spec->problem));
-        const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-        const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
-            target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, FWW_WMMA_K, NULL);
-        if(op == NULL || op->op_id == NULL)
-        {
-            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_fwd_wmma: no WMMA atom");
-            return NULL;
-        }
-        c.wmma_op_id = op->op_id;
-    }
+    c.wmma_op_id = rocke_wmma_fwd_op_id(
+        b, rocke_direct_conv_problem_dtype(&spec->problem), arch, "build_direct_fwd_wmma");
+    if(c.wmma_op_id == NULL)
+        return NULL;
     c.WAVE = spec->wave_size;
     c.WK = spec->waves_k;
     c.WP = spec->waves_p;
@@ -1922,7 +1872,7 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
         c.SEL_HI = (hi & 0x80000000ull) ? (int64_t)hi - ((int64_t)1 << 32) : (int64_t)hi;
     }
 
-    for(int ks = 0; ks < c.CK / FWW_WMMA_K; ++ks)
+    for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
         for(int r = 0; r < c.KH; ++r)
             for(int s = 0; s < c.KW; ++s)
                 c.steps.push_back(fww_step{ks, r, s});

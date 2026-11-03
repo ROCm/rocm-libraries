@@ -56,29 +56,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef
-from rocke.helpers.spec import ceil_div
+from rocke.helpers.spec import align_up, ceil_div
 
-from kernels.common.conv_direct_fwd_wmma import CH_PAD, WMMA_K, _tdm_descriptor_3d
+from kernels.common.conv_direct_fwd_wmma import (
+    _lds_frag16,
+    _tdm_descriptor_3d,
+    _tdm_ring_wait,
+)
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
+    _buf_store_vN,
     _io_type,
     emit_direct_params,
 )
 from kernels.common.conv_fwd_wmma_gate import (
-    WMMA_M,
-    WMMA_N,
-    wmma_ab_dtype,
+    CH_PAD,
+    WMMA_K,
     wmma_fwd_gate,
     wmma_fwd_halo_cols,
     wmma_fwd_halo_extent,
     wmma_fwd_lead_cols,
     wmma_fwd_limits_reason,
+    wmma_fwd_op,
 )
 
 GSTREAM_VGPR_BUDGET = 448
@@ -116,7 +120,7 @@ class FwdGstreamWmmaSpec:
         to whole 16-row M tiles (the padding rows have zero weights and are
         not stored)."""
         kpg = self.problem.kpg
-        return kpg if self.span16 else ceil_div(kpg, 16) * 16
+        return kpg if self.span16 else align_up(kpg, 16)
 
     @property
     def block_k(self) -> int:
@@ -250,7 +254,7 @@ def fwd_gstream_tile_efficiency(spec: FwdGstreamWmmaSpec) -> float:
     """Share of ``spec``'s padded pixel grid that is real work on its problem."""
     p = spec.problem
     hp = spec.n_bands() * spec.tile_h
-    wp = ceil_div(p.Wo, spec.tile_w) * spec.tile_w
+    wp = align_up(p.Wo, spec.tile_w)
     return (p.Ho * p.Wo) / (hp * wp)
 
 
@@ -274,11 +278,7 @@ def fwd_gstream_reason(spec: FwdGstreamWmmaSpec, arch: str = "gfx1250") -> str |
         return f"cpg {p.cpg} != kpg {p.kpg}"
     if p.cpg not in (8, 16) and (p.cpg < WMMA_K or p.cpg % 8):
         return f"cpg {p.cpg} not 8, 16 or a multiple of 8 from 32"
-    if (
-        p.cpg > 16
-        and p.cpg % WMMA_K
-        and ceil_div(p.cpg, WMMA_K) * WMMA_K - p.cpg > CH_PAD
-    ):
+    if p.cpg > 16 and p.cpg % WMMA_K and align_up(p.cpg, WMMA_K) - p.cpg > CH_PAD:
         return f"cpg {p.cpg}: its last k-step reads past the LDS row skew"
     if min(spec.waves_k, spec.waves_p, spec.tiles_k, spec.tiles_p) < 1:
         return "waves and tiles must be >= 1"
@@ -336,16 +336,7 @@ def build_fwd_gstream_wmma(
     S, PAD = p.stride, p.PAD
     CPG = p.cpg
     io_type = _io_type(p.dtype)
-    ab = wmma_ab_dtype(p.dtype)
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma",
-        a_dtype=ab,
-        b_dtype=ab,
-        c_dtype="fp32",
-        m=WMMA_M,
-        n=WMMA_N,
-        k=WMMA_K,
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     WAVE = spec.wave_size
     WK = spec.waves_k
@@ -610,11 +601,6 @@ def build_fwd_gstream_wmma(
     else:
         m_choff = [c0] * TM
 
-    def _read16(addr):
-        lo = b.smem_load_vN(lds, c0, addr, dtype=io_type, n=8)
-        hi = b.smem_load_vN(lds, c0, b.add(addr, c8), dtype=io_type, n=8)
-        return b.vec_concat(lo, hi)
-
     def _bfrags(slot_base, ks):
         static, var = ks_off[ks]
         out = []
@@ -629,12 +615,12 @@ def build_fwd_gstream_wmma(
                 addr = b.add(addr, var)
             if BK > KPAD:
                 addr = b.add(addr, m_choff[m])
-            out.append(_read16(b.add(addr, b.const_i32(static))))
+            addr = b.add(addr, b.const_i32(static))
+            out.append(_lds_frag16(b, lds, addr, c0=c0, c8=c8, io_type=io_type))
         return out
 
     # ---- epilogue: 16 bytes per lane, masked through the buffer bounds.
     y_rsrc = b.buffer_rsrc(Yp, params["D_bytes"])
-    store = b.buffer_store_vN_bf16 if p.dtype == "bf16" else b.buffer_store_vN_f16
     ep_px = []
     for tn in range(TN):
         flat = b.add(
@@ -670,18 +656,7 @@ def build_fwd_gstream_wmma(
                 okm = ok if ep_ok[m] is None else b.land(ok, ep_ok[m])
                 voff = b.select(okm, off, params["D_bytes"])
                 val = b.vec_cast_f32_to(accs[m * TN + tn], io_type)
-                store(y_rsrc, voff, c0, val, 4)
-
-    def _wait_landed(it) -> None:
-        if NS == 2:
-            b.s_wait_tensorcnt(0)
-        else:
-            more = b.cmp_lt(b.add(it, b.const_i32(NS - 2)), n_it)
-            with b.scf_if_else(more) as (then_ctx, else_ctx):
-                with then_ctx:
-                    b.s_wait_tensorcnt(NS - 2)
-                with else_ctx:
-                    b.s_wait_tensorcnt(0)
+                _buf_store_vN(b, p.dtype, y_rsrc, voff, c0, val, 4)
 
     # ---- the walk.
     for st in range(NS - 1):
@@ -689,7 +664,7 @@ def build_fwd_gstream_wmma(
             _issue(b.add(task0, b.const_i32(st)), b.const_i32(st))
     zero_acc = b.zero_vec_f32(8)
     with b.scf_for(c0, n_it, c1, iv_name="it") as it:
-        _wait_landed(it)
+        _tdm_ring_wait(b, it, NS, n_it)
         b.sync_lds_only()  # band it is visible; slot (it - 1) % NS is free
         nxt = b.add(it, b.const_i32(NS - 1))
         with b.scf_if(b.cmp_lt(nxt, n_it)):

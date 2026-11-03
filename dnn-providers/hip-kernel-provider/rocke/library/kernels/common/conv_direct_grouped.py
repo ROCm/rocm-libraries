@@ -239,6 +239,15 @@ def _io_type(dtype: str):
     )
 
 
+def _buf_load_half(
+    b: IRBuilder, dtype: str, rsrc: Value, voff: Value, soff: Value
+) -> Value:
+    """Dtype-dispatch for a scalar 16-bit buffer load."""
+    if dtype == "bf16":
+        return b.buffer_load_bf16(rsrc, voff, soff)
+    return b.buffer_load_f16(rsrc, voff, soff)
+
+
 def _buf_load_vN(
     b: IRBuilder, dtype: str, rsrc: Value, voff: Value, soff: Value, dwords: int
 ) -> Value:
@@ -8211,9 +8220,7 @@ def build_direct_depthwise_dgrad_windowed(
     d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
 
     def load_half(rsrc: Value, off: Value) -> Value:
-        if p.dtype == "bf16":
-            return b.buffer_load_bf16(rsrc, off, c0)
-        return b.buffer_load_f16(rsrc, off, c0)
+        return _buf_load_half(b, p.dtype, rsrc, off, c0)
 
     # Preload W[ch + i, r, s]: f32 per tap (CPL-wide), or 16-bit tap pairs
     # (s, s + 1) for dot2 with a zero partner for an odd KW.
@@ -8579,10 +8586,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
                     ]
                 )
                 continue
-            if p.dtype == "bf16":
-                w = b.buffer_load_bf16(b_rsrc, off, c0)
-            else:
-                w = b.buffer_load_f16(b_rsrc, off, c0)
+            w = _buf_load_half(b, p.dtype, b_rsrc, off, c0)
             comps = [b.select(is_k[j], w, zero_half) for j in range(DW_DGRAD_MFMA_CH)]
             row.append(b.vec_pack(comps, io_type))
         weights.append(row)

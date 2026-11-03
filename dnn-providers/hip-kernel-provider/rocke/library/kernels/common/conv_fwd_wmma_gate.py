@@ -17,10 +17,15 @@ What each family reads from here:
 - the halo helpers (the input window a tile of output pixels reads, for the
   families that stage one per channel chunk): ``conv_direct_fwd_wmma`` and
   ``conv_direct_fwd_gstream_wmma``;
-- the WMMA atom (``WMMA_M`` / ``WMMA_N`` / ``WMMA_K``, :func:`wmma_ab_dtype`):
-  all of the above and ``conv_direct_dw_fwd_wmma`` (depthwise), which uses
-  neither the gate nor the validator tail: it checks its arch and shapes
-  itself.
+- :func:`wmma_fwd_tensor_bytes_reason`, the i32 byte-offset check of the
+  tail: also ``conv_fwd_small_wmma``, which ends with its own scheduler check;
+- ``CH_PAD``, the LDS row skew of a staged X / W tile: ``conv_direct_fwd_wmma``,
+  ``conv_fwd_small_wmma``, ``conv_direct_fwd_gstream_wmma`` and
+  ``conv_direct_fwd_tapouter_wmma``;
+- the WMMA atom (``WMMA_M`` / ``WMMA_N`` / ``WMMA_K``, :func:`wmma_ab_dtype`,
+  :func:`wmma_fwd_op`): all of the above and ``conv_direct_dw_fwd_wmma``
+  (depthwise), which uses neither the gate nor the validator tail: it checks
+  its arch and shapes itself.
 
 The other shape rules of each family stay in its own ``*_reason``.
 
@@ -42,6 +47,7 @@ from kernels.common.conv_direct_grouped import (
 )
 
 __all__ = [
+    "CH_PAD",
     "WMMA_K",
     "WMMA_M",
     "WMMA_N",
@@ -51,18 +57,36 @@ __all__ = [
     "wmma_fwd_halo_extent",
     "wmma_fwd_lead_cols",
     "wmma_fwd_limits_reason",
+    "wmma_fwd_op",
+    "wmma_fwd_tensor_bytes_reason",
 ]
 
 # The fp32-accumulating WMMA atom every forward family issues: M x N x K.
 WMMA_M = 16
 WMMA_N = 16
 WMMA_K = 32
+CH_PAD = 8  # channels of row skew past each LDS row of a staged tile (16 bytes)
 _I32_MAX = (1 << 31) - 1
 
 
 def wmma_ab_dtype(dtype: str) -> str:
     """The WMMA operand dtype of a conv ``dtype`` ("fp16" or "bf16")."""
     return "bf16" if dtype == "bf16" else "f16"
+
+
+def wmma_fwd_op(dtype: str, arch: str):
+    """The ``WMMA_M x WMMA_N x WMMA_K`` fp32-accumulating WMMA of conv
+    ``dtype`` on ``arch`` (the op every forward family issues)."""
+    ab = wmma_ab_dtype(dtype)
+    return ArchTarget.from_gfx(arch).mma.op_for_shape(
+        family="wmma",
+        a_dtype=ab,
+        b_dtype=ab,
+        c_dtype="fp32",
+        m=WMMA_M,
+        n=WMMA_N,
+        k=WMMA_K,
+    )
 
 
 def wmma_fwd_gate(
@@ -112,6 +136,16 @@ def wmma_fwd_limits_reason(
         normalize_scheduler_strategy(sched)
     except ValueError as e:
         return str(e)
+    why = wmma_fwd_tensor_bytes_reason(p)
+    if why is not None:
+        return why
+    if n_blocks > _I32_MAX:
+        return f"{n_blocks} workgroups exceed the i32 block id"
+    return None
+
+
+def wmma_fwd_tensor_bytes_reason(p: DirectConvProblem) -> str | None:
+    """Why the i32 byte offsets cannot address X, W or Y of ``p``."""
     tensor_bytes = (
         2 * p.N * p.H * p.W * p.total_c,
         2 * p.total_k * p.KH * p.KW * p.cpg,
@@ -119,8 +153,6 @@ def wmma_fwd_limits_reason(
     )
     if max(tensor_bytes) > _I32_MAX:
         return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
-    if n_blocks > _I32_MAX:
-        return f"{n_blocks} workgroups exceed the i32 block id"
     return None
 
 

@@ -802,7 +802,7 @@ rocke_status_t rocke_ceil_div_grid(const int* totals, const int* tiles, size_t n
 }
 
 /* ------------------------------------------------------------------ *
- * ceil_div / floor division
+ * ceil_div / align_up / floor division
  * ------------------------------------------------------------------ */
 
 long long rocke_floor_div(long long a, long long b)
@@ -818,6 +818,11 @@ long long rocke_ceil_div(long long a, long long b)
 {
     /* Python: -(-a // b). */
     return -rocke_floor_div(-a, b);
+}
+
+long long rocke_align_up(long long n, long long mult)
+{
+    return rocke_ceil_div(n, mult) * mult;
 }
 
 /* ------------------------------------------------------------------ *

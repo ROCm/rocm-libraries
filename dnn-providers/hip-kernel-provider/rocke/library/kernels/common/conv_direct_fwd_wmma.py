@@ -78,12 +78,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value, VectorType
+from rocke.helpers.spec import align_up, ceil_div
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -91,18 +91,16 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
 )
 from kernels.common.conv_fwd_wmma_gate import (
+    CH_PAD,
     WMMA_K,
-    WMMA_M,
-    WMMA_N,
-    wmma_ab_dtype,
     wmma_fwd_gate,
     wmma_fwd_halo_cols,
     wmma_fwd_halo_extent,
     wmma_fwd_lead_cols,
     wmma_fwd_limits_reason,
+    wmma_fwd_op,
 )
 
-CH_PAD = 8  # channels of row skew past each LDS row (16 bytes)
 FWD_WMMA_VGPR_BUDGET = 512
 # Channels one lane zeroes (one 16-byte store) when a single wave clears the
 # leading view pixel of a padded poly_view chunk.
@@ -112,10 +110,6 @@ POLY_ZERO_LANE_CH = 8
 def poly_view_zero_channels(wave_size: int) -> int:
     """Most channels of a padded poly_view chunk its one zeroing wave clears."""
     return POLY_ZERO_LANE_CH * wave_size
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
 
 
 @dataclass(frozen=True)
@@ -401,11 +395,11 @@ class DirectFwdWmmaSpec:
 
     def grid(self) -> tuple[int, int, int]:
         p = self.vp
-        n_kt = _ceil_div(self.kpg_eff, self.block_k)
-        n_ht = _ceil_div(p.Ho, self.tile_h)
-        n_wt = _ceil_div(p.Wo, self.tile_w)
+        n_kt = ceil_div(self.kpg_eff, self.block_k)
+        n_ht = ceil_div(p.Ho, self.tile_h)
+        n_wt = ceil_div(p.Wo, self.tile_w)
         return (
-            _ceil_div(p.N, self.tile_n) * self.groups_eff * n_ht * n_wt * n_kt,
+            ceil_div(p.N, self.tile_n) * self.groups_eff * n_ht * n_wt * n_kt,
             1,
             1,
         )
@@ -418,10 +412,10 @@ def fwd_wmma_tile_efficiency(spec: DirectFwdWmmaSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""
     p = spec.vp
     tiles = (
-        _ceil_div(p.N, spec.tile_n) * spec.tile_n,
-        _ceil_div(p.Ho, spec.tile_h) * spec.tile_h,
-        _ceil_div(p.Wo, spec.tile_w) * spec.tile_w,
-        _ceil_div(spec.kpg_eff, spec.block_k) * spec.block_k,
+        align_up(p.N, spec.tile_n),
+        align_up(p.Ho, spec.tile_h),
+        align_up(p.Wo, spec.tile_w),
+        align_up(spec.kpg_eff, spec.block_k),
     )
     return (p.N * p.Ho * p.Wo * spec.kpg_eff) / (
         tiles[0] * tiles[1] * tiles[2] * tiles[3]
@@ -662,6 +656,45 @@ def _tdm_descriptor_3d(
     return pk(group0), pk(group1), pk(group2), b.zero_vec(I32, 4), b.zero_vec(I32, 8)
 
 
+def _tdm_ring_wait(b: IRBuilder, step: Value, stages: int, n_steps: Value) -> None:
+    """Wait until this wave's TDM transfer of ring step ``step`` has landed.
+
+    With ``stages`` ring slots the step's transfer is the oldest in flight;
+    the ``stages - 2`` younger ones exist only while steps below ``n_steps``
+    remain to be issued, so the wait leaves those in flight or none.
+    """
+    if stages == 2:
+        b.s_wait_tensorcnt(0)
+        return
+    more = b.cmp_lt(b.add(step, b.const_i32(stages - 2)), n_steps)
+    with b.scf_if_else(more) as (then_ctx, else_ctx):
+        with then_ctx:
+            b.s_wait_tensorcnt(stages - 2)
+        with else_ctx:
+            b.s_wait_tensorcnt(0)
+
+
+def _lds_frag16(
+    b: IRBuilder,
+    lds: Value,
+    base: Value,
+    off: Value | None = None,
+    const_off: int = 0,
+    *,
+    c0: Value,
+    c8: Value,
+    io_type,
+) -> Value:
+    """One 16-element WMMA operand fragment from the ``[1, n]`` LDS buffer
+    ``lds``: the 8 elements at ``base`` (``base + (off + const_off)`` when
+    ``off`` is given) and the 8 after them. ``c0`` / ``c8`` are the caller's
+    i32 constants 0 and 8."""
+    addr = base if off is None else b.add(base, b.add(off, b.const_i32(const_off)))
+    lo = b.smem_load_vN(lds, c0, addr, dtype=io_type, n=8)
+    hi = b.smem_load_vN(lds, c0, b.add(addr, c8), dtype=io_type, n=8)
+    return b.vec_concat(lo, hi)
+
+
 def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     why = fwd_wmma_reason(spec, arch)
     if why is not None:
@@ -677,16 +710,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     PAD_W = p.PAD_W
     G = spec.pack_groups
     io_type = _io_type(p.dtype)
-    ab = wmma_ab_dtype(p.dtype)
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma",
-        a_dtype=ab,
-        b_dtype=ab,
-        c_dtype="fp32",
-        m=WMMA_M,
-        n=WMMA_N,
-        k=WMMA_K,
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     WAVE = spec.wave_size
     WK, WP = spec.waves_k, spec.waves_p
@@ -856,7 +880,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         zero_v = b.zero_vec(io_type, 8)
         for a, (_, z_elems, _) in enumerate(sub_halos):
             z_vecs = b.div(z_elems, b.const_i32(8))
-            for j in range(0, _ceil_div(max_z, 8), THREADS):
+            for j in range(0, ceil_div(max_z, 8), THREADS):
                 v = b.add(tid, b.const_i32(j))
                 with b.scf_if(b.cmp_lt(v, z_vecs)):
                     flat = b.mul(v, b.const_i32(8))
@@ -1013,10 +1037,9 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         )
 
     def _read16(stage_base: Value, off: Value, const_off: int) -> Value:
-        addr = b.add(stage_base, b.add(off, b.const_i32(const_off)))
-        lo = b.smem_load_vN(lds, c0, addr, dtype=io_type, n=8)
-        hi = b.smem_load_vN(lds, c0, b.add(addr, c8), dtype=io_type, n=8)
-        return b.vec_concat(lo, hi)
+        return _lds_frag16(
+            b, lds, stage_base, off, const_off, c0=c0, c8=c8, io_type=io_type
+        )
 
     TU = spec.tap_reuse
     TSH = spec.tap_shift
@@ -1065,17 +1088,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
 
     def _wait_landed(kc: Value) -> None:
         """Wait until this wave's transfer of chunk ``kc`` has landed."""
-        if NS == 2:
-            b.s_wait_tensorcnt(0)
-        else:
-            # This chunk's transfer is the oldest in flight; younger ones
-            # exist only while chunks remain to be issued.
-            more = b.cmp_lt(b.add(kc, b.const_i32(NS - 2)), n_chunks)
-            with b.scf_if_else(more) as (then_ctx, else_ctx):
-                with then_ctx:
-                    b.s_wait_tensorcnt(NS - 2)
-                with else_ctx:
-                    b.s_wait_tensorcnt(0)
+        _tdm_ring_wait(b, kc, NS, n_chunks)
 
     def _signal_next(kc: Value) -> None:
         """Split barrier, first half: this wave's reads of chunk ``kc`` are
@@ -1232,15 +1245,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             # row the halo issuers wait for its halo (their only transfer in
             # flight: the next chunk's goes out below, after the barrier).
             with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
-                if NS == 2:
-                    b.s_wait_tensorcnt(0)
-                else:
-                    more = b.cmp_lt(b.add(u, b.const_i32(NS - 2)), n_steps)
-                    with b.scf_if_else(more) as (then_ctx, else_ctx):
-                        with then_ctx:
-                            b.s_wait_tensorcnt(NS - 2)
-                        with else_ctx:
-                            b.s_wait_tensorcnt(0)
+                _tdm_ring_wait(b, u, NS, n_steps)
             if r == 0:
                 with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
                     b.s_wait_tensorcnt(0)

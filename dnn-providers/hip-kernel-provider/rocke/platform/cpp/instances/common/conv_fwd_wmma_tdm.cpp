@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * conv_fwd_wmma_tdm.cpp -- the rank-3 TDM descriptor of the wave32 WMMA forward
- * families (see rocke/instance_conv_fwd_wmma_tdm_internal.h).
+ * conv_fwd_wmma_tdm.cpp -- the TDM staging helpers of the wave32 WMMA forward
+ * families: the rank-3 TDM descriptor, the ring wait and the LDS fragment read
+ * (see rocke/instance_conv_fwd_wmma_tdm_internal.h).
  */
 #include <stdint.h>
 
@@ -76,4 +77,50 @@ void rocke_fwd_tdm_descriptor_3d(rocke_ir_builder_t* b,
     out[2] = rocke_b_vec_pack(b, r, 4, rocke_i32());
     out[3] = rocke_b_zero_vec(b, rocke_i32(), 4);
     out[4] = rocke_b_zero_vec(b, rocke_i32(), 8);
+}
+
+void rocke_fwd_tdm_ring_wait(rocke_ir_builder_t* b,
+                             rocke_value_t* step,
+                             int stages,
+                             rocke_value_t* n_steps)
+{
+    if(stages == 2)
+    {
+        rocke_b_s_wait_tensorcnt(b, 0);
+        return;
+    }
+    rocke_value_t* c = rocke_b_const_i32(b, stages - 2);
+    rocke_value_t* x = rocke_b_add(b, step, c);
+    rocke_value_t* more = rocke_b_cmp_lt(b, x, n_steps);
+    rocke_if_else_t ie = rocke_b_scf_if_else(b, more);
+    rocke_b_region_enter(b, ie.then_region);
+    rocke_b_s_wait_tensorcnt(b, stages - 2);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, ie.else_region);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_region_leave(b);
+}
+
+rocke_value_t* rocke_fwd_lds_frag16(rocke_ir_builder_t* b,
+                                    rocke_value_t* lds,
+                                    rocke_value_t* base,
+                                    rocke_value_t* off,
+                                    int64_t const_off,
+                                    rocke_value_t* c0,
+                                    rocke_value_t* c8,
+                                    const rocke_type_t* io_type)
+{
+    rocke_value_t* addr = base;
+    if(off != NULL)
+    {
+        rocke_value_t* k = rocke_b_const_i32(b, const_off);
+        rocke_value_t* t = rocke_b_add(b, off, k);
+        addr = rocke_b_add(b, base, t);
+    }
+    rocke_value_t* i0[2] = {c0, addr};
+    rocke_value_t* lo = rocke_b_smem_load_vN(b, lds, i0, 2, io_type, 8);
+    rocke_value_t* a8 = rocke_b_add(b, addr, c8);
+    rocke_value_t* i1[2] = {c0, a8};
+    rocke_value_t* hi = rocke_b_smem_load_vN(b, lds, i1, 2, io_type, 8);
+    return rocke_b_vec_concat(b, lo, hi);
 }

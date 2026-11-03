@@ -12,13 +12,34 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <string>
+
 #include "rocke/arch_target.h" /* rocke_set_unknown_arch_reason, rocke_mma_catalog_has_shape */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_floor_div, rocke_ceil_div */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_floor_div, rocke_ceil_div, set_reason */
 #include "rocke/ir.h" /* rocke_scheduler_strategy_reason */
+#include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 
 const char* rocke_wmma_ab_dtype(const char* dtype)
 {
     return dtype && strcmp(dtype, "bf16") == 0 ? "bf16" : "f16";
+}
+
+const char* rocke_wmma_fwd_op_id(rocke_ir_builder_t* b,
+                                 const char* dtype,
+                                 const char* arch,
+                                 const char* who)
+{
+    const char* ab = rocke_wmma_ab_dtype(dtype);
+    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+    const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
+        target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, ROCKE_FWD_WMMA_K, NULL);
+    if(op == NULL || op->op_id == NULL)
+    {
+        const std::string msg = std::string(who) + ": no WMMA atom";
+        rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, msg.c_str());
+        return NULL;
+    }
+    return op->op_id;
 }
 
 bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
@@ -93,6 +114,22 @@ bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
     char msg[512];
     if(rocke_scheduler_strategy_reason(sched, reason, reason_cap))
         return false;
+    if(!rocke_wmma_fwd_tensor_bytes_ok(p, reason, reason_cap))
+        return false;
+    if(n_blocks > INT32_MAX)
+    {
+        snprintf(msg, sizeof msg, "%lld workgroups exceed the i32 block id", n_blocks);
+        rocke_spec_set_reason(reason, reason_cap, msg);
+        return false;
+    }
+    return true;
+}
+
+bool rocke_wmma_fwd_tensor_bytes_ok(const rocke_direct_conv_problem_t* p,
+                                    char* reason,
+                                    size_t reason_cap)
+{
+    char msg[512];
     const long long total_c = rocke_direct_conv_problem_total_c(p);
     const long long total_k = rocke_direct_conv_problem_total_k(p);
     const long long Ho = rocke_direct_conv_problem_Ho(p);
@@ -108,12 +145,6 @@ bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
     if(mx > INT32_MAX)
     {
         snprintf(msg, sizeof msg, "tensors of %lld B exceed the i32 byte offsets", mx);
-        rocke_spec_set_reason(reason, reason_cap, msg);
-        return false;
-    }
-    if(n_blocks > INT32_MAX)
-    {
-        snprintf(msg, sizeof msg, "%lld workgroups exceed the i32 block id", n_blocks);
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }

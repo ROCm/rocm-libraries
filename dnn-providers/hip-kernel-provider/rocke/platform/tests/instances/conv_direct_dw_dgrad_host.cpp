@@ -500,9 +500,23 @@ static void test_fwd_wmma_scheduler_reason(void)
     CHECK(rocke_scheduler_strategy_is_valid(NULL), "NULL strategy refused");
 }
 
-/* Python: a // b and ceil_div(a, b) = -(-a // b), for every sign. */
+/* Python: a // b, ceil_div(a, b) = -(-a // b) and align_up(a, b) =
+ * ceil_div(a, b) * b, for every sign. */
 static void test_ceil_floor_div(void)
 {
+    const long long up[][3] = {/* n, mult, align_up(n, mult) */
+                               {7, 4, 8},
+                               {8, 4, 8},
+                               {0, 4, 0},
+                               {-7, 4, -4},
+                               {13, 16, 16}};
+    for(const auto& u : up)
+        CHECK(rocke_align_up(u[0], u[1]) == u[2],
+              "rocke_align_up(%lld, %lld) = %lld, want %lld",
+              u[0],
+              u[1],
+              rocke_align_up(u[0], u[1]),
+              u[2]);
     const long long cases[][4] = {/* a, b, a // b, ceil_div(a, b) */
                                   {7, 2, 3, 4},
                                   {8, 2, 4, 4},

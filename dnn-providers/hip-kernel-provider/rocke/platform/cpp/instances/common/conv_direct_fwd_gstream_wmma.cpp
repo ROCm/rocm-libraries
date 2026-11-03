@@ -25,9 +25,9 @@
 #include <vector>
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
@@ -41,9 +41,6 @@ typedef rocke_value_t* V;
 namespace
 {
 
-/* conv_direct_fwd_wmma.WMMA_K / CH_PAD (conv_fwd_wmma_gate's). */
-constexpr int kWmmaK = ROCKE_FWD_WMMA_K;
-constexpr int kChPad = ROCKE_FWD_WMMA_CH_PAD;
 bool gs_span16(const rocke_fwd_gstream_wmma_spec_t* s)
 {
     return s->problem.cpg <= 16;
@@ -89,7 +86,7 @@ int gs_lead_cols(const rocke_fwd_gstream_wmma_spec_t* s)
 
 int gs_x_pitch(const rocke_fwd_gstream_wmma_spec_t* s)
 {
-    return rocke_fwd_gstream_wmma_block_c(s) + kChPad;
+    return rocke_fwd_gstream_wmma_block_c(s) + ROCKE_FWD_WMMA_CH_PAD;
 }
 
 long gs_phase_elems(const rocke_fwd_gstream_wmma_spec_t* s)
@@ -121,7 +118,7 @@ std::vector<gs_kstep> gs_k_steps(const rocke_fwd_gstream_wmma_spec_t* s)
             out.push_back({j, j + 1 < T ? j + 1 : -1, 0});
         return out;
     }
-    const int nc = (int)rocke_ceil_div(s->problem.cpg, kWmmaK);
+    const int nc = (int)rocke_ceil_div(s->problem.cpg, ROCKE_FWD_WMMA_K);
     for(int t = 0; t < T; ++t)
         for(int c = 0; c < nc; ++c)
             out.push_back({t, t, c});
@@ -173,7 +170,7 @@ rocke_fwd_gstream_wmma_spec_t rocke_fwd_gstream_wmma_spec_default(void)
 int rocke_fwd_gstream_wmma_kpad(const rocke_fwd_gstream_wmma_spec_t* spec)
 {
     const int kpg = spec->problem.kpg;
-    return gs_span16(spec) ? kpg : (int)rocke_ceil_div(kpg, 16) * 16;
+    return gs_span16(spec) ? kpg : (int)rocke_align_up(kpg, 16);
 }
 
 int rocke_fwd_gstream_wmma_block_k(const rocke_fwd_gstream_wmma_spec_t* spec)
@@ -217,8 +214,7 @@ double rocke_fwd_gstream_wmma_tile_efficiency(const rocke_fwd_gstream_wmma_spec_
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const long long hp = gs_n_bands(spec) * rocke_fwd_gstream_wmma_tile_h(spec);
-    const long long wp
-        = rocke_ceil_div(rocke_direct_conv_problem_Wo(p), spec->tile_w) * spec->tile_w;
+    const long long wp = rocke_align_up(rocke_direct_conv_problem_Wo(p), spec->tile_w);
     return (double)(rocke_direct_conv_problem_Ho(p) * rocke_direct_conv_problem_Wo(p))
            / (double)(hp * wp);
 }
@@ -319,10 +315,10 @@ bool rocke_fwd_gstream_wmma_is_valid_spec(const rocke_fwd_gstream_wmma_spec_t* s
         GS_FAIL("empty output %lldx%lld", Ho, Wo);
     if(p->cpg != p->kpg)
         GS_FAIL("cpg %d != kpg %d", p->cpg, p->kpg);
-    if(p->cpg != 8 && p->cpg != 16 && (p->cpg < kWmmaK || p->cpg % 8 != 0))
+    if(p->cpg != 8 && p->cpg != 16 && (p->cpg < ROCKE_FWD_WMMA_K || p->cpg % 8 != 0))
         GS_FAIL("cpg %d not 8, 16 or a multiple of 8 from 32", p->cpg);
-    if(p->cpg > 16 && p->cpg % kWmmaK != 0
-       && rocke_ceil_div(p->cpg, kWmmaK) * kWmmaK - p->cpg > kChPad)
+    if(p->cpg > 16 && p->cpg % ROCKE_FWD_WMMA_K != 0
+       && rocke_align_up(p->cpg, ROCKE_FWD_WMMA_K) - p->cpg > ROCKE_FWD_WMMA_CH_PAD)
         GS_FAIL("cpg %d: its last k-step reads past the LDS row skew", p->cpg);
     if(std::min(std::min(spec->waves_k, spec->waves_p), std::min(spec->tiles_k, spec->tiles_p)) < 1)
         GS_FAIL("waves and tiles must be >= 1");
@@ -406,16 +402,10 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
     const int KW = p->KW;
     const int S = p->stride, PAD = p->PAD;
     const int CPG = p->cpg;
-    const char* ab = rocke_wmma_ab_dtype(p->dtype);
-    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    const rocke_mmaop_t* mop = rocke_archtarget_op_for_shape(
-        target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, kWmmaK, NULL);
-    if(mop == NULL || mop->op_id == NULL)
-    {
-        rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_fwd_gstream_wmma: no WMMA atom");
+    const char* wmma_op = rocke_wmma_fwd_op_id(
+        b, rocke_direct_conv_problem_dtype(p), arch, "build_fwd_gstream_wmma");
+    if(wmma_op == NULL)
         return NULL;
-    }
-    const char* wmma_op = mop->op_id;
 
     const int WAVE = spec->wave_size;
     const int WK = spec->waves_k;
@@ -437,7 +427,7 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
     const bool SHARE_B = gs_share_b(spec);
     const std::vector<gs_kstep> KSTEPS = gs_k_steps(spec);
     const int KPAD = rocke_fwd_gstream_wmma_kpad(spec);
-    const bool PADG = KPAD != p->kpg || (CPG % kWmmaK != 0 && !SPAN16);
+    const bool PADG = KPAD != p->kpg || (CPG % ROCKE_FWD_WMMA_K != 0 && !SPAN16);
 
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
@@ -706,7 +696,7 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
             {
                 if(!SPAN16)
                 {
-                    V x = ci(b, k.cc * kWmmaK);
+                    V x = ci(b, k.cc * ROCKE_FWD_WMMA_K);
                     V y = rocke_b_mul(b, lhalf, c16);
                     V z = rocke_b_add(b, x, y);
                     gidx = rocke_b_add(b, gidx, z);
@@ -715,7 +705,7 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
                 {
                     V ch;
                     {
-                        V x = ci(b, k.cc * kWmmaK);
+                        V x = ci(b, k.cc * ROCKE_FWD_WMMA_K);
                         V y = rocke_b_mul(b, lhalf, c16);
                         ch = rocke_b_add(b, x, y);
                     }
@@ -812,7 +802,7 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
     {
         const int tb = k.t1 >= 0 ? k.t1 : k.t0;
         if(tap_off(k.t0) == tap_off(tb))
-            ks_off.push_back({tap_off(k.t0) + k.cc * kWmmaK, NULL});
+            ks_off.push_back({tap_off(k.t0) + k.cc * ROCKE_FWD_WMMA_K, NULL});
         else
         {
             V eq = rocke_b_cmp_eq(b, lhalf, c0);
@@ -839,15 +829,6 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
     else
         m_choff.assign(TM, c0);
 
-    auto read16 = [&](V addr) -> V {
-        V i0[2] = {c0, addr};
-        V lo = rocke_b_smem_load_vN(b, lds, i0, 2, io_type, 8);
-        V a8 = rocke_b_add(b, addr, c8);
-        V i1[2] = {c0, a8};
-        V hi = rocke_b_smem_load_vN(b, lds, i1, 2, io_type, 8);
-        return rocke_b_vec_concat(b, lo, hi);
-    };
-
     auto bfrags = [&](V slot_base, size_t ks) -> std::vector<V> {
         const ks_off_t& ko = ks_off[ks];
         std::vector<V> out;
@@ -868,7 +849,7 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
                 addr = rocke_b_add(b, addr, m_choff[mt.first]);
             V s = ci(b, ko.stat);
             V a = rocke_b_add(b, addr, s);
-            out.push_back(read16(a));
+            out.push_back(rocke_fwd_lds_frag16(b, lds, a, NULL, 0, c0, c8, io_type));
         }
         return out;
     };
@@ -944,29 +925,9 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
                 V okm = ep_ok[m] == NULL ? ok : rocke_b_land(b, ok, ep_ok[m]);
                 V voff = rocke_b_select(b, okm, off, prm.D_bytes);
                 V val = rocke_b_vec_cast_f32_to(b, accs[m * TN + tn], io_type);
-                if(bf16)
-                    rocke_b_buffer_store_vN_bf16(b, y_rsrc, voff, c0, val, 4);
-                else
-                    rocke_b_buffer_store_vN_f16(b, y_rsrc, voff, c0, val, 4);
+                rocke_dconv_buf_store_vN(b, bf16, y_rsrc, voff, c0, val, 4);
             }
         }
-    };
-
-    auto wait_landed = [&](V it) {
-        if(NS == 2)
-        {
-            rocke_b_s_wait_tensorcnt(b, 0);
-            return;
-        }
-        V x = rocke_b_add(b, it, ci(b, NS - 2));
-        V more = rocke_b_cmp_lt(b, x, n_it);
-        rocke_if_else_t ie = rocke_b_scf_if_else(b, more);
-        rocke_b_region_enter(b, ie.then_region);
-        rocke_b_s_wait_tensorcnt(b, NS - 2);
-        rocke_b_region_leave(b);
-        rocke_b_region_enter(b, ie.else_region);
-        rocke_b_s_wait_tensorcnt(b, 0);
-        rocke_b_region_leave(b);
     };
 
     /* ---- the walk. */
@@ -987,7 +948,7 @@ rocke_kernel_def_t* rocke_build_fwd_gstream_wmma(rocke_ir_builder_t* b,
     rocke_b_region_enter(b, loop.body);
     {
         V it = loop.iv;
-        wait_landed(it);
+        rocke_fwd_tdm_ring_wait(b, it, NS, n_it);
         rocke_b_sync_lds_only(b);
         V nxt = rocke_b_add(b, it, ci(b, NS - 1));
         V lt = rocke_b_cmp_lt(b, nxt, n_it);

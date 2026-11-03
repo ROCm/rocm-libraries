@@ -70,26 +70,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
-from rocke.helpers.spec import ceil_div
+from rocke.helpers.spec import align_up, ceil_div
 
-from kernels.common.conv_direct_fwd_wmma import CH_PAD, WMMA_K, _tdm_descriptor_3d
+from kernels.common.conv_direct_fwd_wmma import (
+    _lds_frag16,
+    _tdm_descriptor_3d,
+    _tdm_ring_wait,
+)
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
     emit_direct_params,
 )
 from kernels.common.conv_fwd_wmma_gate import (
-    WMMA_M,
-    WMMA_N,
-    wmma_ab_dtype,
+    CH_PAD,
+    WMMA_K,
     wmma_fwd_gate,
     wmma_fwd_limits_reason,
+    wmma_fwd_op,
 )
 
 TAPOUTER_VGPR_BUDGET = 512
@@ -201,9 +204,9 @@ def tapouter_tile_efficiency(spec: DirectFwdTapOuterSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""
     p = spec.problem
     tiles = (
-        ceil_div(p.Ho, spec.tile_h) * spec.tile_h,
-        ceil_div(p.Wo, spec.tile_w) * spec.tile_w,
-        ceil_div(p.kpg, spec.block_k) * spec.block_k,
+        align_up(p.Ho, spec.tile_h),
+        align_up(p.Wo, spec.tile_w),
+        align_up(p.kpg, spec.block_k),
     )
     return (p.Ho * p.Wo * p.kpg) / (tiles[0] * tiles[1] * tiles[2])
 
@@ -276,16 +279,7 @@ def build_direct_fwd_tapouter_wmma(
     DH, DW = p.dil_h, p.dil_w
     PAD = p.PAD
     io_type = _io_type(p.dtype)
-    ab = wmma_ab_dtype(p.dtype)
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma",
-        a_dtype=ab,
-        b_dtype=ab,
-        c_dtype="fp32",
-        m=WMMA_M,
-        n=WMMA_N,
-        k=WMMA_K,
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     WAVE = spec.wave_size
     WK, WP = spec.waves_k, spec.waves_p
@@ -498,32 +492,17 @@ def build_direct_fwd_tapouter_wmma(
         )
 
     def _read16(base: Value, off: Value, const_off: int) -> Value:
-        addr = b.add(base, b.add(off, b.const_i32(const_off)))
-        lo = b.smem_load_vN(lds, c0, addr, dtype=io_type, n=8)
-        hi = b.smem_load_vN(lds, c0, b.add(addr, c8), dtype=io_type, n=8)
-        return b.vec_concat(lo, hi)
+        return _lds_frag16(b, lds, base, off, const_off, c0=c0, c8=c8, io_type=io_type)
 
     def _frags(base: Value, ks: int):
         af = [_read16(base, wei_off[m], ks * WMMA_K) for m in range(TM)]
         bf = [_read16(base, px_off[tn], ks * WMMA_K) for tn in range(TN)]
         return af, bf
 
-    def _wait_landed(u: Value) -> None:
-        """Wait until this wave's transfer of step ``u`` has landed."""
-        if NS == 2:
-            b.s_wait_tensorcnt(0)
-        else:
-            more = b.cmp_lt(b.add(u, b.const_i32(NS - 2)), n_steps)
-            with b.scf_if_else(more) as (then_ctx, else_ctx):
-                with then_ctx:
-                    b.s_wait_tensorcnt(NS - 2)
-                with else_ctx:
-                    b.s_wait_tensorcnt(0)
-
     KSTEPS = CK // WMMA_K
 
     def _step(u: Value, accs: list[Value]) -> list[Value]:
-        _wait_landed(u)
+        _tdm_ring_wait(b, u, NS, n_steps)
         b.sync_lds_only()
         nxt = b.add(u, b.const_i32(NS - 1))
         with b.scf_if(b.cmp_lt(nxt, n_steps)):

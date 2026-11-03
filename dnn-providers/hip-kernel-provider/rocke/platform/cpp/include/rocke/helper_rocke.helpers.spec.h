@@ -355,7 +355,7 @@ rocke_status_t
     rocke_ceil_div_grid(const int* totals, const int* tiles, size_t num_dims, int out[3]);
 
 /* ------------------------------------------------------------------ *
- * ceil_div (and the floor division it rests on)
+ * ceil_div / align_up (and the floor division they rest on)
  * ------------------------------------------------------------------ *
  *
  * Python:
@@ -363,12 +363,16 @@ rocke_status_t
  *   def ceil_div(a: int, b: int) -> int:
  *       return -(-a // b)
  *
+ *   def align_up(n: int, mult: int) -> int:
+ *       return ceil_div(n, mult) * mult
+ *
  * Host arithmetic only (tile counts, grids, output extents); never emits IR.
- * rocke_floor_div is Python's `a // b` and rocke_ceil_div is ceil_div, both
- * exact for any sign of `a` and `b`; `b` must not be 0 (Python's
- * ZeroDivisionError). */
+ * rocke_floor_div is Python's `a // b`, rocke_ceil_div is ceil_div and
+ * rocke_align_up is align_up, exact for any sign of `a` and `b`; `b` / `mult`
+ * must not be 0 (Python's ZeroDivisionError). */
 long long rocke_floor_div(long long a, long long b);
 long long rocke_ceil_div(long long a, long long b);
+long long rocke_align_up(long long n, long long mult);
 
 /* ------------------------------------------------------------------ *
  * spec reason-string copy

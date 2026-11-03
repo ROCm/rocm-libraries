@@ -61,6 +61,7 @@ from kernels.common.conv_direct_grouped import (
     DW_DGRAD_WIN_OOB_LANE,
     DW_DGRAD_WIN_OOB_UNIFORM,
     DirectConvProblem,
+    _buf_load_half,
     _buf_load_vN,
     _buf_store_vN,
     _dw_mfma_passes,
@@ -71,7 +72,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
-from kernels.common.conv_fwd_wmma_gate import WMMA_K, WMMA_M, WMMA_N, wmma_ab_dtype
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
 
 DW_FWD_WMMA_ARCHES = ("gfx1250",)
 DW_FWD_WMMA_WAVE = 32
@@ -256,8 +257,6 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
 
     Y[n, ho, wo, c] = sum_{r, s} W[c, r, s] * X[n, ho - PAD + r, wo - PAD + s, c].
     """
-    from rocke.core.arch import ArchTarget
-
     ok, why = is_valid_dw_fwd_wmma_spec(spec, arch)
     if not ok:
         raise ValueError(f"invalid DwFwdWmmaSpec for {arch}: {why}")
@@ -298,16 +297,7 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     oob_lane = b.const_i32(DW_DGRAD_WIN_OOB_LANE)
     oob_uniform = b.const_i32(DW_DGRAD_WIN_OOB_UNIFORM)
     zero_acc = b.zero_vec_f32(8)
-    ab = wmma_ab_dtype(p.dtype)
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma",
-        a_dtype=ab,
-        b_dtype=ab,
-        c_dtype="fp32",
-        m=WMMA_M,
-        n=WMMA_N,
-        k=WMMA_K,
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
     zero_f32 = b.const_f32(0.0)
     if p.dtype == "bf16":
         zero_half = b.trunc_f32_to_bf16(zero_f32)
@@ -352,10 +342,7 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
                 ok = b.land(ch_ok, b.land(b.cmp_ge(s, c0), b.cmp_lt(s, c_KW)))
                 tap = b.add(b.const_i32(r * KW), s)
                 off = b.select(ok, b.add(w_base, b.mul(tap, c2)), oob_lane)
-                if p.dtype == "bf16":
-                    w = b.buffer_load_bf16(b_rsrc, off, c0)
-                else:
-                    w = b.buffer_load_f16(b_rsrc, off, c0)
+                w = _buf_load_half(b, p.dtype, b_rsrc, off, c0)
                 comps += [b.select(is_k[i], w, zero_half) for i in range(CH)]
             row.append(b.vec_pack(comps, io_type))
         weights.append(row)

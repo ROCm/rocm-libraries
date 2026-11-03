@@ -25,9 +25,9 @@
 #include <vector>
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
@@ -41,17 +41,14 @@ typedef rocke_value_t* V;
 namespace
 {
 
-/* conv_direct_fwd_wmma.WMMA_K / CH_PAD (conv_fwd_wmma_gate's). */
-constexpr int kWmmaK = ROCKE_FWD_WMMA_K;
-constexpr int kChPad = ROCKE_FWD_WMMA_CH_PAD;
 int to_x_pitch(const rocke_fwd_tapouter_wmma_spec_t* s)
 {
-    return s->ck + kChPad;
+    return s->ck + ROCKE_FWD_WMMA_CH_PAD;
 }
 
 int to_epi_pitch(const rocke_fwd_tapouter_wmma_spec_t* s)
 {
-    return rocke_fwd_tapouter_wmma_block_k(s) + kChPad;
+    return rocke_fwd_tapouter_wmma_block_k(s) + ROCKE_FWD_WMMA_CH_PAD;
 }
 
 long to_win_elems(const rocke_fwd_tapouter_wmma_spec_t* s)
@@ -140,10 +137,9 @@ double rocke_fwd_tapouter_wmma_tile_efficiency(const rocke_fwd_tapouter_wmma_spe
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const int th = rocke_fwd_tapouter_wmma_tile_h(spec);
     const int bk = rocke_fwd_tapouter_wmma_block_k(spec);
-    const double t0 = (double)(rocke_ceil_div(rocke_direct_conv_problem_Ho(p), th) * th);
-    const double t1
-        = (double)(rocke_ceil_div(rocke_direct_conv_problem_Wo(p), spec->tile_w) * spec->tile_w);
-    const double t2 = (double)(rocke_ceil_div(p->kpg, bk) * bk);
+    const double t0 = (double)rocke_align_up(rocke_direct_conv_problem_Ho(p), th);
+    const double t1 = (double)rocke_align_up(rocke_direct_conv_problem_Wo(p), spec->tile_w);
+    const double t2 = (double)rocke_align_up(p->kpg, bk);
     return (double)(rocke_direct_conv_problem_Ho(p) * rocke_direct_conv_problem_Wo(p) * p->kpg)
            / (t0 * t1 * t2);
 }
@@ -230,8 +226,8 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
         TO_FAIL("empty output %lldx%lld", Ho, Wo);
     if(p->cpg % 8 != 0 || p->kpg % 8 != 0)
         TO_FAIL("cpg %d and kpg %d must be multiples of 8 (16-byte rows)", p->cpg, p->kpg);
-    if(spec->ck % kWmmaK != 0 || spec->ck <= 0)
-        TO_FAIL("ck %d must be a positive multiple of %d", spec->ck, kWmmaK);
+    if(spec->ck % ROCKE_FWD_WMMA_K != 0 || spec->ck <= 0)
+        TO_FAIL("ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
     if(std::min(std::min(spec->waves_k, spec->waves_p), std::min(spec->tiles_k, spec->tiles_p)) < 1)
         TO_FAIL("waves and tiles must be >= 1");
     if(spec->waves_k * spec->waves_p < 2)
@@ -305,16 +301,10 @@ rocke_kernel_def_t* rocke_build_fwd_tapouter_wmma(rocke_ir_builder_t* b,
     const int KH = p->KH, KW = p->KW;
     const int DH = p->dil_h, DW = p->dil_w;
     const int PAD = p->PAD;
-    const char* ab = rocke_wmma_ab_dtype(p->dtype);
-    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    const rocke_mmaop_t* mop = rocke_archtarget_op_for_shape(
-        target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, kWmmaK, NULL);
-    if(mop == NULL || mop->op_id == NULL)
-    {
-        rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_fwd_tapouter_wmma: no WMMA atom");
+    const char* wmma_op = rocke_wmma_fwd_op_id(
+        b, rocke_direct_conv_problem_dtype(p), arch, "build_direct_fwd_tapouter_wmma");
+    if(wmma_op == NULL)
         return NULL;
-    }
-    const char* wmma_op = mop->op_id;
 
     const int WAVE = spec->wave_size;
     const int WK = spec->waves_k;
@@ -674,48 +664,21 @@ rocke_kernel_def_t* rocke_build_fwd_tapouter_wmma(rocke_ir_builder_t* b,
     }
 
     auto read16 = [&](V base, V off, int const_off) -> V {
-        V a;
-        {
-            V x = rocke_b_add(b, off, ci(b, const_off));
-            a = rocke_b_add(b, base, x);
-        }
-        V i0[2] = {c0, a};
-        V lo = rocke_b_smem_load_vN(b, lds, i0, 2, io_type, 8);
-        V a8 = rocke_b_add(b, a, c8);
-        V i1[2] = {c0, a8};
-        V hi = rocke_b_smem_load_vN(b, lds, i1, 2, io_type, 8);
-        return rocke_b_vec_concat(b, lo, hi);
+        return rocke_fwd_lds_frag16(b, lds, base, off, const_off, c0, c8, io_type);
     };
     auto frags = [&](V base, int ks, std::vector<V>* af, std::vector<V>* bf) {
         af->clear();
         bf->clear();
         for(int m = 0; m < TM; ++m)
-            af->push_back(read16(base, wei_off[m], ks * kWmmaK));
+            af->push_back(read16(base, wei_off[m], ks * ROCKE_FWD_WMMA_K));
         for(int tn = 0; tn < TN; ++tn)
-            bf->push_back(read16(base, px_off[tn], ks * kWmmaK));
+            bf->push_back(read16(base, px_off[tn], ks * ROCKE_FWD_WMMA_K));
     };
 
-    auto wait_landed = [&](V u) {
-        if(NS == 2)
-        {
-            rocke_b_s_wait_tensorcnt(b, 0);
-            return;
-        }
-        V x = rocke_b_add(b, u, ci(b, NS - 2));
-        V more = rocke_b_cmp_lt(b, x, n_steps);
-        rocke_if_else_t ie = rocke_b_scf_if_else(b, more);
-        rocke_b_region_enter(b, ie.then_region);
-        rocke_b_s_wait_tensorcnt(b, NS - 2);
-        rocke_b_region_leave(b);
-        rocke_b_region_enter(b, ie.else_region);
-        rocke_b_s_wait_tensorcnt(b, 0);
-        rocke_b_region_leave(b);
-    };
-
-    const int KSTEPS = CK / kWmmaK;
+    const int KSTEPS = CK / ROCKE_FWD_WMMA_K;
 
     auto step = [&](V u, std::vector<V> accs) -> std::vector<V> {
-        wait_landed(u);
+        rocke_fwd_tdm_ring_wait(b, u, NS, n_steps);
         rocke_b_sync_lds_only(b);
         V nxt = rocke_b_add(b, u, ci(b, NS - 1));
         V lt = rocke_b_cmp_lt(b, nxt, n_steps);
