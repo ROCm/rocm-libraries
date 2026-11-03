@@ -778,6 +778,103 @@ void testing_bdsqr_oob_regression()
     ROCSOLVER_TEST_CHECK(T, err, 2 * n);
 }
 
+// Regression test for an invalid HIP launch configuration (hipErrorInvalidConfiguration)
+// triggered when the input bidiagonal matrix is already diagonal, i.e. every
+// off-diagonal element E[i] is below the internal convergence threshold.
+//
+// Root cause: the host-side iteration loop in rocsolver_bdsqr_template builds its
+// split-indexed launch grids directly from the split-block count read back from
+// the device:
+//     dim3 gridSplits(1, h_params.num_splits, batch_count);
+//     dim3 gridVUC((nvuc_max - 1) / BS1 + 1, h_params.num_splits, batch_count);
+// h_params.num_splits comes from bdsqr_init's scan for off-diagonal elements that
+// are not already below the convergence threshold. If the input is already
+// diagonal to within tolerance, that scan finds zero split blocks, so
+// h_params.num_splits == 0 and gridSplits.y / gridVUC.y == 0 on the very first
+// pass through the loop -- before bdsqr_chk_completed has had a chance to mark
+// the (trivially converged) instance as complete and let the host break out
+// early. ROCSOLVER_LAUNCH_KERNEL explicitly rejects any launch configuration
+// with a zero grid dimension rather than silently launching zero blocks, so the
+// kernel launch would fail outright.
+//
+// The two data sets below are crafted to produce exactly zero split blocks from
+// the first bdsqr_init scan: a genuinely diagonal matrix (distinct nonzero
+// diagonal entries, zero superdiagonal), and the degenerate all-zero matrix.
+template <typename T>
+void testing_bdsqr_zero_splits_regression()
+{
+    using S = decltype(std::real(T{}));
+
+    auto run_case = [](std::vector<S> const& Ddata, std::vector<S> const& Edata) {
+        rocblas_local_handle handle;
+        rocblas_fill uplo = rocblas_fill_upper;
+        rocblas_int n = rocblas_int(Ddata.size());
+        rocblas_int nv = 0, nu = 0, nc = 0;
+        rocblas_int ldv = 1, ldu = 1, ldc = 1;
+
+        host_strided_batch_vector<S> hD(n, 1, n, 1);
+        host_strided_batch_vector<S> hE(n - 1, 1, n - 1, 1);
+        host_strided_batch_vector<T> hV(1, 1, 1, 1);
+        host_strided_batch_vector<T> hU(1, 1, 1, 1);
+        host_strided_batch_vector<T> hC(1, 1, 1, 1);
+        host_strided_batch_vector<rocblas_int> hInfo(1, 1, 1, 1);
+        host_strided_batch_vector<S> hDRes(n, 1, n, 1);
+        host_strided_batch_vector<rocblas_int> hInfoRes(1, 1, 1, 1);
+
+        device_strided_batch_vector<S> dD(n, 1, n, 1);
+        device_strided_batch_vector<S> dE(n - 1, 1, n - 1, 1);
+        device_strided_batch_vector<T> dV(1, 1, 1, 1);
+        device_strided_batch_vector<T> dU(1, 1, 1, 1);
+        device_strided_batch_vector<T> dC(1, 1, 1, 1);
+        device_strided_batch_vector<rocblas_int> dInfo(1, 1, 1, 1);
+        CHECK_HIP_ERROR(dD.memcheck());
+        CHECK_HIP_ERROR(dE.memcheck());
+        CHECK_HIP_ERROR(dV.memcheck());
+        CHECK_HIP_ERROR(dU.memcheck());
+        CHECK_HIP_ERROR(dC.memcheck());
+        CHECK_HIP_ERROR(dInfo.memcheck());
+
+        // deterministic, already-diagonal (or all-zero) bidiagonal data: a zero
+        // superdiagonal produces exactly zero split blocks on the first
+        // bdsqr_init scan, regardless of what the diagonal entries are
+        for(rocblas_int i = 0; i < n; i++)
+            hD[0][i] = Ddata[i];
+        for(rocblas_int i = 0; i < n - 1; i++)
+            hE[0][i] = Edata[i];
+
+        CHECK_HIP_ERROR(dD.transfer_from(hD));
+        CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+        // this call previously threw hipErrorInvalidConfiguration due to
+        // gridSplits/gridVUC being built with a zero y-dimension when no split
+        // blocks exist
+        CHECK_ROCBLAS_ERROR(rocsolver_bdsqr(handle, uplo, n, nv, nu, nc, dD.data(), dE.data(),
+                                            dV.data(), ldv, dU.data(), ldu, dC.data(), ldc,
+                                            dInfo.data()));
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
+
+        // also verify correctness against the LAPACK-equivalent CPU reference
+        CHECK_HIP_ERROR(hDRes.transfer_from(dD));
+        CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
+
+        std::vector<S> hW(4 * n);
+        cpu_bdsqr(uplo, n, 0, 0, 0, hD[0], hE[0], hV[0], ldv, hU[0], ldu, hC[0], ldc, hW.data(),
+                  hInfo[0]);
+
+        EXPECT_EQ(hInfo[0][0], hInfoRes[0][0]);
+        double err = norm_error('F', 1, n, 1, hD[0], hDRes[0]);
+        ROCSOLVER_TEST_CHECK(T, err, 2 * n);
+    };
+
+    // case 1: already-diagonal matrix (distinct nonzero singular values, zero
+    // superdiagonal)
+    run_case({S(1.0), S(2.0), S(3.0), S(4.0)}, {S(0.0), S(0.0), S(0.0)});
+
+    // case 2: degenerate all-zero matrix
+    run_case({S(0.0), S(0.0), S(0.0), S(0.0)}, {S(0.0), S(0.0), S(0.0)});
+}
+
 #define EXTERN_TESTING_BDSQR(...) extern template void testing_bdsqr<__VA_ARGS__>(Arguments&);
 
 INSTANTIATE(EXTERN_TESTING_BDSQR, FOREACH_SCALAR_TYPE, APPLY_STAMP)

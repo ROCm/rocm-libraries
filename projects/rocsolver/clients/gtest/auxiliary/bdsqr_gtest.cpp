@@ -220,3 +220,27 @@ TEST(BDSQR, __oob_regression_double_complex)
 {
     testing_bdsqr_oob_regression<rocblas_double_complex>();
 }
+
+// regression tests for an invalid HIP launch configuration when the input
+// bidiagonal matrix is already diagonal (zero/negligible superdiagonal), so
+// that zero split blocks are produced on the first pass (see the detailed
+// explanation in testing_bdsqr_zero_splits_regression, in testing_bdsqr.hpp)
+TEST(BDSQR, __zero_splits_regression_float)
+{
+    testing_bdsqr_zero_splits_regression<float>();
+}
+
+TEST(BDSQR, __zero_splits_regression_double)
+{
+    testing_bdsqr_zero_splits_regression<double>();
+}
+
+TEST(BDSQR, __zero_splits_regression_float_complex)
+{
+    testing_bdsqr_zero_splits_regression<rocblas_float_complex>();
+}
+
+TEST(BDSQR, __zero_splits_regression_double_complex)
+{
+    testing_bdsqr_zero_splits_regression<rocblas_double_complex>();
+}
