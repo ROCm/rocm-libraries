@@ -349,6 +349,11 @@ namespace
         {
             INFO(("hipblasLtCreate"));
             REQUIRE((hipblasLtCreate(&handle) == HIPBLAS_STATUS_SUCCESS));
+#ifdef HIPBLASLT_JIT_HIPKITTENS
+            // The HipKittens kernels are hand-written, which uniform summation
+            // order refuses, and a handle enables it by default.
+            REQUIRE((hipblasLtSetUniformSummationOrder(handle, 0) == HIPBLAS_STATUS_SUCCESS));
+#endif
         }
         {
             INFO(("hipblasLtMatmulDescCreate"));

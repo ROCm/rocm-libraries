@@ -423,6 +423,9 @@ TEST_CASE("the HipKittens gfx950 backend", "[jit-gpu]")
     hipStream_t           stream{};
     jit::Diagnostics      diagnostics;
     BLAS(hipblasLtCreate(&handle));
+    // The HipKittens kernels are hand-written, which uniform summation order
+    // refuses, and a handle enables it by default.
+    BLAS(hipblasLtSetUniformSummationOrder(handle, 0));
     BLAS(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F));
     const hipblasOperation_t transpose = HIPBLAS_OP_T;
     BLAS(hipblasLtMatmulDescSetAttribute(
