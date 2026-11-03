@@ -1595,6 +1595,33 @@ _GFX942_3D_PP = {
         split_atomic_pairs=True,
         epi_lds_barriers=True,
     ),
+    # 88-92: the other two-ahead schedules (pps 4 / 3 / 6 / 11) and m_band on
+    # the non-box ping-pong.
+    88: dict(
+        tile_m=256,
+        tile_n=128,
+        tile_k=64,
+        warp_m=4,
+        warp_n=2,
+        tapk_pp_sched=4,
+        tapk_pp_epi=2,
+        tapk_ztrim=1,
+    ),
+    89: dict(_T128, tapk_pp_sched=3),
+    90: dict(_T128, tapk_pp_sched=6),
+    91: dict(_T128, tapk_pp_sched=11),
+    92: dict(
+        tile_m=512,
+        tile_n=128,
+        tile_k=32,
+        warp_m=4,
+        warp_n=2,
+        tapk_pp_sched=1,
+        tapk_pp_epi=2,
+        tapk_pp_bslab=1,
+        m_band=11,
+        cshuffle_m_chunks=2,
+    ),
 }
 
 

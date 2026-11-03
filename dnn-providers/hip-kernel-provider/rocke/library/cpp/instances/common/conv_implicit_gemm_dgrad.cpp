@@ -671,6 +671,17 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             return false;
         }
     }
+    if(s->m_band < 0
+       || (s->m_band
+           && (!s->xcd_remap || s->split_k != 1 || !_dgrad_folds_sub_gemm_record(s)
+               || s->tapk_pp_persist || s->xh_persist || s->pp_boxes || s->pp_streamk)))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "m_band needs xcd_remap, split_k 1 and the folded (stride-1) record (not with "
+                 "tapk_pp_persist / xh_persist / pp_boxes / pp_streamk)");
+        return false;
+    }
     /* Branch knobs the C++ engine does not implement yet. */
     const bool xh_ok = s->tapk_xhalo && s->tap_outer_k;
     if(s->xh_yring
@@ -685,12 +696,13 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             "ring of P = k * Wi >= tile_m + X - 1 rows within the A slab");
         return false;
     }
-    if((s->tapk_ilv && !xh_ok) || (s->xhalo_exact && !xh_ok) || (s->m_band && !xh_ok)
-       || (s->xh_stride_m && !xh_ok) || s->xh_dlds || (s->xh_epi_lin && !xh_ok)
-       || (s->xh_tap_rsrc && !xh_ok) || (s->xh_yring && !xh_ok) || (s->tapk_lds_ahead && !xh_ok)
-       || (s->tapk_lds_barrier && !xh_ok) || (s->tapk_setprio && !xh_ok)
-       || (s->lds_xor && !s->tapk_pingpong && !xh_ok) || (s->xh_b_wide && !xh_ok)
-       || (s->xh_b_kpad && !xh_ok) || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->split_k <= 1))
+    if((s->tapk_ilv && !xh_ok) || (s->xhalo_exact && !xh_ok)
+       || (s->m_band && !xh_ok && !s->tapk_pingpong) || (s->xh_stride_m && !xh_ok) || s->xh_dlds
+       || (s->xh_epi_lin && !xh_ok) || (s->xh_tap_rsrc && !xh_ok) || (s->xh_yring && !xh_ok)
+       || (s->tapk_lds_ahead && !xh_ok) || (s->tapk_lds_barrier && !xh_ok)
+       || (s->tapk_setprio && !xh_ok) || (s->lds_xor && !s->tapk_pingpong && !xh_ok)
+       || (s->xh_b_wide && !xh_ok) || (s->xh_b_kpad && !xh_ok)
+       || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->split_k <= 1))
        || (s->split_atomic_pairs
            && !(s->tapk_pingpong && (s->pp_boxes == 7 || s->pp_boxes == 77) && s->split_k > 1
                 && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0 && s->wave_size == 64))
@@ -7721,7 +7733,7 @@ static rocke_kernel_def_t*
             }
             const int half = k_atoms / 2;
             const int pps = spec->tapk_pp_sched;
-            if(pps == 0 || pps == 3 || pps == 4 || pps == 6 || pps == 7 || pps == 11)
+            if(pps == 0 || pps == 7)
             {
                 rocke_i_set_err(
                     b, ROCKE_ERR_VALUE, "tapk_pp_sched %d is Python-only (no C++ twin yet)", pps);
@@ -7829,11 +7841,22 @@ static rocke_kernel_def_t*
                 advance(st, nxt);
                 rocke_ctl_staged_t a2, b2;
                 a2.count = b2.count = 0;
-                if(pps == 12)
+                if(pps == 3)
+                {
+                    ld_a(&a2);
+                    ld_b(&b2);
+                }
+                if(pps == 4)
+                    ld_a(&a2);
+                if(pps == 11 || pps == 12)
                     ld_b(&b2);
                 rocke_value_t* acc_a[ROCKE_CONV_MAX_ACCS];
                 mfmas(0, half, iv, acc_a);
-                if(pps == 12)
+                if(pps == 3)
+                    interleave(n_mf_half, a2.count + b2.count);
+                else if(pps == 4)
+                    interleave(n_mf_half, a2.count);
+                else if(pps == 11 || pps == 12)
                     interleave(n_mf_half, b2.count);
                 else
                     for(int j = 0; j < n_mf_half; ++j)
@@ -7858,8 +7881,10 @@ static rocke_kernel_def_t*
                     ld_a(&a2);
                     ld_b(&b2);
                 }
-                if(pps == 5)
+                if(pps == 5 || pps == 11)
                     ld_a(&a2);
+                if(pps == 6)
+                    ld_b(&b2);
                 rocke_b_sched_barrier(b, 0);
                 rocke_b_sync_lds_only(b);
                 /* [compute B] */
@@ -7869,17 +7894,17 @@ static rocke_kernel_def_t*
                     ld_a(&a2);
                     ld_b(&b2);
                 }
-                if(pps == 5)
+                if(pps == 4 || pps == 5)
                     ld_b(&b2);
-                if(pps == 12)
+                if(pps == 6 || pps == 12)
                     ld_a(&a2);
                 rocke_value_t* acc_b[ROCKE_CONV_MAX_ACCS];
                 mfmas(half, k_atoms, acc_a, acc_b);
                 if(pps == 2)
                     interleave(n_mf_half, a2.count + b2.count);
-                if(pps == 5)
+                if(pps == 4 || pps == 5)
                     interleave(n_mf_half, b2.count);
-                if(pps == 12)
+                if(pps == 6 || pps == 12)
                     interleave(n_mf_half, a2.count);
                 rocke_b_sched_barrier(b, 0);
                 rocke_b_s_setprio(b, 0);
