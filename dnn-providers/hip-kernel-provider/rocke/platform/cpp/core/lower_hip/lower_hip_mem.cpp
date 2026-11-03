@@ -1074,8 +1074,9 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
     }
     ptr = op->operands[0];
     num_bytes = op->operands[1];
-    /* num_records is an int, so the (int) cast would truncate an i64 byte
-     * count at every LLVM version. A constant-space ptr is kept: the HIP
+    /* num_records is cast to (int), which ROCm 7's builtin (int num_records)
+     * and later clang's (uint64_t num_records) both accept; the cast would
+     * truncate an i64 byte count. A constant-space ptr is kept: the HIP
      * signature declares every pointer parameter the same way, and the builtin
      * takes a void*. */
     {
@@ -1086,8 +1087,8 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
             return rocke_h_fail(lw,
                                 ROCKE_ERR_VALUE,
                                 "tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
-                                "%s; the HIP builtin takes an int num_records, so the byte count "
-                                "would be truncated at every LLVM version; pass it as i32",
+                                "%s; the HIP lowering casts num_records to (int), so a wider byte "
+                                "count would be truncated; pass it as i32",
                                 nb_ty);
         }
     }

@@ -2404,7 +2404,8 @@ class _Lowerer:
         #
         # Signature on ROCm 7 amdclang:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
-        # int num_records, int flags)``
+        # int num_records, int flags)``; later clang takes a ``uint64_t``
+        # ``num_records``.
         #
         # The flags word is the rsrc DWORD3. Its format / out-of-bounds
         # encoding is ISA-specific (the gfx9 value makes every raw buffer
@@ -2415,8 +2416,9 @@ class _Lowerer:
         # dropped on store; without it the compiler can lower buffer loads to
         # unbounded single-dword loads with no bounds check.
         #
-        # ``num_records`` is an ``int``, so the ``(int)`` cast would truncate an
-        # i64 byte count at every LLVM version; anything but i32 is refused.
+        # ``num_records`` is cast to ``(int)``, which either signature accepts;
+        # the cast would truncate an i64 byte count, so anything but i32 is
+        # refused.
         # The C++ engine refuses with the same text. A constant-space ``ptr``
         # is kept: the HIP signature declares every pointer parameter the same
         # way whatever its ``addr_space``, and the builtin takes a ``void*``.
@@ -2424,8 +2426,8 @@ class _Lowerer:
         if nb_ty != "i32":
             raise ValueError(
                 f"tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
-                f"{nb_ty}; the HIP builtin takes an int num_records, so the byte "
-                "count would be truncated at every LLVM version; pass it as i32"
+                f"{nb_ty}; the HIP lowering casts num_records to (int), so a wider "
+                "byte count would be truncated; pass it as i32"
             )
         ptr, num_bytes = op.operands
         word3 = backend_for(self.arch).buffer_rsrc_word3

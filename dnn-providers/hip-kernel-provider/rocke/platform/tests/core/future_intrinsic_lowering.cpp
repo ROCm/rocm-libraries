@@ -3391,8 +3391,8 @@ void case_buffer_rsrc_refusals()
         ROCKE_LLVM_FLAVOR_LLVM22);
     EXPECT_IR(ir22, "@llvm.amdgcn.make.buffer.rsrc.p8.p1(ptr addrspace(1) %X, i16 0, i64 %n, ");
 
-    /* The HIP builtin takes an int num_records, so the HIP lowering refuses an
-     * i64 num_bytes whatever the LLVM version. */
+    /* The HIP lowering casts num_records to (int), so it refuses an i64
+     * num_bytes whatever the LLVM version. */
     std::string hip_err;
     const rocke_status_t hip_st = lower_hip_expect_error(
         "rsrc_i64_hip",
@@ -3401,8 +3401,8 @@ void case_buffer_rsrc_refusals()
         &hip_err);
     if(hip_st != ROCKE_ERR_VALUE
        || hip_err.find("tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
-                       "the HIP builtin takes an int num_records, so the byte count would be "
-                       "truncated at every LLVM version; pass it as i32")
+                       "the HIP lowering casts num_records to (int), so a wider byte count "
+                       "would be truncated; pass it as i32")
               == std::string::npos)
         fail(("i64 num_bytes in HIP: " + hip_err).c_str(), __LINE__);
 

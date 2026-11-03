@@ -20,10 +20,10 @@ Before these refusals both engines emitted the call anyway, and an LLVM 20
 expected 'ptr addrspace(1)'"; "'%n' defined with type 'i64' but expected
 'i32'").
 
-The HIP lowering calls ``__builtin_amdgcn_make_buffer_rsrc``, whose
-``num_records`` is an ``int``: it cast an i64 ``num_bytes`` to ``(int)``, which
-truncates the byte count at every LLVM version, so it refuses any width but i32.
-It keeps a constant-space pointer: the HIP signature declares every pointer
+The HIP lowering calls ``__builtin_amdgcn_make_buffer_rsrc`` with
+``num_records`` cast to ``(int)`` (ROCm 7's builtin takes an ``int`` there,
+later clang a ``uint64_t``). The cast would truncate an i64 ``num_bytes``, so
+the HIP lowering refuses any width but i32. It keeps a constant-space pointer: the HIP signature declares every pointer
 parameter the same way, and the builtin takes a ``void*``.
 """
 
@@ -115,8 +115,8 @@ def test_both_hip_lowerings_refuse_an_i64_num_bytes():
         ARCH,
         ValueError,
         "tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
-        "the HIP builtin takes an int num_records, so the byte count would be "
-        "truncated at every LLVM version; pass it as i32",
+        "the HIP lowering casts num_records to (int), so a wider byte count "
+        "would be truncated; pass it as i32",
     )
 
 

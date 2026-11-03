@@ -158,9 +158,10 @@ i64 elements, so those two lower through LLVM only.
 parameter declared `addr_space="constant"` (`ptr addrspace(4)` in the kernel header) is refused by
 the LLVM lowering of both engines, as the `global_ptr_*` ops refuse it. `num_bytes` is i32 or i64 at
 llvm22 and later (an i32 is zero-extended); llvm20's intrinsic takes an i32 `num_records`, so an i64
-`num_bytes` is refused there. The HIP lowering's `__builtin_amdgcn_make_buffer_rsrc` takes an `int`
-`num_records` at every LLVM version, so it refuses any `num_bytes` but i32; it keeps a constant-space
-pointer, since the HIP signature declares every pointer parameter alike and the builtin takes a `void*`.
+`num_bytes` is refused there. The HIP lowering passes `num_records` to
+`__builtin_amdgcn_make_buffer_rsrc` cast to `(int)`, which would truncate a wider byte count, so it
+refuses any `num_bytes` but i32. It keeps a constant-space pointer, since the HIP signature declares
+every pointer parameter alike and the builtin takes a `void*`.
 
 ## MFMA
 
