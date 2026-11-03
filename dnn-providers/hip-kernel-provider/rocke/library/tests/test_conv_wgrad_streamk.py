@@ -314,17 +314,30 @@ class TestStreamKValidator(unittest.TestCase):
                 got = eng.conv_wgrad_is_valid_spec(_spec_dict(spec), arch)
                 self.assertEqual(tuple(got), want)
 
-    def test_cpp_rejects_grouped_non_streamk(self):
-        # Intentional divergence: grouped wgrad is only ported on the stream-K
-        # path, so the C port rejects a grouped spec Python accepts -- but only
-        # after every gate the two share.
+    def test_cpp_accepts_grouped_non_streamk(self):
+        # Grouped wgrad runs grid-per-group in both engines (the group index
+        # on block_id_z), so the C port accepts the grouped specs Python
+        # accepts, reports the same first failing gate otherwise, and lowers
+        # them to the same bytes. Group merging stays stream-K only in C++.
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
         eng = _engine()
-        spec = _spec(_GROUPED, streamk="off")
-        self.assertEqual(is_valid_wgrad_spec(spec, "gfx950"), (True, "ok"))
-        ok, why = eng.conv_wgrad_is_valid_spec(_spec_dict(spec), "gfx950")
-        self.assertFalse(ok)
-        self.assertIn("grouped convolution (groups=3 > 1)", why)
+        for arch, edge in (("gfx950", 32), ("gfx942", 16)):
+            spec = _spec(_GROUPED, edge=edge, streamk="off")
+            with self.subTest(arch=arch):
+                self.assertEqual(is_valid_wgrad_spec(spec, arch), (True, "ok"))
+                self.assertEqual(
+                    tuple(eng.conv_wgrad_is_valid_spec(_spec_dict(spec), arch)),
+                    (True, "ok"),
+                )
+                py_ll = _lower_kernel_to_llvm_python(
+                    build_implicit_gemm_conv_wgrad(spec, arch=arch), arch=arch
+                )
+                self.assertEqual(
+                    eng.conv_wgrad_lower_llvm(_spec_dict(spec), arch), py_ll
+                )
         bad = _spec(_GROUPED, streamk="off", tile_m=96)
+        self.assertFalse(is_valid_wgrad_spec(bad, "gfx950")[0])
         self.assertEqual(
             tuple(eng.conv_wgrad_is_valid_spec(_spec_dict(bad), "gfx950")),
             is_valid_wgrad_spec(bad, "gfx950"),
