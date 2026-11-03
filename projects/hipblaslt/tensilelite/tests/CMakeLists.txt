@@ -74,7 +74,7 @@ target_sources(tensilelite-tests
 
 # MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
 # which is only defined when MSGPACK is the active serialization format
-# (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
+# (see tensilelite/src/msgpack/MessagePack.cpp). The test also writes msgpack mapping
 # files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
 if(NOT TENSILELITE_ENABLE_YAML)
     # The solution-record fixtures are written into TEST_DATA_DIR on every
