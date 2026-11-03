@@ -1,6 +1,6 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --Gfx1250HazardPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --Gfx1250XnackHazardPass --print-output
 #
-# Gfx1250HazardPass initially implements single-group replay protection
+# Gfx1250XnackHazardPass initially implements single-group replay protection
 # that hardware does not insert itself. It must:
 #   * split unsafe SMEM and FLAT groups with s_wait_xcnt 0;
 #   * drain VMEM before the first atomic, but not between atomics;
@@ -107,7 +107,7 @@ st.func @smem_multi_op_self_overlap() {
 
 # A multi-DWORD SMEM load may complete partially, so it can never overwrite its
 # own source. That is not repairable with a drain and the pass aborts on it;
-# see the death test in unit/asm/Gfx1250HazardPassTest.cpp.
+# see the death test in unit/asm/Gfx1250XnackHazardPassTest.cpp.
 
 # A scalar prefetch joins the SMEM group, so it needs an XCnt drain only when an
 # SMEM group is still outstanding (BUG #20).

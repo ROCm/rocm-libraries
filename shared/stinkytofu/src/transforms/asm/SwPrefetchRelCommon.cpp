@@ -35,7 +35,7 @@ using namespace stinkytofu;
 /// BUG #20 (MI400-SPG §4.5.6.1): in xnack-replay mode XCNT must be 0 when an `s_prefetch_*`
 /// issues. A prefetch belongs to the SMEM group, so single-group hardware already drains XCNT when
 /// it follows any other group or a non-memory instruction; only an open SMEM group needs a wait.
-/// Gfx1250HazardPass rejects kernels that may enable multi-group replay.
+/// Gfx1250XnackHazardPass rejects kernels that may enable multi-group replay.
 bool needsSwPrefetchXcntWait(BasicBlock& bb, IRList::iterator insertBefore, bool emitXnackWait) {
     if (!emitXnackWait) return false;
     return gfx1250::smemReplayGroupOpenBefore(bb, insertBefore);

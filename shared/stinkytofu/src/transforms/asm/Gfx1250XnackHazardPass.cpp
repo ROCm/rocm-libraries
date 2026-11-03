@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 
 #include <algorithm>
 #include <array>
@@ -117,7 +117,7 @@ bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayM
 // memory-level parallelism. Report it: a register allocation without the
 // overlap would have kept the group intact.
 void warnGroupBreak(const BasicBlock& bb, const StinkyInstruction& inst, const char* memKind) {
-    std::cerr << "[Gfx1250HazardPass] warning: " << memKind << " instruction in block \""
+    std::cerr << "[Gfx1250XnackHazardPass] warning: " << memKind << " instruction in block \""
               << bb.getLabel()
               << "\" overwrites a replay source of its group; "
                  "inserting s_wait_xcnt 0 to break the group:\n";
@@ -129,7 +129,7 @@ void warnGroupBreak(const BasicBlock& bb, const StinkyInstruction& inst, const c
 // partially complete, and the XNACKed DWORDs then replay with the source
 // already clobbered. Only a different register allocation can fix it.
 void reportUnrepairableSmemSelfOverlap(const BasicBlock& bb, const StinkyInstruction& inst) {
-    std::cerr << "[Gfx1250HazardPass] error: multi-DWORD SMEM instruction in block \""
+    std::cerr << "[Gfx1250XnackHazardPass] error: multi-DWORD SMEM instruction in block \""
               << bb.getLabel()
               << "\" overwrites one of its own source registers; "
                  "s_wait_xcnt cannot repair this register allocation:\n";
@@ -150,19 +150,19 @@ void assertFallthrough(const BasicBlock& previous, const BasicBlock& next) {
            "fall-through successor is missing its predecessor edge");
 }
 
-class Gfx1250HazardPass : public Pass {
+class Gfx1250XnackHazardPass : public Pass {
    public:
     static char ID;
 
-    explicit Gfx1250HazardPass(bool enableXcntDrainProfile)
+    explicit Gfx1250XnackHazardPass(bool enableXcntDrainProfile)
         : enableXcntDrainProfile(enableXcntDrainProfile) {}
 
     const char* getName() const override {
-        return "Gfx1250HazardPass";
+        return "Gfx1250XnackHazardPass";
     }
 
     Pass::ID getPassID() const override {
-        return &Gfx1250HazardPass::ID;
+        return &Gfx1250XnackHazardPass::ID;
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
@@ -330,7 +330,7 @@ class Gfx1250HazardPass : public Pass {
     static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile,
                               bool enableXnackReplay) {
         if (enableXnackReplay && gfx1250::mayEnableMultiGroupReplay(func)) {
-            report_fatal_error("Gfx1250HazardPass: '" + func.getName() +
+            report_fatal_error("Gfx1250XnackHazardPass: '" + func.getName() +
                                "' may set MODE.REPLAY_MODE (multi-group XNACK replay), but only "
                                "the single-group replay policy is implemented");
         }
@@ -358,17 +358,17 @@ class Gfx1250HazardPass : public Pass {
     bool enableXcntDrainProfile = false;
 };
 
-char Gfx1250HazardPass::ID = 0;
+char Gfx1250XnackHazardPass::ID = 0;
 
 // Runs the per-function hazard fix under one shared profile so an enabled profile
 // aggregates all functions. Only needed for profiling.
-class Gfx1250HazardModulePass : public ModulePass {
+class Gfx1250XnackHazardModulePass : public ModulePass {
    public:
-    explicit Gfx1250HazardModulePass(bool enableXcntDrainProfile)
+    explicit Gfx1250XnackHazardModulePass(bool enableXcntDrainProfile)
         : enableXcntDrainProfile(enableXcntDrainProfile) {}
 
     const char* getName() const override {
-        return "Gfx1250HazardModulePass";
+        return "Gfx1250XnackHazardModulePass";
     }
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
@@ -382,7 +382,7 @@ class Gfx1250HazardModulePass : public ModulePass {
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
         for (Function* f : M.getFunctions())
             if (f && !f->empty())
-                Gfx1250HazardPass::runOnFunction(*f, archId, *profile, caps.enableXnackReplay);
+                Gfx1250XnackHazardPass::runOnFunction(*f, archId, *profile, caps.enableXnackReplay);
         profile->print();
         return PreservedAnalyses::all();
     }
@@ -393,11 +393,11 @@ class Gfx1250HazardModulePass : public ModulePass {
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createGfx1250HazardPass(bool enableXcntDrainProfile) {
-    return std::make_unique<Gfx1250HazardPass>(enableXcntDrainProfile);
+std::unique_ptr<Pass> createGfx1250XnackHazardPass(bool enableXcntDrainProfile) {
+    return std::make_unique<Gfx1250XnackHazardPass>(enableXcntDrainProfile);
 }
 
-std::unique_ptr<ModulePass> createGfx1250HazardModulePass(bool enableXcntDrainProfile) {
-    return std::make_unique<Gfx1250HazardModulePass>(enableXcntDrainProfile);
+std::unique_ptr<ModulePass> createGfx1250XnackHazardModulePass(bool enableXcntDrainProfile) {
+    return std::make_unique<Gfx1250XnackHazardModulePass>(enableXcntDrainProfile);
 }
 }  // namespace stinkytofu

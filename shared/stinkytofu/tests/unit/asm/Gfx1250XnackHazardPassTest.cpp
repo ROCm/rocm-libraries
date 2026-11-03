@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Covers Gfx1250HazardPass gate and rule behaviour across the four
+// Covers Gfx1250XnackHazardPass gate and rule behaviour across the four
 // (RequiresXCntForVolatileVMEM, EnableXnackReplay) cap combinations:
 //
 //   requiresXCnt  enableReplay  pass runs  RuleAtomic  RuleOthers (SMEM/FLAT)
@@ -10,7 +10,7 @@
 //   false         true          yes        yes         yes
 //   true          true          yes        yes         yes
 //
-// Rule naming matches XcntDrainReason in Gfx1250HazardPass.cpp:
+// Rule naming matches XcntDrainReason in Gfx1250XnackHazardPass.cpp:
 //   RuleAtomic  = AtomicRule4a4a  : s_wait_xcnt before first atomic after non-atomic VMEM
 //   RuleOthers  = SmemRule33 / FlatRule22 : source-clobber protection for SMEM and FLAT groups
 //
@@ -30,7 +30,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/support/Casting.hpp"
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250ReplayGroup.hpp"
 
 using namespace stinkytofu;
@@ -55,7 +55,7 @@ static size_t countXcntDrains(const Function& func) {
 // Fixture
 // ---------------------------------------------------------------------------
 
-class Gfx1250HazardPassTest : public ::testing::Test {
+class Gfx1250XnackHazardPassTest : public ::testing::Test {
    protected:
     std::array<int, 3> arch{12, 5, 0};
 
@@ -72,7 +72,7 @@ class Gfx1250HazardPassTest : public ::testing::Test {
         passCtx.setGemmTileConfig(config);
         passCtx.setAsmCapsConfig(caps);
         AnalysisManager am;
-        createGfx1250HazardPass()->run(*func, passCtx, am);
+        createGfx1250XnackHazardPass()->run(*func, passCtx, am);
         return func;
     }
 
@@ -83,7 +83,7 @@ class Gfx1250HazardPassTest : public ::testing::Test {
         passCtx.setGemmTileConfig(config);
         passCtx.setAsmCapsConfig(caps);
         AnalysisManager am;
-        createGfx1250HazardPass()->run(func, passCtx, am);
+        createGfx1250XnackHazardPass()->run(func, passCtx, am);
     }
 };
 
@@ -92,7 +92,7 @@ class Gfx1250HazardPassTest : public ::testing::Test {
 // ---------------------------------------------------------------------------
 
 // Both caps false → pass is a no-op, no drains inserted.
-TEST_F(Gfx1250HazardPassTest, GateBothFalse_NoOp) {
+TEST_F(Gfx1250XnackHazardPassTest, GateBothFalse_NoOp) {
     // SMEM source clobber would normally fire RuleOthers (SmemRule3) under
     // enableXnackReplay; with both caps false the pass must not run at all.
     std::string ir = R"(
@@ -110,7 +110,7 @@ st.func @gate_both_false() {
 }
 
 // requiresXCntForVolatileVMEM=true, enableXnackReplay=false → pass runs (RuleAtomic).
-TEST_F(Gfx1250HazardPassTest, GateRequiresXCnt_PassRuns) {
+TEST_F(Gfx1250XnackHazardPassTest, GateRequiresXCnt_PassRuns) {
     // buffer_load → global_atomic triggers RuleAtomic (AtomicRule4a).
     std::string ir = R"(
 st.func @gate_requires_xcnt() {
@@ -128,7 +128,7 @@ st.func @gate_requires_xcnt() {
 }
 
 // requiresXCntForVolatileVMEM=false, enableXnackReplay=true → pass runs (RuleOthers).
-TEST_F(Gfx1250HazardPassTest, GateEnableXnackReplay_PassRuns) {
+TEST_F(Gfx1250XnackHazardPassTest, GateEnableXnackReplay_PassRuns) {
     // SMEM source clobber triggers RuleOthers (SmemRule3) when enableXnackReplay is set.
     std::string ir = R"(
 st.func @gate_xnack_replay() {
@@ -151,7 +151,7 @@ st.func @gate_xnack_replay() {
 
 // requiresXCntForVolatileVMEM=true, enableXnackReplay=false:
 // RuleAtomic fires, RuleOthers does not.
-TEST_F(Gfx1250HazardPassTest, RequiresXCntOnly_RuleAtomicFires_RuleOthersSkipped) {
+TEST_F(Gfx1250XnackHazardPassTest, RequiresXCntOnly_RuleAtomicFires_RuleOthersSkipped) {
     // buffer_load (non-atomic) → global_atomic: RuleAtomic inserts one drain.
     // SMEM source clobber is also present but RuleOthers must NOT fire
     // (no enableXnackReplay). The VMEM→SMEM type switch also clears state.
@@ -175,7 +175,7 @@ st.func @requires_xcnt_only() {
 
 // requiresXCntForVolatileVMEM=false, enableXnackReplay=true:
 // Both RuleAtomic and RuleOthers fire.
-TEST_F(Gfx1250HazardPassTest, EnableXnackReplayOnly_RuleAtomicAndRuleOthersFire) {
+TEST_F(Gfx1250XnackHazardPassTest, EnableXnackReplayOnly_RuleAtomicAndRuleOthersFire) {
     // RuleOthers (SmemRule3): SMEM source clobber → one drain.
     // RuleAtomic (AtomicRule4a): buffer_load → global_atomic → one drain.
     // The SMEM→VMEM type switch clears state between the two groups.
@@ -198,7 +198,7 @@ st.func @xnack_replay_only() {
 
 // requiresXCntForVolatileVMEM=true, enableXnackReplay=true:
 // Same result as enableXnackReplay-only — RuleAtomic and RuleOthers both fire.
-TEST_F(Gfx1250HazardPassTest, BothTrue_RuleAtomicAndRuleOthersFire) {
+TEST_F(Gfx1250XnackHazardPassTest, BothTrue_RuleAtomicAndRuleOthersFire) {
     std::string ir = R"(
 st.func @both_true() {
 ^entry:
@@ -218,7 +218,7 @@ st.func @both_true() {
 }
 
 // RuleAtomic is absent when there are no atomics, even with requiresXCntForVolatileVMEM=true.
-TEST_F(Gfx1250HazardPassTest, RequiresXCntOnly_NoAtomics_NoDrains) {
+TEST_F(Gfx1250XnackHazardPassTest, RequiresXCntOnly_NoAtomics_NoDrains) {
     std::string ir = R"(
 st.func @requires_xcnt_no_atomics() {
 ^entry:
@@ -235,7 +235,7 @@ st.func @requires_xcnt_no_atomics() {
 }
 
 // RuleOthers (FlatRule2): FLAT source-clobber is only repaired under enableXnackReplay.
-TEST_F(Gfx1250HazardPassTest, RuleOthers_FlatSourceClobber_RequiresXCntOnly_NoDrain) {
+TEST_F(Gfx1250XnackHazardPassTest, RuleOthers_FlatSourceClobber_RequiresXCntOnly_NoDrain) {
     std::string ir = R"(
 st.func @flat_source_clobber_xcnt_only() {
 ^entry:
@@ -252,7 +252,7 @@ st.func @flat_source_clobber_xcnt_only() {
     EXPECT_EQ(countXcntDrains(*func), 0u);
 }
 
-TEST_F(Gfx1250HazardPassTest, RuleOthers_FlatSourceClobber_EnableXnackReplay_DrainInserted) {
+TEST_F(Gfx1250XnackHazardPassTest, RuleOthers_FlatSourceClobber_EnableXnackReplay_DrainInserted) {
     std::string ir = R"(
 st.func @flat_source_clobber_replay() {
 ^entry:
@@ -274,7 +274,7 @@ st.func @flat_source_clobber_replay() {
 
 // A release build compiles the assert away and only prints the error.
 #ifndef NDEBUG
-TEST_F(Gfx1250HazardPassTest, MultiDwordSmemSelfOverlapAborts) {
+TEST_F(Gfx1250XnackHazardPassTest, MultiDwordSmemSelfOverlapAborts) {
     std::string irString = R"(
 st.func @smem_self_overlap() {
 ^entry:
@@ -331,7 +331,7 @@ static void prependSetreg(Function& func, GfxArchID archId, const ModeWrite& w) 
     setreg->addSrcReg(StinkyRegister(w.value));
 }
 
-TEST_F(Gfx1250HazardPassTest, MultiGroupReplayModeWriteAborts) {
+TEST_F(Gfx1250XnackHazardPassTest, MultiGroupReplayModeWriteAborts) {
     const std::string irString = R"(
 st.func @replay_mode() {
 ^entry:

@@ -15,7 +15,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
-/// gfx1250 XNACK-replay group model shared by Gfx1250HazardPass and the SW instruction prefetch
+/// gfx1250 XNACK-replay group model shared by Gfx1250XnackHazardPass and the SW instruction prefetch
 /// passes (MI400-SPG §6.9.1, §6.9.4).
 namespace stinkytofu::gfx1250 {
 
@@ -153,7 +153,7 @@ inline bool textMayWriteMode(std::string_view text) {
 }
 
 /// True if \p func may switch the wave to multi-group XNACK replay. The single-group model in
-/// this header and in Gfx1250HazardPass is unsound for such a kernel.
+/// this header and in Gfx1250XnackHazardPass is unsound for such a kernel.
 inline bool mayEnableMultiGroupReplay(const Function& func) {
     for (const BasicBlock& bb : func) {
         for (const IRBase& node : bb) {
