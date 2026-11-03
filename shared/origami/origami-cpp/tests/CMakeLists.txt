@@ -58,7 +58,7 @@ add_test(origami_python_tests python3 -m pytest "tests" -v)
 set_tests_properties(origami_python_tests PROPERTIES
     LABELS "python"
     SKIP_RETURN_CODE 5
-    ENVIRONMENT "LD_LIBRARY_PATH=../../@CMAKE_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=../../@CMAKE_INSTALL_LIBDIR@/python@Python_VERSION_MAJOR@.@Python_VERSION_MINOR@/site-packages:$ENV{PYTHONPATH}"
+    ENVIRONMENT "LD_LIBRARY_PATH=../../@CMAKE_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=../..:$ENV{PYTHONPATH}"
 )
 ]=])
 endif()
