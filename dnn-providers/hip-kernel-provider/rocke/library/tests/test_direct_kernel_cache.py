@@ -542,24 +542,17 @@ def test_legacy_windowed_wmma_entries_are_not_launched(tmp_path):
     """The cache guard covers the Toeplitz form too: a gfx1250 entry without
     the recorded wave size is rejected with a rebuild hint, and an entry that
     records wave size 32 is offered. The VALU form's entries need no record."""
-    jobs = _windowed_cell_jobs("gfx1250", 5, 2)
+    jobs = _windowed_cell_jobs(_WAVE32_ARCH, 5, 2)
     toeplitz = [j for j in jobs if j.spec_kwargs.get("mfma")]
     assert toeplitz
     problem = _problem(H=28, W=28, groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2)
 
-    def plans_with(spec_wave_size):
-        c = KernelCache(tmp_path / str(spec_wave_size), "gfx1250")
-        for job in toeplitz:
-            meta = {"kernel_name": job.identity.label()}
-            if spec_wave_size is not None:
-                meta["spec_wave_size"] = spec_wave_size
-            c.put(job.identity, b"placeholder", meta)
-        return dks.direct_plans(c, problem, "dgrad", "gfx1250")
-
-    plans, rejected = plans_with(None)
+    legacy = _wave32_cache(tmp_path / "legacy", toeplitz, None)
+    plans, rejected = dks.direct_plans(legacy, problem, "dgrad", _WAVE32_ARCH)
     assert plans == []
     assert rejected and all("--compile-all" in why for _, why in rejected)
-    plans, _ = plans_with(32)
+    recorded = _wave32_cache(tmp_path / "recorded", toeplitz, 32)
+    plans, _ = dks.direct_plans(recorded, problem, "dgrad", _WAVE32_ARCH)
     assert plans and _variants(plans) == {_WIN}
     for plan in plans:
         (step,) = plan.steps
