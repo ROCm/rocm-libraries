@@ -642,7 +642,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return transform_tensor_descriptor(
                 AK0MK1BlockDesc{},
                 make_tuple(make_unmerge_transform(
-                               make_tuple(Number<A_K0 / KPack>{}, Number<KPack / A_K1>{})),
+                               make_tuple(Number<A_K0 / (KPack / A_K1)>{}, Number<KPack / A_K1>{})),
                            make_unmerge_transform(
                                make_tuple(Number<MRepeat>{}, Number<MWaves>{}, Number<MPerXDL>{})),
                            make_unmerge_transform(
@@ -665,7 +665,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return transform_tensor_descriptor(
                 desc,
                 make_tuple(make_unmerge_transform(
-                               make_tuple(Number<A_K0 / KPack>{}, Number<KPack / A_K1>{})),
+                               make_tuple(Number<A_K0 / (KPack / A_K1)>{}, Number<KPack / A_K1>{})),
                            make_unmerge_transform(
                                make_tuple(Number<MRepeat>{}, Number<MWaves>{}, Number<MPerXDL>{})),
                            make_unmerge_transform(
@@ -690,7 +690,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return make_tuple(0,
                               waveId_m,
                               xdlops_a_idx[I1] / VectorSizeA,
-                              KPerThread / KPack * xdlops_a_idx[I0],
+                              (KPerThread / A_K1) / (KPack / A_K1) * xdlops_a_idx[I0],
                               0,
                               0,
                               (xdlops_a_idx[I1] % VectorSizeA) * VectorSizeA);
@@ -698,7 +698,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return make_tuple(0,
                               waveId_m,
                               xdlops_a_idx[I1] % VectorSizeA,
-                              KPerThread / KPack * xdlops_a_idx[I0],
+                              (KPerThread / A_K1) / (KPack / A_K1) * xdlops_a_idx[I0],
                               0,
                               0,
                               (xdlops_a_idx[I1] / VectorSizeA) * VectorSizeA);
@@ -706,8 +706,13 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
         }
         else
         {
-            return make_tuple(
-                0, waveId_m, xdlops_a_idx[I1], KPerThread / KPack * xdlops_a_idx[I0], 0, 0, 0);
+            return make_tuple(0,
+                              waveId_m,
+                              xdlops_a_idx[I1],
+                              (KPerThread / A_K1) / (KPack / A_K1) * xdlops_a_idx[I0],
+                              0,
+                              0,
+                              0);
         }
     }
 
@@ -721,7 +726,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return transform_tensor_descriptor(
                 BK0NK1BlockDesc{},
                 make_tuple(make_unmerge_transform(
-                               make_tuple(Number<B_K0 / (KPack)>{}, Number<KPack / B_K1>{})),
+                               make_tuple(Number<B_K0 / (KPack / B_K1)>{}, Number<KPack / B_K1>{})),
                            make_unmerge_transform(
                                make_tuple(Number<NRepeat>{}, Number<NWaves>{}, Number<NPerXDL>{})),
                            make_unmerge_transform(
@@ -744,7 +749,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return transform_tensor_descriptor(
                 desc,
                 make_tuple(make_unmerge_transform(
-                               make_tuple(Number<B_K0 / (KPack)>{}, Number<KPack / B_K1>{})),
+                               make_tuple(Number<B_K0 / (KPack / B_K1)>{}, Number<KPack / B_K1>{})),
                            make_unmerge_transform(
                                make_tuple(Number<NRepeat>{}, Number<NWaves>{}, Number<NPerXDL>{})),
                            make_unmerge_transform(
@@ -769,7 +774,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return make_tuple(0,
                               waveId_n,
                               xdlops_b_idx[I1] / VectorSizeB,
-                              KPerThread / KPack * xdlops_b_idx[I0],
+                              (KPerThread / B_K1) / (KPack / B_K1) * xdlops_b_idx[I0],
                               0,
                               0,
                               (xdlops_b_idx[I1] % VectorSizeB) * VectorSizeB);
@@ -777,7 +782,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             return make_tuple(0,
                               waveId_n,
                               xdlops_b_idx[I1] % VectorSizeB,
-                              KPerThread / KPack * xdlops_b_idx[I0],
+                              (KPerThread / B_K1) / (KPack / B_K1) * xdlops_b_idx[I0],
                               0,
                               0,
                               (xdlops_b_idx[I1] / VectorSizeB) * VectorSizeB);
@@ -785,8 +790,13 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
         }
         else
         {
-            return make_tuple(
-                0, waveId_n, xdlops_b_idx[I1], KPerThread / KPack * xdlops_b_idx[I0], 0, 0, 0);
+            return make_tuple(0,
+                              waveId_n,
+                              xdlops_b_idx[I1],
+                              (KPerThread / B_K1) / (KPack / B_K1) * xdlops_b_idx[I0],
+                              0,
+                              0,
+                              0);
         }
     }
 
