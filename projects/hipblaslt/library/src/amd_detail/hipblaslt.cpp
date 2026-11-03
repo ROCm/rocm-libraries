@@ -79,11 +79,11 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
     }
 }
 
-hipblasStatus_t refuse_row_order(const char*      caller,
-                                 hipblasLtOrder_t orderA,
-                                 hipblasLtOrder_t orderB,
-                                 hipblasLtOrder_t orderC,
-                                 hipblasLtOrder_t orderD)
+hipblasStatus_t refuse_unsupported_order(const char*      caller,
+                                         hipblasLtOrder_t orderA,
+                                         hipblasLtOrder_t orderB,
+                                         hipblasLtOrder_t orderC,
+                                         hipblasLtOrder_t orderD)
 {
     const hipblasLtOrder_t orders[] = {orderA, orderB, orderC, orderD};
     const char* const      names[]  = {"A", "B", "C", "D"};
@@ -99,21 +99,35 @@ hipblasStatus_t refuse_row_order(const char*      caller,
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
     }
+    // The kernels write D, and read C, column-major only. Swizzled orders exist for A and B.
+    for(int i = 2; i < 4; ++i)
+    {
+        if(orders[i] != HIPBLASLT_ORDER_COL)
+        {
+            log_error(caller,
+                      "C and D must be HIPBLASLT_ORDER_COL",
+                      "matrix",
+                      names[i],
+                      "order",
+                      int(orders[i]));
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
     return HIPBLAS_STATUS_SUCCESS;
 }
 
-hipblasStatus_t refuse_row_order(const char*             caller,
-                                 rocblaslt_matrix_layout matA,
-                                 rocblaslt_matrix_layout matB,
-                                 rocblaslt_matrix_layout matC,
-                                 rocblaslt_matrix_layout matD)
+hipblasStatus_t refuse_unsupported_order(const char*             caller,
+                                         rocblaslt_matrix_layout matA,
+                                         rocblaslt_matrix_layout matB,
+                                         rocblaslt_matrix_layout matC,
+                                         rocblaslt_matrix_layout matD)
 {
     // A null layout is reported by the caller's own validation.
     for(auto mat : {matA, matB, matC, matD})
         if(!mat)
             return HIPBLAS_STATUS_SUCCESS;
 
-    return refuse_row_order(caller, matA->order, matB->order, matC->order, matD->order);
+    return refuse_unsupported_order(caller, matA->order, matB->order, matC->order, matD->order);
 }
 
 bool gemm_pointers_missing(int64_t                m,
@@ -1337,11 +1351,11 @@ try
     if(auto order_status
        = heuristic_arguments_present(handle, matmulDesc, pref, requestedAlgoCount, returnAlgoCount)
                  && !any_grouped(Adesc, Bdesc, Cdesc, Ddesc)
-             ? refuse_row_order(__func__,
-                                (rocblaslt_matrix_layout)Adesc,
-                                (rocblaslt_matrix_layout)Bdesc,
-                                (rocblaslt_matrix_layout)Cdesc,
-                                (rocblaslt_matrix_layout)Ddesc)
+             ? refuse_unsupported_order(__func__,
+                                        (rocblaslt_matrix_layout)Adesc,
+                                        (rocblaslt_matrix_layout)Bdesc,
+                                        (rocblaslt_matrix_layout)Cdesc,
+                                        (rocblaslt_matrix_layout)Ddesc)
              : HIPBLAS_STATUS_SUCCESS;
        order_status != HIPBLAS_STATUS_SUCCESS)
     {
@@ -1414,11 +1428,11 @@ try
                                 workspace,
                                 workspaceSizeInBytes)
        && !any_grouped(matA, matB, matC, matD))
-        return_status = refuse_row_order(__func__,
-                                         (rocblaslt_matrix_layout)matA,
-                                         (rocblaslt_matrix_layout)matB,
-                                         (rocblaslt_matrix_layout)matC,
-                                         (rocblaslt_matrix_layout)matD);
+        return_status = refuse_unsupported_order(__func__,
+                                                 (rocblaslt_matrix_layout)matA,
+                                                 (rocblaslt_matrix_layout)matB,
+                                                 (rocblaslt_matrix_layout)matC,
+                                                 (rocblaslt_matrix_layout)matD);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();

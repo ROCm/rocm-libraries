@@ -1168,8 +1168,8 @@ namespace hipblaslt_ext
                                   inputs.getB(),
                                   inputs.getC(),
                                   inputs.getD()))
-            if(auto status
-               = refuse_row_order(__func__, problemtype.getOrderA(), problemtype.getOrderB());
+            if(auto status = refuse_unsupported_order(
+                   __func__, problemtype.getOrderA(), problemtype.getOrderB());
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullV2Cpp");
@@ -1230,11 +1230,11 @@ namespace hipblaslt_ext
                                   B,
                                   C,
                                   D))
-            if(auto status = refuse_row_order(__func__,
-                                              (rocblaslt_matrix_layout)matA,
-                                              (rocblaslt_matrix_layout)matB,
-                                              (rocblaslt_matrix_layout)matC,
-                                              (rocblaslt_matrix_layout)matD);
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      (rocblaslt_matrix_layout)matA,
+                                                      (rocblaslt_matrix_layout)matB,
+                                                      (rocblaslt_matrix_layout)matC,
+                                                      (rocblaslt_matrix_layout)matD);
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemCAPICpp");
@@ -1429,8 +1429,8 @@ namespace hipblaslt_ext
                                             inputs[i].getC(),
                                             inputs[i].getD());
         if(pointersPresent)
-            if(auto status
-               = refuse_row_order(__func__, problemtype.getOrderA(), problemtype.getOrderB());
+            if(auto status = refuse_unsupported_order(
+                   __func__, problemtype.getOrderA(), problemtype.getOrderB());
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemFullV2Cpp");
@@ -1513,11 +1513,11 @@ namespace hipblaslt_ext
         const size_t count = present ? matmul_descr.size() : 0;
         for(size_t i = 0; i < count; i++)
         {
-            if(auto status = refuse_row_order(__func__,
-                                              layoutAt(matA, i),
-                                              layoutAt(matB, i),
-                                              layoutAt(matC, i),
-                                              layoutAt(matD, i));
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      layoutAt(matA, i),
+                                                      layoutAt(matB, i),
+                                                      layoutAt(matC, i),
+                                                      layoutAt(matD, i));
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
         }
@@ -1609,11 +1609,11 @@ namespace hipblaslt_ext
     {
         // Missing arguments keep the status rocblaslt_matmul_is_algo_supported reports for them.
         if(handle && matmulDesc && alpha && beta)
-            if(auto status = refuse_row_order(__func__,
-                                              (rocblaslt_matrix_layout)Adesc,
-                                              (rocblaslt_matrix_layout)Bdesc,
-                                              (rocblaslt_matrix_layout)Cdesc,
-                                              (rocblaslt_matrix_layout)Ddesc);
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      (rocblaslt_matrix_layout)Adesc,
+                                                      (rocblaslt_matrix_layout)Bdesc,
+                                                      (rocblaslt_matrix_layout)Cdesc,
+                                                      (rocblaslt_matrix_layout)Ddesc);
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtMatMulIsAlgoSupportedCpp");
@@ -1737,11 +1737,11 @@ namespace hipblaslt_ext
                       hipblasLtMatrixLayout_t Cdesc,
                       hipblasLtMatrixLayout_t Ddesc)
     {
-        if(refuse_row_order(__func__,
-                            (rocblaslt_matrix_layout)Adesc,
-                            (rocblaslt_matrix_layout)Bdesc,
-                            (rocblaslt_matrix_layout)Cdesc,
-                            (rocblaslt_matrix_layout)Ddesc)
+        if(refuse_unsupported_order(__func__,
+                                    (rocblaslt_matrix_layout)Adesc,
+                                    (rocblaslt_matrix_layout)Bdesc,
+                                    (rocblaslt_matrix_layout)Cdesc,
+                                    (rocblaslt_matrix_layout)Ddesc)
            != HIPBLAS_STATUS_SUCCESS)
             return -1;
         rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulIsTunedCpp");
@@ -1775,11 +1775,11 @@ namespace hipblaslt_ext
     {
         // Missing arguments keep the status rocblaslt_matmul_is_algo_supported reports for them.
         if(handle && matmulDesc && alpha && beta)
-            if(auto status = refuse_row_order(__func__,
-                                              (rocblaslt_matrix_layout)matA,
-                                              (rocblaslt_matrix_layout)matB,
-                                              (rocblaslt_matrix_layout)matC,
-                                              (rocblaslt_matrix_layout)matD);
+            if(auto status = refuse_unsupported_order(__func__,
+                                                      (rocblaslt_matrix_layout)matA,
+                                                      (rocblaslt_matrix_layout)matB,
+                                                      (rocblaslt_matrix_layout)matC,
+                                                      (rocblaslt_matrix_layout)matD);
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
         if(heuristicResultsArray[0].algo.data[0] != 0)

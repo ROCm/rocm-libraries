@@ -469,6 +469,100 @@ namespace
         }
     }
 
+    // The kernels write D, and read C, column-major only; swizzled orders exist only for A and B.
+    // A swizzled order, or a value no enumerator names, on C or D is refused rather than computed
+    // as column-major.
+    TEST_F(AlgoErrors, smoke_OutputOrderOtherThanColIsRefused)
+    {
+        const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
+        hipblasLtMatrixLayout_t col      = colOwner.get();
+
+        hipblasLtMatmulHeuristicResult_t control{};
+        int                              controlCount = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, col, col, col, col, pref, 1, &control, &controlCount),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(controlCount, 0);
+
+        for(const auto order : {HIPBLASLT_ORDER_COL16_4R8,
+                                HIPBLASLT_ORDER_COL16_4R16,
+                                HIPBLASLT_ORDER_COL16_4R32,
+                                hipblasLtOrder_t(7)})
+            for(int index = 2; index < 4; index++)
+            {
+                const LayoutPtr         owner   = layoutWithOrder(order);
+                hipblasLtMatrixLayout_t mats[4] = {col, col, col, col};
+                mats[index]                     = owner.get();
+                const std::string which
+                    = std::string(1, "ABCD"[index]) + " order " + std::to_string(int(order));
+
+                hipblasLtMatmulHeuristicResult_t result{};
+                int                              returned = -1;
+                EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                          desc,
+                                                          mats[0],
+                                                          mats[1],
+                                                          mats[2],
+                                                          mats[3],
+                                                          pref,
+                                                          1,
+                                                          &result,
+                                                          &returned),
+                          HIPBLAS_STATUS_NOT_SUPPORTED)
+                    << which;
+                EXPECT_EQ(returned, 0) << which;
+                EXPECT_EQ(hipblasLtMatmul(handle,
+                                          desc,
+                                          &alpha,
+                                          a,
+                                          mats[0],
+                                          b,
+                                          mats[1],
+                                          &beta,
+                                          c,
+                                          mats[2],
+                                          d,
+                                          mats[3],
+                                          nullptr,
+                                          nullptr,
+                                          0,
+                                          nullptr),
+                          HIPBLAS_STATUS_NOT_SUPPORTED)
+                    << which;
+
+                hipblaslt_ext::Gemm gemm(handle,
+                                         HIPBLAS_OP_N,
+                                         HIPBLAS_OP_N,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         HIPBLAS_COMPUTE_32F);
+                EXPECT_EQ(gemm.setProblem(
+                              desc, &alpha, a, mats[0], b, mats[1], &beta, c, mats[2], d, mats[3]),
+                          HIPBLAS_STATUS_NOT_SUPPORTED)
+                    << which;
+
+                size_t workspace = 0;
+                EXPECT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                               desc,
+                                                               &alpha,
+                                                               mats[0],
+                                                               mats[1],
+                                                               &beta,
+                                                               mats[2],
+                                                               mats[3],
+                                                               control.algo,
+                                                               workspace),
+                          HIPBLAS_STATUS_NOT_SUPPORTED)
+                    << which;
+                EXPECT_EQ(
+                    hipblaslt_ext::matmulIsTuned(handle, desc, mats[0], mats[1], mats[2], mats[3]),
+                    -1)
+                    << which;
+            }
+    }
+
     // A missing handle, descriptor, layout or pointer is reported the same way whatever the
     // layouts' order is: each invalid call below must return the status it returns with
     // column-major layouts, not HIPBLAS_STATUS_NOT_SUPPORTED.
