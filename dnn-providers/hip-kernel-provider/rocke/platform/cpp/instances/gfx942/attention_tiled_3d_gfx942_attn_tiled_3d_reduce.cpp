@@ -17,7 +17,7 @@
  * Pure f32 load / exp2 / store; no MFMA, no async DMA. wave64_reduce_max /
  * wave64_reduce_sum come from helper_helper_rocke.helpers.attention.h. The
  * builder-call sequence is a byte-identical translation of the Python span
- * (which is itself a byte-for-byte port of the gfx950 reduce).
+ * (itself the gfx950 reduce with a runtime query head count).
  *
  * Peers (segment-kernel phases, ctx init, config_from_spec) live in sibling
  * translation units and are called only via the internal header. This file

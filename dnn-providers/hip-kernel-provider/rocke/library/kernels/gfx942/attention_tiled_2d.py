@@ -992,6 +992,12 @@ class UnifiedAttention2DTiledSpec:
             f"t{self.tile_size_eff}" if self.n_blocks_per_tile != 1 else "",
             # Head counts are kernargs; only the GQA ratio is baked.
             f"g{self.num_queries_per_kv}",
+            # Except on the fast paged-KV descriptor path, whose shifts bake them.
+            (
+                f"h{self.num_query_heads}kv{self.num_kv_heads}"
+                if self.use_fast_paged_kv_desc
+                else ""
+            ),
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "fnuz" if self.kv_storage_dtype else "",
