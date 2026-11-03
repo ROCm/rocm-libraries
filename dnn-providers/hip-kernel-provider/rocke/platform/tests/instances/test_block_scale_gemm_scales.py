@@ -13,17 +13,20 @@ outputs share the column it loads B from, so one B scale serves them all.
 
 Checks:
 
-* On the host, on the kernel's LLVM IR from both engines for gfx942 and
-  gfx950, fp8 and bf8, and A scale groups of one and two rows: every output
-  gets one term per K group ``kg``, each term scaled with exactly one A
-  scale, from ``AScale[row // gm, kg]``, and one B scale, from
-  ``BScale[kg, col // gn]``, where ``(row, col)`` is the cell the kernel
-  stores that output to.
-* On a gfx942 or gfx950 GPU, with A scales that differ per row and per K
-  group and B scales that differ per column and per K group, the output
-  matches an f32 reference within the runbook GEMM tolerance; with infinite
-  and NaN scales in some rows and columns, the infinities and NaNs land in
-  exactly the outputs of those rows and columns, as in the reference.
+* On the host, on the kernel's LLVM IR for gfx942 and gfx950, fp8 and bf8,
+  and A scale groups of one and two rows (with the C++ engine importable,
+  each engine builds and lowers the kernel from the spec with its own
+  builder, ``build_block_scale_gemm`` and ``rocke_build_block_scale_gemm``,
+  and the two texts must be the same byte for byte): every output gets one
+  term per K group ``kg``, each term scaled with exactly one A scale, from
+  ``AScale[row // gm, kg]``, and one B scale, from ``BScale[kg, col // gn]``,
+  where ``(row, col)`` is the cell the kernel stores that output to.
+* On a gfx942 or gfx950 GPU, running that same LLVM IR, with A scales that
+  differ per row and per K group and B scales that differ per column and per
+  K group, the output matches an f32 reference within the runbook GEMM
+  tolerance; with infinite and NaN scales in some rows and columns, the
+  infinities and NaNs land in exactly the outputs of those rows and columns,
+  as in the reference.
 """
 
 from __future__ import annotations
@@ -37,8 +40,9 @@ import struct
 import numpy as np
 import pytest
 
+from rocke.core.backend import lower_block_scale_gemm
+from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers import compile_kernel
-from rocke.helpers.compile import lower_kernel_for_comgr
 from rocke.instances.common.block_scale_gemm import (
     BlockScaleGemmSpec,
     block_scale_gemm_grid,
@@ -51,6 +55,18 @@ _MANTISSAS = ("fp8e4m3", "bf8e5m2")
 # The runbook's GEMM tolerance (optimization_runbook.md section 1.4), as an
 # error relative to the largest reference output.
 _GEMM_TOLERANCE = 7e-2
+
+
+def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
+    """The kernel's LLVM IR for ``spec`` on ``arch``.
+
+    With the C++ engine importable, each engine builds the kernel from the
+    spec with its own builder and lowers it, and the two texts must be the
+    same byte for byte (``BackendMismatch`` otherwise); without it, the
+    Python engine's text."""
+    if importlib.util.find_spec("rocke_engine"):
+        return lower_block_scale_gemm(spec, arch=arch, backend="both").llvm_text
+    return lower_kernel_to_llvm(build_block_scale_gemm(spec, arch=arch), arch=arch)
 
 
 # ---------------------------------------------------------------------------
@@ -308,12 +324,7 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group
         group_size_mnk=(group_m, group_n, group_k),
     )
     groups = spec.K // group_k
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
-    ir = _KernelIR(
-        lower_kernel_for_comgr(
-            build_block_scale_gemm(spec, arch=arch), arch=arch, backend=backend
-        ).llvm_text
-    )
+    ir = _KernelIR(_lowered_llvm(spec, arch))
     work_items = {
         ir.call_named("llvm.amdgcn.workitem.id.x"): np.arange(spec.block_size)[
             :, None, None, None
@@ -435,15 +446,13 @@ def _element_bytes(arch: str, mantissa: str, values: np.ndarray) -> np.ndarray:
 
 def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
     """Run the block-scaled GEMM of ``spec`` on the GPU and return C as an
-    (M, N) f32 array. ``a`` (M, K) and ``b`` (K, N) are element bytes,
-    ``a_scale`` (M / gm, K / gk) and ``b_scale`` (K / gk, N / gn) f32, all
-    row-major."""
+    (M, N) f32 array. The kernel run is the one :func:`_lowered_llvm`
+    returns. ``a`` (M, K) and ``b`` (K, N) are element bytes, ``a_scale``
+    (M / gm, K / gk) and ``b_scale`` (K / gk, N / gn) f32, all row-major."""
     from rocke.runtime.hip_module import Runtime
 
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
-    artifact = compile_kernel(
-        build_block_scale_gemm(spec, arch=arch), arch=arch, backend=backend
-    )
+    artifact = compile_kernel(build_block_scale_gemm(spec, arch=arch), arch=arch)
+    assert artifact.llvm_text == _lowered_llvm(spec, arch)
     host = {
         "A": np.ascontiguousarray(a, dtype=np.uint8),
         "B": np.ascontiguousarray(b, dtype=np.uint8),
