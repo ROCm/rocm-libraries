@@ -137,7 +137,7 @@ INDEX_TYPE_MAP = {
     2: "f32_c",
     3: "f64_c",
     4: "f16_r",
-    # 5 is Tensile's Int8x4 (rocisa DataType, packed "4xi8"): a legacy type not
+    # 5 is TensileLite's Int8x4 (rocisa DataType, packed "4xi8"): a legacy type not
     # exposed by the hipBLASLt API and absent from every shipped logic file (all
     # int8 logic uses 8). geko does not support it and treats it as i8_r.
     5: "i8_r",

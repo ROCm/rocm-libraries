@@ -16,7 +16,7 @@ from geko.config_generator.constants import (
 )
 from geko.schemas import GemmConfig, GemmType
 
-# Tensile's makeValidMFMA()["I8I8"] (tensilelite/Common/ValidParameters.py).
+# TensileLite's makeValidMFMA()["I8I8"] (tensilelite/Common/ValidParameters.py).
 _TENSILE_I8I8 = {
     (32, 32, 4, 2),
     (32, 32, 8, 1),

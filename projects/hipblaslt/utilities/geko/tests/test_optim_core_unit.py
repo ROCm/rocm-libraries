@@ -249,7 +249,7 @@ def test_run_worker_omits_cu_env_without_a_resolvable_backend_arch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Legacy/hand-written configs with no Backend.Arch must not crash the
-    # worker or pin a bogus CU value -- Tensile's own rocminfo fallback
+    # worker or pin a bogus CU value -- TensileLite's own rocminfo fallback
     # should still be reachable (i.e. "CU" must be absent, not "None").
     env = _run_single_worker_and_capture_env(monkeypatch, tmp_path, "Device: 0\n")
     assert "CU" not in env

@@ -51,7 +51,7 @@ __all__ = ["Library", "LibraryCollection"]
 
 BIAS_MAP = {0: "S", 4: "H", 6: "I", 7: "B"}
 SAB_MAP = {"Scalar": "SAB", "Vector": "SABV"}
-# Tensile DataType code -> name character, for the activation compute type tag
+# TensileLite DataType code -> name character, for the activation compute type tag
 # (HA<char>). Int8 (8) accumulates in int32, so it is tagged "I" like int32 (6).
 ACTIVATION_TYPE_CHAR = {0: "S", 1: "D", 4: "H", 6: "I", 7: "B", 8: "I"}
 SUPPORTED_INITIALIZATIONS = ("trig_float", "rand_int", "hpl")
@@ -371,7 +371,7 @@ class Library:
             btype = "".join([BIAS_MAP[bt] for bt in self.problem["BiasDataTypeList"]])
             bias_segment = f"_Bias{btype}"
 
-        # Tensile names the activation as HA + the ActivationComputeDataType
+        # TensileLite names the activation as HA + the ActivationComputeDataType
         # character (which defaults to ComputeDataType): HAS for float compute,
         # HAI for int32 compute (e.g. I8II_BH_HAI_SAV_UserArgs).
         act_type = self.problem.get(

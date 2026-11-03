@@ -48,15 +48,15 @@ validMFMA["F8N"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
 validMFMA["B8F8"] = validMFMA["F8"]
 # Int8 MFMAs per generation (not looked up by ARCH; documentation of what each
-# generation provides, as Tensile's validMFMA["I8I8"] is their union):
+# generation provides, as TensileLite's validMFMA["I8I8"] is their union):
 #   I8_908: gfx908/gfx90a legacy set.
-#   I8_940: gfx94x. Tensile rejects [32,32,8,1] and [16,16,16,1] there
+#   I8_940: gfx94x. TensileLite rejects [32,32,8,1] and [16,16,16,1] there
 #           ("deprecated in gfx94x") and adds the K=16/32 instructions.
 #   gfx950 adds the native [32,32,32,1] and [16,16,64,1] (listed below).
 validMFMA["I8_908"] = [[32,32,4,2], [32,32,8,1], [16,16,4,4], [16,16,16,1], [4,4,4,16]]
 validMFMA["I8_940"] = [[32,32,4,2], [32,32,16,1], [16,16,4,4], [16,16,32,1], [4,4,4,16]]
 validMFMA["I8_950"] = [[32,32,16,1], [16,16,32,1], [32,32,32,1], [16,16,64,1]]
-# Same set as Tensile's validMFMA["I8I8"] (ValidParameters.makeValidMFMA).
+# Same set as TensileLite's validMFMA["I8I8"] (ValidParameters.makeValidMFMA).
 validMFMA["I8"] = validMFMA["I8_908"] + [[32,32,16,1], [16,16,32,1], [32,32,32,1], [16,16,64,1]]
 
 MAX_GSU_WORKSPACE_SIZE = 128 * 1024 * 1024

@@ -53,7 +53,7 @@ class ConfigSectionGenerator:
 
     # Real fp8-family DataType letters that need a scalar UseScaleAB / an
     # F32 bias fallback. A naive "8" in dtype substring check also matches
-    # "I8" (int8), which has neither -- real int8 Tensile kernels have no
+    # "I8" (int8), which has neither -- real int8 TensileLite kernels have no
     # UseScaleAB/SAB flag, unlike fp8/bf8 ones.
     _FP8_FAMILY_DATA_TYPES = frozenset({"F8", "F8N", "B8", "F8B8", "B8F8"})
 

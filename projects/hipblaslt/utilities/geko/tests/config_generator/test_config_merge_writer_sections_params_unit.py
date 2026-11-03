@@ -240,7 +240,7 @@ def test_config_sections_generator_paths(monkeypatch) -> None:
 def test_build_config_tags_backend_with_the_unstripped_arch_key(arch: str) -> None:
     # LibraryLogic.ArchitectureName strips CU-partition suffixes (e.g.
     # gfx1250-strict_96cu and _192cu both emit "gfx1250-strict"), so anything
-    # needing the real per-partition CU count (geko.optim's Tensile subprocess
+    # needing the real per-partition CU count (geko.optim's TensileLite subprocess
     # env) must read Backend.Arch instead, which must keep the full ARCH key.
     cfg = _section_cfg()
     cfg["ARCH"] = arch

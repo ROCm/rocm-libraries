@@ -133,7 +133,7 @@ def test_add_epilogues_i8_int_or_missing_compute_has_no_bias(compute) -> None:
     lib.add_epilogues()
     assert lib.problem["UseBias"] == 0
     assert lib.problem["BiasDataTypeList"] == []
-    # Tensile tags the activation with the compute type: int32 -> HAI.
+    # TensileLite tags the activation with the compute type: int32 -> HAI.
     assert lib.solutions[0]["BaseName"] == "Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT64x64"
 
 
