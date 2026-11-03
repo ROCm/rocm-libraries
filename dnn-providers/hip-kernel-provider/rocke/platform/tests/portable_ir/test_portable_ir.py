@@ -23,6 +23,7 @@
 #                   in the process at all -- the shape this actually deploys in.
 #                   It comes from the same source-keyed artifact bundle.
 
+import json
 import os
 import pkgutil
 import subprocess
@@ -384,8 +385,6 @@ open(out + "/py.ll", "w").write(
     r = _run([sys.executable, "-c", author, str(tmp_path)])
     assert r.returncode == 0, r.stderr[-4000:]
 
-    import json
-
     expected = (tmp_path / "py.ll").read_text()
     assert "nonnull" in expected and "dereferenceable(256)" in expected
     ir_doc = json.loads((tmp_path / "k.ir.json").read_text())
@@ -454,8 +453,6 @@ open(out + "/py.ll", "w").write(
     r = _run([sys.executable, "-c", author, str(tmp_path)])
     assert r.returncode == 0, r.stderr[-4000:]
 
-    import json
-
     expected = (tmp_path / "py.ll").read_text()
     ir_doc = json.loads((tmp_path / "k.ir.json").read_text())
     recipe = json.loads((tmp_path / "k.recipe.json").read_text())
@@ -489,3 +486,79 @@ open(out + "/py.ll", "w").write(
             "ldc: the relation names K, which is not a parameter of this kernel"
             in got.stderr
         ), got.stderr[-2000:]
+
+
+def _cli_plan(tmp_path, name, recipe, ints=None, strs=None):
+    """The standalone CLI's launch plan of ``recipe`` (CBOR), in the shape of
+    ``launch.plan``, or the CLI's error text when it refuses one."""
+    from rocke.portable_ir.src.online import ARG_KINDS
+    from rocke.portable_ir.src.recipe_bundle import cbor_encode
+
+    path = tmp_path / f"{name}.recipe.cbor"
+    path.write_bytes(cbor_encode(recipe))
+    spec = [
+        arg
+        for flag, values in (("--int", ints or {}), ("--str", strs or {}))
+        for key, value in values.items()
+        for arg in (flag, f"{key}={value}")
+    ]
+    got = subprocess.run(
+        [_replay_cli(), "--recipe", str(path), "--cbor", "--plan", *spec],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if got.returncode != 0:
+        return got.stderr
+    plan = json.loads(got.stdout)
+    for arg in plan["args"]:
+        arg["kind"] = ARG_KINDS[arg["kind"]]
+    if plan["geometry"] is not None:
+        for key in ("grid", "block"):
+            plan["geometry"][key] = tuple(plan["geometry"][key])
+    if plan["cluster"] is not None:
+        plan["cluster"] = tuple(plan["cluster"])
+    return plan
+
+
+def test_standalone_cli_plans_and_refuses_like_python(tmp_path):
+    """The C++ launch plan, through a binary with no Python in it, describes
+    the same launch as ``launch.plan`` and refuses the same recipes with the
+    same text: parameters that state facts, a kernel that checks a value on
+    the GPU (its check word would go unread), and a block other than the
+    kernel's exact ``workgroup_size``."""
+    from rocke.portable_ir.src import launch
+    from rocke.portable_ir.tests import test_launch as cases
+    from rocke.portable_ir.utils.recipe_expand import ExpandError
+
+    planned = {
+        "toy": (cases.toy(), {"D": 1000}, {"dtype": "f32"}),
+        "mixed_signature": (cases.mixed_signature_recipe(), {"D": 1}, {}),
+        "clustered": (cases.clustered(2, 1, 1), {"D": 65}, {"dtype": "f32"}),
+        "exact_block": (cases.exact_block_recipe(), {}, {}),
+    }
+    for name, (recipe, ints, strs) in planned.items():
+        assert _cli_plan(tmp_path, name, recipe, ints, strs) == launch.plan(
+            recipe, ints, strs
+        ), name
+
+    refused = {
+        "facts": (cases.facts_recipe(), cases.FACTS_REFUSAL),
+        "gpu_check": (cases.gpu_check_recipe(), cases.GPU_CHECK_REFUSAL),
+        "gpu_check_and_facts": (
+            cases.gpu_check_recipe(with_facts=True),
+            cases.GPU_CHECK_AND_FACTS_REFUSAL,
+        ),
+        "wrong_block": (
+            cases.exact_block_recipe((32, 1, 1)),
+            cases.wrong_block_refusal((32, 1, 1)),
+        ),
+        "no_block": (cases.exact_block_recipe(None), cases.NO_BLOCK_REFUSAL),
+    }
+    for name, (recipe, message) in refused.items():
+        with pytest.raises(ExpandError) as python_refusal:
+            launch.plan(recipe, {}, {})
+        assert str(python_refusal.value) == message, name
+        cli_refusal = _cli_plan(tmp_path, name, recipe)
+        assert isinstance(cli_refusal, str), f"{name}: the C++ plan was handed out"
+        assert cli_refusal.rstrip("\n").endswith(message), f"{name}: {cli_refusal}"

@@ -19,14 +19,18 @@ What is pinned here:
   arithmetic on it before the check is refused;
 - the range marker's forms (a ``ge`` operand, the ``by`` attr) and the
   verifier's texts for a bad one;
-- that both engines lower a checked kernel to the same bytes -- the failure
-  path stores 1 to the kernel's GPU-check word and returns from the kernel,
-  with no trap -- that a ``tile.gpu_check_failed`` that is not bare is refused by the
-  verifier and every lowering, and that ``optimize_kernel`` keeps the check;
+- that the LLVM and HIP lowerings of a checked kernel make the failure path
+  store 1 to the kernel's GPU-check word and return from the kernel, with no
+  trap; that a ``tile.gpu_check_failed`` that is not bare is refused by the
+  verifier and every lowering; and that ``optimize_kernel`` keeps the check;
 - through ``ROCKE_GPU_CHECKED_VALUE_CLI`` (the ``rocke_gpu_checked_value``
-  ctest), that the C++ builder ``rocke_b_gpu_checked`` emits the same IR and
-  refuses with the same texts for every case in ``CASES``, and that the C++
-  verifier gives the same messages for every marker in ``MARKERS``;
+  ctest, so no ``rocke_engine`` binding is needed), that the C++ builder
+  ``rocke_b_gpu_checked_value`` emits the same IR and refuses with the same texts for
+  every case in ``CASES``, that the C++ verifier gives the same messages for
+  every marker in ``MARKERS``, that the C++ walks count exactly the ops of
+  ``value_sources.MEMORY_READ_OPS`` as memory reads, and that the C++ engine
+  lowers every accepted case to the same LLVM IR and HIP source and refuses a
+  failure path that is not bare with the same text;
 - when a GPU that they have run on is present (``_RUN_ON``), on the LLVM and
   the hipcc route, each in a child process: a launch whose loaded value meets the facts runs to its store; one
   whose value breaks them raises ``GpuCheckFailed`` with the store not done,
@@ -43,8 +47,8 @@ What is pinned here:
   word and leaves no HIP error behind; a checked launch on a stream that is
   being captured into a graph is refused; and a wait with nothing noted asks
   HIP nothing;
-- that both engines put the failure path before a gfx1250 cluster barrier
-  (the GPU case is skipped until it has run on gfx1250 hardware).
+- that the failure path comes before a gfx1250 cluster barrier, the same in
+  both engines (the GPU case is skipped until it has run on gfx1250 hardware).
 """
 
 from __future__ import annotations
@@ -71,15 +75,11 @@ from rocke.core.ir import (
 )
 from rocke.core.ir_print import print_ir
 from rocke.core.ir_serialize import canonicalize, parse, serialize
+from rocke.core.lower_hip import lower_kernel_to_hip
+from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import optimize_kernel
 from rocke.core.value_sources import MEMORY_READ_OPS
 from rocke.core.verify import verify
-from rocke.tests.engines import (
-    assert_both_engines_reject,
-    assert_both_engines_reject_hip,
-    lower_hip_with_both_engines,
-    lower_with_both_engines,
-)
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 INT64_MAX = (1 << 63) - 1
@@ -278,6 +278,7 @@ def _refused_text(name: str) -> str:
 
 
 ACCEPTED = [name for name in CASES if not name.startswith("refuse_")]
+LLVM_FLAVORS = ["llvm20", "llvm22"]
 REFUSED = [name for name in CASES if name.startswith("refuse_")]
 # The HIP lowering has no av_load_b128 or ds_read_tr_b8.
 HIP_LOWERED = [
@@ -395,9 +396,9 @@ def test_optimize_kernel_keeps_the_check():
 
 
 @pytest.mark.parametrize("name", ACCEPTED)
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22"])
-def test_both_engines_lower_a_checked_kernel_the_same(name, flavor):
-    ir = lower_with_both_engines(_build(name).kernel, "gfx942", llvm_flavor=flavor)
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_a_false_fact_stores_to_the_word_and_returns(name, flavor):
+    ir = lower_kernel_to_llvm(_build(name).kernel, arch="gfx942", llvm_flavor=flavor)
     assert "llvm.trap" not in ir
     if name != "param_value_bound":
         word = f"@rocke_gpu_check_failed_{name}"
@@ -411,8 +412,8 @@ def test_both_engines_lower_a_checked_kernel_the_same(name, flavor):
 
 
 @pytest.mark.parametrize("name", HIP_LOWERED)
-def test_both_engines_lower_a_checked_kernel_to_the_same_hip(name):
-    hip = lower_hip_with_both_engines(_build(name).kernel, "gfx942")
+def test_in_hip_a_false_fact_stores_to_the_word_and_returns(name):
+    hip = lower_kernel_to_hip(_build(name).kernel, arch="gfx942")
     assert "__builtin_trap" not in hip
     if name != "param_value_bound":
         word = f"rocke_gpu_check_failed_{name}"
@@ -435,12 +436,16 @@ def _failure_path_with_an_operand_kernel():
     return b.kernel
 
 
+NOT_BARE = "gpu_check_failed takes no operands, results or regions"
+
+
 def test_verifier_and_every_lowering_refuse_a_failure_path_that_is_not_bare():
     kernel = _failure_path_with_an_operand_kernel()
-    message = "gpu_check_failed takes no operands, results or regions"
-    assert message in [d.message for d in verify(kernel)]
-    assert_both_engines_reject(kernel, "gfx942", ValueError, message)
-    assert_both_engines_reject_hip(kernel, "gfx942", ValueError, message)
+    assert NOT_BARE in [d.message for d in verify(kernel)]
+    with pytest.raises(ValueError, match=f"^{NOT_BARE}$"):
+        lower_kernel_to_llvm(kernel, arch="gfx942", llvm_flavor="llvm20")
+    with pytest.raises(ValueError, match=f"^{NOT_BARE}$"):
+        lower_kernel_to_hip(kernel, arch="gfx942")
 
 
 # --------------------------------------------------------------------------
@@ -837,6 +842,55 @@ def test_cpp_verifies_every_marker_form_the_same():
             timeout=30,
         ).stdout
         assert printed.splitlines() == messages, name
+
+
+def _cpp_lowering(kernel, *mode: str) -> subprocess.CompletedProcess:
+    """The C++ engine's lowering of ``kernel``: ``mode`` is ``--lower-llvm ARCH
+    FLAVOR`` or ``--lower-hip ARCH``. Exit 1 with the refusal on stderr."""
+    return subprocess.run(
+        [str(_cli()), *mode],
+        input=serialize(kernel),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+@pytest.mark.parametrize("name", ACCEPTED)
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_cpp_lowers_every_checked_kernel_to_the_same_llvm(name, flavor):
+    kernel = _build(name).kernel
+    lowered = _cpp_lowering(kernel, "--lower-llvm", "gfx942", flavor)
+    assert lowered.returncode == 0, lowered.stderr
+    assert lowered.stdout == lower_kernel_to_llvm(
+        kernel, arch="gfx942", llvm_flavor=flavor
+    )
+
+
+@pytest.mark.parametrize("name", HIP_LOWERED)
+def test_cpp_lowers_every_checked_kernel_to_the_same_hip(name):
+    kernel = _build(name).kernel
+    lowered = _cpp_lowering(kernel, "--lower-hip", "gfx942")
+    assert lowered.returncode == 0, lowered.stderr
+    assert lowered.stdout == lower_kernel_to_hip(kernel, arch="gfx942")
+
+
+def test_cpp_lowerings_refuse_a_failure_path_that_is_not_bare():
+    kernel = _failure_path_with_an_operand_kernel()
+    for mode in (("--lower-llvm", "gfx942", "llvm20"), ("--lower-hip", "gfx942")):
+        lowered = _cpp_lowering(kernel, *mode)
+        assert lowered.returncode == 1, mode
+        assert lowered.stderr.rstrip("\n").endswith(NOT_BARE), lowered.stderr
+
+
+def test_cpp_lowers_a_check_before_a_cluster_barrier_the_same():
+    kernel = _cluster_kernel("gpu_checked_cluster")
+    lowered = _cpp_lowering(kernel, "--lower-llvm", "gfx1250", "llvm23")
+    assert lowered.returncode == 0, lowered.stderr
+    assert lowered.stdout == lower_kernel_to_llvm(
+        kernel, arch="gfx1250", llvm_flavor="llvm23"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1263,11 +1317,11 @@ def test_a_wait_with_nothing_noted_asks_hip_nothing():
     assert asked == []
 
 
-def test_both_engines_lower_a_check_before_a_cluster_barrier_the_same():
+def test_a_check_comes_before_a_cluster_barrier():
     """gfx1250: the failure path (store, return) comes before the cluster
     barrier, so a workgroup that fails leaves before it."""
-    ir = lower_with_both_engines(
-        _cluster_kernel("gpu_checked_cluster"), "gfx1250", llvm_flavor="llvm23"
+    ir = lower_kernel_to_llvm(
+        _cluster_kernel("gpu_checked_cluster"), arch="gfx1250", llvm_flavor="llvm23"
     )
     store = (
         "  store atomic i32 1, ptr addrspace(1) @rocke_gpu_check_failed_gpu_checked_"

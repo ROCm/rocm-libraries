@@ -16,6 +16,11 @@
  * and prints the C++ verifier's messages, one per line; the Python test
  * compares them on markers of every form.
  *
+ * Run with --lower-llvm ARCH FLAVOR or --lower-hip ARCH it reads one serialized
+ * kernel from stdin and prints the C++ engine's LLVM IR or HIP source for it, or
+ * exits 1 with the lowering's refusal on stderr. The Python test compares both
+ * with the Python lowerings, so the comparison needs no rocke_engine binding.
+ *
  * Run with --memory-read-ops it prints the name of every op the GPU-check walks
  * count as a memory read (rocke_i_opcode_reads_memory), one per line; the
  * Python test compares them with value_sources.MEMORY_READ_OPS.
@@ -35,6 +40,9 @@
 #include "rocke/ir_internal.h"
 #include "rocke/ir_print.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/strbuf.h"
 #include "rocke/verify.h"
 
 namespace
@@ -434,16 +442,28 @@ int print_cases()
     return 0;
 }
 
-int print_verifier_messages()
+/* Parse the serialized kernel on stdin into `b` (initialised here; the caller
+ * frees it). Returns NULL, having said why on stderr, when it does not parse. */
+rocke_kernel_def_t* parse_stdin(rocke_ir_builder_t* b)
 {
     const std::string text{std::istreambuf_iterator<char>(std::cin),
                            std::istreambuf_iterator<char>()};
-    rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "parsed");
+    rocke_ir_builder_init(b, "parsed");
     rocke_kernel_def_t* k = nullptr;
-    if(rocke_ir_parse(text.c_str(), &b, &k) != ROCKE_OK || !k)
+    if(rocke_ir_parse(text.c_str(), b, &k) != ROCKE_OK || !k)
     {
-        fprintf(stderr, "parse failed: %s\n", rocke_ir_builder_error(&b));
+        fprintf(stderr, "parse failed: %s\n", rocke_ir_builder_error(b));
+        return nullptr;
+    }
+    return k;
+}
+
+int print_verifier_messages()
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = parse_stdin(&b);
+    if(!k)
+    {
         rocke_ir_builder_free(&b);
         return 2;
     }
@@ -457,6 +477,74 @@ int print_verifier_messages()
     rocke_ir_builder_free(&b);
     fwrite(out.data(), 1, out.size(), stdout);
     return 0;
+}
+
+int print_llvm(const char* arch, const char* flavor_name)
+{
+    const rocke_llvm_flavor_t flavor = rocke_llvm_flavor_from_name(flavor_name);
+    if(flavor == ROCKE_LLVM_FLAVOR_AUTO)
+    {
+        fprintf(stderr, "unknown LLVM flavor '%s'\n", flavor_name);
+        return 2;
+    }
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = parse_stdin(&b);
+    if(!k)
+    {
+        rocke_ir_builder_free(&b);
+        return 2;
+    }
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const rocke_status_t status
+        = rocke_lower_kernel_to_llvm_ex(k, flavor, arch, &ll, err, sizeof err);
+    int rc = 0;
+    if(status != ROCKE_OK || !ll)
+    {
+        fprintf(stderr, "%s\n", err);
+        rc = 1;
+    }
+    else
+    {
+        fwrite(ll, 1, strlen(ll), stdout);
+    }
+    free(ll);
+    rocke_ir_builder_free(&b);
+    return rc;
+}
+
+int print_hip(const char* arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = parse_stdin(&b);
+    if(!k)
+    {
+        rocke_ir_builder_free(&b);
+        return 2;
+    }
+    rocke_strbuf_t text;
+    if(rocke_strbuf_init(&text, 0) != 0)
+    {
+        fprintf(stderr, "out of memory\n");
+        rocke_ir_builder_free(&b);
+        return 2;
+    }
+    rocke_lower_hip_opts_t opts = {};
+    opts.arch = arch;
+    int rc = 0;
+    if(rocke_lower_kernel_to_hip(&b, k, &opts, &text) != ROCKE_OK)
+    {
+        fprintf(stderr, "%s\n", rocke_ir_builder_error(&b));
+        rc = 1;
+    }
+    else
+    {
+        fwrite(rocke_strbuf_cstr(&text), 1, strlen(rocke_strbuf_cstr(&text)), stdout);
+    }
+    rocke_strbuf_free(&text);
+    rocke_ir_builder_free(&b);
+    return rc;
 }
 
 /* rocke_i_one_unsigned_compare_checks refuses a value other than i32 or i64
@@ -493,6 +581,10 @@ int main(int argc, char** argv)
         return print_cases();
     if(argc > 1 && strcmp(argv[1], "--verify") == 0)
         return print_verifier_messages();
+    if(argc == 4 && strcmp(argv[1], "--lower-llvm") == 0)
+        return print_llvm(argv[2], argv[3]);
+    if(argc == 3 && strcmp(argv[1], "--lower-hip") == 0)
+        return print_hip(argv[2]);
     if(argc > 1 && strcmp(argv[1], "--memory-read-ops") == 0)
         return print_memory_read_ops();
     int failures = 0;
