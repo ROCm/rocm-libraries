@@ -26,6 +26,40 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+_rocsparse_csrmv_info::_rocsparse_csrmv_info() = default;
+
+_rocsparse_csrmv_info::~_rocsparse_csrmv_info()
+{
+    this->clear();
+}
+
+void _rocsparse_csrmv_info::clear()
+{
+    this->adaptive.clear();
+    this->lrb.clear();
+    this->nnzsplit.clear();
+    this->trans        = rocsparse_operation_none;
+    this->m            = 0;
+    this->n            = 0;
+    this->nnz          = 0;
+    this->max_rows     = 0;
+    this->descr        = nullptr;
+    this->csr_row_ptr  = nullptr;
+    this->csr_col_ind  = nullptr;
+    this->index_type_I = deprecated_rocsparse_indextype_u16;
+    this->index_type_J = deprecated_rocsparse_indextype_u16;
+    this->alg          = rocsparse::csrmv_alg_default;
+}
+
+rocsparse::csrmv_alg _rocsparse_csrmv_info::alg_for(rocsparse_operation operation) const
+{
+    if(this->alg != rocsparse::csrmv_alg_default && this->trans == operation)
+    {
+        return this->alg;
+    }
+    return rocsparse::csrmv_map_default(operation);
+}
+
 /********************************************************************************
  * \brief Copy csrmv info.
  *******************************************************************************/
@@ -69,7 +103,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     previously_created |= (dest->csr_col_ind != nullptr);
     previously_created |= (dest->index_type_I != deprecated_rocsparse_indextype_u16);
     previously_created |= (dest->index_type_J != deprecated_rocsparse_indextype_u16);
-    previously_created |= (dest->selected_alg != rocsparse::csrmv_alg_default);
+    previously_created |= (dest->alg != rocsparse::csrmv_alg_default);
 
     if(previously_created)
     {
@@ -93,7 +127,9 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
         invalid |= (dest->max_rows != src->max_rows);
         invalid |= (dest->index_type_I != src->index_type_I);
         invalid |= (dest->index_type_J != src->index_type_J);
-        invalid |= (dest->selected_alg != src->selected_alg);
+        invalid |= (dest->nnzsplit.starting_block_ids_size_in_bytes
+                    != src->nnzsplit.starting_block_ids_size_in_bytes);
+        invalid |= (dest->alg != src->alg);
 
         if(invalid)
         {
@@ -261,7 +297,9 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     dest->max_rows                            = src->max_rows;
     dest->index_type_I                        = src->index_type_I;
     dest->index_type_J                        = src->index_type_J;
-    dest->selected_alg                        = src->selected_alg;
+    dest->nnzsplit.starting_block_ids_size_in_bytes
+        = src->nnzsplit.starting_block_ids_size_in_bytes;
+    dest->alg = src->alg;
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     dest->descr       = src->descr;

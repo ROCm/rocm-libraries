@@ -26,6 +26,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
+#include "rocsparse_csrmv_adaptive.hpp"
 #include "rocsparse_csrmv_adaptive_analysis.hpp"
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
@@ -346,12 +347,10 @@ namespace rocsparse
 }
 
 template <typename I, typename J>
-rocsparse_status
-    rocsparse::csrmv_adaptive_compute_partition(rocsparse_handle                handle,
-                                                J                               m,
-                                                I                               nnz,
-                                                const I*                        csr_row_ptr,
-                                                csrmv_adaptive_partition<I, J>& partition)
+rocsparse_status rocsparse::csrmv_partition<I, J>::compute(rocsparse_handle handle,
+                                                           J                m,
+                                                           I                nnz,
+                                                           const I*         csr_row_ptr)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -359,9 +358,9 @@ rocsparse_status
     hipStream_t stream = handle->stream;
 
     // Temporary arrays to hold device data
-    partition.row_ptr.resize(m + 1);
+    this->row_ptr.resize(m + 1);
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        partition.row_ptr.data(), csr_row_ptr, sizeof(I) * (m + 1), hipMemcpyDeviceToHost, stream));
+        this->row_ptr.data(), csr_row_ptr, sizeof(I) * (m + 1), hipMemcpyDeviceToHost, stream));
 
     // Wait for host transfer to finish
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
@@ -369,54 +368,54 @@ rocsparse_status
     // built with the same value the kernel is later launched with.
     // Use nnz (not row_ptr[m] - row_ptr[0]) so the workgroup size baked into wg_ids
     // here matches the value the kernel is launched with, which cannot diverge.
-    partition.gen_wg = rocsparse::general_wg_size(handle, m, nnz);
+    this->gen_wg = rocsparse::general_wg_size(handle, m, nnz);
 
     // Determine row blocks array size
     size_t row_block_size = 0;
     ComputeRowBlocks<I, J>((I*)NULL,
                            (J*)NULL,
                            row_block_size,
-                           partition.first_row,
-                           partition.last_row,
-                           partition.row_ptr.data(),
+                           this->first_row,
+                           this->last_row,
+                           this->row_ptr.data(),
                            m,
-                           partition.gen_wg,
+                           this->gen_wg,
                            false);
 
     // Create row blocks and workgroup data structures
-    partition.row_blocks.assign(row_block_size, 0);
-    partition.wg_ids.assign(row_block_size, 0);
+    this->row_blocks.assign(row_block_size, 0);
+    this->wg_ids.assign(row_block_size, 0);
 
-    ComputeRowBlocks<I, J>(partition.row_blocks.data(),
-                           partition.wg_ids.data(),
+    ComputeRowBlocks<I, J>(this->row_blocks.data(),
+                           this->wg_ids.data(),
                            row_block_size,
-                           partition.first_row,
-                           partition.last_row,
-                           partition.row_ptr.data(),
+                           this->first_row,
+                           this->last_row,
+                           this->row_ptr.data(),
                            m,
-                           partition.gen_wg,
+                           this->gen_wg,
                            true);
 
     // The second pass may use fewer row blocks than the first one counted.
-    partition.row_blocks.resize(row_block_size);
-    partition.wg_ids.resize(row_block_size);
+    this->row_blocks.resize(row_block_size);
+    this->wg_ids.resize(row_block_size);
 
     return rocsparse_status_success;
 }
 
 template <typename I, typename J, typename A>
-rocsparse_status rocsparse::csrmv_analysis_adaptive_template_dispatch(
-    rocsparse_handle                      handle,
-    rocsparse_operation                   trans,
-    J                                     m,
-    J                                     n,
-    I                                     nnz,
-    const rocsparse_mat_descr             descr,
-    const A*                              csr_val,
-    const I*                              csr_row_ptr,
-    const J*                              csr_col_ind,
-    rocsparse_csrmv_info*                 p_csrmv_info,
-    const csrmv_adaptive_partition<I, J>* partition)
+rocsparse_status
+    rocsparse::csrmv_analysis_adaptive_template_dispatch(rocsparse_handle             handle,
+                                                         rocsparse_operation          trans,
+                                                         J                            m,
+                                                         J                            n,
+                                                         I                            nnz,
+                                                         const rocsparse_mat_descr    descr,
+                                                         const A*                     csr_val,
+                                                         const I*                     csr_row_ptr,
+                                                         const J*                     csr_col_ind,
+                                                         rocsparse_csrmv_info*        p_csrmv_info,
+                                                         const csrmv_partition<I, J>* partition)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -428,11 +427,10 @@ rocsparse_status rocsparse::csrmv_analysis_adaptive_template_dispatch(
         // Stream
         hipStream_t stream = handle->stream;
 
-        csrmv_adaptive_partition<I, J> computed_partition;
+        csrmv_partition<I, J> computed_partition;
         if(partition == nullptr)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_adaptive_compute_partition(
-                handle, m, nnz, csr_row_ptr, computed_partition));
+            RETURN_IF_ROCSPARSE_ERROR(computed_partition.compute(handle, m, nnz, csr_row_ptr));
             partition = &computed_partition;
         }
 
@@ -935,17 +933,17 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
 
 #define INSTANTIATE(ITYPE, JTYPE, ATYPE)                                            \
     template rocsparse_status rocsparse::csrmv_analysis_adaptive_template_dispatch( \
-        rocsparse_handle                                         handle,            \
-        rocsparse_operation                                      trans,             \
-        JTYPE                                                    m,                 \
-        JTYPE                                                    n,                 \
-        ITYPE                                                    nnz,               \
-        const rocsparse_mat_descr                                descr,             \
-        const ATYPE*                                             csr_val,           \
-        const ITYPE*                                             csr_row_ptr,       \
-        const JTYPE*                                             csr_col_ind,       \
-        rocsparse_csrmv_info*                                    info,              \
-        const rocsparse::csrmv_adaptive_partition<ITYPE, JTYPE>* partition);
+        rocsparse_handle                                handle,                     \
+        rocsparse_operation                             trans,                      \
+        JTYPE                                           m,                          \
+        JTYPE                                           n,                          \
+        ITYPE                                           nnz,                        \
+        const rocsparse_mat_descr                       descr,                      \
+        const ATYPE*                                    csr_val,                    \
+        const ITYPE*                                    csr_row_ptr,                \
+        const JTYPE*                                    csr_col_ind,                \
+        rocsparse_csrmv_info*                           info,                       \
+        const rocsparse::csrmv_partition<ITYPE, JTYPE>* partition);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, float);
@@ -974,13 +972,9 @@ INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
 
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, JTYPE)                                          \
-    template rocsparse_status rocsparse::csrmv_adaptive_compute_partition( \
-        rocsparse_handle                                   handle,         \
-        JTYPE                                              m,              \
-        ITYPE                                              nnz,            \
-        const ITYPE*                                       csr_row_ptr,    \
-        rocsparse::csrmv_adaptive_partition<ITYPE, JTYPE>& partition);
+#define INSTANTIATE(ITYPE, JTYPE)                                                \
+    template rocsparse_status rocsparse::csrmv_partition<ITYPE, JTYPE>::compute( \
+        rocsparse_handle handle, JTYPE m, ITYPE nnz, const ITYPE* csr_row_ptr);
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int32_t);

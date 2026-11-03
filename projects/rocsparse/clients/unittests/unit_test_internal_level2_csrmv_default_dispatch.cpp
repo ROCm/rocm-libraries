@@ -340,7 +340,7 @@ namespace
         }
         out.has_info        = true;
         out.adaptive_blocks = info->adaptive.row_blocks != nullptr;
-        out.selected        = info->selected_alg;
+        out.selected        = info->alg;
         out.nnzsplit_tuned
             = info->nnzsplit.starting_ids != nullptr && info->nnzsplit.block_size != 0;
         if(!out.nnzsplit_tuned)
@@ -357,8 +357,7 @@ namespace
                       && copied->nnzsplit.nnz_per_thread == info->nnzsplit.nnz_per_thread
                       && copied->nnzsplit.starting_ids_size_in_bytes
                              == info->nnzsplit.starting_ids_size_in_bytes
-                      && copied->selected_alg == info->selected_alg
-                      && copied->adaptive.row_blocks == nullptr
+                      && copied->alg == info->alg && copied->adaptive.row_blocks == nullptr
                       && (static_cast<char*>(copied->nnzsplit.starting_block_ids)
                           - static_cast<char*>(copied->nnzsplit.starting_ids))
                              == (static_cast<char*>(info->nnzsplit.starting_block_ids)

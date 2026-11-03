@@ -54,34 +54,20 @@ typedef struct _rocsparse_csrmv_info
     rocsparse_indextype index_type_I = deprecated_rocsparse_indextype_u16;
     rocsparse_indextype index_type_J = deprecated_rocsparse_indextype_u16;
 
-    // Algorithm chosen when the analysis was asked for csrmv_alg_default, and
-    // csrmv_alg_default when an explicit algorithm was analysed.
-    rocsparse::csrmv_alg selected_alg = rocsparse::csrmv_alg_default;
+    // Concrete algorithm stored when analysis was asked for csrmv_alg_default.
+    // Left as csrmv_alg_default when analysis was asked for an explicit
+    // algorithm, so a later default compute does not reuse that choice.
+    rocsparse::csrmv_alg alg = rocsparse::csrmv_alg_default;
 
-    _rocsparse_csrmv_info() {}
+    _rocsparse_csrmv_info();
+    ~_rocsparse_csrmv_info();
 
-    ~_rocsparse_csrmv_info()
-    {
-        this->clear();
-    }
+    void clear();
 
-    void clear()
-    {
-        this->adaptive.clear();
-        this->lrb.clear();
-        this->nnzsplit.clear();
-        this->trans        = rocsparse_operation_none;
-        this->m            = 0;
-        this->n            = 0;
-        this->nnz          = 0;
-        this->max_rows     = 0;
-        this->descr        = nullptr;
-        this->csr_row_ptr  = nullptr;
-        this->csr_col_ind  = nullptr;
-        this->index_type_I = deprecated_rocsparse_indextype_u16;
-        this->index_type_J = deprecated_rocsparse_indextype_u16;
-        this->selected_alg = rocsparse::csrmv_alg_default;
-    }
+    // Stored algorithm when the caller passes csrmv_alg_default and operation
+    // is the one analysis ran for. Otherwise the static default map. operation
+    // is the caller's operation, compared with this->trans.
+    rocsparse::csrmv_alg alg_for(rocsparse_operation operation) const;
 
 } * rocsparse_csrmv_info, *rocsparse_cscmv_info;
 

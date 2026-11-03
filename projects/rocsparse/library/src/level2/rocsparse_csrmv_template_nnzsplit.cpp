@@ -367,31 +367,15 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
     // Stream
     hipStream_t stream = handle->stream;
 
-    const bool use_starting_block_ids
-        = csrmv_info == nullptr ? false : csrmv_info->nnzsplit.use_starting_block_ids;
-
     uint32_t NNZ_PER_BLOCK  = NNZ_PER_THREAD * BLOCKSIZE;
     uint32_t requiredBlocks = (nnz + NNZ_PER_BLOCK - 1) / NNZ_PER_BLOCK;
-
-    csrmv_info->nnzsplit.size = requiredBlocks;
-
-    csrmv_info->nnzsplit.use_starting_block_ids = use_starting_block_ids;
 
     dim3 csrmv_threads(BLOCKSIZE);
     dim3 csrmv_phase_1((rocsparse::max(m + 1, n) + BLOCKSIZE - 1) / BLOCKSIZE);
 
-    csrmv_info->nnzsplit.starting_ids_size_in_bytes = csrmv_info->nnzsplit.use_starting_block_ids
-                                                          ? sizeof(J) * (2 * requiredBlocks + 2)
-                                                          : sizeof(J) * (requiredBlocks + 1);
-    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->nnzsplit.starting_ids,
-                                                 csrmv_info->nnzsplit.starting_ids_size_in_bytes,
-                                                 stream));
-    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(csrmv_info->nnzsplit.starting_ids,
-                                                 0,
-                                                 csrmv_info->nnzsplit.starting_ids_size_in_bytes,
-                                                 stream));
+    RETURN_IF_ROCSPARSE_ERROR(
+        csrmv_info->nnzsplit.allocate_starting_ids(stream, requiredBlocks, sizeof(J)));
     J* temp_buffer_j = reinterpret_cast<J*>(csrmv_info->nnzsplit.starting_ids);
-    csrmv_info->nnzsplit.starting_block_ids = &temp_buffer_j[requiredBlocks + 1];
 
     if(csrmv_info->nnzsplit.use_starting_block_ids)
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

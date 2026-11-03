@@ -29,7 +29,10 @@
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrmv.hpp"
-#include "rocsparse_csrmv_adaptive_analysis.hpp"
+#include "rocsparse_csrmv_adaptive.hpp"
+#include "rocsparse_csrmv_lrb.hpp"
+
+#include <type_traits>
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
@@ -48,64 +51,41 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
     return true;
 };
 
-rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg&        alg,
-                                                        rocsparse_operation          operation,
-                                                        const _rocsparse_csrmv_info* csrmv_info)
-{
-    if(alg != rocsparse::csrmv_alg_default)
-    {
-        // Algorithm is already specific, no dispatch needed
-        return rocsparse_status_success;
-    }
-
-    if(csrmv_info != nullptr && csrmv_info->selected_alg != rocsparse::csrmv_alg_default
-       && csrmv_info->trans == operation)
-    {
-        alg = csrmv_info->selected_alg;
-        return rocsparse_status_success;
-    }
-
-    // Dispatch default algorithm to a specific algorithm based on operation:
-    // - transpose/conjugate_transpose: use rowsplit (adaptive doesn't support transpose)
-    // - none: use adaptive
-    if(operation != rocsparse_operation_none)
-    {
-        alg = rocsparse::csrmv_alg_rowsplit;
-    }
-    else
-    {
-        alg = rocsparse::csrmv_alg_adaptive;
-    }
-    return rocsparse_status_success;
-}
-
 template <typename I, typename J>
-rocsparse_status rocsparse::csrmv_select_algorithm(rocsparse_handle                handle,
-                                                   rocsparse_operation             trans,
-                                                   J                               m,
-                                                   I                               nnz,
-                                                   const I*                        csr_row_ptr,
-                                                   rocsparse::csrmv_alg&           alg,
-                                                   csrmv_adaptive_partition<I, J>& partition)
+rocsparse_status rocsparse::csrmv_select_algorithm(rocsparse_handle      handle,
+                                                   rocsparse_operation   trans,
+                                                   J                     m,
+                                                   I                     nnz,
+                                                   const I*              csr_row_ptr,
+                                                   bool                  keep_adaptive_default,
+                                                   rocsparse::csrmv_alg* alg,
+                                                   std::optional<csrmv_partition<I, J>>* partition)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    if(alg != rocsparse::csrmv_alg_default || trans != rocsparse_operation_none)
+    partition->reset();
+
+    if(*alg != rocsparse::csrmv_alg_default)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans, nullptr));
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csrmv_adaptive_compute_partition(handle, m, nnz, csr_row_ptr, partition));
+    if(trans != rocsparse_operation_none)
+    {
+        *alg = rocsparse::csrmv_alg_rowsplit;
+        return rocsparse_status_success;
+    }
 
-    alg = rocsparse::csrmv_adaptive_partition_is_poor_fit(partition.row_blocks.data(),
-                                                          partition.row_blocks.size(),
-                                                          partition.row_ptr.data(),
-                                                          static_cast<I>(m))
-              ? rocsparse::csrmv_alg_nnzsplit
-              : rocsparse::csrmv_alg_adaptive;
+    if(keep_adaptive_default)
+    {
+        *alg = rocsparse::csrmv_alg_adaptive;
+        return rocsparse_status_success;
+    }
 
+    csrmv_partition<I, J> built;
+    RETURN_IF_ROCSPARSE_ERROR(built.compute(handle, m, nnz, csr_row_ptr));
+    *alg = built.is_poor_fit() ? rocsparse::csrmv_alg_nnzsplit : rocsparse::csrmv_alg_adaptive;
+    *partition = std::move(built);
     return rocsparse_status_success;
 }
 
@@ -141,20 +121,15 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
 
     const bool default_requested = (alg == rocsparse::csrmv_alg_default);
 
-    // Filled when the selection already ran the first adaptive analysis phase.
-    rocsparse::csrmv_adaptive_partition<I, J> partition;
-    if(std::is_same<A, _Float16>{} || std::is_same<A, rocsparse_bfloat16>{})
-    {
-        // Analysis only knows the matrix type, and only half-precision matrices
-        // can have a half-precision y, where nnz-split would add every partial
-        // sum with an atomic in that precision. Keep the adaptive default.
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans, nullptr));
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::csrmv_select_algorithm(handle, trans, m, nnz, csr_row_ptr, alg, partition));
-    }
+    // Empty unless default, non-transpose, full-precision selection built the
+    // host partition. Analysis only knows the matrix type, and only
+    // half-precision matrices can have a half-precision y, where nnz-split
+    // would add every partial sum with an atomic in that precision.
+    std::optional<rocsparse::csrmv_partition<I, J>> partition;
+    const bool                                      keep_adaptive_default
+        = std::is_same<A, _Float16>{} || std::is_same<A, rocsparse_bfloat16>{};
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_select_algorithm(
+        handle, trans, m, nnz, csr_row_ptr, keep_adaptive_default, &alg, &partition));
 
     switch(alg)
     {
@@ -171,7 +146,7 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
             csr_row_ptr,
             csr_col_ind,
             p_csrmv_info,
-            partition.row_blocks.empty() ? nullptr : &partition));
+            partition ? &*partition : nullptr));
         break;
     }
 
@@ -190,26 +165,26 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
     case rocsparse::csrmv_alg_nnzsplit:
     {
         // The selection copied the row pointers to the host, so the longest row
-        // does not need another device pass.
-        int64_t max_row_nnz = 0;
-        for(size_t row = 1; row < partition.row_ptr.size(); ++row)
+        // does not need another device pass. Explicit nnz-split has no partition.
+        int64_t        max_row_nnz       = 0;
+        const int64_t* known_max_row_nnz = nullptr;
+        if(partition)
         {
-            max_row_nnz = std::max(
-                max_row_nnz,
-                static_cast<int64_t>(partition.row_ptr[row] - partition.row_ptr[row - 1]));
+            max_row_nnz       = partition->max_nnz_per_row();
+            known_max_row_nnz = &max_row_nnz;
         }
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
-            handle,
-            trans,
-            m,
-            n,
-            nnz,
-            descr,
-            csr_val,
-            csr_row_ptr,
-            csr_col_ind,
-            p_csrmv_info,
-            partition.row_ptr.empty() ? nullptr : &max_row_nnz));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmv_analysis_nnzsplit_template_dispatch(handle,
+                                                                 trans,
+                                                                 m,
+                                                                 n,
+                                                                 nnz,
+                                                                 descr,
+                                                                 csr_val,
+                                                                 csr_row_ptr,
+                                                                 csr_col_ind,
+                                                                 p_csrmv_info,
+                                                                 known_max_row_nnz));
         break;
     }
 
@@ -224,7 +199,7 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
 
     if(default_requested && p_csrmv_info[0] != nullptr)
     {
-        p_csrmv_info[0]->selected_alg = alg;
+        p_csrmv_info[0]->alg = alg;
     }
 
     return rocsparse_status_success;
@@ -312,8 +287,13 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
 
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
-    // Dispatch default algorithm to the one analysis selected, or based on operation
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans, csrmv_info));
+    // A default request uses the algorithm analysis stored for this operation,
+    // or the static map when analysis did not store one.
+    if(alg == rocsparse::csrmv_alg_default)
+    {
+        alg = (csrmv_info != nullptr) ? csrmv_info->alg_for(trans)
+                                      : rocsparse::csrmv_map_default(trans);
+    }
 
     // Another quick return.
     if(m == 0 || n == 0 || nnz == 0)

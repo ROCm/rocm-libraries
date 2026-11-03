@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include "rocsparse-types.h"
+
 namespace rocsparse
 {
     typedef enum csrmv_alg_
@@ -34,4 +36,15 @@ namespace rocsparse
         csrmv_alg_lrb,
         csrmv_alg_nnzsplit
     } csrmv_alg;
+
+    // csrmv_alg_default asks the library to choose. It is not a kernel.
+    // Transpose and conjugate transpose use row-split. Non-transpose uses adaptive.
+    inline csrmv_alg csrmv_map_default(rocsparse_operation operation)
+    {
+        if(operation != rocsparse_operation_none)
+        {
+            return csrmv_alg_rowsplit;
+        }
+        return csrmv_alg_adaptive;
+    }
 }

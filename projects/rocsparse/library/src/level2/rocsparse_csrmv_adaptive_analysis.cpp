@@ -23,19 +23,19 @@
  * ************************************************************************ */
 
 #include "rocsparse_csrmv_adaptive_analysis.hpp"
+#include "rocsparse_csrmv_partition.hpp"
 
-template <typename I>
-bool rocsparse::csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
-                                                     std::size_t row_block_size,
-                                                     const I*    row_ptr,
-                                                     I           n_rows)
+template <typename I, typename J>
+bool rocsparse::csrmv_partition<I, J>::is_poor_fit() const
 {
-    if(row_block_size < 2 || n_rows <= 0)
+    const I n_rows
+        = this->row_ptr.empty() ? static_cast<I>(0) : static_cast<I>(this->row_ptr.size() - 1);
+    if(this->row_blocks.size() < 2 || n_rows <= 0)
     {
         return false;
     }
 
-    const std::size_t nblocks         = row_block_size - 1;
+    const std::size_t nblocks         = this->row_blocks.size() - 1;
     const I           span_limit      = static_cast<I>(csrmv_adaptive_wide_block_rows);
     const I           underfilled_nnz = static_cast<I>(csrmv_adaptive_block_nnz / 8);
 
@@ -45,22 +45,22 @@ bool rocsparse::csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
 
     for(std::size_t block = 0; block < nblocks; ++block)
     {
-        I begin = row_blocks[block];
-        I end   = row_blocks[block + 1];
+        I begin = this->row_blocks[block];
+        I end   = this->row_blocks[block + 1];
 
         // The first block also takes the empty prefix adaptive does not skip,
         // and the last block the empty suffix. Count only the rows from the
         // first to the last nonempty one.
         if(block == 0)
         {
-            while(begin < end && row_ptr[begin + 1] == row_ptr[begin])
+            while(begin < end && this->row_ptr[begin + 1] == this->row_ptr[begin])
             {
                 ++begin;
             }
         }
         if(block == nblocks - 1)
         {
-            while(end > begin && row_ptr[end] == row_ptr[end - 1])
+            while(end > begin && this->row_ptr[end] == this->row_ptr[end - 1])
             {
                 --end;
             }
@@ -77,7 +77,7 @@ bool rocsparse::csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
             wide_rows += static_cast<int64_t>(span);
         }
 
-        const I block_nnz = row_ptr[end] - row_ptr[begin];
+        const I block_nnz = this->row_ptr[end] - this->row_ptr[begin];
         ++comparable;
         if(block_nnz < underfilled_nnz)
         {
@@ -95,10 +95,9 @@ bool rocsparse::csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
     return comparable >= 8 && underfilled * 4 >= comparable;
 }
 
-#define INSTANTIATE(I)                                                \
-    template bool rocsparse::csrmv_adaptive_partition_is_poor_fit<I>( \
-        const I* row_blocks, std::size_t row_block_size, const I* row_ptr, I n_rows);
+#define INSTANTIATE(I, J) template bool rocsparse::csrmv_partition<I, J>::is_poor_fit() const;
 
-INSTANTIATE(int32_t);
-INSTANTIATE(int64_t);
+INSTANTIATE(int32_t, int32_t);
+INSTANTIATE(int64_t, int32_t);
+INSTANTIATE(int64_t, int64_t);
 #undef INSTANTIATE
