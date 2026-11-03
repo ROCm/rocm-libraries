@@ -320,6 +320,10 @@ def warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     3D segment kernel, the future MFMA-based norm kernels, and any
     other op that needs an in-warp 16-lane butterfly.
     """
+    # Intentionally on ds_swizzle for all masks: unlike warp_xor_reduce_sum,
+    # masks 1, 2, 4, 8 are not routed to warp_shuffle_xor_dpp here. They could
+    # take the same win; if you add it, mirror the split in the C++ max
+    # reconstructions so the byte-identity gate stays green.
     cur = v
     for k in range(stages):
         remote = b.warp_shuffle_xor(cur, 1 << k)
@@ -333,10 +337,25 @@ def warp_xor_reduce_sum(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     See :func:`warp_xor_reduce_max` for the lane-XOR rationale (masks
     ``1, 2, 4, 8`` lower to ``ds_swizzle_b32``, not ``ds_bpermute``);
     the only difference is the combiner is ``fadd`` instead of ``fmax``.
+
+    For f32/i32 data the stages inside one 16-lane DPP row ride
+    ``warp_shuffle_xor_dpp`` (VALU DPP, no ``ds_swizzle`` / no
+    ``lgkmcnt(0)`` wait): masks 1 and 2 as themselves (``quad_perm`` on
+    gfx9 CDNA), masks 4 and 8 as dpp masks 7 and 15 (``row_half_mirror``
+    / ``row_mirror``). The stages run in ascending order, so when the
+    mask 4 (8) stage runs every lane of each quad (half-row) holds the same
+    sum, and pairing with ``i ^ 7`` (``i ^ 15``) adds the same value as
+    ``i ^ 4`` (``i ^ 8``): the result is bitwise identical. Masks 16 and
+    up, and any other dtype, stay on ``warp_shuffle_xor``.
+    Mirrors ``cpp/helpers/attention.cpp::rocke_warp_xor_reduce_sum``.
     """
     cur = v
     for k in range(stages):
-        remote = b.warp_shuffle_xor(cur, 1 << k)
+        mask = 1 << k
+        if mask <= 8 and cur.type.name in ("f32", "i32"):
+            remote = b.warp_shuffle_xor_dpp(cur, mask if mask <= 2 else 2 * mask - 1)
+        else:
+            remote = b.warp_shuffle_xor(cur, mask)
         cur = b.fadd(cur, remote)
     return cur
 
