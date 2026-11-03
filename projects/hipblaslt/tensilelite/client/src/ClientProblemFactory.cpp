@@ -652,11 +652,21 @@ namespace TensileLite
                             rv.back().setMXScaleHostPreSwizzle(m_mxScaleHostPreSwizzle);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_mxScalePadding, m_mxBlockFreeA);
+                                rv.back().setMXScaleA(
+                                    m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA],
+                                    m_mxBlockA,
+                                    {},
+                                    m_mxScalePadding,
+                                    m_mxBlockFreeA);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_mxScalePadding, m_mxBlockFreeB);
+                                rv.back().setMXScaleB(
+                                    m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB],
+                                    m_mxBlockB,
+                                    {},
+                                    m_mxScalePadding,
+                                    m_mxBlockFreeB);
                             }
                             // StreamK=5 hybrid-mode toggle. Accepts the full
                             // tri-state {0=OFF (static), 1=ON (dynamic per-XCD

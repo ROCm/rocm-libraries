@@ -250,7 +250,7 @@ namespace
                                           bool           transB,
                                           int            mxBlock      = 32,
                                           bool           packedScales = true,
-                                          MXScalePadding padding = MXScalePadding::Gfx950)
+                                          MXScalePadding padding      = MXScalePadding::Gfx950)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(transA,
                                                             transB,

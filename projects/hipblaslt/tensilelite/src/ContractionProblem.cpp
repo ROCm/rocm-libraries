@@ -695,7 +695,7 @@ namespace TensileLite
         normalize();
         calcArithmeticIntensity();
     }
-	
+
     void ContractionProblemGemm::setMXScaleA(rocisa::DataType    mxTypeA,
                                              int                 mxBlockA,
                                              std::vector<size_t> saStride,
@@ -722,13 +722,13 @@ namespace TensileLite
                 saSizes[freeIdx] = CeilDivide(saSizes[freeIdx], (size_t)m_mxBlockFreeA);
             }
             saSizes[boundIdx] = CeilDivide(saSizes[boundIdx], (size_t)mxBlockA);
-            if (padding == MXScalePadding::Gfx950)
+            if(padding == MXScalePadding::Gfx950)
             {
                 saSizes[boundIdx] = RoundUpToMultiple(saSizes[boundIdx], (size_t)8);
                 auto freeIdx = m_freeIndicesA[0].i;
                 saSizes[freeIdx] = RoundUpToMultiple(saSizes[freeIdx], (size_t)32);
             }
-            else if (padding == MXScalePadding::Gfx1250)
+            else if(padding == MXScalePadding::Gfx1250)
             {
                 // A scale covers mxBlockA elements along K, and the scale tensor is
                 // padded so that K-blocks tile the 128-element K step of the scaled
@@ -764,13 +764,13 @@ namespace TensileLite
                 sbSizes[freeIdx] = CeilDivide(sbSizes[freeIdx], (size_t)m_mxBlockFreeB);
             }
             sbSizes[boundIdx] = CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB);
-            if (padding == MXScalePadding::Gfx950)
+            if(padding == MXScalePadding::Gfx950)
             {
                 sbSizes[boundIdx] = RoundUpToMultiple(sbSizes[boundIdx], (size_t)8);
                 auto freeIdx = m_freeIndicesB[0].i;
                 sbSizes[freeIdx] = RoundUpToMultiple(sbSizes[freeIdx], (size_t)32);
             }
-            else if (padding == MXScalePadding::Gfx1250)
+            else if(padding == MXScalePadding::Gfx1250)
             {
                 // See setMXScaleA for the dimk rationale.
                 size_t dimk = std::max<size_t>(1, 128 / mxBlockB);

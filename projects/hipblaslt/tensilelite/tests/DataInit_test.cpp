@@ -92,11 +92,17 @@ namespace
             M, M * N,                       // ldd, strideD
             0.0);                           // beta
         if(mxBlockA > 0)
-            problem.setMXScaleA(rocisa::DataType::E8, mxBlockA, {},
-                                TensileLite::MXScalePadding::Gfx950, mxBlockFreeA);
+            problem.setMXScaleA(rocisa::DataType::E8,
+                                mxBlockA,
+                                {},
+                                TensileLite::MXScalePadding::Gfx950,
+                                mxBlockFreeA);
         if(mxBlockB > 0)
-            problem.setMXScaleB(rocisa::DataType::E8, mxBlockB, {},
-                                TensileLite::MXScalePadding::Gfx950, mxBlockFreeB);
+            problem.setMXScaleB(rocisa::DataType::E8,
+                                mxBlockB,
+                                {},
+                                TensileLite::MXScalePadding::Gfx950,
+                                mxBlockFreeB);
         return problem;
     }
 

@@ -103,9 +103,9 @@ namespace
             .mi_dtype = elementSizeA_bits < elementSizeB_bits ? call.typeB : call.typeA,
         };
         origami::config_t origami_config = {
-            .mt = {static_cast<size_t>(call.workgroupTile_m),
-                   static_cast<size_t>(call.workgroupTile_n),
-                   static_cast<size_t>(call.workgroupTile_k)},
+            .mt                        = {static_cast<size_t>(call.workgroupTile_m),
+                                          static_cast<size_t>(call.workgroupTile_n),
+                                          static_cast<size_t>(call.workgroupTile_k)},
             .occupancy                 = call.occupancy,
             .workspace_size            = call.workspaceSize,
             .workspace_size_per_elem_c = elementSizeAcc,
@@ -182,11 +182,11 @@ namespace
 
     std::string describe(RocRollerCallSite const& c)
     {
-        return "m=" + std::to_string(c.m) + " n=" + std::to_string(c.n) + " k="
-               + std::to_string(c.k) + " batch=" + std::to_string(c.batch_count) + " cus="
+        return "m=" + std::to_string(c.m) + " n=" + std::to_string(c.n)
+               + " k=" + std::to_string(c.k) + " batch=" + std::to_string(c.batch_count) + " cus="
                + std::to_string(c.sm_count_target) + " mt=" + std::to_string(c.workgroupTile_m)
-               + "x" + std::to_string(c.workgroupTile_n) + "x"
-               + std::to_string(c.workgroupTile_k) + " occ=" + std::to_string(c.occupancy)
+               + "x" + std::to_string(c.workgroupTile_n) + "x" + std::to_string(c.workgroupTile_k)
+               + " occ=" + std::to_string(c.occupancy)
                + " a=" + std::to_string(static_cast<int>(c.typeA))
                + " b=" + std::to_string(static_cast<int>(c.typeB));
     }
@@ -250,8 +250,8 @@ namespace
 
         origami::problem_t oracleProblem{};
         origami::config_t  oracleConfig{};
-        int const oracleGrid = chooseStreamKGridSizeTranscription(
-            call, hw, oracleProblem, oracleConfig);
+        int const          oracleGrid
+            = chooseStreamKGridSizeTranscription(call, hw, oracleProblem, oracleConfig);
 
         RocRollerStreamKGridInputs const in = portInputs(call);
 
@@ -340,15 +340,15 @@ namespace
                             for(int occ = 1; occ <= 20; ++occ)
                             {
                                 RocRollerCallSite call{};
-                                call.m                 = static_cast<size_t>(size.m);
-                                call.n                 = static_cast<size_t>(size.n);
-                                call.k                 = static_cast<size_t>(size.k);
-                                call.batch_count       = batch;
-                                call.sm_count_target   = cus;
-                                call.workgroupTile_m   = mt.m;
-                                call.workgroupTile_n   = mt.n;
-                                call.workgroupTile_k   = mt.k;
-                                call.occupancy         = occ;
+                                call.m               = static_cast<size_t>(size.m);
+                                call.n               = static_cast<size_t>(size.n);
+                                call.k               = static_cast<size_t>(size.k);
+                                call.batch_count     = batch;
+                                call.sm_count_target = cus;
+                                call.workgroupTile_m = mt.m;
+                                call.workgroupTile_n = mt.n;
+                                call.workgroupTile_k = mt.k;
+                                call.occupancy       = occ;
                                 // Exercise both the "no workspace" and the
                                 // "plenty of workspace" branches of the
                                 // reduction choice.
@@ -378,16 +378,18 @@ TEST(RocRollerStreamKGrid, MatchesRocRollerTranscriptionOnGfx950)
 {
     origami::hardware_t const hw = makeGfx950Hardware();
     size_t const              n  = sweep(hw, "gfx950");
-    EXPECT_EQ(n, sizes().size() * macrotiles().size() * typePairs().size() * cuBudgets().size()
-                     * 2u * 20u);
+    EXPECT_EQ(n,
+              sizes().size() * macrotiles().size() * typePairs().size() * cuBudgets().size() * 2u
+                  * 20u);
 }
 
 TEST(RocRollerStreamKGrid, MatchesRocRollerTranscriptionOnGfx942)
 {
     origami::hardware_t const hw = makeGfx942Hardware();
     size_t const              n  = sweep(hw, "gfx942");
-    EXPECT_EQ(n, sizes().size() * macrotiles().size() * typePairs().size() * cuBudgets().size()
-                     * 2u * 20u);
+    EXPECT_EQ(n,
+              sizes().size() * macrotiles().size() * typePairs().size() * cuBudgets().size() * 2u
+                  * 20u);
 }
 
 // The mi_dtype rule, stated directly rather than inferred from the sweep:

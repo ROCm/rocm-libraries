@@ -89,9 +89,10 @@ namespace TensileLite
             auto const& sm               = solution->sizeMapping;
             auto const& ck               = solution->customKernel;
             bool const  partialReduction = sm.requiresPartialReduction();
-            bool const  customStreamK    = ck.workspaceType == CustomWorkspaceType::StreamK
-                                        || ck.workspaceType == CustomWorkspaceType::StreamKWithReduction
-                                        || ck.workspaceType == CustomWorkspaceType::RocRollerStreamK;
+            bool const  customStreamK
+                = ck.workspaceType == CustomWorkspaceType::StreamK
+                  || ck.workspaceType == CustomWorkspaceType::StreamKWithReduction
+                  || ck.workspaceType == CustomWorkspaceType::RocRollerStreamK;
             bool const  mbsk             = sm.globalAccumulation == 3 || sm.adaptiveGemmGSUA == 1;
             bool const  handwritten      = !ck.name.empty() && !ck.generated;
             bool const  customArg

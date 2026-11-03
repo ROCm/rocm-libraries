@@ -11,8 +11,8 @@
 #include <cstdint>
 #include <stdexcept>
 
-#include <gtest/gtest.h>
 #include <Tensile/RocRollerStreamKKernargs.hpp>
+#include <gtest/gtest.h>
 
 using namespace TensileLite;
 

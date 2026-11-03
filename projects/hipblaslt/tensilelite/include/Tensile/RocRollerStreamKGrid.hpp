@@ -74,15 +74,14 @@ namespace TensileLite
      * mi_dtype is whichever of A/B has the larger element width, matching
      * rocRoller's `elementBitsA < elementBitsB ? B : A`.
      */
-    inline origami::problem_t
-        rocRollerStreamKGridProblem(RocRollerStreamKGridInputs const& in)
+    inline origami::problem_t rocRollerStreamKGridProblem(RocRollerStreamKGridInputs const& in)
     {
         return origami::problem_t{
-            .size    = {in.m, in.n, in.k},
-            .batch   = in.batch,
-            .num_cus = in.numCUs,
-            .a_dtype = in.aDtype,
-            .b_dtype = in.bDtype,
+            .size     = {in.m, in.n, in.k},
+            .batch    = in.batch,
+            .num_cus  = in.numCUs,
+            .a_dtype  = in.aDtype,
+            .b_dtype  = in.bDtype,
             .mi_dtype = in.aElementBits < in.bElementBits ? in.bDtype : in.aDtype,
         };
     }
@@ -125,7 +124,7 @@ namespace TensileLite
 
         // problem.num_cus carries the caller's budget (sm_count_target);
         // select_grid_size derives the CU budget from it internally.
-        return static_cast<uint32_t>(origami::streamk::select_grid_size(
-            problem, hw, config, RocRollerStreamKGridSelection));
+        return static_cast<uint32_t>(
+            origami::streamk::select_grid_size(problem, hw, config, RocRollerStreamKGridSelection));
     }
 } // namespace TensileLite

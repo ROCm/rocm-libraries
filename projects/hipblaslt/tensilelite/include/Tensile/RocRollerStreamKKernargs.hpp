@@ -64,10 +64,10 @@ namespace TensileLite
         uint32_t numDPTilesPerWG = 0;
         if(tiles > numWGs - 1u)
         {
-            numSKTiles           = ((tiles % numWGs) + numWGs) * iters;
-            uint32_t fullRounds  = (tiles / numWGs) - 1u;
-            numDPTiles           = (fullRounds * numWGs) * iters;
-            numDPTilesPerWG      = fullRounds * iters;
+            numSKTiles          = ((tiles % numWGs) + numWGs) * iters;
+            uint32_t fullRounds = (tiles / numWGs) - 1u;
+            numDPTiles          = (fullRounds * numWGs) * iters;
+            numDPTilesPerWG     = fullRounds * iters;
         }
         else
         {

@@ -156,8 +156,7 @@ TEST_P(MXScalePaddingGFX1250Test, BoundDimensionPaddedFreeDimensionUntouched)
     auto [mxBlock, M, N, K, expectedScaleK] = GetParam();
 
     auto problem = makeMXProblem(
-        M, N, K, mxBlock, /*batch=*/1, /*transA=*/true, /*transB=*/false,
-        MXScalePadding::Gfx1250);
+        M, N, K, mxBlock, /*batch=*/1, /*transA=*/true, /*transB=*/false, MXScalePadding::Gfx1250);
 
     auto const& sa = problem.mxsa().sizes();
     auto const& sb = problem.mxsb().sizes();
@@ -208,8 +207,8 @@ TEST(MXScalePaddingGFX1250, LargeBlocksDoNotProduceEmptyScaleTensor)
 {
     for(int mxBlock : {128, 256})
     {
-        auto problem = makeMXProblem(
-            256, 256, 2048, mxBlock, 1, true, false, MXScalePadding::Gfx1250);
+        auto problem
+            = makeMXProblem(256, 256, 2048, mxBlock, 1, true, false, MXScalePadding::Gfx1250);
 
         EXPECT_EQ(problem.mxsa().sizes()[0], CeilDivide((size_t)2048, (size_t)mxBlock))
             << "mxBlock=" << mxBlock;
@@ -268,8 +267,14 @@ TEST_P(MXScaleFreeTileTest, FreeDimensionDividedByTileExtent)
     auto [mxBlockFree, M, N, K, expectedScaleM, expectedScaleN] = GetParam();
     const int mxBlock = 128;
 
-    auto problem = makeMXProblem(M, N, K, mxBlock, /*batch=*/1, /*transA=*/true,
-                                 /*transB=*/false, MXScalePadding::Gfx1250,
+    auto problem = makeMXProblem(M,
+                                 N,
+                                 K,
+                                 mxBlock,
+                                 /*batch=*/1,
+                                 /*transA=*/true,
+                                 /*transB=*/false,
+                                 MXScalePadding::Gfx1250,
                                  mxBlockFree);
 
     auto const& sa = problem.mxsa().sizes();
@@ -317,8 +322,8 @@ INSTANTIATE_TEST_SUITE_P(
 // clamp it to 1, which is the no-tiling layout.
 TEST(MXScaleFreeTile, ZeroTileExtentClampsToOne)
 {
-    auto problem = makeMXProblem(256, 256, 2048, 128, 1, true, false,
-                                 MXScalePadding::Gfx1250, /*mxBlockFree=*/0);
+    auto problem = makeMXProblem(
+        256, 256, 2048, 128, 1, true, false, MXScalePadding::Gfx1250, /*mxBlockFree=*/0);
 
     EXPECT_EQ(problem.mxBlockFreeA(), 1u);
     EXPECT_EQ(problem.mxBlockFreeB(), 1u);
@@ -330,8 +335,8 @@ TEST(MXScaleFreeTile, ZeroTileExtentClampsToOne)
 // round-up to 32 applies to the already-divided count, not to M/N.
 TEST(MXScaleFreeTile, TileDivideHappensBeforeFreeDimensionPadding)
 {
-    auto problem = makeMXProblem(256, 512, 2048, 128, 1, true, false,
-                                 MXScalePadding::Gfx950, /*mxBlockFree=*/128);
+    auto problem = makeMXProblem(
+        256, 512, 2048, 128, 1, true, false, MXScalePadding::Gfx950, /*mxBlockFree=*/128);
 
     // ceil(256/128) = 2 -> 32, ceil(512/128) = 4 -> 32
     EXPECT_EQ(problem.mxsa().sizes()[1], 32u);

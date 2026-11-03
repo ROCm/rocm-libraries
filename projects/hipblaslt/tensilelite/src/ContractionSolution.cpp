@@ -189,7 +189,8 @@ namespace TensileLite
         case CustomGridSize::TilesYGSU:        return "TilesYGSU";
         case CustomGridSize::ComputeUnits:     return "ComputeUnits";
         // String deliberately unsuffixed; see the enum declaration.
-        case CustomGridSize::RocRollerStreamKGrid: return "RocRollerStreamK";
+        case CustomGridSize::RocRollerStreamKGrid:
+            return "RocRollerStreamK";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -200,20 +201,20 @@ namespace TensileLite
     CustomGridSize fromStringCustomGridSize(std::string& str)
     {
         static const std::unordered_map<std::string, CustomGridSize> lookup = {
-            {"One",              CustomGridSize::One},
-            {"TilesX",           CustomGridSize::TilesX},
-            {"TilesY",           CustomGridSize::TilesY},
-            {"Batch",            CustomGridSize::Batch},
-            {"TilesXY",          CustomGridSize::TilesXY},
-            {"TilesXYBatch",     CustomGridSize::TilesXYBatch},
+            {"One", CustomGridSize::One},
+            {"TilesX", CustomGridSize::TilesX},
+            {"TilesY", CustomGridSize::TilesY},
+            {"Batch", CustomGridSize::Batch},
+            {"TilesXY", CustomGridSize::TilesXY},
+            {"TilesXYBatch", CustomGridSize::TilesXYBatch},
             {"StreamKWithBatch", CustomGridSize::StreamKWithBatch},
-            {"StreamKNoBatch",   CustomGridSize::StreamKNoBatch},
+            {"StreamKNoBatch", CustomGridSize::StreamKNoBatch},
             {"PersistentGrid", CustomGridSize::PersistentGrid},
             {"PersistentWithBatch", CustomGridSize::PersistentWithBatch},
             {"PersistentNoBatch", CustomGridSize::PersistentNoBatch},
-            {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
-            {"TilesYGSU",        CustomGridSize::TilesYGSU},
-            {"ComputeUnits",     CustomGridSize::ComputeUnits},
+            {"TilesXYBatchGSU", CustomGridSize::TilesXYBatchGSU},
+            {"TilesYGSU", CustomGridSize::TilesYGSU},
+            {"ComputeUnits", CustomGridSize::ComputeUnits},
             {"RocRollerStreamK", CustomGridSize::RocRollerStreamKGrid},
         };
 
@@ -3373,8 +3374,7 @@ namespace TensileLite
                 skKernargs = evaluateRocRollerStreamKKernargs(
                     static_cast<int64_t>(problem.problemSizes()[0]),
                     static_cast<int64_t>(problem.problemSizes()[1]),
-                    static_cast<int64_t>(
-                        problem.problemSizes()[problem.problemSizes().size() - 1]),
+                    static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
                     customKernel.macrotile.x,
                     customKernel.macrotile.y,
                     customKernel.macrotile.z,
@@ -4038,25 +4038,32 @@ namespace TensileLite
                     rv.args.appendCustomType("RR_SKNumSKTiles", skKernarg().numSKTiles, arg.type);
                     break;
                 case CustomArgSemantic::RR_SKNumSKTilesPerWG:
-                    rv.args.appendCustomType("RR_SKNumSKTilesPerWG", skKernarg().numSKTilesPerWG, arg.type);
+                    rv.args.appendCustomType(
+                        "RR_SKNumSKTilesPerWG", skKernarg().numSKTilesPerWG, arg.type);
                     break;
                 case CustomArgSemantic::RR_SKNumDPTiles:
                     rv.args.appendCustomType("RR_SKNumDPTiles", skKernarg().numDPTiles, arg.type);
                     break;
                 case CustomArgSemantic::RR_SKNumDPTilesPerWG:
-                    rv.args.appendCustomType("RR_SKNumDPTilesPerWG", skKernarg().numDPTilesPerWG, arg.type);
+                    rv.args.appendCustomType(
+                        "RR_SKNumDPTilesPerWG", skKernarg().numDPTilesPerWG, arg.type);
                     break;
                 case CustomArgSemantic::RR_SKMagicMultipleIters:
-                    rv.args.appendCustomType("RR_SKMagicMultipleIters", skKernarg().magicMultipleIters, arg.type);
+                    rv.args.appendCustomType(
+                        "RR_SKMagicMultipleIters", skKernarg().magicMultipleIters, arg.type);
                     break;
                 case CustomArgSemantic::RR_SKMagicShiftsIters:
-                    rv.args.appendCustomType("RR_SKMagicShiftsIters", skKernarg().magicShiftsIters, arg.type);
+                    rv.args.appendCustomType(
+                        "RR_SKMagicShiftsIters", skKernarg().magicShiftsIters, arg.type);
                     break;
                 case CustomArgSemantic::RR_SKMagicMultipleNumTiles1:
-                    rv.args.appendCustomType("RR_SKMagicMultipleNumTiles1", skKernarg().magicMultipleNumTiles1, arg.type);
+                    rv.args.appendCustomType("RR_SKMagicMultipleNumTiles1",
+                                             skKernarg().magicMultipleNumTiles1,
+                                             arg.type);
                     break;
                 case CustomArgSemantic::RR_SKMagicShiftsNumTiles1:
-                    rv.args.appendCustomType("RR_SKMagicShiftsNumTiles1", skKernarg().magicShiftsNumTiles1, arg.type);
+                    rv.args.appendCustomType(
+                        "RR_SKMagicShiftsNumTiles1", skKernarg().magicShiftsNumTiles1, arg.type);
                     break;
                 case CustomArgSemantic::RR_SKAddressPartials:
                     rv.args.template append<void const*>("RR_SKAddressPartials", inputs.ws);
@@ -6298,8 +6305,7 @@ namespace TensileLite
             // grid, so there is no `tiles % grid` exemption to test. The grid
             // comes from the same helper the launch uses.
             size += sizeMapping.macroTile.x * sizeMapping.macroTile.y
-                    * sizeMapping.workspaceSizePerElemC
-                    * rocRollerStreamKGrid(problem, hardware);
+                    * sizeMapping.workspaceSizePerElemC * rocRollerStreamKGrid(problem, hardware);
         }
         else if(workspaceType == CustomWorkspaceType::SplitK)
         {
@@ -6967,12 +6973,12 @@ namespace TensileLite
         in.batch = batch;
         // Only sm_count_target: rocRoller has no persistentMaxCUs notion, and
         // folding one in here would move the grid off the JIT path's answer.
-        in.numCUs                = static_cast<size_t>(std::max(0, problem.getParams().smCountTarget()));
-        in.tileM                 = static_cast<size_t>(customKernel.macrotile.x);
-        in.tileN                 = static_cast<size_t>(customKernel.macrotile.y);
-        in.tileK                 = static_cast<size_t>(customKernel.macrotile.z);
-        in.occupancy             = static_cast<int>(customKernel.occupancy);
-        in.workspaceSize         = problem.workspaceSize();
+        in.numCUs        = static_cast<size_t>(std::max(0, problem.getParams().smCountTarget()));
+        in.tileM         = static_cast<size_t>(customKernel.macrotile.x);
+        in.tileN         = static_cast<size_t>(customKernel.macrotile.y);
+        in.tileK         = static_cast<size_t>(customKernel.macrotile.z);
+        in.occupancy     = static_cast<int>(customKernel.occupancy);
+        in.workspaceSize = problem.workspaceSize();
         in.workspaceSizePerElemC = sizeMapping.workspaceSizePerElemC;
         in.aDtype                = datatypeToAnalyticalDatatype(problem.a().dataType());
         in.bDtype                = datatypeToAnalyticalDatatype(problem.b().dataType());
