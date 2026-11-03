@@ -1790,46 +1790,6 @@ TEST(TestGfx950AttentionDenseTileMatch, EachLengthIsJudgedAgainstEachCandidateTi
 // consumes it: the order a cold (unbenchmarked) plan build tries candidates in.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseScore, BaselineFirstThenAscendingTilesWhateverTheIdOrder)
-{
-    // D64 S1024 admits all seven tiles. Ids are assigned twice -- ascending with the
-    // expected order, then descending -- so an order the id tie-break decided would
-    // differ between the two runs.
-    const std::vector<Tile> expected{
-        {256, 64}, {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 128}, {256, 256}};
-    const GraphSpec graph = d64H32Noncausal(1024, 1024);
-
-    for(const bool descendingIds : {false, true})
-    {
-        SCOPED_TRACE(descendingIds ? "descending ids" : "ascending ids");
-        auto cohort = d64H32Cohort();
-        for(std::size_t i = 0; i < cohort.size(); ++i)
-        {
-            const auto& tile = expected.at(i);
-            auto& candidate = cohort.at(i);
-            candidate.blockM = tile.first;
-            candidate.blockN = tile.second;
-            candidate.idByte = static_cast<unsigned>(descendingIds ? std::size_t{0x70} - i
-                                                                   : std::size_t{0x10} + i);
-        }
-        EXPECT_EQ(coldOrder(graph, cohort), expected);
-    }
-}
-
-TEST(TestGfx950AttentionDenseScore, BestApplicableAlternativeLeadsWhenTheBaselineCannotServe)
-{
-    // Sq 384 rules out every block_m 256 tile, the baseline included. Ids descend against
-    // the authoring order, so the selector's ascending-id tie-break alone would put
-    // 128/128 first.
-    auto cohort = d128H9Cohort();
-    for(std::size_t i = 0; i < cohort.size(); ++i)
-    {
-        cohort.at(i).idByte = static_cast<unsigned>(std::size_t{0x80} - i);
-    }
-    EXPECT_EQ(coldOrder(d128H9Noncausal(1, 384, 512), cohort),
-              (std::vector<Tile>{{128, 32}, {128, 64}, {128, 128}}));
-}
-
 TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight)
 {
     // The properties the selector relies on beyond the order itself: a scorer that drifts
@@ -1844,6 +1804,94 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
         EXPECT_EQ(score, scoreOf(candidate));
         EXPECT_GT(score, 0.0);
         EXPECT_TRUE(std::isfinite(score));
+    }
+}
+
+/// One shape and the tile order the scorer must produce for it.
+///
+/// PHASE 2 SEAM. The orders below are the shipped shape-blind ranking: baseline
+/// 256/64 first, then ascending (block_m, block_n). When the gfx950 tile sweep
+/// fits a measured rule into `tilePreference`, these expectations become the
+/// measured winner order and new rows are added for the shapes that distinguish
+/// the rule -- in particular either side of the grid-fill boundary, where a rule
+/// that reads the CU count must differ from one that does not.
+///
+/// Keeping the cases in a table rather than one test each is what makes that a
+/// data edit instead of a rewrite under time pressure.
+struct ColdOrderCase
+{
+    const char* name;
+    GraphSpec graph;
+    std::vector<KernelSpec> cohort;
+    std::vector<Tile> expected;
+};
+
+std::vector<ColdOrderCase> coldOrderCases()
+{
+    return {
+        // All seven D64 tiles are legal at S1024, so this pins the full order.
+        {"d64 s1024, every tile legal",
+         d64H32Noncausal(1024, 1024),
+         d64H32Cohort(),
+         {{256, 64}, {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 128}, {256, 256}}},
+        // Sq 384 rules out every block_m 256 tile, the baseline included, so the
+        // order starts from the best remaining alternative.
+        {"d128 sq384, baseline cannot serve",
+         d128H9Noncausal(1, 384, 512),
+         d128H9Cohort(),
+         {{128, 32}, {128, 64}, {128, 128}}},
+    };
+}
+
+TEST(TestGfx950AttentionDenseScore, RanksEachShapeInItsExpectedOrderWhateverTheIdOrder)
+{
+    // Ids are assigned twice -- ascending with the expected order, then descending --
+    // so an order the selector's descriptor-id tie-break decided would differ between
+    // the two runs and fail here rather than looking like a ranking.
+    for(const auto& testCase : coldOrderCases())
+    {
+        SCOPED_TRACE(testCase.name);
+        ASSERT_FALSE(testCase.expected.empty());
+        // Only the ids move. The cohort keeps its authored tiles, so a case may expect
+        // fewer tiles than the cohort holds: kernelMatches drops the ones the shape
+        // cannot use before anything is ranked.
+        for(const bool descendingIds : {false, true})
+        {
+            SCOPED_TRACE(descendingIds ? "descending ids" : "ascending ids");
+            auto cohort = testCase.cohort;
+            for(std::size_t i = 0; i < cohort.size(); ++i)
+            {
+                cohort.at(i).idByte = static_cast<unsigned>(descendingIds ? std::size_t{0x70} - i
+                                                                          : std::size_t{0x10} + i);
+            }
+            EXPECT_EQ(coldOrder(testCase.graph, cohort), testCase.expected);
+        }
+    }
+}
+
+TEST(TestGfx950AttentionDenseScore, NeverRanksATileThatCannotServeTheShape)
+{
+    // Holds whatever `tilePreference` becomes. Scoring runs after kernelMatches, so a
+    // tile in the ranking is a tile the engine will launch: one that does not divide
+    // both lengths would read past the operands or drop the remainder, and no ordering
+    // is a defence against that. Shapes chosen so each rules out a different slice of
+    // the tile set rather than all or nothing.
+    const std::vector<std::pair<const char*, GraphSpec>> shapes{
+        {"d128 sq384: no block_m 256", d128H9Noncausal(1, 384, 512)},
+        {"d128 skv192: only block_n 32 and 64", d128H9Noncausal(1, 1024, 192)},
+        {"d64 skv128: every tile but block_n 256", d64H32Noncausal(1024, 128)},
+    };
+    for(const auto& [name, graph] : shapes)
+    {
+        SCOPED_TRACE(name);
+        const auto cohort = graph.headSize == 64 ? d64H32Cohort() : d128H9Cohort();
+        const auto ranked = coldOrder(graph, cohort);
+        EXPECT_FALSE(ranked.empty()) << "a servable shape must rank at least one tile";
+        for(const auto& [blockM, blockN] : ranked)
+        {
+            EXPECT_EQ(graph.seqLenQ % blockM, 0) << blockM << "/" << blockN;
+            EXPECT_EQ(graph.seqLenKv % blockN, 0) << blockM << "/" << blockN;
+        }
     }
 }
 

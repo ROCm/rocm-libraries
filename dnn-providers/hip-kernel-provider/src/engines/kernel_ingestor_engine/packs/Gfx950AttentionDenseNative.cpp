@@ -125,17 +125,54 @@ constexpr double KEY_SPAN = 262144.0; // 2^18
 constexpr double UNSUPPORTED_TILE_SCORE = 0.0;
 
 /**
+ * @brief Preference among tiles that can serve this problem. Higher wins, range [0, 1).
+ *
+ * PLACEHOLDER. This reproduces the shape-blind cold order described on @ref scoreKernel
+ * and ignores @p problem and @p cuCount. It is the seam the measured rule replaces: the
+ * gfx950 tile sweep records the fastest tile per shape, and the fit goes here. Until it
+ * does, selection is the historical one and the order is unchanged.
+ *
+ * Whatever replaces this body must keep two properties the selector depends on, both
+ * asserted by ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight: every score is
+ * positive and finite, and two distinct tiles never score equal, or the descriptor-id
+ * tie-break silently decides between them.
+ *
+ * Divisibility is not this function's problem. kernelMatches rejects a tile that does not
+ * divide both lengths (@ref tileDivides) before anything is scored, so every tile here can
+ * already serve the shape and the question is only which is fastest.
+ */
+double tilePreference(const AttentionDenseTile& tile,
+                      const AttentionDenseProblem& problem,
+                      int cuCount)
+{
+    static_cast<void>(problem); // the measured rule reads both; the placeholder does not
+    static_cast<void>(cuCount);
+
+    if(tile.blockM == BASELINE_BLOCK_M && tile.blockN == BASELINE_BLOCK_N)
+    {
+        return BASELINE_TILE_SCORE;
+    }
+    const int64_t key = tile.blockM * BLOCK_M_KEY_WEIGHT + tile.blockN;
+    return ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
+}
+
+/**
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
- * A stable fallback order for cold selection, not a performance model:
+ * A stable fallback order for cold selection, not yet a performance model:
  *
  *  1. The baseline 256/64 tile -- every legacy record's -- above every alternative.
  *  2. The alternatives in ascending lexicographic (block_m, block_n) order.
  *
  * Every distinct tile gets a distinct score, so the selector's descriptor-id tie-break
  * never decides between two tiles.
+ *
+ * The shape and the device reach @ref tilePreference so a measured rule can read them.
+ * A graph this scorer cannot read the shape from falls back to the tile-only order rather
+ * than refusing: applicability is kernelMatches' job, and anything scored here already
+ * passed it.
  */
-double scoreKernel(const MatchContext& /*context*/,
+double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
 {
@@ -144,12 +181,18 @@ double scoreKernel(const MatchContext& /*context*/,
     {
         return UNSUPPORTED_TILE_SCORE;
     }
-    if(tile->blockM == BASELINE_BLOCK_M && tile->blockN == BASELINE_BLOCK_N)
+
+    AttentionDenseProblem problem;
+    if(const auto* attributes = sdpaNode(context); attributes != nullptr)
     {
-        return BASELINE_TILE_SCORE;
+        const auto* q = findTensor(context, attributes->q_tensor_uid());
+        const auto* k = findTensor(context, attributes->k_tensor_uid());
+        if(q != nullptr && k != nullptr)
+        {
+            problem = problemFor(*q, *k);
+        }
     }
-    const int64_t key = tile->blockM * BLOCK_M_KEY_WEIGHT + tile->blockN;
-    return ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
+    return tilePreference(*tile, problem, context.deviceProperties.multiProcessorCount);
 }
 
 } // namespace
