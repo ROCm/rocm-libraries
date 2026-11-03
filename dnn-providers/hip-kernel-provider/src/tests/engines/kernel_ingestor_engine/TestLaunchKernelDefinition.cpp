@@ -20,6 +20,7 @@
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
@@ -156,19 +157,34 @@ TEST(TestLaunchKernelDefinition, ResolvesTheLaunchItWasAskedFor)
     EXPECT_EQ(decode.source.signature.size(), 2u);
 }
 
-TEST(TestLaunchKernelDefinition, TwoLaunchesNamingOneKernelResolveToEqualDefinitions)
+TEST(TestLaunchKernelDefinition, TwoLaunchNamesMayShareOneEntryAndEachGetsItsOwnCopy)
 {
     KernelDefinition kernel = makeDecodeKernel();
-    kernel.sources.at("reduce") = kernel.sources.at("decode");
+    const KernelSource shared = kernel.sources.at("decode");
+    kernel.sources.at("reduce") = shared;
 
-    const KernelDefinition decode = launchKernelDefinition(kernel, "decode");
-    const KernelDefinition reduce = launchKernelDefinition(kernel, "reduce");
+    for(const char* launch : {"decode", "reduce"})
+    {
+        SCOPED_TRACE(launch);
+        KernelDefinition definition;
+        ASSERT_NO_THROW(definition = launchKernelDefinition(kernel, launch));
 
-    EXPECT_EQ(reduce.source.library, decode.source.library);
-    EXPECT_EQ(reduce.source.tocKey, decode.source.tocKey);
-    EXPECT_EQ(reduce.source.symbol, decode.source.symbol);
-    EXPECT_EQ(reduce.source.symbol, "rocke_decode");
-    EXPECT_EQ(reduce.source.signature.size(), decode.source.signature.size());
+        EXPECT_EQ(definition.source.symbol, shared.symbol);
+        EXPECT_EQ(definition.source.sha256, shared.sha256);
+        ASSERT_EQ(definition.source.signature.size(), shared.signature.size());
+        for(size_t i = 0; i < shared.signature.size(); ++i)
+        {
+            EXPECT_EQ(definition.source.signature[i].kind, shared.signature[i].kind) << i;
+            EXPECT_EQ(definition.source.signature[i].size, shared.signature[i].size) << i;
+            EXPECT_EQ(definition.source.signature[i].offset, shared.signature[i].offset) << i;
+            EXPECT_EQ(definition.source.signature[i].name, shared.signature[i].name) << i;
+        }
+    }
+
+    // The kernel's own entries are untouched by either resolution.
+    EXPECT_EQ(kernel.sources.size(), 3u);
+    EXPECT_EQ(kernel.sources.at("decode").symbol, shared.symbol);
+    EXPECT_EQ(kernel.sources.at("reduce").symbol, shared.symbol);
 }
 
 TEST(TestLaunchKernelDefinition, ClearsTheLaunchesOnTheCopy)
@@ -201,6 +217,57 @@ TEST(TestLaunchKernelDefinition, RefusesASingleLaunchKernel)
 
     EXPECT_NE(what.find("single-launch"), std::string::npos) << what;
     EXPECT_NE(what.find("'merge'"), std::string::npos) << what;
+}
+
+/// A library that does not exist is enough: the signature comparison runs before the load,
+/// so a launch that reaches the loader has already failed to be refused.
+TEST(TestLaunchKernelDefinition, ChecksTheLaunchsOwnSignatureBeforeLoadingItsArchive)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory scratch
+        = hipdnn_test_sdk::utilities::claimScratchDirectory("launchkerneldefinition");
+    hip_kernel_provider::compilation::KpackModuleCache cache;
+    const hip_kernel_provider::compilation::KpackKernelLoader loader{cache};
+    const GraphFixture graph(buildConvFwdGraph(data_objects::DataType::HALF), DeviceProperties{});
+
+    KernelDefinition kernel = makeDecodeKernel();
+    kernel.originDirectory = scratch.path();
+    kernel.treeRoot = scratch.path();
+    for(auto& entry : kernel.sources)
+    {
+        entry.second.library = "absent.kpack";
+    }
+
+    // What the pack marshals for either launch: the decode entry's recorded list. The merge
+    // entry records three arguments, so only it disagrees.
+    const std::vector<KernelArgument> expected = kernel.sources.at("decode").signature;
+
+    try
+    {
+        static_cast<void>(buildIngestorKernelCode(
+            loader, graph.context(), launchKernelDefinition(kernel, "merge"), expected));
+        FAIL() << "expected the merge launch's disagreeing signature to be refused";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(what.find("rocke_decode_merge"), std::string::npos) << what;
+        EXPECT_NE(what.find("this pack launches it with"), std::string::npos) << what;
+        EXPECT_EQ(what.find("does not exist"), std::string::npos) << what;
+    }
+
+    try
+    {
+        static_cast<void>(buildIngestorKernelCode(
+            loader, graph.context(), launchKernelDefinition(kernel, "decode"), expected));
+        FAIL() << "expected the absent archive to be what fails, not the signature";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        // Reaching the loader is the pass: the agreeing launch got past the comparison.
+        EXPECT_NE(std::string(error.what()).find("does not exist"), std::string::npos)
+            << error.what();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -376,7 +443,6 @@ TEST_F(TestLaunchKernelDefinitionKpack, RefusesALaunchWhoseRecordedSignatureDisa
         // Only the second launch's entry is wrong: the first still builds.
         static_cast<void>(
             buildIngestorKernelCode(_loader, graph.context(), first, packSignature()));
-        const size_t afterFirst = _cache.size();
 
         try
         {
@@ -393,8 +459,9 @@ TEST_F(TestLaunchKernelDefinitionKpack, RefusesALaunchWhoseRecordedSignatureDisa
                 << what;
         }
 
-        // Refused ahead of the load: nothing was loaded on the second launch's behalf.
-        EXPECT_EQ(_cache.size(), afterFirst);
+        // The refusal's ordering against the load is pinned device-free by
+        // ChecksTheLaunchsOwnSignatureBeforeLoadingItsArchive: here the module is cached by
+        // the first launch, so the cache could not show it.
     }
 }
 

@@ -52,6 +52,14 @@ question that this section returns to below. It matters more than the headline c
 | How to run | `cd tensilelite && tox -e unit` (skips the client build), or `tox -e rocisa` for the extension only |
 | Coverage | `tox -e coverage-unit` measures; `tox -e coverage-gate` enforces the floors against what it wrote |
 
+**Worker pools are not exercised here.** The unit suite pins `CpuThreads` to 1 (a session fixture in
+[`Tests/unit/conftest.py`](tensilelite/Tests/unit/conftest.py)), so its `ParallelMap` and `ParallelMap2`
+calls run in the test process and nothing is pickled or sent to a worker. The real pool path is
+covered by the device-library builds (`TensileCreateLibrary` with the default `CpuThreads` of -1), by
+the subprocess-based `Tests/common/test_config.py` runs, and by one small test in
+[`characterization/Parallel`](tensilelite/Tests/unit/characterization/Parallel/test_parallel_char.py)
+that runs both helpers with `CpuThreads=2`.
+
 A significant part of that suite is a **characterization suite** under
 [`tensilelite/Tests/unit/characterization/`](tensilelite/Tests/unit/characterization/), established in
 [PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989) and grown considerably since. It now
@@ -211,7 +219,7 @@ fixture or pinning current behavior. In spirit this is closer to
 validate tuning data rather than code, and where each one lives follows from that.
 
 One of these checks, sibling-`DeviceNames` consistency, is implemented in
-`Tensile.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
+`tensilelite.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks it regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy also lives in
@@ -384,7 +392,7 @@ Relative to the build, the logic YAML is compiler input rather than build output
 `TensileCreateLibrary` consumes it and emits kernels from it. Validating it is front-end analysis
 rather than testing, and running codegen over input already known to be invalid produces output nobody
 should trust. So the check is wired in as a CMake custom command in
-[`hipblaslt_codegen.cmake`](cmake/hipblaslt_codegen.cmake) that runs ahead of
+[`hipblaslt_codegen.cmake`](../cmake/hipblaslt_codegen.cmake) that runs ahead of
 `TensileCreateLibrary` and writes a stamp file. A failure stops the build.
 
 That placement buys good reach. It runs on every build that generates kernels, including every

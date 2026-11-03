@@ -55,7 +55,7 @@
 #define MIO_BN_DEBUG 0
 #define MIO_BN_MAX_DEBUGLOOP 65536
 
-#define EPSILON 1e-3
+#define EPSILON 1e-5
 
 #define ERRTOL_FP32 1e-4
 #define ERRTOL_FP16 0.5e-3
@@ -1967,6 +1967,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
     if(!back)
         return miopenStatusSuccess;
 
+    Tref epsilon = static_cast<Tref>(EPSILON);
     // float alphaDataDiff = static_cast<float>(1), betaDataDiff = static_cast<float>(0);
     // float alphaParamDiff = static_cast<float>(1), betaParamDiff = static_cast<float>(0);
     int size{0};
@@ -2027,6 +2028,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
                                          bnBias.GetTensor(),
                                          dScale_ref,
                                          dBias_ref,
+                                         static_cast<double>(epsilon),
                                          savedMean.GetTensor(),
                                          savedInvVar.GetTensor(),
                                          activ_mode,
@@ -2043,6 +2045,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
                                          bnBias.GetTensor(),
                                          dScale_ref,
                                          dBias_ref,
+                                         static_cast<double>(epsilon),
                                          empty_tensor,
                                          empty_tensor,
                                          activ_mode,

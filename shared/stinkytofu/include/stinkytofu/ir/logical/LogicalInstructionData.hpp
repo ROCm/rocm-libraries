@@ -38,6 +38,8 @@ struct MFMAData {
     int blocks;            ///< Number of blocks
     bool mfma1k;           ///< Whether this is a _1k variant
     bool neg;              ///< Negate operands
+    bool reuseA;           ///< Matrix A reuse flag
+    bool reuseB;           ///< Matrix B reuse flag
 
     /// Per-matrix input format tokens for gfx1250 f8f6f4-family WMMA, e.g.
     /// "MATRIX_FMT_FP6" (empty when the instruction needs no matrix_*_fmt).
@@ -54,9 +56,15 @@ struct MFMAData {
     /// is tracked separately from `scaled` (which controls only the mnemonic).
     bool scaleOperands;
 
+    /// Width of neg_lo when `neg` is set. 3 is HasWMMA_V1 (`neg_lo:[1,1,1]`);
+    /// 2 is `neg_lo:[1,1]`. 0 keeps the historical 2-source form.
+    int negSrcs;
+
     MFMAData(const std::string& instType_, const std::string& accType_, int m_, int n_, int k_,
-             int blocks_, bool mfma1k_, bool neg_ = false, const std::string& matrixAFmt_ = "",
-             const std::string& matrixBFmt_ = "", bool scaled_ = false, bool scaleOperands_ = false)
+             int blocks_, bool mfma1k_, bool neg_ = false, bool reuseA_ = false,
+             bool reuseB_ = false, const std::string& matrixAFmt_ = "",
+             const std::string& matrixBFmt_ = "", bool scaled_ = false, bool scaleOperands_ = false,
+             int negSrcs_ = 0)
         : instType(instType_),
           accType(accType_),
           m(m_),
@@ -65,10 +73,13 @@ struct MFMAData {
           blocks(blocks_),
           mfma1k(mfma1k_),
           neg(neg_),
+          reuseA(reuseA_),
+          reuseB(reuseB_),
           matrixAFmt(matrixAFmt_),
           matrixBFmt(matrixBFmt_),
           scaled(scaled_),
-          scaleOperands(scaleOperands_) {}
+          scaleOperands(scaleOperands_),
+          negSrcs(negSrcs_) {}
 };
 
 /**
@@ -95,11 +106,14 @@ struct MXMFMAData {
     bool reuseB;                  ///< Matrix B reuse flag
     std::string matrixAFmt;       ///< Per-matrix input format for A (e.g. MATRIX_FMT_FP4)
     std::string matrixBFmt;       ///< Per-matrix input format for B (e.g. MATRIX_FMT_FP4)
+    int mxScaleASel;              ///< Matrix A scale slot selector
+    int mxScaleBSel;              ///< Matrix B scale slot selector
 
     MXMFMAData(const std::string& instType_, const std::string& accType_,
                const std::string& mxScaleATypeStr_, const std::string& mxScaleBTypeStr_, int m_,
                int n_, int k_, int block_, bool reuseA_, bool reuseB_,
-               const std::string& matrixAFmt_ = "", const std::string& matrixBFmt_ = "")
+               const std::string& matrixAFmt_ = "", const std::string& matrixBFmt_ = "",
+               int mxScaleASel_ = 0, int mxScaleBSel_ = 0)
         : instType(instType_),
           accType(accType_),
           mxScaleATypeStr(mxScaleATypeStr_),
@@ -111,7 +125,9 @@ struct MXMFMAData {
           reuseA(reuseA_),
           reuseB(reuseB_),
           matrixAFmt(matrixAFmt_),
-          matrixBFmt(matrixBFmt_) {}
+          matrixBFmt(matrixBFmt_),
+          mxScaleASel(mxScaleASel_),
+          mxScaleBSel(mxScaleBSel_) {}
 };
 
 /**
@@ -173,6 +189,20 @@ struct SWaitAluLogicalData {
           vm_vsrc(vm_vsrc_),
           va_vcc(va_vcc_),
           sa_sdst(sa_sdst_) {}
+};
+
+/**
+ * @brief Data for SBarrier instructions (logical IR)
+ *
+ * Preserves rocisa's split-barrier form and cluster scope through logical IR.
+ */
+struct SBarrierLogicalData {
+    bool separate;
+    bool wait;
+    bool clusterBarrier;
+
+    SBarrierLogicalData(bool separate_ = false, bool wait_ = false, bool clusterBarrier_ = false)
+        : separate(separate_), wait(wait_), clusterBarrier(clusterBarrier_) {}
 };
 
 /**
