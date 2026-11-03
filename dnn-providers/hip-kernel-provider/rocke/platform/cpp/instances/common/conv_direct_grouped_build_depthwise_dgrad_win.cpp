@@ -365,8 +365,11 @@ bool rocke_direct_depthwise_dgrad_win_is_valid_spec(
         }
         else if(strcmp(arch, "gfx950") != 0)
         {
+            /* A wave32 target runs the form on the WMMA, at wave_size 32. */
+            const char* hint = strcmp(arch, "gfx1250") == 0 ? "; set wave_size=32" : "";
             if(reason != NULL && reason_cap > 0)
-                snprintf(reason, reason_cap, "mfma needs one of ('gfx950',) (got %s)", arch);
+                snprintf(
+                    reason, reason_cap, "mfma needs one of ('gfx950',) (got %s)%s", arch, hint);
             return false;
         }
     }

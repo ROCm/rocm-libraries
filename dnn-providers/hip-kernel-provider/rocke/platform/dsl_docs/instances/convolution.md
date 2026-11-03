@@ -1038,7 +1038,8 @@ exceed `DW_DGRAD_MFMA_MAX_FRAG_VGPRS` at wave32. The AOT build gives this form
 the target's wave size and records it in the cache entry
 (`direct_variants.direct_spec_takes_target_wave`, the one rule for the spec,
 the record and the run-side guard `direct_entry_wave_reason`); the VALU form
-keeps its logical wave64. The non-finite semantics are those of the MFMA form.
+keeps its logical wave64. On gfx1250 the wave64 MFMA form is refused with the
+hint `set wave_size=32`. The non-finite semantics are those of the MFMA form.
 The WMMA form has no forward pass: both engines reject `fwd` (and so
 `out_stride=2` and the grouped form) at `wave_size=32`.
 
@@ -1048,7 +1049,8 @@ filters `_DEPTHWISE_FILTERS` with every padding; for the VALU form the `(block_w
 channel pairs at `DW_WIN_PAIR_WAVES`; for the MFMA form every
 `DW_WIN_MFMA_FOLDS` x `DW_WIN_MFMA_WAVES` x `DW_WIN_MFMA_BLOCK_H` at
 `prefetch_rows = DW_WIN_MFMA_PREFETCH`, filtered by `_dw_win_policy_reason`
-(on gfx1250, the WMMA form, the row tiles also take `DW_WIN_WMMA_BLOCK_H`).
+(on gfx1250, the WMMA form at `wave_size=32`, the row tiles also take
+`DW_WIN_WMMA_BLOCK_H`).
 
 Choosing between the forms is left to the dispatcher rework. The MFMA form
 was measured ahead of the `dot2` VALU kernel, with warm and with cold caches,

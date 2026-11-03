@@ -7768,7 +7768,8 @@ class DirectDepthwiseDgradWindowedSpec:
       ``block_ch = threads_per_block * ch_per_lane``
       Grid: ``(ceil(W / block_w), ceil(C / block_ch), N * ceil(H / block_h))``
 
-    Toeplitz MFMA form (``mfma=True``, gfx950): every wave owns 8 channels,
+    Toeplitz MFMA form (``mfma=True``, gfx950; on gfx1250 the same form on
+    the wave32 WMMA, with ``wave_size=32``): every wave owns 8 channels,
     so ``block_ch = 8 * block_waves``; a block covers ``tile_w = 32 / w_fold``
     columns of ``w_fold`` images. Grid:
     ``(ceil(W / tile_w), ceil(C / block_ch), ceil(N / w_fold) * ceil(H / block_h))``.
@@ -8120,7 +8121,12 @@ def is_valid_depthwise_dgrad_win_spec(
                     f"wave32 mfma needs one of {DW_DGRAD_WMMA_ARCHES} (got {arch})",
                 )
         elif arch not in DW_DGRAD_MFMA_ARCHES:
-            return False, f"mfma needs one of {DW_DGRAD_MFMA_ARCHES} (got {arch})"
+            # A wave32 target runs the form on the WMMA, at wave_size 32.
+            hint = "; set wave_size=32" if arch in DW_DGRAD_WMMA_ARCHES else ""
+            return (
+                False,
+                f"mfma needs one of {DW_DGRAD_MFMA_ARCHES} (got {arch}){hint}",
+            )
     return _depthwise_dgrad_win_check(spec)
 
 

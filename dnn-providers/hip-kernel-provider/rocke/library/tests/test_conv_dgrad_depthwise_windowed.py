@@ -378,7 +378,15 @@ class TestWmmaSpec(unittest.TestCase):
             self._wmma(wave_size=64), arch="gfx1250"
         )
         self.assertFalse(ok)
-        self.assertIn("mfma needs one of ('gfx950',)", why)
+        self.assertEqual(
+            why, "mfma needs one of ('gfx950',) (got gfx1250); set wave_size=32"
+        )
+        # No wave32 hint on a target without the WMMA form.
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(wave_size=64), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(why, "mfma needs one of ('gfx950',) (got gfx942)")
 
     def test_wave32_form_has_no_forward_pass(self):
         """``fwd`` (the rotated-filter forward pass, any ``out_stride`` or

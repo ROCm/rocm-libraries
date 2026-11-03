@@ -33,7 +33,7 @@
 # the forward form at stride 2 (58, an odd block_h, both reject). Indices
 # 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
 # cpg 64 (stride 2).
-# Indices 62..70: the Toeplitz WMMA form of DirectDepthwiseDgradWindowedSpec
+# Indices 62..72: the Toeplitz WMMA form of DirectDepthwiseDgradWindowedSpec
 # (mfma=True at wave_size 32, gfx1250): 5x5 and 7x7, 1 / 4 / 8 waves, the tall
 # 28- and 32-row tiles and shorter ones, every w_fold, fp16 and bf16, and a
 # 3x3 single pass; 68 (9x9: the fragments exceed the VGPR cap), 69 (wave32
