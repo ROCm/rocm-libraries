@@ -716,7 +716,8 @@ namespace rocalution
 
     template <class OperatorType, class VectorType, typename ValueType>
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Vcycle_(const VectorType& rhs,
-                                                                     VectorType*       x)
+                                                                     VectorType*       x,
+                                                                     bool              continue_x)
     {
         log_debug(this, "BaseMultiGrid::Vcycle_()", " #*# begin", (const void*&)rhs, x);
 
@@ -748,7 +749,7 @@ namespace rocalution
 
         // Pre-smoothing
         smoother->InitMaxIter(this->iter_pre_smooth_);
-        if(this->is_precond_ || this->current_level_ != 0)
+        if(!continue_x && (this->is_precond_ || this->current_level_ != 0))
         {
             // When this AMG is a preconditioner or if we are not on the finest level,
             // we have to use a zero initial guess
@@ -919,11 +920,9 @@ namespace rocalution
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Wcycle_(const VectorType& rhs,
                                                                      VectorType*       x)
     {
-        // gamma = 2 hardcoded
-        for(int i = 0; i < 2; ++i)
-        {
-            this->Vcycle_(rhs, x);
-        }
+        // gamma = 2 hardcoded, the second cycle continues from the first
+        this->Vcycle_(rhs, x);
+        this->Vcycle_(rhs, x, true);
     }
 
     // LCOV_EXCL_START

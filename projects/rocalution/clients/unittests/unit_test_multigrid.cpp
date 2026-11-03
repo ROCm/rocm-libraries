@@ -758,10 +758,6 @@ TYPED_TEST(multigrid, w_cycle_continues_from_the_first_coarse_cycle)
     const Vec<T> b  = rhs<T>(15);
     const Vec<T> x0 = initial_guess<T>(15);
     const Vec<T> x  = solve(s.mg, *s.user.A, b, x0, 1);
-
-    // The second V-cycle of the W-cycle starts from zero again, so the W-cycle
-    // computes the V-cycle
-    KNOWN_BUG("the W-cycle repeats the same V-cycle on the coarse levels");
     expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
 }
 

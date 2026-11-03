@@ -136,8 +136,8 @@ namespace rocalution
         /** \brief Prolongs a given coarse vector to a fine vector */
         void Prolong_(const VectorType& coarse, VectorType* fine);
 
-        /** \brief V-cycle */
-        void Vcycle_(const VectorType& rhs, VectorType* x);
+        /** \brief V-cycle, on a coarse level from a zero initial guess unless continue_x is set */
+        void Vcycle_(const VectorType& rhs, VectorType* x, bool continue_x = false);
         /** \brief W-cycle */
         void Wcycle_(const VectorType& rhs, VectorType* x);
         /** \brief F-cycle */

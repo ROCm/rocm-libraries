@@ -42,6 +42,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed `MultiGrid` crashing in `Clear` and in its destructor after `Build`, because it deleted transfer maps that only the AMG solvers allocate.
+* Fixed the W-cycle computing the V-cycle. Its second coarse cycle now continues from the first instead of restarting from zero.
 
 ## (Unreleased) rocALUTION 4.1.1
 
