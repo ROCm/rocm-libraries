@@ -7,6 +7,8 @@ engine:
   knobs:
   - block_m
   - block_n
+  - lds_row_pad
+  - pv_priority
   heuristic: native
 kmd_fields:
 - name: dtype

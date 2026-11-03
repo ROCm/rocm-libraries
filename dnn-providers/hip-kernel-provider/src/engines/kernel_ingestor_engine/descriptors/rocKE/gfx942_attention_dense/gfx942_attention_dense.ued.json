@@ -12,6 +12,8 @@
   },
   "knobs": [
     "block_m",
-    "block_n"
+    "block_n",
+    "lds_row_pad",
+    "pv_priority"
   ]
 }

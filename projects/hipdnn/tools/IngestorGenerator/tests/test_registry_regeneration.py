@@ -308,6 +308,36 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
     assert rc == 0, report.out + report.err
 
 
+def test_g5_every_cell_is_addressable_by_the_engine_knobs(selection):
+    """hipDNN pages a graph's candidates by their engine-knob tuple and refuses a page in
+    which two candidates share one ("Ambiguous enrolled knob tuple"). A graph's candidates
+    all sit in one cell (the reduction's feature fields), so inside every cell each
+    kernel's tuple of engine knobs must be unique."""
+    features = list(selection.reduction["fields"]["feature"])
+    knobs = list(selection.engine.knobs)
+    cells = collections.defaultdict(list)
+    for kernel in _selection_kernels(selection):
+        cell = tuple(kernel.metadata.get(f) for f in features)
+        cells[cell].append((tuple(kernel.metadata.get(k) for k in knobs), kernel.name))
+    clashes = [
+        names
+        for entries in cells.values()
+        for names in _group_names(entries).values()
+        if len(names) > 1
+    ]
+    assert not clashes, (
+        f"engine knobs {knobs} do not tell these kernels apart within a cell; "
+        f"add the KMD field that differs to engine.knobs: {clashes[:3]}"
+    )
+
+
+def _group_names(entries):
+    grouped = collections.defaultdict(list)
+    for knob_values, name in entries:
+        grouped[knob_values].append(name)
+    return grouped
+
+
 def test_g4_the_selection_header_equals_the_manifest(
     selection, registry_config, tmp_path_factory
 ):
