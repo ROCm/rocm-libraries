@@ -44,14 +44,6 @@ bool dgw_packable(int c)
     return c == 2 || c == 4 || c == 8 || c == 16;
 }
 
-void dgw_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-    {
-        snprintf(reason, reason_cap, "%s", msg);
-    }
-}
-
 const char* dgw_dtype(const rocke_direct_dgrad_wmma_spec_t* spec)
 {
     return spec->problem.dtype ? spec->problem.dtype : "fp16";
@@ -327,7 +319,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
 
     if(spec == NULL)
     {
-        dgw_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -341,56 +333,56 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     p = &spec->problem;
     if(target->wave_size != 32 || spec->wave_size != 32)
     {
-        dgw_set_reason(reason, reason_cap, "direct_dgrad_wmma is a wave32 kernel");
+        rocke_spec_set_reason(reason, reason_cap, "direct_dgrad_wmma is a wave32 kernel");
         return false;
     }
     if(!target->memory.has_tdm)
     {
         snprintf(msg, sizeof msg, "no TDM on %s", arch);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     ab = dgw_is_bf16(spec) ? "bf16" : "f16";
     if(strcmp(dgw_dtype(spec), "fp16") != 0 && strcmp(dgw_dtype(spec), "bf16") != 0)
     {
         snprintf(msg, sizeof msg, "unsupported dtype '%s'", dgw_dtype(spec));
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!rocke_mma_catalog_has_shape(
            rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, ROCKE_FWD_WMMA_K))
     {
         snprintf(msg, sizeof msg, "missing wmma_f32_16x16x32_%s on %s", ab, arch);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->stride != 1 && p->stride != 2)
     {
         snprintf(msg, sizeof msg, "stride %d not in (1, 2)", p->stride);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->stride > 1 && (p->dil_h != 1 || p->dil_w != 1))
     {
-        dgw_set_reason(reason, reason_cap, "a strided dilated dgrad is not supported");
+        rocke_spec_set_reason(reason, reason_cap, "a strided dilated dgrad is not supported");
         return false;
     }
     if(p->dil_h < 1 || p->dil_w < 1)
     {
         snprintf(msg, sizeof msg, "dilation %dx%d < 1", p->dil_h, p->dil_w);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->KH < 1 || p->KW < 1)
     {
         snprintf(msg, sizeof msg, "filter %dx%d is not positive", p->KH, p->KW);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->PAD < 0 || dgw_plan_h(spec).shift < 0 || dgw_plan_w(spec).shift < 0)
     {
         snprintf(msg, sizeof msg, "PAD %d outside 0..(K-1)*dilation", p->PAD);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap))
@@ -399,7 +391,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     if(G < 1)
     {
         snprintf(msg, sizeof msg, "pack_groups %d < 1", G);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(G > 1)
@@ -407,14 +399,14 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         if(p->groups % G != 0)
         {
             snprintf(msg, sizeof msg, "groups %d not a multiple of pack_groups %d", p->groups, G);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(!dgw_packable(p->cpg) || !dgw_packable(p->kpg))
         {
             snprintf(
                 msg, sizeof msg, "packed cpg %d / kpg %d not in (2, 4, 8, 16)", p->cpg, p->kpg);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(dgw_kpg_eff(spec) > spec->ck)
@@ -424,7 +416,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                      "packed kpg %d > ck %d (one dY chunk)",
                      dgw_kpg_eff(spec),
                      spec->ck);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(dgw_cpg_eff(spec) > rocke_direct_dgrad_wmma_block_c(spec))
@@ -434,7 +426,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                      "packed cpg %d > block_c %d",
                      dgw_cpg_eff(spec),
                      rocke_direct_dgrad_wmma_block_c(spec));
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
     }
@@ -445,24 +437,24 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                  "cpg %d and kpg %d must be multiples of 8 (16-byte rows)",
                  dgw_cpg_eff(spec),
                  dgw_kpg_eff(spec));
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->ck % ROCKE_FWD_WMMA_K != 0 || spec->ck <= 0)
     {
         snprintf(
             msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->waves_c < 1 || spec->waves_p < 1 || spec->tiles_c < 1 || spec->tiles_p < 1)
     {
-        dgw_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
+        rocke_spec_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
         return false;
     }
     if(spec->stages < 2)
     {
-        dgw_set_reason(reason, reason_cap, "stages must be >= 2");
+        rocke_spec_set_reason(reason, reason_cap, "stages must be >= 2");
         return false;
     }
     tw = spec->tile_w;
@@ -470,31 +462,31 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     if(tw < 1 || spec->tile_n < 1)
     {
         snprintf(msg, sizeof msg, "tile_w %d and tile_n %d must be >= 1", tw, spec->tile_n);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(block_p % (tw * spec->tile_n) != 0)
     {
         snprintf(
             msg, sizeof msg, "tile_w %d x tile_n %d must divide %d", tw, spec->tile_n, block_p);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->tile_n > 1 && (rocke_direct_dgrad_wmma_tile_h(spec) * tw) % 16 != 0)
     {
-        dgw_set_reason(reason, reason_cap, "an image tile must hold whole 16-pixel tiles");
+        rocke_spec_set_reason(reason, reason_cap, "an image tile must hold whole 16-pixel tiles");
         return false;
     }
     if(spec->tile_n > spec->waves_c * spec->waves_p - 1)
     {
-        dgw_set_reason(reason,
-                       reason_cap,
-                       "tile_n needs one more wave than images (one dY transfer per image)");
+        rocke_spec_set_reason(reason,
+                              reason_cap,
+                              "tile_n needs one more wave than images (one dY transfer per image)");
         return false;
     }
     if((spec->split_barrier || spec->wave_epilogue) && (p->stride > 1 || G > 1))
     {
-        dgw_set_reason(
+        rocke_spec_set_reason(
             reason, reason_cap, "split_barrier / wave_epilogue serve stride-1 unpacked tiles only");
         return false;
     }
@@ -503,7 +495,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         int wpx = spec->tiles_p * 16;
         if(wpx % tw != 0 || (rocke_direct_dgrad_wmma_tile_h(spec) * tw) % wpx != 0)
         {
-            dgw_set_reason(
+            rocke_spec_set_reason(
                 reason, reason_cap, "wave_epilogue needs whole rows of one image per wave");
             return false;
         }
@@ -515,18 +507,19 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                  sizeof msg,
                  "%d threads per block",
                  rocke_direct_dgrad_wmma_threads_per_block(spec));
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->waves_c * spec->waves_p < 2)
     {
-        dgw_set_reason(reason, reason_cap, "needs at least two waves (one TDM issuer per operand)");
+        rocke_spec_set_reason(
+            reason, reason_cap, "needs at least two waves (one TDM issuer per operand)");
         return false;
     }
     if(dgw_x_pitch(spec) > 0xFFFF || dgw_w_pitch(spec) > 0xFFFF || dgw_halo_w(spec) > 0xFFFF
        || dgw_halo_h(spec) > 0xFFFF)
     {
-        dgw_set_reason(reason, reason_cap, "tile too wide for a TDM descriptor");
+        rocke_spec_set_reason(reason, reason_cap, "tile too wide for a TDM descriptor");
         return false;
     }
     if(!rocke_archtarget_fits_lds(target, rocke_direct_dgrad_wmma_lds_bytes(spec)))
@@ -536,7 +529,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                  "LDS %ld B > %d",
                  rocke_direct_dgrad_wmma_lds_bytes(spec),
                  target->lds_capacity_bytes);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     vgprs = 8 * dgw_phases(spec) * spec->tiles_c * spec->tiles_p
@@ -544,7 +537,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     if(vgprs > DGW_VGPR_BUDGET)
     {
         snprintf(msg, sizeof msg, "~%d VGPRs of accumulators and fragments", vgprs);
-        dgw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(rocke_scheduler_strategy_reason(spec->sched, reason, reason_cap))
@@ -579,17 +572,17 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         if(mx > INT32_MAX)
         {
             snprintf(msg, sizeof msg, "tensors of %lld B exceed the i32 byte offsets", mx);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
         if(tiles > INT32_MAX)
         {
             snprintf(msg, sizeof msg, "%lld workgroups exceed the i32 block id", tiles);
-            dgw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
     }
-    dgw_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1854,7 +1847,7 @@ rocke_status_t rocke_direct_dgrad_wmma_lower_to_llvm(const rocke_direct_dgrad_wm
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        dgw_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -1864,7 +1857,7 @@ rocke_status_t rocke_direct_dgrad_wmma_lower_to_llvm(const rocke_direct_dgrad_wm
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        dgw_set_reason(
+        rocke_spec_set_reason(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_dgrad_wmma failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;

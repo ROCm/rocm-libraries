@@ -117,14 +117,6 @@ static int nongrouped_wo(const rocke_direct_conv_problem_t* p)
            + 1;
 }
 
-static void nongrouped_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-    {
-        snprintf(reason, reason_cap, "%s", msg);
-    }
-}
-
 /* ===================================================================== *
  *  Spec defaults + derived geometry
  * ===================================================================== */
@@ -351,22 +343,20 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
 {
     const rocke_direct_conv_problem_t* p;
     const rocke_dconv_nongrouped_atom_t* at;
-    char msg[ROCKE_ERR_MSG_CAP];
     int t, merged_c, merged_k;
 
     if(spec == NULL)
     {
-        nongrouped_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
 
-#define NONGROUPED_REJECT(...)                          \
-    do                                                  \
-    {                                                   \
-        snprintf(msg, sizeof(msg), __VA_ARGS__);        \
-        nongrouped_set_reason(reason, reason_cap, msg); \
-        return ROCKE_ERR_VALUE;                         \
+#define NONGROUPED_REJECT(...)                                   \
+    do                                                           \
+    {                                                            \
+        rocke_spec_set_reasonf(reason, reason_cap, __VA_ARGS__); \
+        return ROCKE_ERR_VALUE;                                  \
     } while(0)
 
     if(strcmp(nongrouped_dtype(spec), "fp16") != 0 && strcmp(nongrouped_dtype(spec), "bf16") != 0)
@@ -569,7 +559,7 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     }
 #undef NONGROUPED_REJECT
 
-    nongrouped_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -589,7 +579,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
 
     if(spec == NULL)
     {
-        nongrouped_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -611,7 +601,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
     if(p->stride != 1 && p->stride != 2)
     {
         snprintf(msg, sizeof(msg), "stride %d is not supported (expected 1 or 2)", p->stride);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     at = nongrouped_atom(spec->atom);
@@ -620,7 +610,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
            rocke_archtarget_mma(target), "mma", ab, ab, "fp32", at->tile, at->tile, at->k))
     {
         snprintf(msg, sizeof(msg), "missing mfma_f32_%s_%s on %s", at->name, ab, arch);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->wave_size != target->wave_size)
@@ -631,7 +621,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
                  spec->wave_size,
                  arch,
                  target->wave_size);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(rocke_direct_conv_nongrouped_threads_per_block(spec)
@@ -641,7 +631,7 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
                  sizeof(msg),
                  "threads_per_block %d exceeds arch limit",
                  rocke_direct_conv_nongrouped_threads_per_block(spec));
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!rocke_archtarget_fits_lds(target, rocke_direct_conv_nongrouped_lds_bytes(spec)))
@@ -651,10 +641,10 @@ bool rocke_direct_conv_nongrouped_is_valid_spec(const rocke_direct_conv_nongroup
                  "LDS %ld B exceeds %d B",
                  rocke_direct_conv_nongrouped_lds_bytes(spec),
                  target->lds_capacity_bytes);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    nongrouped_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1857,7 +1847,7 @@ rocke_status_t rocke_direct_conv_split_reduce_validate(
 
     if(spec == NULL)
     {
-        nongrouped_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return ROCKE_ERR_VALUE;
     }
     if(strcmp(split_reduce_dtype(spec), "fp16") != 0
@@ -1867,13 +1857,13 @@ rocke_status_t rocke_direct_conv_split_reduce_validate(
                  sizeof(msg),
                  "DirectSplitReduceSpec: unsupported dtype '%s'",
                  split_reduce_dtype(spec));
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return ROCKE_ERR_VALUE;
     }
     if(spec->split_c < 2)
     {
         snprintf(msg, sizeof(msg), "split_c must be >= 2 (got %d)", spec->split_c);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return ROCKE_ERR_VALUE;
     }
     if(spec->threads <= 0 || spec->threads % 64 != 0 || spec->threads > 1024)
@@ -1882,10 +1872,10 @@ rocke_status_t rocke_direct_conv_split_reduce_validate(
                  sizeof(msg),
                  "threads must be a positive multiple of 64 up to 1024 (got %d)",
                  spec->threads);
-        nongrouped_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return ROCKE_ERR_VALUE;
     }
-    nongrouped_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 

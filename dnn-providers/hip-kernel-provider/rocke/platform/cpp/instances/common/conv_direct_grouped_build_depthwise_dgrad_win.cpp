@@ -221,117 +221,141 @@ static bool
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const char* dtype = rocke_direct_conv_problem_dtype(p);
-#define DW_WIN_FAIL(...)                        \
-    do                                          \
-    {                                           \
-        if(reason != NULL && cap > 0)           \
-            snprintf(reason, cap, __VA_ARGS__); \
-        return false;                           \
-    } while(0)
     if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
-        DW_WIN_FAIL("unsupported dtype '%s'; expected fp16 or bf16", dtype);
+        ROCKE_SPEC_FAIL(reason, cap, "unsupported dtype '%s'; expected fp16 or bf16", dtype);
     const bool grouped8 = spec->mfma && spec->fwd && p->cpg == p->kpg
                           && p->cpg % ROCKE_DW_DGRAD_MFMA_CH == 0
                           && p->cpg <= ROCKE_DW_WIN_MAX_GROUP_CH;
     if((p->cpg != 1 || p->kpg != 1) && !grouped8)
-        DW_WIN_FAIL("requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
+        ROCKE_SPEC_FAIL(reason, cap, "requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
     if(grouped8 && rocke_direct_depthwise_dgrad_win_block_ch(spec) % p->cpg != 0)
-        DW_WIN_FAIL("a block must hold whole groups (block_ch=%d, cpg=%d)",
-                    rocke_direct_depthwise_dgrad_win_block_ch(spec),
-                    p->cpg);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "a block must hold whole groups (block_ch=%d, cpg=%d)",
+                        rocke_direct_depthwise_dgrad_win_block_ch(spec),
+                        p->cpg);
     if(p->stride != 1)
-        DW_WIN_FAIL("requires stride=1 (got %d)", p->stride);
+        ROCKE_SPEC_FAIL(reason, cap, "requires stride=1 (got %d)", p->stride);
     if(rocke_direct_dilation_reason(p, reason, cap))
         return false;
     const long long Ho = rocke_direct_conv_problem_Ho(p);
     const long long Wo = rocke_direct_conv_problem_Wo(p);
     if(p->PAD < 0 || Ho <= 0 || Wo <= 0)
-        DW_WIN_FAIL("degenerate geometry (PAD=%d, Ho=%lld, Wo=%lld)", p->PAD, Ho, Wo);
+        ROCKE_SPEC_FAIL(
+            reason, cap, "degenerate geometry (PAD=%d, Ho=%lld, Wo=%lld)", p->PAD, Ho, Wo);
     if(spec->block_w < 1)
-        DW_WIN_FAIL("block_w must be >= 1 (got %d)", spec->block_w);
+        ROCKE_SPEC_FAIL(reason, cap, "block_w must be >= 1 (got %d)", spec->block_w);
     if(spec->block_h < 1)
-        DW_WIN_FAIL("block_h must be >= 1 (got %d); the image height is a kernarg, so a block "
-                    "covers a tile of rows",
-                    spec->block_h);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "block_h must be >= 1 (got %d); the image height is a kernarg, so a block "
+                        "covers a tile of rows",
+                        spec->block_h);
     const int threads = rocke_direct_depthwise_dgrad_win_threads_per_block(spec);
     if(spec->block_waves < 1 || threads > 1024)
-        DW_WIN_FAIL("block_waves must give 1..1024 threads (got %d)", spec->block_waves);
+        ROCKE_SPEC_FAIL(
+            reason, cap, "block_waves must give 1..1024 threads (got %d)", spec->block_waves);
     const int cpl = spec->ch_per_lane;
     if(cpl != 1 && cpl != 2 && cpl != 4 && cpl != 8)
-        DW_WIN_FAIL("ch_per_lane must be 1, 2, 4 or 8 (got %d)", cpl);
+        ROCKE_SPEC_FAIL(reason, cap, "ch_per_lane must be 1, 2, 4 or 8 (got %d)", cpl);
     if(p->groups % cpl != 0)
-        DW_WIN_FAIL("groups=%d is not a multiple of ch_per_lane=%d", p->groups, cpl);
+        ROCKE_SPEC_FAIL(
+            reason, cap, "groups=%d is not a multiple of ch_per_lane=%d", p->groups, cpl);
     if(spec->dot2 && cpl != 1)
-        DW_WIN_FAIL("dot2 requires ch_per_lane=1 (got %d)", cpl);
+        ROCKE_SPEC_FAIL(reason, cap, "dot2 requires ch_per_lane=1 (got %d)", cpl);
     if(spec->prefetch_rows < 1)
-        DW_WIN_FAIL("prefetch_rows must be >= 1 (got %d)", spec->prefetch_rows);
+        ROCKE_SPEC_FAIL(reason, cap, "prefetch_rows must be >= 1 (got %d)", spec->prefetch_rows);
     if(spec->fwd && !spec->mfma)
-        DW_WIN_FAIL("fwd requires mfma");
+        ROCKE_SPEC_FAIL(reason, cap, "fwd requires mfma");
     if(spec->fwd && p->KH != p->KW)
         /* One PAD serves both axes; only a square filter keeps it one value. */
-        DW_WIN_FAIL("fwd requires a square filter (got %dx%d)", p->KH, p->KW);
+        ROCKE_SPEC_FAIL(reason, cap, "fwd requires a square filter (got %dx%d)", p->KH, p->KW);
     if((spec->out_stride != 1 && spec->out_stride != 2) || (spec->out_stride != 1 && !spec->fwd))
-        DW_WIN_FAIL("out_stride must be 1, or 2 with fwd (got %d)", spec->out_stride);
+        ROCKE_SPEC_FAIL(
+            reason, cap, "out_stride must be 1, or 2 with fwd (got %d)", spec->out_stride);
     if(spec->block_h % spec->out_stride != 0)
-        DW_WIN_FAIL(
-            "block_h=%d must be a multiple of out_stride=%d", spec->block_h, spec->out_stride);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "block_h=%d must be a multiple of out_stride=%d",
+                        spec->block_h,
+                        spec->out_stride);
     if(spec->mfma)
     {
         if(spec->dot2 || cpl != 1)
-            DW_WIN_FAIL("mfma excludes dot2 and ch_per_lane > 1");
+            ROCKE_SPEC_FAIL(reason, cap, "mfma excludes dot2 and ch_per_lane > 1");
         if(!rocke_dw_mfma_w_fold_ok(spec->w_fold))
-            DW_WIN_FAIL("w_fold must be 1, 2 or 4 (got %d)", spec->w_fold);
+            ROCKE_SPEC_FAIL(reason, cap, "w_fold must be 1, 2 or 4 (got %d)", spec->w_fold);
         if(spec->prefetch_rows > ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS)
-            DW_WIN_FAIL("prefetch_rows must be <= %d (got %d)",
-                        ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS,
-                        spec->prefetch_rows);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "prefetch_rows must be <= %d (got %d)",
+                            ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS,
+                            spec->prefetch_rows);
         if(spec->block_waves > ROCKE_DW_DGRAD_MFMA_MAX_WAVES)
-            DW_WIN_FAIL("mfma needs block_waves <= %d (got %d)",
-                        ROCKE_DW_DGRAD_MFMA_MAX_WAVES,
-                        spec->block_waves);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "mfma needs block_waves <= %d (got %d)",
+                            ROCKE_DW_DGRAD_MFMA_MAX_WAVES,
+                            spec->block_waves);
         if(!grouped8 && p->groups % ROCKE_DW_DGRAD_MFMA_CH != 0)
-            DW_WIN_FAIL("mfma needs groups %% %d == 0 (got %d)", ROCKE_DW_DGRAD_MFMA_CH, p->groups);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "mfma needs groups %% %d == 0 (got %d)",
+                            ROCKE_DW_DGRAD_MFMA_CH,
+                            p->groups);
         const int frag = rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(spec);
         if(frag > ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS)
-            DW_WIN_FAIL("mfma fragments need %d VGPRs (> %d); lower prefetch_rows or the filter",
-                        frag,
-                        ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS);
+            ROCKE_SPEC_FAIL(
+                reason,
+                cap,
+                "mfma fragments need %d VGPRs (> %d); lower prefetch_rows or the filter",
+                frag,
+                ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS);
     }
     else if(spec->w_fold != 1 || spec->prefetch_rows != 1)
-        DW_WIN_FAIL("w_fold and prefetch_rows require mfma (got w_fold=%d, prefetch_rows=%d)",
-                    spec->w_fold,
-                    spec->prefetch_rows);
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "w_fold and prefetch_rows require mfma (got w_fold=%d, prefetch_rows=%d)",
+                        spec->w_fold,
+                        spec->prefetch_rows);
     {
         const long long dy = (long long)p->N * Ho * Wo * p->groups * p->cpg * 2;
         const long long dx = (long long)p->N * p->H * p->W * p->groups * p->cpg * 2;
         const long long mx = dy > dx ? dy : dx;
         if(mx > ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES)
-            DW_WIN_FAIL("dY/dX of %lld bytes exceed the %lld-byte sentinel addressing range",
-                        mx,
-                        (long long)ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "dY/dX of %lld bytes exceed the %lld-byte sentinel addressing range",
+                            mx,
+                            (long long)ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES);
     }
     if(spec->mfma)
     {
         const long long u = rocke_direct_depthwise_dgrad_win_unrolled_mfmas(spec);
         if(u > ROCKE_DW_DGRAD_MFMA_MAX_UNROLL)
-            DW_WIN_FAIL("unrolled body too large (%lld MFMAs > %d); lower block_h",
-                        u,
-                        ROCKE_DW_DGRAD_MFMA_MAX_UNROLL);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "unrolled body too large (%lld MFMAs > %d); lower block_h",
+                            u,
+                            ROCKE_DW_DGRAD_MFMA_MAX_UNROLL);
         const int lds = rocke_direct_depthwise_dgrad_win_mfma_lds_bytes(spec);
         if(lds > ROCKE_DW_DGRAD_MFMA_LDS_BUDGET)
-            DW_WIN_FAIL("mfma stages %d LDS bytes per workgroup (budget %d); lower block_waves",
-                        lds,
-                        ROCKE_DW_DGRAD_MFMA_LDS_BUDGET);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "mfma stages %d LDS bytes per workgroup (budget %d); lower block_waves",
+                            lds,
+                            ROCKE_DW_DGRAD_MFMA_LDS_BUDGET);
     }
     else
     {
         const long long u = rocke_direct_depthwise_dgrad_win_unrolled_fmas(spec);
         if(u > ROCKE_DW_DGRAD_WIN_MAX_UNROLL)
-            DW_WIN_FAIL("unrolled body too large (%lld FMAs > %d); lower block_w or block_h",
-                        u,
-                        ROCKE_DW_DGRAD_WIN_MAX_UNROLL);
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "unrolled body too large (%lld FMAs > %d); lower block_w or block_h",
+                            u,
+                            ROCKE_DW_DGRAD_WIN_MAX_UNROLL);
     }
-#undef DW_WIN_FAIL
     return true;
 }
 

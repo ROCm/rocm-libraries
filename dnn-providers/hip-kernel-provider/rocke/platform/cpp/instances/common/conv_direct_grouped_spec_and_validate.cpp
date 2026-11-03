@@ -321,19 +321,9 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
     const rocke_arch_mma_catalog_t* mma;
     const rocke_direct_conv_problem_t* p;
 
-#define CK_DCONV16C_REJECT(...)                        \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return false;                                  \
-    } while(0)
-
     if(spec == NULL)
     {
-        CK_DCONV16C_REJECT("spec is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
     if(arch == NULL)
     {
@@ -354,7 +344,8 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
         const char* dt = p->dtype ? p->dtype : "fp16";
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
-            CK_DCONV16C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
     }
     {
@@ -380,13 +371,20 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
     /* if p.cpg != 16 or p.kpg != 16: return False, ... */
     if(p->cpg != 16 || p->kpg != 16)
     {
-        CK_DCONV16C_REJECT("DirectConv16cSpec expects cpg=kpg=16 (got %d, %d)", p->cpg, p->kpg);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "DirectConv16cSpec expects cpg=kpg=16 (got %d, %d)",
+                        p->cpg,
+                        p->kpg);
     }
     /* if p.groups % spec.block_groups != 0: return False, ... */
     if(spec->block_groups == 0 || (p->groups % spec->block_groups) != 0)
     {
-        CK_DCONV16C_REJECT(
-            "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "groups %d not divisible by block_groups %d",
+                        p->groups,
+                        spec->block_groups);
     }
 
     mma = rocke_archtarget_mma(target);
@@ -396,16 +394,18 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
         /* if not target.mma.has_shape(ab,ab,fp32, 16,16,16): return False, ... */
         if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
         {
-            CK_DCONV16C_REJECT("missing 16x16x16 %s MFMA atom on %s", ab, arch);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "missing 16x16x16 %s MFMA atom on %s", ab, arch);
         }
         /* if spec.fold_k32 and not target.mma.has_shape(ab,ab,fp32, 16,16,32): ... */
         if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
         {
-            CK_DCONV16C_REJECT("fold_k32=True needs the 16x16x32 %s MFMA atom, absent on %s; use "
-                               "fold_k32=False for a %s-capable kernel",
-                               ab,
-                               arch,
-                               arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "fold_k32=True needs the 16x16x32 %s MFMA atom, absent on %s; use "
+                            "fold_k32=False for a %s-capable kernel",
+                            ab,
+                            arch,
+                            arch);
         }
     }
 
@@ -414,8 +414,6 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
         snprintf(reason, reason_cap, "ok");
     }
     return true;
-
-#undef CK_DCONV16C_REJECT
 }
 
 /* ===================================================================== *
@@ -675,19 +673,9 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     const rocke_archtarget_t* target;
     const rocke_direct_conv_problem_t* p;
 
-#define CK_DCONV4C_REJECT(...)                         \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return false;                                  \
-    } while(0)
-
     if(spec == NULL)
     {
-        CK_DCONV4C_REJECT("spec is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
     if(arch == NULL)
     {
@@ -709,7 +697,8 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
         const char* dt = p->dtype ? p->dtype : "fp16";
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
-            CK_DCONV4C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
     }
     {
@@ -724,31 +713,38 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     /* if p.cpg != 4 or p.kpg != 4: return False, ... */
     if(p->cpg != 4 || p->kpg != 4)
     {
-        CK_DCONV4C_REJECT("DirectConv4cSpec expects cpg=kpg=4 (got %d, %d)", p->cpg, p->kpg);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "DirectConv4cSpec expects cpg=kpg=4 (got %d, %d)", p->cpg, p->kpg);
     }
     /* if spec.block_groups % 16 != 0: return False, ... */
     if((spec->block_groups % 16) != 0)
     {
-        CK_DCONV4C_REJECT("DirectConv4cSpec block_groups must be a multiple of 16");
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "DirectConv4cSpec block_groups must be a multiple of 16");
     }
     /* if spec.block_q % 4 != 0: return False, ... */
     if((spec->block_q % 4) != 0)
     {
-        CK_DCONV4C_REJECT("DirectConv4cSpec block_q must be a multiple of 4");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "DirectConv4cSpec block_q must be a multiple of 4");
     }
     /* if p.groups % spec.block_groups != 0: return False, ... */
     if(spec->block_groups == 0 || (p->groups % spec->block_groups) != 0)
     {
-        CK_DCONV4C_REJECT(
-            "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "groups %d not divisible by block_groups %d",
+                        p->groups,
+                        spec->block_groups);
     }
     /* if p.KH * p.KW > DCONV4C_MAX_TAPS: return False, ... (the builder's
      * per-tap arrays are sized ROCKE_DCONV4C_MAX_TAPS). */
     if(p->KH * p->KW > ROCKE_DCONV4C_MAX_TAPS)
     {
-        CK_DCONV4C_REJECT("DirectConv4cSpec supports KH*KW <= %d (got %d)",
-                          ROCKE_DCONV4C_MAX_TAPS,
-                          p->KH * p->KW);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "DirectConv4cSpec supports KH*KW <= %d (got %d)",
+                        ROCKE_DCONV4C_MAX_TAPS,
+                        p->KH * p->KW);
     }
     /* why = _stage_rows_reject_reason(spec); if why: return False, why */
     if(rocke_dconv4c_stage_rows_reject(spec, reason, reason_cap))
@@ -760,11 +756,14 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     {
         if(!spec->dgrad_fused_weights)
         {
-            CK_DCONV4C_REJECT("dgrad_weights_lds requires dgrad_fused_weights");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "dgrad_weights_lds requires dgrad_fused_weights");
         }
         if(!target->memory.has_ds_read_tr)
         {
-            CK_DCONV4C_REJECT("dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)",
+                            arch);
         }
         /* wl_passes = ceil(block_groups*cpg*KH*KW*kpg/8 / threads) <= bound */
         {
@@ -773,9 +772,11 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
             const int wl_passes = (wl_vecs + wl_threads - 1) / wl_threads;
             if(wl_passes > ROCKE_DCONV4C_MAX_WL_PASSES)
             {
-                CK_DCONV4C_REJECT("dgrad_weights_lds needs %d staging passes (max %d)",
-                                  wl_passes,
-                                  ROCKE_DCONV4C_MAX_WL_PASSES);
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "dgrad_weights_lds needs %d staging passes (max %d)",
+                                wl_passes,
+                                ROCKE_DCONV4C_MAX_WL_PASSES);
             }
         }
     }
@@ -786,16 +787,20 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
         rocke_dconv4c_staged_geometry(spec, &geo);
         if(geo.passes > ROCKE_DCONV4C_MAX_ROW_PASSES)
         {
-            CK_DCONV4C_REJECT("stage_rows needs %d row staging passes (max %d)",
-                              geo.passes,
-                              ROCKE_DCONV4C_MAX_ROW_PASSES);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "stage_rows needs %d row staging passes (max %d)",
+                            geo.passes,
+                            ROCKE_DCONV4C_MAX_ROW_PASSES);
         }
         if(geo.lds_bytes > target->lds_capacity_bytes)
         {
-            CK_DCONV4C_REJECT("stage_rows needs %d bytes of LDS (more than %d on %s)",
-                              geo.lds_bytes,
-                              target->lds_capacity_bytes,
-                              arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "stage_rows needs %d bytes of LDS (more than %d on %s)",
+                            geo.lds_bytes,
+                            target->lds_capacity_bytes,
+                            arch);
         }
     }
 
@@ -809,8 +814,6 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
         snprintf(reason, reason_cap, "ok");
     }
     return true;
-
-#undef CK_DCONV4C_REJECT
 }
 
 /* The launch signature is not built here: every direct kernel takes the AOT
@@ -2685,14 +2688,11 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
 {
     const rocke_direct_conv_problem_t* p;
 
-#define ROCKE_DCONV_WGRAD_RAISE(...)                   \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return ROCKE_ERR_VALUE;                        \
+#define ROCKE_DCONV_WGRAD_RAISE(...)                             \
+    do                                                           \
+    {                                                            \
+        rocke_spec_set_reasonf(reason, reason_cap, __VA_ARGS__); \
+        return ROCKE_ERR_VALUE;                                  \
     } while(0)
 
     if(spec == NULL)
@@ -2785,19 +2785,9 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
     const rocke_arch_mma_catalog_t* mma;
     const rocke_direct_conv_problem_t* p;
 
-#define ROCKE_DCONV_WGRAD_REJECT(...)                  \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return false;                                  \
-    } while(0)
-
     if(spec == NULL)
     {
-        ROCKE_DCONV_WGRAD_REJECT("spec is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
     if(arch == NULL)
     {
@@ -2823,75 +2813,84 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         const char* dt = p->dtype ? p->dtype : "fp16";
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
-            ROCKE_DCONV_WGRAD_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
     }
     if(p->kpg < spec->wave_tile_k)
     {
-        ROCKE_DCONV_WGRAD_REJECT("kpg %d must be >= wave_tile_k %d", p->kpg, spec->wave_tile_k);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "kpg %d must be >= wave_tile_k %d", p->kpg, spec->wave_tile_k);
     }
     if(p->cpg < spec->wave_tile_c)
     {
-        ROCKE_DCONV_WGRAD_REJECT("cpg %d must be >= wave_tile_c %d", p->cpg, spec->wave_tile_c);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "cpg %d must be >= wave_tile_c %d", p->cpg, spec->wave_tile_c);
     }
     if(spec->wave_tile_k != 16 || spec->wave_tile_c != 16)
     {
-        ROCKE_DCONV_WGRAD_REJECT("wave_tile_k and wave_tile_c must be 16");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "wave_tile_k and wave_tile_c must be 16");
     }
     if(p->KH < 1 || p->KH > ROCKE_DCONV_WGRAD_MAX_KH)
     {
-        ROCKE_DCONV_WGRAD_REJECT("KH must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KH, p->KH);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "KH must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KH, p->KH);
     }
     if(p->KW < 1 || p->KW > ROCKE_DCONV_WGRAD_MAX_KW)
     {
-        ROCKE_DCONV_WGRAD_REJECT("KW must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KW, p->KW);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "KW must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KW, p->KW);
     }
     if(spec->waves_k < 1)
     {
-        ROCKE_DCONV_WGRAD_REJECT("waves_k must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves_k must be >= 1");
     }
     if(spec->waves_c < 1)
     {
-        ROCKE_DCONV_WGRAD_REJECT("waves_c must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves_c must be >= 1");
     }
     if(spec->waves_k * spec->waves_c > 16)
     {
-        ROCKE_DCONV_WGRAD_REJECT("waves_k * waves_c must be <= 16");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves_k * waves_c must be <= 16");
     }
     if(spec->waves_q < 1)
     {
-        ROCKE_DCONV_WGRAD_REJECT("waves_q must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves_q must be >= 1");
     }
     if(spec->wave_size != target->wave_size)
     {
-        ROCKE_DCONV_WGRAD_REJECT("wave_size %d does not match the %s wave size %d",
-                                 spec->wave_size,
-                                 arch,
-                                 target->wave_size);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "wave_size %d does not match the %s wave size %d",
+                        spec->wave_size,
+                        arch,
+                        target->wave_size);
     }
     if(spec->wave_size != 64)
     {
-        ROCKE_DCONV_WGRAD_REJECT(ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
+        ROCKE_SPEC_FAIL(reason, reason_cap, ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
     }
     if(rocke_direct_conv_wgrad_threads_per_block(spec)
        > rocke_archtarget_max_threads_per_block(target))
     {
-        ROCKE_DCONV_WGRAD_REJECT("threads_per_block %d > %d (hardware cap) on %s",
-                                 rocke_direct_conv_wgrad_threads_per_block(spec),
-                                 rocke_archtarget_max_threads_per_block(target),
-                                 arch);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "threads_per_block %d > %d (hardware cap) on %s",
+                        rocke_direct_conv_wgrad_threads_per_block(spec),
+                        rocke_archtarget_max_threads_per_block(target),
+                        arch);
     }
     if(spec->ho_per_block <= 0)
     {
-        ROCKE_DCONV_WGRAD_REJECT("ho_per_block must be > 0");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "ho_per_block must be > 0");
     }
     if(spec->mfma_k != 16 && spec->mfma_k != 32)
     {
-        ROCKE_DCONV_WGRAD_REJECT("mfma_k must be 16 or 32 (got %d)", spec->mfma_k);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "mfma_k must be 16 or 32 (got %d)", spec->mfma_k);
     }
     if(p->stride != 1)
     {
-        ROCKE_DCONV_WGRAD_REJECT(ROCKE_WGRAD_STRIDE_WHY, p->stride);
+        ROCKE_SPEC_FAIL(reason, reason_cap, ROCKE_WGRAD_STRIDE_WHY, p->stride);
     }
     mma = rocke_archtarget_mma(target);
     {
@@ -2899,19 +2898,21 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
         if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
         {
-            ROCKE_DCONV_WGRAD_REJECT("missing mfma_f32_16x16x16_%s on %s", ab, arch);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "missing mfma_f32_16x16x16_%s on %s", ab, arch);
         }
         if(spec->mfma_k == 32
            && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
         {
-            ROCKE_DCONV_WGRAD_REJECT(
-                "mfma_k=32 needs mfma_f32_16x16x32_%s, absent on %s", ab, arch);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "mfma_k=32 needs mfma_f32_16x16x32_%s, absent on %s", ab, arch);
         }
     }
     if(!target->memory.has_ds_read_tr)
     {
-        ROCKE_DCONV_WGRAD_REJECT(
-            "wgrad LDS staging requires ds_read_tr16_b64 (gfx950+), absent on %s", arch);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "wgrad LDS staging requires ds_read_tr16_b64 (gfx950+), absent on %s",
+                        arch);
     }
     if(reason != NULL && reason_cap > 0)
     {
@@ -2919,8 +2920,6 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         reason[reason_cap - 1] = '\0';
     }
     return true;
-
-#undef ROCKE_DCONV_WGRAD_REJECT
 }
 
 /* ===================================================================== *
@@ -3617,12 +3616,11 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
 {
     const rocke_direct_conv_problem_t* p;
     char why[ROCKE_ERR_MSG_CAP];
-#define ROCKE_DCONV_GEN_RAISE(...)                     \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        return ROCKE_ERR_VALUE;                        \
+#define ROCKE_DCONV_GEN_RAISE(...)                               \
+    do                                                           \
+    {                                                            \
+        rocke_spec_set_reasonf(reason, reason_cap, __VA_ARGS__); \
+        return ROCKE_ERR_VALUE;                                  \
     } while(0)
 
     if(spec == NULL)
@@ -3752,16 +3750,9 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
     const rocke_direct_conv_problem_t* p;
     const char* ab;
     char why[ROCKE_ERR_MSG_CAP];
-#define ROCKE_DCONV_GEN_REJECT(...)                    \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        return false;                                  \
-    } while(0)
 
     if(spec == NULL)
-        ROCKE_DCONV_GEN_REJECT("spec is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     if(arch == NULL)
         arch = "gfx950";
     target = rocke_archtarget_from_gfx(arch);
@@ -3772,44 +3763,54 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
     }
     p = &spec->problem;
     if(p->dtype == NULL)
-        ROCKE_DCONV_GEN_REJECT("dtype is not set; expected 'fp16' or 'bf16'");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "dtype is not set; expected 'fp16' or 'bf16'");
     if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
-        ROCKE_DCONV_GEN_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", p->dtype);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", p->dtype);
     if(rocke_direct_forward_padding_reason(p, why, sizeof why))
-        ROCKE_DCONV_GEN_REJECT("%s", why);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "%s", why);
     if(2 * p->PAD != p->KW - 1)
-        ROCKE_DCONV_GEN_REJECT("needs same padding 2*PAD == KW-1 on the column axis too "
-                               "(got KH=%d, KW=%d, PAD=%d)",
-                               p->KH,
-                               p->KW,
-                               p->PAD);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "needs same padding 2*PAD == KW-1 on the column axis too "
+                        "(got KH=%d, KW=%d, PAD=%d)",
+                        p->KH,
+                        p->KW,
+                        p->PAD);
     if(p->stride != 1)
-        ROCKE_DCONV_GEN_REJECT("stride > 1 is not supported (got %d)", p->stride);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stride > 1 is not supported (got %d)", p->stride);
     if(p->cpg % 4 != 0 || p->cpg < 4)
-        ROCKE_DCONV_GEN_REJECT("cpg must be a positive multiple of 4 (got %d)", p->cpg);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "cpg must be a positive multiple of 4 (got %d)", p->cpg);
     if(p->kpg < 1)
-        ROCKE_DCONV_GEN_REJECT("kpg must be >= 1 (got %d)", p->kpg);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "kpg must be >= 1 (got %d)", p->kpg);
     if(p->kpg % 4 != 0)
-        ROCKE_DCONV_GEN_REJECT("kpg must be a multiple of 4 (got kpg=%d)", p->kpg);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "kpg must be a multiple of 4 (got kpg=%d)", p->kpg);
     if(dconv_gen_weight_knobs_reason(spec, why, sizeof why) != 0)
-        ROCKE_DCONV_GEN_REJECT("%s", why);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "%s", why);
     if(spec->dgrad_weights_lds && !target->memory.has_ds_read_tr)
-        ROCKE_DCONV_GEN_REJECT("dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
     if(dconv_gen_row_stream_reason(spec, why, sizeof why))
-        ROCKE_DCONV_GEN_REJECT("%s", why);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "%s", why);
     if(spec->xcd_tiles && dconv_gen_xcd_tiles_count(arch) == 0)
-        ROCKE_DCONV_GEN_REJECT("xcd_tiles is built for ['gfx950'] only (got %s)", arch);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "xcd_tiles is built for ['gfx950'] only (got %s)", arch);
     if(spec->block_groups <= 0 || p->groups % spec->block_groups != 0)
-        ROCKE_DCONV_GEN_REJECT(
-            "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "groups %d not divisible by block_groups %d",
+                        p->groups,
+                        spec->block_groups);
     if(spec->block_q % 16 != 0)
-        ROCKE_DCONV_GEN_REJECT("block_q must be a multiple of 16");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "block_q must be a multiple of 16");
     ab = (strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
     mma = rocke_archtarget_mma(target);
     if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
-        ROCKE_DCONV_GEN_REJECT("missing mfma_f32_16x16x16_%s on %s", ab, arch);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "missing mfma_f32_16x16x16_%s on %s", ab, arch);
     if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
-        ROCKE_DCONV_GEN_REJECT("fold_k32 requires mfma_f32_16x16x32_%s on %s", ab, arch);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fold_k32 requires mfma_f32_16x16x32_%s on %s", ab, arch);
     {
         /* LDS budget: the A/B staging ring plus the waves_k > 1 cross-wave
          * reduction scratch (build_direct_conv's own sizing). */
@@ -3826,13 +3827,15 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
                                    : 0;
         const long total = ab_bytes + red_bytes;
         if(!rocke_archtarget_fits_lds(target, total))
-            ROCKE_DCONV_GEN_REJECT("LDS budget %ld bytes (A/B=%s%ld, red=%ld) > %d cap on %s",
-                                   total,
-                                   spec->double_buffer ? "x2 " : "",
-                                   lds_total_fp16 * 2,
-                                   red_bytes,
-                                   target->lds_capacity_bytes,
-                                   arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "LDS budget %ld bytes (A/B=%s%ld, red=%ld) > %d cap on %s",
+                            total,
+                            spec->double_buffer ? "x2 " : "",
+                            lds_total_fp16 * 2,
+                            red_bytes,
+                            target->lds_capacity_bytes,
+                            arch);
     }
     if(spec->dgrad_weights_lds || spec->lds_pad || spec->stage_out)
     {
@@ -3840,14 +3843,15 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
          * buffer; the column pad and the output tiles add to the footprint. */
         const long lds = rocke_direct_conv_lds_bytes(spec);
         if(!rocke_archtarget_fits_lds(target, lds))
-            ROCKE_DCONV_GEN_REJECT("LDS footprint %ld B (row buffers, staged weights, output "
-                                   "tiles) exceeds %d cap on %s",
-                                   lds,
-                                   target->lds_capacity_bytes,
-                                   arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "LDS footprint %ld B (row buffers, staged weights, output "
+                            "tiles) exceeds %d cap on %s",
+                            lds,
+                            target->lds_capacity_bytes,
+                            arch);
     }
     if(reason != NULL && reason_cap > 0)
         snprintf(reason, reason_cap, "ok");
     return true;
-#undef ROCKE_DCONV_GEN_REJECT
 }

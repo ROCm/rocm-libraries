@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_spec_set_reason */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* ROCKE_FWD_WMMA_K */
 #include "rocke/ir.h"
 
@@ -40,12 +41,6 @@ using V = rocke_value_t*;
  * gate's (ROCKE_FWD_WMMA_K / ROCKE_FWD_WMMA_CH_PAD), floor / ceil division
  * rocke_floor_div / rocke_ceil_div. */
 constexpr int kVgprBudget = 448;
-
-inline void set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-        snprintf(reason, reason_cap, "%s", msg);
-}
 
 inline V ci(rocke_ir_builder_t* b, int64_t v)
 {
