@@ -212,7 +212,9 @@ computing dK, dV, dQ and, on a bias graph, dBias; its plans are not serializable
 saving in its dispatch handler). `hipkernel:flydsl_sdpa_bwd_split` is
 slotted, three launches in order -- prep, dK/dV, dQ -- and so is not plan-serializable either. The
 split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
-`sdpa_bwd_split` is descriptor-only (no objects). The dBias and dSink reduce kernels have no
+`sdpa_bwd_split` is descriptor-only (no objects): its UED, and its engine estimate, which is
+engine-level (it models the whole program); trained estimates install under
+`sdpa_bwd_split/heuristics/`, and the slots have no rankers. The dBias and dSink reduce kernels have no
 op of their own: on gfx950 they ride inside the objects that launch them (and in the fp32 combined bias rows of gfx942 and gfx90a); on
 gfx11-generic, gfx942 and gfx90a the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
 tail-zero object (`sdpa_bwd_tailzero`, one per arch family and dtype) after the gradient launches: it
