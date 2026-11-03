@@ -1969,12 +1969,14 @@ def w32_jobs():
     )
 
 
-@pytest.fixture
-def w32_cache(tmp_path, w32_jobs):
-    c = KernelCache(tmp_path, _W32)
-    for job in w32_jobs:
-        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
-    return c
+@pytest.fixture(scope="module")
+def w32_cache(tmp_path_factory, w32_jobs):
+    """Every gfx1250 wgrad job with a placeholder binary, held in memory (see
+    :class:`_InMemoryEntriesCache`). The tests that take it only read it, so
+    the module shares one."""
+    return _InMemoryEntriesCache(
+        tmp_path_factory.mktemp("w32_cache"), _W32, [j.identity for j in w32_jobs]
+    )
 
 
 def test_w32_wgrad_rows_are_built_with_their_reduce_helpers(w32_jobs):
