@@ -2591,6 +2591,9 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            // The problem is reused: drop an MX block left by an earlier call.
+            if(tensileProblem.mxBlockA() != 0)
+                tensileProblem.setMXScaleA(rocisa::DataType::None, 0);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2631,6 +2634,8 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            if(tensileProblem.mxBlockB() != 0)
+                tensileProblem.setMXScaleB(rocisa::DataType::None, 0);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:

@@ -298,6 +298,36 @@ namespace
         hipblasLtDestroy(handle);
     }
 
+    // A descriptor keeps its Tensile problem between queries. After a scale-1001
+    // query, scalar scales must not keep searching MX kernels.
+    TEST_F(Gfx950MxScaleLayout, smoke_ReusedDescriptorLeavesMxScaling)
+    {
+        RocRollerEnv      env("0");
+        hipblasLtHandle_t handle = nullptr;
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        {
+            Problem q;
+            makeProblem(q, handle, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+            if(HasFatalFailure())
+                return;
+
+            auto preResults = heuristic(q);
+            ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
+
+            const hipblasLtMatmulMatrixScale_t scalar = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+            for(auto attr :
+                {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+                ASSERT_EQ(hipblasLtMatmulDescSetAttribute(q.desc, attr, &scalar, sizeof(scalar)),
+                          HIPBLAS_STATUS_SUCCESS);
+
+            auto scalarResults = heuristic(q);
+            ASSERT_FALSE(scalarResults.empty()) << "scalar scales returned no kernel";
+            for(const auto& name : names(handle, scalarResults))
+                EXPECT_EQ(name.find("MXAE8"), std::string::npos) << name;
+        }
+        hipblasLtDestroy(handle);
+    }
+
     // hipblaslt_ext::Gemm has no rocRoller dispatch, so it reaches the Tensile
     // filter whatever HIPBLASLT_USE_ROCROLLER says.
     TEST_F(Gfx950MxScaleLayout, smoke_ExtGemmApi)
