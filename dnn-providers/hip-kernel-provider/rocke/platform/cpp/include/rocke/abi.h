@@ -91,7 +91,9 @@ extern "C" {
  *    rocke_unified_attention_reduce_tiled_spec_t (gfx942, gfx950) gained
  *    emit_lse at their end, which changes their size.
  * 7: rocke_direct_fwd_wmma_spec_t gained strided_view, fold_n and poly_view
- *    at its end, which changes its size. */
+ *    at its end, which changes its size; rocke_direct_conv_problem_total_c /
+ *    _total_k return long long (they returned int), which changes their
+ *    signature. */
 #define ROCKE_ABI_VERSION 7
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
