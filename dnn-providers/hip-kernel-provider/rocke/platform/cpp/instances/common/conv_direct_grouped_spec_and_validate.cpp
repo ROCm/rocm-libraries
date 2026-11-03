@@ -950,11 +950,7 @@ rocke_status_t rocke_direct_conv_8c_validate(const rocke_direct_conv_8c_spec_t* 
         }
         return ROCKE_ERR_VALUE;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -970,10 +966,7 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
 
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-        {
-            strncpy(reason, "null spec", reason_cap);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -1063,11 +1056,7 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
         }
         return false;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1180,11 +1169,7 @@ rocke_status_t rocke_direct_conv_32c_validate(const rocke_direct_conv_32c_spec_t
         }
         return ROCKE_ERR_VALUE;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -1200,10 +1185,7 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
 
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-        {
-            strncpy(reason, "null spec", reason_cap);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -1282,11 +1264,7 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
         }
         return false;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1396,11 +1374,7 @@ rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec
     }
     block_ch = rocke_direct_depthwise_block_ch(spec);
     (void)block_ch;
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -1440,10 +1414,7 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
     const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-        {
-            strncpy(reason, "null spec", reason_cap);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -1540,11 +1511,7 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
     }
     block_ch = rocke_direct_depthwise_block_ch(spec);
     (void)block_ch;
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1623,10 +1590,7 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
 
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-        {
-            strncpy(reason, "null spec", reason_cap);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -1699,11 +1663,7 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         }
         return false;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1738,11 +1698,7 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
                      p->kpg);
         return ROCKE_ERR_VALUE;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -1994,11 +1950,7 @@ rocke_status_t rocke_direct_depthwise_col_validate(const rocke_direct_depthwise_
         }
         return ROCKE_ERR_VALUE;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -2019,11 +1971,7 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
     int allowed;
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-        {
-            strncpy(reason, "null spec", reason_cap);
-            reason[reason_cap - 1] = '\0';
-        }
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -2247,11 +2195,7 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         }
         return false;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -2370,10 +2314,7 @@ bool rocke_direct_conv_dgrad_is_valid_spec(const rocke_direct_conv_dgrad_spec_t*
     const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-        {
-            strncpy(reason, "null spec", reason_cap);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -2438,11 +2379,7 @@ bool rocke_direct_conv_dgrad_is_valid_spec(const rocke_direct_conv_dgrad_spec_t*
         }
         return false;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -2550,10 +2487,7 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
     const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-        {
-            strncpy(reason, "null spec", reason_cap);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -2583,11 +2517,7 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
         }
         return false;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -2799,11 +2729,7 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
     {
         ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_STRIDE_WHY, p->stride);
     }
-    if(reason != NULL && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 
 #undef ROCKE_DCONV_WGRAD_RAISE
@@ -2949,11 +2875,7 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
                         "wgrad LDS staging requires ds_read_tr16_b64 (gfx950+), absent on %s",
                         arch);
     }
-    if(reason != NULL && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -3138,11 +3060,7 @@ rocke_status_t rocke_direct_depthwise_tiled_validate(
             return ROCKE_ERR_VALUE;
         }
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
 }
 
@@ -3157,8 +3075,7 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
 
     if(spec == NULL)
     {
-        if(reason && reason_cap > 0)
-            strncpy(reason, "null spec", reason_cap);
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -3287,11 +3204,7 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
                      ROCKE_DCONV_DW_TILED_UNROLL_MAX_FMAS);
         return false;
     }
-    if(reason && reason_cap > 0)
-    {
-        strncpy(reason, "ok", reason_cap);
-        reason[reason_cap - 1] = '\0';
-    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
