@@ -184,6 +184,10 @@ struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
 //! \see make_tuple
 //! \see tuple
 //! \see get
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 template <typename IteratorTuple>
 class THRUST_DECLSPEC_EMPTY_BASES zip_iterator : public detail::make_zip_iterator_base<IteratorTuple>::type
 {
