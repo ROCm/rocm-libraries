@@ -26,10 +26,8 @@ kernel in ``IR_CASES`` goes through both engines and must print the same.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -43,6 +41,7 @@ from rocke.core.param_facts import FACT_INT_TYPES, int_type_limits
 from rocke.core.passes import optimize_kernel
 from rocke.core.verify import verify
 from rocke.portable_ir.src.recording_builder import record_kernel
+from rocke.tests.built_programs import assert_refuses_arguments, built_program
 from rocke.tests.engines import lower_with_both_engines
 
 MAX_EXTENT = 1 << 20
@@ -478,11 +477,7 @@ def test_cpp_derives_the_same_int_type_limits():
     """``rocke_int_type_limits`` gives every fact type the range
     ``int_type_limits`` gives it and refuses every other scalar type, and
     ``rocke_type_is_unsigned`` holds for exactly ``UNSIGNED_INTEGER_DTYPES``."""
-    executable = os.environ.get("ROCKE_PARAM_FACTS_CLI")
-    if not executable:
-        pytest.skip("Set ROCKE_PARAM_FACTS_CLI to the built rocke_param_facts")
-    path = Path(executable).resolve()
-    assert path.is_file(), f"ROCKE_PARAM_FACTS_CLI names {path}, not a file"
+    path = built_program("ROCKE_PARAM_FACTS_CLI", "rocke_param_facts")
     printed = subprocess.run(
         [str(path), "--int-type-limits"],
         capture_output=True,
@@ -520,6 +515,16 @@ def test_int_type_limits_refuses_a_type_no_fact_is_stated_on(type_name):
     )
 
 
+@pytest.mark.parametrize(
+    "arguments", [("--IR",), ("--ir", "extra"), ("--int-type-limits", "extra")]
+)
+def test_cpp_program_refuses_a_mistyped_mode(arguments):
+    """A mistyped mode or a wrong argument count exits 2 with the usage, instead
+    of running the self-test and passing."""
+    program = built_program("ROCKE_PARAM_FACTS_CLI", "rocke_param_facts")
+    assert_refuses_arguments(program, *arguments)
+
+
 def test_cpp_prints_verifies_and_canonicalizes_the_same():
     """The C++ ``print_ir``, verifier and ``canonicalize`` agree with Python on
     every kernel in ``IR_CASES``.
@@ -528,11 +533,7 @@ def test_cpp_prints_verifies_and_canonicalizes_the_same():
     ``tests/run_all.py`` resolves it from a configured build and the installed
     ``rocke_pytest`` ctest sets it. A value that names no file fails.
     """
-    executable = os.environ.get("ROCKE_PARAM_FACTS_CLI")
-    if not executable:
-        pytest.skip("Set ROCKE_PARAM_FACTS_CLI to the built rocke_param_facts")
-    path = Path(executable).resolve()
-    assert path.is_file(), f"ROCKE_PARAM_FACTS_CLI names {path}, not a file"
+    path = built_program("ROCKE_PARAM_FACTS_CLI", "rocke_param_facts")
     for case in sorted(IR_CASES):
         kernel = parse(serialize(IR_CASES[case][0]()))
         printed = subprocess.run(

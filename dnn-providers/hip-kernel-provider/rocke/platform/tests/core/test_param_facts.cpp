@@ -20,6 +20,8 @@
  * rocke_int_type_limits, or "<type> unsigned=<0|1> none" for a type no fact is
  * stated on; test_param_facts.py compares the lines with
  * UNSIGNED_INTEGER_DTYPES and int_type_limits.
+ *
+ * Any other argument list prints the usage to stderr and exits 2.
  */
 #include <cstdint>
 #include <cstdio>
@@ -360,10 +362,16 @@ int print_int_type_limits()
 
 int main(int argc, char** argv)
 {
-    if(argc > 1 && strcmp(argv[1], "--ir") == 0)
+    if(argc == 2 && strcmp(argv[1], "--ir") == 0)
         return report_serialized_ir();
-    if(argc > 1 && strcmp(argv[1], "--int-type-limits") == 0)
+    if(argc == 2 && strcmp(argv[1], "--int-type-limits") == 0)
         return print_int_type_limits();
+    if(argc != 1)
+    {
+        /* A mistyped mode must not fall through to the self-test and pass. */
+        fprintf(stderr, "usage: %s [--ir | --int-type-limits]\n", argv[0]);
+        return 2;
+    }
     case_stores_ints_and_canonical_relations();
     case_refusals_match_the_python_builder();
     if(g_failures)

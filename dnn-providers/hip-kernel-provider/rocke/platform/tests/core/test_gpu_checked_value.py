@@ -55,7 +55,6 @@ What is pinned here:
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import textwrap
@@ -86,6 +85,7 @@ from rocke.core.passes import optimize_kernel
 from rocke.core.value_sources import MEMORY_READ_OPS
 from rocke.core.verify import verify
 from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
+from rocke.tests.built_programs import assert_refuses_arguments, built_program
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 INT64_MAX = (1 << 63) - 1
@@ -798,14 +798,23 @@ def _cli() -> Path:
     """``ROCKE_GPU_CHECKED_VALUE_CLI`` names the built ``rocke_gpu_checked_value``:
     ``tests/run_all.py`` resolves it from a configured build and the installed
     ``rocke_pytest`` ctest sets it. A value that names no file fails."""
-    executable = os.environ.get("ROCKE_GPU_CHECKED_VALUE_CLI")
-    if not executable:
-        pytest.skip(
-            "Set ROCKE_GPU_CHECKED_VALUE_CLI to the built rocke_gpu_checked_value"
-        )
-    path = Path(executable).resolve()
-    assert path.is_file(), f"ROCKE_GPU_CHECKED_VALUE_CLI names {path}, not a file"
-    return path
+    return built_program("ROCKE_GPU_CHECKED_VALUE_CLI", "rocke_gpu_checked_value")
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("--lower-lvm", "gfx942", "llvm20"),
+        ("--lower-llvm", "gfx942"),
+        ("--lower-hip",),
+        ("--cases", "extra"),
+        ("--memory-read-ops", "extra"),
+    ],
+)
+def test_cpp_program_refuses_a_mistyped_mode(arguments):
+    """A mistyped mode or a wrong argument count exits 2 with the usage, instead
+    of running the self-test and passing."""
+    assert_refuses_arguments(_cli(), *arguments)
 
 
 def test_cpp_counts_the_same_ops_as_memory_reads():

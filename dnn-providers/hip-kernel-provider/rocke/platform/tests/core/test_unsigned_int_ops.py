@@ -14,11 +14,9 @@ the same texts as here.
 from __future__ import annotations
 
 import ctypes
-import os
 import shutil
 import struct
 import subprocess
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -30,6 +28,7 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.passes import optimize_kernel
 from rocke.core.verify import ERROR, verify
+from rocke.tests.built_programs import assert_refuses_arguments, built_program
 
 FLAVORS = LLVM_FLAVORS
 
@@ -87,6 +86,14 @@ def test_plain_add_still_emits_nsw():
     assert "wrap" not in b.kernel.body.ops[0].attrs
 
 
+@pytest.mark.parametrize("arguments", [("--print-lvm",), ("--print-llvm", "extra")])
+def test_cpp_program_refuses_a_mistyped_mode(arguments):
+    """A mistyped mode or a wrong argument count exits 2 with the usage, instead
+    of running the self-test and passing."""
+    program = built_program("ROCKE_UNSIGNED_INT_OPS_CLI", "rocke_unsigned_int_ops")
+    assert_refuses_arguments(program, *arguments)
+
+
 def test_c_api_builders_match_the_python_builder():
     """The C API's rocke_b_add_nuw / rocke_b_cmp_ult build the same function.
 
@@ -95,13 +102,7 @@ def test_c_api_builders_match_the_python_builder():
     ``rocke_pytest`` ctest sets it. A value that names no file is a broken
     setup, so it fails instead of skipping.
     """
-    executable = os.environ.get("ROCKE_UNSIGNED_INT_OPS_CLI")
-    if not executable:
-        pytest.skip(
-            "Set ROCKE_UNSIGNED_INT_OPS_CLI to the built rocke_unsigned_int_ops"
-        )
-    path = Path(executable).resolve()
-    assert path.is_file(), f"ROCKE_UNSIGNED_INT_OPS_CLI names {path}, not a file"
+    path = built_program("ROCKE_UNSIGNED_INT_OPS_CLI", "rocke_unsigned_int_ops")
     printed = subprocess.run(
         [str(path), "--print-llvm"],
         capture_output=True,

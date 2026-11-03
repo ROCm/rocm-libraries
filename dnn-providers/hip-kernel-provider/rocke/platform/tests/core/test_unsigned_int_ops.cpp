@@ -15,6 +15,8 @@
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
  * with the same function built by the Python builder.
+ *
+ * Any other argument list prints the usage to stderr and exits 2.
  */
 #include <cstdint>
 #include <cstdio>
@@ -521,7 +523,7 @@ void case_constant_folding()
 
 int main(int argc, char** argv)
 {
-    if(argc > 1 && strcmp(argv[1], "--print-llvm") == 0)
+    if(argc == 2 && strcmp(argv[1], "--print-llvm") == 0)
     {
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "unsigned_int_ops");
@@ -532,6 +534,12 @@ int main(int argc, char** argv)
             return 1;
         fputs(ll.c_str(), stdout);
         return 0;
+    }
+    if(argc != 1)
+    {
+        /* A mistyped mode must not fall through to the self-test and pass. */
+        fprintf(stderr, "usage: %s [--print-llvm]\n", argv[0]);
+        return 2;
     }
     case_llvm_text();
     case_hip_text();

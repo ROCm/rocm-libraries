@@ -13,9 +13,7 @@ is a bug in one of them.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -28,6 +26,7 @@ from rocke.core.intexpr import (
     quotient_of,
     sum_of,
 )
+from rocke.tests.built_programs import assert_refuses_arguments, built_program
 
 TWO_31 = 1 << 31
 # 2^62, built by arithmetic because a number leaf may not exceed 2^53 - 1.
@@ -138,11 +137,7 @@ def test_cpp_evaluator_prints_the_same_lines():
     sets it. A value that names no file is a broken setup, so it fails instead
     of skipping.
     """
-    executable = os.environ.get("ROCKE_INTEXPR_CLI")
-    if not executable:
-        pytest.skip("Set ROCKE_INTEXPR_CLI to the built rocke_intexpr")
-    path = Path(executable).resolve()
-    assert path.is_file(), f"ROCKE_INTEXPR_CLI names {path}, not a file"
+    path = built_program("ROCKE_INTEXPR_CLI", "rocke_intexpr")
     printed = subprocess.run(
         [str(path), "--eval"],
         input=json.dumps({"env": ENV, "cases": [c for c, _ in CASES]}),
@@ -152,6 +147,14 @@ def test_cpp_evaluator_prints_the_same_lines():
         timeout=30,
     )
     assert printed.stdout.splitlines() == [want for _, want in CASES]
+
+
+@pytest.mark.parametrize("arguments", [("--evaluate",), ("--eval", "extra")])
+def test_cpp_program_refuses_a_mistyped_mode(arguments):
+    """A mistyped mode or a wrong argument count exits 2 with the usage, instead
+    of running the self-test and passing."""
+    program = built_program("ROCKE_INTEXPR_CLI", "rocke_intexpr")
+    assert_refuses_arguments(program, *arguments)
 
 
 def test_recipe_expander_uses_this_evaluator():

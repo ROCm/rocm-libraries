@@ -24,6 +24,8 @@
  * Run with --memory-read-ops it prints the name of every op the GPU-check walks
  * count as a memory read (rocke_i_opcode_reads_memory), one per line; the
  * Python test compares them with value_sources.MEMORY_READ_OPS.
+ *
+ * Any other argument list prints the usage to stderr and exits 2.
  */
 #include <cstdint>
 #include <cstdio>
@@ -577,16 +579,25 @@ int print_memory_read_ops()
 
 int main(int argc, char** argv)
 {
-    if(argc > 1 && strcmp(argv[1], "--cases") == 0)
+    if(argc == 2 && strcmp(argv[1], "--cases") == 0)
         return print_cases();
-    if(argc > 1 && strcmp(argv[1], "--verify") == 0)
+    if(argc == 2 && strcmp(argv[1], "--verify") == 0)
         return print_verifier_messages();
     if(argc == 4 && strcmp(argv[1], "--lower-llvm") == 0)
         return print_llvm(argv[2], argv[3]);
     if(argc == 3 && strcmp(argv[1], "--lower-hip") == 0)
         return print_hip(argv[2]);
-    if(argc > 1 && strcmp(argv[1], "--memory-read-ops") == 0)
+    if(argc == 2 && strcmp(argv[1], "--memory-read-ops") == 0)
         return print_memory_read_ops();
+    if(argc != 1)
+    {
+        /* A mistyped mode must not fall through to the self-test and pass. */
+        fprintf(stderr,
+                "usage: %s [--cases | --verify | --lower-llvm ARCH FLAVOR | --lower-hip ARCH | "
+                "--memory-read-ops]\n",
+                argv[0]);
+        return 2;
+    }
     int failures = 0;
     const std::string refusal = unsigned_compare_refusal_failure();
     if(!refusal.empty())

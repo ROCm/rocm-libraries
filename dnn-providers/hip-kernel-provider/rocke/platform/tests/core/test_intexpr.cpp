@@ -13,6 +13,8 @@
  * and prints one line per case: "value <n>" or "error <text>". The Python test
  * tests/core/test_intexpr.py feeds it the same table it evaluates with
  * rocke.core.intexpr, so the two mirrors are pinned against each other.
+ *
+ * Any other argument list prints the usage to stderr and exits 2.
  */
 #include <cstdint>
 #include <cstdio>
@@ -167,8 +169,14 @@ int eval_stdin()
 
 int main(int argc, char** argv)
 {
-    if(argc > 1 && strcmp(argv[1], "--eval") == 0)
+    if(argc == 2 && strcmp(argv[1], "--eval") == 0)
         return eval_stdin();
+    if(argc != 1)
+    {
+        /* A mistyped mode must not fall through to the self-test and pass. */
+        fprintf(stderr, "usage: %s [--eval]\n", argv[0]);
+        return 2;
+    }
     case_leaves_and_refusals();
     case_env_may_bind_nothing();
     if(g_failures)
