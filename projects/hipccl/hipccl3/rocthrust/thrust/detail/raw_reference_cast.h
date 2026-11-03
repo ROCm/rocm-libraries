@@ -29,7 +29,6 @@
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(__tuple_dir/apply.h)
 #include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
@@ -37,6 +36,7 @@
 #include _THRUST_STD_INCLUDE(__type_traits/remove_cv.h)
 #include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 #include _THRUST_STD_INCLUDE(__utility/forward.h)
+#include _THRUST_STD_INCLUDE(tuple)
 
 // the order of declarations and definitions in this file is totally goofy
 // this header defines raw_reference_cast, which has a few overloads towards the bottom of the file
@@ -60,7 +60,7 @@ inline constexpr bool can_unwrap = is_wrapped_reference<T>::value;
 // specialize is_unwrappable
 // a tuple is_unwrappable if any of its elements is_unwrappable
 template <typename... Ts>
-inline constexpr bool can_unwrap<tuple<Ts...>> = (can_unwrap<Ts> || ...);
+inline constexpr bool can_unwrap<_THRUST_STD::tuple<Ts...>> = (can_unwrap<Ts> || ...);
 
 // specialize is_unwrappable
 // a tuple_of_iterator_references is_unwrappable if any of its elements is_unwrappable
@@ -114,9 +114,9 @@ struct raw_reference_tuple_helper
 
 // recurse on tuples
 template <typename... Ts>
-struct raw_reference_tuple_helper<tuple<Ts...>>
+struct raw_reference_tuple_helper<_THRUST_STD::tuple<Ts...>>
 {
-  using type = tuple<typename raw_reference_tuple_helper<Ts>::type...>;
+  using type = _THRUST_STD::tuple<typename raw_reference_tuple_helper<Ts>::type...>;
 };
 
 template <typename... Ts>
@@ -132,10 +132,10 @@ struct raw_reference_tuple_helper<tuple_of_iterator_references<Ts...>>
 //   then the raw_reference of tuple_type is a tuple of its members' raw_references
 //   else the raw_reference of tuple_type is tuple_type &
 template <typename... Ts>
-struct raw_reference<tuple<Ts...>>
+struct raw_reference<_THRUST_STD::tuple<Ts...>>
 {
 private:
-  using tuple_type = tuple<Ts...>;
+  using tuple_type = _THRUST_STD::tuple<Ts...>;
 
 public:
   using type = typename eval_if<can_unwrap<tuple_type>,
@@ -175,12 +175,13 @@ THRUST_HOST_DEVICE auto raw_reference_cast(detail::tuple_of_iterator_references<
 {
   if constexpr (detail::can_unwrap<detail::tuple_of_iterator_references<Ts...>>)
   {
-    using ResultTuple = tuple<typename detail::raw_reference_detail::raw_reference_tuple_helper<Ts>::type...>;
+    using ResultTuple =
+      _THRUST_STD::tuple<typename detail::raw_reference_detail::raw_reference_tuple_helper<Ts>::type...>;
     return _THRUST_STD::apply(
       [](auto&&... refs) {
         return ResultTuple{raw_reference_cast(_THRUST_STD::forward<decltype(refs)>(refs))...};
       },
-      static_cast<tuple<Ts...>&>(t));
+      static_cast<_THRUST_STD::tuple<Ts...>&>(t));
   }
   else
   {

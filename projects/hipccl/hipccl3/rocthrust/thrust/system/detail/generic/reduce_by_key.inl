@@ -51,7 +51,7 @@ struct reduce_by_key_functor
 {
   AssociativeOperator binary_op;
 
-  using result_type = typename thrust::tuple<ValueType, TailFlagType>;
+  using result_type = typename _THRUST_STD::tuple<ValueType, TailFlagType>;
 
   THRUST_HOST_DEVICE reduce_by_key_functor(AssociativeOperator _binary_op)
       : binary_op(_binary_op)
@@ -59,8 +59,9 @@ struct reduce_by_key_functor
 
   THRUST_HOST_DEVICE result_type operator()(result_type a, result_type b)
   {
-    return result_type(thrust::get<1>(b) ? thrust::get<0>(b) : binary_op(thrust::get<0>(a), thrust::get<0>(b)),
-                       thrust::get<1>(a) | thrust::get<1>(b));
+    return result_type(
+      _THRUST_STD::get<1>(b) ? _THRUST_STD::get<0>(b) : binary_op(_THRUST_STD::get<0>(a), _THRUST_STD::get<0>(b)),
+      _THRUST_STD::get<1>(a) | _THRUST_STD::get<1>(b));
   }
 };
 } // end namespace detail
