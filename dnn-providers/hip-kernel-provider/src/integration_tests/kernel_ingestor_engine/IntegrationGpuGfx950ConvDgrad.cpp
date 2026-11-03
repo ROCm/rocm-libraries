@@ -175,10 +175,6 @@ struct DgradGraph
     DgradProblem problem;
     std::array<size_t, VARIANTS.size()> fp16;
     std::array<size_t, VARIANTS.size()> bf16;
-    /// The graph has an MFMA tuple whose every catalog row uses the reorganize helper
-    /// (waves_k > 1) at groups > 1, which the engine must refuse: rocKE's reorganize
-    /// kernel mis-addresses every group but the first.
-    bool refusesCoalescedMfma = false;
 
     const std::array<size_t, VARIANTS.size()>& counts(DataType dtype) const
     {
@@ -222,39 +218,39 @@ const std::vector<DgradGraph>& dgradGraphs()
         // sub-GEMMs), dilation, a 1x1 strided filter whose sub-GEMMs leave dX holes (the
         // zero-fill), a nonsquare filter, patch embeddings (a folded width, a stride past
         // the filter), the dY-halo widths, grouped and strided grouped.
-        {"Dense", {1, 32, 32, 10, 9, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {160, 0, 0, 6, 0, 0, 0}, {160, 0, 0, 6, 0, 0, 0}},
-        {"Strided", {2, 32, 48, 15, 13, 3, 3, 2, 2, 1, 1, 1, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
-        {"Stride3x2Dilation2x1", {1, 16, 24, 17, 13, 3, 3, 3, 2, 2, 1, 2, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
-        {"PatchEmbedStride8", {2, 16, 32, 24, 16, 8, 8, 8, 8, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
-        {"PatchEmbedC3Stride4", {2, 3, 64, 32, 32, 4, 4, 4, 4, 0, 0, 1, 1, 1}, {19, 0, 0, 0, 0, 0, 0}, {19, 0, 0, 0, 0, 0, 0}},
-        {"PatchEmbedC3Stride16", {2, 3, 64, 64, 64, 16, 16, 16, 16, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
-        {"PatchEmbedGapStride5", {2, 8, 64, 30, 30, 4, 4, 5, 5, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
-        {"FoldedStride2", {2, 64, 128, 16, 16, 2, 2, 2, 2, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
-        {"PointwiseStride2", {2, 32, 64, 14, 13, 1, 1, 2, 2, 0, 0, 1, 1, 1}, {155, 0, 0, 0, 0, 0, 0}, {155, 0, 0, 0, 0, 0, 0}},
-        {"Dilated2", {2, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
-        {"Stride4Pad3Filter7", {1, 16, 16, 23, 21, 7, 7, 4, 4, 3, 3, 1, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
-        {"NonsquareFilterStride1x2", {2, 24, 40, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1, 1}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
-        {"HaloWo32", {2, 128, 128, 12, 32, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {229, 0, 0, 0, 0, 0, 0}, {229, 0, 0, 0, 0, 0, 0}},
-        {"HaloWo8", {2, 128, 128, 12, 8, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {237, 0, 0, 0, 0, 0, 0}, {237, 0, 0, 0, 0, 0, 0}},
-        {"HaloWo16", {2, 128, 128, 12, 16, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {234, 0, 0, 0, 0, 0, 0}, {234, 0, 0, 0, 0, 0, 0}},
-        {"HaloFilter5Wo48", {1, 128, 128, 10, 48, 5, 5, 1, 1, 2, 2, 1, 1, 1}, {196, 0, 0, 0, 0, 0, 0}, {196, 0, 0, 0, 0, 0, 0}},
-        {"Filter1x7", {2, 128, 128, 9, 17, 1, 7, 1, 1, 0, 3, 1, 1, 1}, {195, 0, 0, 0, 0, 0, 0}, {195, 0, 0, 0, 0, 0, 0}},
+        {"Dense", {1, 32, 32, 10, 9, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {79, 0, 0, 6, 0, 0, 0}, {79, 0, 0, 6, 0, 0, 0}},
+        {"Strided", {2, 32, 48, 15, 13, 3, 3, 2, 2, 1, 1, 1, 1, 1}, {73, 0, 0, 0, 0, 0, 0}, {73, 0, 0, 0, 0, 0, 0}},
+        {"Stride3x2Dilation2x1", {1, 16, 24, 17, 13, 3, 3, 3, 2, 2, 1, 2, 1, 1}, {73, 0, 0, 0, 0, 0, 0}, {73, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedStride8", {2, 16, 32, 24, 16, 8, 8, 8, 8, 0, 0, 1, 1, 1}, {81, 0, 0, 0, 0, 0, 0}, {81, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedC3Stride4", {2, 3, 64, 32, 32, 4, 4, 4, 4, 0, 0, 1, 1, 1}, {12, 0, 0, 0, 0, 0, 0}, {12, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedC3Stride16", {2, 3, 64, 64, 64, 16, 16, 16, 16, 0, 0, 1, 1, 1}, {81, 0, 0, 0, 0, 0, 0}, {81, 0, 0, 0, 0, 0, 0}},
+        {"PatchEmbedGapStride5", {2, 8, 64, 30, 30, 4, 4, 5, 5, 0, 0, 1, 1, 1}, {81, 0, 0, 0, 0, 0, 0}, {81, 0, 0, 0, 0, 0, 0}},
+        {"FoldedStride2", {2, 64, 128, 16, 16, 2, 2, 2, 2, 0, 0, 1, 1, 1}, {81, 0, 0, 0, 0, 0, 0}, {81, 0, 0, 0, 0, 0, 0}},
+        {"PointwiseStride2", {2, 32, 64, 14, 13, 1, 1, 2, 2, 0, 0, 1, 1, 1}, {81, 0, 0, 0, 0, 0, 0}, {81, 0, 0, 0, 0, 0, 0}},
+        {"Dilated2", {2, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2, 1}, {73, 0, 0, 0, 0, 0, 0}, {73, 0, 0, 0, 0, 0, 0}},
+        {"Stride4Pad3Filter7", {1, 16, 16, 23, 21, 7, 7, 4, 4, 3, 3, 1, 1, 1}, {73, 0, 0, 0, 0, 0, 0}, {73, 0, 0, 0, 0, 0, 0}},
+        {"NonsquareFilterStride1x2", {2, 24, 40, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1, 1}, {73, 0, 0, 0, 0, 0, 0}, {73, 0, 0, 0, 0, 0, 0}},
+        {"HaloWo32", {2, 128, 128, 12, 32, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {124, 0, 0, 0, 0, 0, 0}, {124, 0, 0, 0, 0, 0, 0}},
+        {"HaloWo8", {2, 128, 128, 12, 8, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {132, 0, 0, 0, 0, 0, 0}, {132, 0, 0, 0, 0, 0, 0}},
+        {"HaloWo16", {2, 128, 128, 12, 16, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {129, 0, 0, 0, 0, 0, 0}, {129, 0, 0, 0, 0, 0, 0}},
+        {"HaloFilter5Wo48", {1, 128, 128, 10, 48, 5, 5, 1, 1, 2, 2, 1, 1, 1}, {97, 0, 0, 0, 0, 0, 0}, {97, 0, 0, 0, 0, 0, 0}},
+        {"Filter1x7", {2, 128, 128, 9, 17, 1, 7, 1, 1, 0, 3, 1, 1, 1}, {96, 0, 0, 0, 0, 0, 0}, {96, 0, 0, 0, 0, 0, 0}},
         // Channel counts that admit only narrower vector widths.
-        {"GroupedG4", {2, 64, 96, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
-        {"GroupedG3Strided", {2, 48, 96, 15, 15, 3, 3, 2, 2, 1, 1, 1, 1, 3}, {146, 0, 0, 0, 0, 0, 0}, {146, 0, 0, 0, 0, 0, 0}},
-        {"GroupedG4Cpg3", {2, 12, 32, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
-        {"C12K24", {2, 12, 24, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
-        {"C6K8Strided", {2, 6, 8, 13, 12, 3, 3, 2, 2, 1, 1, 1, 1, 1}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
-        {"C3K16", {2, 3, 16, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {17, 0, 0, 0, 0, 0, 0}, {17, 0, 0, 0, 0, 0, 0}},
-        {"C16K20", {2, 16, 20, 11, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {16, 0, 0, 0, 0, 0, 0}, {16, 0, 0, 0, 0, 0, 0}},
-        {"C16K5", {2, 16, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {9, 0, 0, 0, 0, 0, 0}, {9, 0, 0, 0, 0, 0, 0}},
+        {"GroupedG4", {2, 64, 96, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {73, 0, 0, 0, 0, 0, 0}, {73, 0, 0, 0, 0, 0, 0}},
+        {"GroupedG3Strided", {2, 48, 96, 15, 15, 3, 3, 2, 2, 1, 1, 1, 1, 3}, {73, 0, 0, 0, 0, 0, 0}, {73, 0, 0, 0, 0, 0, 0}},
+        {"GroupedG4Cpg3", {2, 12, 32, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {10, 0, 0, 0, 0, 0, 0}, {10, 0, 0, 0, 0, 0, 0}},
+        {"C12K24", {2, 12, 24, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {10, 0, 0, 0, 0, 0, 0}, {10, 0, 0, 0, 0, 0, 0}},
+        {"C6K8Strided", {2, 6, 8, 13, 12, 3, 3, 2, 2, 1, 1, 1, 1, 1}, {10, 0, 0, 0, 0, 0, 0}, {10, 0, 0, 0, 0, 0, 0}},
+        {"C3K16", {2, 3, 16, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {10, 0, 0, 0, 0, 0, 0}, {10, 0, 0, 0, 0, 0, 0}},
+        {"C16K20", {2, 16, 20, 11, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {6, 0, 0, 0, 0, 0, 0}, {6, 0, 0, 0, 0, 0, 0}},
+        {"C16K5", {2, 16, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {3, 0, 0, 0, 0, 0, 0}, {3, 0, 0, 0, 0, 0, 0}},
         // Depthwise (C = K = groups): the streaming and windowed kernels' filters, strides
         // and paddings. 96 and 200 groups leave a partial 64-lane channel tile; odd and even
         // H under stride 2.
-        {"DepthwiseG96", {2, 96, 96, 14, 15, 3, 3, 1, 1, 1, 1, 1, 1, 96}, {0, 2, 19, 0, 0, 0, 0}, {0, 2, 19, 0, 0, 0, 0}},
-        {"DepthwiseG200N1", {1, 200, 200, 9, 7, 3, 3, 1, 1, 1, 1, 1, 1, 200}, {0, 2, 19, 0, 0, 0, 0}, {0, 2, 19, 0, 0, 0, 0}},
-        {"DepthwiseStridedG40OddH", {2, 40, 40, 17, 15, 3, 3, 2, 2, 1, 1, 1, 1, 40}, {0, 7, 0, 0, 0, 0, 0}, {0, 7, 0, 0, 0, 0, 0}},
-        {"DepthwiseStridedG8EvenH", {2, 8, 8, 16, 18, 3, 3, 2, 2, 1, 1, 1, 1, 8}, {0, 7, 0, 0, 0, 0, 0}, {0, 7, 0, 0, 0, 0, 0}},
+        {"DepthwiseG96", {2, 96, 96, 14, 15, 3, 3, 1, 1, 1, 1, 1, 1, 96}, {0, 1, 13, 0, 0, 0, 0}, {0, 1, 13, 0, 0, 0, 0}},
+        {"DepthwiseG200N1", {1, 200, 200, 9, 7, 3, 3, 1, 1, 1, 1, 1, 1, 200}, {0, 1, 13, 0, 0, 0, 0}, {0, 1, 13, 0, 0, 0, 0}},
+        {"DepthwiseStridedG40OddH", {2, 40, 40, 17, 15, 3, 3, 2, 2, 1, 1, 1, 1, 40}, {0, 5, 0, 0, 0, 0, 0}, {0, 5, 0, 0, 0, 0, 0}},
+        {"DepthwiseStridedG8EvenH", {2, 8, 8, 16, 18, 3, 3, 2, 2, 1, 1, 1, 1, 8}, {0, 5, 0, 0, 0, 0, 0}, {0, 5, 0, 0, 0, 0, 0}},
         {"Depthwise5x5G64", {3, 64, 64, 13, 11, 5, 5, 1, 1, 2, 2, 1, 1, 64}, {0, 0, 6, 0, 0, 0, 0}, {0, 0, 6, 0, 0, 0, 0}},
         {"Depthwise5x5StridedG32", {2, 32, 32, 15, 15, 5, 5, 2, 2, 2, 2, 1, 1, 32}, {0, 3, 0, 0, 0, 0, 0}, {0, 3, 0, 0, 0, 0, 0}},
         {"Depthwise7x7Pad0G64", {2, 64, 64, 16, 16, 7, 7, 1, 1, 0, 0, 1, 1, 64}, {0, 0, 2, 0, 0, 0, 0}, {0, 0, 2, 0, 0, 0, 0}},
@@ -262,16 +258,17 @@ const std::vector<DgradGraph>& dgradGraphs()
         // The fused and 4c pipelines, 3x3 p1 s1 at each (C/groups, K/groups) they bake,
         // with N * ceil(Ho / block_h) at least the eight row bands an xcd_tiles row needs.
         {"FusedC4G8", {8, 32, 32, 16, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, {0, 0, 0, 1, 0, 0, 0}, {0, 0, 0, 1, 0, 0, 0}},
-        {"FusedC8G8", {8, 64, 64, 16, 13, 3, 3, 1, 1, 1, 1, 1, 1, 8}, {146, 0, 0, 3, 0, 0, 0}, {146, 0, 0, 3, 0, 0, 0}},
-        {"FusedC16G4", {8, 64, 64, 14, 16, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {146, 0, 0, 4, 0, 0, 0}, {146, 0, 0, 4, 0, 0, 0}},
-        {"FusedC24Dense", {8, 24, 24, 16, 16, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {146, 0, 0, 4, 0, 0, 0}, {146, 0, 0, 4, 0, 0, 0}},
-        {"FusedC32G2", {8, 64, 64, 13, 16, 3, 3, 1, 1, 1, 1, 1, 1, 2}, {160, 0, 0, 6, 0, 0, 0}, {160, 0, 0, 6, 0, 0, 0}},
+        {"FusedC8G8", {8, 64, 64, 16, 13, 3, 3, 1, 1, 1, 1, 1, 1, 8}, {73, 0, 0, 3, 0, 0, 0}, {73, 0, 0, 3, 0, 0, 0}},
+        {"FusedC16G4", {8, 64, 64, 14, 16, 3, 3, 1, 1, 1, 1, 1, 1, 4}, {73, 0, 0, 4, 0, 0, 0}, {73, 0, 0, 4, 0, 0, 0}},
+        {"FusedC24Dense", {8, 24, 24, 16, 16, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {73, 0, 0, 2, 0, 0, 0}, {73, 0, 0, 2, 0, 0, 0}},
+        {"FusedC32G2", {8, 64, 64, 13, 16, 3, 3, 1, 1, 1, 1, 1, 1, 2}, {79, 0, 0, 6, 0, 0, 0}, {79, 0, 0, 6, 0, 0, 0}},
         {"FourCG64", {2, 256, 256, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 64}, {0, 0, 0, 0, 2, 0, 0}, {0, 0, 0, 0, 2, 0, 0}},
-        // The MFMA pipelines: the dense c4k320 rows (coalesced weights, so groups == 1
-        // only) and the runtime-channel row.
-        {"MfmaC4K320Dense", {1, 4, 320, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {24, 0, 0, 0, 0, 3, 1}, {24, 0, 0, 0, 0, 3, 1}},
-        {"MfmaRtcC12K320Dense", {1, 12, 320, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {24, 0, 0, 0, 0, 0, 1}, {24, 0, 0, 0, 0, 0, 1}},
-        {"MfmaC4K320G2Refused", {1, 8, 640, 10, 11, 3, 3, 1, 1, 1, 1, 1, 1, 2}, {24, 0, 0, 0, 0, 0, 0}, {24, 0, 0, 0, 0, 0, 0}, true},
+        // The MFMA pipelines: the dense c4k320 rows and the runtime-channel row; MfmaC4K320G2
+        // is the same tuple grouped (the reorganize helper's group-offset bug this once
+        // refused is fixed upstream of this PR's base, commit aa9ff78, #13075).
+        {"MfmaC4K320Dense", {1, 4, 320, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {14, 0, 0, 0, 0, 3, 1}, {14, 0, 0, 0, 0, 3, 1}},
+        {"MfmaRtcC12K320Dense", {1, 12, 320, 14, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {14, 0, 0, 0, 0, 0, 1}, {14, 0, 0, 0, 0, 0, 1}},
+        {"MfmaC4K320G2", {1, 8, 640, 10, 11, 3, 3, 1, 1, 1, 1, 1, 1, 2}, {14, 0, 0, 0, 0, 3, 1}, {14, 0, 0, 0, 0, 3, 1}},
     };
     return s_graphs;
 }
@@ -429,10 +426,6 @@ struct CatalogKernel
     bool isSingleKernelDirect() const
     {
         return family == DIRECT_FAMILY && among(SINGLE_KERNEL_VARIANTS, variant);
-    }
-    bool usesCoalescedWeights() const
-    {
-        return isMfma() && (wavesK > 1 || runtimeKLoop != 0);
     }
 
     /// Whether the kernel's pinned build-time capability is the graph's. A direct kernel
@@ -922,8 +915,10 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, UnbenchmarkedPlanServesFromTheWholeCata
 
     auto graph = buildDgradGraph(variant.dtype, graphCase.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(false)}));
-    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(total) + " ("
-                                          + std::to_string(total) + " before knob filtering)"))
+    // Only "before knob filtering" (the pack-admitted total, independent of ranking) is
+    // pinned here: with no knob requested, shadowByArchTier can rank fewer than `total`
+    // candidates (one per arch tier), so "at rank 0 from N" does not have to equal it.
+    EXPECT_TRUE(recorder.hasLogContaining("(" + std::to_string(total) + " before knob filtering)"))
         << recorder.getRecordedLogsAsString();
     const auto* selected = catalog.find(selectedKernel(recorder));
     ASSERT_NE(selected, nullptr) << recorder.getRecordedLogsAsString();
@@ -1061,7 +1056,7 @@ TEST_P(IntegrationGpuGfx950ConvDgradAotCatalog, EveryInstanceMatchesCpuReference
         }
         selectable.push_back(&kernel);
     }
-    EXPECT_EQ(selectable.size(), 320U);
+    EXPECT_EQ(selectable.size(), 203U);
     EXPECT_EQ(helpers, 4U);
 
     const ScopedPluginLogCapture capture(this);
@@ -1074,16 +1069,11 @@ TEST_P(IntegrationGpuGfx950ConvDgradAotCatalog, EveryInstanceMatchesCpuReference
         SCOPED_TRACE(graphCase.name);
         auto reference = makeReference(variant, graphCase.problem, seed++);
         std::map<std::string, size_t> served;
-        size_t coalescedAttempted = 0;
         for(const auto* kernel : selectable)
         {
             if(!kernel->capabilityAdmits(graphCase.problem))
             {
                 continue;
-            }
-            if(kernel->usesCoalescedWeights() && graphCase.problem.groups > 1)
-            {
-                ++coalescedAttempted;
             }
             const auto outcome = pinAndVerify(variant,
                                               graphCase.problem,
@@ -1102,10 +1092,6 @@ TEST_P(IntegrationGpuGfx950ConvDgradAotCatalog, EveryInstanceMatchesCpuReference
         for(const auto* name : VARIANTS)
         {
             EXPECT_EQ(served[name], graphCase.count(variant.dtype, name)) << name;
-        }
-        if(graphCase.refusesCoalescedMfma)
-        {
-            EXPECT_GT(coalescedAttempted, 0U) << "no coalesced MFMA row has this tuple";
         }
     }
 
