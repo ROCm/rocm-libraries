@@ -12,6 +12,7 @@
 #include <limits>
 
 #include "origami/gemm.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
 
@@ -66,6 +67,11 @@ bool is_split_k_prone(const problem_t& problem, std::size_t n_cu) {
   return ref_tiles < n_cu && ref_k_iters >= kSplitKMinKIters;
 }
 
+// GEMV shapes (M == 1 or N == 1) are never pruned either. The full model has GEMV and
+// M-edge terms the proxy cannot model, and hipBLASLt's predicates reject most configs
+// of these lists after the ranking, so a pruned list may keep few runnable configs.
+bool is_gemv(const problem_t& problem) { return problem.size.m == 1 || problem.size.n == 1; }
+
 void log_leveled_rejection(const config_t& config, int level, const char* reason) {
   OLOG_DEBUG("  [leveled] Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
                                        << ") MI=(" << config.mi.m << "," << config.mi.n << ","
@@ -95,10 +101,31 @@ double epilogue_latency_quick(const hardware_t& hardware,
   return tile_bytes / per_cu_store_bw;
 }
 
-// Level-1 context-free proxy: max(MI compute, A/B read time) per MT_M x MT_N x MT_K
-// block, times the K-blocks each CU handles, plus the quick epilogue per output-tile
-// wave. Scaling by the K-iteration count keeps the compute term independent of MT_K
-// (total MACs are fixed), so the memory term ranks MT_K by global-read reuse.
+// Tensile params of a config, or the defaults when it has none (as in the full model).
+const tensile_params_t& proxy_tparams(const config_t& config) {
+  static const tensile_params_t kDefaultTensile{};
+  return config.has_tensile_params() ? config.tensile() : kDefaultTensile;
+}
+
+// Level-1 context-free proxy, in cycles: a data-parallel schedule of output-tile waves,
+// where each tile pays its K-loop, its fixed per-tile costs and the quick epilogue.
+//
+//   score = ceil(tiles / n_cu) * (iters * max(L_compute, L_mem) + overhead + epilogue)
+//
+// - Schedule: one output tile per CU per wave, with no K-split. Charging the balanced
+//   work per CU instead (as if stream-K spread every K-iteration over all CUs for free)
+//   makes few large tiles look nearly free on small and medium grids, although they
+//   leave CUs idle or need a split with a costly reduction.
+// - Per-tile overhead, as in the full model's main loop: the prologue's first load
+//   (L_mem), the PGR fill and the terminal compute iterations (L_compute per prefetched
+//   iteration, at most the K-iterations), and the per-K-iteration loop bookkeeping,
+//   partly hidden by deep PGR.
+// - Memory: A/B bytes of one MT_M x MT_N x MT_K block at L2 bandwidth, with every CU
+//   loading. The proxy has no cache hit rates, and charging DRAM bandwidth instead
+//   overcharges large tiles that the full model mostly serves from the caches.
+//
+// The full-model terms the proxy omits: cache hit rates, the split-K/stream-K schedule
+// and its reduction, edge tiles and the scalar epilogue, and compute occupancy scaling.
 double score_proxy(const problem_t& problem,
                    const hardware_t& hardware,
                    const config_t& config,
@@ -112,38 +139,28 @@ double score_proxy(const problem_t& problem,
   const std::size_t grid_n           = math::safe_ceil_div(problem.size.n, config.mt.n);
   const std::size_t num_output_tiles = grid_m * grid_n * problem.batch;
 
-  const std::size_t num_iter =
-      std::max<std::size_t>(1, math::safe_ceil_div(problem.size.k, config.mt.k));
+  const double num_iter = static_cast<double>(
+      std::max<std::size_t>(1, math::safe_ceil_div(problem.size.k, config.mt.k)));
 
-  // A/B read time of one K-iteration, in cycles, as in the full model's memory latency:
-  // the bytes all active CUs load in one K-iteration, divided by the bandwidth of each
-  // memory level in bytes per cycle. L2 bandwidth scales with the active share of the
-  // CUs, and DRAM bandwidth with the occupancy-limited fraction (the same scaling as
-  // the store in epilogue_latency_quick()). The proxy has no context, so it has no cache
-  // hit rates: every byte is charged to both levels, and the slower one is taken.
   const double a_bytes         = data_type_to_bytes(problem.a_dtype);
   const double b_bytes         = data_type_to_bytes(problem.b_dtype);
   const double bytes_per_block = static_cast<double>(config.mt.m * config.mt.k) * a_bytes +
                                  static_cast<double>(config.mt.k * config.mt.n) * b_bytes;
-  const std::size_t active_cus = std::min(num_output_tiles, n_cu);
-  const double bytes_per_iter  = bytes_per_block * static_cast<double>(active_cus);
-  const double l2_bw           = hardware.mem1_perf_ratio * static_cast<double>(active_cus) /
-                       static_cast<double>(std::max<std::size_t>(hardware.N_CU, 1));
-  const double dram_bw =
-      hardware.mem3_perf_ratio * compute_mem_bw_from_occupancy(hardware, active_cus);
-  const double L_mem_l2   = (l2_bw > 0.0) ? (bytes_per_iter / l2_bw) : 0.0;
-  const double L_mem_dram = (dram_bw > 0.0) ? (bytes_per_iter / dram_bw) : 0.0;
-  const double L_mem      = std::max(L_mem_l2, L_mem_dram);
+  const double L_mem = (hardware.mem1_perf_ratio > 0.0)
+                           ? bytes_per_block *
+                                 static_cast<double>(std::max<std::size_t>(hardware.N_CU, 1)) /
+                                 hardware.mem1_perf_ratio
+                           : 0.0;
 
-  const double per_block           = std::max(L_compute, L_mem);
-  const std::size_t total_k_blocks = num_output_tiles * num_iter;
-  const std::size_t work_per_cu    = math::safe_ceil_div(total_k_blocks, n_cu);
-  const std::size_t epilogue_waves = math::safe_ceil_div(num_output_tiles, n_cu);
+  const double pgr = static_cast<double>(std::max(proxy_tparams(config).prefetch_global_read, 0));
+  const double loop_overlap = (pgr >= 3.0) ? 1.0 / (pgr - 1.0) : 1.0;
+  const double overhead     = L_mem + L_compute * std::min(pgr, num_iter) +
+                          heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * num_iter * loop_overlap;
 
   const double epilogue =
       epilogue_latency_quick(hardware, config.mt, problem.d_dtype, num_output_tiles, n_cu);
-  return per_block * static_cast<double>(work_per_cu) +
-         epilogue * static_cast<double>(epilogue_waves);
+  const double waves = static_cast<double>(math::safe_ceil_div(num_output_tiles, n_cu));
+  return waves * (std::max(L_compute, L_mem) * num_iter + overhead + epilogue);
 }
 
 }  // namespace
@@ -176,11 +193,11 @@ leveled_estimation_result_t rank_leveled_estimation(const problem_t& problem,
 
   // Prune to the cheapest max(kLeveledMinKeep, n * kLeveledKeepFraction) by proxy cost.
   // Configs with the same proxy cost as the last kept one are kept as well: the proxy
-  // only sees MT, MI and the data types, so variants that differ in other parameters
+  // only sees MT, MI, PGR and the data types, so variants that differ in other parameters
   // tie, and the tie-breakers in rank_configs() need the whole group. The kept set
   // therefore depends on proxy values only, not on the order of the config list.
   std::size_t keep =
-      is_split_k_prone(problem, n_cu)
+      (is_split_k_prone(problem, n_cu) || is_gemv(problem))
           ? candidates.size()
           : std::max(kLeveledMinKeep,
                      static_cast<std::size_t>(static_cast<double>(candidates.size()) *

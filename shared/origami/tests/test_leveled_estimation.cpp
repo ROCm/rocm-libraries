@@ -119,8 +119,9 @@ void require_leveled_ranking(const std::vector<origami::prediction_result_t>& le
   for (size_t i = scored; i < leveled.size(); ++i) REQUIRE(leveled[i].latency == kRejected);
 }
 
-// The proxy sees only MT, MI and the data types, so configs that share them have the same
-// proxy cost. The cut must keep or prune each such group as a whole.
+// The proxy sees only MT, MI, PGR and the data types, so configs that share them have the
+// same proxy cost. The test configs carry no Tensile params, so PGR is the default for all.
+// The cut must keep or prune each such group as a whole.
 void require_whole_proxy_groups(const std::vector<origami::prediction_result_t>& leveled) {
   const size_t scored = count_scored(leveled);
   auto same_group     = [](const origami::config_t& a, const origami::config_t& b) {
@@ -290,6 +291,54 @@ TEST_CASE("Leveled: split-K-prone shapes skip the prune", "[origami][leveled]") 
         require_same_ranking(rank(problem, hardware, configs, true), flat);
       }
     }
+  }
+}
+
+TEST_CASE("Leveled: GEMV shapes skip the prune", "[origami][leveled]") {
+  // M == 1 or N == 1 with a shallow K, so the split-K-prone skip does not apply: every
+  // config that passes level 0 reaches the full model. The same shapes with M or N of 2
+  // are pruned, so the GEMV skip is what keeps these lists whole.
+  auto configs = sweep_configs();
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware = make_hardware(gpu_arch);
+      for (const auto& [m, n, batch] : std::vector<std::array<size_t, 3>>{
+               {1, 65536, 1}, {65536, 1, 1}, {1, 2048, 8}, {2048, 1, 8}}) {
+        INFO("shape " << m << "x" << n << "x1024x" << batch);
+        const auto gemv =
+            make_problem(m, n, 1024, origami::transpose_t::T, origami::transpose_t::N, batch);
+        auto flat = rank(gemv, hardware, configs, false);
+        REQUIRE(flat.size() > expected_keep(flat.size()));
+        require_same_ranking(rank(gemv, hardware, configs, true), flat);
+
+        const auto not_gemv = make_problem(std::max<size_t>(m, 2),
+                                           std::max<size_t>(n, 2),
+                                           1024,
+                                           origami::transpose_t::T,
+                                           origami::transpose_t::N,
+                                           batch);
+        auto leveled        = rank(not_gemv, hardware, configs, true);
+        REQUIRE(count_scored(leveled) < leveled.size());
+      }
+    }
+  }
+}
+
+TEST_CASE("Leveled: small-grid shapes keep the single-pass pick", "[origami][leveled]") {
+  // A small output grid and a shallow K. Large tiles leave CUs idle or need a K-split
+  // with a reduction, and the proxy's data-parallel wave schedule charges them a whole
+  // wave each. A proxy that spreads the K-iterations evenly over the CUs instead ranks
+  // them first and prunes the single-pass pick.
+  auto configs  = sweep_configs();
+  auto hardware = make_hardware(950);
+  for (const auto& problem :
+       {make_problem(688, 768, 912, origami::transpose_t::N), make_problem(688, 768, 912)}) {
+    auto flat    = rank(problem, hardware, configs, false);
+    auto leveled = rank(problem, hardware, configs, true);
+    require_leveled_ranking(leveled, flat);
+    REQUIRE(count_scored(leveled) < leveled.size());
+    REQUIRE(leveled.front().config.index == flat.front().config.index);
+    REQUIRE(leveled.front().latency == flat.front().latency);
   }
 }
 
