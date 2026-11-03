@@ -144,6 +144,17 @@ bool rocke_direct_conv_one_padding_reason(const rocke_direct_conv_problem_t* p,
                                           char* reason,
                                           size_t reason_cap);
 
+/* dilation_reason(p): why a direct-conv kernel without dilation support
+ * cannot compute p. Returns true (and writes the reason) when p is dilated --
+ * any dilation other than 1, zero and negatives included, as in Python's
+ * is_dilated. */
+bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap);
+
+/* The problem's dtype, NULL read as "fp16" (see the dtype field). */
+const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p);
+/* p.dtype == "bf16". */
+bool rocke_direct_conv_problem_is_bf16(const rocke_direct_conv_problem_t* p);
+
 /* @property total_c -> groups * cpg. */
 int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
 /* @property total_k -> groups * kpg. */

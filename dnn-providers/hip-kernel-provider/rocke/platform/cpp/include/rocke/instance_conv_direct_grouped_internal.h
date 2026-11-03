@@ -1079,8 +1079,92 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx);
 void rocke_dconv_dwcol_build_descriptors(rocke_dconv_dwcol_ctx_t* ctx);
 rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx);
 
+/* ===================================================================== *
+ *  Windowed depthwise helpers (conv_direct_grouped_build_depthwise_dgrad_win.cpp)
+ *
+ *  Shared by the windowed depthwise dgrad and the Toeplitz WMMA depthwise
+ *  forward (conv_direct_dw_fwd_wmma.cpp), as their Python builders share them:
+ *
+ *    Python (conv_direct_grouped.py)        C++ (here)
+ *    ------------------------------------   ---------------------------------
+ *    _dw_mfma_passes(KW)                    rocke_dw_mfma_passes
+ *    DW_DGRAD_MFMA_W_FOLDS                  rocke_dw_mfma_w_fold_ok
+ *    _dw_win_tile(b, p_Hi, rows)            rocke_dw_win_tile
+ *    _buf_load_vN(b, dtype, ...)            rocke_dconv_buf_load_vN
+ *    _buf_store_vN(b, dtype, ...)           rocke_dconv_buf_store_vN
+ *    _trunc_f32(b, dtype, val)              rocke_dconv_trunc_f32
+ *    b.buffer_load_bf16 / _f16 by dtype     rocke_dconv_buf_load_half
+ *    the one-trip guarded scf.for_iter      rocke_dw_win_guarded (C++ only)
+ *
+ *  `bf16` stands for Python's `dtype == "bf16"`. Every helper emits its ops in
+ *  the Python order (byte identity).
+ * ===================================================================== */
+
+/* 16x16x32 passes per filter row: ceil((KW + 1) / 4). */
+int rocke_dw_mfma_passes(int KW);
+
+/* w_fold in DW_DGRAD_MFMA_W_FOLDS (1, 2 or 4). */
+bool rocke_dw_mfma_w_fold_ok(int w_fold);
+
+/* (image_tile, h0) of this block: block z is image_tile * h_tiles + h_tile
+ * with h_tiles = ceil(p_Hi / rows). */
+void rocke_dw_win_tile(rocke_ir_builder_t* b,
+                       rocke_value_t* p_Hi,
+                       int rows,
+                       rocke_value_t** n_tile,
+                       rocke_value_t** h0);
+
+rocke_value_t* rocke_dconv_buf_load_half(rocke_ir_builder_t* b,
+                                         bool bf16,
+                                         rocke_value_t* rsrc,
+                                         rocke_value_t* voff,
+                                         rocke_value_t* soff);
+rocke_value_t* rocke_dconv_buf_load_vN(rocke_ir_builder_t* b,
+                                       bool bf16,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* voff,
+                                       rocke_value_t* soff,
+                                       int dwords);
+void rocke_dconv_buf_store_vN(rocke_ir_builder_t* b,
+                              bool bf16,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voff,
+                              rocke_value_t* soff,
+                              rocke_value_t* val,
+                              int dwords);
+/* Truncate a vector of f32 accumulators to the output dtype. */
+rocke_value_t* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, rocke_value_t* val);
+
+/* One staged pixel chunk of a window row: its LDS column `px`, channel
+ * offset `ch8`, and the guarded global byte offset `g_off`. */
+typedef struct rocke_dw_win_plan
+{
+    rocke_value_t* px;
+    rocke_value_t* ch8;
+    rocke_value_t* g_off;
+} rocke_dw_win_plan_t;
+
 #ifdef __cplusplus
 } /* extern "C" */
+#endif
+
+#ifdef __cplusplus
+#include <functional>
+#include <vector>
+
+/* A one-trip (or zero-trip) scf.for_iter guarding `body` on the block-uniform
+ * `ok`, carrying `accs` (updated in place to the loop results). The iter args
+ * are named `<prefix>_y<y>_<i>`, the induction variable `<prefix>_y<y>`. */
+void rocke_dw_win_guarded(
+    rocke_ir_builder_t* b,
+    rocke_value_t* ok,
+    rocke_value_t* c0,
+    rocke_value_t* c1,
+    std::vector<rocke_value_t*>& accs,
+    const char* prefix,
+    int y,
+    bool elide_trailing_barrier,
+    const std::function<std::vector<rocke_value_t*>(const std::vector<rocke_value_t*>&)>& body);
 #endif
 
 #endif /* ROCKE_INSTANCE_CONV_DIRECT_GROUPED_INTERNAL_H */

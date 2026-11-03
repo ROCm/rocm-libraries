@@ -36,28 +36,6 @@
 
 typedef rocke_value_t V;
 
-namespace
-{
-
-/* _dw_mfma_passes(KW): ceil((KW + 1) / 4). */
-int dfw_passes(int KW)
-{
-    return (KW + 4) / 4;
-}
-
-bool dfw_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
-}
-
-void dfw_set_reason(char* reason, size_t cap, const char* msg)
-{
-    if(reason != NULL && cap > 0)
-        snprintf(reason, cap, "%s", msg);
-}
-
-} // namespace
-
 /* ===================================================================== *
  *  Spec helpers
  * ===================================================================== */
@@ -91,7 +69,8 @@ int rocke_direct_dw_fwd_wmma_tile_w(const rocke_direct_dw_fwd_wmma_spec_t* spec)
 
 int rocke_direct_dw_fwd_wmma_in_passes(const rocke_direct_dw_fwd_wmma_spec_t* spec)
 {
-    const int win = rocke_direct_dw_fwd_wmma_tile_w(spec) + 4 * dfw_passes(spec->problem.KW) - 2;
+    const int win
+        = rocke_direct_dw_fwd_wmma_tile_w(spec) + 4 * rocke_dw_mfma_passes(spec->problem.KW) - 2;
     const int per_px = rocke_direct_dw_fwd_wmma_block_ch(spec) / ROCKE_DW_DGRAD_MFMA_CH;
     if(rocke_direct_dw_fwd_wmma_threads_per_block(spec) <= 0)
         return 0; /* block_waves < 1 is rejected */
@@ -102,7 +81,7 @@ int rocke_direct_dw_fwd_wmma_in_passes(const rocke_direct_dw_fwd_wmma_spec_t* sp
 int rocke_direct_dw_fwd_wmma_frag_vgprs(const rocke_direct_dw_fwd_wmma_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const int kwp = dfw_passes(p->KW);
+    const int kwp = rocke_dw_mfma_passes(p->KW);
     return 8 * (p->KH * kwp + p->KH + kwp)
            + 4 * spec->prefetch_rows * rocke_direct_dw_fwd_wmma_in_passes(spec);
 }
@@ -122,7 +101,7 @@ long rocke_direct_dw_fwd_wmma_lds_bytes(const rocke_direct_dw_fwd_wmma_spec_t* s
 
 int rocke_direct_dw_fwd_wmma_unrolled_wmmas(const rocke_direct_dw_fwd_wmma_spec_t* spec)
 {
-    return spec->block_h * spec->problem.KH * dfw_passes(spec->problem.KW);
+    return spec->block_h * spec->problem.KH * rocke_dw_mfma_passes(spec->problem.KW);
 }
 
 void rocke_direct_dw_fwd_wmma_grid(const rocke_direct_dw_fwd_wmma_spec_t* spec, int grid[3])
@@ -150,7 +129,7 @@ rocke_status_t rocke_direct_dw_fwd_wmma_kernel_name(const rocke_direct_dw_fwd_wm
     snprintf(pf, sizeof pf, "pf%d", spec->prefetch_rows);
     const char* parts[] = {rsp, wv, bh, f, pf};
     const char* flag_names[] = {"bf16"};
-    int flag_on[] = {dfw_is_bf16(p) ? 1 : 0};
+    int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "rocke_direct_dw_fwd_wmma",
                                   parts,
                                   sizeof(parts) / sizeof(parts[0]),
@@ -166,7 +145,7 @@ rocke_status_t rocke_direct_dw_fwd_wmma_kernel_name(const rocke_direct_dw_fwd_wm
 static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason, size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const char* dtype = p->dtype != NULL ? p->dtype : "fp16";
+    const char* dtype = rocke_direct_conv_problem_dtype(p);
 #define DFW_FAIL(...)                           \
     do                                          \
     {                                           \
@@ -180,12 +159,8 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
         DFW_FAIL("requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
     if(p->stride != 1)
         DFW_FAIL("requires stride=1 (got %d)", p->stride);
-    if(p->dil_h != 1 || p->dil_w != 1)
-        DFW_FAIL("this direct conv kernel has no dilation (got %dx%d); only the non-grouped "
-                 "forward kernel computes a dilated convolution",
-                 p->dil_h,
-                 p->dil_w);
-    if(rocke_direct_conv_one_padding_reason(p, "", reason, cap))
+    if(rocke_direct_dilation_reason(p, reason, cap)
+       || rocke_direct_conv_one_padding_reason(p, "", reason, cap))
         return false;
     {
         const int kmax = p->KH > p->KW ? p->KH : p->KW;
@@ -198,7 +173,7 @@ static bool dfw_check(const rocke_direct_dw_fwd_wmma_spec_t* spec, char* reason,
     if(spec->block_waves < 1 || spec->block_waves > ROCKE_DW_FWD_WMMA_MAX_WAVES)
         DFW_FAIL(
             "block_waves must be 1..%d (got %d)", ROCKE_DW_FWD_WMMA_MAX_WAVES, spec->block_waves);
-    if(spec->w_fold != 1 && spec->w_fold != 2 && spec->w_fold != 4)
+    if(!rocke_dw_mfma_w_fold_ok(spec->w_fold))
         DFW_FAIL("w_fold must be one of (1, 2, 4) (got %d)", spec->w_fold);
     if(spec->prefetch_rows < 1 || spec->prefetch_rows > ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS)
         DFW_FAIL("prefetch_rows must be 1..%d (got %d)",
@@ -254,7 +229,7 @@ bool rocke_direct_dw_fwd_wmma_is_valid_spec(const rocke_direct_dw_fwd_wmma_spec_
 {
     if(spec == NULL)
     {
-        dfw_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -267,44 +242,9 @@ bool rocke_direct_dw_fwd_wmma_is_valid_spec(const rocke_direct_dw_fwd_wmma_spec_
     }
     if(!dfw_check(spec, reason, reason_cap))
         return false;
-    dfw_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
-
-/* ===================================================================== *
- *  Emission helpers
- * ===================================================================== */
-namespace
-{
-
-V* dfw_load_half(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* off, V* c0)
-{
-    return bf16 ? rocke_b_buffer_load_bf16(b, rsrc, off, c0)
-                : rocke_b_buffer_load_f16(b, rsrc, off, c0);
-}
-
-V* dfw_load_vN(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* off, V* c0, int dwords)
-{
-    return bf16 ? rocke_b_buffer_load_vN_bf16(b, rsrc, off, c0, dwords)
-                : rocke_b_buffer_load_vN_f16(b, rsrc, off, c0, dwords);
-}
-
-void dfw_store_vN(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* off, V* c0, V* v, int dw)
-{
-    if(bf16)
-        rocke_b_buffer_store_vN_bf16(b, rsrc, off, c0, v, dw);
-    else
-        rocke_b_buffer_store_vN_f16(b, rsrc, off, c0, v, dw);
-}
-
-struct dfw_plan
-{
-    V* px;
-    V* ch8;
-    V* g_off;
-};
-
-} // namespace
 
 /* ===================================================================== *
  *  build_dw_fwd_wmma
@@ -314,12 +254,12 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
                                                    const char* arch)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const bool bf16 = dfw_is_bf16(p);
+    const bool bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int KH = p->KH, KW = p->KW, PAD = p->PAD;
     const int F = spec->w_fold;
     const int SUB = 16 / F;
     const int TW = rocke_direct_dw_fwd_wmma_tile_w(spec);
-    const int KWP = dfw_passes(KW);
+    const int KWP = rocke_dw_mfma_passes(KW);
     const int U = TW + 4 * KWP - 2;
     const int ROWS = spec->block_h;
     const int THREADS = rocke_direct_dw_fwd_wmma_threads_per_block(spec);
@@ -340,7 +280,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     const char* wmma_op = mop->op_id;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     rocke_dconv_params_t prm;
     rocke_dconv_emit_params(b, &prm, "fwd", io_type);
     if(!rocke_ir_builder_ok(b))
@@ -370,20 +310,9 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     V* tid = rocke_b_thread_id_x(b);
     V* bx = rocke_b_block_id_x(b);
     V* by = rocke_b_block_id_y(b);
-    /* _dw_win_tile(b, p_Ho, ROWS) */
     V* n_tile;
     V* h0;
-    {
-        V* bz = rocke_b_block_id_z(b);
-        V* c_rows = rocke_b_const_i32(b, ROWS);
-        V* c_rm1 = rocke_b_const_i32(b, ROWS - 1);
-        V* sum = rocke_b_add(b, p_Ho, c_rm1);
-        V* h_tiles = rocke_b_div(b, sum, c_rows);
-        n_tile = rocke_b_div(b, bz, h_tiles);
-        V* m = rocke_b_mul(b, n_tile, h_tiles);
-        V* d = rocke_b_sub(b, bz, m);
-        h0 = rocke_b_mul(b, d, c_rows);
-    }
+    rocke_dw_win_tile(b, p_Ho, ROWS, &n_tile, &h0);
     V* c32 = rocke_b_const_i32(b, 32);
     V* lane = rocke_b_mod(b, tid, c32);
     V* wave = rocke_b_div(b, tid, c32);
@@ -439,7 +368,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
                 V* tb = rocke_b_mul(b, tap, c2);
                 V* a = rocke_b_add(b, w_base, tb);
                 V* off = rocke_b_select(b, ok, a, oob_lane);
-                V* w = dfw_load_half(b, bf16, b_rsrc, off, c0);
+                V* w = rocke_dconv_buf_load_half(b, bf16, b_rsrc, off, c0);
                 for(int i = 0; i < CH; ++i)
                     comps[j * CH + i] = rocke_b_select(b, is_k[i], w, zero_half);
             }
@@ -465,7 +394,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     }
     const int n_out = F * TW * PER_PX;
     V* c_TW = rocke_b_const_i32(b, TW);
-    std::vector<dfw_plan> drain;
+    std::vector<rocke_dw_win_plan_t> drain;
     for(int i = 0; i < (int)rocke_ceil_div(n_out, THREADS); ++i)
     {
         V* ci = rocke_b_const_i32(b, i * THREADS);
@@ -491,7 +420,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
         V* m3 = rocke_b_mul(b, ch_o, c2);
         V* s1 = rocke_b_add(b, m2, m3);
         V* g_off = rocke_b_add(b, m1, s1);
-        dfw_plan e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
+        rocke_dw_win_plan_t e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
         drain.push_back(e);
     }
 
@@ -502,7 +431,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     const int i_shape[3] = {2, in_px, CH_PAD};
     V* i_smem = rocke_b_smem_alloc(b, io_type, i_shape, 3, "x_stage");
     V* c_U = rocke_b_const_i32(b, U);
-    std::vector<dfw_plan> in_plan;
+    std::vector<rocke_dw_win_plan_t> in_plan;
     for(int i = 0; i < in_passes; ++i)
     {
         V* ci = rocke_b_const_i32(b, i * THREADS);
@@ -532,7 +461,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
         V* m3 = rocke_b_mul(b, ch_i, c2);
         V* s1 = rocke_b_add(b, m2, m3);
         V* g_off = rocke_b_add(b, m1, s1);
-        dfw_plan e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
+        rocke_dw_win_plan_t e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
         in_plan.push_back(e);
     }
     V* f_u = rocke_b_mul(b, f, c_U);
@@ -564,10 +493,10 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
         V* m = rocke_b_mul(b, hi, x_row);
         V* x_r = rocke_b_select(b, ok, m, oob_uniform);
         std::vector<V*> vals;
-        for(const dfw_plan& e : in_plan)
+        for(const rocke_dw_win_plan_t& e : in_plan)
         {
             V* off = rocke_b_add(b, e.g_off, x_r);
-            vals.push_back(dfw_load_vN(b, bf16, a_rsrc, off, c0, 4));
+            vals.push_back(rocke_dconv_buf_load_vN(b, bf16, a_rsrc, off, c0, 4));
         }
         rocke_b_sched_barrier(b, 0);
         return vals;
@@ -582,12 +511,12 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
     };
 
     auto drain_out = [&](V* buf, V* y_r) {
-        for(const dfw_plan& e : drain)
+        for(const rocke_dw_win_plan_t& e : drain)
         {
             V* idx[3] = {buf, e.px, e.ch8};
             V* v = rocke_b_smem_load_vN(b, o_smem, idx, 3, io_type, 8);
             V* off = rocke_b_add(b, e.g_off, y_r);
-            dfw_store_vN(b, bf16, d_rsrc, off, c0, v, 4);
+            rocke_dconv_buf_store_vN(b, bf16, d_rsrc, off, c0, v, 4);
         }
     };
 
@@ -665,36 +594,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
         for(int sl : slots)
             accs.push_back(acc[sl]);
         if(halo)
-        {
-            V* trip = rocke_b_select(b, row_ok[y], c1, c0);
-            std::vector<std::string> names(accs.size());
-            std::vector<rocke_iter_arg_t> iargs(accs.size());
-            for(size_t i = 0; i < accs.size(); ++i)
-            {
-                names[i] = "dfw_y" + std::to_string(y) + "_" + std::to_string(i);
-                iargs[i].name = names[i].c_str();
-                iargs[i].init = accs[i];
-            }
-            const std::string iv = "dfw_y" + std::to_string(y);
-            rocke_for_t loop = rocke_b_scf_for_iter(b,
-                                                    c0,
-                                                    trip,
-                                                    c1,
-                                                    iargs.data(),
-                                                    (int)iargs.size(),
-                                                    iv.c_str(),
-                                                    /*unroll=*/false,
-                                                    /*elide_trailing_barrier=*/true);
-            if(!rocke_ir_builder_ok(b))
-                return NULL;
-            rocke_b_region_enter(b, loop.body);
-            std::vector<V*> carried(loop.iter_vars, loop.iter_vars + loop.num_iter_vars);
-            std::vector<V*> res = multiply(carried);
-            rocke_b_scf_yield(b, res.data(), (int)res.size());
-            rocke_b_region_leave(b);
-            for(size_t i = 0; i < accs.size(); ++i)
-                accs[i] = loop.op->results[i];
-        }
+            rocke_dw_win_guarded(b, row_ok[y], c0, c1, accs, "dfw", y, true, multiply);
         else
             accs = multiply(accs);
         if(!rocke_ir_builder_ok(b))
@@ -705,8 +605,7 @@ rocke_kernel_def_t* rocke_build_direct_dw_fwd_wmma(rocke_ir_builder_t* b,
         if(o_local < 0 || o_local >= ROWS)
             continue;
         const int slot = o_local % KH;
-        pend_val = bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, acc[slot])
-                        : rocke_b_vec_trunc_f32_to_f16(b, acc[slot]);
+        pend_val = rocke_dconv_trunc_f32(b, bf16, acc[slot]);
         pend_row = y_row_part(o_local);
         have_out = true;
         acc[slot] = zero_acc;
@@ -763,7 +662,7 @@ rocke_status_t rocke_direct_dw_fwd_wmma_lower_to_llvm(const rocke_direct_dw_fwd_
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        dfw_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -773,7 +672,8 @@ rocke_status_t rocke_direct_dw_fwd_wmma_lower_to_llvm(const rocke_direct_dw_fwd_
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        dfw_set_reason(err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_dw_fwd_wmma failed");
+        rocke_spec_set_reason(
+            err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_dw_fwd_wmma failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }

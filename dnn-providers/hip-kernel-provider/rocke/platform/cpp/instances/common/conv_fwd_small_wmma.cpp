@@ -48,24 +48,6 @@ int fsw_round_up(long long a, long long b)
     return (int)(rocke_ceil_div(a, b) * b);
 }
 
-void fsw_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-    {
-        snprintf(reason, reason_cap, "%s", msg);
-    }
-}
-
-const char* fsw_dtype(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype ? p->dtype : "fp16";
-}
-
-bool fsw_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return strcmp(fsw_dtype(p), "bf16") == 0;
-}
-
 /* _common_shape_reason(p, square): the problem shapes small C and small K
  * both serve (square=false: small K, rectangular filters too). On failure
  * writes reason and returns false. */
@@ -77,18 +59,18 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
     char msg[512];
     if(p->groups != 1 || p->dil_h != 1 || p->dil_w != 1)
     {
-        fsw_set_reason(reason, reason_cap, "ungrouped, undilated convolutions only");
+        rocke_spec_set_reason(reason, reason_cap, "ungrouped, undilated convolutions only");
         return false;
     }
     if(square && p->KH != p->KW)
     {
-        fsw_set_reason(reason, reason_cap, "square filters only");
+        rocke_spec_set_reason(reason, reason_cap, "square filters only");
         return false;
     }
     if(!(0 <= p->PAD && p->PAD <= p->KH - 1))
     {
         snprintf(msg, sizeof msg, "PAD %d outside 0..K-1", p->PAD);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     {
@@ -96,14 +78,14 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
         if(!(0 <= pad_w && pad_w <= p->KW - 1))
         {
             snprintf(msg, sizeof msg, "column PAD %d outside 0..KW-1", pad_w);
-            fsw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
     }
     if(p->stride < 1) /* before fsw_ho / fsw_wo divide by it */
     {
         snprintf(msg, sizeof msg, "stride %d < 1", p->stride);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     {
@@ -121,7 +103,7 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
         if(mx > INT32_MAX)
         {
             snprintf(msg, sizeof msg, "tensors of %lld B exceed the i32 byte offsets", mx);
-            fsw_set_reason(reason, reason_cap, msg);
+            rocke_spec_set_reason(reason, reason_cap, msg);
             return false;
         }
     }
@@ -296,7 +278,7 @@ rocke_status_t rocke_fwd_smallc_wmma_kernel_name(const rocke_fwd_smallc_wmma_spe
     const char* parts[]
         = {f, st, pad, cc, wk, wp, tk, tp, oh, ow, tb, spec->tdm_store ? "ts" : "", sched.c_str()};
     const char* flag_names[] = {"bf16"};
-    int flag_on[] = {fsw_is_bf16(p) ? 1 : 0};
+    int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "fwd_smallc_wmma",
                                   parts,
                                   sizeof(parts) / sizeof(parts[0]),
@@ -324,7 +306,7 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
 
     if(spec == NULL)
     {
-        fsw_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -336,23 +318,23 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
     if(p->cpg > FSW_SMALLC_MAX_C)
     {
         snprintf(msg, sizeof msg, "C %d > %d", p->cpg, FSW_SMALLC_MAX_C);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->kpg % 8 != 0)
     {
         snprintf(msg, sizeof msg, "K %d must be a multiple of 8 (16-byte output rows)", p->kpg);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->waves_k < 1 || spec->waves_p < 1 || spec->tiles_k < 1 || spec->tiles_p < 1)
     {
-        fsw_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
+        rocke_spec_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
         return false;
     }
     if(spec->tiles_per_block < 1)
     {
-        fsw_set_reason(reason, reason_cap, "tiles_per_block must be >= 1");
+        rocke_spec_set_reason(reason, reason_cap, "tiles_per_block must be >= 1");
         return false;
     }
     if(spec->out_h * spec->out_w != rocke_fwd_smallc_wmma_block_p(spec))
@@ -363,12 +345,12 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
                  spec->out_h,
                  spec->out_w,
                  rocke_fwd_smallc_wmma_block_p(spec));
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(sc_row_pitch(spec) > 0xFFFF || sc_win_h(spec) > 0xFFFF)
     {
-        fsw_set_reason(reason, reason_cap, "window too large for one TDM tile");
+        rocke_spec_set_reason(reason, reason_cap, "window too large for one TDM tile");
         return false;
     }
     if(rocke_fwd_smallc_wmma_threads_per_block(spec)
@@ -376,7 +358,7 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
     {
         snprintf(
             msg, sizeof msg, "%d threads per block", rocke_fwd_smallc_wmma_threads_per_block(spec));
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!rocke_archtarget_fits_lds(target, rocke_fwd_smallc_wmma_lds_bytes(spec)))
@@ -386,23 +368,23 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
                  "LDS %ld B > %d",
                  rocke_fwd_smallc_wmma_lds_bytes(spec),
                  target->lds_capacity_bytes);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     vgprs = 8 * spec->tiles_k * (spec->tiles_p + sc_steps(spec)) + 8 * spec->tiles_p;
     if(vgprs > FSW_VGPR_BUDGET)
     {
         snprintf(msg, sizeof msg, "~%d VGPRs of accumulators and fragments", vgprs);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
     {
         snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", spec->sched);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    fsw_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -504,7 +486,7 @@ rocke_status_t rocke_fwd_smallk_wmma_kernel_name(const rocke_fwd_smallk_wmma_spe
                            spec->prefetch ? "pf" : "",
                            sched.c_str()};
     const char* flag_names[] = {"bf16"};
-    int flag_on[] = {fsw_is_bf16(p) ? 1 : 0};
+    int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "fwd_smallk_wmma",
                                   parts,
                                   sizeof(parts) / sizeof(parts[0]),
@@ -532,7 +514,7 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
 
     if(spec == NULL)
     {
-        fsw_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -544,30 +526,30 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
     if(p->kpg > FSW_SMALLK_MAX_K)
     {
         snprintf(msg, sizeof msg, "K %d > %d", p->kpg, FSW_SMALLK_MAX_K);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->kpg < 1)
     {
         snprintf(msg, sizeof msg, "K %d must be >= 1", p->kpg);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(p->cpg % 8 != 0)
     {
         snprintf(msg, sizeof msg, "C %d must be a multiple of 8 (16-byte input rows)", p->cpg);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->ck % FSW_WMMA_K != 0 || spec->ck <= 0)
     {
         snprintf(msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, FSW_WMMA_K);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->waves_c < 1 || spec->waves_p < 1 || spec->tiles_c < 1 || spec->tiles_p < 1)
     {
-        fsw_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
+        rocke_spec_set_reason(reason, reason_cap, "waves and tiles must be >= 1");
         return false;
     }
     block_c = rocke_fwd_smallk_wmma_block_c(spec);
@@ -575,7 +557,7 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
     if(block_c < ncols || block_c - ncols >= 16)
     {
         snprintf(msg, sizeof msg, "block_c %d must be R*S*K = %d rounded up to 16", block_c, ncols);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if((long long)sk_win_h(spec) * sk_win_w(spec) > rocke_fwd_smallk_wmma_block_p(spec))
@@ -586,17 +568,17 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
                  sk_win_h(spec),
                  sk_win_w(spec),
                  rocke_fwd_smallk_wmma_block_p(spec));
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->stages < 2)
     {
-        fsw_set_reason(reason, reason_cap, "stages must be >= 2");
+        rocke_spec_set_reason(reason, reason_cap, "stages must be >= 2");
         return false;
     }
     if(spec->waves_c * spec->waves_p < 2)
     {
-        fsw_set_reason(reason, reason_cap, "needs at least two waves");
+        rocke_spec_set_reason(reason, reason_cap, "needs at least two waves");
         return false;
     }
     if(rocke_fwd_smallk_wmma_threads_per_block(spec)
@@ -604,7 +586,7 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
     {
         snprintf(
             msg, sizeof msg, "%d threads per block", rocke_fwd_smallk_wmma_threads_per_block(spec));
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!rocke_archtarget_fits_lds(target, rocke_fwd_smallk_wmma_lds_bytes(spec)))
@@ -614,7 +596,7 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
                  "LDS %ld B > %d",
                  rocke_fwd_smallk_wmma_lds_bytes(spec),
                  target->lds_capacity_bytes);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     vgprs = 8 * spec->tiles_c * spec->tiles_p
@@ -622,16 +604,16 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
     if(vgprs > FSW_VGPR_BUDGET)
     {
         snprintf(msg, sizeof msg, "~%d VGPRs of accumulators and fragments", vgprs);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->sched != NULL && !rocke_scheduler_strategy_is_valid(spec->sched))
     {
         snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", spec->sched);
-        fsw_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    fsw_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -699,7 +681,7 @@ const char* wmma_op_id(rocke_ir_builder_t* b,
                        const char* arch,
                        const char* who)
 {
-    const char* ab = rocke_wmma_ab_dtype(fsw_dtype(p));
+    const char* ab = rocke_wmma_ab_dtype(rocke_direct_conv_problem_dtype(p));
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
     const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
         target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, FSW_WMMA_K, NULL);
@@ -1085,8 +1067,8 @@ rocke_kernel_def_t*
     c.RUN = c.KW * c.C;
     c.E0 = sc_run(spec);
     c.STEPS = sc_steps(spec);
-    c.bf16 = fsw_is_bf16(p);
-    c.io_type = rocke_b_io_ir_type(b, fsw_dtype(p));
+    c.bf16 = rocke_direct_conv_problem_is_bf16(p);
+    c.io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     if(c.io_type == NULL)
         return NULL;
     c.wmma_op = wmma_op_id(b, p, arch, "build_fwd_smallc_wmma");
@@ -1529,8 +1511,8 @@ rocke_kernel_def_t*
     c.spec = spec;
     c.K = p->kpg;
     c.RS = KH * KW;
-    bool bf16 = fsw_is_bf16(p);
-    c.io_type = rocke_b_io_ir_type(b, fsw_dtype(p));
+    bool bf16 = rocke_direct_conv_problem_is_bf16(p);
+    c.io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     if(c.io_type == NULL)
         return NULL;
     c.wmma_op = wmma_op_id(b, p, arch, "build_fwd_smallk_wmma");
@@ -1984,7 +1966,7 @@ rocke_status_t lower_common(const Spec* spec,
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        fsw_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -1994,7 +1976,7 @@ rocke_status_t lower_common(const Spec* spec,
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        fsw_set_reason(err, err_cap, (m != NULL && m[0] != '\0') ? m : who);
+        rocke_spec_set_reason(err, err_cap, (m != NULL && m[0] != '\0') ? m : who);
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }

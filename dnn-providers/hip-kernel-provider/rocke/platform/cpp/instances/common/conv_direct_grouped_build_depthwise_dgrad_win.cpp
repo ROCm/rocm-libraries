@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx */
 #include "rocke/helper_rocke.helpers.io.h"
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_ceil_div */
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -81,14 +83,14 @@ int rocke_direct_depthwise_dgrad_win_tile_w(const rocke_direct_depthwise_dgrad_w
     return spec->mfma ? 32 / spec->w_fold : spec->block_w;
 }
 
-static int dw_win_passes(int KW)
+int rocke_dw_mfma_passes(int KW)
 {
     return (KW + 4) / 4;
 }
 
-static int dw_win_cdiv(int a, int b)
+bool rocke_dw_mfma_w_fold_ok(int w_fold)
 {
-    return (a + b - 1) / b;
+    return w_fold == 1 || w_fold == 2 || w_fold == 4;
 }
 
 /* 8-channel input chunks a wave contracts (1 for depthwise). */
@@ -108,23 +110,23 @@ long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    return (long long)spec->block_h * p->KH * dw_win_passes(p->KW) * dw_win_cin_chunks(p);
+    return (long long)spec->block_h * p->KH * rocke_dw_mfma_passes(p->KW) * dw_win_cin_chunks(p);
 }
 
 static int dw_win_mfma_in_passes(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
-    const int win
-        = rocke_direct_depthwise_dgrad_win_tile_w(spec) + 4 * dw_win_passes(spec->problem.KW) - 2;
+    const int win = rocke_direct_depthwise_dgrad_win_tile_w(spec)
+                    + 4 * rocke_dw_mfma_passes(spec->problem.KW) - 2;
     const int per_px = rocke_direct_depthwise_dgrad_win_block_ch(spec) / ROCKE_DW_DGRAD_MFMA_CH;
-    return dw_win_cdiv(spec->w_fold * win * per_px,
-                       rocke_direct_depthwise_dgrad_win_threads_per_block(spec));
+    return (int)rocke_ceil_div((long long)spec->w_fold * win * per_px,
+                               rocke_direct_depthwise_dgrad_win_threads_per_block(spec));
 }
 
 int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const int kwp = dw_win_passes(p->KW) * dw_win_cin_chunks(p);
+    const int kwp = rocke_dw_mfma_passes(p->KW) * dw_win_cin_chunks(p);
     const int rows = spec->prefetch_rows * dw_win_mfma_in_passes(spec);
     return 4 * (p->KH * kwp + p->KH + kwp + rows);
 }
@@ -135,14 +137,9 @@ int rocke_direct_depthwise_dgrad_win_mfma_lds_bytes(
     const int block_ch = rocke_direct_depthwise_dgrad_win_block_ch(spec);
     const int per_px = block_ch / ROCKE_DW_DGRAD_MFMA_CH;
     const int threads = rocke_direct_depthwise_dgrad_win_threads_per_block(spec);
-    const int in_px = dw_win_cdiv(dw_win_mfma_in_passes(spec) * threads, per_px);
+    const int in_px = (int)rocke_ceil_div((long long)dw_win_mfma_in_passes(spec) * threads, per_px);
     const int out_px = spec->w_fold * rocke_direct_depthwise_dgrad_win_tile_w(spec);
     return 2 * (in_px + out_px) * (block_ch + ROCKE_DW_DGRAD_MFMA_CH) * 2;
-}
-
-static bool dw_win_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
 }
 
 rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
@@ -170,7 +167,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
                      spec->block_h,
                      spec->w_fold,
                      spec->prefetch_rows,
-                     dw_win_is_bf16(p) ? "_bf16" : "",
+                     rocke_direct_conv_problem_is_bf16(p) ? "_bf16" : "",
                      spec->fwd ? "_fwd" : "",
                      gtag,
                      spec->out_stride == 2 ? "_s2" : "");
@@ -187,7 +184,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
                      spec->ch_per_lane,
                      spec->block_h,
                      spec->dot2 ? "_dot2" : "",
-                     dw_win_is_bf16(p) ? "_bf16" : "");
+                     rocke_direct_conv_problem_is_bf16(p) ? "_bf16" : "");
     if(n < 0 || (size_t)n >= out_cap)
         return ROCKE_ERR_VALUE;
     for(char* c = out; *c; ++c)
@@ -201,7 +198,7 @@ static bool
     dw_win_check(const rocke_direct_depthwise_dgrad_win_spec_t* spec, char* reason, size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const char* dtype = p->dtype != NULL ? p->dtype : "fp16";
+    const char* dtype = rocke_direct_conv_problem_dtype(p);
 #define DW_WIN_FAIL(...)                        \
     do                                          \
     {                                           \
@@ -222,15 +219,12 @@ static bool
                     p->cpg);
     if(p->stride != 1)
         DW_WIN_FAIL("requires stride=1 (got %d)", p->stride);
-    if(p->dil_h != 1 || p->dil_w != 1)
-        DW_WIN_FAIL("this direct conv kernel has no dilation (got %dx%d); only the non-grouped "
-                    "forward kernel computes a dilated convolution",
-                    p->dil_h,
-                    p->dil_w);
-    const int Ho = p->H + 2 * p->PAD - p->KH + 1;
-    const int Wo = p->W + 2 * rocke_direct_conv_problem_pad_w(p) - p->KW + 1;
+    if(rocke_direct_dilation_reason(p, reason, cap))
+        return false;
+    const long long Ho = rocke_direct_conv_problem_Ho(p);
+    const long long Wo = rocke_direct_conv_problem_Wo(p);
     if(p->PAD < 0 || Ho <= 0 || Wo <= 0)
-        DW_WIN_FAIL("degenerate geometry (PAD=%d, Ho=%d, Wo=%d)", p->PAD, Ho, Wo);
+        DW_WIN_FAIL("degenerate geometry (PAD=%d, Ho=%lld, Wo=%lld)", p->PAD, Ho, Wo);
     if(spec->block_w < 1)
         DW_WIN_FAIL("block_w must be >= 1 (got %d)", spec->block_w);
     if(spec->block_h < 1)
@@ -263,7 +257,7 @@ static bool
     {
         if(spec->dot2 || cpl != 1)
             DW_WIN_FAIL("mfma excludes dot2 and ch_per_lane > 1");
-        if(spec->w_fold != 1 && spec->w_fold != 2 && spec->w_fold != 4)
+        if(!rocke_dw_mfma_w_fold_ok(spec->w_fold))
             DW_WIN_FAIL("w_fold must be 1, 2 or 4 (got %d)", spec->w_fold);
         if(spec->prefetch_rows > ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS)
             DW_WIN_FAIL("prefetch_rows must be <= %d (got %d)",
@@ -369,8 +363,7 @@ static void dw_win_byte_strides(rocke_ir_builder_t* b, const rocke_dconv_params_
     out[5] = rocke_b_mul(b, prm->p_D_stride_wo, c2); /* p_dX_stride_wi */
 }
 
-/* _dw_win_tile: (image_tile, h0) from block z and h_tiles = ceil(p_Hi / rows). */
-static void dw_win_tile(rocke_ir_builder_t* b, V* p_Hi, int rows, V** n_tile, V** h0)
+void rocke_dw_win_tile(rocke_ir_builder_t* b, V* p_Hi, int rows, V** n_tile, V** h0)
 {
     V* bz = rocke_b_block_id_z(b);
     V* c_rows = rocke_b_const_i32(b, rows);
@@ -383,43 +376,41 @@ static void dw_win_tile(rocke_ir_builder_t* b, V* p_Hi, int rows, V** n_tile, V*
     *h0 = rocke_b_mul(b, d, c_rows);
 }
 
-static V* dw_win_load_half(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* off, V* c0)
+V* rocke_dconv_buf_load_half(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* voff, V* soff)
 {
-    return bf16 ? rocke_b_buffer_load_bf16(b, rsrc, off, c0)
-                : rocke_b_buffer_load_f16(b, rsrc, off, c0);
+    return bf16 ? rocke_b_buffer_load_bf16(b, rsrc, voff, soff)
+                : rocke_b_buffer_load_f16(b, rsrc, voff, soff);
 }
 
-static V* dw_win_load_vN(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* off, V* c0, int dwords)
+V* rocke_dconv_buf_load_vN(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* voff, V* soff, int dwords)
 {
-    return bf16 ? rocke_b_buffer_load_vN_bf16(b, rsrc, off, c0, dwords)
-                : rocke_b_buffer_load_vN_f16(b, rsrc, off, c0, dwords);
+    return bf16 ? rocke_b_buffer_load_vN_bf16(b, rsrc, voff, soff, dwords)
+                : rocke_b_buffer_load_vN_f16(b, rsrc, voff, soff, dwords);
 }
 
-static void dw_win_store_vN(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* off, V* c0, V* v, int dw)
+void rocke_dconv_buf_store_vN(
+    rocke_ir_builder_t* b, bool bf16, V* rsrc, V* voff, V* soff, V* val, int dwords)
 {
     if(bf16)
-        rocke_b_buffer_store_vN_bf16(b, rsrc, off, c0, v, dw);
+        rocke_b_buffer_store_vN_bf16(b, rsrc, voff, soff, val, dwords);
     else
-        rocke_b_buffer_store_vN_f16(b, rsrc, off, c0, v, dw);
+        rocke_b_buffer_store_vN_f16(b, rsrc, voff, soff, val, dwords);
 }
 
-static V* dw_win_trunc_vec(rocke_ir_builder_t* b, bool bf16, V* v)
+V* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, V* val)
 {
-    return bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, v) : rocke_b_vec_trunc_f32_to_f16(b, v);
+    return bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, val) : rocke_b_vec_trunc_f32_to_f16(b, val);
 }
 
-/* A one-trip (or zero-trip) loop guarding `body` on the block-uniform `ok`,
- * carrying `accs` (updated in place to the loop results). */
-template <typename Body>
-static void dw_win_guarded(rocke_ir_builder_t* b,
-                           V* ok,
-                           V* c0,
-                           V* c1,
-                           std::vector<V*>& accs,
-                           const char* prefix,
-                           int y,
-                           bool elide_trailing_barrier,
-                           Body body)
+void rocke_dw_win_guarded(rocke_ir_builder_t* b,
+                          V* ok,
+                          V* c0,
+                          V* c1,
+                          std::vector<V*>& accs,
+                          const char* prefix,
+                          int y,
+                          bool elide_trailing_barrier,
+                          const std::function<std::vector<V*>(const std::vector<V*>&)>& body)
 {
     V* trip = rocke_b_select(b, ok, c1, c0);
     std::vector<std::string> names(accs.size());
@@ -458,7 +449,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
                                              const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const bool bf16 = dw_win_is_bf16(p);
+    const bool bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int BW = spec->block_w;
     const int CPL = spec->ch_per_lane;
     const int KH = p->KH, KW = p->KW, PAD = p->PAD;
@@ -471,7 +462,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
                        &b->kernel->attrs,
                        "max_workgroup_size",
                        rocke_direct_depthwise_dgrad_win_threads_per_block(spec));
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     rocke_dconv_params_t prm;
     rocke_dconv_emit_params(b, &prm, "dgrad", io_type);
     if(!rocke_ir_builder_ok(b))
@@ -492,7 +483,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
     V* by = rocke_b_block_id_y(b);
     V* n = NULL;
     V* h0 = NULL;
-    dw_win_tile(b, p_Hi, ROWS, &n, &h0);
+    rocke_dw_win_tile(b, p_Hi, ROWS, &n, &h0);
     V* c_bw = rocke_b_const_i32(b, BW);
     V* wi0 = rocke_b_mul(b, bx, c_bw);
     V* lane_ch = tid;
@@ -529,7 +520,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
             {
                 V* c = rocke_b_const_i32(b, (r * KW + s) * 2);
                 V* off = rocke_b_add(b, w_lane, c);
-                raw_w[r][s] = dw_win_load_half(b, bf16, b_rsrc, off, c0);
+                raw_w[r][s] = rocke_dconv_buf_load_half(b, bf16, b_rsrc, off, c0);
             }
         V* zero_half = NULL;
         if(KW % 2)
@@ -552,7 +543,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
                 {
                     V* c = rocke_b_const_i32(b, ((i * KH + r) * KW + s) * 2);
                     V* off = rocke_b_add(b, w_lane, c);
-                    V* h = dw_win_load_half(b, bf16, b_rsrc, off, c0);
+                    V* h = rocke_dconv_buf_load_half(b, bf16, b_rsrc, off, c0);
                     comps[i] = rocke_b_cast_to_f32(b, h);
                 }
                 weights[r].push_back(CPL > 1 ? rocke_b_vec_pack(b, comps.data(), CPL, rocke_f32())
@@ -612,8 +603,8 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
         for(int t = 0; t < WIN; ++t)
         {
             V* off = rocke_b_add(b, win_lane[t], dy_row);
-            raw[t] = CPL == 1 ? dw_win_load_half(b, bf16, a_rsrc, off, c0)
-                              : dw_win_load_vN(b, bf16, a_rsrc, off, c0, CPL / 2);
+            raw[t] = CPL == 1 ? rocke_dconv_buf_load_half(b, bf16, a_rsrc, off, c0)
+                              : rocke_dconv_buf_load_vN(b, bf16, a_rsrc, off, c0, CPL / 2);
         }
         rocke_b_sched_barrier(b, 0);
         return raw;
@@ -716,7 +707,7 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
                 accs.push_back(acc[sl][j]);
         const int rel_ho = y + PAD - (KH - 1);
         if(rel_ho < 0 || rel_ho >= ROWS)
-            dw_win_guarded(
+            rocke_dw_win_guarded(
                 b, row_ok[y], c0, c1, accs, "dww", y, true, [&](const std::vector<V*>& carried) {
                     return taps(rs, raw, carried);
                 });
@@ -756,8 +747,8 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
             }
             else
             {
-                V* h = dw_win_trunc_vec(b, bf16, acc[slot][j]);
-                dw_win_store_vN(b, bf16, d_rsrc, off, c0, h, CPL / 2);
+                V* h = rocke_dconv_trunc_f32(b, bf16, acc[slot][j]);
+                rocke_dconv_buf_store_vN(b, bf16, d_rsrc, off, c0, h, CPL / 2);
             }
             acc[slot][j] = zero_acc;
         }
@@ -768,23 +759,16 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
 /* ===================================================================== *
  *  Toeplitz MFMA form
  * ===================================================================== */
-typedef struct dw_win_plan
-{
-    V* px;
-    V* ch8;
-    V* g_off;
-} dw_win_plan;
-
 static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
                                              const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const bool bf16 = dw_win_is_bf16(p);
+    const bool bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int KH = p->KH, KW = p->KW, PAD = p->PAD;
     const int F = spec->w_fold;
     const int SUB = 16 / F;
     const int TW = rocke_direct_depthwise_dgrad_win_tile_w(spec);
-    const int KWP = dw_win_passes(KW);
+    const int KWP = rocke_dw_mfma_passes(KW);
     const int U = TW + 4 * KWP - 2;
     const int ROWS = spec->block_h;
     const int THREADS = rocke_direct_depthwise_dgrad_win_threads_per_block(spec);
@@ -796,7 +780,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     const int S = spec->out_stride;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     rocke_dconv_params_t prm;
     rocke_dconv_emit_params(b, &prm, FWD ? "fwd" : "dgrad", io_type);
     if(!rocke_ir_builder_ok(b))
@@ -847,7 +831,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* by = rocke_b_block_id_y(b);
     V* n_tile = NULL;
     V* h0 = NULL;
-    dw_win_tile(b, p_Hi, ROWS, &n_tile, &h0);
+    rocke_dw_win_tile(b, p_Hi, ROWS, &n_tile, &h0);
     V* c64 = rocke_b_const_i32(b, 64);
     V* lane = rocke_b_mod(b, tid, c64);
     V* wave = rocke_b_div(b, tid, c64);
@@ -925,11 +909,11 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
                 {
                     V* ch = rocke_b_const_i32(b, 16 * h);
                     V* oh = rocke_b_add(b, off, ch);
-                    gweights[r][ph][h] = dw_win_load_vN(b, bf16, b_rsrc, oh, c0, 4);
+                    gweights[r][ph][h] = rocke_dconv_buf_load_vN(b, bf16, b_rsrc, oh, c0, 4);
                 }
                 continue;
             }
-            V* w = dw_win_load_half(b, bf16, b_rsrc, off, c0);
+            V* w = rocke_dconv_buf_load_half(b, bf16, b_rsrc, off, c0);
             V* comps[ROCKE_DW_DGRAD_MFMA_CH];
             for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
                 comps[j] = rocke_b_select(b, is_k[j], w, zero_half);
@@ -973,8 +957,8 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         c_TWS = rocke_b_const_i32(b, TW / S);
         x0_out = rocke_b_div(b, x0, c_S);
     }
-    std::vector<dw_win_plan> drain;
-    for(int i = 0; i < dw_win_cdiv(n_out, THREADS); ++i)
+    std::vector<rocke_dw_win_plan_t> drain;
+    for(int i = 0; i < rocke_ceil_div(n_out, THREADS); ++i)
     {
         V* ci = rocke_b_const_i32(b, i * THREADS);
         V* idx = rocke_b_add(b, tid, ci);
@@ -1021,17 +1005,17 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         V* m3 = rocke_b_mul(b, ch_o, c2);
         V* s1 = rocke_b_add(b, m2, m3);
         V* g_off = rocke_b_add(b, m1, s1);
-        dw_win_plan e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
+        rocke_dw_win_plan_t e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
         drain.push_back(e);
     }
 
     const int n_in = F * U * PER_PX;
-    const int in_passes = dw_win_cdiv(n_in, THREADS);
-    const int in_px = dw_win_cdiv(in_passes * THREADS, PER_PX);
+    const int in_passes = rocke_ceil_div(n_in, THREADS);
+    const int in_px = rocke_ceil_div(in_passes * THREADS, PER_PX);
     const int i_shape[3] = {2, in_px, CH_PAD};
     V* i_smem = rocke_b_smem_alloc(b, io_type, i_shape, 3, "dy_stage");
     V* c_U = rocke_b_const_i32(b, U);
-    std::vector<dw_win_plan> in_plan;
+    std::vector<rocke_dw_win_plan_t> in_plan;
     for(int i = 0; i < in_passes; ++i)
     {
         V* ci = rocke_b_const_i32(b, i * THREADS);
@@ -1062,7 +1046,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         V* m3 = rocke_b_mul(b, ch_i, c2);
         V* s1 = rocke_b_add(b, m2, m3);
         V* g_off = rocke_b_add(b, m1, s1);
-        dw_win_plan e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
+        rocke_dw_win_plan_t e = {px, ch8, rocke_b_select(b, ok, g_off, oob_lane)};
         in_plan.push_back(e);
     }
     V* f_u = rocke_b_mul(b, f, c_U);
@@ -1092,10 +1076,10 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         V* m = rocke_b_mul(b, ho, dy_row_bytes);
         V* dy_row = rocke_b_select(b, ok, m, oob_uniform);
         std::vector<V*> vals;
-        for(const dw_win_plan& e : in_plan)
+        for(const rocke_dw_win_plan_t& e : in_plan)
         {
             V* off = rocke_b_add(b, e.g_off, dy_row);
-            vals.push_back(dw_win_load_vN(b, bf16, a_rsrc, off, c0, 4));
+            vals.push_back(rocke_dconv_buf_load_vN(b, bf16, a_rsrc, off, c0, 4));
         }
         rocke_b_sched_barrier(b, 0);
         return vals;
@@ -1112,12 +1096,12 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     };
 
     auto drain_out = [&](V* buf, V* dx_row) {
-        for(const dw_win_plan& e : drain)
+        for(const rocke_dw_win_plan_t& e : drain)
         {
             V* idx[3] = {buf, e.px, e.ch8};
             V* v = rocke_b_smem_load_vN(b, o_smem, idx, 3, io_type, 8);
             V* off = rocke_b_add(b, e.g_off, dx_row);
-            dw_win_store_vN(b, bf16, d_rsrc, off, c0, v, 4);
+            rocke_dconv_buf_store_vN(b, bf16, d_rsrc, off, c0, v, 4);
         }
     };
 
@@ -1223,7 +1207,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
             /* A stride-2 window row whose output rows are all dropped. */
         }
         else if(halo)
-            dw_win_guarded(b, row_ok[y], c0, c1, accs, "dwm", y, true, multiply);
+            rocke_dw_win_guarded(b, row_ok[y], c0, c1, accs, "dwm", y, true, multiply);
         else
             accs = multiply(accs);
         if(!rocke_ir_builder_ok(b))
@@ -1234,7 +1218,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         if(hi_local < 0 || hi_local >= ROWS || hi_local % S != 0)
             continue;
         const int slot = hi_local % KH;
-        pend_val = dw_win_trunc_vec(b, bf16, acc[slot]);
+        pend_val = rocke_dconv_trunc_f32(b, bf16, acc[slot]);
         pend_row = dx_row_part(hi_local);
         have_out = true;
         acc[slot] = zero_acc;

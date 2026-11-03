@@ -69,6 +69,16 @@ rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void)
     return p;
 }
 
+const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p)
+{
+    return p->dtype != NULL ? p->dtype : "fp16";
+}
+
+bool rocke_direct_conv_problem_is_bf16(const rocke_direct_conv_problem_t* p)
+{
+    return strcmp(rocke_direct_conv_problem_dtype(p), "bf16") == 0;
+}
+
 int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p)
 {
     return p->groups * p->cpg;
@@ -209,15 +219,13 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
  * right under "same" padding PAD == (KH-1)/2 with an odd filter; any other
  * padding makes the kernel write wrong rows (including the next image's)
  * rather than fail, so it is refused before a binary is built. */
-/* dilation_reason(p): why a direct-conv kernel without dilation support cannot
- * compute p. Only the non-grouped forward kernel computes a dilated conv. Any
- * dilation other than 1 -- zero and negatives included -- is refused, as in
- * Python's is_dilated. */
-static bool
-    rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap)
+/* dilation_reason(p): declared in rocke/instance_conv_direct_grouped.h. */
+bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap)
 {
     if(p->dil_h != 1 || p->dil_w != 1)
     {
+        if(why == NULL || why_cap == 0)
+            return true;
         snprintf(why,
                  why_cap,
                  "this direct conv kernel has no dilation (got %dx%d); only the non-grouped "

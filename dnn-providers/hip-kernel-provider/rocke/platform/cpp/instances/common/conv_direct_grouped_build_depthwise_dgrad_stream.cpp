@@ -91,11 +91,6 @@ bool dgs_stream_padding_reason(const rocke_direct_conv_problem_t* p,
     return rocke_direct_conv_one_padding_reason(p, prefix, reason, reason_cap);
 }
 
-bool dgs_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
-}
-
 /* Iteration arguments whose names outlive the scf.for they seed. */
 struct dgs_iargs
 {
@@ -245,11 +240,11 @@ rocke_kernel_def_t* dgs_build_scalar(rocke_ir_builder_t* b,
     c.BLOCK_W = BLOCK_W;
     c.stride = stride;
     c.n_slots = stride * KH;
-    c.is_bf16 = dgs_is_bf16(p);
+    c.is_bf16 = rocke_direct_conv_problem_is_bf16(p);
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_emit_params(
-        b, &c.params, "dgrad", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+        b, &c.params, "dgrad", rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p)));
     rocke_value_t* p_Hi = c.params.p_Hi;
 
     c.c0 = rocke_b_const_i32(b, 0);
@@ -494,12 +489,12 @@ rocke_kernel_def_t* dgs_build_packed(rocke_ir_builder_t* b,
     c.BLOCK_W = BLOCK_W;
     c.stride = stride;
     c.n_slots = stride * KH;
-    c.is_bf16 = dgs_is_bf16(p);
+    c.is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const rocke_type_t* elem = c.is_bf16 ? rocke_bf16() : rocke_f16();
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_emit_params(
-        b, &c.params, "dgrad", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+        b, &c.params, "dgrad", rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p)));
     rocke_value_t* p_Hi = c.params.p_Hi;
     rocke_value_t* c_Ho = c.params.p_Ho;
 
@@ -793,7 +788,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_kernel_name(
     {
         const char* flag_names[1] = {"bf16"};
         int flag_on[1];
-        flag_on[0] = dgs_is_bf16(&spec->problem) ? 1 : 0;
+        flag_on[0] = rocke_direct_conv_problem_is_bf16(&spec->problem) ? 1 : 0;
         return rocke_kernel_name_join(
             spec->name, parts, n_parts, flag_names, flag_on, 1, out, out_cap, NULL);
     }
@@ -807,7 +802,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_validate(
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
     {
-        const char* dt = p->dtype ? p->dtype : "fp16";
+        const char* dt = rocke_direct_conv_problem_dtype(p);
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason && reason_cap > 0)
@@ -854,22 +849,12 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
         return false;
     }
     p = &spec->problem;
-    /* dilation_reason(p) */
-    if(p->dil_h != 1 || p->dil_w != 1)
-    {
-        if(reason && reason_cap > 0)
-            snprintf(reason,
-                     reason_cap,
-                     "this direct conv kernel has no dilation (got %dx%d); only the non-grouped "
-                     "forward kernel computes a dilated convolution",
-                     p->dil_h,
-                     p->dil_w);
+    if(rocke_direct_dilation_reason(p, reason, reason_cap))
         return false;
-    }
     if(dgs_stream_padding_reason(p, "", reason, reason_cap))
         return false;
     {
-        const char* dt = p->dtype ? p->dtype : "fp16";
+        const char* dt = rocke_direct_conv_problem_dtype(p);
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason && reason_cap > 0)

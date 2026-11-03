@@ -8,32 +8,13 @@
  */
 #include "rocke/instance_conv_fwd_wmma_gate_internal.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "rocke/arch_target.h" /* rocke_set_unknown_arch_reason, rocke_mma_catalog_has_shape */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_floor_div, rocke_ceil_div */
 #include "rocke/ir.h" /* rocke_scheduler_strategy_is_valid */
-
-namespace
-{
-
-void gate_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-    {
-        snprintf(reason, reason_cap, "%s", msg);
-    }
-}
-
-const char* gate_dtype(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype ? p->dtype : "fp16";
-}
-
-constexpr long long kGateI32Max = 2147483647LL;
-
-} // namespace
 
 const char* rocke_wmma_ab_dtype(const char* dtype)
 {
@@ -61,22 +42,23 @@ bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
     if(target->wave_size != 32 || wave_size != 32)
     {
         snprintf(msg, sizeof msg, "%s is a wave32 kernel", name);
-        gate_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!target->memory.has_tdm)
     {
         snprintf(msg, sizeof msg, "no TDM on %s", arch);
-        gate_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(strcmp(gate_dtype(p), "fp16") != 0 && strcmp(gate_dtype(p), "bf16") != 0)
+    const char* dtype = rocke_direct_conv_problem_dtype(p);
+    if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
     {
-        snprintf(msg, sizeof msg, "unsupported dtype '%s'", gate_dtype(p));
-        gate_set_reason(reason, reason_cap, msg);
+        snprintf(msg, sizeof msg, "unsupported dtype '%s'", dtype);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    const char* ab = rocke_wmma_ab_dtype(gate_dtype(p));
+    const char* ab = rocke_wmma_ab_dtype(dtype);
     if(!rocke_mma_catalog_has_shape(rocke_archtarget_mma(target),
                                     "wmma",
                                     ab,
@@ -94,7 +76,7 @@ bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
                  ROCKE_FWD_WMMA_K,
                  ab,
                  arch);
-        gate_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(per_axis_pad)
@@ -117,7 +99,7 @@ bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
                  "unsupported scheduler_strategy '%s'; expected one "
                  "of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None",
                  sched);
-        gate_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     const long long total_c = rocke_direct_conv_problem_total_c(p);
@@ -132,16 +114,16 @@ bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
         mx = bytes[1];
     if(bytes[2] > mx)
         mx = bytes[2];
-    if(mx > kGateI32Max)
+    if(mx > INT32_MAX)
     {
         snprintf(msg, sizeof msg, "tensors of %lld B exceed the i32 byte offsets", mx);
-        gate_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(n_blocks > kGateI32Max)
+    if(n_blocks > INT32_MAX)
     {
         snprintf(msg, sizeof msg, "%lld workgroups exceed the i32 block id", n_blocks);
-        gate_set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     return true;

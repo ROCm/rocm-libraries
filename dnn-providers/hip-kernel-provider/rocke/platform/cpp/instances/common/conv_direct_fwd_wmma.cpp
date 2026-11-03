@@ -54,24 +54,6 @@ int fww_poly_view_zero_channels(int wave_size)
     return FWW_POLY_ZERO_LANE_CH * wave_size;
 }
 
-void fww_set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-    {
-        snprintf(reason, reason_cap, "%s", msg);
-    }
-}
-
-const char* fww_dtype(const rocke_direct_fwd_wmma_spec_t* spec)
-{
-    return spec->problem.dtype ? spec->problem.dtype : "fp16";
-}
-
-bool fww_is_bf16(const rocke_direct_fwd_wmma_spec_t* spec)
-{
-    return strcmp(fww_dtype(spec), "bf16") == 0;
-}
-
 /* spec.vp: the problem the tile loop sees, ``problem`` itself, its
  * polyphase view (1 x m, stride 1) or its strided-GEMM view (1x1, stride 1,
  * over the Ho x Wo output grid). */
@@ -348,7 +330,7 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
                            spec->fold_n ? "fn" : "",
                            spec->poly_view ? "pv" : ""};
     const char* flag_names[] = {"bf16"};
-    int flag_on[] = {fww_is_bf16(spec) ? 1 : 0};
+    int flag_on[] = {rocke_direct_conv_problem_is_bf16(&spec->problem) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_fwd_wmma",
                                   parts,
                                   sizeof(parts) / sizeof(parts[0]),
@@ -364,12 +346,12 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
  *  fwd_wmma_reason / is_valid_fwd_wmma_spec
  * ===================================================================== */
 
-#define FWW_FAIL(...)                            \
-    do                                           \
-    {                                            \
-        snprintf(msg, sizeof msg, __VA_ARGS__);  \
-        fww_set_reason(reason, reason_cap, msg); \
-        return false;                            \
+#define FWW_FAIL(...)                                   \
+    do                                                  \
+    {                                                   \
+        snprintf(msg, sizeof msg, __VA_ARGS__);         \
+        rocke_spec_set_reason(reason, reason_cap, msg); \
+        return false;                                   \
     } while(0)
 
 bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spec,
@@ -383,7 +365,7 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
 
     if(spec == NULL)
     {
-        fww_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -595,7 +577,7 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         if(!rocke_wmma_fwd_limits_ok(&spec->problem, spec->sched, tiles, reason, reason_cap))
             return false;
     }
-    fww_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -1530,11 +1512,11 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     c.PAD = p->PAD;
     c.PAD_W = rocke_direct_conv_problem_pad_w(p);
     c.G = spec->pack_groups;
-    c.io_type = rocke_b_io_ir_type(b, fww_dtype(spec));
+    c.io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(&spec->problem));
     if(c.io_type == NULL)
         return NULL;
     {
-        const char* ab = rocke_wmma_ab_dtype(fww_dtype(spec));
+        const char* ab = rocke_wmma_ab_dtype(rocke_direct_conv_problem_dtype(&spec->problem));
         const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
         const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
             target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, FWW_WMMA_K, NULL);
@@ -2077,7 +2059,7 @@ rocke_status_t rocke_direct_fwd_wmma_lower_to_llvm(const rocke_direct_fwd_wmma_s
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        fww_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -2087,7 +2069,7 @@ rocke_status_t rocke_direct_fwd_wmma_lower_to_llvm(const rocke_direct_fwd_wmma_s
     {
         const char* m = rocke_ir_builder_error(&b);
         st = rocke_ir_builder_status(&b);
-        fww_set_reason(
+        rocke_spec_set_reason(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_fwd_wmma failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;

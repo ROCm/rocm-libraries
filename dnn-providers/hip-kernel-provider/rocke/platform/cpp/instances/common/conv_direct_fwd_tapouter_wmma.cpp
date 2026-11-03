@@ -44,19 +44,6 @@ namespace
 /* conv_direct_fwd_wmma.WMMA_K / CH_PAD (conv_fwd_wmma_gate's). */
 constexpr int kWmmaK = ROCKE_FWD_WMMA_K;
 constexpr int kChPad = ROCKE_FWD_WMMA_CH_PAD;
-constexpr long long kI32Max = 2147483647LL;
-
-bool to_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
-}
-
-void to_set_reason(char* reason, size_t cap, const char* msg)
-{
-    if(reason != NULL && cap > 0)
-        snprintf(reason, cap, "%s", msg);
-}
-
 int to_x_pitch(const rocke_fwd_tapouter_wmma_spec_t* s)
 {
     return s->ck + kChPad;
@@ -143,7 +130,7 @@ long rocke_fwd_tapouter_wmma_lds_bytes(const rocke_fwd_tapouter_wmma_spec_t* spe
 void rocke_fwd_tapouter_wmma_grid(const rocke_fwd_tapouter_wmma_spec_t* spec, int grid[3])
 {
     const long long g = to_grid0(spec);
-    grid[0] = (int)(g > kI32Max ? kI32Max : g);
+    grid[0] = (int)(g > INT32_MAX ? INT32_MAX : g);
     grid[1] = 1;
     grid[2] = 1;
 }
@@ -189,7 +176,7 @@ rocke_status_t rocke_fwd_tapouter_wmma_kernel_name(const rocke_fwd_tapouter_wmma
     const char* parts[]
         = {f, pad, dil, wk, wp, tk, tp, tw, ck, st, spec->prefetch ? "pf" : "", sched.c_str(), ts};
     const char* flag_names[] = {"bf16"};
-    int flag_on[] = {to_is_bf16(p) ? 1 : 0};
+    int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_fwd_tapouter_wmma",
                                   parts,
                                   sizeof(parts) / sizeof(parts[0]),
@@ -207,16 +194,16 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
                                            size_t reason_cap)
 {
     char msg[512];
-#define TO_FAIL(...)                            \
-    do                                          \
-    {                                           \
-        snprintf(msg, sizeof msg, __VA_ARGS__); \
-        to_set_reason(reason, reason_cap, msg); \
-        return false;                           \
+#define TO_FAIL(...)                                    \
+    do                                                  \
+    {                                                   \
+        snprintf(msg, sizeof msg, __VA_ARGS__);         \
+        rocke_spec_set_reason(reason, reason_cap, msg); \
+        return false;                                   \
     } while(0)
     if(spec == NULL)
     {
-        to_set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -284,7 +271,7 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
     if(!rocke_wmma_fwd_limits_ok(p, spec->sched, to_grid0(spec), reason, reason_cap))
         return false;
 #undef TO_FAIL
-    to_set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -343,7 +330,7 @@ rocke_kernel_def_t* rocke_build_fwd_tapouter_wmma(rocke_ir_builder_t* b,
     const int SPLIT = spec->tdm_split;
     const int XR = TH / SPLIT, WR = BK / SPLIT;
 
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     if(spec->sched != NULL && spec->sched[0] != '\0')
         rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->sched);
@@ -899,7 +886,7 @@ rocke_status_t rocke_fwd_tapouter_wmma_lower_to_llvm(const rocke_fwd_tapouter_wm
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        to_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
@@ -909,9 +896,10 @@ rocke_status_t rocke_fwd_tapouter_wmma_lower_to_llvm(const rocke_fwd_tapouter_wm
     {
         const char* m = rocke_ir_builder_error(&b);
         rocke_status_t st = rocke_ir_builder_status(&b);
-        to_set_reason(err,
-                      err_cap,
-                      (m != NULL && m[0] != '\0') ? m : "build_direct_fwd_tapouter_wmma failed");
+        rocke_spec_set_reason(
+            err,
+            err_cap,
+            (m != NULL && m[0] != '\0') ? m : "build_direct_fwd_tapouter_wmma failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
