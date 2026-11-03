@@ -4,14 +4,15 @@
 
 The family-wide HIP source identity test compares whatever the kernel families
 build. The cases here pin the ops those families may not reach on every
-target: every native MFMA and WMMA atom in each target's MMA catalog, inline asm
-and its refusals for malformed attributes, and the s_waitcnt refusal on a target
-without the monolithic instruction. Each case lowers one small kernel through the Python lowerer and, through the
-rocke_engine binding, the C++ one, and compares the text or the error.
+target: every native MFMA and WMMA atom in each target's MMA catalog, the inline asm
+template and constraints refusals, and the s_waitcnt refusal on a target
+without the monolithic instruction. Each case lowers one small kernel through the
+Python lowerer and, through the rocke_engine binding, the C++ one, and compares
+the text or the error.
 """
 
 import pytest
-from rocke.core.arch import ArchTarget
+from rocke.core.arch import ArchTarget, arches_with_own_facts
 from rocke.core.ir import (
     BF8E5M2,
     BF16,
@@ -27,37 +28,23 @@ from rocke.core.ir import (
     type_bits,
 )
 from rocke.core.ir_serialize import serialize
-from rocke.core.lower_hip import lower_kernel_to_hip
-
-# rocke_status_t (cpp/include/rocke/ir.h): the C++ error code the binding reports
-# for each Python exception type the lowerers raise.
-_NATIVE_STATUS = {ValueError: 1, TypeError: 2, KeyError: 3, NotImplementedError: 5}
-
-
-def _native_hip(builder: IRBuilder, gfx: str) -> str:
-    rocke_engine = pytest.importorskip("rocke_engine")
-    return rocke_engine.lower_serialized_ir_hip(serialize(builder.kernel), gfx)
+from rocke.tests.engines import (
+    HipRefusal,
+    hip_outcomes_of_both_engines,
+    lower_hip_with_both_engines,
+)
 
 
 def _assert_both_refuse(
     builder: IRBuilder, gfx: str, error: type[Exception], message: str
 ) -> None:
-    """Python raises `error` with exactly `message`; C++ reports the matching
-    status with the same text."""
-    with pytest.raises(error) as python_error:
-        lower_kernel_to_hip(builder.kernel, arch=gfx)
-    assert python_error.value.args[0] == message
-    with pytest.raises(RuntimeError) as native_error:
-        _native_hip(builder, gfx)
-    assert str(native_error.value).endswith(
-        f"(status {_NATIVE_STATUS[error]}): {message}"
+    """Both engines refuse the kernel with ``error`` and exactly ``message``:
+    Python raises it, and C++ reports the status code that stands for it."""
+    refusal = HipRefusal(error.__name__, message)
+    assert hip_outcomes_of_both_engines(serialize(builder.kernel), gfx) == (
+        refusal,
+        refusal,
     )
-
-
-def _assert_same_source(builder: IRBuilder, gfx: str) -> str:
-    python_hip = lower_kernel_to_hip(builder.kernel, arch=gfx)
-    assert _native_hip(builder, gfx) == python_hip
-    return python_hip
 
 
 def _waitcnt_kernel(op: str) -> IRBuilder:
@@ -86,21 +73,9 @@ def test_waitcnt_is_refused_where_the_target_has_split_wait_counters(op):
 @pytest.mark.parametrize("op", ["s_waitcnt", "sync_lds_only"])
 @pytest.mark.parametrize("gfx", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
 def test_waitcnt_still_lowers_where_the_target_has_it(op, gfx):
-    hip = _assert_same_source(_waitcnt_kernel(op), gfx)
+    hip = lower_hip_with_both_engines(_waitcnt_kernel(op).kernel, gfx)
     assert "__builtin_amdgcn_s_waitcnt(" in hip
 
-
-# Every target with a catalog, so each MMA atom is lowered where it exists.
-_TARGETS = (
-    "gfx90a",
-    "gfx942",
-    "gfx950",
-    "gfx1151",
-    "gfx11-generic",
-    "gfx1201",
-    "gfx12-generic",
-    "gfx1250",
-)
 
 # WMMA atoms take 8- and 4-bit A and B operands packed into 32-bit words, and
 # the gfx11 and gfx1250 catalog rows count those words. The gfx12 rows count
@@ -123,40 +98,14 @@ def _zero_operand(builder: IRBuilder, atom, dtype: str, frag_len: int):
 
 
 def _catalog_atoms():
-    """(gfx, atom) for every native MFMA / WMMA atom a target lists. TF32
-    operands have no zero constant to build them from; their atoms are covered
-    by the TF32 MMA tests."""
-    for gfx in _TARGETS:
+    """(gfx, atom) for every native MFMA / WMMA atom of each distinct target
+    catalog (a target that takes its facts from a generic has the generic's).
+    TF32 atoms are covered by the TF32 MMA tests."""
+    for gfx in arches_with_own_facts():
         for atom in ArchTarget.from_gfx(gfx).mma.ops:
             lowered_here = atom.family in ("mma", "wmma") and atom.is_native
             if lowered_here and "tf32" not in (atom.srcs[0].dtype, atom.srcs[1].dtype):
                 yield pytest.param(gfx, atom, id=f"{gfx}-{atom.op_id}")
-
-
-def _mma_kernel(op, a_type, a_len: int, b_type, b_len: int, c_type, c_len: int):
-    builder = IRBuilder("mma_atom")
-    builder.param("out", PtrType(c_type, "global"))
-    builder.mma(
-        op,
-        builder.zero_vec(a_type, a_len),
-        builder.zero_vec(b_type, b_len),
-        builder.zero_vec(c_type, c_len),
-    )
-    builder.ret()
-    return builder
-
-
-def _lower_both(builder: IRBuilder, gfx: str) -> tuple[str, str]:
-    """Each engine's HIP source, or its error text when it refuses."""
-    try:
-        python_result = lower_kernel_to_hip(builder.kernel, arch=gfx)
-    except (ValueError, NotImplementedError) as error:
-        python_result = f"refused: {error}"
-    try:
-        native_result = _native_hip(builder, gfx)
-    except RuntimeError as error:
-        native_result = f"refused: {str(error).split('): ', 1)[1]}"
-    return python_result, native_result
 
 
 @pytest.mark.parametrize(("gfx", "atom"), list(_catalog_atoms()))
@@ -172,8 +121,10 @@ def test_each_mma_atom_lowers_to_the_same_source(gfx, atom):
         builder.zero_vec(accumulator, accumulator_input.frag_len),
     )
     builder.ret()
-    python_result, native_result = _lower_both(builder, gfx)
-    assert native_result == python_result
+    python_outcome, native_outcome = hip_outcomes_of_both_engines(
+        serialize(builder.kernel), gfx
+    )
+    assert native_outcome == python_outcome
 
 
 # The 4x4x4 MFMA atoms are in no target's catalog; kernels name them by op_id.
@@ -182,8 +133,16 @@ def test_each_mma_atom_lowers_to_the_same_source(gfx, atom):
     [("mfma_f32_4x4x4_f16", F16), ("mfma_f32_4x4x4_bf16", BF16)],
 )
 def test_4x4x4_mfma_atoms_lower_to_the_same_source(op_id, operand_type):
-    builder = _mma_kernel(op_id, operand_type, 4, operand_type, 4, F32, 4)
-    hip = _assert_same_source(builder, "gfx942")
+    builder = IRBuilder("mma_atom")
+    builder.param("out", PtrType(F32, "global"))
+    builder.mma(
+        op_id,
+        builder.zero_vec(operand_type, 4),
+        builder.zero_vec(operand_type, 4),
+        builder.zero_vec(F32, 4),
+    )
+    builder.ret()
+    hip = lower_hip_with_both_engines(builder.kernel, "gfx942")
     assert "f32x4 " in hip and "__builtin_amdgcn_mfma_f32_4x4x4" in hip
 
 
