@@ -306,6 +306,10 @@ Run these against the revision you are about to splice; a render from an earlier
 is not evidence for this one. The config loader rejects a YAML mapping that repeats a key,
 including a repeated `<<`, and reports both source positions.
 
+An engine that runs several kernels in a fixed order is a **slotted engine**; follow
+[Slotted engines](#slotted-engines-rfc-0021) for what differs; the rest of this runbook
+describes an unslotted engine.
+
 The verification root follows the configured dialect (see **Descriptor placement**):
 `direct_load` emits under `test_descriptors/`, `packaged` under `descriptors/`. A root
 holding no `*.kdp.json` is a hard failure, so the wrong root fails immediately:
@@ -1146,6 +1150,47 @@ bundle's architecture, check the configure STATUS lines `hkp: automatic probe ar
 build (`cmake --build <build> --target hkp_packaging_probes`), and run
 `ctest --test-dir <build> -R '^hkp-probe-' --no-tests=error`; every `hkp-probe-*` entry must
 pass. See "Packaging probes" in the descriptor-packaging README.
+
+## Slotted engines (RFC 0021)
+
+A slotted engine selects one kernel per slot, in slot order, on one stream: UED → slots →
+KDPs → UKDs. Each slot has its own KMD, packs, knobs, optional ranker and winner records.
+Kernels whose choices depend on each other belong in **one** slot, launched by that slot's
+dispatch handler. Only slot-bearing UED, KDP and UHD files are version `1.1`, and a UKD is
+`1.1` only when it carries `sources` (slotted or not); every other file stays `1.0`.
+
+- **Authoring.** Config keys and refusals (`engine.shared_workspace`, `slots[]`, a `slot` on
+  every pack): the IngestorGenerator README ("Slotted engines"). A slot name matches
+  `^[a-z][a-z0-9_]*$` and is never `global`; a slot without a ranker orders its catalog by
+  priority, then id. `shared_workspace` without `slots` is a config error.
+- **Shared workspace** (RFC 0021 §6). The native graph match publishes the `shared_workspace`
+  token, `ws.scratch_offset` and one `ws.<name>.offset` per shared object; catalog build
+  declines the engine on a malformed token. Handlers get the **unshifted** workspace base,
+  read the offset tokens in `prepare()`, and add them at `launch()`. The `ws.` root is
+  reserved: never a ranker feature, a `problem_features` entry or a training column. A slotted
+  kernel's `workspaceBytes` is its scratch only: the plan's workspace is the aligned shared
+  region plus the largest scratch, a null workspace is rejected when that is non-zero, and
+  `global.workspace_size_limit` applies to the total.
+- **Validation (stage 4).** `hipdnn_validate_descriptors` checks each slot's ranker against
+  that slot's own KMD, knobs and packs, and reports it in `model_checks` with its `slot`;
+  see its fixtures' README for each refusal. A slot with no loadable pack only warns:
+  the engine stays registered and declines every graph.
+- **Knobs and candidates.** A knob on slot `s` is `s.<field>` and filters that slot only; a
+  setting that empties the slot is rejected, naming the knob. Enumeration lists the product
+  of the slot catalogs, named `prep=<id>|dkdv=<id>|dq=<id>`.
+- **Benchmarking and winner records.** With `global.benchmarking` on, `SlotProgramBenchmark`
+  times a reference program, each other kernel against it, then the winners program, and
+  writes per-slot records plus one `program` record to `winners.jsonl` v3 (RFC 0021 §7, §10).
+  A covered slot is skipped; under a knob filter or workspace limit nothing is recorded. A
+  program record is valid on read only if every kernel it names is in the current catalogs,
+  equals the slot winner, and that slot's record covers its whole catalog.
+- **Predictions and heuristics.** A configuration-kind `getPrediction` evaluated through
+  `predictConfiguration` is `UNAVAILABLE` unless a valid program record exists; the
+  engine-level estimate comes from the engine-level model and needs no program record. Slot
+  rankers train per slot with `uhd_gen` (README,
+  "Slotted engines") and install under `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`.
+  Adding, removing, renaming or reordering slots is a breaking engine revision: knob ids and
+  record keys change, and trained models and winner records no longer apply.
 
 ## 8. Handoff
 

@@ -818,3 +818,37 @@ def test_ctest_comgr_default_preserves_runtime_override(build_environment, overr
             if "COMGR_SELECTED=" in line
         )
         assert Path(selected) == expected
+
+
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_source_superbuild_preserves_sdk_setup_and_ctest_tiers(platform):
+    workflow = (
+        Path(__file__).resolve().parents[5]
+        / ".github/workflows/hipdnn-superbuild-ci.yml"
+    )
+    if not workflow.is_file():
+        pytest.skip("source superbuild workflow is absent from this packaging tree")
+    yaml = pytest.importorskip("yaml")
+    job = yaml.safe_load(workflow.read_text())["jobs"][f"hipdnn-{platform}-superbuild"]
+    steps = job["steps"]
+    setup = next(
+        step
+        for step in steps
+        if step.get("name") == "Install rocKE wheel with SDK dependency"
+    )
+    tests = next(step for step in steps if step.get("name") == "Run tests")
+    assert steps.index(setup) < steps.index(tests)
+    assert '"${wheel}[sdk-core]"' in setup["run"]
+    assert '--no-deps --force-reinstall "$wheel"' in setup["run"]
+    assert "ROCKE_COMGR_LIB" not in tests["env"]
+    assert tests["env"]["Python3_ROOT_DIR"] == "${{ env.VENV_PATH }}"
+    if platform == "linux":
+        assert tests["env"]["CMAKE_GENERATOR"] == "Ninja"
+    commands = [line.strip() for line in tests["run"].splitlines() if "ctest " in line]
+    assert len(commands) == 2
+    assert all(
+        "--parallel 16" in command and "|| rc=$?" in command for command in commands
+    )
+    assert "-L '^full$'" in commands[0]
+    assert "-LE '^(quick|standard|comprehensive|ffm-quick|full)$'" in commands[1]
+    assert tests["run"].strip().endswith("exit $rc")
