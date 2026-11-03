@@ -58,10 +58,6 @@
 
 #include <sstream>
 
-#ifdef ENABLE_ROCTX
-#include <roctracer/roctx.h>
-#endif
-
 #define TENSILELITE_TO_STR(x) #x
 #define TENSILELITE_ENUMSTR(x) x, TENSILELITE_TO_STR(x)
 

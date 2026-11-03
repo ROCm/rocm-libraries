@@ -523,9 +523,7 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* de
 }
 #endif
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 #define RETURN_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK)              \
     {                                                                  \
@@ -1695,6 +1693,4 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-#ifdef __cplusplus
 }
-#endif

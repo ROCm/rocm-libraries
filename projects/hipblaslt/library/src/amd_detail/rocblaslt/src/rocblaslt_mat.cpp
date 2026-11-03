@@ -36,9 +36,7 @@
 
 #include <hip/hip_runtime_api.h>
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /********************************************************************************
  * \brief
@@ -483,7 +481,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
         return rocblaslt_status_invalid_value;
     }
 #endif
-
 
     return gemmCreate(problem, gemmData, gemmCount);
 }
@@ -978,9 +975,7 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
                                  workspaceSizeInBytes,
                                  stream);
 }
-#ifdef __cplusplus
 }
-#endif
 
 template <typename ProblemType, typename Epilogue, typename Inputs>
 rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,

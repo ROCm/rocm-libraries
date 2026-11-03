@@ -31,9 +31,7 @@
 #pragma once
 
 #include <hip/hip_bfloat16.h>
-#ifdef __cplusplus
 #include <array>
-#endif
 #ifndef LEGACY_HIPBLAS_DIRECT
 #include <hipblas-common/hipblas-common.h>
 #else
@@ -49,15 +47,6 @@
 
 #define ROCBLASLT_KERNEL __global__
 #define ROCBLASLT_DEVICE_ILF __device__
-
-/*! \ingroup types_module
- *  \brief Specifies whether int32 or int64 is used.
- */
-#if defined(rocblaslt_ILP64)
-typedef int64_t rocblaslt_int;
-#else
-typedef int32_t rocblaslt_int;
-#endif
 
 /* Forward declaration of hipStream_t */
 typedef struct ihipStream_t* hipStream_t;
@@ -119,9 +108,7 @@ typedef struct _rocblaslt_matmul_preference* rocblaslt_matmul_preference;
  */
 // typedef struct _rocblaslt_matmul_heuristic_result
 // rocblaslt_matmul_heuristic_result;
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /*! \brief Single precision floating point type */
 typedef float rocblaslt_float;
@@ -450,17 +437,10 @@ typedef struct __attribute__((packed, aligned(8))) _rocblaslt_matmul_algo
  *******************************************************************************/
 typedef struct _rocblaslt_matmul_algo
 {
-#ifdef __cplusplus
     uint8_t data[8]             = {0}; // must match hipblasLtMatmulAlgo_t layout
     bool    fallback            = false; //
     uint8_t data_pad[7]         = {0}; // has uint8_t data[16]
     size_t  max_workspace_bytes = 0;
-#else
-    uint8_t data[8];
-    bool    fallback;
-    uint8_t data_pad[7];
-    size_t  max_workspace_bytes;
-#endif
 } rocblaslt_matmul_algo;
 
 static_assert(sizeof(rocblaslt_matmul_algo) == sizeof(hipblasLtMatmulAlgo_t),
@@ -492,9 +472,7 @@ typedef struct _rocblaslt_matrix_transform_desc
     hipblasOperation_t     opA{HIPBLAS_OP_N};
     hipblasOperation_t     opB{HIPBLAS_OP_N};
 } rocblaslt_matrix_transform_desc;
-#ifdef __cplusplus
 }
-#endif
 
 namespace rocblaslt
 {

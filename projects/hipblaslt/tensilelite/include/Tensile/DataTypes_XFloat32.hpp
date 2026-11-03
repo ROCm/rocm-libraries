@@ -32,10 +32,6 @@
 
 #include <tensilelitehost/export.h>
 
-#ifndef __BYTE_ORDER__
-#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
-#endif
-
 #define XFloat32_Q_NAN_VALUE 0x7FC00000
 
 namespace TensileLite
