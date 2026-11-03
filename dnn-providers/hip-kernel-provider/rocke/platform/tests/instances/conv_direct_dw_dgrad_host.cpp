@@ -68,7 +68,7 @@
  * rocke_direct_fwd_wmma_spec_t fails the build here until ROCKE_ABI_VERSION in
  * rocke/abi.h moves with it. 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_direct_fwd_wmma_spec_t) == 152 && ROCKE_ABI_VERSION >= 7,
+static_assert(sizeof(rocke_direct_fwd_wmma_spec_t) == 152 && ROCKE_ABI_VERSION >= 8,
               "rocke_direct_fwd_wmma_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif
