@@ -739,6 +739,46 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             return false;
         }
     }
+    /* _pp_streamk_conflict: the pp_boxes rule (classes, loop, order). */
+    if(s->pp_boxes)
+    {
+        const int pb = s->pp_boxes;
+        bool cls
+            = pb == 3 || pb == 5 || pb == 33 || pb == 55 || ((pb == 7 || pb == 77) && !s->pp_zskip);
+        if(pb >= 100 && pb <= 555)
+        {
+            cls = true;
+            for(int v = pb; v; v /= 10)
+                if(v % 10 != 1 && v % 10 != 3 && v % 10 != 5)
+                    cls = false;
+        }
+        const int po = s->pp_box_order;
+        if(!(cls && s->tapk_pingpong >= 4 && s->split_k >= 1 && !s->pp_streamk
+             && !(s->tapk_pp_epi && s->split_k > 1) && po >= 0 && po <= 3
+             && !((po & 1) && s->split_k == 1) && !((po & 2) && !s->xcd_remap) && s->epilogue
+             && strcmp(s->epilogue, "cshuffle") == 0 && _dgrad_folds_sub_gemm_record(s)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "pp_boxes (3 or 5) needs tapk_pingpong >= 4, the cshuffle epilogue "
+                     "(tapk_pp_epi only with split_k 1), stride 1, no pp_streamk");
+            return false;
+        }
+    }
+    {
+        /* _xhalo_knob_conflict: cshuffle_m_chunks divides the MFMAs per warp. */
+        const int mc = s->cshuffle_m_chunks;
+        const int mpw = (s->warp_m && s->warp_tile_m) ? s->tile_m / s->warp_m / s->warp_tile_m : 1;
+        if(mc > 1 && mpw % mc)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "cshuffle_m_chunks %d must divide mfmas_per_warp_m %d",
+                     mc,
+                     mpw);
+            return false;
+        }
+    }
     /* _pp_streamk_conflict: pp_zskip's rules. */
     if((s->pp_streamk || s->pp_boxes || s->pp_zskip)
        && (s->tapk_pp_persist || s->tapk_pp_xhalo || s->tapk_ztrim))
@@ -793,11 +833,15 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     }
     if((s->tapk_ilv && !xh_ok) || (s->xhalo_exact && !xh_ok)
        || (s->m_band && !xh_ok && !s->tapk_pingpong) || (s->xh_stride_m && !xh_ok) || s->xh_dlds
-       || (s->xh_epi_lin && !xh_ok) || (s->xh_tap_rsrc && !xh_ok) || (s->xh_yring && !xh_ok)
-       || (s->tapk_lds_ahead && !xh_ok) || (s->tapk_lds_barrier && !xh_ok)
-       || (s->tapk_setprio && !xh_ok) || (s->lds_xor && !s->tapk_pingpong && !xh_ok)
-       || (s->xh_b_wide && !xh_ok) || (s->xh_b_kpad && !xh_ok)
-       || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->split_k <= 1))
+       || (s->xh_epi_lin
+           && !(xh_ok
+                || (s->tapk_pp_epi && s->tapk_pingpong && s->epilogue
+                    && strcmp(s->epilogue, "cshuffle") == 0 && s->split_k == 1 && !s->pp_boxes
+                    && !s->pp_streamk && !s->tapk_pp_persist && !s->async_dma)))
+       || (s->xh_tap_rsrc && !xh_ok) || (s->xh_yring && !xh_ok) || (s->tapk_lds_ahead && !xh_ok)
+       || (s->tapk_lds_barrier && !xh_ok) || (s->tapk_setprio && !xh_ok)
+       || (s->lds_xor && !s->tapk_pingpong && !xh_ok) || (s->xh_b_wide && !xh_ok)
+       || (s->xh_b_kpad && !xh_ok) || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->split_k <= 1))
        || (s->split_atomic_pairs
            && !(s->tapk_pingpong && s->split_k > 1 && s->epilogue
                 && strcmp(s->epilogue, "cshuffle") == 0 && s->wave_size == 64))
@@ -805,7 +849,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || (s->tapk_pp_bslab && !s->tapk_pingpong) || (s->xh_a_k4 && !xh_ok)
        || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok) || (s->xh_fast_a && !xh_ok)
        || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode
-       || ((s->pp_boxes || s->pp_box_order) && !s->tapk_pingpong)
+       || (s->pp_boxes && !s->tapk_pingpong)
        || (s->pp_box_det
            && !((s->pp_box_det == 1 || s->pp_box_det == 2) && s->pp_boxes && s->split_k > 1))
        || (s->epi_lds_barriers && !s->pp_boxes && !xh_ok
@@ -3342,7 +3386,9 @@ static void _emit_pp_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        void* addr_user,
                                        rocke_value_t* bound_m,
                                        rocke_value_t* bound_n,
-                                       bool lds_sync)
+                                       bool lds_sync,
+                                       const rocke_conv_build_ctx_t* lin_params = NULL,
+                                       rocke_value_t* lin_cgb = NULL)
 {
     const int mc = spec->cshuffle_m_chunks > 1 ? spec->cshuffle_m_chunks : 1;
     const int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
@@ -3380,6 +3426,34 @@ static void _emit_pp_cshuffle_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* c_eb = rocke_b_const_i32(b, 2);
     rocke_value_t* oob = rocke_b_const_i32(b, 2147483647);
     const int vecs_per_thread = (rows_c * tile_n / sv) / threads;
+    /* xh_epi_lin (dense rows, Python _dx_lin_addr): offset m * stride_w + c
+     * when the dX strides are row-major (one uniform branch). */
+    rocke_value_t* lin_ok = NULL;
+    rocke_value_t* sw = NULL;
+    if(spec->xh_epi_lin && lin_params != NULL)
+    {
+        const rocke_conv_build_ctx_t* params = lin_params;
+        sw = params->p_dX_stride_wi;
+        rocke_value_t* sh = params->p_dX_stride_hi;
+        rocke_value_t* swi = rocke_b_mul(b, sw, params->p_Wi);
+        lin_ok = rocke_b_cmp_eq(b, sh, swi);
+        if(params->params_is_3d)
+        {
+            rocke_value_t* sd = params->p_dX_stride_di;
+            rocke_value_t* shh = rocke_b_mul(b, sh, params->p_Hi);
+            rocke_value_t* e1 = rocke_b_cmp_eq(b, sd, shh);
+            lin_ok = rocke_b_land(b, lin_ok, e1);
+            rocke_value_t* sdd = rocke_b_mul(b, sd, params->p_Di);
+            rocke_value_t* e2 = rocke_b_cmp_eq(b, params->p_dX_stride_n, sdd);
+            lin_ok = rocke_b_land(b, lin_ok, e2);
+        }
+        else
+        {
+            rocke_value_t* shh = rocke_b_mul(b, sh, params->p_Hi);
+            rocke_value_t* e2 = rocke_b_cmp_eq(b, params->p_dX_stride_n, shh);
+            lin_ok = rocke_b_land(b, lin_ok, e2);
+        }
+    }
     for(int c = 0; c < mc; ++c)
     {
         sync();
@@ -3404,34 +3478,57 @@ static void _emit_pp_cshuffle_epilogue(rocke_ir_builder_t* b,
             }
         }
         sync();
-        for(int e = 0; e < vecs_per_thread; ++e)
+        auto store_phase = [&](bool lin) {
+            for(int e = 0; e < vecs_per_thread; ++e)
+            {
+                rocke_value_t* em = rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads);
+                rocke_value_t* vec_idx = rocke_b_add(b, em, grid->tid);
+                rocke_value_t* row = rocke_b_div(b, vec_idx, c_tnv);
+                rocke_value_t* rt = rocke_b_mul(b, row, c_tnv);
+                rocke_value_t* rr = rocke_b_sub(b, vec_idx, rt);
+                rocke_value_t* col = rocke_b_mul(b, rr, rocke_b_const_i32(b, sv));
+                rocke_value_t* w = rocke_b_div(b, row, c_slab);
+                rocke_value_t* ws = rocke_b_mul(b, w, c_slab);
+                rocke_value_t* r_in = rocke_b_sub(b, row, ws);
+                rocke_value_t* wr = rocke_b_mul(b, w, c_wrows);
+                rocke_value_t* wrc = rocke_b_add(b, wr, rocke_b_const_i32(b, c * cm * am));
+                rocke_value_t* g_row = rocke_b_add(b, wrc, r_in);
+                rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, g_row);
+                rocke_value_t* n_val = rocke_b_add(b, grid->block_n_off, col);
+                rocke_value_t* ok
+                    = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bound_m, bound_n, sv);
+                rocke_value_t* valid = NULL;
+                rocke_value_t* off_elems;
+                if(lin)
+                {
+                    rocke_value_t* c_ = lin_cgb ? rocke_b_add(b, n_val, lin_cgb) : n_val;
+                    rocke_value_t* mw = rocke_b_mul(b, m_val, sw);
+                    off_elems = rocke_b_add(b, mw, c_);
+                }
+                else
+                    off_elems = addr_fn(b, m_val, n_val, &valid, addr_user);
+                if(valid != NULL)
+                    ok = ok == NULL ? valid : rocke_b_land(b, ok, valid);
+                rocke_value_t* off_b = rocke_b_mul(b, off_elems, c_eb);
+                rocke_value_t* safe = ok != NULL ? rocke_b_select(b, ok, off_b, oob) : off_b;
+                rocke_value_t* sc = swz(row, col);
+                rocke_value_t* li[2] = {row, sc};
+                rocke_value_t* vbf = rocke_b_smem_load_vN(b, c_smem, li, 2, rocke_bf16(), sv);
+                rocke_b_buffer_store_vN_bf16(
+                    b, dx_rsrc, safe, rocke_b_const_i32(b, 0), vbf, sv / 2);
+            }
+        };
+        if(lin_ok == NULL)
+            store_phase(false);
+        else
         {
-            rocke_value_t* em = rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads);
-            rocke_value_t* vec_idx = rocke_b_add(b, em, grid->tid);
-            rocke_value_t* row = rocke_b_div(b, vec_idx, c_tnv);
-            rocke_value_t* rt = rocke_b_mul(b, row, c_tnv);
-            rocke_value_t* rr = rocke_b_sub(b, vec_idx, rt);
-            rocke_value_t* col = rocke_b_mul(b, rr, rocke_b_const_i32(b, sv));
-            rocke_value_t* w = rocke_b_div(b, row, c_slab);
-            rocke_value_t* ws = rocke_b_mul(b, w, c_slab);
-            rocke_value_t* r_in = rocke_b_sub(b, row, ws);
-            rocke_value_t* wr = rocke_b_mul(b, w, c_wrows);
-            rocke_value_t* wrc = rocke_b_add(b, wr, rocke_b_const_i32(b, c * cm * am));
-            rocke_value_t* g_row = rocke_b_add(b, wrc, r_in);
-            rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, g_row);
-            rocke_value_t* n_val = rocke_b_add(b, grid->block_n_off, col);
-            rocke_value_t* ok
-                = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bound_m, bound_n, sv);
-            rocke_value_t* valid = NULL;
-            rocke_value_t* off_elems = addr_fn(b, m_val, n_val, &valid, addr_user);
-            if(valid != NULL)
-                ok = ok == NULL ? valid : rocke_b_land(b, ok, valid);
-            rocke_value_t* off_b = rocke_b_mul(b, off_elems, c_eb);
-            rocke_value_t* safe = ok != NULL ? rocke_b_select(b, ok, off_b, oob) : off_b;
-            rocke_value_t* sc = swz(row, col);
-            rocke_value_t* li[2] = {row, sc};
-            rocke_value_t* vbf = rocke_b_smem_load_vN(b, c_smem, li, 2, rocke_bf16(), sv);
-            rocke_b_buffer_store_vN_bf16(b, dx_rsrc, safe, rocke_b_const_i32(b, 0), vbf, sv / 2);
+            rocke_if_else_t ie = rocke_b_scf_if_else(b, lin_ok);
+            rocke_b_region_enter(b, ie.then_region);
+            store_phase(true);
+            rocke_b_region_leave(b);
+            rocke_b_region_enter(b, ie.else_region);
+            store_phase(false);
+            rocke_b_region_leave(b);
         }
     }
 }
@@ -5132,7 +5229,9 @@ static rocke_kernel_def_t*
                                                &pctx,
                                                ctx.p_dg_M,
                                                ctx.p_dg_N,
-                                               spec->epi_lds_barriers);
+                                               spec->epi_lds_barriers,
+                                               &ctx,
+                                               c_group_base);
                 }
                 else if(use_cshuffle_ && spec->xh_epi == 1)
                     _emit_xh_cshuffle_epilogue(b,

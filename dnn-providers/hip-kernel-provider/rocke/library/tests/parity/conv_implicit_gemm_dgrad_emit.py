@@ -1675,6 +1675,10 @@ _GFX942_3D_PP = {
         pp_boxes=7,
         pp_box_order=2,
     ),
+    # 106: xh_epi_lin on the dense pp_epi 2 store (+ epi_lds_barriers).
+    106: dict(
+        _T128, tapk_pp_sched=5, tapk_pp_epi=2, xh_epi_lin=True, epi_lds_barriers=True
+    ),
 }
 
 
