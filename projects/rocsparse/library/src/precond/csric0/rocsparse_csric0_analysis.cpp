@@ -24,6 +24,7 @@
 
 #include "../level2/rocsparse_csrsv.hpp"
 #include "rocsparse_csric0.hpp"
+#include "rocsparse_trm_uncouple_slot.hpp"
 #include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
@@ -87,6 +88,9 @@ rocsparse_status rocsparse::csric0_analysis(rocsparse_handle          handle,
         csric0_info      = new _rocsparse_csric0_info();
         p_csric0_info[0] = csric0_info;
     }
+
+    rocsparse::trm_uncouple_slot(
+        info, csric0_info, rocsparse_operation_none, rocsparse_fill_mode_lower);
 
     RETURN_IF_ROCSPARSE_ERROR(csric0_info->recreate(rocsparse_operation_none,
                                                     rocsparse_fill_mode_lower,

@@ -101,6 +101,10 @@ Tests:
   function: csrsv_bad_arg
   precision: *single_double_precisions_complex_real
 
+- name: csrsv_extra
+  category: pre_checkin
+  function: csrsv_extra
+
 - name: csrsv_file
   category: pre_checkin
   function: csrsv
