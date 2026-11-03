@@ -39,7 +39,10 @@ def _as_i32_bits(v: int) -> int:
     """
     if v >= (1 << 31):
         if v >= (1 << 32):
-            raise ValueError(f"i32 kernarg value {v} does not fit in 32 bits")
+            # struct.error, not ValueError: callers packing a tensor's byte count
+            # (e.g. benchmark_grouped_conv._run_case) catch struct.error to skip
+            # an over-sized case rather than aborting the whole sweep.
+            raise struct.error(f"i32 kernarg value {v} does not fit in 32 bits")
         return v - (1 << 32)
     return v
 
