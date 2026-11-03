@@ -183,6 +183,9 @@ struct Arguments
     int32_t fast_check_repeat;
     int32_t fast_check_inject;
     int8_t  requires_streamk;
+    // Self-test of the checks of D across solutions: the position in the solution list of a
+    // solution that is never launched, which the allclose check must report (-1 = none)
+    int32_t skip_launch_solution;
     // integer_exact value pattern: '' (standard), ternary or sparse_k (hipblaslt_init.hpp)
     char    integer_exact_pattern[16];
     // skip, rather than fail, when the library offers no solution (size-threshold sweeps)
@@ -328,6 +331,7 @@ struct Arguments
     OPER(fast_check_repeat) SEP      \
     OPER(fast_check_inject) SEP      \
     OPER(requires_streamk) SEP       \
+    OPER(skip_launch_solution) SEP   \
     OPER(integer_exact_pattern) SEP  \
     OPER(allow_no_solution) SEP      \
     OPER(timing) SEP                 \

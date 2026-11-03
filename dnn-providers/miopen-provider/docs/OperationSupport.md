@@ -53,9 +53,10 @@ The following table lists all operations currently supported in hipDNN:
 - Compute data type: FP32
 - Activation mode: RELU_FORWARD
 - Supports
-    - no clipping
-    - relu_lower_clip set
-    - relu_lower_clip and relu_upper_clip set
+    - standard ReLU: no clips set, or relu_lower_clip = 0
+    - clipped ReLU: relu_upper_clip set
+    - CLAMP: relu_lower_clip and relu_upper_clip set
+- relu_lower_clip_slope must be unset or 0 (leaky ReLU is not supported when fused)
 
 ## Operation Notes
 
@@ -76,10 +77,16 @@ The following table lists all operations currently supported in hipDNN:
 >   - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
-> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU, Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
+> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
 
 > [!NOTE]
 > **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+
+> [!NOTE]
+> **ReLU parameters:** An unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no
+> upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope, so
+> equivalent encodings select the same MIOpen activation. A non-zero `relu_lower_clip` without an
+> upper clip is not supported.
 
 > [!NOTE]
 > **Standalone Binary Elementwise:** A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN

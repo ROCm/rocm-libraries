@@ -431,8 +431,9 @@ rocke_value_t* rocke_gfx942_attn2d_apply_transposed_pv_regs(rocke_gfx942_attn2d_
  *  assembles the scf_yield carry into ctx->out_carry, and emits scf_yield.
  *
  *  This worker is invoked from the _emit_kv_body driver (peer-owned); the
- *  softmax-derived per-reg lists (alpha_regs, new_l_vals, m_new, p_regs_f32, the
- *  PT32 register groups) are passed in by the caller through the parameter block
+ *  softmax-derived per-reg lists (alpha_regs, new_l_vals, m_carry = the raw
+ *  running max, p_regs_f32, the PT32 register groups) are passed in by the
+ *  caller through the parameter block
  *  so this TU owns ONLY the PV math + yield/loop wiring. The long QK/softmax
  *  prelude is the peer's bucket; here we stub the inbound lists from ctx scratch
  *  where the shared header does not (yet) carry them, so the file links in
@@ -706,7 +707,7 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
         int y = 0;
         for(int r = 0; r < S; ++r)
         {
-            yields[y++] = in->m_new[r];
+            yields[y++] = in->m_carry[r];
             yields[y++] = in->new_l_vals[r];
         }
         for(int n = 0; n < ACC_N_TILES; ++n)

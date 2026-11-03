@@ -123,6 +123,119 @@ TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorPresentBinds)
     EXPECT_EQ(tensor->memory().hostData(), data.data());
 }
 
+TEST(TestFlatbufferTensorAttributesUtils, ElementCountTreatsEmptyDimsAsOneElement)
+{
+    TensorAttributesT attr;
+    attr.dims = {};
+    EXPECT_EQ(elementCount(attr), 1);
+    attr.dims = {1};
+    EXPECT_EQ(elementCount(attr), 1);
+    attr.dims = {2, 3};
+    EXPECT_EQ(elementCount(attr), 6);
+}
+
+namespace
+{
+
+constexpr int64_t OPERAND_UID = 11;
+
+// An ordinary FLOAT tensor operand.
+TensorAttributesT makeFloatOperand(std::vector<int64_t> dims, std::vector<int64_t> strides)
+{
+    TensorAttributesT attr;
+    attr.uid = OPERAND_UID;
+    attr.name = "operand";
+    attr.data_type = DataType::FLOAT;
+    attr.dims = std::move(dims);
+    attr.strides = std::move(strides);
+    return attr;
+}
+
+TensorAttributesT makeBakedOperand(float value)
+{
+    auto attr = makeFloatOperand({1}, {1});
+    attr.value.Set(Float32Value(value));
+    return attr;
+}
+
+TensorAttributesT makeRuntimePassByValueOperand()
+{
+    auto attr = makeFloatOperand({1}, {1});
+    attr.is_runtime_pass_by_value = true;
+    return attr;
+}
+
+} // namespace
+
+// A baked operand is read from the graph, even when the variant pack has a slot for its uid.
+TEST(TestFlatbufferTensorAttributesUtils, ReadHostFloatOperandBakedReadsGraphValue)
+{
+    const auto attr = makeBakedOperand(2.5f);
+    EXPECT_FLOAT_EQ(readHostFloatOperand(attr, {}, "operand"), 2.5f);
+
+    float differing = 99.0f;
+    const std::unordered_map<int64_t, void*> variantPack{{OPERAND_UID, &differing}};
+    EXPECT_FLOAT_EQ(readHostFloatOperand(attr, variantPack, "operand"), 2.5f);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, ReadHostFloatOperandRuntimePassByValueReadsHostPointer)
+{
+    float hostValue = 0.75f;
+    const std::unordered_map<int64_t, void*> variantPack{{OPERAND_UID, &hostValue}};
+    EXPECT_FLOAT_EQ(readHostFloatOperand(makeRuntimePassByValueOperand(), variantPack, "operand"),
+                    0.75f);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, ReadHostFloatOperandOrdinaryTensorReadsHostBuffer)
+{
+    std::array<float, 1> buffer = {0.375f};
+    const std::unordered_map<int64_t, void*> variantPack{{OPERAND_UID, buffer.data()}};
+    EXPECT_FLOAT_EQ(readHostFloatOperand(makeFloatOperand({1}, {1}), variantPack, "operand"),
+                    0.375f);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, BindOptionalHostFloatOperandNulloptYieldsNullptr)
+{
+    EXPECT_EQ(bindOptionalHostFloatOperand(std::nullopt, {}, "operand"), nullptr);
+}
+
+// A baked operand has no variant-pack slot, so its value is copied into a one-element tensor.
+TEST(TestFlatbufferTensorAttributesUtils, BindOptionalHostFloatOperandBakedYieldsOneElementTensor)
+{
+    const auto tensor = bindOptionalHostFloatOperand(makeBakedOperand(2.5f), {}, "operand");
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), std::vector<int64_t>{1});
+    EXPECT_FLOAT_EQ(tensor->getHostValue(0), 2.5f);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils,
+     BindOptionalHostFloatOperandRuntimePassByValueYieldsOneElementTensor)
+{
+    float hostValue = 0.75f;
+    const std::unordered_map<int64_t, void*> variantPack{{OPERAND_UID, &hostValue}};
+    const auto tensor
+        = bindOptionalHostFloatOperand(makeRuntimePassByValueOperand(), variantPack, "operand");
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), std::vector<int64_t>{1});
+    EXPECT_FLOAT_EQ(tensor->getHostValue(0), 0.75f);
+}
+
+// An ordinary operand is viewed in place with its own dims and strides, e.g. a per-head descale.
+TEST(TestFlatbufferTensorAttributesUtils, BindOptionalHostFloatOperandOrdinaryViewsHostBuffer)
+{
+    const auto attr = makeFloatOperand({1, 2, 1, 1}, {2, 1, 1, 1});
+    std::array<float, 2> buffer = {0.5f, 4.0f};
+    const std::unordered_map<int64_t, void*> variantPack{{OPERAND_UID, buffer.data()}};
+
+    const auto tensor = bindOptionalHostFloatOperand(attr, variantPack, "operand");
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), attr.dims);
+    EXPECT_EQ(tensor->strides(), attr.strides);
+    EXPECT_EQ(tensor->memory().hostData(), buffer.data());
+    EXPECT_FLOAT_EQ(tensor->getHostValue(0, 0, 0, 0), 0.5f);
+    EXPECT_FLOAT_EQ(tensor->getHostValue(0, 1, 0, 0), 4.0f);
+}
+
 TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBoolean)
 {
     const std::vector<int64_t> dims = {2, 2};
