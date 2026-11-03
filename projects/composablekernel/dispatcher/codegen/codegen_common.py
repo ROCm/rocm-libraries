@@ -1379,13 +1379,8 @@ GFX1250_FP32_ACC_REJECT_REASON = (
 # comp_tdm_pc (producer/consumer TDM): the C tile lives on the consumer waves
 # only (the two producer waves hold no accumulator), one fp32 VGPR per element.
 # Past 256 accumulators per lane occupancy collapses; same cap as the Tile
-# Engine MAX_ACC_VGPRS_PER_LANE. BatchedGemmKernel does not arm the pipeline's
-# named barriers, so the pipeline is plain-GEMM only.
+# Engine MAX_ACC_VGPRS_PER_LANE.
 COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE = 256
-COMP_TDM_PC_BATCHED_REJECT_REASON = (
-    "comp_tdm_pc is not supported for batched GEMM: BatchedGemmKernel does not "
-    "arm the producer/consumer named barriers"
-)
 # BlockGemm and the epilogue spread the C tile over warp_m x warp_n waves only,
 # with no K-wave reduction, so a K wave would be a consumer whose work is lost.
 # Mirrors the static_assert in GemmPipelineAgBgCrCompTDMProducerConsumer.
@@ -1553,7 +1548,6 @@ def gfx1250_pipeline_reject_reason(
     pads: Optional[Tuple[bool, bool, bool]] = None,
     warp_tile_m: int = 0,
     warp_tile_n: int = 0,
-    batched: bool = False,
     tile_mn: Optional[Tuple[int, int]] = None,
     warp_k: Optional[int] = None,
     streamk: bool = False,
@@ -1566,10 +1560,10 @@ def gfx1250_pipeline_reject_reason(
     immediately, so existing kernel sets are unchanged.
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
-    support (only plain, batched and preshuffle GEMM are; comp_tdm_pc is plain
-    only). ``pads`` is (pad_m, pad_n, pad_k); None means unknown and skips the
-    pad rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
-    (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
+    support (only plain, batched and preshuffle GEMM are). ``pads`` is
+    (pad_m, pad_n, pad_k); None means unknown and skips the pad rules.
+    ``tile_mn`` (tile_m, tile_n) enables the comp_tdm_pc accumulator rule
+    (None skips it).
     ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it).
     ``streamk`` marks the Stream-K variant: only STREAMK_GFX1250_PIPELINES are
     accepted, and the epilogue rules are streamk_trait_reject_reason's (they depend
@@ -1605,8 +1599,6 @@ def gfx1250_pipeline_reject_reason(
         if pipeline == "comp_tdm_v2" and num_waves != 4:
             return "comp_tdm_v2 requires exactly 4 waves"
         if pipeline == "comp_tdm_pc":
-            if batched:
-                return COMP_TDM_PC_BATCHED_REJECT_REASON
             if warp_k is not None and warp_k != 1:
                 return COMP_TDM_PC_WARP_K_REJECT_REASON
             if tile_mn is not None:
@@ -1665,9 +1657,7 @@ PRESHUFFLE_GFX1250_PIPELINES = (
 PRESHUFFLE_GFX1250_LAYOUT = "rcr"
 # The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
 # packed buffer and a partial K tile packs the wrong elements.
-PRESHUFFLE_PAD_NK_REJECT_REASON = (
-    "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
-)
+PRESHUFFLE_PAD_NK_REJECT_REASON = "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
 # These block GEMMs ignore K warps while the launch still counts them, so the
 # extra waves run as M warps past the tile and corrupt C (comp_tdm* only survive
 # through their TDM store), on every arch.
@@ -1686,7 +1676,9 @@ def packed_b_pipeline_reject_reason(pipeline: str, preshuffle: bool) -> str:
     preshuffle variant performs; any other GEMM would compute from unpacked B.
     """
     if pipeline in PACKED_B_PIPELINES and not preshuffle:
-        return f"{pipeline} reads preshuffled B, so only the preshuffle variant can use it"
+        return (
+            f"{pipeline} reads preshuffled B, so only the preshuffle variant can use it"
+        )
     return ""
 
 
@@ -1729,7 +1721,9 @@ def preshuffle_pipeline_reject_reason(
     pads = (pad_m, pad_n, pad_k)
     if pipeline not in PRESHUFFLE_GFX1250_PIPELINES:
         pad_nk = is_true(pad_n) or is_true(pad_k)
-        return PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and arch == GFX1250_ARCH else ""
+        return (
+            PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and arch == GFX1250_ARCH else ""
+        )
     if arch and arch != GFX1250_ARCH:
         return f"pipeline {pipeline!r} requires {GFX1250_ARCH}, got {arch!r}"
     # rcr also covers the comp_async A row-major / B col-major requirement.
@@ -1742,7 +1736,11 @@ def preshuffle_pipeline_reject_reason(
         return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
     if pipeline != "comp_async" and any(is_true(p) for p in pads):
         return TDM_PAD_REJECT_REASON
-    if pipeline == "comp_async" and None not in pads and not all(is_true(p) for p in pads):
+    if (
+        pipeline == "comp_async"
+        and None not in pads
+        and not all(is_true(p) for p in pads)
+    ):
         return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
     if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
         return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
@@ -1904,14 +1902,33 @@ def warp_size_for_arch(gpu_target: str) -> int:
 
 
 def preshuffle_tile_reject_reason(
-    pipeline, gpu_target, dtype, tile_m, tile_n, tile_k, warp_m, warp_n, warp_k,
-    warp_tile_m, warp_tile_n, warp_tile_k,
+    pipeline,
+    gpu_target,
+    dtype,
+    tile_m,
+    tile_n,
+    tile_k,
+    warp_m,
+    warp_n,
+    warp_k,
+    warp_tile_m,
+    warp_tile_n,
+    warp_tile_k,
 ) -> str:
     """Tile rules the preshuffle kernels static_assert on; "" when the tile is valid."""
     warp_size = warp_size_for_arch(gpu_target)
     if pipeline in PACKED_B_PIPELINES and not is_preshuffle_config_valid(
-        tile_m, tile_n, tile_k, warp_m, warp_n, warp_k, warp_tile_m, warp_tile_n,
-        warp_tile_k, dtype, warp_size,
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
+        dtype,
+        warp_size,
     ):
         return (
             f"preshuffle {pipeline} packed-B M0/M1/M2 or vector-load rule rejects "
