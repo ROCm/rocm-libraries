@@ -22,6 +22,7 @@ std::string SolutionParameters::toString() const
            << std::endl;
     result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
            << " LDSFactor:" << prefetchLDSFactor << " MixMemOps:" << prefetchMixMemOps << std::endl;
+    result << "SyncLDSQueueAtKLoop:" << syncLDSQueueAtKLoop << std::endl;
     result << "Block Scale Options:" << " Swizzle Scale:" << swizzleScale
            << " Prefetch Scale:" << prefetchScale << " loadPathAScale:" << loadPathAScale
            << " loadPathBScale:" << loadPathBScale << std::endl;
