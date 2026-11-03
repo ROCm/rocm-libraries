@@ -77,16 +77,21 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
         return spec.build(arch)
 
     def signature(spec):
-        from kernels.common.attention_unified import _3d_signature, _attn_signature
+        from kernels.common.attention_unified import (
+            _tiled_2d_signature,
+            _tiled_3d_signatures,
+        )
 
         if spec.path == "3d":
-            return _3d_signature(
-                spec.kernel_spec.dtype, kv_dtype=spec.kernel_spec.kv_storage_dtype
+            segment, _ = _tiled_3d_signatures(
+                spec.arch,
+                spec.kernel_spec.dtype,
+                kv_dtype=spec.kernel_spec.kv_storage_dtype,
             )
-        return _attn_signature(
+            return segment
+        return _tiled_2d_signature(
+            spec.arch,
             spec.kernel_spec.dtype,
-            include_bt_stride=True,
-            include_qq_bias_stride=True,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
         )
 

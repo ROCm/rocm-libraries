@@ -111,6 +111,7 @@ from .attention import (
     apply_softcap_scalar,
     binary_search_seq_idx,
     binary_search_seq_idx_iters,
+    binary_search_seq_idx_trip_count,
     apply_attention_mask,
     causal_mask,
     mfma_16x16x16_for_dtype,
@@ -434,6 +435,7 @@ __all__ = [
     "BINARY_SEARCH_FALLBACK_ITERS",
     "binary_search_seq_idx",
     "binary_search_seq_idx_iters",
+    "binary_search_seq_idx_trip_count",
     "apply_attention_mask",
     "causal_mask",
     # MFMA GEMM inner helper

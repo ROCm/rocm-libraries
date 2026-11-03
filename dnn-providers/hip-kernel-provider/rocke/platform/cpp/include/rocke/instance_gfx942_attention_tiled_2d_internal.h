@@ -177,6 +177,14 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    /* RUNTIME_KERNARG_FIELDS params, in declaration order; set only when
+     * runtime_shape. */
+    rocke_value_t* num_qh_p;
+    rocke_value_t* num_kv_p;
+    rocke_value_t* sliding_window_p;
+    /* The gfx942 Python body: it reads its runtime kernargs and searches at
+     * runtime. False when this body stands in for the gfx950 builder. */
+    bool runtime_shape;
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;
@@ -268,20 +276,21 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* lane_rg_is2_v;
 
     /* ---- SSA constants (lines 1891-1912) ---- */
-    rocke_value_t* c0;
     rocke_value_t* zero_f;
     rocke_value_t* neg_inf_v; /* b.const_f32(-inf)              (1892) */
     rocke_value_t* one_f_v; /* b.const_f32(1.0)               (1894) */
     rocke_value_t* rcp_ln2_v; /* b.const_f32(1.4426950408889634) (1895) */
     rocke_value_t* qk_scale_v; /* derived from scale_p            */
-    rocke_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW) (1910) */
+    rocke_value_t* sw_const_v; /* sliding_window_p, else const_i32(SLIDING_WINDOW) */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 2163-2351) ---- */
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
     rocke_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
     rocke_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
     rocke_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
-    rocke_value_t* kv_block_bytes_c_v; /* const BS*NUM_KV*HD*KV_BYTES (2227) */
+    rocke_value_t* kv_block_bytes_c_v; /* one-block bound: kv_stride_blk_b_v, or its const */
+    rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES (runtime_shape only) */
+    rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS (runtime_shape only) */
     rocke_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE (2232) */
     rocke_value_t* zero_soff_v; /* const_i32(0) soffset (2238)     */
     rocke_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64 (2254/2263) */
@@ -360,6 +369,13 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* rcp_l[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_nonzero[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
 } rocke_gfx942_attn2d_build_ctx_t;
+
+/* The query head count as a row bound: the kernarg under runtime_shape, else
+ * the constant the gfx950 builder bakes, created at each use as Python does. */
+static inline rocke_value_t* rocke_gfx942_attn2d_num_qh(rocke_gfx942_attn2d_build_ctx_t* ctx)
+{
+    return ctx->runtime_shape ? ctx->num_qh_p : rocke_b_const_i32(ctx->b, ctx->NUM_QH);
+}
 
 /* ===================================================================== *
  *  DRIVER-INTERNAL ctx population (the build prologue, lines 1104-1912).

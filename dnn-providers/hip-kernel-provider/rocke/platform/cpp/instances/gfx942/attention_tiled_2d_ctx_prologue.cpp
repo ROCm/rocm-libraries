@@ -117,6 +117,9 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->b = b;
     ctx->spec = spec;
     ctx->arch = arch;
+    /* This body also stands in for the gfx950 Python builder (the fastKV
+     * register-P twin), which bakes the shape values gfx942 reads at runtime. */
+    ctx->runtime_shape = rocke_a2d_streq(arch, "gfx942");
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
     if(!rocke_a2d_require_tiled_attention_arch(b, arch))
@@ -398,6 +401,12 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        if(ctx->runtime_shape)
+        {
+            ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+            ctx->num_kv_p = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
+            ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
+        }
     }
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
@@ -427,14 +436,23 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
 
     /* ---- seq lookup + Q-block geometry (lines 1390-1409) ---- */
-    ctx->seq_idx
-        = rocke_binary_search_seq_idx(b,
-                                      ctx->cu_q,
-                                      ctx->q_block_global_idx,
-                                      ctx->num_seqs_p,
-                                      BLOCK_Q,
-                                      rocke_attention_tiled_2d_spec_binary_search_iters(spec),
-                                      false);
+    if(ctx->runtime_shape)
+    {
+        rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
+        ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
+            b, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
+    }
+    else
+    {
+        ctx->seq_idx
+            = rocke_binary_search_seq_idx(b,
+                                          ctx->cu_q,
+                                          ctx->q_block_global_idx,
+                                          ctx->num_seqs_p,
+                                          BLOCK_Q,
+                                          rocke_attention_tiled_2d_spec_binary_search_iters(spec),
+                                          false);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);
@@ -735,8 +753,8 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
      * (line 1994) and mask (lines 4111/4328/4403) regions. The previous port
      * created an unused i32 0 here and a FRESH const in the loop scaffold,
      * allocating an extra SSA value that shifted every later %N. Cache it. */
-    ctx->sw_const_v = rocke_b_const_i32(b, ctx->SLIDING_WINDOW);
-    ctx->c0 = ctx->sw_const_v;
+    ctx->sw_const_v
+        = ctx->runtime_shape ? ctx->sliding_window_p : rocke_b_const_i32(b, ctx->SLIDING_WINDOW);
 
     /* ---- acc geometry the epilogue aliases (lines 2142-2143) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;
@@ -994,7 +1012,7 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* row_ok = (qp_r < q_len) && (qh_r < NUM_QH) [&& (row < VALID_ROWS)].
          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         rocke_value_t* row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_gfx942_attn2d_num_qh(ctx));
         rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
         rocke_value_t* row_ok;
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -1022,7 +1040,7 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
             rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_gfx942_attn2d_num_qh(ctx));
             rocke_value_t* slope = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
             /* The softmax bucket reads the per-reg slope from hoist_q_head. */

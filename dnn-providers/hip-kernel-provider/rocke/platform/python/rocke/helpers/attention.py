@@ -699,6 +699,19 @@ def binary_search_seq_idx_iters(num_seqs: int, *, floor: int = 1) -> int:
     return max(floor, int(math.ceil(math.log2(num_seqs + 1))))
 
 
+def binary_search_seq_idx_trip_count(b: IRBuilder, num_seqs: Value) -> Value:
+    """Runtime trip count for :func:`binary_search_seq_idx`: ``bit_length(num_seqs)``,
+    at least 1, read off the exponent of ``float(num_seqs)``.
+
+    Equals :func:`binary_search_seq_idx_iters` below 2**24 sequences. Past that the
+    conversion may round up a power of two and add one iteration, which the
+    search's done guard turns into a no-op. Lets one kernel serve every batch size.
+    """
+    bits = b.bitcast(b.sitofp_f32(num_seqs), I32)
+    exponent = b.lshr(bits, b.const_i32(23))
+    return b.smax(b.sub(exponent, b.const_i32(126)), b.const_i32(1))
+
+
 def binary_search_seq_idx(
     b: IRBuilder,
     cu_q: Value,
@@ -706,7 +719,7 @@ def binary_search_seq_idx(
     num_seqs: Value,
     *,
     block_q: int,
-    iterations: int,
+    iterations: int | Value,
     per_token: bool = False,
 ) -> Value:
     """Triton-style binary search for the seq_idx for this q_block.
@@ -716,7 +729,8 @@ def binary_search_seq_idx(
     invariant is ``cu_q[i] // BLOCK_Q + i <= target`` (i.e. the
     cumulative Q-block count up to sequence ``i``). The caller
     specializes ``iterations`` from the known problem batch size with
-    :func:`binary_search_seq_idx_iters`.
+    :func:`binary_search_seq_idx_iters`, or passes the runtime bound from
+    :func:`binary_search_seq_idx_trip_count`.
 
     P49: ``per_token=True`` switches to per-token mode
     (``cu_q[s] <= q_token < cu_q[s+1]``) used by ``fmha_paged_prefill``,
@@ -729,7 +743,7 @@ def binary_search_seq_idx(
     bq = b.const_i32(block_q)
     loop = b.scf_for_iter(
         b.const_i32(0),
-        b.const_i32(iterations),
+        iterations if isinstance(iterations, Value) else b.const_i32(iterations),
         b.const_i32(1),
         [("left", b.const_i32(0)), ("right", num_seqs)],
         iv_name="bs_i",

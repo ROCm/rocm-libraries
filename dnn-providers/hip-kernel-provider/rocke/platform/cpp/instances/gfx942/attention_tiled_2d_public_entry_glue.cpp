@@ -513,7 +513,7 @@ static rocke_status_t
     /* Value-carrying optionals become conditional strings; value-less flags
      * are passed as positional parts (kernel_name_join drops empties), exactly
      * as the Python kernel_name does. */
-    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
+    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], wpe_buf[32], mw_buf[32], kvcp_buf[64];
     char rd_buf[32], ks_buf[32];
     int nqh, nkv;
@@ -530,13 +530,20 @@ static rocke_status_t
         snprintf(t_buf, sizeof(t_buf), "t%d", rocke_attention_tiled_2d_spec_tile_size_eff(s));
     else
         t_buf[0] = '\0';
-    snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", nqh, nkv);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(hkv_buf, sizeof(hkv_buf), "g%d", nqh / nkv);
+    /* Except on the fast paged-KV descriptor path, whose shifts bake them. */
+    if(s->use_fast_paged_kv_desc)
+        snprintf(fhkv_buf, sizeof(fhkv_buf), "h%dkv%d", nqh, nkv);
+    else
+        fhkv_buf[0] = '\0';
     if(s->kv_storage_dtype)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
         kv_buf[0] = '\0';
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
-        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+        snprintf(sw_buf, sizeof(sw_buf), "sw");
     else
         sw_buf[0] = '\0';
     if(s->num_warps != 1)
@@ -578,11 +585,14 @@ static rocke_status_t
             b_buf,
             t_buf,
             hkv_buf,
+            fhkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
             /* Python emits "fnuz" under the *same* condition as the kv part,
              * not under a format test, so it keys off kv_buf being non-empty. */
             kv_buf[0] ? "fnuz" : "",
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",

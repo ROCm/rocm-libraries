@@ -8,7 +8,7 @@
  * SCOPE (this TU only):
  *   - The two by-value spec structs' _default() / _validate() (__post_init__)
  *     and every @property accessor (num_queries_per_kv, block_m=16, block_q,
- *     tile_size, dtype_ir, binary_search_iters, kernel_name via
+ *     tile_size, dtype_ir, kernel_name via
  *     kernel_name_join).  (Python lines 91-172, 977-999.)
  *   - supports_tiled_3d coverage gate (pure host predicate, static reasons).
  *     (Python lines 175-231.)
@@ -40,7 +40,6 @@
  * the 16x16x16 f16+bf16 atoms present), which IS fully reproducible here. The
  * fallback reason strings mirror the Python text byte-for-byte.
  */
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -243,25 +242,6 @@ const rocke_type_t*
     return rocke_bf16();
 }
 
-int rocke_unified_attention_3d_tiled_spec_binary_search_iters(
-    const rocke_unified_attention_3d_tiled_spec_t* s)
-{
-    double v;
-    int r;
-    if(s == NULL)
-    {
-        return -1;
-    }
-    if(s->num_seqs <= 0)
-    {
-        return 32;
-    }
-    /* max(1, ceil(log2(num_seqs + 1))) */
-    v = ceil(log2((double)(s->num_seqs + 1)));
-    r = (int)v;
-    return r < 1 ? 1 : r;
-}
-
 int rocke_unified_attention_3d_tiled_spec_kernel_name(
     const rocke_unified_attention_3d_tiled_spec_t* s, char* buf, size_t cap)
 {
@@ -298,7 +278,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
     snprintf(b_part, sizeof(b_part), "b%d", s->block_size);
-    snprintf(h_part, sizeof(h_part), "h%dkv%d", s->num_query_heads, s->num_kv_heads);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(h_part, sizeof(h_part), "g%d", s->num_query_heads / s->num_kv_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn3d_tiled_gfx942";
@@ -319,9 +300,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "sinks";
     }
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
     {
-        snprintf(sw_part, sizeof(sw_part), "sw%d", s->sliding_window);
+        snprintf(sw_part, sizeof(sw_part), "sw");
         parts[np++] = sw_part;
     }
     if(s->has_softcap)
@@ -394,10 +376,9 @@ const rocke_type_t* rocke_unified_attention_reduce_tiled_spec_dtype_ir(
 int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
-    /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+    /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, seg<NUM_SEG>,
+     *   dtype); the head count is a kernarg. */
     char d_part[32];
-    char h_part[32];
     char seg_part[32];
     const char* parts[8];
     size_t np = 0;
@@ -410,12 +391,10 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     }
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
-    snprintf(h_part, sizeof(h_part), "h%d", s->num_query_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn_reduce_tiled_gfx942";
     parts[np++] = d_part;
-    parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
 
@@ -669,7 +648,6 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D_MFMA_N;
 
     out->THREADS = 64;
-    out->binary_search_iters = rocke_unified_attention_3d_tiled_spec_binary_search_iters(spec);
 
     if(out->PV_N_TILES < 0 || out->PV_N_TILES > 16)
     {

@@ -61,7 +61,6 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
     const int ACC_M_ATOMS = ctx->ACC_M_ATOMS;
     const int REGS_PER_LANE = ctx->REGS_PER_LANE;
     const int NQK = ctx->NQK;
-    const int NUM_QH = ctx->NUM_QH;
     const int BLOCK_M = ctx->BLOCK_M;
     const int THREADS = ctx->THREADS;
     const int MFMA_N = 16; /* module-level constant MFMA_N (attention_tiled_2d.py:81) */
@@ -129,7 +128,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
             rocke_value_t* op_qh_mod = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, NQK));
             rocke_value_t* op_qh_t = rocke_b_add(b, op_qh_mul, op_qh_mod);
             rocke_value_t* op_ok_pos = rocke_b_cmp_lt(b, op_pos_t, cur_batch_q_len);
-            rocke_value_t* op_ok_qh = rocke_b_cmp_lt(b, op_qh_t, rocke_b_const_i32(b, NUM_QH));
+            rocke_value_t* op_ok_qh = rocke_b_cmp_lt(b, op_qh_t, rocke_gfx942_attn2d_num_qh(ctx));
             rocke_value_t* op_ok_inner = rocke_b_land(b, op_ok_pos, op_ok_qh);
             /* Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
             rocke_value_t* op_mask_t;
@@ -205,7 +204,8 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
         rocke_value_t* op_qh32_base = rocke_b_add(b, op_qh32_mul, op_qh32_mod);
         /* Python emits the pos cmp BEFORE the qh cmp, then AND's VALID_ROWS; bind in order. */
         rocke_value_t* op_ok_pos32 = rocke_b_cmp_lt(b, op_pos32_base, cur_batch_q_len);
-        rocke_value_t* op_ok_qh32 = rocke_b_cmp_lt(b, op_qh32_base, rocke_b_const_i32(b, NUM_QH));
+        rocke_value_t* op_ok_qh32
+            = rocke_b_cmp_lt(b, op_qh32_base, rocke_gfx942_attn2d_num_qh(ctx));
         rocke_value_t* op_ok_inner32 = rocke_b_land(b, op_ok_pos32, op_ok_qh32);
         /* Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         rocke_value_t* op_mask32_base;
@@ -303,7 +303,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
     rocke_value_t* op_qh_mod = rocke_b_mod(b, OUT_ROW_BASE, rocke_b_const_i32(b, NQK));
     rocke_value_t* op_qh = rocke_b_add(b, op_qh_mul, op_qh_mod);
     rocke_value_t* op_mask_pos = rocke_b_cmp_lt(b, op_pos, cur_batch_q_len);
-    rocke_value_t* op_mask_qh = rocke_b_cmp_lt(b, op_qh, rocke_b_const_i32(b, NUM_QH));
+    rocke_value_t* op_mask_qh = rocke_b_cmp_lt(b, op_qh, rocke_gfx942_attn2d_num_qh(ctx));
     rocke_value_t* op_mask_inner = rocke_b_land(b, op_mask_pos, op_mask_qh);
     /* Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
     rocke_value_t* op_mask;
