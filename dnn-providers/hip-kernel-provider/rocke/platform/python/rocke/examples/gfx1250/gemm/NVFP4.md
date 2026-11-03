@@ -118,10 +118,17 @@ Symbols use a codegen specialization suffix rather than an M/N/K tag: M changes
 only the grid, while baked addressing and K unrolling still distinguish kernels.
 `tools/check_byte_identity.py` uses a separate inventory of paired Python/C
 emitters, so its family totals do not establish NVFP4 builder coverage.
-`optimization_barrier_emit.{py,c}` also provides eight `hip` configurations:
-gfx950/gfx1250 × BF16/FP16 × absent/empty clobbers. The focused host test checks
-Python/native HIP text through the binding, independently of `ROCKE_BACKEND`;
-strict `both` is an LLVM comparison, not a HIP comparison.
+`optimization_barrier_emit.{py,c}` provides seventeen `hip` configurations:
+eight tensor epilogues (gfx950/gfx1250 × BF16/FP16 × absent/empty clobbers), four
+multiline/escaping cases, and five clobber cases (four on those targets plus the
+three-input gfx950 LDS-DMA form). The `rocke_optimization_barrier_hip_pair` CTest
+compares the actual prebuilt C emitter with the selected Python emitter for all
+seventeen configurations and the range boundary, in build and installed layouts.
+Binding tests check Python/native HIP lowering of Python-built IR independently
+of `ROCKE_BACKEND`; they do not check C-builder evaluation order. Strict `both` is
+an LLVM comparison, not a HIP comparison. See the
+[optimization-barrier coverage](../../../../../tests/README.md#optimization-barrier-coverage)
+for the maintained test inventory and scope.
 
 The host example test calls `nvfp4_gemm.main`; the GPU test below launches
 `nvfp4_gemm_verify` as a subprocess for COMGR/HIP, BF16/FP16, and both shapes:
