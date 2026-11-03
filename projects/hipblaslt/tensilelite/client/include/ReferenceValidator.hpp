@@ -126,6 +126,10 @@ namespace TensileLite
                 return m_referenceInputs[card];
             }
 
+        protected:
+            // Allow lifecycle tests to observe validation without device transfers.
+            virtual void validateSlots(std::vector<size_t> const& slots);
+
         private:
             void allocateResultBuffer(size_t bytes);
 
@@ -139,10 +143,11 @@ namespace TensileLite
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
-            ContractionProblem* m_problem;
+            ContractionProblem* m_problem = nullptr;
 
             bool m_enabled;
-            bool m_fusedA2A = false;
+            bool m_fusedA2A              = false;
+            bool m_validateAfterEnqueues = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -168,7 +173,6 @@ namespace TensileLite
             size_t m_errorsReported    = 0;
 
             bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
-            void validateSlots(std::vector<size_t> const& slots);
             bool recvMatches(size_t dst, ContractionInputs const& inputs);
         };
     } // namespace Client
