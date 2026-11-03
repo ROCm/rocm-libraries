@@ -39,7 +39,6 @@ from rocke.core.arch.target import (
     _mma_op_by_id,
     _GFX1250_SCALED_FAMILY,
     _mma_operand_rows,
-    _op_id_c_dtype,
     _op_id_family,
     normalize_dtype,
 )

@@ -356,7 +356,7 @@ class BlockGemm:
 
     def zero_acc(self, b: IRBuilder) -> list[list[Value]]:
         return [
-            [b.zero_vec_f32(self.op.c_frag_len) for _ in range(self.frags_n)]
+            [b.zero_vec_f32(self.op.srcs[2].frag_len) for _ in range(self.frags_n)]
             for _ in range(self.frags_m)
         ]
 

@@ -2018,7 +2018,7 @@ class BwdTileStep:
             for fm in range(g4.frags_m):
                 for fn in range(g4.frags_n):
                     frag = g4.mma_frag(
-                        b, b.zero_vec_f32(g4.op.c_frag_len), a_ds, kt_b, fm, fn,
+                        b, b.zero_vec_f32(g4.op.srcs[2].frag_len), a_ds, kt_b, fm, fn,
                         lane=lane, origin=self.o4,
                     )  # fmt: skip
                     hand_off([(fm, fn, frag)])

@@ -687,17 +687,12 @@ def _mma_dst_is_int(op_id: str) -> bool:
     return dtype_info(dtype).name == "i32"
 
 
-# Compatibility aliases for code that historically used C as the result role.
-_mma_c_frag_len = _mma_dst_frag_len
-_mma_c_is_int = _mma_dst_is_int
-
-
-def _mma_c_dtype(op_id: str) -> str:
-    """The accumulator dtype of ``op_id``, from the arch catalog.
+def _mma_dst_dtype(op_id: str) -> str:
+    """The result dtype of ``op_id``, from the arch catalog.
 
     Sourced from ``core/arch/data/arch_specs.json`` via
-    ``target._op_id_c_dtype``. Op_ids absent from the catalog accumulate in
-    fp32.
+    ``target._op_id_dst_dtype``. Op_ids absent from the catalog retain the
+    historical fp32 result default.
     """
     return _arch._op_id_dst_dtype().get(op_id, "fp32")
 
@@ -3219,7 +3214,7 @@ class IRBuilder:
         else:
             dst_frag_len = _mma_dst_frag_len(op_id)
             try:
-                dst_elem = dtype_to_ir_type(_mma_c_dtype(op_id))
+                dst_elem = dtype_to_ir_type(_mma_dst_dtype(op_id))
             except ValueError as exc:
                 raise ValueError(f"MMA destination dtype: {exc}") from exc
         hint = (

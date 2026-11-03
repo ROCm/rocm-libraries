@@ -17,6 +17,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.core.arch.h"
+#include "rocke/helper_rocke.helpers.mfma_attention.h"
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -82,6 +83,75 @@ static bool rejects_query(F query)
         return e.code() == ROCKE_ERR_VALUE;
     }
     return false;
+}
+
+static int check_wmma_source_result_roles(
+    const rocke_region_t* region, int source_width, int result_width, int* zeros, int* mmas)
+{
+    for(int i = 0; i < region->num_ops; ++i)
+    {
+        const auto* op = region->ops[i];
+        if(strcmp(op->name, "arith.constant_vec") == 0
+           && op->results[0]->type->elem->scalar == ROCKE_SCALAR_F32)
+        {
+            CHECK(op->results[0]->type->count == source_width);
+            ++*zeros;
+        }
+        if(strcmp(op->name, "tile.mma") == 0)
+        {
+            CHECK(op->operands[2]->type->count == source_width);
+            CHECK(op->results[0]->type->count == result_width);
+            ++*mmas;
+        }
+        for(int r = 0; r < op->num_regions; ++r)
+            CHECK(check_wmma_source_result_roles(
+                      op->regions[r], source_width, result_width, zeros, mmas)
+                  == 0);
+    }
+    return 0;
+}
+
+static int test_wmma_attention_accumulator_source_width()
+{
+    for(const char* gfx : {"gfx1151", "gfx11-generic", "gfx1201", "gfx12-generic"})
+        for(const char* dtype : {"fp16", "bf16"})
+        {
+            auto target = *rocke_arch_target_from_gfx(gfx);
+            char id[48];
+            rocke_wmma_attn_op_id(&target, dtype, id, sizeof(id));
+            auto atom = *rocke_mma_catalog_by_op_id(&target.mma, id);
+            // Asymmetric metadata tests the builder role, not a new physical ABI.
+            atom.srcs[2].frag_len = atom.dst.frag_len + 1;
+            target.mma.ops = &atom;
+            target.mma.num_ops = 1;
+            rocke_ir_builder_t builder;
+            CHECK(rocke_ir_builder_init(&builder, "wmma_operand_roles") == ROCKE_OK);
+            rocke_mfma_attn_params_t p = {};
+            const auto* elem = strcmp(dtype, "bf16") == 0 ? rocke_bf16() : rocke_f16();
+            const auto* ptr = rocke_ptr_type(&builder, elem, "global");
+            p.Q = rocke_b_param(&builder, "Q", ptr, NULL);
+            p.K = rocke_b_param(&builder, "K", ptr, NULL);
+            p.V = rocke_b_param(&builder, "V", ptr, NULL);
+            p.O = rocke_b_param(&builder, "O", ptr, NULL);
+            auto* zero = rocke_b_const_i32(&builder, 0);
+            auto* stride = rocke_b_const_i32(&builder, 16);
+            p.head_size = 16;
+            p.seqlen_k = rocke_b_param(&builder, "n", rocke_i32(), NULL);
+            p.q_tile_base = p.head_idx = p.kv_head_idx = zero;
+            p.stride_q_token = p.stride_q_head = p.stride_k_token = p.stride_k_head = stride;
+            p.stride_v_token = p.stride_v_head = p.stride_o_token = p.stride_o_head = stride;
+            p.scale_log2 = rocke_b_param(&builder, "scale", rocke_f32(), NULL);
+            p.dtype = dtype;
+            p.arch = gfx;
+            CHECK(rocke_wmma_attention_fwd_inner_body(&builder, &p, false, &target) == ROCKE_OK);
+            int zeros = 0, mmas = 0;
+            CHECK(check_wmma_source_result_roles(
+                      builder.kernel->body, atom.srcs[2].frag_len, atom.dst.frag_len, &zeros, &mmas)
+                  == 0);
+            CHECK(zeros == 2 && mmas == 2);
+            rocke_ir_builder_free(&builder);
+        }
+    return 0;
 }
 
 static int test_gfx942_catalog_keeps_fp64_rows_before_fp16()
@@ -1248,7 +1318,8 @@ int main()
        || test_scaled_wmma_supported_combinations() || test_emulated_rows_mirror_physical()
        || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom()
        || test_rdna_integer_wmma_rows_name_i8_and_i4()
-       || test_gfx942_catalog_keeps_fp64_rows_before_fp16())
+       || test_gfx942_catalog_keeps_fp64_rows_before_fp16()
+       || test_wmma_attention_accumulator_source_width())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})

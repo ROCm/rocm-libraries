@@ -1012,7 +1012,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "acc%d", d);
         iter_args[n_ia].name = name_buf[n_ia];
-        iter_args[n_ia].init = rocke_b_zero_vec_f32(b, c_frag);
+        iter_args[n_ia].init = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
         ++n_ia;
     }
 
@@ -1095,7 +1095,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             if(k_half_off != NULL)
                 k_elem_base = rocke_b_add(b, k_elem_base, k_half_off);
         }
-        rocke_value_t* score = rocke_b_zero_vec_f32(b, c_frag);
+        rocke_value_t* score = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
         for(int d = 0; d < n_dk; ++d)
         {
             rocke_value_t* k_frag;

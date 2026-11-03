@@ -1745,10 +1745,6 @@ def _op_id_dst_dtype() -> Dict[str, str]:
     return out
 
 
-# Compatibility for callers that used C to mean the instruction result.
-_op_id_c_dtype = _op_id_dst_dtype
-
-
 @lru_cache(maxsize=1)
 def _op_id_emulated_tf32_operands() -> Dict[str, Tuple[int, int, int]]:
     """``op_id -> (a_frag_len, b_frag_len, c_frag_len)`` for each emulated TF32 atom.
@@ -1758,7 +1754,7 @@ def _op_id_emulated_tf32_operands() -> Dict[str, Tuple[int, int, int]]:
     borrows from the physical atom it expands into, and the accumulator is
     ``vec<f32xM>``. Read from the catalog rather than restated, so a new emulated
     row needs no verifier edit. Same first-hit and raise-on-drift contract as
-    :func:`_op_id_c_dtype` -- an op_id names a specific atom, so its fragments
+    :func:`_op_id_dst_dtype` -- an op_id names a specific atom, so its fragments
     must be invariant across the arches that list it. Mirrored by
     ``rocke_arch_mma_op_id_emulated_operands`` in ``query.cpp``.
     """
@@ -1813,7 +1809,7 @@ def _op_id_physical_op_id() -> Dict[str, str]:
     only a logical op_id string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) needs
     it to size a fragment the emulated atom borrows rather than owns. Natively
     encoded rows contribute nothing. Same first-hit and raise-on-drift contract
-    as :func:`_op_id_c_dtype` — an op_id names a specific atom, so the
+    as :func:`_op_id_dst_dtype` — an op_id names a specific atom, so the
     instruction it expands into must be invariant across the arches listing it.
     Mirrored by ``rocke_arch_mma_op_id_physical_op_id`` in ``query.cpp``.
     """

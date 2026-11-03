@@ -5,18 +5,18 @@
 
 After the arch-SSOT cleanup, ``rocke.core.ir`` keeps *no* private frag-length or
 int-accumulator tables. ``IRBuilder.mma`` sizes a ``tile.mma`` result vector from
-a bare ``op_id`` string via three pieces:
+a bare ``op_id`` string via these pieces:
 
 * ``_mma_dst_frag_len`` — ``dst`` fragment length, resolved from the arch SSOT
   ``core.arch.target._MMA_FRAGMENT_INFO`` (no ir-side copy);
 * ``_mma_dst_is_int`` — whether the atom produces i32, resolved from the JSON
   catalog ``dst`` dtype (``target._op_id_dst_dtype``);
-* ``_mma_c_dtype`` -- the atom's accumulator dtype, resolved from the JSON catalog
-  (``target._op_id_c_dtype``); every catalog accumulator has an IR type;
+* ``_mma_dst_dtype`` -- the atom's result dtype, resolved from the JSON catalog
+  (``target._op_id_dst_dtype``); every catalog destination has an IR type;
 * ``_MMA_RESULT_HINT`` — the ir-side SSA result-name hints (naming only, kept in
   ir.py to preserve byte-identical value numbering).
 
-These must stay mutually consistent with the SSOT: any op_id that accumulates in
+These must stay mutually consistent with the SSOT: any op_id that produces
 i32, or that carries a result-name hint, must also have a fragment length in the
 SSOT, or ``IRBuilder.mma`` would raise on an otherwise-valid atom.
 
@@ -39,7 +39,6 @@ from rocke.core.arch.target import (
     _MMA_FRAGMENT_INFO,
     _frag_info,
     _load_specs,
-    _op_id_c_dtype,
     _op_id_dst_dtype,
     _op_id_physical_op_id,
 )
@@ -51,8 +50,7 @@ from rocke.core.ir import (
     F32,
     I32,
     IRBuilder,
-    _mma_c_dtype,
-    _mma_c_frag_len,
+    _mma_dst_dtype,
     dtype_to_ir_type,
 )
 
@@ -111,9 +109,9 @@ class TestMmaFragTables(unittest.TestCase):
             )
             self.assertEqual(info.a_scale_frag_len, 128 // row["scale_block_k"])
             self.assertEqual(info.b_scale_frag_len, info.a_scale_frag_len)
-            self.assertEqual(_mma_c_frag_len(row["op_id"]), 8)
+            self.assertEqual(_mma_dst_frag_len(row["op_id"]), 8)
             with self.assertRaises(ValueError):
-                _mma_c_frag_len(row["op_id"] + "_unknown")
+                _mma_dst_frag_len(row["op_id"] + "_unknown")
 
     def test_frag_lengths_are_positive(self):
         sizable = _sizable_op_ids()
@@ -130,10 +128,10 @@ class TestMmaFragTables(unittest.TestCase):
         with self.assertRaises(ValueError):
             _mma_dst_frag_len("not_a_real_op_id")
 
-    def test_int_acc_op_ids_have_frag_lengths(self):
+    def test_int_result_op_ids_have_frag_lengths(self):
         int_op_ids = [op for op, dtype in _op_id_dst_dtype().items() if dtype == "i32"]
         self.assertTrue(
-            int_op_ids, "expected at least one i32-accumulator atom in the catalog"
+            int_op_ids, "expected at least one i32-result atom in the catalog"
         )
         for op_id in int_op_ids:
             self.assertTrue(
@@ -143,7 +141,7 @@ class TestMmaFragTables(unittest.TestCase):
             self.assertGreater(
                 _mma_dst_frag_len(op_id),
                 0,
-                msg=f"int-accumulator op_id {op_id!r} has no SSOT frag length, so "
+                msg=f"integer-result op_id {op_id!r} has no SSOT frag length, so "
                 f"IRBuilder.mma would raise for it",
             )
 
@@ -158,7 +156,7 @@ class TestMmaFragTables(unittest.TestCase):
                 self.assertNotIn(op_id, _MMA_FRAGMENT_INFO)
                 self.assertIs(_frag_info(op_id), _MMA_FRAGMENT_INFO[physical])
                 self.assertEqual(
-                    _mma_c_frag_len(op_id), _MMA_FRAGMENT_INFO[physical].dst.frag_len
+                    _mma_dst_frag_len(op_id), _MMA_FRAGMENT_INFO[physical].dst.frag_len
                 )
 
     def test_non_integer_destinations_are_not_integer(self):
@@ -171,12 +169,12 @@ class TestMmaFragTables(unittest.TestCase):
             with self.subTest(op_id=op_id):
                 self.assertFalse(_mma_dst_is_int(op_id))
 
-    def test_an_op_id_outside_the_catalog_accumulates_in_fp32(self):
+    def test_an_op_id_outside_the_catalog_defaults_result_to_fp32(self):
         # mfma_f32_4x4x4_f16 has fragment information but no catalog row.
-        self.assertNotIn("mfma_f32_4x4x4_f16", _op_id_c_dtype())
-        self.assertEqual(_mma_c_dtype("mfma_f32_4x4x4_f16"), "fp32")
+        self.assertNotIn("mfma_f32_4x4x4_f16", _op_id_dst_dtype())
+        self.assertEqual(_mma_dst_dtype("mfma_f32_4x4x4_f16"), "fp32")
 
-    def test_mma_results_take_the_accumulator_dtype(self):
+    def test_mma_results_take_the_destination_dtype(self):
         for gfx, op_id, c, a_type, result in (
             ("gfx942", "mfma_f32_16x16x16_f16", (F32, 4), (F16, 4), "vec<f32x4>"),
             ("gfx1151", "wmma_i32_16x16x16_iu8", (I32, 8), (I32, 4), "vec<i32x8>"),
@@ -188,12 +186,12 @@ class TestMmaFragTables(unittest.TestCase):
                 self.assertEqual(b.mma(op, a, a, b.zero_vec(*c)).type.name, result)
                 self.assertEqual(b.mma(op_id, a, a, b.zero_vec(*c)).type.name, result)
 
-    def test_every_catalog_accumulator_has_an_ir_type(self):
+    def test_every_catalog_destination_has_an_ir_type(self):
         for gfx in known_arches():
             for op in ArchTarget.from_gfx(gfx).mma.ops:
                 with self.subTest(gfx=gfx, op_id=op.op_id):
-                    dtype_to_ir_type(op.c_dtype)
-                    self.assertEqual(_mma_c_dtype(op.op_id), op.c_dtype)
+                    dtype_to_ir_type(op.dst.dtype)
+                    self.assertEqual(_mma_dst_dtype(op.op_id), op.dst.dtype)
 
     def test_native_mma_results_match_the_python_builder(self):
         executable = os.environ.get("ROCKE_IR_TYPES_TEST")
