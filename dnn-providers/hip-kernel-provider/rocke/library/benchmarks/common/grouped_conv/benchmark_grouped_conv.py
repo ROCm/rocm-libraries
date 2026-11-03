@@ -773,14 +773,14 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
             launchers: list[KernelLauncher] = []
             try:
                 try:
-                    launchers = [
-                        KernelLauncher(
-                            hsaco=hsaco,
-                            kernel_name=meta["kernel_name"],
-                            signature=list(step.signature),
+                    for step, (hsaco, meta) in zip(plan.steps, entries):
+                        launchers.append(
+                            KernelLauncher(
+                                hsaco=hsaco,
+                                kernel_name=meta["kernel_name"],
+                                signature=list(step.signature),
+                            )
                         )
-                        for step, (hsaco, meta) in zip(plan.steps, entries)
-                    ]
                     # Each step bound once: a timed loop that packs per
                     # launch times the host, not a short kernel.
                     bound = [
@@ -853,6 +853,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                     flush=True,
                 )
             finally:
+                synchronize_and_release(0)
                 for launcher in launchers:
                     launcher.unload()
     finally:
