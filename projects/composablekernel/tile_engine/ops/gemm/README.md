@@ -33,6 +33,7 @@ Tile Engine does — it only swaps the harness.
 |---|---|
 | `gemm_full_benchmark.py` | Driver: compile (Phase 1) → load problems (Phase 2) → benchmark across all visible GPUs (Phase 3). |
 | `run_one_gemm_kernel.py` | Disposable worker: loads one `.so` in an isolated subprocess and times it. A GPU fault kills only the worker. |
+| `gemm_search.py` | Adaptive search mode of the driver (`--search-config`), see [Adaptive kernel search](#adaptive-kernel-search---search-config). |
 
 To measure only the kernels a trained model picks, and to score the picks
 against a full sweep, see
@@ -155,6 +156,113 @@ measures and reports exactly as described above.
 The files a run writes (`--csv`, `--failures-csv`, `--repeat-csv`) and the
 `--pairs` file must all be different files; the driver refuses to start
 otherwise.
+
+### Adaptive kernel search (`--search-config`)
+
+Instead of building and measuring every eligible `(problem, kernel)` pair, a
+search run lets one strategy per problem propose the next kernel to try, builds
+only the proposed kernels (each at most once per run, shared by all problems),
+measures them with `--verify` and learns from each verified result. At the end
+it re-measures the best kernels of each problem with fresh verified calls and
+exports only the confirmed winners. The coordinator is
+`tile_engine/ops/common/adaptive_search.py`; the strategies are a vendored copy
+of the ROCKE search core in `dispatcher/python/ck_search` (see its `VENDOR.md`).
+
+```bash
+cat > search.json <<'EOF'
+{"schema_version": 1, "strategy": "tpe", "seed": 7,
+ "trials_per_problem": 60, "new_builds_per_run": 400,
+ "confirm": {"finalists": 2, "fresh_calls": 3}}
+EOF
+python gemm_full_benchmark.py configs/default_config.json --variant gemm_universal \
+    --arch gfx950 --dtype fp16 --layout rcr --problems problems.json --devices 0, \
+    --search-config search.json --search-output-dir runs/search-001
+
+# winners.json is a --pairs file: re-check the winners with a plain run
+python gemm_full_benchmark.py configs/default_config.json --variant gemm_universal \
+    --arch gfx950 --dtype fp16 --layout rcr --problems problems.json \
+    --pairs runs/search-001/winners.json --verify --devices 0, --csv recheck.csv
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `schema_version` | required | `1` |
+| `strategy` | required | `random`, `exhaustive`, `de`, `hill`, `tpe`, `gp` or `portfolio` |
+| `trials_per_problem` | required | measured trials per problem, failures and warm starts included |
+| `new_builds_per_run` | required | distinct kernels the run may build (failed builds count); at least `trials_per_problem` |
+| `seed`, `seed_policy` | `0`, `shared` | `per_problem` gives problem `i` the seed `seed + i` |
+| `deadline_s` | `3600` | stops admitting trials; running work and the confirmation still finish |
+| `batch_per_problem` | `4` | trials a problem may propose per round |
+| `max_stall_rounds` | `8` | rounds in a row without a new result before the run stops |
+| `warm_start.pairs_file`, `top_k` | none, `5` | a `--pairs` file (e.g. from `select_kernels.py --out_pairs`): the first `top_k` listed kernels of a problem are tried first |
+| `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
+| `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
+| `measurement_policy` | `full` | the only value |
+
+Unknown keys are an error; relative warm-start paths are read from the settings
+file's directory.
+
+Budget: each round, every active problem in turn proposes up to
+`batch_per_problem` trials (re-queued ones first), capped by its trials left
+and by the build capacity left once the distinct new kernels the round already
+needs are subtracted. A kernel that is already built, or planned this round,
+costs no further build, so problems that share kernels leave room for others,
+and a round never plans more builds than `new_builds_per_run` allows.
+
+Option rules:
+
+- `--search-config` and `--search-output-dir` go together, for `gemm_universal`
+  only. `--list-pairs`, `--repeat-top` and `--failures-csv` are rejected; the
+  search writes its own records and `--csv` is not written.
+- Every measurement is verified and runs one kernel per worker, whatever
+  `--verify` and `--batch-size` say, so a failure always names one kernel.
+  `--verify-tol`, `--kernel-timeout`, `--workers`, `--build-timeout` and
+  `--devices` apply as usual.
+- The candidates of a problem are exactly the kernels a full run measures with
+  it when every kernel builds (its `--list-pairs` pairs). `--pairs` and
+  `--max-kernels` narrow them (recorded in `run.json`); `--pairs` also limits
+  the search to the problems it lists, and is not a warm start. A listed
+  problem none of whose listed kernels pair with it stays unresolved. A
+  problem with fewer candidates than `trials_per_problem` is measured
+  exhaustively. The fixed-vector-width kernels a full run falls back to when a
+  native kernel fails to build are not candidates.
+
+Outputs, in a directory that must not hold an earlier run:
+
+| File | Content |
+|---|---|
+| `winners.json` | `{"MxNxK": [kernel]}` for the confirmed winners only (a `--pairs` file) |
+| `summary.json` | status (`complete`, `partial`, `no_winner`), stop reason, each winner's confirmed median, each unresolved problem with its reason, counts and budget |
+| `run.json` | settings, build context, sources (commit, sha256 of the config and problem files), per-problem candidates, strategy and seed |
+| `trials.jsonl` | one event per trial, build, result, confirmation call, re-queue, cancel and error (with its traceback) |
+| `rounds/NNNN-measure.csv`, `rounds/NNNN-confirm.csv` | the usual results CSV of each measure call; the `.json` next to it maps `problem_idx` to the request and holds the call's failure records |
+| `artifacts/<kernel>.so` | the run's copy of each built kernel; only these copies are loaded, and one that changed since its build is refused |
+
+Exit status: `0` when every problem has a confirmed winner, `1` when any has
+none or the run stopped on an error, `2` for invalid options or settings. An
+error (a build or worker pool that dies, a strategy failure) ends the search,
+but the finalists measured before it are still confirmed and exported; the
+status is then at best `partial` and `summary.json` holds the error. When the
+adapter breaks its contract (a lost or repeated outcome), nothing is confirmed.
+
+Only a verified row of the requested kernel and problem with a finite positive
+latency counts as a result. A verification failure is `numeric_fail`; a blank
+`verified`, a bad latency or unreadable worker output is `invalid_measurement`;
+a worker error, crash or wrong kernel identity is `run_error`; a failed build is
+`compile_error` for every problem that wanted the kernel (one build charged); a
+kernel the worker never reached is retried once. Nothing falls back to an
+unconfirmed result. A search run asks the worker to check each library's
+identity (`check_identity`): a library whose own name
+(`GpuGemmRunner.kernel_name`, the codegen `KERNEL_NAME` that
+`GemmKernelConfig.name` reproduces) is not the requested kernel is refused
+with an error naming both. The worker also reports that name as
+`loaded_kernel` in its raw output, for information only: the driver copies it
+into neither its rows nor its CSV.
+
+Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
+`summary.json` and the failing calls in `trials.jsonl`. If nearly every
+candidate gets built, the problems are choosing different kernels: lower
+`new_builds_per_run` or keep the default `shared` seed policy.
 
 ### Multi-GPU parallelism
 

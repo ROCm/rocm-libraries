@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""
+--search-config / --search-output-dir of the tile_engine GEMM sweep driver
+(gemm_full_benchmark.py).
+
+A run without them is unchanged and never loads the search modules; invalid
+combinations exit 2; a search run measures only verified single-kernel batches
+of the pairs a full run would measure, writes a winners.json the driver's
+--pairs accepts, and exits 0 only when every problem has a confirmed winner.
+Also: get_arch_filter_data no longer grows sys.path on every call.
+
+No GPU or compiler needed: the build and the GPU batch runner are stubbed, the
+real ck_search strategies run. Run: python3 -m pytest -q tests/test_gemm_search_cli.py
+"""
+
+import csv
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+DISPATCHER_DIR = Path(__file__).resolve().parent.parent
+GEMM_TE_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
+sys.path.insert(0, str(DISPATCHER_DIR / "python"))
+sys.path.insert(0, str(GEMM_TE_DIR))
+sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+
+import ctypes_utils as cu  # noqa: E402
+import gemm_full_benchmark as drv  # noqa: E402
+from _gemm_driver_stubs import run_stub_driver  # noqa: E402
+
+PROBLEMS = [
+    {"M": 512, "N": 512, "K": 512},
+    {"M": 1024, "N": 512, "K": 256},
+    {"M": 256, "N": 1024, "K": 512},
+]
+# Pairs with only the fixed-vector-width kernels: a candidate list that ignores
+# the pairing rule shows up on it (the aligned problems pair with every native).
+MISALIGNED = {"M": 1000, "N": 520, "K": 250}
+KEYS = [drv.problem_key(p) for p in PROBLEMS]
+SEARCH_MODULES = ("gemm_search", "adaptive_search", "ck_search")
+LEGACY_CSV = ["kernel", "problem_idx", "M", "N", "K", "device", "latency_ms",
+              "tflops", "non_zero", "max_rel", "verified"]
+
+
+def _ms(name):
+    return 1.0 + (sum(map(ord, name)) % 97) / 100.0
+
+
+def _main(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
+          devices=("0",)):
+    """Run the driver with a stub build (real files, so the search can copy
+    them) and a stub GPU runner; ``bad`` names fail verification ("*": all).
+    Returns (rc, out, built names, calls)."""
+    libs = tmp_path / "libs"
+    libs.mkdir(exist_ok=True)
+    built, calls = [], []
+
+    def build(cfgs, **kw):
+        built.extend(c.name for c in cfgs)
+        for c in cfgs:
+            (libs / f"lib{c.name}.so").write_text(c.name)
+        return [libs / f"lib{c.name}.so" for c in cfgs]
+
+    def run_batch(device_id, unit, args, worker_path, base_env, extra=None, **kw):
+        prob_idx, prob, batch = unit
+        names = [cfg.name for _, cfg, _ in batch]
+        calls.append({"names": names, "prob": prob, "verify": args.verify,
+                      "batch_size": args.batch_size, "extra": extra,
+                      "worker": (worker_path, base_env.get("GEMM_PYPATH"))})
+        rows, n_fail = [], 0
+        for name in names:
+            ok = not (bad == "*" or name in bad)
+            rows.append({"kernel": name, "problem_idx": prob_idx, **prob,
+                         "device": device_id, "latency_ms": _ms(name), "tflops": 1.0,
+                         "non_zero": 1, "max_rel": 0.0,
+                         "verified": ok if args.verify else ""})
+            if not ok:
+                n_fail += 1
+                if kw.get("failures") is not None:
+                    kw["failures"].append({
+                        "kernel": name, "problem_idx": prob_idx, **prob,
+                        "device": device_id, "kind": "mismatch", "error": "max_rel 0.9"})
+        return rows, [], n_fail, 0
+
+    rc, cap = run_stub_driver(drv, monkeypatch, capsys, tmp_path, problems, *argv,
+                              build=build, run_batch=run_batch, devices=devices)
+    return rc, cap, built, calls
+
+
+def _assert_worker(calls):
+    """Every batch ran the driver's worker with its GEMM_PYPATH."""
+    want = (GEMM_TE_DIR / "run_one_gemm_kernel.py", os.pathsep.join(
+        [str(DISPATCHER_DIR / "python"), str(GEMM_TE_DIR)]))
+    assert calls and all(c["worker"] == want for c in calls)
+
+
+def _settings(tmp_path, **kw):
+    s = {"schema_version": 1, "strategy": "tpe", "seed": 3, "trials_per_problem": 5,
+         "new_builds_per_run": 12, "batch_per_problem": 3,
+         "confirm": {"finalists": 2, "fresh_calls": 2}}
+    s.update(kw)
+    path = tmp_path / "search.json"
+    path.write_text(json.dumps(s))
+    return str(path)
+
+
+def _search(monkeypatch, capsys, tmp_path, *argv, bad=(), problems=PROBLEMS,
+            devices=("0",), **settings):
+    out = tmp_path / "run"
+    got = _main(monkeypatch, capsys, tmp_path, "--search-config",
+                _settings(tmp_path, **settings), "--search-output-dir", str(out),
+                *argv, bad=bad, problems=problems, devices=devices)
+    return (*got, out)
+
+
+def _listing(monkeypatch, capsys, tmp_path, problems=PROBLEMS):
+    path = tmp_path / "pairs.json"
+    rc, _, built, _ = _main(monkeypatch, capsys, tmp_path, "--list-pairs", str(path),
+                            problems=problems)
+    assert rc == 0 and not built
+    return json.loads(path.read_text())["pairs"]
+
+
+def _read(out, name):
+    return json.loads((out / name).read_text())
+
+
+def test_run_without_search_is_unchanged_and_loads_no_search_module(
+    monkeypatch, capsys, tmp_path
+):
+    for name in list(sys.modules):
+        if name.split(".")[0] in SEARCH_MODULES:
+            monkeypatch.delitem(sys.modules, name)
+    rc, _, built, calls = _main(monkeypatch, capsys, tmp_path, "--verify")
+    assert rc == 0 and built
+    assert all(c["extra"] is None and c["batch_size"] == 20 for c in calls)
+    _assert_worker(calls)
+    assert not [n for n in sys.modules if n.split(".")[0] in SEARCH_MODULES]
+    with open(tmp_path / "out.csv", newline="") as f:
+        assert csv.DictReader(f).fieldnames == LEGACY_CSV
+
+
+@pytest.mark.parametrize("argv, message", [
+    (["--search-config", "{S}"], "go together"),
+    (["--search-output-dir", "{O}"], "go together"),
+    (["--search-config", "", "--search-output-dir", ""], "go together"),
+    (["--search-config", "{S}", "--search-output-dir", "{O}", "--list-pairs", "x.json"],
+     "does not take --list-pairs"),
+    (["--search-config", "{S}", "--search-output-dir", "{O}", "--repeat-top", "2"],
+     "does not take --repeat-top"),
+    (["--search-config", "{S}", "--search-output-dir", "{O}", "--failures-csv", "f.csv"],
+     "does not take --failures-csv"),
+    (["--search-config", "{S}", "--search-output-dir", "{O}", "--variant",
+      "gemm_multi_d"], "gemm_universal only"),
+    (["--search-config", "{BAD}", "--search-output-dir", "{O}"], "unknown key"),
+    (["--search-config", "{S}", "--search-output-dir", "{OLD}"], "already holds a run"),
+])
+def test_invalid_search_options_exit_2(monkeypatch, capsys, tmp_path, argv, message):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"schema_version": 1, "strategy": "tpe",
+                               "trials_per_problem": 2, "new_builds_per_run": 4,
+                               "bogus": 1}))
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "run.json").write_text("{}")
+    subs = {"{S}": _settings(tmp_path), "{O}": str(tmp_path / "new"),
+            "{BAD}": str(bad), "{OLD}": str(old)}
+    argv = [subs.get(a, a) for a in argv]
+    with pytest.raises(SystemExit) as e:
+        _main(monkeypatch, capsys, tmp_path, *argv)
+    assert e.value.code == 2
+    assert message in capsys.readouterr().err
+    assert not (tmp_path / "new").exists() and not any((tmp_path / "libs").iterdir())
+
+
+@pytest.mark.parametrize("case, message", [
+    ("no_devices", "no GPU to measure on"),
+    ("pairs_file", "warm_start.pairs_file: entry"),
+    ("ranked_csv", "ranked.csv line 2: expected an MxNxK problem and a number"),
+])
+def test_search_setup_errors_exit_2_before_any_build(
+    monkeypatch, capsys, tmp_path, case, message
+):
+    (tmp_path / "warm.json").write_text(json.dumps({KEYS[0]: 7}))
+    (tmp_path / "ranked.csv").write_text(
+        f"problem,rank,kernel,predicted_tflops\n{KEYS[0]},1,kA\n")
+    warm = {"pairs_file": {"pairs_file": "warm.json"},
+            "ranked_csv": {"ranked_csv": "ranked.csv", "use_prior": True}}.get(case)
+    rc, cap, built, calls, out = _search(
+        monkeypatch, capsys, tmp_path, devices=() if case == "no_devices" else ("0",),
+        **({"warm_start": warm} if warm else {}))
+    assert rc == 2 and message in cap.out
+    assert not built and not calls and not (out / "summary.json").exists()
+
+
+def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path):
+    eligible = _listing(monkeypatch, capsys, tmp_path)
+    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path)
+    assert rc == 0, cap.out
+    # Every measurement is one verified kernel with the identity check.
+    assert calls and all(
+        len(c["names"]) == 1 and c["verify"] and c["batch_size"] == 1
+        and c["extra"] == {"check_identity": True} for c in calls)
+    _assert_worker(calls)
+    assert len(set(built)) == len(built) <= 12
+    assert {p.name for p in (out / "artifacts").iterdir()} == {f"{n}.so" for n in built}
+    winners = drv.load_pair_list(out / "winners.json")
+    assert set(winners) == set(KEYS)
+    for key, prob in zip(KEYS, PROBLEMS):
+        (name,) = winners[key]
+        assert name in eligible[key]
+        tried = {c["names"][0] for c in calls if c["prob"] == prob}
+        # Confirmation repeats the discovery latency: the fastest tried wins.
+        assert len(tried) <= 5 and _ms(name) == min(map(_ms, tried))
+    summary, run = _read(out, "summary.json"), _read(out, "run.json")
+    assert (summary["status"], summary["exit_code"]) == ("complete", 0)
+    assert summary["counts"]["confirm_calls"] == 2 * 2 * len(KEYS)
+    assert (run["sampling_policy"], run["exhaustive"]) == ("adaptive", False)
+    assert (run["context"]["arch"], run["context"]["variant"]) == ("gfx950", "standard")
+    assert "SEARCH COMPLETE: 3/3 problems" in cap.out
+    # Today's driver re-checks the winners from the file as a --pairs list.
+    rc, _, rebuilt, recalls = _main(monkeypatch, capsys, tmp_path, "--pairs",
+                                    str(out / "winners.json"), "--verify")
+    assert rc == 0 and set(rebuilt) == {n for v in winners.values() for n in v}
+    assert {(c["prob"]["M"], c["prob"]["N"], c["prob"]["K"], n)
+            for c in recalls for n in c["names"]} == {
+        (p["M"], p["N"], p["K"], winners[k][0]) for k, p in zip(KEYS, PROBLEMS)}
+
+
+def test_ranked_csv_is_the_search_prior(monkeypatch, capsys, tmp_path):
+    eligible = _listing(monkeypatch, capsys, tmp_path)
+    rows = [f"{KEYS[0]},{i + 1},{name},{10.0 - i}"
+            for i, name in enumerate(eligible[KEYS[0]][:3])]
+    (tmp_path / "ranked.csv").write_text(
+        "problem,rank,kernel,predicted_tflops\n" + "\n".join(rows) + "\n")
+    rc, cap, built, calls, out = _search(
+        monkeypatch, capsys, tmp_path,
+        warm_start={"ranked_csv": "ranked.csv", "use_prior": True})
+    assert rc == 0, cap.out
+    entries = {k: p["prior_entries"] for k, p in _read(out, "run.json")["problems"].items()}
+    assert entries == {KEYS[0]: 3, KEYS[1]: 0, KEYS[2]: 0}
+
+
+def _domain_sha256(pairs):
+    return hashlib.sha256(json.dumps(pairs, sort_keys=True).encode()).hexdigest()
+
+
+def test_search_candidates_are_the_pairs_a_full_run_measures(
+    monkeypatch, capsys, tmp_path
+):
+    problems = PROBLEMS[:1] + [MISALIGNED]
+    eligible = _listing(monkeypatch, capsys, tmp_path, problems)
+    sizes = {k: len(v) for k, v in eligible.items()}
+    assert sizes[drv.problem_key(MISALIGNED)] > sizes[KEYS[0]]
+    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path,
+                                         problems=problems, strategy="random",
+                                         new_builds_per_run=24)
+    assert rc == 0, cap.out
+    run = _read(out, "run.json")
+    assert {k: p["eligible"] for k, p in run["problems"].items()} == sizes
+    assert run["context"]["domain_sha256"] == _domain_sha256(eligible)
+    for c in calls:
+        assert c["names"][0] in eligible[drv.problem_key(c["prob"])]
+
+
+def test_pairs_restricts_the_search_domain(monkeypatch, capsys, tmp_path):
+    problems = PROBLEMS + [MISALIGNED]
+    eligible = _listing(monkeypatch, capsys, tmp_path, problems)
+    odd = drv.problem_key(MISALIGNED)
+    unpaired = next(n for n in eligible[odd] if n not in eligible[KEYS[0]])
+    # Two paired kernels per problem, plus one the first problem does not pair.
+    picks = {k: names[:2] for k, names in eligible.items()}
+    picks[KEYS[0]] = picks[KEYS[0]] + [unpaired]
+    path = tmp_path / "picks.json"
+    path.write_text(json.dumps(picks))
+    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path,
+                                         "--pairs", str(path), problems=problems)
+    assert rc == 0, cap.out
+    assert "the search builds only the kernels it proposes" in cap.out
+    assert "building" not in cap.out
+    domain = {k: [n for n in v if n in eligible[k]] for k, v in picks.items()}
+    assert unpaired not in domain[KEYS[0]]
+    assert set(built) <= {n for v in domain.values() for n in v}
+    run = _read(out, "run.json")
+    assert run["context"]["pairs_file"] == str(path)
+    assert run["context"]["domain_sha256"] == _domain_sha256(domain)
+    # Two candidates and five trials per problem: searched exhaustively.
+    assert all(p["strategy"] == "exhaustive" and p["eligible"] == 2
+               for p in run["problems"].values())
+
+
+def test_pairs_subset_searches_only_its_problems(monkeypatch, capsys, tmp_path):
+    eligible = _listing(monkeypatch, capsys, tmp_path)
+    path = tmp_path / "picks.json"
+    path.write_text(json.dumps({KEYS[1]: eligible[KEYS[1]][:3]}))
+    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path,
+                                         "--pairs", str(path))
+    assert rc == 0, cap.out
+    assert list(_read(out, "run.json")["problems"]) == [KEYS[1]]
+    assert _read(out, "winners.json").keys() == {KEYS[1]}
+    assert {drv.problem_key(c["prob"]) for c in calls} == {KEYS[1]}
+    assert "SEARCH COMPLETE: 1/1 problems" in cap.out
+
+
+def test_pairs_problem_without_a_paired_kernel_is_unresolved(
+    monkeypatch, capsys, tmp_path
+):
+    problems = PROBLEMS[:1] + [MISALIGNED]
+    eligible = _listing(monkeypatch, capsys, tmp_path, problems)
+    unpaired = next(n for n in eligible[drv.problem_key(MISALIGNED)]
+                    if n not in eligible[KEYS[0]])
+    path = tmp_path / "picks.json"
+    path.write_text(json.dumps({KEYS[0]: [unpaired]}))
+    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path,
+                                         "--pairs", str(path), problems=problems)
+    assert rc == 1 and not built and not calls
+    summary = _read(out, "summary.json")
+    assert summary["unresolved"] == {KEYS[0]: "no eligible candidates"}
+
+
+def test_search_without_a_winner_exits_1(monkeypatch, capsys, tmp_path):
+    rc, cap, built, calls, out = _search(monkeypatch, capsys, tmp_path, bad="*",
+                                         strategy="random")
+    assert rc == 1 and built and calls
+    assert _read(out, "winners.json") == {}
+    summary = _read(out, "summary.json")
+    assert (summary["status"], summary["exit_code"]) == ("no_winner", 1)
+    assert summary["counts"]["failed_by_status"]["numeric_fail"] == len(calls)
+    assert summary["counts"]["confirm_calls"] == 0
+
+
+def test_get_arch_filter_data_does_not_grow_sys_path(monkeypatch):
+    # It runs once per expanded config: a full sweep used to add one entry per call.
+    codegen = str(cu.get_dispatcher_root() / "codegen")
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != codegen])
+    n = len(sys.path)
+    for _ in range(3):
+        assert cu.get_arch_filter_data()["supported_archs"]
+    assert len(sys.path) == n + 1 and sys.path.count(codegen) == 1

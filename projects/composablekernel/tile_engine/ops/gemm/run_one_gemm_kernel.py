@@ -15,12 +15,20 @@ Input JSON format:
 
 Optional top-level keys ``verify`` (bool) and ``verify_tol`` (float) enable an
 fp32 numpy reference check; when set, each OK result also carries ``verified``
-and ``max_rel``.
+and ``max_rel``. With ``check_identity`` (bool) a library whose own kernel name
+is not the requested ``kernel_name`` is refused (the adaptive search sets it).
 
 Output JSON format (one line per kernel):
     {"idx": 0, "ok": true, "ms": 0.123, "tflops": 456.7, "non_zero": 1, "kernel": "..."}
     {"idx": 0, "ok": true, ..., "verified": true, "max_rel": 3.1e-4}   # with --verify
     {"idx": 1, "ok": false, "error": "...", "kernel": "..."}
+
+``kernel`` echoes the request; ``loaded_kernel``, when the library loaded, is
+the name the library itself reports (``GpuGemmRunner.kernel_name``, the codegen
+``KERNEL_NAME`` that ``GemmKernelConfig.name`` reproduces). ``loaded_kernel``
+is informational, for readers of the raw worker output: the driver does not
+copy it into its rows or CSV. The identity is enforced by ``check_identity``
+above, whose error names both kernels.
 """
 
 import json
@@ -48,6 +56,16 @@ def _is_multi_abd(kernel_name):
     return "_multiabd_" in (kernel_name or "")
 
 
+def _check_identity(runner, kernel_name):
+    """Refuse a library that reports another kernel than the requested one, so
+    a stale or mislabeled .so cannot produce a result for the wrong kernel."""
+    if runner.kernel_name != kernel_name:
+        raise RuntimeError(
+            f"identity mismatch: the library reports {runner.kernel_name!r}, "
+            f"requested {kernel_name!r}"
+        )
+
+
 def _run_one(
     idx,
     so_path,
@@ -59,6 +77,7 @@ def _run_one(
     a_op=None,
     b_op=None,
     cde_op=None,
+    check_identity=False,
 ):
     """Run a single kernel and emit its result as one JSON line.
 
@@ -88,6 +107,8 @@ def _run_one(
                 b_elementwise_op=b_op,
                 cde_elementwise_op=cde_op,
             )
+            if check_identity:
+                _check_identity(runner, kernel_name)
             # The multi_abd runner computes its own numpy reference (it owns the
             # operands), so verification flows through the runner, not the A@B
             # check below.
@@ -109,6 +130,8 @@ def _run_one(
 
             # CRITICAL: load the library ONLY inside this subprocess.
             runner = GpuGemmRunner(lib_path=so_path)
+            if check_identity:
+                _check_identity(runner, kernel_name)
             result = runner.run(A, B, problem)
 
         if result.success:
@@ -124,6 +147,7 @@ def _run_one(
                 "tflops": result.tflops,
                 "non_zero": non_zero,
                 "kernel": kernel_name,
+                "loaded_kernel": runner.kernel_name,
             }
             if verify and _is_multi_abd(kernel_name):
                 # Multi-ABD verifies against its own full multi-tensor reference
@@ -163,6 +187,7 @@ def _run_one(
                         "ok": False,
                         "error": f"kernel returned status {result.status}",
                         "kernel": kernel_name,
+                        "loaded_kernel": runner.kernel_name,
                     }
                 ),
                 flush=True,
@@ -190,6 +215,7 @@ def main():
 
     verify = bool(d.get("verify", False))
     verify_tol = float(d.get("verify_tol", 2e-2))
+    check_identity = bool(d.get("check_identity", False))
 
     if "items" in d:
         for i, item in enumerate(d["items"]):
@@ -204,6 +230,7 @@ def main():
                 a_op=item.get("a_elementwise_op"),
                 b_op=item.get("b_elementwise_op"),
                 cde_op=item.get("cde_elementwise_op"),
+                check_identity=check_identity,
             )
     else:
         _run_one(
@@ -217,6 +244,7 @@ def main():
             a_op=d.get("a_elementwise_op"),
             b_op=d.get("b_elementwise_op"),
             cde_op=d.get("cde_elementwise_op"),
+            check_identity=check_identity,
         )
 
 
