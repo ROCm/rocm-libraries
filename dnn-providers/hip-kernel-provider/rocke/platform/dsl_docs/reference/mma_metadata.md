@@ -121,7 +121,8 @@ arrive in any shape its own matrix format allows:
 
 A mixed op such as fp8 x fp4 takes `vec<fp8e4m3x64>` for A and `vec<i32x8>` for
 B. Any other shape is refused with an error naming the operand and the register
-type. These operations lower with LLVM 23 only.
+type, including a packed payload of fewer words than its format needs (an
+incomplete matrix). These operations lower with LLVM 23 only.
 
 For gfx950, select the 32x32x64 scaled-MFMA family in the same way. This
 example selects FP8 A and FP4 B, with independent E8M0 scales over K32:

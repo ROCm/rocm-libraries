@@ -402,7 +402,7 @@ take one form (`core/isa/matrix_operand_forms.py`):
 | Form | The operand the kernel holds | What reaches the instruction |
 |---|---|---|
 | `AsIs(t)` | `t`, or the same bits in another shape | unchanged, or one `bitcast` |
-| `ZeroPadded(<m x i32>)` | packed `<n x i32>` words, n <= m | the words, then m - n zero words |
+| `ZeroPadded(<m x i32>, n)` | exactly its `n` packed words as `<n x i32>`, or the whole `<m x i32>` register | the words, then m - n zero words; the register unchanged |
 | `EvenHalves(<2n x h>)` | n 16-bit values | the values in the even half-slots |
 
 A register type that changed at a newer LLVM flavor is a `FlavorType`. The

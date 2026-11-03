@@ -52,7 +52,7 @@ from rocke.core.ir import (
 )
 from rocke.core.isa.matrix_operand_forms import AsIs, ZeroPadded, f8f6f4_operand_form
 from rocke.core.lower_llvm import LLVM_FLAVORS
-from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
 from rocke.tests.ir_validity import target_instructions
 from rocke.tests.lane_maps import lane_placements
 
@@ -131,10 +131,13 @@ def test_an_operand_layout_names_the_matrix_formats():
 
 @pytest.mark.parametrize("dtype", list(MATRIX_FORMATS) + ["fp4", "bf6"])
 def test_an_8_bit_operand_passes_as_is_and_a_narrower_one_is_zero_padded(dtype):
+    """A 6-bit format takes exactly 12 of the 16 words and a 4-bit one 8."""
     register = VectorType(I32, 16)
     form = f8f6f4_operand_form(dtype, register)
     expected = AsIs if _bits(dtype) == 8 else ZeroPadded
     assert type(form) is expected and form.register_type == register
+    if expected is ZeroPadded:
+        assert form.payload_words == {6: 12, 4: 8}[_bits(dtype)]
 
 
 def test_an_operand_form_names_the_matrix_formats():
@@ -352,6 +355,34 @@ def test_both_engines_call_the_f4_32x16x128_intrinsic(flavor):
     types, _ = _call(text, _F4)
     assert types == ["<16 x i32>", "<8 x i32>", "i16 0", "<16 x float>"]
     assert "zeroinitializer, <16 x i32>" not in text
+
+
+@pytest.mark.parametrize("dtype", ["fp6e2m3", "fp6e3m2", "fp4e2m1"])
+def test_both_engines_refuse_a_narrow_operand_short_of_its_packed_words(dtype):
+    """64 fp6 values are twelve packed words and 64 fp4 values eight. One word
+    fewer is an incomplete operand, so both engines refuse it instead of
+    padding it into a different matrix."""
+    op_id = f"wmma_gfx1250_f32_16x16x128_f8f6f4_{dtype}_fp8e4m3"
+    op = _op(op_id)
+    words = 64 * _bits(dtype) // 32
+    b = IRBuilder(f"gfx1250_short_{op_id}")
+    out = b.param("D", PtrType(dtype_to_ir_type(op.c_dtype), "global"))
+    d = b.mma(
+        op,
+        b.zero_vec(I32, words - 1),
+        b.zero_vec(dtype_to_ir_type("fp8e4m3"), 64),
+        b.zero_vec(dtype_to_ir_type(op.c_dtype), op.c_frag_len),
+    )
+    b.global_store(out, b.thread_id_x(), b.vec_extract(d, 0))
+    b.ret()
+    assert_both_engines_reject(
+        b.kernel,
+        "gfx1250",
+        ValueError,
+        f"MMA operand a of {op_id!r} is vec<i32x{words - 1}>; the instruction "
+        f"takes the operand's {words} packed 32-bit words as vec<i32x{words}>, or "
+        "the whole <16 x i32> register -- pass one of those",
+    )
 
 
 @pytest.mark.parametrize(

@@ -138,6 +138,17 @@ static bool is_register(const rocke_matrix_form_t& form, const char* elem, int c
            && form.register_type.base.count == count;
 }
 
+/* The form an operand of format code `format` takes in a `words`-word
+ * register: an 8-bit format as is; a 6-bit or 4-bit one zero-padded from
+ * exactly its packed words, bits * words / 8 of them (12 or 8 of 16). */
+static bool is_operand_form(const rocke_matrix_form_t& form, int format, int words)
+{
+    const int bits = rocke_matrix_format_bits(format);
+    if(bits == 8)
+        return form.kind == ROCKE_MATRIX_FORM_AS_IS && form.payload_words == 0;
+    return form.kind == ROCKE_MATRIX_FORM_ZERO_PADDED && form.payload_words == bits * words / 8;
+}
+
 static bool is_imm(const rocke_matrix_arg_t& arg, int value, bool immarg)
 {
     return arg.kind == ROCKE_MATRIX_ARG_IMM && strcmp(arg.imm_type, "i32") == 0
@@ -227,14 +238,7 @@ static void check_shape(const rocke_arch_target_t* arch, const shape_t& shape)
                   && is_imm(call->args[6], 0, false) && is_imm(call->args[7], 0, true)
                   && is_imm(call->args[8], 0, false),
               id);
-        CHECK(call->a.kind
-                  == (rocke_matrix_format_bits(a) == 8 ? ROCKE_MATRIX_FORM_AS_IS
-                                                       : ROCKE_MATRIX_FORM_ZERO_PADDED),
-              id);
-        CHECK(call->b.kind
-                  == (rocke_matrix_format_bits(b) == 8 ? ROCKE_MATRIX_FORM_AS_IS
-                                                       : ROCKE_MATRIX_FORM_ZERO_PADDED),
-              id);
+        CHECK(is_operand_form(call->a, a, 8) && is_operand_form(call->b, b, 8), id);
         CHECK(is_register(call->a, "i32", 8) && is_register(call->b, "i32", 8)
                   && is_register(call->c, "f32", shape.results)
                   && is_register(call->result, "f32", shape.results),

@@ -10,10 +10,11 @@ f8f6f4 form of its own matrix format (``f8f6f4_operand_form``):
   the one the scaled ops always emitted;
 - the 64 logical values of an 8-bit format (``vec<fp8e4m3x64>``), which pass
   with one ``bitcast``;
-- the packed words of 64 values of a 6-bit or 4-bit format (``vec<i32x12>``,
-  ``vec<i32x8>``), which are zero-padded to sixteen words.
+- exactly the packed words of 64 values of a 6-bit or 4-bit format
+  (``vec<i32x12>``, ``vec<i32x8>``), which are zero-padded to sixteen words.
 
-An operand of any other shape is refused with the form's error. Every case runs
+An operand of any other shape is refused with the form's error, including a
+payload short of its format's packed words (an incomplete matrix). Every case runs
 over all 86 scaled ops of the gfx1250 catalog, in both engines, at LLVM 23 (the
 only flavor that lowers these ops). The last tests compile and link the stack
 forms for gfx1250 and check the instruction LLVM selects (compile-verified, not
@@ -203,23 +204,27 @@ def test_the_stack_forms_reach_the_16_word_register(op_id):
         ), produced
 
 
-def _wrong_shape(dtype: str):
-    """An operand of the wrong shape for its format: twenty packed words for
-    fp4 (more than the register holds), 32 logical values for fp8 (half the
-    register)."""
+# The wrong fp4 word counts (whole loads of four words): half the eight packed
+# words (an incomplete matrix) and twenty (more than the register holds).
+_WRONG_FP4_WORDS = (4, 20)
+
+
+def _wrong_shape(dtype: str, fp4_words: int):
+    """An operand of the wrong shape for its format: ``fp4_words`` packed words
+    for fp4, 32 logical values for fp8 (half the register)."""
 
     def build(b: IRBuilder, name: str, operand_dtype: str):
         if operand_dtype != dtype:
             return _stack_form(b, name, operand_dtype)
         if dtype == "fp4e2m1":
-            return _words(b, name, 20)
+            return _words(b, name, fp4_words)
         return b.bitcast(_words(b, name, 8), VectorType(dtype_to_ir_type(dtype), 32))
 
     return build
 
 
 _WRONG_SHAPES = [
-    (op_id, role, dtype)
+    (op_id, role, dtype, fp4_words)
     for op_id in _OPS
     for role, dtype in zip(
         ("a", "b"),
@@ -228,21 +233,23 @@ _WRONG_SHAPES = [
             gfx1250_scaled_wmma(op_id).atom.b_dtype,
         ),
     )
+    for fp4_words in (_WRONG_FP4_WORDS if dtype == "fp4e2m1" else (None,))
     if dtype in ("fp4e2m1", "fp8e4m3")
 ]
 
 
-@pytest.mark.parametrize(("op_id", "role", "dtype"), _WRONG_SHAPES)
-def test_an_operand_of_another_shape_is_refused(op_id, role, dtype):
-    """Twenty fp4 words do not fit the sixteen-word register (the zero-padding
-    form's error); 32 fp8 values are half its bits (the bitcast form's error)."""
-    wrong, right = _wrong_shape(dtype), _stack_form
+@pytest.mark.parametrize(("op_id", "role", "dtype", "fp4_words"), _WRONG_SHAPES)
+def test_an_operand_of_another_shape_is_refused(op_id, role, dtype, fp4_words):
+    """Four fp4 words are half the operand's eight and twenty do not fit the
+    sixteen-word register (the zero-padding form's error); 32 fp8 values are
+    half its bits (the bitcast form's error)."""
+    wrong, right = _wrong_shape(dtype, fp4_words), _stack_form
     kernel = _kernel(op_id, *((wrong, right) if role == "a" else (right, wrong)))
     if dtype == "fp4e2m1":
         message = (
-            f"MMA operand {role} of '{op_id}' is vec<i32x20>; the instruction takes "
-            "a packed payload of whole 32-bit words in <16 x i32> -- pass the "
-            "operand's packed words"
+            f"MMA operand {role} of '{op_id}' is vec<i32x{fp4_words}>; the "
+            "instruction takes the operand's 8 packed 32-bit words as vec<i32x8>, "
+            "or the whole <16 x i32> register -- pass one of those"
         )
     else:
         message = (

@@ -35,7 +35,7 @@ static const rocke_matrix_arg_t k_cdna_mfma_args[] = {
 
 static constexpr rocke_matrix_form_t as_is(rocke_matrix_register_t reg)
 {
-    return rocke_matrix_form_t{ROCKE_MATRIX_FORM_AS_IS, reg};
+    return rocke_matrix_form_t{ROCKE_MATRIX_FORM_AS_IS, reg, 0};
 }
 
 static constexpr rocke_matrix_register_t reg(const char* elem, int count)
@@ -139,8 +139,8 @@ static constexpr rocke_matrix_call_t gfx11_16bit_out_wmma(const char* intrinsic,
         (int)(sizeof(k_gfx11_16bit_out_args) / sizeof(k_gfx11_16bit_out_args[0])),
         as_is(reg),
         as_is(reg),
-        rocke_matrix_form_t{ROCKE_MATRIX_FORM_EVEN_HALVES, reg},
-        rocke_matrix_form_t{ROCKE_MATRIX_FORM_EVEN_HALVES, reg},
+        rocke_matrix_form_t{ROCKE_MATRIX_FORM_EVEN_HALVES, reg, 0},
+        rocke_matrix_form_t{ROCKE_MATRIX_FORM_EVEN_HALVES, reg, 0},
         NULL};
 }
 
@@ -200,15 +200,15 @@ static const rocke_matrix_flavor_override_t k_i64_from_llvm22[] = {{"llvm22", {"
 static constexpr rocke_matrix_register_t k_fp8_x8 = {{"i32", 2}, k_i64_from_llvm22, 1};
 
 /* gfx1250 f4 32x16x128 (Python _GFX1250_F4_32X16X128): (A, B, C modifier, C),
- * the C modifier 0. 128 fp4 values of A per lane in sixteen words and 64 of B
- * in eight, each zero-padded from fewer packed words; sixteen fp32 results. */
+ * the C modifier 0. 128 fp4 values of A per lane fill its sixteen words and 64
+ * of B fill its eight, so neither register has padding and both operands pass
+ * as is; sixteen fp32 results. */
 static const rocke_matrix_arg_t k_gfx1250_f4_args[] = {
     {ROCKE_MATRIX_ARG_A, NULL, 0, false},
     {ROCKE_MATRIX_ARG_B, NULL, 0, false},
     {ROCKE_MATRIX_ARG_IMM, "i16", 0, true},
     {ROCKE_MATRIX_ARG_C, NULL, 0, false},
 };
-static constexpr int k_fp4_format = 4;
 
 /* op_id -> call, for every MMA instruction lowered from data rather than by a
  * hand-written handler and not generated below (Python MATRIX_CALLS, same
@@ -546,8 +546,8 @@ consteval matrix_call_table make_matrix_call_table()
            {"llvm.amdgcn.wmma.f32.32x16x128.f4.v16f32.v16i32.v8i32",
             k_gfx1250_f4_args,
             (int)(sizeof(k_gfx1250_f4_args) / sizeof(k_gfx1250_f4_args[0])),
-            rocke_f8f6f4_operand_form(k_fp4_format, reg("i32", 16)),
-            rocke_f8f6f4_operand_form(k_fp4_format, reg("i32", 8)),
+            as_is(reg("i32", 16)),
+            as_is(reg("i32", 8)),
             as_is(reg("f32", 16)),
             as_is(reg("f32", 16)),
             NULL}};
@@ -738,11 +738,18 @@ static void check_form(const rocke_matrix_form_t& form)
     }
     if(form.kind == ROCKE_MATRIX_FORM_ZERO_PADDED)
     {
-        for_every_type(form.register_type, [](const rocke_matrix_type_t& t) {
+        const int words = form.payload_words;
+        for_every_type(form.register_type, [words](const rocke_matrix_type_t& t) {
             if(t.count == 0 || strcmp(t.elem, "i32") != 0)
                 throw TypeError(
                     format_error("ZeroPadded register type must be a vector of i32 words, got %s",
                                  type_name(t).c_str()));
+            if(words < 1 || words > t.count)
+                throw ValueError(format_error("ZeroPadded payload of %d words does not fit %s; "
+                                              "it is 1 to %d words",
+                                              words,
+                                              type_name(t).c_str(),
+                                              t.count));
         });
     }
     if(form.kind == ROCKE_MATRIX_FORM_EVEN_HALVES)

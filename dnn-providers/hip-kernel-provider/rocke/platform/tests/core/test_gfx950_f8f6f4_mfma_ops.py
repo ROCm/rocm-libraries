@@ -41,7 +41,7 @@ from rocke.core.arch.target import gfx950_eight_bit_f8f6f4_op_ids, narrow_f8f6f4
 from rocke.core.dtypes import dtype_info
 from rocke.core.ir import I32, IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.lower_llvm import LLVM_FLAVORS
-from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
 from rocke.tests.ir_validity import target_instructions
 from rocke.tests.lane_maps import lane_placements
 
@@ -278,6 +278,35 @@ def test_both_engines_call_the_f8f6f4_mfma_with_its_formats(op_id, flavor):
     ]
     _assert_operand_reaches_the_register(text, values[0], a)
     _assert_operand_reaches_the_register(text, values[1], b)
+
+
+@pytest.mark.parametrize("shape", list(_SHAPES))
+@pytest.mark.parametrize("dtype", ["fp6e2m3", "fp6e3m2", "fp4e2m1"])
+def test_both_engines_refuse_a_narrow_operand_short_of_its_packed_words(shape, dtype):
+    """32 fp6 values are six packed words and 32 fp4 values four. One word
+    fewer is an incomplete operand, so both engines refuse it instead of
+    padding it into a different matrix."""
+    op_id = _op_id(shape, dtype, "fp8e4m3")
+    op = _op(op_id)
+    words = 32 * _bits(dtype) // 32
+    b = IRBuilder(f"gfx950_short_{op_id}")
+    out = b.param("D", PtrType(dtype_to_ir_type(op.c_dtype), "global"))
+    d = b.mma(
+        op,
+        b.zero_vec(I32, words - 1),
+        b.zero_vec(dtype_to_ir_type("fp8e4m3"), 32),
+        b.zero_vec(dtype_to_ir_type(op.c_dtype), op.c_frag_len),
+    )
+    b.global_store(out, b.thread_id_x(), b.vec_extract(d, 0))
+    b.ret()
+    assert_both_engines_reject(
+        b.kernel,
+        "gfx950",
+        ValueError,
+        f"MMA operand a of {op_id!r} is vec<i32x{words - 1}>; the instruction "
+        f"takes the operand's {words} packed 32-bit words as vec<i32x{words}>, or "
+        "the whole <8 x i32> register -- pass one of those",
+    )
 
 
 # The pairs compiled for gfx950 at both shapes: both operands narrow, an 8-bit

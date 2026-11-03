@@ -58,18 +58,31 @@ def eight_bit_matrix_format_pairs() -> list[tuple[str, str]]:
     return [(a, b) for a in wide for b in wide]
 
 
+def matrix_operand_packing(dtype: str, words: int) -> FragmentPacking:
+    """How one f8f6f4 operand of format ``dtype`` fills its ``words``-word register.
+
+    The register has room for ``4 * words`` 8-bit values, and every format
+    holds that many values per lane, packed from the low bit; a 6-bit or 4-bit
+    format fills only the low words (``live_carriers``) and leaves the rest
+    zero::
+
+        16 words: fp8 64 values in 16 words, fp6 / bf6 in 12, fp4 in 8
+    """
+    bits = dtype_info(require_matrix_format(dtype)).encoded_bits
+    return FragmentPacking(BitPacking(bits), 4 * words, 32, words)
+
+
 def matrix_operand_layout(
     dtype: str, words: int, lane_groups: int, lanes_per_group: int
 ) -> MatrixFragmentLayout:
     """Where each value of one f8f6f4 operand of format ``dtype`` sits.
 
-    The operand register is ``words`` 32-bit words, room for ``4 * words``
-    8-bit values, and every format holds that many values per lane, packed from
-    the low bit. The wave's lanes form ``lane_groups`` groups of
-    ``lanes_per_group``: lane ``l`` holds row ``l % lanes_per_group`` of A (that
-    column of B), and its values are runs of consecutive K, 16 long for an
-    8-bit format and 32 for a 6-bit or 4-bit one, which the lane groups take in
-    turn::
+    The operand register is ``words`` 32-bit words, packed as
+    :func:`matrix_operand_packing` says. The wave's lanes form ``lane_groups``
+    groups of ``lanes_per_group``: lane ``l`` holds row ``l % lanes_per_group``
+    of A (that column of B), and its values are runs of consecutive K, 16 long
+    for an 8-bit format and 32 for a 6-bit or 4-bit one, which the lane groups
+    take in turn::
 
         16x16x128 fp8, 16 words, 2 groups x 16 lanes (64 values, runs of 16):
           lanes  0..15   K  0..15, 32..47, 64..79,  96..111
@@ -79,11 +92,10 @@ def matrix_operand_layout(
     4 x 16 lanes at 16x16x128 and 2 x 32 at 32x32x64); CK uses the same runs
     for gfx1250 (16 words, 2 x 16 lanes).
     """
-    name = require_matrix_format(dtype)
-    bits = dtype_info(name).encoded_bits
+    packing = matrix_operand_packing(dtype, words)
     return MatrixFragmentLayout(
-        FragmentPacking(BitPacking(bits), 4 * words, 32, words),
-        16 if bits == 8 else 32,
+        packing,
+        16 if packing.packing.element_bits == 8 else 32,
         lane_groups,
         lanes_per_group,
     )

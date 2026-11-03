@@ -204,6 +204,17 @@ static bool is_register(const rocke_matrix_form_t& form, const char* elem, int c
            && form.register_type.base.count == count;
 }
 
+/* The form an operand of format code `format` takes in a `words`-word
+ * register: an 8-bit format as is; a 6-bit or 4-bit one zero-padded from
+ * exactly its packed words, bits * words / 8 of them (12 or 8 of 16). */
+static bool is_operand_form(const rocke_matrix_form_t& form, int format, int words)
+{
+    const int bits = rocke_matrix_format_bits(format);
+    if(bits == 8)
+        return form.kind == ROCKE_MATRIX_FORM_AS_IS && form.payload_words == 0;
+    return form.kind == ROCKE_MATRIX_FORM_ZERO_PADDED && form.payload_words == bits * words / 8;
+}
+
 static void check_f8f6f4(const rocke_arch_target_t* arch)
 {
     for(int i = 0; i < k_rocke_narrow_matrix_format_pairs.count; ++i)
@@ -260,14 +271,7 @@ static void check_f8f6f4(const rocke_arch_target_t* arch)
                   && strcmp(call->args[4].imm_type, "i16") == 0 && call->args[4].imm_value == 0
                   && call->args[5].kind == ROCKE_MATRIX_ARG_C,
               id);
-        CHECK(call->a.kind
-                  == (rocke_matrix_format_bits(a) == 8 ? ROCKE_MATRIX_FORM_AS_IS
-                                                       : ROCKE_MATRIX_FORM_ZERO_PADDED),
-              id);
-        CHECK(call->b.kind
-                  == (rocke_matrix_format_bits(b) == 8 ? ROCKE_MATRIX_FORM_AS_IS
-                                                       : ROCKE_MATRIX_FORM_ZERO_PADDED),
-              id);
+        CHECK(is_operand_form(call->a, a, 16) && is_operand_form(call->b, b, 16), id);
         CHECK(is_register(call->a, "i32", 16) && is_register(call->b, "i32", 16)
                   && is_register(call->c, "f32", 8) && is_register(call->result, "f32", 8),
               id);
@@ -296,8 +300,8 @@ static void check_f4(const rocke_arch_target_t* arch)
     {
         CHECK(strcmp(call->intrinsic, "llvm.amdgcn.wmma.f32.32x16x128.f4.v16f32.v16i32.v8i32") == 0,
               id);
-        CHECK(call->a.kind == ROCKE_MATRIX_FORM_ZERO_PADDED
-                  && call->b.kind == ROCKE_MATRIX_FORM_ZERO_PADDED,
+        /* 128 fp4 values fill A's sixteen words and 64 fill B's eight. */
+        CHECK(call->a.kind == ROCKE_MATRIX_FORM_AS_IS && call->b.kind == ROCKE_MATRIX_FORM_AS_IS,
               id);
         CHECK(is_register(call->a, "i32", 16) && is_register(call->b, "i32", 8)
                   && is_register(call->c, "f32", 16) && is_register(call->result, "f32", 16),

@@ -389,13 +389,13 @@ def _gfx1250_f8f6f4_wmma(a: str, b: str) -> MatrixCall:
 
 
 # gfx1250 f4 32x16x128: (A, B, C modifier, C), the C modifier 0. 128 fp4 values
-# of A per lane in sixteen words and 64 of B in eight, each zero-padded from
-# fewer packed words; sixteen fp32 results.
+# of A per lane fill its sixteen words and 64 of B fill its eight, so neither
+# register has padding and both operands pass as is; sixteen fp32 results.
 _GFX1250_F4_32X16X128 = MatrixCall(
     intrinsic="llvm.amdgcn.wmma.f32.32x16x128.f4.v16f32.v16i32.v8i32",
     args=(MatrixOperand.A, MatrixOperand.B, Imm(I16, 0), MatrixOperand.C),
-    a=f8f6f4_operand_form("fp4e2m1", VectorType(I32, 16)),
-    b=f8f6f4_operand_form("fp4e2m1", VectorType(I32, 8)),
+    a=AsIs(VectorType(I32, 16)),
+    b=AsIs(VectorType(I32, 8)),
     c=AsIs(VectorType(F32, 16)),
     result=AsIs(VectorType(F32, 16)),
 )

@@ -544,9 +544,11 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
   f8f6f4 operand holds 64 values per lane in the f8f6f4 operand layout of its
   own format (`matrix_operand_layout`: K runs of 16 for fp8 / bf8 and 32 for
   fp6 / bf6 / fp4, the same runs the scaled atoms use); an fp8 / bf8 operand is
-  passed as its logical values and a narrower one as its packed words, which
-  the call zero-pads to sixteen words. The f4 atom has no lane maps yet. No
-  family uses them yet.
+  passed as its logical values and a narrower one as exactly its packed words
+  (twelve for fp6 / bf6, eight for fp4), which the call zero-pads to sixteen
+  words. The f4 atom takes its 128 fp4 values of A in sixteen words and 64 of
+  B in eight, with no padding; it has no lane maps yet. No family uses them
+  yet.
 - The gfx950 dense f8f6f4 atoms (`mfma_f32_16x16x128_f8f6f4_<a>_<b>` and
   `mfma_f32_32x32x64_f8f6f4_<a>_<b>`, one per (A, B) format pair) are declared;
   fp8 x fp8 at 16x16x128 is `mfma_f32_16x16x128_fp8`, the K=128 atom the
@@ -554,7 +556,8 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
   f8f6f4 operand layout of its own format (four groups of 16 lanes at
   16x16x128, two groups of 32 at 32x32x64, as the public CDNA4 ISA operand
   tables give); an fp8 / bf8 operand is passed as its logical values and a
-  narrower one as its packed words, which the call zero-pads to eight words.
+  narrower one as exactly its packed words (six for fp6 / bf6, four for fp4),
+  which the call zero-pads to eight words.
   They lower to the f8f6f4 scaled-MFMA intrinsic with every scale argument 0,
   which LLVM selects as the unscaled instruction. They are the largest K for
   their pair and shape, so fp8 / bf8 selection on gfx950 picks them.

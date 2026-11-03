@@ -13,7 +13,8 @@
  * The forms (Python AsIs / ZeroPadded / EvenHalves):
  *   AS_IS        the value has the register type, or the same bits in another
  *                shape (one bitcast; rocke_mma_operand_needs_reinterpret)
- *   ZERO_PADDED  a packed <n x i32> payload widened to <m x i32>, zero high words
+ *   ZERO_PADDED  a packed payload of exactly n words widened to <m x i32>, zero
+ *                high words, or the whole <m x i32> register unchanged
  *   EVEN_HALVES  n logical 16-bit values in the even half-slots of a 2n register
  *
  * The emitter is rocke_ll_emit_matrix_call (cpp/core/lower_llvm/matrix_call.cpp).
@@ -61,22 +62,27 @@ typedef enum rocke_matrix_form_kind
     ROCKE_MATRIX_FORM_EVEN_HALVES
 } rocke_matrix_form_kind_t;
 
-/* How one operand, or the result, meets its register type. */
+/* How one operand, or the result, meets its register type. `payload_words`
+ * is for ZERO_PADDED only (0 otherwise): the exact number of packed 32-bit
+ * words of the operand's payload (Python ZeroPadded.payload_words). */
 typedef struct rocke_matrix_form
 {
     rocke_matrix_form_kind_t kind;
     rocke_matrix_register_t register_type;
+    int payload_words;
 } rocke_matrix_form_t;
 
 /* The form an f8f6f4 operand of the matrix format with code `format` takes in
  * `reg` (Python f8f6f4_operand_form): an 8-bit format passes as is or with one
- * bitcast; a 6-bit or 4-bit format arrives as packed words, zero-padded. */
+ * bitcast; a 6-bit or 4-bit format arrives as exactly its packed words
+ * (rocke_matrix_operand_payload_words), zero-padded. */
 constexpr rocke_matrix_form_t rocke_f8f6f4_operand_form(int format, rocke_matrix_register_t reg)
 {
-    return rocke_matrix_form_t{rocke_matrix_format_bits(format) == 8
-                                   ? ROCKE_MATRIX_FORM_AS_IS
-                                   : ROCKE_MATRIX_FORM_ZERO_PADDED,
-                               reg};
+    if(rocke_matrix_format_bits(format) == 8)
+        return rocke_matrix_form_t{ROCKE_MATRIX_FORM_AS_IS, reg, 0};
+    return rocke_matrix_form_t{ROCKE_MATRIX_FORM_ZERO_PADDED,
+                               reg,
+                               rocke_matrix_operand_payload_words(format, reg.base.count)};
 }
 
 /* One call argument: an MMA operand (A, B, C), a literal immediate, or the

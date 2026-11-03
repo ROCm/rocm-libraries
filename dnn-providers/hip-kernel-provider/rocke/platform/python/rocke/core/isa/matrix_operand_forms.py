@@ -12,8 +12,9 @@ names the register type and the one rule that turns the kernel's value into it:
 
       vec<fp8e4m3x32>  --bitcast-->  <8 x i32>
 
-- :class:`ZeroPadded` -- a packed payload of ``n`` 32-bit words fills only part
-  of an ``<m x i32>`` register; the high ``m - n`` words are zero::
+- :class:`ZeroPadded` -- a packed payload of exactly ``n`` 32-bit words fills
+  only part of an ``<m x i32>`` register; the high ``m - n`` words are zero (a
+  value already widened to the whole register passes unchanged)::
 
       <4 x i32> [w0 w1 w2 w3]  -->  <8 x i32> [w0 w1 w2 w3 0 0 0 0]
 
@@ -36,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..arch.mfma_scale import require_matrix_format
+from ..arch.mfma_scale import matrix_operand_packing, require_matrix_format
 from ..dtypes import dtype_info
 from ..ir import I32, Op, Type, VectorType, type_bits
 from ..mma_operand import MmaOperandRole, mma_operand_value
@@ -154,11 +155,16 @@ class AsIs(_Form):
 
 @dataclass(frozen=True)
 class ZeroPadded(_Form):
-    """Widen a packed ``<n x i32>`` payload to the ``<m x i32>`` register, n <= m.
+    """Widen the ``payload_words``-word packed payload to the ``<m x i32>`` register.
 
-    The high ``m - n`` words are zero; ``n == m`` passes the value unchanged. An
-    operand form only: no instruction returns a padded result.
+    The operand is exactly ``vec<i32 x payload_words>``, widened with
+    ``m - payload_words`` zero words, or the whole ``vec<i32 x m>`` register,
+    passed unchanged. Any other word count would be a different, incomplete
+    matrix, so it is refused rather than padded. An operand form only: no
+    instruction returns a padded result.
     """
+
+    payload_words: int
 
     def __post_init__(self) -> None:
         for t in self._every_register_type():
@@ -166,25 +172,32 @@ class ZeroPadded(_Form):
                 raise TypeError(
                     f"ZeroPadded register type must be a vector of i32 words, got {t.name}"
                 )
+            if (
+                isinstance(self.payload_words, bool)
+                or not isinstance(self.payload_words, int)
+                or not 1 <= self.payload_words <= t.count
+            ):
+                raise ValueError(
+                    f"ZeroPadded payload of {self.payload_words!r} words does not fit "
+                    f"{t.name}; it is 1 to {t.count} words"
+                )
 
     def operand(self, lowerer, op: Op, role: MmaOperandRole) -> str:
         """Operand ``role`` of ``op`` widened to the register; returns its LLVM name."""
         register = self.register_type_at(lowerer._flavor)
         value = mma_operand_value(op, role)
         payload = value.type
-        if not (
-            isinstance(payload, VectorType)
-            and payload.elem == I32
-            and payload.count <= register.count
-        ):
+        words = self.payload_words
+        if payload not in (VectorType(I32, words), register):
             raise ValueError(
                 f"MMA operand {role} of {_op_id(op)!r} is {payload.name}; the "
-                "instruction takes a packed payload of whole 32-bit words in "
-                f"{_llvm_type(register)} -- pass the operand's packed words"
+                f"instruction takes the operand's {words} packed 32-bit words as "
+                f"vec<i32x{words}>, or the whole {_llvm_type(register)} register "
+                "-- pass one of those"
             )
         if payload.count == register.count:
             return lowerer._operand(value)
-        words, width = payload.count, register.count
+        width = register.count
         mask = ", ".join(
             [f"i32 {i}" for i in range(words)] + [f"i32 {words}"] * (width - words)
         )
@@ -282,19 +295,22 @@ MatrixOperandForm = AsIs | ZeroPadded | EvenHalves
 MatrixResultForm = AsIs | EvenHalves
 
 
-def f8f6f4_operand_form(dtype: str, register_type: RegisterType) -> AsIs | ZeroPadded:
+def f8f6f4_operand_form(dtype: str, register_type: VectorType) -> AsIs | ZeroPadded:
     """The form an f8f6f4 operand of matrix format ``dtype`` takes in ``register_type``.
 
     An 8-bit format (fp8e4m3, bf8e5m2) arrives as its logical values, or as
     words of the register's width, and passes with at most one ``bitcast``
-    (:class:`AsIs`). A 6-bit or 4-bit format arrives as its packed words and is
+    (:class:`AsIs`). A 6-bit or 4-bit format arrives as exactly its packed
+    words (:func:`~rocke.core.arch.mfma_scale.matrix_operand_packing`) and is
     widened with zero words (:class:`ZeroPadded`)::
 
         fp8e4m3   vec<fp8e4m3x64>  --bitcast-->   <16 x i32>
+        fp6e2m3   vec<i32x12>      --zero words-> <16 x i32>
         fp4e2m1   vec<i32x8>       --zero words-> <16 x i32>
 
     Raises ``ValueError`` when ``dtype`` is not one of the five matrix formats.
     """
     if dtype_info(require_matrix_format(dtype)).encoded_bits == 8:
         return AsIs(register_type)
-    return ZeroPadded(register_type)
+    packing = matrix_operand_packing(dtype, register_type.count)
+    return ZeroPadded(register_type, packing.live_carriers)

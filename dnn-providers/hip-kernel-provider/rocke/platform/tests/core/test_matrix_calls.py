@@ -284,11 +284,12 @@ def test_as_is_refuses_a_result_of_another_bit_width():
         )
 
 
+# A takes four packed words zero-padded to eight; B fills its eight words.
 _PADDED = MatrixCall(
     intrinsic="llvm.amdgcn.example.padded",
     args=(A, B, C),
-    a=ZeroPadded(VectorType(I32, 8)),
-    b=ZeroPadded(VectorType(I32, 8)),
+    a=ZeroPadded(VectorType(I32, 8), 4),
+    b=ZeroPadded(VectorType(I32, 8), 8),
     c=AsIs(VectorType(F32, 4)),
     result=AsIs(VectorType(F32, 4)),
 )
@@ -316,21 +317,36 @@ def test_zero_padded_widens_a_packed_payload_with_zero_words():
     ]
 
 
+def test_zero_padded_passes_a_value_of_the_whole_register_unchanged():
+    lowerer = _lowerer("gfx950")
+    i32x8, f32x4 = VectorType(I32, 8), VectorType(F32, 4)
+    emit_matrix_call(lowerer, _mma_op("example", i32x8, i32x8, f32x4, f32x4), _PADDED)
+    assert _emitted(lowerer) == [
+        (
+            "%d = call <4 x float> @llvm.amdgcn.example.padded("
+            "<8 x i32> %a, <8 x i32> %b, <4 x float> %c)"
+        ),
+    ]
+
+
 @pytest.mark.parametrize(
-    "operand_b",
-    [VectorType(F16, 8), VectorType(I32, 12), I32],
-    ids=["another_format", "too_many_words", "not_a_vector"],
+    "operand_a",
+    [VectorType(F16, 8), VectorType(I32, 3), VectorType(I32, 6), I32],
+    ids=["another_format", "too_few_words", "between_payload_and_register", "scalar"],
 )
-def test_zero_padded_refuses_anything_but_whole_words_that_fit(operand_b):
+def test_zero_padded_refuses_anything_but_its_packed_words_or_register(operand_a):
+    """A payload of other than the form's four words is an incomplete or
+    different matrix, not one to pad; only those words or the whole register
+    are taken."""
     message = (
-        "MMA operand b of 'mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1' is "
-        f"{operand_b.name}; the instruction takes a packed payload of whole 32-bit "
-        "words in <8 x i32> -- pass the operand's packed words"
+        "MMA operand a of 'mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3' is "
+        f"{operand_a.name}; the instruction takes the operand's 4 packed 32-bit "
+        "words as vec<i32x4>, or the whole <8 x i32> register -- pass one of those"
     )
     op = _mma_op(
-        "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
+        "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3",
+        operand_a,
         VectorType(I32, 8),
-        operand_b,
         VectorType(F32, 4),
         VectorType(F32, 4),
     )
@@ -425,17 +441,27 @@ def test_a_result_is_never_zero_padded():
             AsIs(F32),
             AsIs(F32),
             AsIs(F32),
-            ZeroPadded(VectorType(I32, 4)),
+            ZeroPadded(VectorType(I32, 4), 4),
         )
 
 
 def test_forms_refuse_a_register_type_they_cannot_fill():
     with pytest.raises(TypeError, match=r"vector of i32 words, got vec<f16x8>"):
-        ZeroPadded(VectorType(F16, 8))
+        ZeroPadded(VectorType(F16, 8), 4)
     with pytest.raises(
         TypeError, match=r"even number of 16-bit elements, got vec<f32x8>"
     ):
         EvenHalves(VectorType(F32, 8))
+
+
+@pytest.mark.parametrize("payload_words", [0, 9, True, 4.0])
+def test_a_zero_padded_payload_fits_its_register(payload_words):
+    with pytest.raises(ValueError) as error:
+        ZeroPadded(VectorType(I32, 8), payload_words)
+    assert str(error.value) == (
+        f"ZeroPadded payload of {payload_words!r} words does not fit vec<i32x8>; "
+        "it is 1 to 8 words"
+    )
 
 
 def test_an_immediate_is_a_fitting_integer():
@@ -578,6 +604,8 @@ def _operand_type(form, flavor: str) -> Type:
     register = form.register_type_at(flavor)
     if isinstance(form, EvenHalves):
         return VectorType(register.elem, register.count // 2)
+    if isinstance(form, ZeroPadded):
+        return VectorType(I32, form.payload_words)
     return register
 
 

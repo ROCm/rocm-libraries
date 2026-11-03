@@ -222,12 +222,13 @@ static const rocke_matrix_call_t k_i16_accumulator = {
     NULL,
 };
 
+/* A takes four packed words zero-padded to eight; B fills its eight words. */
 static const rocke_matrix_call_t k_padded = {
     "llvm.amdgcn.example.padded",
     k_abc,
     3,
-    {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("i32", 8)},
-    {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("i32", 8)},
+    {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("i32", 8), 4},
+    {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("i32", 8), 8},
     as_is("f32", 4),
     as_is("f32", 4),
     NULL,
@@ -403,23 +404,39 @@ static void test_zero_padded()
                     "<8 x i32> %mma_pad.1, <8 x i32> %b, <4 x float> %c)",
                     "padded call");
     }
+    {
+        Lowerer lw("gfx950", ROCKE_LLVM_FLAVOR_LLVM20);
+        const rocke_type_t *i32x8 = lw.vec(rocke_i32(), 8), *f32x4 = lw.vec(rocke_f32(), 4);
+        MmaOp m(i32x8, i32x8, f32x4, f32x4);
+        rocke_ll_emit_matrix_call(&lw.L, &m.op, "example", &k_padded);
+        std::vector<std::string> lines = lw.lines();
+        check_equal(lines.at(0),
+                    "%d = call <4 x float> @llvm.amdgcn.example.padded("
+                    "<8 x i32> %a, <8 x i32> %b, <4 x float> %c)",
+                    "the whole register passes unchanged");
+    }
+    /* A payload of other than the form's four words is an incomplete or
+     * different matrix, not one to pad; only those words or the whole register
+     * are taken. */
     Lowerer types("gfx950", ROCKE_LLVM_FLAVOR_LLVM20);
-    const rocke_type_t* refused[]
-        = {types.vec(rocke_f16(), 8), types.vec(rocke_i32(), 12), rocke_i32()};
-    for(const rocke_type_t* operand_b : refused)
+    const rocke_type_t* refused[] = {types.vec(rocke_f16(), 8),
+                                     types.vec(rocke_i32(), 3),
+                                     types.vec(rocke_i32(), 6),
+                                     rocke_i32()};
+    for(const rocke_type_t* operand_a : refused)
     {
         Lowerer lw("gfx950", ROCKE_LLVM_FLAVOR_LLVM20);
         const rocke_type_t* f32x4 = lw.vec(rocke_f32(), 4);
-        MmaOp m(lw.vec(rocke_i32(), 8), operand_b, f32x4, f32x4);
+        MmaOp m(operand_a, lw.vec(rocke_i32(), 8), f32x4, f32x4);
         check_equal(error_of([&] {
                         rocke_ll_emit_matrix_call(
-                            &lw.L, &m.op, "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1", &k_padded);
+                            &lw.L, &m.op, "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3", &k_padded);
                     }),
-                    std::string("MMA operand b of 'mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1' is ")
-                        + operand_b->name
-                        + "; the instruction takes a packed payload of whole 32-bit words in "
-                          "<8 x i32> -- pass the operand's packed words",
-                    "zero padding refuses anything but whole words that fit");
+                    std::string("MMA operand a of 'mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3' is ")
+                        + operand_a->name
+                        + "; the instruction takes the operand's 4 packed 32-bit words as "
+                          "vec<i32x4>, or the whole <8 x i32> register -- pass one of those",
+                    "zero padding refuses anything but its packed words or register");
     }
 }
 
@@ -484,7 +501,7 @@ static void test_the_schema()
                                                as_is("f32", 0),
                                                as_is("f32", 0),
                                                as_is("f32", 0),
-                                               {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("i32", 4)},
+                                               {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("i32", 4), 4},
                                                NULL};
     check_equal(error_of([&] { rocke_matrix_call_check(&padded_result); }),
                 "MatrixCall 'llvm.amdgcn.x' result form must be AsIs or EvenHalves, got "
@@ -494,7 +511,7 @@ static void test_the_schema()
     const rocke_matrix_call_t padded_halves = {"llvm.amdgcn.x",
                                                k_abc,
                                                3,
-                                               {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("f16", 8)},
+                                               {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("f16", 8), 4},
                                                as_is("f32", 0),
                                                as_is("f32", 0),
                                                as_is("f32", 0),
@@ -502,6 +519,23 @@ static void test_the_schema()
     check_equal(error_of([&] { rocke_matrix_call_check(&padded_halves); }),
                 "ZeroPadded register type must be a vector of i32 words, got vec<f16x8>",
                 "zero padding needs i32 words");
+
+    for(int payload_words : {0, 9})
+    {
+        const rocke_matrix_call_t unfitting
+            = {"llvm.amdgcn.x",
+               k_abc,
+               3,
+               {ROCKE_MATRIX_FORM_ZERO_PADDED, reg("i32", 8), payload_words},
+               as_is("f32", 0),
+               as_is("f32", 0),
+               as_is("f32", 0),
+               NULL};
+        check_equal(error_of([&] { rocke_matrix_call_check(&unfitting); }),
+                    "ZeroPadded payload of " + std::to_string(payload_words)
+                        + " words does not fit vec<i32x8>; it is 1 to 8 words",
+                    "a zero-padded payload fits its register");
+    }
 
     const rocke_matrix_call_t halves_of_f32 = {"llvm.amdgcn.x",
                                                k_abc,

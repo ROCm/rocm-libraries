@@ -60,29 +60,33 @@ static const char* as_is_operand(rocke_lower_t* L,
     return rocke_ll_operand(L, value);
 }
 
-/* Python ZeroPadded.operand: a packed <n x i32> payload, n <= m, widened to
- * the <m x i32> register with zero high words. */
+/* Python ZeroPadded.operand: a packed payload of exactly `words` 32-bit words
+ * widened to the <m x i32> register with zero high words, or the whole register
+ * passed unchanged. */
 static const char* zero_padded_operand(rocke_lower_t* L,
                                        const rocke_op_t* op,
                                        const char* op_id,
                                        rocke_matrix_arg_kind_t kind,
-                                       const rocke_type_t* register_type)
+                                       const rocke_type_t* register_type,
+                                       int words)
 {
     const rocke_value_t* value = rocke_mma_operand_value(op, role_of(kind));
     const rocke_type_t* payload = value->type;
     if(!(is_vector(payload) && strcmp(payload->elem->name, "i32") == 0
-         && payload->count <= register_type->count))
+         && (payload->count == words || payload->count == register_type->count)))
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
-                      "MMA operand %s of '%s' is %s; the instruction takes a packed payload of "
-                      "whole 32-bit words in %s -- pass the operand's packed words",
+                      "MMA operand %s of '%s' is %s; the instruction takes the operand's %d "
+                      "packed 32-bit words as vec<i32x%d>, or the whole %s register -- pass "
+                      "one of those",
                       role_name(kind),
                       op_id,
                       payload->name,
+                      words,
+                      words,
                       rocke_ll_llvm_type(L, register_type));
     if(payload->count == register_type->count)
         return rocke_ll_operand(L, value);
-    const int words = payload->count;
     const int width = register_type->count;
     std::string mask;
     for(int i = 0; i < width; ++i)
@@ -243,7 +247,7 @@ const char* rocke_ll_matrix_operand(rocke_lower_t* L,
     switch(form->kind)
     {
     case ROCKE_MATRIX_FORM_ZERO_PADDED:
-        return zero_padded_operand(L, op, op_id, kind, register_type);
+        return zero_padded_operand(L, op, op_id, kind, register_type, form->payload_words);
     case ROCKE_MATRIX_FORM_EVEN_HALVES:
         return even_halves_operand(L, op, op_id, kind, register_type);
     case ROCKE_MATRIX_FORM_AS_IS:
