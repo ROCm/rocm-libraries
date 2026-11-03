@@ -1730,9 +1730,9 @@ level_labels:
     - {id: S10b-blockmask-paged, why: "block mask with paging (FA tests/cute:4558, FA#2623; weak evidence)",
        changes: {block_mask: present, paged_kv: present}}
 
-  # Cost of one case (draft). Seconds come from a per-case timing file (`--timings ARCH=FILE`,
-  # columns case_key,seconds,source); the first arch named is the budget basis. A case the file
-  # does not name, or names as `modelled`, costs a + b*MFLOP + c*tensor-MB (fitted to the cases
+  # Cost of one case (draft). Seconds come from per-case timings measured on each arch
+  # (case_key, seconds, source); `basis` is the budget basis. A case the timings
+  # do not name, or name as `modelled`, costs a + b*MFLOP + c*tensor-MB (fitted to the cases
   # measured in full, one run on one node per arch). Outside fitted_range the model is not
   # trusted: the case is UNMEASURED and never pulled down by `fill`.
   cost:
