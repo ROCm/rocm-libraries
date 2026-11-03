@@ -107,3 +107,30 @@ class TestPlannedBoxes(unittest.TestCase):
         ok, why = is_valid_dgrad_spec(spec, "gfx942")
         self.assertTrue(ok, why)
         self.assertIn("pbl", spec.kernel_name())  # the pp_boxes 7 binary
+
+
+class TestGreedySolver(unittest.TestCase):
+    """The pure-Python planner (used without scipy) yields valid plans."""
+
+    def test_greedy_valid(self):
+        import kernels.common.conv_dgrad_box_plan as P
+
+        old = P._SOLVER
+        try:
+            P._SOLVER = "greedy"
+            P._plan_cached.cache_clear()
+            for p, tm, tk, ms, cus in ((_p3(), 128, 64, 8, 228), (_p3(D=34, H=18, W=18, C=512, K=512), 256, 32, 3, 456)):
+                T, plan = P.plan_boxes(p, tm, 256, tk, ms, cus)
+                cl = P.pixel_classes(p)
+                owner = {pix: c for c, v in cl.items() for pix in v}
+                seen = []
+                for box, tiles, split, rows in plan:
+                    self.assertLessEqual(len(rows), tiles * tm)
+                    self.assertLessEqual(split, ms)
+                    for r in rows:
+                        self.assertTrue(P._contains(box, owner[r]))
+                    seen += rows
+                self.assertEqual(sorted(seen), sorted(owner))
+        finally:
+            P._SOLVER = old
+            P._plan_cached.cache_clear()
