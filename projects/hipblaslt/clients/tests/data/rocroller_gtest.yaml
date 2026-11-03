@@ -20,10 +20,7 @@ Tests:
   beta: 2.0
   initialization: hpl
   unit_check: 0
-  # No numerical check: this now lands on a generated MX kernel, and those fail
-  # norm_check on their own, with HIPBLASLT_USE_ROCROLLER=0 and so without any
-  # rocRoller routing. Restore norm_check: 1 once that is fixed.
-  norm_check: 0
+  norm_check: 1
   gpu_arch: '950'
 
 # A single rocRoller buffer descriptor's num_records field is 32 bits, so it cannot
@@ -55,12 +52,8 @@ Tests:
 # Batched MX GEMMs reach the Tensile heuristic: rocRoller serves batch_count == 1
 # only. Tensile's MX kernels read host-pre-swizzled scales
 # (Block_32_UE8M0_32_8_EXT = 1001), so with those the problem must get a kernel
-# and the call succeed. gfx950 because only there do the MX types reach these
-# paths. No numerical check: the generated MX kernels this lands on fail
-# norm_check at batch_count 1 too, with HIPBLASLT_USE_ROCROLLER=0 and so
-# without any rocRoller routing at all. That is a TensileLite defect this test
-# must not be coupled to; what it asserts is that a solution is found and the
-# call succeeds.
+# and the call succeed with the right answer. gfx950 because only there do the
+# MX types reach these paths.
 - name: matmul_mxf8_batched_rocroller_fallback
   category: pre_checkin
   function:
@@ -77,7 +70,7 @@ Tests:
   batch_count: [2, 16]
   initialization: uniform_low_precision
   unit_check: 0
-  norm_check: 0
+  norm_check: 1
   gpu_arch: '950'
 
 # The same batched problems with compact (packed, not pre-swizzled) scales have
