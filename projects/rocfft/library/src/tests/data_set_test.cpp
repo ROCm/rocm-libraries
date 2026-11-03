@@ -36,9 +36,9 @@ extern size_t num_random_cases;
 
 struct data_set_test_access
 {
-    static void reorder_length_axes(data_set_t& layout, const std::vector<size_t>& order)
+    static void reorder_length_axes(data_set_t& data_set, const std::vector<size_t>& order)
     {
-        layout.reorder_length_axes(order);
+        data_set.reorder_length_axes(order);
     }
 };
 
@@ -86,8 +86,8 @@ protected:
         std::shuffle(ret.begin(), ret.end(), rng);
         return ret;
     }
-    // Full layout of random ranks/spans whose axes are laid out in random order, with
-    // random padding between consecutive axes (non-aliasing, not necessarily packed).
+    // Full-range data set of random ranks/spans whose axes are laid out in random order,
+    // with random padding between consecutive axes (non-aliasing, not necessarily packed).
     data_set_t random_full_range()
     {
         const auto          len_rank   = uniform(1, 4);
@@ -197,10 +197,10 @@ TEST_F(data_set_test, padded_buffer_element_count)
     }
 }
 
-// A layout is contiguous iff its elements fill a buffer without gaps: taken by increasing
+// A data set is contiguous iff its elements fill a buffer without gaps: taken by increasing
 // stride, each non-unit-span axis must be strided by the number of elements spanned by the
 // axes before it (1 for the first one), whatever the axis order.
-// contiguous_strides_and_distances() returns the layout's own strides if it is contiguous,
+// contiguous_strides_and_distances() returns the data set's own strides if it is contiguous,
 // and packed strides in natural axis order otherwise.
 TEST_F(data_set_test, contiguous_strides)
 {
@@ -221,8 +221,8 @@ TEST_F(data_set_test, contiguous_strides)
             strides[axis] = next;
             next          = next * spans[axis] + (packed ? 0 : uniform(0, 3));
         }
-        const data_set_t layout(std::vector<size_t>(rank, 0), spans, strides, batch_rank);
-        SCOPED_TRACE("layout " + layout.str());
+        const data_set_t data_set(std::vector<size_t>(rank, 0), spans, strides, batch_rank);
+        SCOPED_TRACE("data set " + data_set.str());
 
         std::vector<size_t> non_unit_axes;
         for(size_t d = 0; d < rank; d++)
@@ -243,8 +243,9 @@ TEST_F(data_set_test, contiguous_strides)
         for(size_t d = 1; d < rank; d++)
             packed_strides[d] = packed_strides[d - 1] * spans[d - 1];
 
-        EXPECT_EQ(layout.is_contiguous(), contiguous);
-        EXPECT_EQ(layout.contiguous_strides_and_distances(), contiguous ? strides : packed_strides);
+        EXPECT_EQ(data_set.is_contiguous(), contiguous);
+        EXPECT_EQ(data_set.contiguous_strides_and_distances(),
+                  contiguous ? strides : packed_strides);
     }
 }
 
@@ -253,8 +254,8 @@ TEST_F(data_set_test, offset_in)
     for(size_t i = 0; i < num_random_cases; i++)
     {
         // outer: random sub-range, along every axis (batch axes included), of a random
-        // full layout, so its lower bounds are generally not 0; inner: random sub-range
-        // of outer, with arbitrary strides since offset_in only uses outer's strides
+        // full-range data set, so its lower bounds are generally not 0; inner: random
+        // sub-range of outer, with arbitrary strides since offset_in only uses outer's strides
         const auto          full         = random_full_range();
         const auto          rank         = full.get_full_rank();
         const auto          full_upper   = full.upper();
@@ -286,17 +287,17 @@ TEST_F(data_set_test, offset_in)
         EXPECT_THROW(outside.offset_in(outer), std::invalid_argument);
     }
 
-    // layouts must have the same numbers of length and batch axes
-    const auto layout_2d = data_set_t::full_range({8, 8}, {1, 8}, 1, 64);
-    const auto layout_1d = data_set_t::full_range({8}, {1}, 1, 8);
-    EXPECT_THROW(layout_1d.offset_in(layout_2d), std::invalid_argument);
+    // data sets must have the same numbers of length and batch axes
+    const auto data_set_2d = data_set_t::full_range({8, 8}, {1, 8}, 1, 64);
+    const auto data_set_1d = data_set_t::full_range({8}, {1}, 1, 8);
+    EXPECT_THROW(data_set_1d.offset_in(data_set_2d), std::invalid_argument);
 
     // even with the same total number of axes
-    const data_set_t layout_1d_two_batches({0, 0, 0}, {8, 8, 1}, {1, 8, 64}, 2);
-    EXPECT_THROW(layout_1d_two_batches.offset_in(layout_2d), std::invalid_argument);
+    const data_set_t data_set_1d_two_batches({0, 0, 0}, {8, 8, 1}, {1, 8, 64}, 2);
+    EXPECT_THROW(data_set_1d_two_batches.offset_in(data_set_2d), std::invalid_argument);
 }
 
-// Any sub-range along the slowest-varying axis of a layout is one unbroken run of it.
+// Any sub-range along the slowest-varying axis of a data set is one unbroken run of it.
 // Unit-length axes do not vary, so they are never the slowest-varying axis, whatever
 // their stride (e.g. a trailing batch axis of length 1).
 TEST_F(data_set_test, continuous_chunk)
@@ -466,7 +467,7 @@ TEST_F(data_set_test, intersection)
                  std::invalid_argument);
 
     // ...and the same embedding (if any): views of different length axes, or an embedded
-    // view and a plain layout with the same axes, are rejected
+    // view and a plain data set with the same axes, are rejected
     const auto       innermost = full_3d.get_data_set_for_len_axes({0});
     const auto       middle    = full_3d.get_data_set_for_len_axes({1});
     const data_set_t plain_middle(
@@ -482,16 +483,16 @@ TEST_F(data_set_test, intersection)
     EXPECT_EQ(middle_overlap.corresponding_axes_in_embedding(), (std::vector<size_t>{1}));
 }
 
-// Complex in-place transforms use the same layout on both sides: the counterpart must
-// be an exact copy, whatever the layout.
+// Complex in-place transforms use the same data set on both sides: the counterpart
+// must be an exact copy, whatever the data set.
 TEST_F(data_set_test, inplace_complex_is_unchanged)
 {
     for(size_t i = 0; i < num_random_cases; i++)
     {
         // Batch axes may be partial ranges (unlike length axes), so cut a random
         // sub-range along them. Then keep a random subset of the length axes, which
-        // gives an embedded layout unless every length axis is kept: the embedding map
-        // must survive the copy too.
+        // gives an embedded data set unless every length axis is kept: the embedding
+        // map must survive the copy too.
         const auto full = random_full_range();
         auto       lo   = full.lower();
         auto       hi   = full.upper();
@@ -503,7 +504,7 @@ TEST_F(data_set_test, inplace_complex_is_unchanged)
         const data_set_t batch_range(lo, hi, full.strides_and_distances(), full.get_batch_rank());
         auto             len_axes = random_permutation(full.get_len_rank());
         len_axes.resize(uniform(1, len_axes.size()));
-        const auto layout
+        const auto data_set
             = batch_range.get_data_set_for_len_axes({len_axes.begin(), len_axes.end()});
 
         // the same copy is expected for either direction and either side: draw one
@@ -511,20 +512,20 @@ TEST_F(data_set_test, inplace_complex_is_unchanged)
         const auto fft_type = uniform(0, 1) ? rocfft_transform_type_complex_forward
                                             : rocfft_transform_type_complex_inverse;
         const auto io       = uniform(0, 1) ? io_data_label::INPUT : io_data_label::OUTPUT;
-        SCOPED_TRACE("layout " + layout.str() + " / fft_type " + std::to_string(fft_type) + " / io "
-                     + (io == io_data_label::INPUT ? "INPUT" : "OUTPUT"));
+        SCOPED_TRACE("data set " + data_set.str() + " / fft_type " + std::to_string(fft_type)
+                     + " / io " + (io == io_data_label::INPUT ? "INPUT" : "OUTPUT"));
 
-        const auto other = layout.get_other_inplace_data_set_for(io, fft_type);
+        const auto other = data_set.get_other_inplace_data_set_for(io, fft_type);
         ASSERT_TRUE(other.has_value());
-        EXPECT_TRUE(*other == layout) << other->str();
+        EXPECT_TRUE(*other == data_set) << other->str();
         // operator== ignores the embedding map, so compare it separately
-        EXPECT_TRUE(other->get_embedding_data_set() == layout.get_embedding_data_set());
+        EXPECT_TRUE(other->get_embedding_data_set() == data_set.get_embedding_data_set());
         EXPECT_EQ(other->corresponding_axes_in_embedding(),
-                  layout.corresponding_axes_in_embedding());
+                  data_set.corresponding_axes_in_embedding());
     }
 }
 
-// real -> Hermitian -> real gives back the original layout, for both real
+// real -> Hermitian -> real gives back the original data set, for both real
 // transform directions and for even and odd innermost lengths; the wrong parity
 // flag must not.
 TEST_F(data_set_test, inplace_real_round_trip)
@@ -535,10 +536,10 @@ TEST_F(data_set_test, inplace_real_round_trip)
         const auto B    = random_vec(uniform(1, 3), 1, 5);
         const bool odd  = L[0] % 2 == 1;
         const auto full = data_set_t::default_full_range(L, B, true);
-        // Multi-device plans also derive in-place layouts for embedded (lower-dimensional)
+        // Multi-device plans also derive in-place data sets for embedded (lower-dimensional)
         // views, which must keep the embedding's innermost axis for real transforms (see
         // plan.cpp). Keep axis 0 and a random subset of the other length axes; keeping all
-        // of them gives the plain, non-embedded layout.
+        // of them gives the plain, non-embedded data set.
         std::set<size_t> kept{0};
         for(size_t d = 1; d < L.size(); d++)
             if(uniform(0, 1))
@@ -582,14 +583,14 @@ TEST_F(data_set_test, inplace_real_round_trip)
     }
 }
 
-// A Hermitian layout has an in-place real counterpart iff it is packed along its
-// innermost axis (and is not self-aliased). A real layout has an in-place Hermitian
+// A Hermitian data set has an in-place real counterpart iff it is packed along its
+// innermost axis (and is not self-aliased). A real data set has an in-place Hermitian
 // counterpart iff:
 // - it is packed along its innermost axis;
 // - every other non-unit-span axis has an even stride (a whole number of complex
 //   interleaved values);
 // - neither it nor its Hermitian interleaved counterpart is self-aliased.
-// The layouts below are built so that they are never self-aliased, and neither are
+// The data sets below are built so that they are never self-aliased, and neither are
 // their counterparts if the first two conditions hold and every other non-unit-span
 // axis is strided by no less than an innermost row padded to 2 * (n / 2 + 1) reals.
 // That per-axis rule is what the library currently checks instead of robust
@@ -607,10 +608,10 @@ TEST_F(data_set_test, inplace_real_counterpart_rules)
         const auto n          = spans[0];
         const auto P          = 2 * (n / 2 + 1);
 
-        // Axes are nested so that the layout is not self-aliased: axis 0 first (mostly
+        // Axes are nested so that the data set is not self-aliased: axis 0 first (mostly
         // packed), then the other non-unit-span axes in random order, each strided by the
         // extent of the axes before it plus up to 3 elements. Rows count as P elements in
-        // that extent, so that the counterpart of a real layout is not self-aliased
+        // that extent, so that the counterpart of a real data set is not self-aliased
         // either if the stride rules hold. Only the first of those axes can thus be
         // strided below P, while any of them can have an odd stride. Unit-span axes span
         // nothing and get any stride.
@@ -629,7 +630,7 @@ TEST_F(data_set_test, inplace_real_counterpart_rules)
             strides[d] = extent + uniform(0, 3);
             extent     = std::max(extent, P) + (spans[d] - 1) * strides[d];
         }
-        const data_set_t layout(std::vector<size_t>(rank, 0), spans, strides, batch_rank);
+        const data_set_t data_set(std::vector<size_t>(rank, 0), spans, strides, batch_rank);
 
         // query the counterpart of either side, for either real transform
         const auto fft_type = uniform(0, 1) ? rocfft_transform_type_real_forward
@@ -639,7 +640,7 @@ TEST_F(data_set_test, inplace_real_counterpart_rules)
         const bool from_real = uniform(0, 1);
         const auto other_io  = from_real ? herm_io : other(herm_io);
         const bool odd       = uniform(0, 1);
-        SCOPED_TRACE("layout " + layout.str() + " / fft_type " + std::to_string(fft_type)
+        SCOPED_TRACE("data set " + data_set.str() + " / fft_type " + std::to_string(fft_type)
                      + (from_real ? " / real side" : " / Hermitian side"));
 
         bool follows_rules = spans[0] == 1 || strides[0] == 1;
@@ -660,11 +661,11 @@ TEST_F(data_set_test, inplace_real_counterpart_rules)
         // a Hermitian innermost length of 1 only comes from a real one of 1
         if(!from_real && n == 1 && !odd)
         {
-            EXPECT_THROW(layout.get_other_inplace_data_set_for(other_io, fft_type, odd),
+            EXPECT_THROW(data_set.get_other_inplace_data_set_for(other_io, fft_type, odd),
                          std::invalid_argument);
             continue;
         }
-        const auto counterpart = layout.get_other_inplace_data_set_for(other_io, fft_type, odd);
+        const auto counterpart = data_set.get_other_inplace_data_set_for(other_io, fft_type, odd);
         ASSERT_EQ(counterpart.has_value(), follows_rules);
         if(counterpart)
         {
@@ -676,12 +677,12 @@ TEST_F(data_set_test, inplace_real_counterpart_rules)
 
 TEST_F(data_set_test, inplace_query_rejects_bad_arguments)
 {
-    auto layout = data_set_t::default_full_range({8}, 1);
-    EXPECT_THROW(layout.get_other_inplace_data_set_for(io_data_label::OUTPUT,
-                                                       static_cast<rocfft_transform_type>(99)),
+    auto data_set = data_set_t::default_full_range({8}, 1);
+    EXPECT_THROW(data_set.get_other_inplace_data_set_for(io_data_label::OUTPUT,
+                                                         static_cast<rocfft_transform_type>(99)),
                  std::invalid_argument);
 
-    // a layout covering nothing has no counterpart
+    // a data set covering nothing has no counterpart
     data_set_t empty({0, 0}, {0, 1}, {1, 1});
     EXPECT_THROW(empty.get_other_inplace_data_set_for(io_data_label::OUTPUT,
                                                       rocfft_transform_type_real_forward),
@@ -721,7 +722,7 @@ TEST_F(data_set_test, axes_by_increasing_stride)
             distinct.insert(uniform(1, 1000));
         std::vector<size_t> strides(distinct.begin(), distinct.end());
         std::shuffle(strides.begin(), strides.end(), rng);
-        const auto layout
+        const auto data_set
             = data_set_t::full_range(random_vec(rank, 1, 8), strides, 1, 1 + *distinct.rbegin());
         SCOPED_TRACE("strides " + to_str(strides));
 
@@ -738,8 +739,8 @@ TEST_F(data_set_test, axes_by_increasing_stride)
         for(auto [stride, d] : rest_by_stride)
             pinned.push_back(d);
 
-        EXPECT_EQ(layout.length_axes_by_increasing_strides(false), unpinned);
-        EXPECT_EQ(layout.length_axes_by_increasing_strides(true), pinned);
+        EXPECT_EQ(data_set.length_axes_by_increasing_strides(false), unpinned);
+        EXPECT_EQ(data_set.length_axes_by_increasing_strides(true), pinned);
     }
 }
 
@@ -773,7 +774,7 @@ TEST_F(data_set_test, embedding_round_trip)
         EXPECT_TRUE(subsub.get_embedding_data_set() == L);
         EXPECT_EQ(subsub.corresponding_axes_in_embedding(), subsub_axes);
 
-        // Reordering keeps the embedding consistent only for embedded layouts;
+        // Reordering keeps the embedding consistent only for embedded data sets;
         // selecting every axis returns a plain copy without an embedding map.
         if(S.size() == len_rank)
             continue;
@@ -799,7 +800,7 @@ TEST_F(data_set_test, embedding_round_trip)
 
 TEST_F(data_set_test, subset_of_axes_rejects_bad_input)
 {
-    auto layout = data_set_t::default_full_range({4, 8, 2}, 3);
-    EXPECT_THROW(layout.get_data_set_for_len_axes({}), std::invalid_argument);
-    EXPECT_THROW(layout.get_data_set_for_len_axes({0, 7}), std::invalid_argument);
+    auto data_set = data_set_t::default_full_range({4, 8, 2}, 3);
+    EXPECT_THROW(data_set.get_data_set_for_len_axes({}), std::invalid_argument);
+    EXPECT_THROW(data_set.get_data_set_for_len_axes({0, 7}), std::invalid_argument);
 }
