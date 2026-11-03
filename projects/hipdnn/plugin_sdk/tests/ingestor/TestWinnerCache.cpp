@@ -4,7 +4,6 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <atomic>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -191,6 +190,33 @@ TEST(TestIngestorWinnerCache, KeysDifferingOnlyInGraphAreDistinct)
                               DeviceKey{properties}};
 
     EXPECT_NE(firstKey, secondKey);
+}
+
+TEST(TestIngestorWinnerCache, EmptySlotKeyMatchesAggregateInitKeyAndHash)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942";
+    const WinnerKey plain{GraphContentKey{graph}, DeviceKey{properties}};
+    const WinnerKey explicitEmpty{GraphContentKey{graph}, DeviceKey{properties}, std::string{}};
+
+    EXPECT_EQ(plain, explicitEmpty);
+    EXPECT_EQ(WinnerKeyHash{}(plain), WinnerKeyHash{}(explicitEmpty));
+}
+
+TEST(TestIngestorWinnerCache, KeysDifferingOnlyInSlotAreDistinct)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942";
+    const WinnerKey unslotted{GraphContentKey{graph}, DeviceKey{properties}};
+    const WinnerKey slotA{GraphContentKey{graph}, DeviceKey{properties}, "a"};
+    const WinnerKey slotB{GraphContentKey{graph}, DeviceKey{properties}, "b"};
+
+    EXPECT_NE(unslotted, slotA);
+    EXPECT_NE(slotA, slotB);
+    EXPECT_NE(WinnerKeyHash{}(unslotted), WinnerKeyHash{}(slotA));
+    EXPECT_NE(WinnerKeyHash{}(slotA), WinnerKeyHash{}(slotB));
 }
 
 TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
@@ -613,77 +639,6 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
     EXPECT_EQ(reads.load(), 2000) << "the key exists throughout, so no read may miss";
 }
 
-/// A value no other live ScopedCacheDir shares, in this process or any other: a
-/// steady-clock reading separates concurrent processes, the counter separates two
-/// guards within one process. Not getpid(): <unistd.h> does not exist on Windows.
-inline std::string uniqueSuffix()
-{
-    static std::atomic<uint64_t> s_counter{0};
-    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::to_string(static_cast<uint64_t>(stamp)) + "_"
-           + std::to_string(s_counter.fetch_add(1));
-}
-
-/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
-/// restores the caller's value after.
-///
-/// Also neutralizes HIPDNN_DISABLE_CACHE for the same window. An ambient truthy value in
-/// the runner's environment makes cacheRoot() return empty before it reads
-/// HIPDNN_CACHE_DIR at all, which silently turns every disk test below into a test of the
-/// in-memory fallback.
-class ScopedCacheDir
-{
-public:
-    explicit ScopedCacheDir(const std::string& name)
-        : _previous(hipdnn_data_sdk::utilities::getEnv(CACHE_DIR_ENV))
-        , _previousDisable(hipdnn_data_sdk::utilities::getEnv(DISABLE_CACHE_ENV))
-        , _path(std::filesystem::temp_directory_path()
-                / ("hipdnn_winner_cache_test_" + uniqueSuffix() + "_" + name))
-    {
-        std::filesystem::remove_all(_path);
-        std::filesystem::create_directories(_path);
-        const std::string value = _path.string();
-        hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, value.c_str());
-        hipdnn_data_sdk::utilities::unsetEnv(DISABLE_CACHE_ENV);
-    }
-
-    ScopedCacheDir(const ScopedCacheDir&) = delete;
-    ScopedCacheDir& operator=(const ScopedCacheDir&) = delete;
-    ScopedCacheDir(ScopedCacheDir&&) = delete;
-    ScopedCacheDir& operator=(ScopedCacheDir&&) = delete;
-
-    ~ScopedCacheDir()
-    {
-        if(_previous.empty())
-        {
-            hipdnn_data_sdk::utilities::unsetEnv(CACHE_DIR_ENV);
-        }
-        else
-        {
-            hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, _previous.c_str());
-        }
-        if(!_previousDisable.empty())
-        {
-            hipdnn_data_sdk::utilities::setEnv(DISABLE_CACHE_ENV, _previousDisable.c_str());
-        }
-        std::error_code ignored;
-        std::filesystem::remove_all(_path, ignored);
-    }
-
-    const std::filesystem::path& path() const
-    {
-        return _path;
-    }
-
-private:
-    static constexpr const char* CACHE_DIR_ENV = "HIPDNN_CACHE_DIR";
-    static constexpr const char* DISABLE_CACHE_ENV = "HIPDNN_DISABLE_CACHE";
-
-    std::string _previous;
-    std::string _previousDisable;
-    std::filesystem::path _path;
-};
-
 /// The suffixed arch a real gfx942 reports, with nonzero memory properties so a codec that
 /// drops one is caught.
 DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
@@ -714,6 +669,103 @@ WinnerRecord recordFor(uint8_t kernel, double timeMs)
 /// UUID text is already a plain path component, so it reaches the shard path verbatim.
 const std::string UHD_ID = toString(HEURISTIC_ID);
 
+// Golden pins of the unslotted on-disk contract: expected values are literal so a change to
+// persisted bytes or shard location fails here rather than silently orphaning caches.
+
+/// The graph payload is base64 of the graph's serialized bytes, so it is spliced in from
+/// GraphContentKey::toJson() instead of spelled out; its envelope is pinned separately.
+TEST(TestIngestorWinnerCache, UnslottedGoldenWinnerRecordLineBytesAreFormatV2)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyFor(graph, suffixedDeviceProperties());
+    const WinnerRecord record{entryFor(definitionFor(0x01), 1.5),
+                              entryFor(definitionFor(0x02), 0.25)};
+
+    const auto graphJson = key.graph.toJson();
+    ASSERT_TRUE(graphJson.is_object());
+    ASSERT_EQ(graphJson.size(), 1U);
+    ASSERT_TRUE(graphJson.contains("content_base64"));
+
+    const std::string expected
+        = std::string(
+              R"({"device":{"gcn_arch_name":"gfx942:sramecc+:xnack-","memory_bus_width":8192,)"
+              R"("memory_clock_rate":2600000,"multi_processor_count":304,)"
+              R"("shared_mem_per_block":65536,"total_global_mem":206141652992,"warp_size":64},)"
+              R"("entries":[{"dispatch_id":"d0d0d0d0-d0d0-d0d0-d0d0-d0d0d0d0d0d0",)"
+              R"("kernel_id":"01010101-0101-0101-0101-010101010101",)"
+              R"("pack_id":"f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0","time_ms":1.5},)"
+              R"({"dispatch_id":"d0d0d0d0-d0d0-d0d0-d0d0-d0d0d0d0d0d0",)"
+              R"("kernel_id":"02020202-0202-0202-0202-020202020202",)"
+              R"("pack_id":"f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0","time_ms":0.25}],"graph":)")
+          + graphJson.dump() + R"(,"v":2})";
+
+    EXPECT_EQ(encodeWinnerRecordLine(key, record), expected);
+    EXPECT_EQ(detail::WINNER_LINE_FORMAT_VERSION, 2);
+}
+
+std::string relativeShardPath(const EngineIdentity& engine, std::string_view gcnArchName)
+{
+    const auto path = winnerCacheShardPath(engine, gcnArchName);
+    return path.lexically_relative(hipdnn_data_sdk::utilities::cacheRoot()).generic_string();
+}
+
+/// The sanitized engine component is `<stem>-<FNV-1a of the whole name>`; for "test:Golden"
+/// that is `test_Golden-89323a9478aa8f9c`.
+TEST(TestIngestorWinnerCache, UnslottedGoldenShardPathLayoutForAnEngineWithAModel)
+{
+    const ScopedCacheDir cacheDir("unslotted_golden_path_model");
+    const EngineIdentity engine{
+        "test:Golden", {1, 2, 3}, "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2", "0123456789abcdef0123"};
+
+    EXPECT_EQ(relativeShardPath(engine, "gfx942:sramecc+:xnack-"),
+              "ingestor-winners/" + std::string(winnerCacheVersion())
+                  + "/test_Golden-89323a9478aa8f9c/e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2/"
+                    "1.2.3-0123456789abcdef/gfx942/winners.jsonl");
+}
+
+TEST(TestIngestorWinnerCache, UnslottedGoldenShardPathLayoutForAnEngineWithoutAModel)
+{
+    const ScopedCacheDir cacheDir("unslotted_golden_path_no_model");
+    const EngineIdentity engine{"test:Golden", {1, 0, 0}};
+
+    EXPECT_EQ(relativeShardPath(engine, "gfx950"),
+              "ingestor-winners/" + std::string(winnerCacheVersion())
+                  + "/test_Golden-89323a9478aa8f9c/no-uhd/1.0.0-unhashed/gfx950/winners.jsonl");
+}
+
+TEST(TestIngestorWinnerCacheStateManager,
+     UnslottedGoldenShardHoldsTheVersionLineThenTheEncodedRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("unslotted_golden_shard");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    const EngineIdentity engine{"test:UnslottedGoldenShard"};
+    const auto first = recordFor(0x01, 1.5);
+
+    {
+        const auto writer = makeIdentifiedStateManager(engine);
+        writer->recordWinner(key, first, WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto path = winnerCacheShardPath(engine, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    EXPECT_EQ(path.filename().string(), "winners.jsonl");
+    {
+        std::ifstream shardFile(path);
+        ASSERT_TRUE(shardFile.is_open());
+        std::vector<std::string> rawLines;
+        for(std::string line; std::getline(shardFile, line);)
+        {
+            rawLines.push_back(line);
+        }
+        ASSERT_EQ(rawLines.size(), 2U);
+        EXPECT_EQ(rawLines[0], std::string(winnerCacheVersion()));
+        EXPECT_EQ(rawLines[1], encodeWinnerRecordLine(key, first));
+    }
+}
+
 /// Proves the codec plus the read-once path across two manager lifetimes; the
 /// cross-process case is a separate ctest-driven pair below.
 TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroughTheShard)
@@ -736,6 +788,9 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
         << "a fresh manager did not read back the record the previous one wrote";
     ASSERT_EQ(served->size(), 1U);
     EXPECT_EQ(served->front().kernelId, testId(0x11));
+    EXPECT_EQ(served->front().packId, definitionFor(0x11).packId);
+    EXPECT_EQ(served->front().dispatchId, definitionFor(0x11).dispatchId);
+    EXPECT_DOUBLE_EQ(served->front().timeMs, 1.5);
 }
 
 /// RFC 0019 §9.2: a retrained model keeps its UHD id, so the content hash must separate it.
