@@ -22,9 +22,9 @@
 # THE SOFTWARE.
 # #############################################################################
 
-# GNU toolchain (gfortran).
-# Usage, from projects/rocfft/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/gnu.cmake
+# Intel oneAPI toolchain (ifx, the LLVM-based compiler).
+# Usage, from bindings/fortran/rocfft:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
 
-set(CMAKE_Fortran_COMPILER gfortran CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       gcc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")

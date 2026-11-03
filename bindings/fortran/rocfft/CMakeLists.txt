@@ -289,8 +289,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocfft-fortran-config.cmake"
 # From this tree's root, not rocfft_VERSION, which standalone is the INSTALLED
 # rocFFT. Judged on the whole match: the minor component "0" is falsy.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _rocfft_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocfft/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocfft/CMakeLists.txt" _rocfft_root)
   set(_rocfft_parts "")
   foreach(_part MAJOR MINOR PATCH)
     string(REGEX MATCH "set[ \t]*\\([ \t]*ROCFFT_VERSION_${_part}[ \t]+\"?([0-9]+)"
