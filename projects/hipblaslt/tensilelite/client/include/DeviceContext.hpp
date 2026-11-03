@@ -83,8 +83,13 @@ namespace TensileLite
             }
         }
 
-        // devices: the problem's ranks, rank r on devices[r]. Both are no-ops unless the
+        // devices: the problem's ranks, rank r on devices[r]. These are no-ops unless the
         // problem is a fused GEMM+A2A.
+        void checkFusedA2ASolution(ContractionProblem const&  problem,
+                                   ContractionSolution const& solution,
+                                   Hardware const&            hardware,
+                                   size_t                     world);
+
         void resetCommBuffers(ContractionProblem const&                          problem,
                               std::vector<std::shared_ptr<DeviceContext>> const& devices);
 
@@ -92,8 +97,6 @@ namespace TensileLite
         // and channel.
         ProblemInputs const* rankInputs(ContractionInputs&                                 scratch,
                                         ContractionProblem const&                          problem,
-                                        ContractionSolution const&                         solution,
-                                        Hardware const&                                    hardware,
                                         std::vector<std::shared_ptr<DeviceContext>> const& devices,
                                         size_t                                             rank,
                                         size_t                                             launch);

@@ -1231,6 +1231,7 @@ int main(int argc, const char* argv[])
                     {
                         try
                         {
+                            checkFusedA2ASolution(*problem, *solution, *hardware, active.size());
                             resetCommBuffers(*problem, active);
                             while(listeners.needMoreRunsInSolution())
                             {
@@ -1259,8 +1260,6 @@ int main(int argc, const char* argv[])
                                             ContractionInputs    scratch;
                                             ProblemInputs const* inputs = rankInputs(scratch,
                                                                                      *problem,
-                                                                                     *solution,
-                                                                                     *hardware,
                                                                                      active,
                                                                                      d,
                                                                                      k);

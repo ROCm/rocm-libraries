@@ -102,6 +102,31 @@ namespace TensileLite
                 static_cast<void>(hipStreamDestroy(stream));
         }
 
+        void checkFusedA2ASolution(ContractionProblem const&  problem,
+                                   ContractionSolution const& solution,
+                                   Hardware const&            hardware,
+                                   size_t                     world)
+        {
+            auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(&problem);
+            if(gemm == nullptr || !gemm->fusedGemmA2A())
+                return;
+            const size_t macroTileN   = solution.sizeMapping.macroTile.y;
+            const size_t tokenTiles   = (gemm->freeSizeB(0) + macroTileN - 1) / macroTileN;
+            const size_t counterBytes = kCounter1Offset + world * tokenTiles * sizeof(uint32_t);
+            const size_t synchronizerBytes
+                = gemm->tensors()[ContractionProblemGemm::TENSOR::Synchronizer]
+                      .totalAllocatedBytes();
+            if(counterBytes > synchronizerBytes)
+                throw std::runtime_error(concatenate("[fused-a2a] the counter needs ",
+                                                     counterBytes,
+                                                     " bytes; the Synchronizer holds ",
+                                                     synchronizerBytes,
+                                                     "."));
+            if(solution.requiredWorkspaceSize(*gemm, hardware) != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] solutions that need a workspace are not supported.");
+        }
+
         void resetCommBuffers(ContractionProblem const&                          problem,
                               std::vector<std::shared_ptr<DeviceContext>> const& devices)
         {
@@ -126,8 +151,6 @@ namespace TensileLite
 
         ProblemInputs const* rankInputs(ContractionInputs&                                 scratch,
                                         ContractionProblem const&                          problem,
-                                        ContractionSolution const&                         solution,
-                                        Hardware const&                                    hardware,
                                         std::vector<std::shared_ptr<DeviceContext>> const& devices,
                                         size_t                                             rank,
                                         size_t                                             launch)
@@ -137,23 +160,8 @@ namespace TensileLite
             if(gemm == nullptr || !gemm->fusedGemmA2A())
                 return devices[rank]->inputArr[slot].get();
 
-            const size_t world        = devices.size();
-            const size_t channel      = launch % kCommChannels;
-            const size_t macroTileN   = solution.sizeMapping.macroTile.y;
-            const size_t tokenTiles   = (gemm->freeSizeB(0) + macroTileN - 1) / macroTileN;
-            const size_t counterBytes = kCounter1Offset + world * tokenTiles * sizeof(uint32_t);
-            const size_t synchronizerBytes
-                = gemm->tensors()[ContractionProblemGemm::TENSOR::Synchronizer]
-                      .totalAllocatedBytes();
-            if(counterBytes > synchronizerBytes)
-                throw std::runtime_error(concatenate("[fused-a2a] the counter needs ",
-                                                     counterBytes,
-                                                     " bytes; the Synchronizer holds ",
-                                                     synchronizerBytes,
-                                                     "."));
-            if(solution.requiredWorkspaceSize(*gemm, hardware) != 0)
-                throw std::runtime_error(
-                    "[fused-a2a] solutions that need a workspace are not supported.");
+            const size_t world   = devices.size();
+            const size_t channel = launch % kCommChannels;
 
             scratch = dynamic_cast<ContractionInputs const&>(*devices[rank]->inputArr[slot]);
             scratch.fusedA2APeers.clear();

@@ -198,6 +198,30 @@ TEST_F(ReferenceValidatorTest, OneShotValidatesOnlyTheFirstRun)
     EXPECT_EQ(validator->error(), 0);
 }
 
+TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferIsAligned)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
+        GTEST_SKIP() << "needs a device";
+
+    auto args = makeValidatorArgs();
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{64, 63, 1, 65}});
+    setOption(args, "fused-gemm-a2a", true);
+    setOption(args, "world", std::vector<int>{1});
+    setOption(args, "fused-a2a-extent", std::vector<int>{64});
+    setOption(args, "rotating-buffer-size", 1);
+    ClientProblemFactory factory(args);
+    auto                 dataInit = std::make_shared<DataInitialization>(args, factory);
+    auto* problem = dynamic_cast<ContractionProblemGemm*>(factory.problems()[0].get());
+    ASSERT_NE(problem->b().totalAllocatedBytes() % 16, 0u);
+
+    auto inputs  = dataInit->prepareGPUInputs(problem);
+    auto rotated = dataInit->prepareRotatingGPUOutput(2, problem, inputs, nullptr);
+    ASSERT_EQ(rotated.size(), 2u);
+    auto const& copy = dynamic_cast<ContractionInputs const&>(*rotated[1]);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(copy.a2aBuf) % 16, 0u);
+}
+
 TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
 {
     int deviceCount = 0;
