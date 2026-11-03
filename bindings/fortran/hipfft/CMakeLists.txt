@@ -338,8 +338,8 @@ include(CMakePackageConfigHelpers)
 # From this tree's root, not hipfft_VERSION, which standalone is the INSTALLED
 # hipFFT. One version for both packages.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _hipfft_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipfft/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipfft/CMakeLists.txt" _hipfft_root)
   set(_v_parts "")
   foreach(_v_comp MAJOR MINOR PATCH)
     # Judged on the whole match: a failed match leaves CMAKE_MATCH_1 stale.

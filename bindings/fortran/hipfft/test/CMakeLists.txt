@@ -144,6 +144,8 @@ elseif(NOT TARGET hip::hipfftw)
     "tests (they link libhipfftw). Point CMAKE_PREFIX_PATH at an installed "
     "ROCm to build them standalone.")
 else()
+  # hipfftw_fortran_add_test(<name>): builds <name>.f03 as test
+  # hipfftw_fortran_<name>.
   function(hipfftw_fortran_add_test name)
     set(src "${CMAKE_CURRENT_SOURCE_DIR}/${name}.f03")
     if(NOT EXISTS "${src}")

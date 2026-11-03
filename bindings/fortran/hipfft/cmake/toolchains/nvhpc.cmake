@@ -22,9 +22,9 @@
 # THE SOFTWARE.
 # ############################################################################
 
-# AMD ROCm toolchain (amdflang).
-# Usage, from projects/hipfft/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
+# NVIDIA HPC SDK toolchain (nvfortran).
+# Usage, from bindings/fortran/hipfft:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/nvhpc.cmake
 
-set(CMAKE_Fortran_COMPILER amdflang CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       amdclang CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER nvfortran CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       nvc CACHE FILEPATH "C compiler")
