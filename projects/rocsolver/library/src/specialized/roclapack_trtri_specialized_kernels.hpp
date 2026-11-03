@@ -48,7 +48,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(TRTRI_MAX_COLS)
     trti2_kernel_small(const rocblas_fill uplo,
                        const rocblas_diagonal diagtype,
                        U AA,
-                       const rocblas_int shiftA,
+                       const rocblas_stride shiftA,
                        const rocblas_int lda,
                        const rocblas_stride strideA)
 {
@@ -142,7 +142,7 @@ void trti2_run_small(rocblas_handle handle,
                      const rocblas_diagonal diag,
                      const rocblas_int n,
                      U A,
-                     const rocblas_int shiftA,
+                     const rocblas_stride shiftA,
                      const rocblas_int lda,
                      const rocblas_stride strideA,
                      const rocblas_int batch_count)
@@ -236,7 +236,7 @@ void trti2_run_small(rocblas_handle handle,
 #define INSTANTIATE_TRTI2_SMALL(T, U)                                                          \
     template void trti2_run_small<T, U>(rocblas_handle handle, const rocblas_fill uplo,        \
                                         const rocblas_diagonal diag, const rocblas_int n, U A, \
-                                        const rocblas_int shiftA, const rocblas_int lda,       \
+                                        const rocblas_stride shiftA, const rocblas_int lda,    \
                                         const rocblas_stride strideA, const rocblas_int batch_count)
 
 ROCSOLVER_END_NAMESPACE
