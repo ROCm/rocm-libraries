@@ -119,6 +119,11 @@ class TestExtractElfMeta(unittest.TestCase):
                 for key in ("vgprs", "sgprs", "lds_bytes"):
                     self.assertIn(key, meta, f"{key} missing for {arch}: {meta}")
                     self.assertGreater(meta[key], 0, f"{key} not populated for {arch}")
+                # The note's first kernel key, printed "- .agpr_count: N". Only
+                # MFMA targets have AGPRs; gfx1250's note carries no such key.
+                # 0 is a valid count, so only presence is checked.
+                if arch == "gfx950":
+                    self.assertIn("agprs", meta, f"agprs missing for {arch}: {meta}")
 
     def test_reports_spill_counts(self):
         """Spills are why this metadata is worth collecting.

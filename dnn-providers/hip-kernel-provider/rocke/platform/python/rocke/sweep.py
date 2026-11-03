@@ -156,7 +156,9 @@ def _extract_elf_meta(hsaco_path: Path) -> Dict[str, int]:
         return {}
     meta: Dict[str, int] = {}
     for line in out.splitlines():
-        line = line.strip()
+        # The first key of each kernel entry is a YAML list item, printed as
+        # "- .agpr_count: N"; drop the marker so its key is looked up too.
+        line = line.strip().removeprefix("- ")
         key = _ELF_META_KEYS.get(line.split(None, 1)[0] if line else "")
         if key is None:
             continue
