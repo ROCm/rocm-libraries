@@ -776,16 +776,26 @@ def test_hook_tables_match_the_current_python():
             )
 
 
-def _reject_sites() -> set[tuple[str, int]]:
-    """(file, line) of every reject the C++ port mirrors: each ``raise`` in
+def _reject_sites() -> tuple[set, set]:
+    """(file, line) of every reject the C++ port mirrors, as two sets.
+
+    Statements a case must execute: each ``raise`` in
     ``AttentionDenseSpec.__post_init__``, each ``return False, ...`` in
-    ``check_dense_spec_preflight``, and each non-None return of a decode check."""
+    ``check_dense_spec_preflight``, and each non-None return of a decode check
+    (including a check's own ``return why``, so a check that shares
+    ``_aligned_causal_error`` with another still needs its own case).
+
+    Divisions a case must make raise ``ZeroDivisionError``: the two paged ones in
+    ``__post_init__`` (``block_n // num_waves`` and ``block_size %
+    rows_per_wave``), which the C port mirrors as its two "division by zero"
+    rejects."""
     import ast
 
     import kernels.common.attention_dense_decode as decode_mod
     import kernels.common.attention_dense_spec as spec_mod
 
     sites = set()
+    divisions = set()
     for mod in (spec_mod, decode_mod):
         path = inspect.getsourcefile(mod)
         tree = ast.parse(Path(path).read_text())
@@ -795,6 +805,22 @@ def _reject_sites() -> set[tuple[str, int]]:
             if mod is spec_mod and node.name == "__post_init__":
                 sites |= {
                     (path, n.lineno) for n in ast.walk(node) if isinstance(n, ast.Raise)
+                }
+                divisions |= {
+                    (path, n.lineno)
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.BinOp)
+                    and isinstance(n.op, (ast.FloorDiv, ast.Mod))
+                    and (
+                        (
+                            isinstance(n.right, ast.Name)
+                            and n.right.id == "rows_per_wave"
+                        )
+                        or (
+                            isinstance(n.right, ast.Attribute)
+                            and n.right.attr == "num_waves"
+                        )
+                    )
                 }
             elif mod is spec_mod and node.name == "check_dense_spec_preflight":
                 sites |= {
@@ -814,9 +840,9 @@ def _reject_sites() -> set[tuple[str, int]]:
                     and not (
                         isinstance(n.value, ast.Constant) and n.value.value is None
                     )
-                    and not isinstance(n.value, ast.Name)
                 }
-    return sites
+    assert len(divisions) == 2, divisions
+    return sites, divisions
 
 
 def test_cases_reach_every_reject_site():
@@ -826,21 +852,24 @@ def test_cases_reach_every_reject_site():
     # Unreachable in both engines: __post_init__ already rejects any dtype other
     # than bf16 / fp16 before the paged block, so no spec reaches this re-check.
     unreachable = ("paged not yet implemented for dtype",)
+    all_sites, divisions = _reject_sites()
     sites = {
         (path, line)
-        for path, line in _reject_sites()
+        for path, line in all_sites
         if not any(
             text in Path(path).read_text().splitlines()[line - 1]
             for text in unreachable
         )
     }
     hit = set()
+    divided_by_zero = set()
 
     def tracer(frame, event, arg):
-        if event == "line":
-            key = (frame.f_code.co_filename, frame.f_lineno)
-            if key in sites:
-                hit.add(key)
+        key = (frame.f_code.co_filename, frame.f_lineno)
+        if event == "line" and key in sites:
+            hit.add(key)
+        elif event == "exception" and key in divisions and arg[0] is ZeroDivisionError:
+            divided_by_zero.add(key)
         return tracer
 
     sys.settrace(tracer)
@@ -851,6 +880,8 @@ def test_cases_reach_every_reject_site():
         sys.settrace(None)
     missed = sorted(sites - hit)
     assert not missed, f"reject sites no case reaches: {missed}"
+    missed = sorted(divisions - divided_by_zero)
+    assert not missed, f"paged divisions no case makes divide by zero: {missed}"
 
 
 def test_cases_cover_every_reject_reason_and_valid_specs():
