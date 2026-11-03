@@ -1676,17 +1676,7 @@ TYPED_TEST(local_matrix, iterative_triangular_solves_converge)
         iters, scaled_tol<T>(1e-14), true, *make_local_vector(this->backend(), b), *inv, u.get());
     LU->ItLUAnalyseClear();
     LL->ItLLAnalyseClear();
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG(
-            "host ItLUSolve and ItLLSolve give the second solve the first one's iteration count");
-    }
     expect_close(ref.apply(values_of(*w)), b, loose_tol<T>(1e-10));
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG("the transposed host iterative triangular solve does not keep the largest "
-                  "residual, so with a tolerance ItLLSolve may stop early");
-    }
     expect_close(s.apply(values_of(*v)), b, loose_tol<T>(1e-10));
     expect_close(s.apply(values_of(*u)), b, loose_tol<T>(1e-10));
 }

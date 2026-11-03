@@ -476,7 +476,7 @@ namespace rocalution
                 {
                     for(J i = 0; i < m; ++i)
                     {
-                        mx_residual = std::max(mx, std::abs(alpha[0] * x[i] - y[i]));
+                        mx_residual = std::max(mx_residual, std::abs(alpha[0] * x[i] - y[i]));
                         const T h   = inv_diag[i] * (alpha[0] * x[i] - y[i]);
                         mx          = std::max(mx, std::abs(h));
                         y[i]        = h + y_p[i];

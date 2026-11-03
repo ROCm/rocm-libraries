@@ -1864,8 +1864,6 @@ TYPED_TEST(matrix_kernels_host_csritsv, the_tolerance_bounds_the_largest_residua
         expect_near(r.y, lower_solve(dense(L), L.n, x, false), tol<T>());
     }
 
-    KNOWN_BUG("the transposed solve takes the largest update of the previous rows as the residual");
-
     {
         SCOPED_TRACE("transposed");
         const std::vector<T> x        = {0, 5, 0};

@@ -729,11 +729,6 @@ TYPED_TEST(backend_csr_preconditioners,
     ASSERT_TRUE(A->ItLLSolve(10, std::ldexp(1.0, -9), true, *in, out.get()));
     A->ItLLAnalyseClear();
 
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG("the stopping test of the transposed solve takes the largest correction of "
-                  "the previous rows instead of the largest residual");
-    }
     expect_near(values_of(*out), expected, tol<T>());
 }
 
