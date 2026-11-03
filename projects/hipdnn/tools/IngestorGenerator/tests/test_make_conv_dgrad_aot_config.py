@@ -89,9 +89,9 @@ def _document(kind):
 
 
 def test_the_catalog_is_203_selectable_kernels_and_4_helpers_per_dtype(specs):
-    """203 (141 implicit-GEMM + 62 direct) selectable kernels and 4 helpers per dtype,
-    the prune-150 catalog's backward-greedy reduction from 320/dtype -- see
-    docs/dgrad-aot-catalog-prune-150-plan.md."""
+    """203 (141 implicit-GEMM + 62 direct) selectable kernels and 4 helpers per dtype:
+    the deliverable set for the gfx950 dgrad AOT catalog, one count per (kernel_family,
+    direct_variant) pair."""
     by_dtype = collections.defaultdict(collections.Counter)
     for spec in specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1

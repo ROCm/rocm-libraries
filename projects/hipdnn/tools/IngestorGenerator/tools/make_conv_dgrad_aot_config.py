@@ -145,6 +145,8 @@ DIRECT_FIELDS = {
     "cpg": 0,
     "kpg": 0,
 }
+
+
 #: The variant knobs after DIRECT_FIELDS, with their builder_default. A direct or
 #: helper instance states those of its variant only (_direct_variant_fields()).
 def _direct_knob_fields() -> dict:
@@ -180,6 +182,8 @@ def _direct_variant_fields() -> dict:
         variant: tuple(f for f in order if f in fields)
         for variant, fields in stated.items()
     }
+
+
 DIRECT_SPEC_ORDER = SPEC_ORDER + tuple(DIRECT_FIELDS)
 _STRING_FIELDS = (
     "dtype",
@@ -189,6 +193,8 @@ _STRING_FIELDS = (
     "layout",
     "direct_variant",
 )
+
+
 def _int_fields() -> tuple:
     """Every KMD field that is an int. Resolved on first use: the knob set comes from
     the adapter, which is bound at run time."""
@@ -197,6 +203,8 @@ def _int_fields() -> tuple:
         for f in DIRECT_SPEC_ORDER + tuple(_direct_knob_fields())
         if f not in _STRING_FIELDS
     )
+
+
 #: The UED knobs: every KMD field that tunes a kernel, so the ranking model can tell
 #: apart the instances one problem admits; together they make every per-graph
 #: candidate tuple unique. Left out are the fields that only restate the problem the
@@ -237,6 +245,8 @@ def engine_knobs() -> tuple:
         "uniform_k_decode",
     )
     return fixed + tuple(_direct_knob_fields())
+
+
 #: Every dgrad direct-sweep algorithm the packaged launch runs (or loads, for the
 #: MFMA helpers), and its direct_variant: AOT_DGRAD_DIRECT_ALGORITHMS of the adapter.
 #: Derived, not restated: the adapter decides what has a packaged launch, and a
@@ -274,6 +284,8 @@ def _packaged_direct():
             )
         _PACKAGED_DIRECT_CACHE = (algorithms, directions)
     return _PACKAGED_DIRECT_CACHE
+
+
 #: The generator variant (kernel name) of the implicit-GEMM instances and of each
 #: direct and helper variant.
 IMPLICIT_VARIANT_NAME = "gfx950_conv_dgrad_aot_{dtype}_{instance_id}"
@@ -525,9 +537,7 @@ def build_config(
         implicit = [s for s in shards[shard] if not s.is_direct]
         if implicit:
             variants.append(
-                _fwd._variant(
-                    IMPLICIT_VARIANT_NAME, spec_order(implicit[0]), implicit
-                )
+                _fwd._variant(IMPLICIT_VARIANT_NAME, spec_order(implicit[0]), implicit)
             )
         for variant_name in _DIRECT_VARIANT_NAMES:
             members = [

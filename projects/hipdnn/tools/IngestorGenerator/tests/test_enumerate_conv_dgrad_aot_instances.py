@@ -58,9 +58,8 @@ def _label(identity):
 
 
 #: The c48k192 block_h=8 block_q=32 fold_k32 waves_k=2 MFMA instance: rocKE's compute
-#: kernel writes wrong dX even at groups == 1. Not present in the v3 catalog
-#: (docs/dgrad_instances_v3.txt), so there is nothing to exclude for it -- this just
-#: guards against it coming back.
+#: kernel writes wrong dX even at groups == 1. Not present in rocKE's current grid, so
+#: there is nothing to exclude for it -- this just guards against it coming back.
 DROPPED_INSTANCES = {
     "fp16": "5da5fce3ee7974bb75839d487f3338e697ac98e6",
     "bf16": "ea7c649d3a54865546adb95698c39166193b3dd9",
@@ -114,10 +113,12 @@ def test_the_lists_add_the_helpers_per_dtype_the_mfma_entries_need(committed):
         assert needed == listed, dtype
 
 
-def test_every_list_entry_is_a_dgrad_sweep_identity(committed):
+def test_every_list_entry_is_a_dgrad_sweep_identity(committed, monkeypatch):
     """Each entry, helpers included, is a gfx950 dgrad identity of rocKE's
     implicit-GEMM AOT grid or of its direct grid."""
     for dtype, entries in committed.items():
+        (flavor,) = {entry["llvm_flavor"] for entry in entries}
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
         swept = tool.sweep_hashes(dtype, _JOBS)
         missing = [_label(e) for e in entries if tool.stable_hash(e) not in swept]
         assert not missing, missing[:5]
