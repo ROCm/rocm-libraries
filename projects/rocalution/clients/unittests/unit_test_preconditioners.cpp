@@ -2253,10 +2253,6 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
     gs.Build();
     const std::vector<T> gs_z = apply(gs, *A, r);
 
-    KNOWN_BUG("the sweeps divide by omega instead of multiplying, the middle step scales by "
-              "omega / (2 - omega) instead of (2 - omega) / omega, and the triangular solves "
-              "ignore omega");
-
     for(size_t k = 0; k < sgs.size(); ++k)
     {
         SCOPED_TRACE(k == 0 ? "decomposition" : "triangular solves");

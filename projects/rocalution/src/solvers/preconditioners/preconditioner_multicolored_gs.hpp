@@ -63,6 +63,7 @@ namespace rocalution
         void SetRelaxation(ValueType omega);
 
     protected:
+        virtual void Factorize_(void);
         virtual void PostAnalyse_(void);
 
         virtual void SolveL_(void);

@@ -46,6 +46,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `FSAI` keeping the pattern value in a row of the pattern that holds only the diagonal, unless the diagonal is the first entry of that row of the matrix.
 * Fixed `AIChebyshev` building a wrong approximate inverse: the series started from the matrix instead of the identity, the shifted matrix was scaled only on its diagonal, and all coefficients were halved.
 * Fixed `AS` and `RAS` leaving the last rows in no block when the number of rows is not a multiple of the number of blocks, `AS` weighting the overlaps of a block between two others wrongly, and a single block with an overlap reaching past the last row.
+* Fixed `MultiColoredGS` and `MultiColoredSGS` applying a wrong relaxation for `SetRelaxation()` values other than 1, and `MultiColoredSGS` without decomposition ignoring the relaxation.
 
 ## (Unreleased) rocALUTION 4.1.1
 

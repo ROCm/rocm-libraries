@@ -116,6 +116,19 @@ namespace rocalution
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
+    void MultiColoredSGS<OperatorType, VectorType, ValueType>::Factorize_(void)
+    {
+        log_debug(this, "MultiColoredSGS::Factorize_()", this->build_);
+
+        // Without decomposition, the triangular solves run on D + omega (L + U)
+        if(this->decomp_ == false && this->omega_ != static_cast<ValueType>(1))
+        {
+            this->preconditioner_->Scale(this->omega_);
+            this->preconditioner_->ScaleDiagonal(static_cast<ValueType>(1) / this->omega_);
+        }
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
     void MultiColoredSGS<OperatorType, VectorType, ValueType>::PostAnalyse_(void)
     {
         log_debug(this, "MultiColoredSGS::PostAnalyse_()", this->build_);
@@ -148,7 +161,7 @@ namespace rocalution
             // SSOR
             if(this->omega_ != static_cast<ValueType>(1))
             {
-                this->x_block_[i]->Scale(static_cast<ValueType>(1) / this->omega_);
+                this->x_block_[i]->Scale(this->omega_);
             }
         }
     }
@@ -167,7 +180,7 @@ namespace rocalution
             // SSOR
             if(this->omega_ != static_cast<ValueType>(1))
             {
-                this->x_block_[i]->Scale(this->omega_ / (static_cast<ValueType>(2) - this->omega_));
+                this->x_block_[i]->Scale((static_cast<ValueType>(2) - this->omega_) / this->omega_);
             }
         }
     }
@@ -195,7 +208,7 @@ namespace rocalution
             // SSOR
             if(this->omega_ != static_cast<ValueType>(1))
             {
-                this->x_block_[i]->Scale(static_cast<ValueType>(1) / this->omega_);
+                this->x_block_[i]->Scale(this->omega_);
             }
         }
     }
@@ -215,6 +228,12 @@ namespace rocalution
         this->preconditioner_->USolve(*x, &this->x_);
 
         x->CopyFromPermuteBackward(this->x_, this->permutation_);
+
+        // SSOR
+        if(this->omega_ != static_cast<ValueType>(1))
+        {
+            x->Scale(this->omega_ * (static_cast<ValueType>(2) - this->omega_));
+        }
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -276,10 +295,10 @@ namespace rocalution
 
             this->diag_solver_[i]->Solve(*this->x_block_[i], this->x_block_[i]);
 
-            // SSOR
+            // SOR
             if(this->omega_ != static_cast<ValueType>(1))
             {
-                this->x_block_[i]->Scale(static_cast<ValueType>(1) / this->omega_);
+                this->x_block_[i]->Scale(this->omega_);
             }
         }
     }
