@@ -486,9 +486,10 @@ if(ROCKE_INSTALL_TESTS)
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
-    # and the arch-domain artifact unit tests. The latter remain
-    # source-only units, while the full regeneration sweep is installed below as
-    # its own CTest with an independent timeout and resource policy.
+    # the clone-check tests (they run tools/clone_check.py from the source tree;
+    # it is not installed), and the arch-domain artifact unit tests. The latter
+    # remain source-only units, while the full regeneration sweep is installed
+    # below as its own CTest with an independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -514,6 +515,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_arch_table_engine_parity.py" EXCLUDE
               PATTERN "test_gemm_spec_dict_binding_parity.py" EXCLUDE
               PATTERN "test_check_mma_catalog.py" EXCLUDE
+              PATTERN "test_clone_check.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
