@@ -22,7 +22,7 @@
  *   rocke_gfx942_attn2d_issue_v_load_runtime    -- _issue_v_load_runtime (2562-2619).
  *   rocke_gfx942_attn2d_issue_k / _issue_v      -- the loader dispatch wrappers
  *     (3347-3396).
- *   rocke_gfx942_attn2d_read_k8_mfma_operand    -- _read_k8_mfma_operand (3398-3424).
+ *   rocke_gfx942_attn2d_read_k8_mfma_operand    -- _read_k8_mfma_operand.
  *
  * The builder-call sequence is byte-identical to the Python body: same ops, same
  * order, same operands. Because C has no closure capture, the per-call byte/
@@ -186,6 +186,24 @@ static rocke_value_t* rocke__wave_lds_offset_i64(rocke_gfx942_attn2d_build_ctx_t
         rocke_b_mul(ctx->b, ctx->wave_id, rocke_b_const_i32(ctx->b, rocke__wave_bytes(ctx))));
     ctx->wave_lds_off_i64_v = rocke_b_zext(ctx->b, off_i32, rocke_i64());
     return ctx->wave_lds_off_i64_v;
+}
+
+/* paged_kv_desc.offset(tile_idx=, linear_half=, kv_head=): the byte offset of
+ * element `linear_half` of KV tile `tile_idx` for this CTA's KV head, through the
+ * non-fast paged-KV descriptor. NULL when the descriptor refuses the coordinates;
+ * the error is then latched on the builder. */
+static rocke_value_t* rocke__paged_kv_voff(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                           rocke_value_t* tile_idx,
+                                           rocke_value_t* linear_half)
+{
+    const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
+    rocke_value_t* in_values[3] = {tile_idx, linear_half, ctx->kv_head_idx};
+    rocke_value_t* voff = NULL;
+    rocke_value_t* valid = NULL;
+    if(!rocke_transforms_descriptor_offset(
+           ctx->b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
+        return NULL;
+    return voff;
 }
 
 /* v_wave_lds_offset_i64: the V-specific (swizzle-aware) wave offset. Cached. */
@@ -751,11 +769,8 @@ void rocke_gfx942_attn2d_issue_k_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
              * i32-only: I64_KV_ADDR takes the per-page path above. */
             rocke_value_t* linear_half
                 = rocke_b_add(b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
-            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
-            rocke_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
-            rocke_value_t* valid = NULL;
-            if(!rocke_transforms_descriptor_offset(
-                   b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
+            voff = rocke__paged_kv_voff(ctx, kv_tile_idx, linear_half);
+            if(voff == NULL)
                 return;
         }
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
@@ -885,11 +900,8 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
              * i32-only: I64_KV_ADDR takes the per-page path above. */
             rocke_value_t* linear_half
                 = rocke_b_add(b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
-            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
-            rocke_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
-            rocke_value_t* valid = NULL;
-            if(!rocke_transforms_descriptor_offset(
-                   b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
+            voff = rocke__paged_kv_voff(ctx, kv_tile_idx, linear_half);
+            if(voff == NULL)
                 return;
         }
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
@@ -909,6 +921,8 @@ void rocke_gfx942_attn2d_issue_k(rocke_gfx942_attn2d_build_ctx_t* ctx,
 {
     if(ctx->K_SLICED_ACTIVE)
         return;
+    if(ctx->K_HBM_DIRECT)
+        return; /* the QK loop reads K straight from global memory */
     if(ctx->FP8_MFMA_QK)
         rocke_gfx942_attn2d_issue_k_fp8_mfma_async(ctx, tile_idx, buf_idx);
     else if(ctx->KV_FP8)
@@ -934,36 +948,35 @@ void rocke_gfx942_attn2d_issue_v(rocke_gfx942_attn2d_build_ctx_t* ctx,
 }
 
 /* ==========================================================================
- * _read_k8_mfma_operand (Python lines 3398-3424).
+ * _read_k8_mfma_operand(buf_idx, k_row, k_off, frag).
  *
- * The Python closure is _read_k8_mfma_operand(buf_idx, k_row, k_off, frag=8).
- * The internal-header form exposes (kv_tile_idx, buf_idx, k_iter, n_tile); the
- * (k_row, k_off, frag) the Python body needs are derived by the caller's QK
- * loop. Here buf_idx is the K_lds buffer slot, k_iter selects the K-row group
- * (k_row), n_tile the head-dim offset (k_off), and frag is the 32x32x16/32x32x8
- * lane fragment width. On gfx942 K_FP8_MFMA is always false, so the plain bf16
- * smem read is the only live path; the fp8 dequant branches are stub-to-link.
+ * The per-lane K operand of the transposed-x8 QK MFMA: `frag` K elements of
+ * row `k_row` starting at head-dim offset `k_off`, from K_lds slot `buf_idx`.
+ * With use_k_hbm_direct K_lds is a stub and the operand is read straight from
+ * the paged K cache of the current KV tile instead, through the K buffer
+ * resource: an out-of-range read returns 0, and the causal mask already zeroes
+ * the scores of keys past the sequence, so no bounds select is needed. fp8 K
+ * is rejected on gfx942, so the plain dtype read is the only K_lds path.
  * ========================================================================== */
 rocke_value_t* rocke_gfx942_attn2d_read_k8_mfma_operand(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                                        rocke_value_t* kv_tile_idx,
                                                         rocke_value_t* buf_idx,
-                                                        int k_iter,
-                                                        int n_tile)
+                                                        rocke_value_t* k_row,
+                                                        rocke_value_t* k_off,
+                                                        int frag)
 {
     rocke_ir_builder_t* b = ctx->b;
-    (void)kv_tile_idx;
-    int frag = ctx->USE_MFMA_32X32X8 ? 4 : 8;
-    rocke_value_t* k_row = rocke_b_const_i32(b, k_iter);
-    rocke_value_t* k_off = rocke_b_const_i32(b, n_tile);
-    rocke_value_t* idx[3];
-    idx[0] = buf_idx;
-    idx[1] = k_row;
-    idx[2] = k_off;
-    if(!ctx->FP8_MFMA_QK)
-        return rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, frag);
-    if(ctx->FP8_NATIVE_QK)
-        return rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, rocke_fp8e4m3(), frag);
-    /* fp8 dequant register path (dequant_fp8x8_to_dtype): not exported by a C
-     * helper header; stub-to-link (fp8 is rejected on gfx942). */
-    return rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, rocke_fp8e4m3(), frag);
+    if(ctx->K_HBM_DIRECT)
+    {
+        /* Constants are bound in the Python builder's operand order so the value
+         * numbering matches. */
+        rocke_value_t* hd_c = rocke_b_const_i32(b, ctx->HD);
+        rocke_value_t* linear_half = rocke_b_add(b, rocke_b_mul(b, k_row, hd_c), k_off);
+        rocke_value_t* voff = rocke__paged_kv_voff(ctx, ctx->kv_tile_iv, linear_half);
+        if(voff == NULL)
+            return NULL;
+        rocke_value_t* zero_soff = rocke_b_const_i32(b, 0);
+        return rocke_b_buffer_load_vN(b, ctx->k_rsrc, voff, zero_soff, ctx->dtype, frag);
+    }
+    rocke_value_t* idx[3] = {buf_idx, k_row, k_off};
+    return rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, frag);
 }

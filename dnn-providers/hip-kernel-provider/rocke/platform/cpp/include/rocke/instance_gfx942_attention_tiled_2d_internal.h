@@ -132,6 +132,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     bool REGISTER_PV, TRANSPOSED_QK_32X32;
     bool CONFLICT_FREE_V, CONFLICT_FREE_V_STORE, K_SINGLE_BUF;
     bool K_SLICED_RING, K_SLICED_LDSSEQ, USE_IGLP_OPT, USE_GLOBAL_LOAD_LDS_K;
+    bool K_HBM_DIRECT; /* spec.use_k_hbm_direct: QK reads K from global memory */
     bool USE_QK_PV_SCHED_GROUP_BARRIER;
     /* env-var diagnostic switches (os.environ reads, lines 1218-1235) */
     bool CFV_SCALAR_READ, CFV_STORE_SCALAR_LOAD, CFV_STORE_SCATTER;
@@ -476,12 +477,14 @@ void rocke_gfx942_attn2d_issue_k(rocke_gfx942_attn2d_build_ctx_t* ctx,
 void rocke_gfx942_attn2d_issue_v(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
                                  rocke_value_t* buf_idx);
-/* _read_k8_mfma_operand: per-lane K8 MFMA B operand for the 32x32x8 path. */
+/* _read_k8_mfma_operand: the per-lane K operand (`frag` elements of row k_row
+ * from head-dim offset k_off) of the transposed-x8 QK MFMA, from K_lds slot
+ * buf_idx, or from the K cache of ctx->kv_tile_iv under use_k_hbm_direct. */
 rocke_value_t* rocke_gfx942_attn2d_read_k8_mfma_operand(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                                        rocke_value_t* kv_tile_idx,
                                                         rocke_value_t* buf_idx,
-                                                        int k_iter,
-                                                        int n_tile);
+                                                        rocke_value_t* k_row,
+                                                        rocke_value_t* k_off,
+                                                        int frag);
 
 /* _tile_page_ptrs: base pointers of the tile's pages (i64 K/V addressing); an
  * arena-owned array of N_BLOCKS_PER_TILE values, or NULL on out of memory. */
