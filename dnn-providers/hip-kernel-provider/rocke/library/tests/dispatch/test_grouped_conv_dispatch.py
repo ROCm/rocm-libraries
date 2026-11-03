@@ -9,14 +9,16 @@ down that:
 
 * each registry is exactly its lists, as a set, and every instance has
   the AOT build job ``--compile-all`` makes its binary from;
-* the list files are canonical (sorted by label) and their loader refuses a
-  broken one;
+* dgrad's list file is canonical (sorted by label) and the loader refuses a
+  broken one; fwd keeps its own hand-tuned on-disk priority order instead
+  (``gc._SET_SEMANTICS_DIRECTIONS``);
 * nothing outside the lists (another arch, another direction) dispatches;
 * the dispatcher admits a shape exactly when the AOT cache's run path would
   launch that binary on it, with the same kernels, grids, blocks, signatures,
   buffers, kernarg values and scratch -- the binaries were built and verified
   through that path;
-* pins and the deterministic (sorted-label) default-pick order behave.
+* pins behave, and the default-pick order is deterministic: sorted-label for
+  dgrad, on-disk file order for fwd.
 
 CPU only: nothing is compiled or launched.
 """
@@ -757,9 +759,29 @@ def test_launch_plan_of_the_patch_dgrad():
 
 
 def test_default_pick_is_the_first_admitted_instance_by_label_order():
-    """With no ranker, the default pick is deterministic (sorted by label),
-    not dependent on the list file's on-disk order (a list is a set)."""
-    order = {name: i for i, name in enumerate(sorted(_listed_names()))}
+    """With no ranker, dgrad's default pick is deterministic (sorted by
+    label), not dependent on the list file's on-disk order (a list is a
+    set) -- see ``gc._SET_SEMANTICS_DIRECTIONS``. fwd is scoped out: its
+    on-disk order is a hand-tuned family preference, exercised below."""
+    order = {
+        name: i
+        for i, name in enumerate(sorted(_listed_names(_LISTS[(_ARCH, "dgrad")])))
+    }
+    for kw in _DGRAD_SHAPES.values():
+        req = _req(direction="dgrad", **kw)
+        admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
+        assert admitted == sorted(admitted, key=order.__getitem__)
+        assert gc.dispatch_conv_grouped(req).spec.name == admitted[0]
+        assert [s.name for s in gc.conv_grouped_sweep_space(req)] == admitted
+
+
+def test_fwd_default_pick_follows_the_list_files_on_disk_priority_order():
+    """fwd is not in ``gc._SET_SEMANTICS_DIRECTIONS``: its default (no
+    ``ranker``) pick is the first admitted instance in ``gfx950_fwd.json``'s
+    own on-disk order, a hand-tuned family preference (e.g. #14628's
+    windowed depthwise kernel sorting first in its catalog) that label order
+    does not reproduce."""
+    order = {name: i for i, name in enumerate(_listed_names(_LISTS[(_ARCH, "fwd")]))}
     for kw in _SHAPES.values():
         req = _req(**kw)
         admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
@@ -776,10 +798,11 @@ def test_depthwise_shapes_default_to_a_direct_depthwise_kernel(shape):
     """A depthwise-shaped request must not fall back to a generic IGEMM tile:
     the direct depthwise candidates are admitted only for genuinely depthwise
     shapes (cpg=kpg=1), so one of them is always among the admitted set and
-    wins the label-order default pick over implicit_gemm ("direct" < "implicit"
-    alphabetically). *Which* direct_depthwise variant wins is deliberately a
-    deterministic (sorted-label) tie-break, not a hand-tuned family
-    preference -- see test_default_pick_is_the_first_admitted_instance_by_label_order.
+    wins fwd's on-disk default pick over implicit_gemm. *Which*
+    direct_depthwise variant wins is deliberately a hand-tuned family
+    preference (e.g. #14628's windowed depthwise kernel sorting first),
+    not a label-order tie-break -- see
+    test_fwd_default_pick_follows_the_list_files_on_disk_priority_order.
     """
     req = _req(**_SHAPES[shape])
     assert gc.dispatch_conv_grouped(req).spec.algorithm.startswith("direct_depthwise")
@@ -817,9 +840,19 @@ def test_algorithm_pin_keeps_one_family():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", sorted(_LISTS.values()), ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "path",
+    sorted(
+        path
+        for (_arch, direction), path in _LISTS.items()
+        if direction in gc._SET_SEMANTICS_DIRECTIONS
+    ),
+    ids=lambda p: p.name,
+)
 def test_instance_list_file_is_canonical(path):
-    """Fix with ``instance_list.py format``."""
+    """Fix with ``instance_list.py format``. Scoped to set-semantics
+    directions (dgrad): ``format_instance_list`` always re-sorts by label,
+    which would destroy fwd's hand-tuned on-disk priority order."""
     lst = gc.load_instance_list(path)
     assert path.read_text(encoding="utf-8") == gc.format_instance_list(lst)
 
