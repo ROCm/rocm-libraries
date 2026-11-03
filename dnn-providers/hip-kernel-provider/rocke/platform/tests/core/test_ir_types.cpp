@@ -618,6 +618,26 @@ static int test_scalar_widths()
     return 0;
 }
 
+/* A whole-byte width is its bit width over eight; a sub-byte format has no
+ * byte width and is refused with core/ir.py::type_bytes's text. */
+static int test_type_bytes()
+{
+    CHECK(rocke_i_type_bytes(rocke_f64()) == 8);
+    CHECK(rocke_i_type_bytes(rocke_fp8e4m3()) == 1);
+    try
+    {
+        rocke_i_type_bytes(rocke_fp6e2m3());
+        CHECK(false);
+    }
+    catch(const ckc::ValueError& error)
+    {
+        CHECK(strcmp(error.what(),
+                     "type_bytes failed - type=fp6e2m3 (6 bits), expected a whole number of bytes")
+              == 0);
+    }
+    return 0;
+}
+
 /* A dtype's logical IR type, as core/ir.py::dtype_to_ir_type gives it: any
  * accepted spelling resolves, and an unknown name is refused with
  * core/dtypes.py's text. */
@@ -746,6 +766,7 @@ int main(int argc, char** argv)
     CHECK(test_smem_vector_elements() == 0);
     CHECK(test_bitcast_width() == 0);
     CHECK(test_scalar_widths() == 0);
+    CHECK(test_type_bytes() == 0);
     CHECK(test_ir_type_of_dtype() == 0);
     CHECK(test_mma_refusals() == 0);
     CHECK(test_scalar_kinds_are_covered() == 0);

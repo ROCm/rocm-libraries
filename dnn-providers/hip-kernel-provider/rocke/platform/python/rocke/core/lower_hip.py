@@ -46,6 +46,7 @@ from .ir import (
     _trap_op_error,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
+    element_type,
     require_streaming_arch,
 )
 from .isa.backend import backend_for
@@ -1529,9 +1530,9 @@ class _Lowerer:
     def _op_vector_extract(self, op: Op) -> None:
         (v,) = op.operands
         i = op.attrs["index"]
-        elem_t = v.type.elem if isinstance(v.type, VectorType) else v.type
         self._emit(
-            f"{_hip_scalar_type(elem_t.name)} {_name(op.result)} = {_name(v)}[{i}];"
+            f"{_hip_scalar_type(element_type(v.type).name)} {_name(op.result)} = "
+            f"{_name(v)}[{i}];"
         )
 
     def _op_vector_trunc_f32_to_f16(self, op: Op) -> None:

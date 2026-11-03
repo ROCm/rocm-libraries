@@ -21,6 +21,7 @@
  */
 #include "rocke/arch_domain.h"
 #include "rocke/arch_target.h"
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
 
@@ -1262,27 +1263,14 @@ static void
     }
 }
 
-/* Size of one smem allocation in bytes (Python _seg_size).
- * No packed-only type has an entry: rocke_i_refuse_packed_only_value refuses
- * its LDS tiles. */
+/* Size of one smem allocation in bytes (Python _seg_size). A packed-only
+ * type never reaches here: rocke_i_refuse_packed_only_value refuses its LDS
+ * tiles. */
 static int ll_smem_seg_size(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)
         return 0;
-    const char* n = stype->elem->name;
-    int eb;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
-       || strcmp(n, "bf8e5m2") == 0)
-        eb = 1;
-    else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
-        eb = 2;
-    else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
-        eb = 4;
-    else if(strcmp(n, "i64") == 0 || strcmp(n, "f64") == 0)
-        eb = 8;
-    else
-        eb = 2; /* default */
-    int seg = eb;
+    int seg = rocke_i_type_bytes(stype->elem);
     for(int d = 0; d < stype->rank; d++)
         seg *= stype->shape[d];
     return seg;

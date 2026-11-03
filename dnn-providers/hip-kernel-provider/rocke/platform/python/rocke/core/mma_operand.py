@@ -20,7 +20,15 @@ from __future__ import annotations
 from typing import Literal
 
 from .arch import ArchTarget
-from .ir import Op, Type, Value, VectorType, dtype_to_ir_type, is_packed_only, type_bits
+from .ir import (
+    Op,
+    Type,
+    Value,
+    dtype_to_ir_type,
+    element_type,
+    is_packed_only,
+    type_bits,
+)
 
 MmaOperandRole = Literal["a", "b"]
 
@@ -31,11 +39,6 @@ _OPERAND_INDEX = {"a": 0, "b": 1}
 def mma_operand_value(op: Op, role: MmaOperandRole) -> Value:
     """MMA operand ``role`` ("a" or "b") of ``op``."""
     return op.operands[_OPERAND_INDEX[role]]
-
-
-def _element_type(t: Type) -> Type:
-    """The element type of a vector type, or the type itself for a scalar."""
-    return t.elem if isinstance(t, VectorType) else t
 
 
 def _admitted_elements(
@@ -51,7 +54,7 @@ def _admitted_elements(
     instructions): no value has that element type, so its operands arrive in
     the register type.
     """
-    elements = {_element_type(register_type)}
+    elements = {element_type(register_type)}
     catalog_op = arch.mma.by_op_id(op_id)
     if catalog_op is not None:
         dtype = catalog_op.a_dtype if role == "a" else catalog_op.b_dtype
@@ -83,7 +86,7 @@ def mma_operand_needs_reinterpret(
     if operand_type == register_type:
         return False
     label = f"MMA operand {role} of {op_id!r}"
-    element = _element_type(operand_type)
+    element = element_type(operand_type)
     admitted = _admitted_elements(op_id, role, register_type, arch)
     if element not in admitted:
         names = " or ".join(sorted(t.name for t in admitted))

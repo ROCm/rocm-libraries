@@ -191,6 +191,12 @@ const rocke_type_t* rocke_require_ir_type(const char* dtype);
  * scalar with no format. */
 int rocke_i_type_bits(const rocke_type_t* t);
 
+/* The number of whole bytes a value of type `t` occupies (Python
+ * core/ir.py::type_bytes): rocke_i_type_bits divided by eight. Throws
+ * ckc::ValueError "type_bytes failed - type=<name> (<bits> bits), expected a
+ * whole number of bytes" for a width that is not whole bytes. */
+int rocke_i_type_bytes(const rocke_type_t* t);
+
 /* The bytes one buffer access of `count` `elem` elements moves (Python
  * core/ir.py::_buffer_access_bytes): `elem` is a scalar whose width is whole
  * bytes and the access is 1, 2, 4, 8 or 16 bytes. Otherwise returns 0 and

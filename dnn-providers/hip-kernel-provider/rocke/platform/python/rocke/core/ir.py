@@ -456,17 +456,16 @@ _UNSIGNED_SCALARS = ("u4", "u8")
 
 def _is_unsigned(t: "Type") -> bool:
     """True when ``t``, or the element of a vector ``t``, is an unsigned integer."""
-    elem = t.elem if isinstance(t, VectorType) else t
-    return elem.name in _UNSIGNED_SCALARS
+    return element_type(t).name in _UNSIGNED_SCALARS
 
 
 def _refuse_unsigned(op_name: str, t: "Type", instead: Optional[str] = None) -> None:
     """Refuse an unsigned operand of type ``t`` to ``op_name``, an op that treats
     its operands as signed; ``instead`` names the unsigned op to use, if any."""
     if _is_unsigned(t):
-        elem = t.elem if isinstance(t, VectorType) else t
         message = (
-            f"{op_name} treats its operands as signed, but {elem.name} is unsigned"
+            f"{op_name} treats its operands as signed, but "
+            f"{element_type(t).name} is unsigned"
         )
         if instead is not None:
             message += f" -- use {instead}"
@@ -745,6 +744,30 @@ def type_bits(t: Type) -> int:
     if isinstance(t, SmemType):
         raise TypeError(f"{t.name} is an LDS allocation, not a value with a bit width")
     return dtype_info(t.name).encoded_bits
+
+
+def element_type(t: Type) -> Type:
+    """The element type of a vector type, or ``t`` itself for a scalar.
+
+    The C++ engine's twin is ``rocke_i_elem_of``.
+    """
+    return t.elem if isinstance(t, VectorType) else t
+
+
+def type_bytes(t: Type) -> int:
+    """The number of whole bytes a value of IR type ``t`` occupies.
+
+    :func:`type_bits` divided by eight. Raises ``ValueError`` for a type whose
+    width is not a whole number of bytes (a packed sub-byte format), which has
+    no byte width to give.
+    """
+    bits = type_bits(t)
+    if bits % 8:
+        raise ValueError(
+            f"type_bytes failed - type={t.name} ({bits} bits), "
+            "expected a whole number of bytes"
+        )
+    return bits // 8
 
 
 def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
@@ -3051,13 +3074,10 @@ class IRBuilder:
         _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             allowed_n = (2, 4, 8, 16)
-            elem_bytes = 1
         elif elem_name == "f64":
             allowed_n = (2,)
-            elem_bytes = 8
         else:
             allowed_n = (2, 4, 8)
-            elem_bytes = 4 if elem_name in ("f32", "i32", "tf32") else 2
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
@@ -3070,7 +3090,7 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                "align": n * elem_bytes,
+                "align": n * type_bytes(value.type.elem),
             },
         )
 
@@ -5672,8 +5692,7 @@ class IRBuilder:
         Supported dtypes: f16, bf16 (2-byte → i16 intrinsic),
         f32 / i32 (4-byte → i32 intrinsic).
         """
-        _elem_bytes = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
-        if dtype.name not in _elem_bytes:
+        if dtype.name not in ("f16", "bf16", "f32", "i32"):
             raise ValueError(f"buffer_load: unsupported dtype {dtype.name!r}")
         return self._op(
             "tile.buffer_load",
@@ -6156,11 +6175,10 @@ class IRBuilder:
         self._op("cf.return")
 
     def vec_extract(self, v: Value, i: int) -> Value:
-        elem_t = v.type.elem if isinstance(v.type, VectorType) else v.type
         return self._op(
             "vector.extract",
             [v],
-            [elem_t],
+            [element_type(v.type)],
             attrs={"index": int(i)},
             result_name_hint="e",
         ).result

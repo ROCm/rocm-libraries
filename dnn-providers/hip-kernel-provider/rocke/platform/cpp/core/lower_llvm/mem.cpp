@@ -30,35 +30,6 @@ static const char* ll_res(const rocke_op_t* op)
     return op->results[0]->name;
 }
 
-/* Element byte size for an smem/store/load alignment, keyed by the scalar
- * type's canonical name; 2 for a name with no entry. Twin of the Python
- * _scalar_bytes (python/rocke/core/lower_llvm.py). */
-static int ll_elem_bytes(const char* name)
-{
-    if(!name)
-    {
-        return 2;
-    }
-    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0 || strcmp(name, "fp8e4m3") == 0
-       || strcmp(name, "bf8e5m2") == 0)
-    {
-        return 1;
-    }
-    if(strcmp(name, "i16") == 0 || strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0)
-    {
-        return 2;
-    }
-    if(strcmp(name, "i32") == 0 || strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0)
-    {
-        return 4;
-    }
-    if(strcmp(name, "i64") == 0 || strcmp(name, "f64") == 0)
-    {
-        return 8;
-    }
-    return 2;
-}
-
 /* int attr with default (Python op.attrs.get(key, dflt)). */
 static int64_t ll_attr_int(const rocke_op_t* op, const char* key, int64_t dflt)
 {
@@ -484,8 +455,7 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* elem_ty = ll_is_vec(val->type) ? rocke_ll_llvm_type(L, val->type->elem)
                                                : rocke_ll_llvm_type(L, val->type);
-    const char* elem_name = ll_is_vec(val->type) ? val->type->elem->name : val->type->name;
-    int elem_bytes = ll_elem_bytes(elem_name);
+    int elem_bytes = rocke_i_type_bytes(rocke_i_elem_of(val->type));
     int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
     if(align <= 0 || (align & (align - 1)))
         rocke_ll_fail(
@@ -570,7 +540,7 @@ static void op_tile_smem_store(rocke_lower_t* L, const rocke_op_t* op)
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
-    int align = ll_elem_bytes(value->type->name);
+    int align = rocke_i_type_bytes(rocke_i_elem_of(value->type));
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    gep,
@@ -626,7 +596,7 @@ static void op_tile_smem_store_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     const char* elem_ty = rocke_ll_llvm_type(L, value->type->elem);
-    int elem_bytes = ll_elem_bytes(value->type->elem->name);
+    int elem_bytes = rocke_i_type_bytes(value->type->elem);
     int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
@@ -697,7 +667,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
     /* The element byte size drives the vector alignment. */
-    int elem_bytes = ll_elem_bytes(op->results[0]->type->elem->name);
+    int elem_bytes = rocke_i_type_bytes(op->results[0]->type->elem);
     /* New 96-bit widths guarantee only element alignment, including FP8. */
     int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend

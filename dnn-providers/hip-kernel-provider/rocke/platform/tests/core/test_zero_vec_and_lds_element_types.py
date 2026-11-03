@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""``zero_vec`` of f64 and i16, LDS loads and stores of i16, and LDS loads of the
-8-bit float types at their natural alignment.
+"""``zero_vec`` of f64 and i16, LDS loads and stores of i16, LDS loads of the
+8-bit float types at their natural alignment, a whole-value LDS store at its
+element width, and the refusal of an LDS tile whose element has no whole-byte
+width.
 
 ``zero_vec`` is what ``fill_fragment`` builds on, so without f64 an f64 fragment could
 not be zero-filled. Lowering goes through the active engine, so a strict both-engines run
@@ -9,11 +11,25 @@ not be zero-filled. Lowering goes through the active engine, so a strict both-en
 test runs only on a visible GPU whose arch it names, and skips otherwise.
 """
 
+import re
+
 import numpy as np
 import pytest
-from rocke.core.ir import BF8E5M2, F64, FP8E4M3, I16, I64, TF32, IRBuilder, PtrType
+from rocke.core.ir import (
+    BF8E5M2,
+    F32,
+    F64,
+    FP8E4M3,
+    I1,
+    I16,
+    I64,
+    TF32,
+    IRBuilder,
+    PtrType,
+)
 from rocke.core.isa.backend import wired_arches
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
+from rocke.tests.engines import assert_both_engines_reject
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_target_accepts
 
@@ -83,6 +99,52 @@ def test_lds_loads_of_8_bit_floats_claim_their_byte_width(dtype, n):
     for line in loads:
         assert line.rstrip().endswith(f"align {n}"), line
     assert_target_accepts(text, "gfx950")
+
+
+def test_a_whole_value_lds_store_claims_its_element_width():
+    # smem_store_vN(..., n=1) stores the whole value in one access. A
+    # <3 x float> is 12 bytes, not a valid alignment, so the store claims its
+    # 4-byte element width.
+    b = IRBuilder("lds_store_f32x3")
+    src = b.param("SRC", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    smem = b.smem_alloc(F32, [12])
+    b.smem_store_vN(smem, [zero], b.global_load_vN(src, zero, F32, 3, align=4), 1)
+    text = lower_kernel_to_llvm(b.kernel, arch="gfx942")
+    stores = [
+        line
+        for line in text.splitlines()
+        if "store <3 x float>" in line and "ptr addrspace(3)" in line
+    ]
+    assert stores
+    for line in stores:
+        assert line.rstrip().endswith("align 4"), line
+    assert_target_accepts(text, "gfx942")
+
+
+_NO_BYTE_WIDTH = (
+    "type_bytes failed - type=i1 (1 bits), expected a whole number of bytes"
+)
+
+
+def _lds_tile_of_i1():
+    # An i1 element has no whole-byte width, so neither the tile's LDS segment
+    # size nor the store's alignment exists; the lowering refuses rather than
+    # assume a width.
+    b = IRBuilder("lds_i1")
+    tid = b.thread_id_x()
+    smem = b.smem_alloc(I1, [64])
+    b.smem_store_vN(smem, [tid], b.cmp_lt(tid, b.const_i32(3)), n=1)
+    return b.kernel
+
+
+def test_an_lds_tile_without_a_byte_width_is_refused():
+    with pytest.raises(ValueError, match=f"^{re.escape(_NO_BYTE_WIDTH)}$"):
+        _lower_kernel_to_llvm_python(_lds_tile_of_i1(), arch="gfx942")
+
+
+def test_both_engines_refuse_an_lds_tile_without_a_byte_width():
+    assert_both_engines_reject(_lds_tile_of_i1(), "gfx942", ValueError, _NO_BYTE_WIDTH)
 
 
 def test_lds_loads_outside_the_element_rules_still_raise():
