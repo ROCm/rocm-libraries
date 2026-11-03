@@ -1,11 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host-only stand-ins for the GPU tensors a paged dense launch takes.
+"""Host-only stand-ins for the GPU tensors a paged dense launch takes, and the
+per-arch dense spec lookup the paged host tests share.
 
-It exposes just what the launcher's checks read (shape, dtype, device, strides,
-indexing, values), so the paged launch validation is testable without torch or a GPU.
+The stand-ins expose just what the launcher's checks read (shape, dtype, device,
+strides, indexing, values), so the paged launch validation is testable without torch
+or a GPU.
 """
+
+
+def dense_arch_spec_class(module):
+    """The concrete dense spec class of an ``kernels.<arch>.attention_dense`` module."""
+    return (
+        getattr(module, "Gfx942AttentionDenseSpec", None) or module.AttentionDenseSpec
+    )
 
 
 class I32DeviceTensor:

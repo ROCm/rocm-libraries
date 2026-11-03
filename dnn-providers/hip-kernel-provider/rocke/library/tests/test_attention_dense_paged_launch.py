@@ -8,14 +8,11 @@ and compile is patched out, so no torch, comgr or GPU is needed."""
 import importlib
 import unittest
 
-from ._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor
-
-
-def _dense_arch_spec_class(module):
-    """The concrete dense spec class of an ``kernels.<arch>.attention_dense`` module."""
-    return (
-        getattr(module, "Gfx942AttentionDenseSpec", None) or module.AttentionDenseSpec
-    )
+from ._dense_paged_stand_ins import (
+    CacheStandIn,
+    I32DeviceTensor,
+    dense_arch_spec_class,
+)
 
 
 class TestDensePagedLaunch(unittest.TestCase):
@@ -24,7 +21,7 @@ class TestDensePagedLaunch(unittest.TestCase):
         and the paged spec builds on host."""
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            AttentionDenseSpec = _dense_arch_spec_class(ad)
+            AttentionDenseSpec = dense_arch_spec_class(ad)
             attention_dense_signature = ad.attention_dense_signature
             build_attention_dense = ad.build_attention_dense
             with self.subTest(arch=arch):
@@ -61,7 +58,7 @@ class TestDensePagedLaunch(unittest.TestCase):
 
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            AttentionDenseSpec = _dense_arch_spec_class(ad)
+            AttentionDenseSpec = dense_arch_spec_class(ad)
             run_attention_dense_torch = ad.run_attention_dense_torch
             with self.subTest(arch=arch):
                 spec = AttentionDenseSpec(
@@ -161,7 +158,7 @@ class TestDensePagedLaunch(unittest.TestCase):
 
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            spec = _dense_arch_spec_class(ad)(
+            spec = dense_arch_spec_class(ad)(
                 batch=1,
                 seqlen_q=1024,
                 seqlen_kv=1024,
@@ -240,7 +237,7 @@ class TestDensePagedLaunch(unittest.TestCase):
 
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            AttentionDenseSpec = _dense_arch_spec_class(ad)
+            AttentionDenseSpec = dense_arch_spec_class(ad)
             run_attention_dense_torch = ad.run_attention_dense_torch
             with self.subTest(arch=arch):
                 spec = AttentionDenseSpec(
@@ -357,7 +354,7 @@ class TestDensePagedLaunch(unittest.TestCase):
 
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            AttentionDenseSpec = _dense_arch_spec_class(ad)
+            AttentionDenseSpec = dense_arch_spec_class(ad)
             run_attention_dense_torch = ad.run_attention_dense_torch
             with self.subTest(arch=arch):
                 spec = AttentionDenseSpec(
@@ -438,3 +435,4 @@ class TestDensePagedLaunch(unittest.TestCase):
                             block_tables=good_bt,
                             kv_lens=I32DeviceTensor([256]),
                         )
+                    self.assertIs(ok.exception, sentinel)

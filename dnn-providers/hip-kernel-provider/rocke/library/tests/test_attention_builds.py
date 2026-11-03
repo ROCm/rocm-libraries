@@ -30,7 +30,7 @@ import pytest
 
 from rocke import lower_kernel_to_llvm
 
-from ._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor
+from ._dense_paged_stand_ins import dense_arch_spec_class
 
 from kernels import (
     UnifiedAttentionProblem,
@@ -80,13 +80,6 @@ def _patch_resolved_arch(arch: str):
 # helpers below reach comgr and additionally assert the emitted kernel fits the
 # arch resource budget (LDS today; the readelf-parsed HSACO also carries VGPR/
 # SGPR for future soft-occupancy checks).
-
-
-def _dense_arch_spec_class(module):
-    """The concrete dense spec class of an ``kernels.<arch>.attention_dense`` module."""
-    return (
-        getattr(module, "Gfx942AttentionDenseSpec", None) or module.AttentionDenseSpec
-    )
 
 
 def _compile_or_skip(kernel, *, arch: str):
@@ -1757,7 +1750,7 @@ class TestAttentionHelpers(unittest.TestCase):
         budget test; the block_tables indirection adds a load but must still fit."""
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            AttentionDenseSpec = _dense_arch_spec_class(ad)
+            AttentionDenseSpec = dense_arch_spec_class(ad)
             build_attention_dense = ad.build_attention_dense
             with self.subTest(arch=arch):
                 for dt in ("fp16", "bf16"):
@@ -1833,7 +1826,7 @@ class TestAttentionHelpers(unittest.TestCase):
         ]
         for arch, tile, dtypes in cases:
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            Spec = _dense_arch_spec_class(ad)
+            Spec = dense_arch_spec_class(ad)
             for dt in dtypes:
                 kw = dict(shape, dtype=dt, **tile)
                 if arch == "gfx942":
