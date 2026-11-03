@@ -390,6 +390,17 @@ typedef struct rocke_conv_build_ctx
      * sep_addr=2 carried-address state (wgrad.cpp), NULL off. */
     int wg_sep_addr;
     bool wg_is3d; /* the true (not stub) wgrad problem is 3-D */
+    /* wgrad xwin: groups per workgroup, the group index (SGPR), the gn
+     * virtual tile column, the logical slice for the workspace slab, the
+     * per-group LDS tile rows, and the n_base of the workspace epilogue. */
+    int wg_xg;
+    rocke_value_t* wg_xg_idx;
+    rocke_value_t* wg_gn_vx;
+    rocke_value_t* wg_z_virtual;
+    int wg_a_buf_rows;
+    int wg_b_buf_rows;
+    rocke_value_t* wg_xw_nb0;
+    int wg_xw_nsub;
     void* wg_inc;
     /* wgrad emit_mfma_phase a_row_off / b_row_off (prefetch_regs=2), NULL off. */
     rocke_value_t* wg_a_row_off;

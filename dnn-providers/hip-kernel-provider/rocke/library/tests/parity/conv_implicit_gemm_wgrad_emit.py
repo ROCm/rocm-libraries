@@ -1239,6 +1239,32 @@ _GFX942_3D_KNOBS = {
     68: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=2)),
     # 69: 61 with plain_pp=4, pfr3-free sepa1
     69: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=1, plain_pp=4)),
+    # 70: 59 + xwin 3 (the X window B tile)
+    70: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1, xwin=3)),
+    # 71: 70 on w2x2 (wpe3) + m_band 1
+    71: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1, xwin=3,
+                  warp_m=2, warp_n=2, waves_per_eu=3, m_band=1)),
+    # 72: w2x2 xwin 3, 2 groups ping-pong sharing the dY tile (xgn2 xpp8)
+    72: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, warp_m=2,
+                  warp_n=2, xwin_groups=2, xwin_pp=8, xwin_gn=2)),
+    # 73: t64x192 w1x2, 4 groups ping-pong (xgn2 xpp8 xps1 xrot1)
+    73: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, tile_m=64,
+                  warp_m=1, warp_n=2, xwin_groups=4, xwin_pp=8, xwin_gn=2, xwin_pps=1,
+                  xwin_rot=1)),
+    # 74: 70 with prefetch_regs=2 (two LDS buffers), no xcd_remap
+    74: (56, dict(prefetch_regs=2, lds_kpack=2, ws_store=1, xwin=3)),
+    # 75: 70 with prefetch_regs=3 (two tiles in flight) and pfr_sched 2
+    75: (56, dict(prefetch_regs=3, lds_kpack=2, pfr_sched=2, xwin=3)),
+    # 76: one 8-wave tile ping-pong (w2x4, xpp8 xps3)
+    76: (56, dict(prefetch_regs=1, lds_kpack=2, ws_store=1, xwin=3, warp_m=2, warp_n=4,
+                  xwin_pp=8, xwin_pps=3)),
+    # 77: 2 groups, plain loop, xgn1
+    77: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, warp_m=2,
+                  warp_n=2, xwin_groups=2, xwin_gn=1)),
+    # 78: 73 on the 2-D problem
+    78: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, tile_m=64,
+                  warp_m=1, warp_n=2, xwin_groups=4, xwin_pp=8, xwin_gn=2, xwin_pps=1,
+                  xwin_rot=1)),
 }
 
 
@@ -1247,6 +1273,11 @@ def _gfx942_3d_knob_spec(idx: int):
 
     base, kw = _GFX942_3D_KNOBS[idx]
     spec, arch = _gfx942_3d_spec(base)
+    if idx == 78:
+        # the 2-D twin of the 3-D grouped probe
+        kw = dict(kw, problem=ConvProblem(
+            N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=2,
+        ))
     return replace(spec, **kw), arch
 
 
