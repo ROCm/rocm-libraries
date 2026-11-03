@@ -29,12 +29,11 @@
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/normal_iterator.h>
 
+#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 #include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 #include _THRUST_STD_INCLUDE(__memory/allocator_traits.h)
 #include _THRUST_STD_INCLUDE(__utility/move.h)
 #include _THRUST_STD_INCLUDE(__utility/swap.h)
-
-#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 THRUST_NAMESPACE_BEGIN
 
