@@ -10223,6 +10223,11 @@ namespace rocalution
 
         assert(cast_G != NULL);
 
+        if(ordering < 0 || ordering > 5)
+        {
+            return false;
+        }
+
         // Initialize G
         for(int i = 0; i < cast_G->size_; ++i)
         {
@@ -10305,21 +10310,31 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position, except the connectivity ordering,
+        // which gives the node at each position
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            if(ordering == 1)
+            {
+                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
+                node[n] = perm.vec_[n];
+            }
+            else
+            {
+                const int k = ordering == 0 ? n : perm.vec_[n];
+                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+                node[k] = n;
+            }
+        }
+
         // Main algorithm
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to the connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in G
             if(cast_G->vec_[i] != -2)
@@ -10426,6 +10441,11 @@ namespace rocalution
         assert(cast_G != NULL);
         assert(cast_mat != NULL);
 
+        if(ordering < 0 || ordering > 5)
+        {
+            return false;
+        }
+
         // Initialize G
         for(int i = 0; i < cast_G->size_; ++i)
         {
@@ -10517,21 +10537,31 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position, except the connectivity ordering,
+        // which gives the node at each position
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            if(ordering == 1)
+            {
+                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
+                node[n] = perm.vec_[n];
+            }
+            else
+            {
+                const int k = ordering == 0 ? n : perm.vec_[n];
+                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+                node[k] = n;
+            }
+        }
+
         // Main algorithm
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to the connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in G
             if(cast_G->vec_[i] != -2)
@@ -10670,6 +10700,11 @@ namespace rocalution
         HostVector<int>* cast_G = dynamic_cast<HostVector<int>*>(G);
         assert(cast_G != NULL);
 
+        if(ordering < 0 || ordering > 5)
+        {
+            return false;
+        }
+
         // Initialize G and inverse indexing for G
         Gsize *= 2;
         int  rGsizec = this->nrow_;
@@ -10727,19 +10762,29 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position, except the connectivity ordering,
+        // which gives the node at each position
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            if(ordering == 1)
+            {
+                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
+                node[n] = perm.vec_[n];
+            }
+            else
+            {
+                const int k = ordering == 0 ? n : perm.vec_[n];
+                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+                node[k] = n;
+            }
+        }
+
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in U
             if(U[i] == 1)
@@ -10879,6 +10924,11 @@ namespace rocalution
         assert(cast_G != NULL);
         assert(cast_mat != NULL);
 
+        if(ordering < 0 || ordering > 5)
+        {
+            return false;
+        }
+
         // Initialize G and inverse indexing for G
         Gsize *= 2;
         int  rGsizec = this->nrow_;
@@ -10936,19 +10986,29 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position, except the connectivity ordering,
+        // which gives the node at each position
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            if(ordering == 1)
+            {
+                assert(perm.vec_[n] >= 0 && perm.vec_[n] < this->nrow_);
+                node[n] = perm.vec_[n];
+            }
+            else
+            {
+                const int k = ordering == 0 ? n : perm.vec_[n];
+                assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+                node[k] = n;
+            }
+        }
+
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in U
             if(U[i] == 1)

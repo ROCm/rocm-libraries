@@ -14,7 +14,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
 * CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
 * `LocalMatrix::CMK()` now returns the Cuthill-McKee ordering and `LocalMatrix::RCMK()` its reverse, so their permutations differ from those of earlier releases.
-* `PairwiseAMG` now builds different aggregates and hierarchies, as `beta` now sets the strength threshold, so the number of levels and of iterations can change.
+* `PairwiseAMG` now builds different aggregates and hierarchies, as `beta` now sets the strength threshold and the orderings visit the nodes in order, so the number of levels and of iterations can change.
 
 ### Removed
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
@@ -44,6 +44,8 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed the strength test of the pairwise aggregation (`PairwiseAMG`), which used a wrong threshold. The initial pass took every negative coupling as strong in rows without a positive coupling, and in rows with one measured the couplings against the largest positive coupling instead. The further passes took every negative coupling, and small positive ones, as strong, except in rows with a positive ghost coupling, which then set the threshold. A coupling is now strong if it is below `-beta` times the largest magnitude of the negative couplings of the row, ghost couplings included.
+* Fixed the CMK, RCMK, MIS and multicoloring orderings of the pairwise aggregation (`PairwiseAMG::SetOrdering()`) visiting the nodes in the wrong order.
+* Fixed `LocalMatrix::InitialPairwiseAggregation()` and `LocalMatrix::FurtherPairwiseAggregation()` dereferencing an empty permutation for an ordering other than 0 to 5. They now stop with an error.
 * Fixed `LocalMatrix::CMK()` and `LocalMatrix::RCMK()` not numbering the neighbours of each node by increasing degree, and numbering every node after the first connected component in index order.
 
 ## (Unreleased) rocALUTION 4.1.1

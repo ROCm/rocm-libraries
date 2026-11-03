@@ -559,18 +559,46 @@ TYPED_TEST(backend_pairwise_amg, cmk_orderings_pair_a_scrambled_path_along_the_p
         Aggregation agg;
         ASSERT_IN_LOOP(this->initial(A, 0.25, ordering, &agg));
         expect_valid_pairwise(A, agg, 2);
-    }
-
-    KNOWN_BUG("the CMK, RCMK, MIS and multicoloring permutations map a node to its "
-              "position, but the node visited at step k is taken as perm[k]");
-
-    for(int ordering : {2, 3})
-    {
-        SCOPED_TRACE(ordering == 2 ? "CMK" : "RCMK");
-
-        Aggregation agg;
-        ASSERT_IN_LOOP(this->initial(A, 0.25, ordering, &agg));
         EXPECT_EQ(agg.nc, 6);
+    }
+}
+
+// The orderings map each node to its position, and the passes visit the nodes by increasing
+// position. On path(6), MIS and multicoloring both give the positions 0, 3, 1, 4, 2, 5, so
+// the aggregates start from the nodes 0, 2 and 4, which are the first members in rG.
+TYPED_TEST(backend_pairwise_amg, mis_and_multicoloring_orderings_visit_the_nodes_by_position)
+{
+    using T              = typename TypeParam::value_type;
+    const Csr<T> A       = path<T>(6);
+    const Csr<T> fine    = doubled(A);
+    const Csr<T> none    = without_entries<T>(A.n, 3);
+    const Csr<T> no_fine = without_entries<T>(fine.n, 3);
+
+    for(int ordering : {4, 5})
+    {
+        for(bool with_ghost : {false, true})
+        {
+            SCOPED_TRACE(std::string(ordering == 4 ? "MIS" : "multicoloring")
+                         + (with_ghost ? ", with a ghost part" : ""));
+
+            Aggregation agg;
+            ASSERT_IN_LOOP(this->initial(A, 0.25, ordering, &agg, with_ghost ? &none : nullptr));
+            expect_valid_pairwise(A, agg, 2);
+            EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 1, 1, 2, 2}));
+            EXPECT_EQ(std::vector<int>(agg.rG, agg.rG + agg.nc), (std::vector<int>{0, 2, 4}));
+
+            // A is also the coarse matrix of the pairs of fine, so the further pass on A visits
+            // its nodes in the same order
+            Aggregation pairs;
+            ASSERT_IN_LOOP(this->initial(fine, 0.25, 0, &pairs, with_ghost ? &no_fine : nullptr));
+            ASSERT_IN_LOOP(pairs.G == (std::vector<int>{0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5}));
+            ASSERT_IN_LOOP(dense(galerkin(fine, pairs.G, pairs.nc)) == dense(A));
+
+            ASSERT_IN_LOOP(this->further(A, 0.25, ordering, &pairs, with_ghost ? &none : nullptr));
+            expect_valid_pairwise(fine, pairs, 4);
+            EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2}));
+            EXPECT_EQ(std::vector<int>(pairs.rG, pairs.rG + pairs.nc), (std::vector<int>{0, 4, 8}));
+        }
     }
 }
 
@@ -839,6 +867,38 @@ TYPED_TEST(backend_pairwise_amg, ghost_couplings_of_a_negated_matrix)
         ASSERT_IN_LOOP(
             this->further(galerkin(A, pairs.G, pairs.nc), 0.25, 0, &pairs, &coarse_strong));
         EXPECT_EQ(pairs.nc, 2);
+        EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
+    }
+}
+
+// The orderings are 0 to 5
+TYPED_TEST(backend_pairwise_amg, unknown_orderings_are_rejected)
+{
+    using T                   = typename TypeParam::value_type;
+    const Csr<T> A            = path<T>(4);
+    const Csr<T> ghost        = column_ghost<T>(4, -0.1);
+    const Csr<T> coarse_ghost = column_ghost<T>(2, -0.1);
+
+    Aggregation pairs;
+    ASSERT_TRUE(this->initial(A, 0.25, 0, &pairs));
+    const Csr<T> Ac = galerkin(A, pairs.G, pairs.nc);
+
+    for(int ordering : {-1, 6})
+    {
+        SCOPED_TRACE("ordering " + std::to_string(ordering));
+
+        Aggregation agg;
+        EXPECT_FALSE(this->initial(A, 0.25, ordering, &agg));
+        EXPECT_EQ(agg.G, std::vector<int>(4, 7));
+        EXPECT_FALSE(this->initial(A, 0.25, ordering, &agg, &ghost));
+        EXPECT_EQ(agg.nc, -1);
+        EXPECT_EQ(agg.Gsize, -1);
+        EXPECT_EQ(agg.rG, nullptr);
+        EXPECT_EQ(agg.G, std::vector<int>(4, 7));
+
+        EXPECT_FALSE(this->further(Ac, 0.25, ordering, &pairs));
+        EXPECT_FALSE(this->further(Ac, 0.25, ordering, &pairs, &coarse_ghost));
+        EXPECT_EQ(pairs.Gsize, 2);
         EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
     }
 }
