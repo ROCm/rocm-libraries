@@ -1874,6 +1874,68 @@ INSTANTIATE_TEST_SUITE_P(
         return info.param.name;
     });
 
+TEST(TestKernelIngestorStateManager, ConstructionOverANullSharedStateThrows)
+{
+    EXPECT_THROW((StateManager{std::shared_ptr<const KernelIngestorSharedState<TestHandle>>{}}),
+                 std::invalid_argument);
+}
+
+TEST(TestKernelIngestorStateManager, MakeEngineOverANullSharedStateThrows)
+{
+    const StubDeviceResolver resolver;
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({});
+
+    EXPECT_THROW(
+        (makeEngine<StubHandle, StubSettings, StubContext>(
+            set, std::shared_ptr<const KernelIngestorSharedState<StubHandle>>{}, resolver)),
+        std::invalid_argument);
+}
+
+/// CatalogView::owner keeps the shared state alive, not the manager: a view obtained from
+/// a manager must stay valid, and its entries unchanged, after that manager is destroyed
+/// while the view is held -- as Container churn can leave a view outliving its manager.
+TEST(TestKernelIngestorStateManager, ACatalogViewOutlivesTheManagerThatProducedIt)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x91));
+    const auto properties = testDeviceProperties();
+    const auto view = manager->catalogView(MatchContext{graph, 0, properties});
+    ASSERT_FALSE(view->entries.empty());
+    const auto expectedKernelId = view->entries.front()->kernelId;
+    const auto expectedPackId = view->entries.front()->packId;
+
+    manager.reset();
+
+    ASSERT_FALSE(view->entries.empty());
+    EXPECT_EQ(view->entries.front()->kernelId, expectedKernelId);
+    EXPECT_EQ(view->entries.front()->packId, expectedPackId);
+}
+
+/// Two managers over one shared state (as separate Containers get per
+/// KernelIngestorEngine.cpp's shared-state discovery) keep their own winner cache: a
+/// winner recorded through one is invisible to the other.
+TEST(TestKernelIngestorStateManager, TwoManagersOverOneSharedStateKeepSeparateWinnerCaches)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto state = makeStateManager()->sharedState();
+    const StateManager first(state);
+    const StateManager second(state);
+
+    const TestGraph graph(makeGraphId(0x92));
+    const auto properties = testDeviceProperties();
+    const WinnerKey key{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
+                        DeviceKey{properties}};
+    const WinnerRecord record{{testId(0x93), testId(0x94), testId(0x95), 1.0}};
+
+    first.recordWinner(key, record, WinnerWriteCause::FRESH_MISS);
+
+    EXPECT_TRUE(first.winnerFor(key).has_value());
+    EXPECT_FALSE(second.winnerFor(key).has_value())
+        << "a winner cache is each manager's own, not shared with the state";
+}
+
 TEST(TestKernelIngestorStateManager, MakeEngineRejectsANullStateManager)
 {
     const StubDeviceResolver resolver;
