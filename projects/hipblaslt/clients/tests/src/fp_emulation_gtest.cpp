@@ -2141,10 +2141,19 @@ namespace
 
     // ── BoundaryValues: FP64 boundary-value inputs handled gracefully ─────────
     //
-    // Tests fp64EmulatedGemm with extreme FP64 inputs spanning the full range
-    // from the minimum subnormal to the maximum finite value.  Since A = identity
-    // and D = I × B = B exactly (mathematically), each column of D must reproduce
-    // the corresponding column of B within the accuracy of the Ozaki extraction.
+    // Tests extreme FP64 inputs spanning the full range from the minimum
+    // subnormal to the maximum finite value.  Since A = identity and
+    // D = I × B = B exactly (mathematically), each column of D must reproduce
+    // the corresponding column of B.
+    //
+    // These inputs need far more CRT capacity than the maximum number of moduli
+    // provides (about 2092 bits against 76), so ADP refuses them:
+    // fp64EmulatedGemm returns invalid_value, and hipblasLtMatmul falls back to
+    // the native GEMM.  The test therefore runs through hipblasLtMatmul with the
+    // emulated compute type and checks that the result is handled gracefully.
+    // The expectations accept both the emulated result (FTZ of dominated
+    // values) and the native one; the derivations below describe the emulated
+    // path.
     //
     // CRITICAL: m and n MUST be >= FIXED_POINT_EMUL_MIN_MN (=16).  Below that
     // threshold emulated_gemm_impl<> short-circuits to native_gemm_fallback<>
@@ -2193,7 +2202,7 @@ namespace
     //       trunc(ldexp(EPS,61))=512; X_true=64×512=2^15; D=ldexp(2^15,-67)=EPS.
     //
     // Checks (sub-test 1: A=I):
-    //   1. fp64EmulatedGemm returns success (no crash, no NaN/Inf in output).
+    //   1. hipblasLtMatmul returns success (no crash, no NaN/Inf in output).
     //   2. D[row=0] of cols 0,2,3: EXPECT_EQ(0.0) — small value dominated → 0.
     //   3. D[row=0] of cols 1,4: EXPECT_NEAR(TINY/NMIN, 1e-9) — CRT exact (≪1e-9 error).
     //   4. D[row=0] of col 5:   EXPECT_NEAR(EPS, 1e-9) — CRT ~1.6e-10 relative error.
@@ -2287,42 +2296,52 @@ namespace
             (void)hipFree(dA);
         };
 
-        FixedPointEmulationSettings settings{};
-        settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
-
-        settings.sv_support = 0u /* special values: none */; /* inputs are finite — no Inf/NaN flag needed */
         const size_t _bv1_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, M, N, K, 1);
         void* _d_bv1_ws = nullptr;
         if(_bv1_ws_sz > 0)
             (void)hipMalloc(&_d_bv1_ws, _bv1_ws_sz);
-        settings.workspace       = _d_bv1_ws;
-        settings.workspace_bytes = _bv1_ws_sz;
 
-        const double           alpha = 1.0, beta = 0.0;
-        const rocblaslt_status st = fp64EmulatedGemm(m_handle,
-                                                     HIPBLAS_OP_N,
-                                                     HIPBLAS_OP_N,
-                                                     M,
-                                                     N,
-                                                     K,
-                                                     &alpha,
-                                                     dA,
-                                                     M,
-                                                     dB,
-                                                     K,
-                                                     &beta,
-                                                     dC,
-                                                     M,
-                                                     dD,
-                                                     M,
-                                                     /*stream=*/nullptr,
-                                                     settings);
-        if(st != rocblaslt_status_success)
+        const double alpha = 1.0, beta = 0.0;
+        /* D = A * B (column-major, no transposes) through hipblasLtMatmul with
+         * the fixture's emulated descriptor (EAGER).                            */
+        auto run_matmul = [&](const double* a, const double* b, const double* c, double* d,
+                              int64_t ncols) -> hipblasStatus_t {
+            hipblasLtMatrixLayout_t la = nullptr, lb = nullptr, lc = nullptr;
+            hipblasLtMatrixLayoutCreate(&la, HIP_R_64F, M, K, M);
+            hipblasLtMatrixLayoutCreate(&lb, HIP_R_64F, K, ncols, K);
+            hipblasLtMatrixLayoutCreate(&lc, HIP_R_64F, M, ncols, M);
+            const hipblasStatus_t st = hipblasLtMatmul(m_handle,
+                                                       m_emul_desc,
+                                                       &alpha,
+                                                       a,
+                                                       la,
+                                                       b,
+                                                       lb,
+                                                       &beta,
+                                                       c,
+                                                       lc,
+                                                       d,
+                                                       lc,
+                                                       nullptr,
+                                                       _d_bv1_ws,
+                                                       _bv1_ws_sz,
+                                                       nullptr);
+            (void)hipDeviceSynchronize();
+            hipblasLtMatrixLayoutDestroy(lc);
+            hipblasLtMatrixLayoutDestroy(lb);
+            hipblasLtMatrixLayoutDestroy(la);
+            return st;
+        };
+
+        const hipblasStatus_t st = run_matmul(dA, dB, dC, dD, N);
+        if(st != HIPBLAS_STATUS_SUCCESS)
         {
             cleanup();
-            GTEST_SKIP() << "fp64EmulatedGemm returned " << static_cast<int>(st)
-                         << " (INT8 device library may be unavailable on this arch)";
+            if(_d_bv1_ws)
+                (void)hipFree(_d_bv1_ws);
+            FAIL() << "hipblasLtMatmul returned " << static_cast<int>(st)
+                   << " for boundary-value inputs";
         }
 
         std::vector<double> hD(MN);
@@ -2430,37 +2449,22 @@ namespace
             ASSERT_EQ(hipMemcpy(dB2, hB2.data(), bytes_B2, hipMemcpyHostToDevice), hipSuccess);
             ASSERT_EQ(hipMemset(dC2, 0, bytes_D2), hipSuccess);
 
-            const rocblaslt_status st2 = fp64EmulatedGemm(m_handle,
-                                                          HIPBLAS_OP_N,
-                                                          HIPBLAS_OP_N,
-                                                          M,
-                                                          N2,
-                                                          K,
-                                                          &alpha,
-                                                          dA2,
-                                                          M,
-                                                          dB2,
-                                                          K,
-                                                          &beta,
-                                                          dC2,
-                                                          M,
-                                                          dD2,
-                                                          M,
-                                                          /*stream=*/nullptr,
-                                                          settings);
+            const hipblasStatus_t st2 = run_matmul(dA2, dB2, dC2, dD2, N2);
 
             std::vector<double> hD2(MN2);
-            if(st2 == rocblaslt_status_success)
+            if(st2 == HIPBLAS_STATUS_SUCCESS)
                 ASSERT_EQ(hipMemcpy(hD2.data(), dD2, bytes_D2, hipMemcpyDeviceToHost), hipSuccess);
             (void)hipFree(dD2);
             (void)hipFree(dC2);
             (void)hipFree(dB2);
             (void)hipFree(dA2);
 
-            if(st2 != rocblaslt_status_success)
+            if(st2 != HIPBLAS_STATUS_SUCCESS)
             {
-                GTEST_SKIP() << "fp64EmulatedGemm (A=2*I) returned " << static_cast<int>(st2)
-                             << " (INT8 device library may be unavailable)";
+                if(_d_bv1_ws)
+                    (void)hipFree(_d_bv1_ws);
+                FAIL() << "hipblasLtMatmul (A=2*I) returned " << static_cast<int>(st2)
+                       << " for boundary-value inputs";
             }
 
             /* Convenience indexing for sub-test 2: hD2[col*M+row]. */
