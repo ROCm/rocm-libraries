@@ -331,6 +331,24 @@ _CONFIGS = {
         use_conflict_free_v_store=True,
         use_i64_kv_addr=True,
     ),
+    # cfg20: cfg5 with Q read straight from global memory (K stays in K_lds).
+    20: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=False,
+        use_q_direct_global=True,
+    ),
 }
 
 
