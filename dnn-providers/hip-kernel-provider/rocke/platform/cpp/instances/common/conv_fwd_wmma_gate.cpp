@@ -111,7 +111,12 @@ bool rocke_wmma_fwd_limits_ok(const rocke_direct_conv_problem_t* p,
     char msg[512];
     if(sched != NULL && !rocke_scheduler_strategy_is_valid(sched))
     {
-        snprintf(msg, sizeof msg, "unsupported scheduler_strategy '%s'", sched);
+        /* normalize_scheduler_strategy's ValueError, word for word. */
+        snprintf(msg,
+                 sizeof msg,
+                 "unsupported scheduler_strategy '%s'; expected one "
+                 "of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None",
+                 sched);
         gate_set_reason(reason, reason_cap, msg);
         return false;
     }

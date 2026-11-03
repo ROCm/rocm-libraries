@@ -160,6 +160,7 @@ class TestTapOuterSpec(unittest.TestCase):
             (_problem(N=4096, H=128, W=128, C=512, K=512), {}),
             (p, dict(prefetch=True, tdm_split=2, stages=4)),
             (p, dict(prefetch=True, tdm_split=2, stages=2)),
+            (p, dict(sched="bogus")),
         ):
             specs.append(DirectFwdTapOuterSpec(problem=problem, **knobs))
         strided = DirectConvProblem(

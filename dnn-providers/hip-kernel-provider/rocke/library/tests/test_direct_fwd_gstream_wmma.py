@@ -192,6 +192,7 @@ class TestFwdGstreamSpec(unittest.TestCase):
             (_problem(N=4096, H=256, W=256), {}),
             (_problem(c=56, g=4, S=2), _k(8, 1, 2, 4, 32, 4, phase_split=True)),
             (_problem(c=8, g=8, S=2), _k(2, 2, 2, 2, 16, 4, st=3, pf_depth=2)),
+            (_problem(), dict(sched="bogus")),
         ):
             specs.append(FwdGstreamWmmaSpec(problem=problem, **knobs))
         for arch in ("gfx1250", "gfx950"):

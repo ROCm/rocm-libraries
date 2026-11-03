@@ -104,6 +104,14 @@ from kernels.common.conv_fwd_wmma_gate import (
 
 CH_PAD = 8  # channels of row skew past each LDS row (16 bytes)
 FWD_WMMA_VGPR_BUDGET = 512
+# Channels one lane zeroes (one 16-byte store) when a single wave clears the
+# leading view pixel of a padded poly_view chunk.
+POLY_ZERO_LANE_CH = 8
+
+
+def poly_view_zero_channels(wave_size: int) -> int:
+    """Most channels of a padded poly_view chunk its one zeroing wave clears."""
+    return POLY_ZERO_LANE_CH * wave_size
 
 
 def _ceil_div(a: int, b: int) -> int:
@@ -469,10 +477,11 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
             return "poly_view is a plain stride-1 1-D loop"
         if not spec.ck or p.cpg % spec.ck or (p.PAD_W * p.cpg) % spec.ck:
             return f"a chunk must lie in one input pixel (cpg {p.cpg}, ck {spec.ck})"
-        if p.PAD_W and spec.ck > 8 * spec.wave_size:
-            # One wave zeroes a leading-pad chunk's view pixel, 8 channels a lane.
+        zero_ch = poly_view_zero_channels(spec.wave_size)
+        if p.PAD_W and spec.ck > zero_ch:
+            # One wave zeroes a leading-pad chunk's view pixel.
             return (
-                f"a padded poly_view zeroes at most {8 * spec.wave_size} channels "
+                f"a padded poly_view zeroes at most {zero_ch} channels "
                 f"of a chunk (ck {spec.ck})"
             )
         if spec.tile_h != 1:
@@ -905,14 +914,14 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                             ),
                             c0,
                         )
-                        zero_lane = b.cmp_lt(lane, b.const_i32(XP // 8))
+                        zero_lane = b.cmp_lt(lane, b.const_i32(XP // POLY_ZERO_LANE_CH))
                         with b.scf_if(b.land(b.land(lead_c, first), zero_lane)):
-                            zero_v = b.zero_vec(io_type, 8)
+                            zero_v = b.zero_vec(io_type, POLY_ZERO_LANE_CH)
                             b.smem_store_vN(
                                 lds,
                                 [c0, b.add(b.add(img_off, z_elems), b.mul(lane, c8))],
                                 zero_v,
-                                n=8,
+                                n=POLY_ZERO_LANE_CH,
                             )
                             b.s_waitcnt(lgkmcnt=0)
                         x_k0 = b.add(b.sub(k0, c_pv_lead), b.mul(skip, xs_w))

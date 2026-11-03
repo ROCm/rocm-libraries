@@ -753,6 +753,10 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
 
 /* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
 bool rocke_scheduler_strategy_is_valid(const char* strategy);
+/* The strategies it takes, sorted, as normalize_scheduler_strategy's
+ * ValueError lists them ("...; expected one of: <these>, or None"). */
+#define ROCKE_SCHEDULER_STRATEGY_CHOICES \
+    "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause"
 
 /* ============================ OPCODE TABLE ============================== */
 

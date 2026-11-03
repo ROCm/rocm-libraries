@@ -31,7 +31,9 @@
  *   - the shared host arithmetic the forward WMMA validators and grids read:
  *     rocke_floor_div / rocke_ceil_div (Python's // and ceil_div, for any
  *     sign) and DirectConvProblem.Ho / Wo, which a too-small input must give
- *     as Python does (floor, not truncation).
+ *     as Python does (floor, not truncation);
+ *   - the forward WMMA validator tail's refusal of an unknown scheduler, which
+ *     must carry normalize_scheduler_strategy's text, choices included.
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -452,6 +454,21 @@ static void test_stem_wmma_kernels_refuse_per_axis_padding(void)
     check_wmma_padding("dgrad_smallc_wmma", smallc, rocke_dgrad_smallc_wmma_is_valid_spec);
 }
 
+/* The validator tail (rocke_wmma_fwd_limits_ok) refuses an unknown scheduler
+ * with Python's ValueError text, word for word. */
+static void test_fwd_wmma_scheduler_reason(void)
+{
+    rocke_direct_fwd_wmma_spec_t s = rocke_direct_fwd_wmma_spec_default();
+    s.problem = dense_problem(13, 21, 64, 96);
+    s.sched = "bogus";
+    expect_fwd_wmma("sched bogus",
+                    &s,
+                    "unsupported scheduler_strategy 'bogus'; expected one of: iterative-ilp, "
+                    "iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause, or None");
+    s.sched = "iterative-ilp";
+    expect_fwd_wmma("sched iterative-ilp", &s, NULL);
+}
+
 /* Python: a // b and ceil_div(a, b) = -(-a // b), for every sign. */
 static void test_ceil_floor_div(void)
 {
@@ -525,6 +542,7 @@ int main(void)
 {
     test_ceil_floor_div();
     test_problem_output_extents();
+    test_fwd_wmma_scheduler_reason();
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();
     test_stream_refuses_per_axis_padding();

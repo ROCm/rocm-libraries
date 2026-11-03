@@ -31,9 +31,11 @@ if _HAS_TORCH:
     torch.cuda.is_available()
 
 from kernels.common.conv_direct_fwd_wmma import (
+    POLY_ZERO_LANE_CH,
     DirectFwdWmmaSpec,
     build_direct_fwd_wmma,
     fwd_wmma_reason,
+    poly_view_zero_channels,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 
@@ -344,6 +346,27 @@ class TestFwdWmmaSpec(unittest.TestCase):
                 if why is None:
                     self.assertEqual(tuple(grid), spec.grid())
 
+    def test_engines_agree_on_scheduler_reason(self):
+        """The shared validator tail refuses an unknown scheduler with
+        normalize_scheduler_strategy's text, choices included, in both
+        engines."""
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import conv_direct_fwd_wmma_spec_to_dict
+        from rocke.core.codegen_policy import normalize_scheduler_strategy
+
+        for sched in ("no-such-strategy", ""):
+            with self.assertRaises(ValueError) as cm:
+                normalize_scheduler_strategy(sched)
+            spec = DirectFwdWmmaSpec(problem=_problem(), sched=sched)
+            why = fwd_wmma_reason(spec)
+            self.assertEqual(why, str(cm.exception))
+            self.assertIn("expected one of: iterative-ilp", why)
+            ok, why_cpp, *_ = eng.conv_direct_fwd_wmma_describe(
+                conv_direct_fwd_wmma_spec_to_dict(spec), "gfx1250"
+            )
+            self.assertFalse(ok)
+            self.assertEqual(why_cpp, why)
+
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
@@ -453,6 +476,8 @@ class TestFwdWmmaSpec(unittest.TestCase):
         channels a lane: with column padding, ck above 256 would leave the
         rest of the chunk stale, so it is refused; ck = 256, or any ck
         without column padding, passes this rule."""
+        self.assertEqual(POLY_ZERO_LANE_CH, 8)
+        self.assertEqual(poly_view_zero_channels(32), 256)
         for C, ck, pad_w, refused in (
             (288, 288, 1, True),
             (512, 512, 1, True),

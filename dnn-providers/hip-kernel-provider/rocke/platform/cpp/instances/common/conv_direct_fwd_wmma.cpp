@@ -36,15 +36,23 @@
 #include "rocke/lower_llvm.h"
 
 /* conv_direct_fwd_wmma.WMMA_K (conv_fwd_wmma_gate's) / CH_PAD /
- * FWD_WMMA_VGPR_BUDGET. */
+ * FWD_WMMA_VGPR_BUDGET / POLY_ZERO_LANE_CH. */
 #define FWW_WMMA_K ROCKE_FWD_WMMA_K
 #define FWW_CH_PAD ROCKE_FWD_WMMA_CH_PAD
 #define FWW_VGPR_BUDGET 512
+#define FWW_POLY_ZERO_LANE_CH 8
 
 namespace
 {
 
 using V = rocke_value_t*;
+
+/* poly_view_zero_channels: most channels of a padded poly_view chunk its one
+ * zeroing wave clears. */
+int fww_poly_view_zero_channels(int wave_size)
+{
+    return FWW_POLY_ZERO_LANE_CH * wave_size;
+}
 
 void fww_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
@@ -424,10 +432,11 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
             FWW_FAIL("poly_view is a plain stride-1 1-D loop");
         if(spec->ck == 0 || p->cpg % spec->ck || (pad_w * p->cpg) % spec->ck)
             FWW_FAIL("a chunk must lie in one input pixel (cpg %d, ck %d)", p->cpg, spec->ck);
-        /* One wave zeroes a leading-pad chunk's view pixel, 8 channels a lane. */
-        if(pad_w != 0 && spec->ck > 8 * spec->wave_size)
+        /* One wave zeroes a leading-pad chunk's view pixel. */
+        const int zero_ch = fww_poly_view_zero_channels(spec->wave_size);
+        if(pad_w != 0 && spec->ck > zero_ch)
             FWW_FAIL("a padded poly_view zeroes at most %d channels of a chunk (ck %d)",
-                     8 * spec->wave_size,
+                     zero_ch,
                      spec->ck);
         if(rocke_direct_fwd_wmma_tile_h(spec) != 1)
             FWW_FAIL("poly_view tiles one row (tile_w * tile_n == block_p)");
@@ -772,7 +781,7 @@ void issue_halo(fww_ctx& c, V chunk, V stage)
                     }
                     V zero_lane;
                     {
-                        V x = ci(c, c.XP / 8);
+                        V x = ci(c, c.XP / FWW_POLY_ZERO_LANE_CH);
                         zero_lane = rocke_b_cmp_lt(b, c.lane, x);
                     }
                     V cond;
@@ -781,11 +790,11 @@ void issue_halo(fww_ctx& c, V chunk, V stage)
                         cond = rocke_b_land(b, x, zero_lane);
                     }
                     if_then(c, cond, [&]() {
-                        V zero_v = rocke_b_zero_vec(b, c.io_type, 8);
+                        V zero_v = rocke_b_zero_vec(b, c.io_type, FWW_POLY_ZERO_LANE_CH);
                         V x = add(c, img_off, sh.z_elems);
                         V y = mul(c, c.lane, c.c8);
                         V idx[2] = {c.c0, add(c, x, y)};
-                        rocke_b_smem_store_vN(b, c.lds, idx, 2, zero_v, 8);
+                        rocke_b_smem_store_vN(b, c.lds, idx, 2, zero_v, FWW_POLY_ZERO_LANE_CH);
                         rocke_b_s_waitcnt(b, -1, 0, -1);
                     });
                     {

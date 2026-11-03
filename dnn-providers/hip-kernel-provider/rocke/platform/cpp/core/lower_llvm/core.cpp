@@ -1973,9 +1973,8 @@ static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_att
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
-                      "unsupported scheduler_strategy '%s'; expected one of: "
-                      "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, "
-                      "max-memory-clause, or None",
+                      "unsupported scheduler_strategy '%s'; expected one "
+                      "of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None",
                       strategy);
     }
     return strategy;
