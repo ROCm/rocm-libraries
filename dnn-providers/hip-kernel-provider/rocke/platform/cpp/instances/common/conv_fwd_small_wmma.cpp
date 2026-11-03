@@ -89,8 +89,8 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
         return false;
     }
     {
-        long long total_c = rocke_direct_conv_problem_total_c(p);
-        long long total_k = rocke_direct_conv_problem_total_k(p);
+        const long long total_c = rocke_direct_conv_problem_total_c(p);
+        const long long total_k = rocke_direct_conv_problem_total_k(p);
         long long bytes[3] = {2LL * p->N * p->H * p->W * total_c,
                               2LL * total_k * p->KH * p->KW * p->cpg,
                               2LL * p->N * rocke_direct_conv_problem_Ho(p)

@@ -79,14 +79,14 @@ bool rocke_direct_conv_problem_is_bf16(const rocke_direct_conv_problem_t* p)
     return strcmp(rocke_direct_conv_problem_dtype(p), "bf16") == 0;
 }
 
-int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p)
+long long rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p)
 {
-    return p->groups * p->cpg;
+    return (long long)p->groups * p->cpg;
 }
 
-int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p)
+long long rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p)
 {
-    return p->groups * p->kpg;
+    return (long long)p->groups * p->kpg;
 }
 
 long long rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p)

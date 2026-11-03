@@ -332,6 +332,8 @@ class TestFwdWmmaSpec(unittest.TestCase):
             (dict(N=8, H=768, W=768, C=256, K=128), {}),
             (dict(N=1, H=8, W=8, C=4096, K=32768), {}),
             (dict(dtype="fp32"), {}),
+            # 2^31 channels: total_c / total_k must not wrap in C++.
+            (dict(N=1, H=8, W=8, C=1 << 31, K=1 << 31, groups=1 << 25), {}),
         ):
             specs.append(DirectFwdWmmaSpec(problem=_problem(**pkw), **knobs))
         for arch in ("gfx1250", "gfx950"):

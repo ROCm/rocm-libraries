@@ -161,6 +161,8 @@ class TestTapOuterSpec(unittest.TestCase):
             (p, dict(prefetch=True, tdm_split=2, stages=4)),
             (p, dict(prefetch=True, tdm_split=2, stages=2)),
             (p, dict(sched="bogus")),
+            # 2^31 channels: total_c / total_k must not wrap in C++.
+            (_problem(N=1, H=33, W=33, C=1 << 31, K=1 << 31, groups=1 << 25), {}),
         ):
             specs.append(DirectFwdTapOuterSpec(problem=problem, **knobs))
         strided = DirectConvProblem(

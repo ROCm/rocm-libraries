@@ -155,10 +155,11 @@ const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p
 /* p.dtype == "bf16". */
 bool rocke_direct_conv_problem_is_bf16(const rocke_direct_conv_problem_t* p);
 
-/* @property total_c -> groups * cpg. */
-int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
-/* @property total_k -> groups * kpg. */
-int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p);
+/* @property total_c -> groups * cpg and @property total_k -> groups * kpg,
+ * in 64 bits like Python's ints: the validators compare tensor sizes built
+ * from them against the i32 limits, so the product must not wrap. */
+long long rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
+long long rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p);
 /* @property Ho -> (H + 2*PAD - (KH-1)*dil_h - 1) // stride + 1 and
  * @property Wo -> (W + 2*PAD_W - (KW-1)*dil_w - 1) // stride + 1: the output
  * extents of a strided, dilated convolution, with Python's floor division

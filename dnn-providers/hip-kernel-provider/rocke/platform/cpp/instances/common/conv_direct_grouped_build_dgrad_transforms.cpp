@@ -165,7 +165,7 @@ static rocke_kernel_def_t*
     else
     {
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_k(p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_k(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->cpg;
@@ -199,7 +199,7 @@ static rocke_kernel_def_t*
     else
     {
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_c(p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_c(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->kpg;

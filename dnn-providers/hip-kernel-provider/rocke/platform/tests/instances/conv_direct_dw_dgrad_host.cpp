@@ -46,6 +46,7 @@
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
+#include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
@@ -538,8 +539,54 @@ static void test_problem_output_extents(void)
           "total_c / total_k");
 }
 
+/* total_c / total_k are 64-bit like Python's ints: groups * cpg = 2^31 does
+ * not wrap, and the forward validators refuse its tensors with Python's
+ * reason (an int product wrapped negative and let these specs pass). */
+static void test_total_channels_past_i32(void)
+{
+    rocke_direct_conv_problem_t p = dense_problem(8, 8, 16, 16);
+    p.N = 1;
+    p.groups = 1 << 27;
+    CHECK(rocke_direct_conv_problem_total_c(&p) == 2147483648LL
+              && rocke_direct_conv_problem_total_k(&p) == 2147483648LL,
+          "total_c / total_k of 2^27 groups x 16: %lld / %lld",
+          rocke_direct_conv_problem_total_c(&p),
+          rocke_direct_conv_problem_total_k(&p));
+    char reason[ERR_CAP];
+
+    rocke_fwd_gstream_wmma_spec_t gs = rocke_fwd_gstream_wmma_spec_default();
+    gs.problem = p;
+    reason[0] = '\0';
+    CHECK(!rocke_fwd_gstream_wmma_is_valid_spec(&gs, "gfx1250", reason, sizeof(reason)),
+          "direct_fwd_gstream_wmma accepted 2^31 channels");
+    CHECK(strcmp(reason, "tensors of 618475290624 B exceed the i32 byte offsets") == 0,
+          "direct_fwd_gstream_wmma 2^31 channels reason: %s",
+          reason);
+
+    rocke_direct_fwd_wmma_spec_t fw = rocke_direct_fwd_wmma_spec_default();
+    fw.problem = dense_problem(8, 8, 64, 64);
+    fw.problem.N = 1;
+    fw.problem.groups = 1 << 25;
+    expect_fwd_wmma("2^31 channels", &fw, "tensors of 2473901162496 B exceed the i32 byte offsets");
+
+    rocke_fwd_tapouter_wmma_spec_t to = rocke_fwd_tapouter_wmma_spec_default();
+    to.problem = dense_problem(33, 33, 64, 64);
+    to.problem.N = 1;
+    to.problem.groups = 1 << 25;
+    to.problem.PAD = 2;
+    to.problem.dil_h = 2;
+    to.problem.dil_w = 2;
+    reason[0] = '\0';
+    CHECK(!rocke_fwd_tapouter_wmma_is_valid_spec(&to, "gfx1250", reason, sizeof(reason)),
+          "direct_fwd_tapouter_wmma accepted 2^31 channels");
+    CHECK(strcmp(reason, "tensors of 4677219385344 B exceed the i32 byte offsets") == 0,
+          "direct_fwd_tapouter_wmma 2^31 channels reason: %s",
+          reason);
+}
+
 int main(void)
 {
+    test_total_channels_past_i32();
     test_ceil_floor_div();
     test_problem_output_extents();
     test_fwd_wmma_scheduler_reason();

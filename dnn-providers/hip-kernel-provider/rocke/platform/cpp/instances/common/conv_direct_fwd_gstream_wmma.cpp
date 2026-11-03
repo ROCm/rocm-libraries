@@ -331,7 +331,7 @@ bool rocke_fwd_gstream_wmma_is_valid_spec(const rocke_fwd_gstream_wmma_spec_t* s
     if(bk % kpad != 0 && kpad % bk != 0)
         GS_FAIL("block_k %d is neither whole groups nor part of one", bk);
     if(((long long)p->groups * kpad) % bk != 0)
-        GS_FAIL("K %d not a multiple of block_k %d", rocke_direct_conv_problem_total_k(p), bk);
+        GS_FAIL("K %lld not a multiple of block_k %d", rocke_direct_conv_problem_total_k(p), bk);
     if(spec->pf_depth < 1 || (spec->pf_depth > 1 && !spec->prefetch))
         GS_FAIL("pf_depth %d: >= 1, and > 1 only with prefetch", spec->pf_depth);
     if(spec->stages < 2 || spec->walk < 1)
