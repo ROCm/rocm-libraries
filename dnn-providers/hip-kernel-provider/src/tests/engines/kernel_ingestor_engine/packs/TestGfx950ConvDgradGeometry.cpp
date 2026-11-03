@@ -65,7 +65,9 @@ TEST(TestGfx950ConvDgradGeometry, EveryCatalogInstanceParses)
             helpers += entry.isHelper() ? 1 : 0;
         }
         EXPECT_EQ(helpers, 4U) << dtype;
-        EXPECT_GT(catalog::catalog(dtype).size(), 300U) << dtype;
+        // 203 selectable kernels + 4 helpers per dtype, the gfx950 dgrad AOT catalog prune
+        // (see IngestorGenerator's test_make_conv_dgrad_aot_config.py).
+        EXPECT_GT(catalog::catalog(dtype).size(), 200U) << dtype;
     }
 }
 

@@ -321,9 +321,15 @@ inline std::optional<std::vector<SubGemm>> enumerateSubGemms(
     const auto tilde = computeTilde(p, g);
     std::vector<SubGemm> subGemms;
     int64_t cumulativeTiles = 0;
-    for(int64_t iYt = 0; iYt < tilde.yTilde; ++iYt)
+    // iYt >= p.y (resp. iXt >= p.x) always makes yDotSlice (resp. xDotSlice)
+    // non-positive below, so the loops never need to run past the filter taps --
+    // without this bound, a large stride (yTilde/xTilde = stride/gcd) makes the
+    // loop stride^2 with every extra iteration empty.
+    const auto yLimit = std::min(tilde.yTilde, p.y);
+    const auto xLimit = std::min(tilde.xTilde, p.x);
+    for(int64_t iYt = 0; iYt < yLimit; ++iYt)
     {
-        for(int64_t iXt = 0; iXt < tilde.xTilde; ++iXt)
+        for(int64_t iXt = 0; iXt < xLimit; ++iXt)
         {
             const auto yDotSlice = ceilDivSigned(p.y - iYt, tilde.yTilde);
             const auto xDotSlice = ceilDivSigned(p.x - iXt, tilde.xTilde);

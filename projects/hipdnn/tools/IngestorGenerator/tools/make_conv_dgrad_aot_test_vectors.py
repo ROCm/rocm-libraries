@@ -96,7 +96,20 @@ def synthetic_problems(specs) -> list:
         _shape(1, 3, 32, 64, 64, 7, 7, 2, 3),
         _shape(1, 16, 32, 31, 29, 7, 7, 4, 3),
         _shape(1, 24, 40, 20, 20, 3, 3, 1, 2, 2),
-        _shape(1, 16, 24, 17, 13, 3, 3, 3, 2, sw=2, pw=1, dw=1),
+        # Stride 3x2, dilation 2x1 (TheContractsMagicExample / Stride3x2Dilation2x1):
+        # the positional `d` must be set explicitly, else dH defaults to 1 and the row
+        # is not dilated at all.
+        _shape(1, 16, 24, 17, 13, 3, 3, 3, 2, d=2, sw=2, pw=1, dw=1),
+        # stride 2, dilation 2 (gcd(s, d) == 2): the tilde decomposition's gcd-driven
+        # residue split, untested by the row above (its gcd is 1).
+        _shape(2, 32, 64, 16, 16, 3, 3, 2, 2, d=2),
+        # the same stride-2/dilation-2 gcd case, grouped.
+        _shape(2, 32, 64, 16, 16, 3, 3, 2, 2, d=2, g=4),
+        # asymmetric dilation (dH != dW), both greater than 1.
+        _shape(1, 16, 32, 19, 23, 3, 3, 1, 1, d=3, dw=2),
+        # odd Hi with gcd(s, d) > 1: exercises the zero-filled dX residue rows the tilde
+        # decomposition leaves when Hi isn't a multiple of the residue period.
+        _shape(1, 16, 32, 15, 15, 3, 3, 4, 1, d=2),
         _shape(2, 64, 64, 32, 32, 3, 3, 1, 1),
         _shape(2, 64, 64, 32, 96, 3, 3, 1, 1),
         _shape(2, 64, 64, 32, 97, 3, 3, 1, 1),
