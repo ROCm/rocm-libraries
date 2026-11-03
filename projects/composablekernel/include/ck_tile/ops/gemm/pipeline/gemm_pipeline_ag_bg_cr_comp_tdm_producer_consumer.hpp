@@ -173,11 +173,8 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
     {
         // The ring triple ends in NumProducerWaves because only BlockWarps[0] and [1] are
         // emitted below, so consumers-plus-producers cannot be recovered from the rest of the
-        // name. Forward protection, not a live collision: tile_engine has no NumSlots/PublishLag
-        // config axis today, so every generated comp_tdm_pc instance ships one ring shape. If
-        // that changes, the ring triple belongs in _format_trait_combo_string -- the one string
-        // that reaches both the CMake target name and the generated header path -- and not in
-        // _format_kernel_name, which neither of those two derives from.
+        // name. tile_engine and the dispatcher name a non-default ring themselves (the
+        // comp_tdm_pc_s{NumSlots}l{PublishLag} pipeline variant and the _s{S}l{L} suffix).
         // clang-format off
         return concat('_', "pipeline_AgBgCrCompTDMProducerConsumer",
                       concat('x', MPerBlock, NPerBlock, KPerBlock), LaunchBlockSize,

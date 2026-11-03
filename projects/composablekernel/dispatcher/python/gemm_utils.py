@@ -361,6 +361,11 @@ class GemmKernelConfig:
     vector_size_a: int = 0
     vector_size_b: int = 0
     vector_size_c: int = 0
+    # comp_tdm_pc ring (NumSlots, PublishLag); num_slots=0 is the policy
+    # default <4, 0>. Sweep configs spell a non-default ring as the pipeline
+    # "comp_tdm_pc_s{S}l{L}" (codegen_common.split_pipeline_ring).
+    num_slots: int = 0
+    publish_lag: int = 0
 
     # No silent default: the arch must be resolved (rocminfo-detected or passed
     # explicitly) before this config feeds the compiler. expand_sweep /
@@ -442,6 +447,11 @@ class GemmKernelConfig:
     @property
     def vector_sizes(self) -> Tuple[int, int, int]:
         return (self.vector_size_a, self.vector_size_b, self.vector_size_c)
+
+    @property
+    def ring_suffix(self) -> str:
+        """ "_s{S}l{L}" for a non-default comp_tdm_pc ring, else ""."""
+        return _codegen_common().pipeline_ring_suffix(self.num_slots, self.publish_lag)
 
     def _vector_args(self) -> Dict[str, Any]:
         return dict(
@@ -532,6 +542,7 @@ class GemmKernelConfig:
         )
         if any(self.vector_sizes):
             name += _codegen_common().gemm_vector_size_suffix(self.vector_sizes)
+        name += self.ring_suffix
         if self.variant == "preshuffle":
             name += "_preshuffle"
             if self.permute_n:
@@ -583,7 +594,7 @@ class GemmKernelConfig:
                 "warp_tile_k": [self.warp_tile_k],
             },
             "trait_config": {
-                "pipeline": [self.pipeline],
+                "pipeline": [self.pipeline + self.ring_suffix],
                 "epilogue": [self.epilogue],
                 "scheduler": [self.scheduler],
                 "pad_m": [self.pad_m],
@@ -641,6 +652,7 @@ class GemmKernelConfig:
             "pad": [self.pad_m, self.pad_n, self.pad_k],
             "persistent": self.persistent,
             "vector_sizes": list(self.vector_sizes),
+            "ring": [self.num_slots, self.publish_lag],
             "gfx_arch": self.gfx_arch,
             "variant": self.variant,
             "name": self.name,
@@ -2836,6 +2848,7 @@ def _gfx1250_pipeline_supported(
     warp_tile_m: int = 0,
     warp_tile_n: int = 0,
     tile_mn: Optional[Tuple[int, int]] = None,
+    ring: Tuple[int, int] = (0, 0),
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
     the codegen would reject for this arch/variant/trait.
@@ -2844,7 +2857,8 @@ def _gfx1250_pipeline_supported(
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it. ``warp_tile_m``/
     ``warp_tile_n`` feed the comp_async 8-bit warp_tile_m/n rule; 0 skips it.
-    ``tile_mn`` feeds the comp_tdm_pc accumulator rule; None skips it."""
+    ``tile_mn`` feeds the comp_tdm_pc accumulator rule; None skips it.
+    ``ring`` is the comp_tdm_pc (num_slots, publish_lag); (0, 0) is the default."""
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2865,6 +2879,7 @@ def _gfx1250_pipeline_supported(
         tile_mn=tile_mn,
         warp_k=wave_k,
         streamk=variant == "stream_k",
+        ring=ring,
     )
     return not reason
 
@@ -2889,6 +2904,7 @@ def _arch_filter_accepts(
     pipeline: str,
     epilogue: str,
     scheduler: str,
+    num_slots: int = 0,
 ) -> bool:
     """Mirror of unified_gemm_codegen's _is_tile_arch_valid ArchFilter call
     (LDS capacity, warp and trait rules), so expand_sweep drops every config
@@ -2925,6 +2941,7 @@ def _arch_filter_accepts(
         scheduler=scheduler,
         layout=layout[:3],
         operator=operator,
+        num_slots=num_slots,
     )
 
 
@@ -3208,6 +3225,8 @@ def expand_sweep(
         persistents,
         reductions,
     ):
+        # "comp_tdm_pc_s{S}l{L}" names a non-default producer/consumer ring.
+        pipe, num_slots, publish_lag = _codegen_common().split_pipeline_ring(pipe)
         # Tile/CShuffle correctness gate. A block tile must split evenly across
         # its waves -- tile % (wave * warp_tile) == 0 -- else the kernel is
         # genuinely invalid.
@@ -3253,6 +3272,7 @@ def expand_sweep(
             warp_tile_m=wtm,
             warp_tile_n=wtn,
             tile_mn=(tm, tn),
+            ring=(num_slots, publish_lag),
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
@@ -3295,6 +3315,8 @@ def expand_sweep(
                     pad_n=bool(pn),
                     pad_k=bool(pk),
                     persistent=bool(persist),
+                    num_slots=num_slots,
+                    publish_lag=publish_lag,
                     gfx_arch=arch,
                     variant=variant,
                     reduction_strategy=red,
@@ -3351,6 +3373,7 @@ def expand_sweep(
                             pipe,
                             epi,
                             sched,
+                            num_slots,
                         )
                     if not val:
                         # Keep counting the later widths' rejects, as the codegen does.
