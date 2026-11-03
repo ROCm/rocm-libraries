@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,23 +67,23 @@ inline auto param_checkstride()
         {
             for(const auto precision : precision_range_sp_dp)
             {
-                for(const auto& types :
-                    generate_types(trans_type, {fft_placement_notinplace}, true))
+                for(const auto& types : generate_types(
+                        trans_type, {fft_placement_notinplace, fft_placement_inplace}, true))
                 {
                     fft_params param;
 
-                    param.length               = std::get<0>(s);
-                    param.istride              = std::get<1>(s);
-                    param.ostride              = std::get<1>(s);
-                    param.nbatch               = std::get<2>(s);
-                    param.precision            = precision;
-                    param.idist                = std::get<3>(s);
-                    param.odist                = std::get<3>(s);
-                    param.transform_type       = std::get<0>(types);
-                    param.placement            = std::get<1>(types);
-                    param.itype                = std::get<2>(types);
-                    param.otype                = std::get<3>(types);
-                    param.check_output_strides = true;
+                    param.length         = std::get<0>(s);
+                    param.istride        = std::get<1>(s);
+                    param.ostride        = std::get<1>(s);
+                    param.nbatch         = std::get<2>(s);
+                    param.precision      = precision;
+                    param.idist          = std::get<3>(s);
+                    param.odist          = std::get<3>(s);
+                    param.transform_type = std::get<0>(types);
+                    param.placement      = std::get<1>(types);
+                    param.itype          = std::get<2>(types);
+                    param.otype          = std::get<3>(types);
+                    param.check_strides  = true;
 
                     param.validate();
 
