@@ -129,10 +129,12 @@ def test_module_predicate_admits_a_spec_both_halves_admit():
 def test_module_predicate_refuses_what_only_the_reduce_refuses():
     """A segment count the segment kernel builds but whose reduce cannot cache its
     per-segment factors in LDS: the segment predicate alone would ship it."""
-    spec = _segment(num_segments=4097)
+    from kernels.gfx950.attention_tiled_3d import reduce_max_segments
+
+    spec = _segment(num_segments=reduce_max_segments("gfx950") + 1)
     assert supports_tiled_3d_spec(spec, arch="gfx950")[0]
     ok, why = supports_unified_attention_3d_tiled_module(spec, arch="gfx950")
-    assert not ok and "exceeds 4096" in why
+    assert not ok and "LDS" in why
 
 
 def test_module_predicate_refuses_what_the_segment_refuses():

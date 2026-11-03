@@ -65,10 +65,13 @@ TEST(TestGfx950AttentionUnified3DGeometry, RefusesWhatTheBuildersRefuse)
     EXPECT_FALSE(isSupportedGfx950Unified3DGeometry(128, 16, 32, 1, 16));
     EXPECT_FALSE(isSupportedGfx950Unified3DGeometry(128, 16, 9, 2, 16));
     EXPECT_FALSE(isSupportedGfx950Unified3DGeometry(128, 16, 8, 0, 16));
-    // Segments: at least one, and no more than the reduce kernel's LDS factor cache holds.
+    // Segments: at least one, and no more than the reduce kernel's LDS factor cache holds:
+    // 163840 B of gfx950 LDS over one f32 per segment.
+    EXPECT_EQ(GFX950_UNIFIED_3D_MAX_SEGMENTS, 40960);
     EXPECT_FALSE(isSupportedGfx950Unified3DGeometry(128, 16, 8, 1, 0));
-    EXPECT_FALSE(isSupportedGfx950Unified3DGeometry(128, 16, 8, 1, 4097));
-    EXPECT_TRUE(isSupportedGfx950Unified3DGeometry(128, 16, 8, 1, 4096));
+    EXPECT_FALSE(
+        isSupportedGfx950Unified3DGeometry(128, 16, 8, 1, GFX950_UNIFIED_3D_MAX_SEGMENTS + 1));
+    EXPECT_TRUE(isSupportedGfx950Unified3DGeometry(128, 16, 8, 1, GFX950_UNIFIED_3D_MAX_SEGMENTS));
 }
 
 // =============================================================================

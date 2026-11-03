@@ -263,7 +263,7 @@ def test_reduce_predicate_admits_the_reduce_spec_of_every_admitted_3d_problem(
         (dict(head_size=96), "divisible by 64"),
         (dict(num_query_heads=30, num_kv_heads=8), "divisible by num_kv_heads"),
         (dict(num_query_heads=-8, num_kv_heads=8), "positive num_query_heads"),
-        (dict(num_segments=4097), "exceeds 4096"),
+        (dict(num_segments=40961), "over gfx950's 163840 B LDS (at most 40960)"),
     ],
 )
 def test_reduce_predicate_rejects_what_the_builder_assumes_away(overrides, reason):
@@ -320,3 +320,33 @@ def test_reduce_predicate_admits_the_segment_kernel_arches(arch):
         head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
     )
     assert supports_tiled_reduce_spec(spec, arch=arch) == (True, "supported")
+
+
+@pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
+def test_reduce_segment_bound_is_the_arch_lds_capacity(arch):
+    """The bound is ``ArchTarget.lds_capacity_bytes`` over one f32 per segment, not a
+    literal: the last count that fits is admitted and the next one refused."""
+    from rocke.core.arch.target import ArchTarget
+
+    from kernels.gfx950.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec,
+        reduce_lds_bytes,
+        reduce_max_segments,
+        supports_tiled_reduce_spec,
+    )
+
+    cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
+    limit = reduce_max_segments(arch)
+    assert reduce_lds_bytes(limit) <= cap < reduce_lds_bytes(limit + 1)
+
+    def spec(n):
+        return UnifiedAttentionReduceTiledSpec(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            num_segments=n,
+        )
+
+    assert supports_tiled_reduce_spec(spec(limit), arch=arch) == (True, "supported")
+    assert not supports_tiled_reduce_spec(spec(limit + 1), arch=arch)[0]

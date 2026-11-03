@@ -1715,9 +1715,26 @@ def supports_tiled_3d_spec(
 
 # Two bounds the reduce builder relies on without checking: one wave64 owns
 # ``head_size // 64`` output dims per thread, and the per-segment factor is cached in
-# an LDS array of ``num_segments`` floats.
+# an LDS array of ``num_segments`` floats (``seg_factor``, its only LDS allocation).
 _REDUCE_THREADS = 64
-_REDUCE_MAX_SEGMENTS = 4096
+_REDUCE_LDS_BYTES_PER_SEGMENT = 4  # one f32 factor
+
+
+def reduce_lds_bytes(num_segments: int) -> int:
+    """The reduce kernel's LDS: its ``seg_factor`` array of ``num_segments`` f32s.
+
+    ``test_attention_tiled_3d_reduce_lds`` holds this to the compiled code object's
+    ``group_segment_fixed_size``."""
+    return num_segments * _REDUCE_LDS_BYTES_PER_SEGMENT
+
+
+def reduce_max_segments(arch: str) -> int:
+    """The most segments whose factor cache fits ``arch``'s LDS
+    (``ArchTarget.lds_capacity_bytes``). The C++ host mirrors gfx950's as
+    ``GFX950_UNIFIED_3D_MAX_SEGMENTS``."""
+    from rocke.core.arch.target import ArchTarget
+
+    return ArchTarget.from_gfx(arch).lds_capacity_bytes // _REDUCE_LDS_BYTES_PER_SEGMENT
 
 
 def supports_tiled_reduce_spec(
@@ -1734,6 +1751,8 @@ def supports_tiled_reduce_spec(
     gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
     wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
     """
+    from rocke.core.arch.target import ArchTarget
+
     from ..common.attention_arch import validate_tiled_attention_arch
 
     arch_ok, arch_reason = validate_tiled_attention_arch(arch)
@@ -1760,11 +1779,15 @@ def supports_tiled_reduce_spec(
             "tiled reduce kernel needs a positive num_query_heads divisible by "
             f"num_kv_heads (got {spec.num_query_heads} / {spec.num_kv_heads})",
         )
-    if spec.num_segments > _REDUCE_MAX_SEGMENTS:
+    # ``arch`` passed validate_tiled_attention_arch, so it has a catalog row.
+    target = ArchTarget.from_gfx(arch)
+    lds_bytes = reduce_lds_bytes(spec.num_segments)
+    if not target.fits_lds(lds_bytes):
         return (
             False,
-            f"tiled reduce kernel caches one LDS factor per segment; "
-            f"num_segments={spec.num_segments} exceeds {_REDUCE_MAX_SEGMENTS}",
+            f"tiled reduce kernel caches one f32 LDS factor per segment; "
+            f"num_segments={spec.num_segments} needs {lds_bytes} B, over {arch}'s "
+            f"{target.lds_capacity_bytes} B LDS (at most {reduce_max_segments(arch)})",
         )
     return True, "supported"
 

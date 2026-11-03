@@ -11,6 +11,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
 
 /**
@@ -40,9 +41,14 @@ inline constexpr unsigned GFX950_UNIFIED_3D_CTA_THREADS
 /// (`supports_tiled_3d`).
 inline constexpr int64_t GFX950_UNIFIED_3D_BLOCK_M = 16;
 
-/// The reduce kernel caches one f32 factor per segment in LDS
-/// (`supports_tiled_reduce_spec`).
-inline constexpr int64_t GFX950_UNIFIED_3D_MAX_SEGMENTS = 4096;
+/// The reduce kernel's LDS per segment: one f32 factor (`reduce_lds_bytes`, held to the
+/// compiled code object's group_segment_fixed_size by test_attention_tiled_3d_reduce_lds).
+inline constexpr int64_t GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT = 4;
+
+/// The most segments whose factor cache fits gfx950's LDS (`reduce_max_segments`): the
+/// bound `supports_tiled_reduce_spec` gates with ArchTarget.fits_lds.
+inline constexpr int64_t GFX950_UNIFIED_3D_MAX_SEGMENTS
+    = GFX950_LDS_CAPACITY_BYTES / GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT;
 
 /// Bytes of one f32 element of the segment scratch.
 inline constexpr std::size_t GFX950_UNIFIED_3D_SCRATCH_ELEMENT = UNIFIED_ATTENTION_SCRATCH_ELEMENT;
@@ -54,7 +60,7 @@ inline constexpr std::size_t GFX950_UNIFIED_3D_SCRATCH_ELEMENT = UNIFIED_ATTENTI
  *   - head_size in {64, 128, 256} (the reduce kernel also needs it divisible by 64)
  *   - block_size in {16, 32, 64}
  *   - 1 <= num_queries_per_kv <= 16 and dividing 16
- *   - 1 <= num_segments <= 4096
+ *   - 1 <= num_segments <= GFX950_UNIFIED_3D_MAX_SEGMENTS (gfx950 LDS / 4 bytes)
  *
  * Total over every int64 input.
  */
