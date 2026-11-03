@@ -112,6 +112,10 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see make_zip_function
  *  \see zip_iterator
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename Function>
 class zip_function
@@ -146,6 +150,10 @@ private:
  *  \return A \p zip_function that takes a N-tuple.
  *
  *  \see zip_function
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename Function>
 THRUST_HOST_DEVICE zip_function<_THRUST_STD::decay_t<Function>> make_zip_function(Function&& fun)
@@ -158,6 +166,10 @@ THRUST_HOST_DEVICE zip_function<_THRUST_STD::decay_t<Function>> make_zip_functio
  */
 
 /*! \} // end function_objects
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 
 THRUST_NAMESPACE_END
