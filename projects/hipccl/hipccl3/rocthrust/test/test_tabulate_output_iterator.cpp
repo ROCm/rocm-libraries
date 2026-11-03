@@ -18,7 +18,6 @@
 #define CCCL_IGNORE_DEPRECATED_API
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/gather.h>
@@ -35,10 +34,6 @@
 #include "test_utils.hpp"
 
 #include _THRUST_STD_INCLUDE(type_traits)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
 
 using VectorTestsParams = ::testing::Types<
   Params<thrust::host_vector<signed char>>,
@@ -77,8 +72,8 @@ struct host_write_first_op
   template <typename IndexT, typename T>
   THRUST_HOST void operator()(IndexT index, T val)
   {
-    // val is a thrust::tuple(value, input_index). Only write out the value part.
-    out[index] = thrust::get<0>(val);
+    // val is a _THRUST_STD::tuple(value, input_index). Only write out the value part.
+    out[index] = _THRUST_STD::get<0>(val);
   }
 };
 
@@ -90,8 +85,8 @@ struct device_write_first_op
   template <typename IndexT, typename T>
   THRUST_DEVICE void operator()(IndexT index, T val)
   {
-    // val is a thrust::tuple(value, input_index). Only write out the value part.
-    out[index] = thrust::get<0>(val);
+    // val is a _THRUST_STD::tuple(value, input_index). Only write out the value part.
+    out[index] = _THRUST_STD::get<0>(val);
   }
 };
 
@@ -100,10 +95,10 @@ struct select_op
   std::size_t select_every_nth;
 
   template <typename T, typename IndexT>
-  THRUST_HOST_DEVICE bool operator()(thrust::tuple<T, IndexT> key_index_pair)
+  THRUST_HOST_DEVICE bool operator()(_THRUST_STD::tuple<T, IndexT> key_index_pair)
   {
     // Select every n-th item
-    return (thrust::get<1>(key_index_pair) % select_every_nth == 0);
+    return (_THRUST_STD::get<1>(key_index_pair) % select_every_nth == 0);
   }
 };
 
@@ -145,14 +140,12 @@ TEST(TabulateOutputIteratorTests, TestTabulateOutputIteratorTraits)
   static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
   // FIXME(bgruber): all up to and including random access should be true
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::output_iterator<it, int>);
   static_assert(!_THRUST_STD::input_iterator<it>);
   static_assert(!_THRUST_STD::forward_iterator<it>);
   static_assert(!_THRUST_STD::bidirectional_iterator<it>);
   static_assert(!_THRUST_STD::random_access_iterator<it>);
   static_assert(!_THRUST_STD::contiguous_iterator<it>);
-#endif
 }
 
 TYPED_TEST(TabulateOutputIteratorVectorTests, TestTabulateOutputIterator)

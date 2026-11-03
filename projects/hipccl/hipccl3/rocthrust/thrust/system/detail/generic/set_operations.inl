@@ -101,9 +101,9 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_diffe
   OutputIterator2 values_result,
   StrictWeakOrdering comp)
 {
-  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
-  using iterator_tuple2 = thrust::tuple<InputIterator2, InputIterator4>;
-  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
+  using iterator_tuple1 = _THRUST_STD::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = _THRUST_STD::tuple<InputIterator2, InputIterator4>;
+  using iterator_tuple3 = _THRUST_STD::tuple<OutputIterator1, OutputIterator2>;
 
   using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
   using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
@@ -123,7 +123,7 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_diffe
     thrust::set_difference(exec, zipped_first1, zipped_last1, zipped_first2, zipped_last2, zipped_result, comp_first)
       .get_iterator_tuple();
 
-  return _THRUST_STD::make_pair(thrust::get<0>(result), thrust::get<1>(result));
+  return _THRUST_STD::make_pair(_THRUST_STD::get<0>(result), _THRUST_STD::get<1>(result));
 } // end set_difference_by_key()
 
 template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator>
@@ -189,9 +189,9 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_inter
   using value_type1       = thrust::detail::it_value_t<InputIterator3>;
   using constant_iterator = thrust::constant_iterator<value_type1>;
 
-  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
-  using iterator_tuple2 = thrust::tuple<InputIterator2, constant_iterator>;
-  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
+  using iterator_tuple1 = _THRUST_STD::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = _THRUST_STD::tuple<InputIterator2, constant_iterator>;
+  using iterator_tuple3 = _THRUST_STD::tuple<OutputIterator1, OutputIterator2>;
 
   using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
   using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
@@ -215,7 +215,7 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_inter
     thrust::set_intersection(exec, zipped_first1, zipped_last1, zipped_first2, zipped_last2, zipped_result, comp_first)
       .get_iterator_tuple();
 
-  return _THRUST_STD::make_pair(thrust::get<0>(result), thrust::get<1>(result));
+  return _THRUST_STD::make_pair(_THRUST_STD::get<0>(result), _THRUST_STD::get<1>(result));
 } // end set_intersection_by_key()
 
 template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator>
@@ -283,9 +283,9 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_symme
   OutputIterator2 values_result,
   StrictWeakOrdering comp)
 {
-  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
-  using iterator_tuple2 = thrust::tuple<InputIterator2, InputIterator4>;
-  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
+  using iterator_tuple1 = _THRUST_STD::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = _THRUST_STD::tuple<InputIterator2, InputIterator4>;
+  using iterator_tuple3 = _THRUST_STD::tuple<OutputIterator1, OutputIterator2>;
 
   using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
   using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
@@ -306,7 +306,7 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_symme
       exec, zipped_first1, zipped_last1, zipped_first2, zipped_last2, zipped_result, comp_first)
       .get_iterator_tuple();
 
-  return _THRUST_STD::make_pair(thrust::get<0>(result), thrust::get<1>(result));
+  return _THRUST_STD::make_pair(_THRUST_STD::get<0>(result), _THRUST_STD::get<1>(result));
 } // end set_symmetric_difference_by_key()
 
 template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator>
@@ -374,9 +374,9 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_union
   OutputIterator2 values_result,
   StrictWeakOrdering comp)
 {
-  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
-  using iterator_tuple2 = thrust::tuple<InputIterator2, InputIterator4>;
-  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
+  using iterator_tuple1 = _THRUST_STD::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = _THRUST_STD::tuple<InputIterator2, InputIterator4>;
+  using iterator_tuple3 = _THRUST_STD::tuple<OutputIterator1, OutputIterator2>;
 
   using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
   using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
@@ -396,7 +396,7 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> set_union
     thrust::set_union(exec, zipped_first1, zipped_last1, zipped_first2, zipped_last2, zipped_result, comp_first)
       .get_iterator_tuple();
 
-  return _THRUST_STD::make_pair(thrust::get<0>(result), thrust::get<1>(result));
+  return _THRUST_STD::make_pair(_THRUST_STD::get<0>(result), _THRUST_STD::get<1>(result));
 } // end set_union_by_key()
 
 template <typename DerivedPolicy,

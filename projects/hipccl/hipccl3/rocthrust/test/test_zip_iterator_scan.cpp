@@ -30,7 +30,8 @@ struct TuplePlus
   THRUST_HOST_DEVICE Tuple operator()(Tuple x, Tuple y) const
   {
     using namespace thrust;
-    return make_tuple(get<0>(x) + get<0>(y), get<1>(x) + get<1>(y));
+    return _THRUST_STD::make_tuple(
+      _THRUST_STD::get<0>(x) + _THRUST_STD::get<0>(y), _THRUST_STD::get<1>(x) + _THRUST_STD::get<1>(y));
   }
 }; // end SumTuple
 
@@ -57,7 +58,7 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
       device_vector<T> d_data0 = h_data0;
       device_vector<T> d_data1 = h_data1;
 
-      using Tuple = tuple<T, T>;
+      using Tuple = _THRUST_STD::tuple<T, T>;
 
       host_vector<Tuple> h_result(size);
       device_vector<Tuple> d_result(size);
@@ -76,8 +77,8 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
       host_vector<Tuple> h_result_d(d_result);
       for (size_t i = 0; i < h_result.size(); ++i)
       {
-        test_equality(thrust::get<0>(h_result[i]), thrust::get<0>(h_result_d[i]), i);
-        test_equality(thrust::get<1>(h_result[i]), thrust::get<1>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<0>(h_result[i]), _THRUST_STD::get<0>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<1>(h_result[i]), _THRUST_STD::get<1>(h_result_d[i]), i);
       }
 
       // exclusive_scan (tuple output)
@@ -96,8 +97,8 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
       h_result_d = d_result;
       for (size_t i = 0; i < h_result.size(); ++i)
       {
-        test_equality(thrust::get<0>(h_result[i]), thrust::get<0>(h_result_d[i]), i);
-        test_equality(thrust::get<1>(h_result[i]), thrust::get<1>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<0>(h_result[i]), _THRUST_STD::get<0>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<1>(h_result[i]), _THRUST_STD::get<1>(h_result_d[i]), i);
       }
 
       host_vector<T> h_result0(size);

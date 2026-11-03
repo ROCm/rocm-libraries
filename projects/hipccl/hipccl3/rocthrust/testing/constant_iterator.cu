@@ -16,7 +16,6 @@
  */
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/transform.h>
@@ -25,10 +24,6 @@
 
 #include _THRUST_STD_INCLUDE(cstdint)
 #include _THRUST_STD_INCLUDE(type_traits)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
 
 // ensure that we properly support thrust::constant_iterator from _THRUST_STD
 void TestConstantIteratorTraits()
@@ -49,37 +44,31 @@ void TestConstantIteratorTraits()
 
   static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::output_iterator<it, int>);
   static_assert(_THRUST_STD::input_iterator<it>);
   static_assert(_THRUST_STD::forward_iterator<it>);
   static_assert(_THRUST_STD::bidirectional_iterator<it>);
   static_assert(_THRUST_STD::random_access_iterator<it>);
   static_assert(!_THRUST_STD::contiguous_iterator<it>);
-#endif
 }
 DECLARE_UNITTEST(TestConstantIteratorTraits);
 
 void TestConstantIteratorConstructFromConvertibleSystem()
 {
-  using namespace thrust;
+  thrust::constant_iterator<int> default_system(13);
 
-  constant_iterator<int> default_system(13);
-
-  constant_iterator<int, use_default, host_system_tag> host_system = default_system;
+  thrust::constant_iterator<int, thrust::use_default, thrust::host_system_tag> host_system = default_system;
   ASSERT_EQUAL(*default_system, *host_system);
 
-  constant_iterator<int, use_default, device_system_tag> device_system = default_system;
+  thrust::constant_iterator<int, thrust::use_default, thrust::device_system_tag> device_system = default_system;
   ASSERT_EQUAL(*default_system, *device_system);
 }
 DECLARE_UNITTEST(TestConstantIteratorConstructFromConvertibleSystem);
 
 void TestConstantIteratorIncrement()
 {
-  using namespace thrust;
-
-  constant_iterator<int> lhs(0, 0);
-  constant_iterator<int> rhs(0, 0);
+  thrust::constant_iterator<int> lhs(0, 0);
+  thrust::constant_iterator<int> rhs(0, 0);
 
   ASSERT_EQUAL(0, lhs - rhs);
 
@@ -117,10 +106,8 @@ DECLARE_UNITTEST(TestConstantIteratorIncrementBig);
 
 void TestConstantIteratorComparison()
 {
-  using namespace thrust;
-
-  constant_iterator<int> iter1(0);
-  constant_iterator<int> iter2(0);
+  thrust::constant_iterator<int> iter1(0);
+  thrust::constant_iterator<int> iter2(0);
 
   ASSERT_EQUAL(0, iter1 - iter2);
   ASSERT_EQUAL(true, iter1 == iter2);
@@ -145,22 +132,21 @@ DECLARE_UNITTEST(TestConstantIteratorComparison);
 
 void TestMakeConstantIterator()
 {
-  using namespace thrust;
-
   // test one argument version
-  constant_iterator<int> iter0 = make_constant_iterator<int>(13);
+  thrust::constant_iterator<int> iter0 = thrust::make_constant_iterator<int>(13);
 
   ASSERT_EQUAL(13, *iter0);
 
   // test two argument version
-  constant_iterator<int, _THRUST_STD::intmax_t> iter1 = make_constant_iterator<int, _THRUST_STD::intmax_t>(13, 7);
+  thrust::constant_iterator<int, _THRUST_STD::intmax_t> iter1 =
+    thrust::make_constant_iterator<int, _THRUST_STD::intmax_t>(13, 7);
 
   ASSERT_EQUAL(13, *iter1);
   ASSERT_EQUAL(7, iter1 - iter0);
 
   // ensure CTAD words
-  constant_iterator deduced_iter{42};
-  static_assert(_THRUST_STD::is_same_v<decltype(deduced_iter), constant_iterator<int>>);
+  thrust::constant_iterator deduced_iter{42};
+  static_assert(_THRUST_STD::is_same_v<decltype(deduced_iter), thrust::constant_iterator<int>>);
   ASSERT_EQUAL(42, *deduced_iter);
 }
 DECLARE_UNITTEST(TestMakeConstantIterator);
@@ -168,14 +154,12 @@ DECLARE_UNITTEST(TestMakeConstantIterator);
 template <typename Vector>
 void TestConstantIteratorCopy()
 {
-  using namespace thrust;
-
   using ValueType = typename Vector::value_type;
-  using ConstIter = constant_iterator<ValueType>;
+  using ConstIter = thrust::constant_iterator<ValueType>;
 
   Vector result(4);
 
-  ConstIter first = make_constant_iterator<ValueType>(7);
+  ConstIter first = thrust::make_constant_iterator<ValueType>(7);
   ConstIter last  = first + result.size();
   thrust::copy(first, last, result.begin());
 
@@ -187,16 +171,14 @@ DECLARE_VECTOR_UNITTEST(TestConstantIteratorCopy);
 template <typename Vector>
 void TestConstantIteratorTransform()
 {
-  using namespace thrust;
-
   using T         = typename Vector::value_type;
-  using ConstIter = constant_iterator<T>;
+  using ConstIter = thrust::constant_iterator<T>;
 
   Vector result(4);
 
-  ConstIter first1 = make_constant_iterator<T>(7);
+  ConstIter first1 = thrust::make_constant_iterator<T>(7);
   ConstIter last1  = first1 + result.size();
-  ConstIter first2 = make_constant_iterator<T>(3);
+  ConstIter first2 = thrust::make_constant_iterator<T>(3);
 
   thrust::transform(first1, last1, result.begin(), _THRUST_STD::negate<T>());
 
@@ -212,12 +194,10 @@ DECLARE_VECTOR_UNITTEST(TestConstantIteratorTransform);
 
 void TestConstantIteratorReduce()
 {
-  using namespace thrust;
-
   using T         = int;
-  using ConstIter = constant_iterator<T>;
+  using ConstIter = thrust::constant_iterator<T>;
 
-  ConstIter first = make_constant_iterator<T>(7);
+  ConstIter first = thrust::make_constant_iterator<T>(7);
   ConstIter last  = first + 4;
 
   T sum = thrust::reduce(first, last);

@@ -60,6 +60,8 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see pair
  *  \see tuple
+ *
+ *  \deprecated Use _THRUST_STD::tuple_element instead
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <size_t N, class T>
@@ -75,6 +77,8 @@ using _THRUST_STD::tuple_element;
  *
  *  \see pair
  *  \see tuple
+ *
+ *  \deprecated Use _THRUST_STD::tuple_size instead
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T>
@@ -119,6 +123,8 @@ using _THRUST_STD::tuple_size;
  *  \see tuple_element
  *  \see tuple_size
  *  \see tie
+ *
+ *  \deprecated Use _THRUST_STD::tuple instead
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class... Ts>
