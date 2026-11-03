@@ -786,12 +786,19 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
 {
     /* The KQ slab pad and the KQ XOR swizzle exist only in the Python builder;
      * the C spec has no field for either, so lowering them here would silently
-     * emit an unpadded, unswizzled K read. */
+     * emit an unpadded, unswizzled K read. The spec is valid, the C++ path is
+     * not written: NotImplementedError, as the Python style guide assigns. */
     for(const char* python_only : {"use_kq_lds_pad", "use_kq_xor_swizzle"})
+    {
         if(a_bool(d, python_only, false))
-            throw py::value_error(std::string("rocke_engine tiled-2d: ") + python_only
-                                  + "=True is not implemented in the C++ engine; build this"
-                                    " spec with the Python engine or set it to False");
+        {
+            const std::string message = std::string("rocke_engine tiled-2d: ") + python_only
+                                        + "=True is not implemented in the C++ engine; build"
+                                          " this spec with the Python engine or set it to False";
+            PyErr_SetString(PyExc_NotImplementedError, message.c_str());
+            throw py::error_already_set();
+        }
+    }
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
