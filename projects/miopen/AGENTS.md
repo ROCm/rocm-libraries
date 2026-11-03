@@ -183,7 +183,7 @@ CI spans Jenkins and GitHub workflows (see Important Files); local green tests d
 
 ## Maintaining This File
 
-`CLAUDE.md` is a symlink to this file; edit `AGENTS.md` only.
+Claude Code and other agents read this file directly; do not add a `CLAUDE.md` copy or symlink. In the default mode a `CLAUDE.md` here makes Claude Code skip every `AGENTS.md`, including the super-repo one.
 
 - Update this file in the same PR when you change something it documents (a CMake option or default, target, test label or tier, solver integration step, ABI artifact, or CI workflow).
 - Verify before writing: read the source of truth or run the command in `rocm/miopen-dev` on a matching GPU. State conditions (combined vs discrete mode, wrapper ON, GPU required).
