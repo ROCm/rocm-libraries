@@ -206,8 +206,8 @@ def test_an_unmeasured_comgr_compiler_keeps_the_processor(
     kernel: KernelDef, llvm_major: int | None
 ) -> None:
     """A compiler whose version is unknown or newer than every qualified lane
-    was never measured: the processor keeps its name (profile removed) and
-    COMGR decides."""
+    was never measured: the processor keeps its name (profile removed), and
+    the build, not the target routing, refuses that compiler."""
     with (
         _comgr(llvm_major),
         mock.patch.object(compile_module, "_lower_llvm_via_backend", return_value="ll"),
