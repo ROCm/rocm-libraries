@@ -904,6 +904,17 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             "ring of P = k * Wi >= tile_m + X - 1 rows within the A slab");
         return false;
     }
+    if(s->xh_a_k4
+       && !(s->tapk_xhalo && s->lds_xor && (s->tile_k == 16 || s->tile_k == 32 || s->tile_k == 64)
+            && s->warp_tile_m * s->warp_tile_k / s->wave_size == 4
+            && s->warp_tile_n * s->warp_tile_k / s->wave_size == 4))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "xh_a_k4 needs tapk_xhalo with lds_xor, tile_k 16..64 and an MFMA atom of 4 k "
+                 "values per lane");
+        return false;
+    }
     if((s->tapk_ilv && !xh_ok) || (s->xhalo_exact && !xh_ok)
        || (s->m_band && !xh_ok && !s->tapk_pingpong) || (s->xh_stride_m && !xh_ok) || s->xh_dlds
        || (s->xh_epi_lin
