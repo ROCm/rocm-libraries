@@ -36,6 +36,47 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
+/* The test-only argument "magnitude" scales the random test matrix close to the overflow ('B')
+   or underflow ('S') threshold, so that the squares of the entries overflow or underflow while
+   the norm itself is representable, sets one entry to NaN ('Q'; the norm must be NaN, as in
+   LAPACK), or sets all the entries to +-tbig, the largest magnitude that Blue's algorithm adds
+   without scaling ('T'; the sum of their squares overflows in single precision when there are
+   2^24 entries). It is 'N' (no scaling) by default. */
+template <typename S, typename I>
+S lange_magnitude_scale(const char magnitude, const I m, const I n)
+{
+    if(magnitude == 'B')
+    {
+        // entries are at most 16 in absolute value, so that any norm is at most
+        // 16 * max(m, n) times the scale, which is less than 2^(max_exponent - 2)
+        int log2mn = 0;
+        while((I(1) << log2mn) < std::max(m, n))
+            log2mn++;
+        return std::ldexp(S(1), std::numeric_limits<S>::max_exponent - 6 - log2mn);
+    }
+    else if(magnitude == 'S')
+        return std::ldexp(S(1), std::numeric_limits<S>::min_exponent + 4);
+    else if(magnitude == 'T')
+        return std::ldexp(
+            S(1), (std::numeric_limits<S>::max_exponent - std::numeric_limits<S>::digits + 1) / 2);
+    else
+        return S(1);
+}
+
+// relative error of the computed norm; it is zero if both values are equal (including when both
+// are infinity or both are NaN)
+template <typename S>
+double lange_relerror(const S gold, const S comp)
+{
+    if(gold == comp || (std::isnan(gold) && std::isnan(comp)))
+        return 0;
+    if(!std::isfinite(gold) || !std::isfinite(comp))
+        return std::numeric_limits<double>::infinity();
+
+    double err = std::abs(double(gold) - double(comp));
+    return (gold != 0) ? err / std::abs(double(gold)) : std::numeric_limits<double>::infinity();
+}
+
 template <typename T, typename I, typename S>
 void lange_checkBadArgs(const rocblas_handle handle,
                         const rocsolver_norm_type norm_type,
@@ -87,6 +128,14 @@ void testing_lange_bad_arg()
 
     // check bad arguments
     lange_checkBadArgs(handle, norm_type, m, n, dA.data(), lda, dnorms.data());
+
+    // null pointers with dimensions whose product overflows I
+    const I big = I(1) << (4 * sizeof(I));
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_lange(handle, norm_type, big, big, (T*)nullptr, big, dnorms.data()),
+        rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(rocsolver_lange(handle, norm_type, big, big, dA.data(), big, (S*)nullptr),
+                          rocblas_status_invalid_pointer);
 }
 
 template <bool CPU, bool GPU, typename T, typename I, typename S, typename Td, typename Sd, typename Th, typename Sh>
@@ -98,11 +147,37 @@ void lange_initData(const rocblas_handle handle,
                     const I lda,
                     Sd& dnorms,
                     Th& hA,
-                    Sh& hnorms)
+                    Sh& hnorms,
+                    const char magnitude)
 {
     if(CPU)
     {
         rocblas_init<T>(hA, true);
+
+        const S scale = lange_magnitude_scale<S>(magnitude, m, n);
+        const T nan = T(std::numeric_limits<S>::quiet_NaN());
+
+        for(I j = 0; j < n; j++)
+        {
+            for(I i = 0; i < lda; i++)
+            {
+                if(i < m)
+                {
+                    // mix the signs and scale to the requested magnitude
+                    T factor = ((i + 2 * j) % 3 == 1) ? T(-scale) : T(scale);
+                    hA[0][i + j * lda] = (magnitude == 'T') ? factor : hA[0][i + j * lda] * factor;
+                }
+                else
+                {
+                    // the padding rows must not be referenced
+                    hA[0][i + j * lda] = nan;
+                }
+            }
+        }
+
+        // a NaN in the last column of the last row
+        if(magnitude == 'Q' && m > 0 && n > 0)
+            hA[0][(m - 1) + (n - 1) * lda] = nan;
     }
 
     if(GPU)
@@ -123,6 +198,7 @@ void lange_getError(const rocblas_handle handle,
                     Th& hA,
                     Sh& hnorms,
                     Sh& hnorms_res,
+                    const char magnitude,
                     double* max_err)
 {
     // Workspace for CPU lange (max needed is for 1-norm or infinity-norm)
@@ -130,7 +206,8 @@ void lange_getError(const rocblas_handle handle,
     std::vector<S> work(size_work);
 
     // initialize data
-    lange_initData<true, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+    lange_initData<true, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                        magnitude);
 
     // execute computations
     // GPU lapack
@@ -141,9 +218,8 @@ void lange_getError(const rocblas_handle handle,
     char norm = rocsolver2char_norm_type(norm_type);
     hnorms[0][0] = cpu_lange<T, S>(norm, m, n, hA[0], lda, work.data());
 
-    // error is ||hnorms - hnorms_res|| / ||hnorms||
-    // using absolute value since we only have a single scalar
-    *max_err = std::abs(hnorms[0][0] - hnorms_res[0][0]) / std::abs(hnorms[0][0]);
+    // error is |hnorms - hnorms_res| / |hnorms|
+    *max_err = lange_relerror(hnorms[0][0], hnorms_res[0][0]);
 }
 
 template <typename T, typename I, typename S, typename Td, typename Sd, typename Th, typename Sh>
@@ -156,6 +232,7 @@ void lange_getPerfData(const rocblas_handle handle,
                        Sd& dnorms,
                        Th& hA,
                        Sh& hnorms,
+                       const char magnitude,
                        double* gpu_time_used,
                        double* cpu_time_used,
                        const rocblas_int hot_calls,
@@ -168,7 +245,8 @@ void lange_getPerfData(const rocblas_handle handle,
     std::vector<S> work(size_work);
 
     // only init CPU data once as it is not overwritten
-    lange_initData<true, false, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+    lange_initData<true, false, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                         magnitude);
 
     if(!perf)
     {
@@ -182,7 +260,8 @@ void lange_getPerfData(const rocblas_handle handle,
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                             magnitude);
 
         CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, norm_type, m, n, dA.data(), lda, dnorms.data()));
     }
@@ -204,7 +283,8 @@ void lange_getPerfData(const rocblas_handle handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                             magnitude);
 
         timer.start(stream);
         rocsolver_lange(handle, norm_type, m, n, dA.data(), lda, dnorms.data());
@@ -224,6 +304,7 @@ void testing_lange(Arguments& argus)
     I m = argus.get<I>("m");
     I n = argus.get<I>("n", m);
     I lda = argus.get<I>("lda", m);
+    char magnitude = argus.get<char>("magnitude", 'N');
 
     rocsolver_norm_type norm_type = char2rocsolver_norm_type(norm_typeC);
     rocblas_int hot_calls = argus.iters;
@@ -284,11 +365,18 @@ void testing_lange(Arguments& argus)
         CHECK_HIP_ERROR(dA.memcheck());
     CHECK_HIP_ERROR(dnorms.memcheck());
 
-    // check quick return
+    // check quick return (the norm of an empty matrix is zero)
     if(n == 0 || m == 0)
     {
+        CHECK_HIP_ERROR(hipMemset(dnorms.data(), 0xff, sizeof(S)));
         EXPECT_ROCBLAS_STATUS(rocsolver_lange(handle, norm_type, m, n, dA.data(), lda, dnorms.data()),
                               rocblas_status_success);
+        if(argus.unit_check)
+        {
+            S norm;
+            CHECK_HIP_ERROR(hipMemcpy(&norm, dnorms.data(), sizeof(S), hipMemcpyDeviceToHost));
+            EXPECT_EQ(norm, S(0));
+        }
 
         if(argus.timing)
             rocsolver_bench_inform(inform_quick_return);
@@ -299,12 +387,12 @@ void testing_lange(Arguments& argus)
     // check computations
     if(argus.unit_check || argus.norm_check)
         lange_getError<T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms, hnorms_res,
-                                &max_error);
+                                magnitude, &max_error);
 
     // collect performance data
     if(argus.timing && hot_calls > 0)
     {
-        lange_getPerfData<T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+        lange_getPerfData<T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms, magnitude,
                                    &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                    argus.profile_kernels, argus.perf);
     }
