@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "rocsparse_csrsm.hpp"
 
 #include "../level2/rocsparse_csrsv.hpp"
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
@@ -60,51 +61,61 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
     const I* csr_row_ptr = reinterpret_cast<const I*>(csr_row_ptr_);
     const J* csr_col_ind = reinterpret_cast<const J*>(csr_col_ind_);
 
-    if(nrhs == 1)
-    {
-        //
-        // Call csrsv.
-        //
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_analysis_template<I, J, T>(handle,
-                                                                               trans_A,
-                                                                               m,
-                                                                               nnz,
-                                                                               descr,
-                                                                               csr_val,
-                                                                               csr_row_ptr,
-                                                                               csr_col_ind,
-                                                                               info,
-                                                                               analysis,
-                                                                               solve,
-                                                                               p_csrsm_info,
-                                                                               temp_buffer)));
-        return rocsparse_status_success;
-    }
-
     auto csrsm_info = p_csrsm_info[0];
 
     // Differentiate the analysis policies
     if(analysis == rocsparse_analysis_policy_reuse)
     {
-        //
-        //
-        //
-        rocsparse::trm_info_t* p = nullptr;
-
-        p = (p != nullptr) ? p : info->get_csrsm_info(trans_A, descr->fill_mode);
-
-        if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans_A == rocsparse_operation_none))
+        // Reuse an analysis from csrsm, csrilu0, csric0 or csrsv, together with its zero pivot.
+        rocsparse_csrsm_info dst        = info->get_csrsm_info();
+        const bool           lower_none = (descr->fill_mode == rocsparse_fill_mode_lower)
+                                && (trans_A == rocsparse_operation_none);
+        rocsparse::trm_data_t* candidates[] = {dst,
+                                               lower_none ? info->get_csrilu0_info() : nullptr,
+                                               lower_none ? info->get_csric0_info() : nullptr,
+                                               info->get_csrsv_info()};
+        for(rocsparse::trm_data_t* src_data : candidates)
         {
-            p = (p != nullptr) ? p : info->get_csrilu0_info(trans_A, descr->fill_mode);
-            p = (p != nullptr) ? p : info->get_csric0_info(trans_A, descr->fill_mode);
+            rocsparse::trm_info_t* src_info
+                = (src_data != nullptr) ? src_data->get(trans_A, descr->fill_mode) : nullptr;
+            if(src_info != nullptr)
+            {
+                if(src_data != dst)
+                {
+                    dst->set(trans_A, descr->fill_mode, src_info);
+                    RETURN_IF_ROCSPARSE_ERROR(dst->copy_pivot_info_async(src_data, handle->stream));
+                }
+                // A unit diagonal has no structural zero pivot.
+                if(descr->diag_type == rocsparse_diag_type_unit)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+                        1, dst->get_indextype(), dst->get_position(), handle->stream));
+                }
+                return rocsparse_status_success;
+            }
         }
+    }
 
-        p = (p != nullptr) ? p : info->get_csrsv_info(trans_A, descr->fill_mode);
-        if(p != nullptr)
-        {
-            info->set_csrsm_info(trans_A, descr->fill_mode, p);
-            return rocsparse_status_success;
-        }
+    if(nrhs == 1)
+    {
+        //
+        // Call csrsv.
+        //
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrsv_analysis_template<I, J, T>(handle,
+                                                         trans_A,
+                                                         m,
+                                                         nnz,
+                                                         descr,
+                                                         csr_val,
+                                                         csr_row_ptr,
+                                                         csr_col_ind,
+                                                         info,
+                                                         rocsparse_analysis_policy_force,
+                                                         solve,
+                                                         p_csrsm_info,
+                                                         temp_buffer)));
+        return rocsparse_status_success;
     }
 
     if(csrsm_info == nullptr)
