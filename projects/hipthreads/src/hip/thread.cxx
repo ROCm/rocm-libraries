@@ -369,11 +369,44 @@ static __host__ uint32_t *getCPUWorkQueuePushCountAddr() {
     return pushCountAddr;
 }
 
+static __host__ const uint32_t *getCPUWorkQueuePopCountAddr() {
+    static const uint32_t * const popCountAddr = [](){
+        void *temp;
+        __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
+        return &static_cast<decltype(cpuWorkQueue) *>(temp)->popCount;
+    }();
+    return popCountAddr;
+}
+
+template <typename T>
+static __global__ void readDeviceWordKernel(const T *src, T *dst) {
+    *dst = __hip_atomic_load(src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+}
+
+// wthread::join() reads link_to_self from a block the device pass never sees (#ifndef __HIP_DEVICE_COMPILE__), so
+// without this the kernel would be missing at launch.
+template __global__ void readDeviceWordKernel<WorkNode_Header **>(WorkNode_Header **const *, WorkNode_Header ***);
+
+// Reads one word of device memory while threading_main is running. A device-to-host hipMemcpyAsync is a blit kernel
+// with a 1024-lane workgroup, which never fits beside a scheduler holding over half of each SIMD's wave slots, so the
+// host would wait forever. A single lane fits in any free slot.
+template <typename T>
+static __host__ T readDeviceWord(const T *src) {
+    // Never freed: hipHostFree waits for all running kernels, threading_main included.
+    thread_local T *slot = [](){
+        void *temp;
+        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(&temp, sizeof(T), hipHostMallocMapped | hipHostMallocCoherent));
+        return static_cast<T *>(temp);
+    }();
+    hipLaunchKernelGGL(readDeviceWordKernel<T>, dim3(1), dim3(1), 0, getEnqueingStream(), src, slot);
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    return *const_cast<volatile T *>(slot);
+}
+
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyFromSymbolAsync(&curPopCount, HIP_SYMBOL(cpuWorkQueue), sizeof(curPopCount), offsetof(decltype(cpuWorkQueue), popCount), hipMemcpyDeviceToHost, getEnqueingStream()));
-        __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        curPopCount = readDeviceWord(getCPUWorkQueuePopCountAddr());
         // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
     }
 }
@@ -734,8 +767,7 @@ __host__ __device__ void wthread::join() {
 
     // We don't have to worry about worknode_d getting invalidated by detach because we would have to be the one calling detach
     for (WorkNode_Header **link_to_self = reinterpret_cast<WorkNode_Header **>(1); link_to_self != nullptr;) {
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyAsync(&link_to_self, &(worknode_d->link_to_self), sizeof(worknode_d->link_to_self), hipMemcpyDeviceToHost, getEnqueingStream()));
-        __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        link_to_self = readDeviceWord(&(worknode_d->link_to_self));
         // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
     }
     worknode_d = nullptr;
@@ -809,38 +841,23 @@ static __host__ uint64_t getTotalRequestedVcores(int device) {
     return (cuCount / 2) * getRequestedVcoresPerWgp();
 }
 
-// Ceiling on total scheduler vcores based on measured occupancy of threading_main, or
-// UINT64_MAX if occupancy could not be measured or safety-divided down to something usable
-// (in which case the caller should treat the device as unconstrained by this check).
-//
-// threading_main is persistent: a vcore that cannot be made resident never runs, and the
-// resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
+// Ceiling on total scheduler vcores: as many threading_main blocks as the device can hold at once,
+// or UINT64_MAX if occupancy could not be measured (the caller then treats the device as
+// unconstrained by this check). Vcores beyond it could only start once others exit, so they add
+// nothing.
 [[gnu::const]]
 static __host__ uint64_t getOccupancyBasedMaxVcores(int device) {
-    // hipOccupancyMaxActiveBlocksPerMultiprocessor is theoretical and over-predicts what a
-    // persistent kernel sustains, by an amount that varies by architecture, so the margin is
-    // scaled: RDNA sustains ~3/4 of it (gfx1100 reports 44 blocks/WGP, wedges at 36); CDNA far
-    // less - gfx942 reports 16 but wedges intermittently at 8, likely because multi-XCD parts
-    // cannot pack the grid evenly and one oversubscribed XCD is enough. Hence the wider margin
-    // there.
-    const int occupancySafetyDivisor = (getCusPerMultiprocessor(device) == 2U) ? 2 : 4;
-
-    int theoreticalBlocksPerMp = 0;
+    int blocksPerMp = 0;
     __LIBHIPTHREADS_HIP_CHECK__(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &theoreticalBlocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
-    if (theoreticalBlocksPerMp <= 0) {
-        return UINT64_MAX;
-    }
-
-    const uint64_t safeBlocksPerMp = static_cast<uint64_t>(theoreticalBlocksPerMp) / occupancySafetyDivisor;
-    if (safeBlocksPerMp == 0) {
+        &blocksPerMp, internal::threading_main, static_cast<int>(wthread::max_width()), 0));
+    if (blocksPerMp <= 0) {
         return UINT64_MAX;
     }
 
     int multiprocessorCount = 0;
     __LIBHIPTHREADS_HIP_CHECK__(
         hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
-    return safeBlocksPerMp * static_cast<uint64_t>(multiprocessorCount);
+    return static_cast<uint64_t>(blocksPerMp) * static_cast<uint64_t>(multiprocessorCount);
 }
 
 // Derives hardware_concurrency() for a specific device - see the individual helpers above for how
