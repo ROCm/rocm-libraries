@@ -256,7 +256,7 @@ def build_all_instances(
     arch: Optional[str] = None,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     parallel: Optional[int] = None,
-    stall_timeout: float = 300.0,
+    stall_timeout: Optional[float] = None,
 ) -> List[BuildRecord]:
     """Build every spec to a cached HSACO blob.
 
@@ -272,6 +272,13 @@ def build_all_instances(
       - None or > 1: use a multiprocessing Pool with that many workers
         (`os.cpu_count()` if None).
       - 1: build serially (useful for debugging crashes).
+
+    `stall_timeout`:
+      - None (default): no watchdog; wait for every build, however slow.
+      - seconds: once no build at all has finished for this long, record the
+        outstanding ones as failures and stop (see `_collect_builds`). Opt in
+        only where a backend abort can kill a worker; a slow but healthy build
+        that outlasts it is recorded as a failure too.
     """
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -323,7 +330,7 @@ def _collect_builds(
     pool,
     work: Sequence[Tuple[str, Dict[str, object], str, str, str]],
     *,
-    stall_timeout: float,
+    stall_timeout: Optional[float],
 ) -> List[Dict[str, object]]:
     """Run every build, surviving a worker that dies instead of returning.
 
@@ -337,7 +344,9 @@ def _collect_builds(
     long as it likes while others are still completing. Only when nothing at
     all has finished for ``stall_timeout`` seconds are the stragglers written
     off as dead and recorded as build failures, which is what the caller
-    already knows how to report.
+    already knows how to report. ``stall_timeout=None`` disables the watchdog:
+    every build is waited for, and a dead worker hangs the stage as it would
+    under ``pool.map``.
     """
     pending = {i: pool.apply_async(_build_one, (item,)) for i, item in enumerate(work)}
     out: List[Optional[Dict[str, object]]] = [None] * len(work)
@@ -354,7 +363,10 @@ def _collect_builds(
         if finished:
             last_progress = time.monotonic()
             continue
-        if time.monotonic() - last_progress > stall_timeout:
+        if (
+            stall_timeout is not None
+            and time.monotonic() - last_progress > stall_timeout
+        ):
             stalled = sorted(pending)
             for i in stalled:
                 out[i] = _dead_worker_record(

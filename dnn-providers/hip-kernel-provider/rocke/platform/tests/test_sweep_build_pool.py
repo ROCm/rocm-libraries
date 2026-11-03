@@ -42,6 +42,8 @@ def _fake_build(item):
     _h, spec, _c, _i, _a = item
     if spec["name"] == "suicide":
         os.kill(os.getpid(), signal.SIGKILL)
+    if spec["name"] == "slow":
+        time.sleep(1.5)
     time.sleep(0.02)
     return sw.asdict(sw.BuildRecord(name=spec["name"], spec_dict=spec, ok=True))
 
@@ -100,6 +102,32 @@ class TestSweepBuildPool(unittest.TestCase):
         )
         self.assertEqual(len(out), 8)
         self.assertTrue(all(d["ok"] for d in out))
+
+    def test_no_watchdog_waits_for_a_slow_build(self):
+        """stall_timeout=None never writes a healthy build off."""
+        work = _work(4)
+        slow = (work[2][0], {"name": "slow", "tile": {}}, *work[2][2:])
+        work[2] = slow
+        # With a watchdog shorter than the build, the slow build is lost ...
+        out = self._collect(work, stall_timeout=0.3)
+        self.assertFalse(out[2]["ok"])
+        # ... and without one it completes.
+        out = self._collect(work, stall_timeout=None)
+        self.assertEqual(len(out), 4)
+        self.assertTrue(all(d["ok"] for d in out), out)
+
+    def test_watchdog_is_off_by_default(self):
+        """Existing build_all_instances callers keep their behaviour."""
+        import inspect
+
+        import rocke.sweep as sw
+
+        default = (
+            inspect.signature(sw.build_all_instances)
+            .parameters["stall_timeout"]
+            .default
+        )
+        self.assertIsNone(default)
 
 
 if __name__ == "__main__":

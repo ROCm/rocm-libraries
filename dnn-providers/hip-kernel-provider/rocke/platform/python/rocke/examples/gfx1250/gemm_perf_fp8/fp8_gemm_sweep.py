@@ -123,6 +123,12 @@ DEFAULT_CONFIG = CONFIG_DIR / "sq4k.json"
 
 STAGES = ("tile", "trait", "final", "lever")
 
+# The build pool's watchdog (rocke.sweep.build_all_instances). A sweep builds
+# hundreds of specs, and a backend abort that kills a worker would otherwise
+# hang the stage forever; once no build has finished for this long, the
+# outstanding ones are recorded as build failures.
+BUILD_STALL_TIMEOUT_S = 300.0
+
 # The exact-accumulate argument holds while |sum| <= 25*K stays under 2^24.
 _MAX_EXACT_K = (1 << 24) // 25
 
@@ -1225,7 +1231,12 @@ def build_and_benchmark(
     List[BuildRecord], List[Dict[str, Any]], PreparedProblem, List[Dict[str, Any]]
 ]:
     records = build_all_instances(
-        specs, cache_dir=cache_dir, arch=arch, isa=isa, parallel=workers
+        specs,
+        cache_dir=cache_dir,
+        arch=arch,
+        isa=isa,
+        parallel=workers,
+        stall_timeout=BUILD_STALL_TIMEOUT_S,
     )
     # Taken after the builds and before the first launch, so it describes the
     # GPU the measurements actually ran on rather than the one the process
@@ -1769,6 +1780,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             arch=arch,
             isa=isa,
             parallel=int(benchmark["workers"]),
+            stall_timeout=BUILD_STALL_TIMEOUT_S,
         )
         lever_problem = PreparedProblem.create(shape, padded_n, with_reference=True)
         lever_results: List[Dict[str, Any]] = []
