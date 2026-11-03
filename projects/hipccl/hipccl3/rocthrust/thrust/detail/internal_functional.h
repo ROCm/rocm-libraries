@@ -42,7 +42,7 @@
 #include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/transform_output_iterator.h)
-#include _THRUST_STD_INCLUDE(__host_stdlib/memory) // for ::new
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
 #include _THRUST_STD_INCLUDE(__new/device_new.h)
 #include _THRUST_STD_INCLUDE(__tuple_dir/get.h)
 #include _THRUST_STD_INCLUDE(__tuple_dir/tuple_element.h)
