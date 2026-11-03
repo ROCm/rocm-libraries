@@ -696,13 +696,15 @@ if(ROCKE_INSTALL_TESTS)
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
-    # host-side SDPA sequence-length and padding-mask adapters/specs, and the
-    # fmha_mfma free-stride ABI and layout contracts.
+    # host-side SDPA sequence-length and padding-mask adapters/specs, the
+    # fmha_mfma free-stride ABI and layout contracts, and the gfx950 dense varlen
+    # K/V buffer bound on the emitted IR.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
