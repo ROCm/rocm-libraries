@@ -62,6 +62,7 @@ from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxat
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
+from .SolutionStructs.segment_interleave import wave_tile_span
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -8998,7 +8999,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # read offset, which must span the far segment. [1,4] puts the jump in the address reg instead.
           wavesPerCompB = kernel["MIWaveGroup"][1] // numComp
           compColsB = kernel["MacroTile1"] // numComp
-          segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB
+          segILWaveSpansCompB = wave_tile_span(kernel, "B") >= compColsB
           if wavesPerCompB == 1 and not segILWaveSpansCompB:
             segOffsets = kernel["LDSSegInterleaveOffsets"]
             readStride = segOffsets.get("readStrideBytesB", segOffsets["writeStrideBytes"])

@@ -226,14 +226,20 @@ def _component_offsets(state, bWhole, portSplit):
 def _wactive(state, tc):
     return state["MIWaveGroup"][0] if tc == "A" else state["MIWaveGroup"][1]
 
+def wave_tile_span(state, tc, vectorWidth=None):
+    """Free-dimension span of one wave's complete instruction tile, in elements."""
+    dim = "M" if tc == "A" else "N"
+    vw = state["VectorWidth" + tc] if vectorWidth is None else vectorWidth
+    # A rectangular instruction has multiple min(M,N)-wide tiIdx subtiles.
+    # All of them belong to the wave, as do its blocks along this operand's axis.
+    return state["MatrixInst" + dim] * state.get("MatrixInstB" + dim, 1) * vw
+
 def _coarse(state, tc):
-    # coarse = VW == WaveTile (one read fits one segment). W = waves on this tensor's dim
+    # coarse = VW == WaveTile (the complete wave tile covers its component). W = waves on this tensor's dim
     # (MIWaveGroup[dim]); for [2,2] W == 2.
     W = _wactive(state, tc)
     mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
-    vw = state["VectorWidthA"] if tc == "A" else state["VectorWidthB"]
-    mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
-    return W > 0 and mi_threads * vw >= mt // W
+    return W > 0 and wave_tile_span(state, tc) >= mt // W
 
 def _port_split(state, tc):
     # VW==WaveTile/2 (2 vIdx per port) with TDMSplit. A smaller VW would need a >2-way split.
@@ -252,8 +258,7 @@ def _b_readable(state):
     # component (coarse), or its per-vIdx column span (vIdxColsB) divides compColsB evenly so no
     # single ds_load straddles the component boundary. WaveTileB=7 -> 112 % 32 != 0 -> False.
     numComp = state["NumWaves"] // 2
-    mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
-    if mi_threads * state["VectorWidthB"] >= state["MacroTile1"] // numComp:
+    if wave_tile_span(state, "B") >= state["MacroTile1"] // numComp:
         return True
     compColsB = state["MacroTile1"] // numComp
     vIdxColsB = state["MatrixInstN"] * state.get("MatrixInstBN", 1) * state["MIWaveGroup"][1] * state["VectorWidthB"]
