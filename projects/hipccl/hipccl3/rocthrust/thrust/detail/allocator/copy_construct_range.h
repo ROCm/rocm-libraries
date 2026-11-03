@@ -33,13 +33,13 @@
 #include <thrust/for_each.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/zip_iterator.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(__host_stdlib/memory)
 #include _THRUST_STD_INCLUDE(__iterator/advance.h)
 #include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_trivially_copy_constructible.h)
+#include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -52,8 +52,8 @@ struct copy_construct_with_allocator
   template <typename Tuple>
   inline THRUST_HOST_DEVICE void operator()(Tuple t)
   {
-    const InputType& in = thrust::get<0>(t);
-    OutputType& out     = thrust::get<1>(t);
+    const InputType& in = _THRUST_STD::get<0>(t);
+    OutputType& out     = _THRUST_STD::get<1>(t);
 
     allocator_traits<Allocator>::construct(a, &out, in);
   }
@@ -90,7 +90,7 @@ THRUST_HOST_DEVICE Pointer uninitialized_copy_with_allocator(
   if constexpr (_THRUST_STD::is_convertible_v<FromSystem, ToSystem>)
   {
     // zip up the iterators
-    using IteratorTuple = thrust::tuple<InputIterator, Pointer>;
+    using IteratorTuple = _THRUST_STD::tuple<InputIterator, Pointer>;
     using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
     ZipIterator begin = thrust::make_zip_iterator(first, result);
@@ -109,7 +109,7 @@ THRUST_HOST_DEVICE Pointer uninitialized_copy_with_allocator(
     thrust::for_each(to_system, begin, end, copy_construct_with_allocator<Allocator, InputType, OutputType>{a});
 
     // return the end of the output range
-    return thrust::get<1>(end.get_iterator_tuple());
+    return _THRUST_STD::get<1>(end.get_iterator_tuple());
   }
   else
   {
@@ -135,7 +135,7 @@ THRUST_HOST_DEVICE Pointer uninitialized_copy_with_allocator_n(
   if constexpr (_THRUST_STD::is_convertible_v<FromSystem, ToSystem>)
   {
     // zip up the iterators
-    using IteratorTuple = thrust::tuple<InputIterator, Pointer>;
+    using IteratorTuple = _THRUST_STD::tuple<InputIterator, Pointer>;
     using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
     ZipIterator begin = thrust::make_zip_iterator(first, result);
@@ -150,7 +150,7 @@ THRUST_HOST_DEVICE Pointer uninitialized_copy_with_allocator_n(
       thrust::for_each_n(to_system, begin, n, copy_construct_with_allocator<Allocator, InputType, OutputType>(a));
 
     // return the end of the output range
-    return thrust::get<1>(end.get_iterator_tuple());
+    return _THRUST_STD::get<1>(end.get_iterator_tuple());
   }
   else
   {

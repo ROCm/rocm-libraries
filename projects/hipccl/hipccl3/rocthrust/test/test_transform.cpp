@@ -21,7 +21,7 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/pair.h>
 #include <thrust/transform.h>
-#include <thrust/tuple.h>
+#include _THRUST_STD_INCLUDE(tuple)
 #include <thrust/universal_vector.h>
 
 #include "test_param_fixtures.hpp"
@@ -592,14 +592,14 @@ TYPED_TEST(TransformInOutTests, TestTransformUnaryToDiscardIteratorZipped) THRUS
       using Iterator1 = typename thrust::host_vector<U>::iterator;
       using Iterator2 = typename thrust::device_vector<U>::iterator;
 
-      using Tuple1 = thrust::tuple<Iterator1, thrust::discard_iterator<>>;
-      using Tuple2 = thrust::tuple<Iterator2, thrust::discard_iterator<>>;
+      using Tuple1 = _THRUST_STD::tuple<Iterator1, thrust::discard_iterator<>>;
+      using Tuple2 = _THRUST_STD::tuple<Iterator2, thrust::discard_iterator<>>;
 
       using ZipIterator1 = thrust::zip_iterator<Tuple1>;
       using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
-      ZipIterator1 z1(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator()));
-      ZipIterator2 z2(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator()));
+      ZipIterator1 z1(_THRUST_STD::tuple(h_output.begin(), thrust::make_discard_iterator()));
+      ZipIterator2 z2(_THRUST_STD::tuple(d_output.begin(), thrust::make_discard_iterator()));
 
       ZipIterator1 h_result = thrust::transform(h_input.begin(), h_input.end(), z1, repeat2());
 
@@ -609,8 +609,8 @@ TYPED_TEST(TransformInOutTests, TestTransformUnaryToDiscardIteratorZipped) THRUS
 
       ASSERT_EQ(h_output, d_output);
 
-      ASSERT_EQ_QUIET(reference, thrust::get<1>(h_result.get_iterator_tuple()));
-      ASSERT_EQ_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
+      ASSERT_EQ_QUIET(reference, _THRUST_STD::get<1>(h_result.get_iterator_tuple()));
+      ASSERT_EQ_QUIET(reference, _THRUST_STD::get<1>(d_result.get_iterator_tuple()));
     }
   }
 }

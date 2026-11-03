@@ -18,7 +18,6 @@
 #define CCCL_IGNORE_DEPRECATED_API
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/gather.h>
@@ -54,8 +53,8 @@ struct host_write_first_op
   template <typename IndexT, typename T>
   THRUST_HOST void operator()(IndexT index, T val)
   {
-    // val is a thrust::tuple(value, input_index). Only write out the value part.
-    out[index] = thrust::get<0>(val);
+    // val is a _THRUST_STD::tuple(value, input_index). Only write out the value part.
+    out[index] = _THRUST_STD::get<0>(val);
   }
 };
 
@@ -67,8 +66,8 @@ struct device_write_first_op
   template <typename IndexT, typename T>
   THRUST_DEVICE void operator()(IndexT index, T val)
   {
-    // val is a thrust::tuple(value, input_index). Only write out the value part.
-    out[index] = thrust::get<0>(val);
+    // val is a _THRUST_STD::tuple(value, input_index). Only write out the value part.
+    out[index] = _THRUST_STD::get<0>(val);
   }
 };
 
@@ -77,10 +76,10 @@ struct select_op
   std::size_t select_every_nth;
 
   template <typename T, typename IndexT>
-  THRUST_HOST_DEVICE bool operator()(thrust::tuple<T, IndexT> key_index_pair)
+  THRUST_HOST_DEVICE bool operator()(_THRUST_STD::tuple<T, IndexT> key_index_pair)
   {
     // Select every n-th item
-    return (thrust::get<1>(key_index_pair) % select_every_nth == 0);
+    return (_THRUST_STD::get<1>(key_index_pair) % select_every_nth == 0);
   }
 };
 

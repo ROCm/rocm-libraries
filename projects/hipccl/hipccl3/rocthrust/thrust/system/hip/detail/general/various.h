@@ -25,6 +25,8 @@
 
 #include <thrust/detail/type_traits.h>
 
+#include _THRUST_STD_INCLUDE(tuple)
+
 #include <hip/hip_runtime.h>
 
 #include <type_traits>
@@ -52,15 +54,15 @@ THRUST_HOST_DEVICE inline size_t align_size(size_t size, size_t alignment = 256)
 template <class Tuple, class Function, size_t... Indices>
 THRUST_HOST_DEVICE inline void apply_to_each_in_tuple_impl(Tuple&& t, Function&& f, thrust::index_sequence<Indices...>)
 {
-  int swallow[] = {(std::forward<Function>(f)(thrust::get<Indices>(std::forward<Tuple>(t))), 0)...};
+  int swallow[] = {(std::forward<Function>(f)(_THRUST_STD::get<Indices>(std::forward<Tuple>(t))), 0)...};
   (void) swallow;
 }
 
 template <class Tuple, class Function>
 THRUST_HOST_DEVICE inline auto apply_to_each_in_tuple(Tuple&& t, Function&& f)
-  -> std::void_t<tuple_size<std::remove_reference_t<Tuple>>>
+  -> std::void_t<_THRUST_STD::tuple_size<std::remove_reference_t<Tuple>>>
 {
-  static constexpr size_t size = tuple_size<std::remove_reference_t<Tuple>>::value;
+  static constexpr size_t size = _THRUST_STD::tuple_size<std::remove_reference_t<Tuple>>::value;
   apply_to_each_in_tuple_impl(std::forward<Tuple>(t), std::forward<Function>(f), thrust::make_index_sequence<size>());
 }
 

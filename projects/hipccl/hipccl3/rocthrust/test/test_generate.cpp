@@ -244,7 +244,7 @@ TYPED_TEST(GenerateVectorTests, TestGenerateZipIterator)
 
   thrust::generate(thrust::make_zip_iterator(v1.begin(), v2.begin()),
                    thrust::make_zip_iterator(v1.end(), v2.end()),
-                   return_value<thrust::tuple<T, T>>(thrust::tuple<T, T>(4, 7)));
+                   return_value<_THRUST_STD::tuple<T, T>>(_THRUST_STD::tuple<T, T>(4, 7)));
 
   Vector ref1(3, 4);
   Vector ref2(3, 7);
@@ -255,7 +255,7 @@ TYPED_TEST(GenerateVectorTests, TestGenerateZipIterator)
 TEST(GenerateTests, TestGenerateTuple)
 {
   using T     = int;
-  using Tuple = thrust::tuple<T, T>;
+  using Tuple = _THRUST_STD::tuple<T, T>;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
