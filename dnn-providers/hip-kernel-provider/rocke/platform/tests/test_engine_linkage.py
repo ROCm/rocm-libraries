@@ -259,7 +259,7 @@ def test_relocated_launcher_suite_has_its_test_assets(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "7 passed" in result.stdout
+    assert "9 passed" in result.stdout
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

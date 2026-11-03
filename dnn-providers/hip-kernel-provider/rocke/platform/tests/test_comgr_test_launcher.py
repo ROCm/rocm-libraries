@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Only explicitly marked native lowering tests acquire compiler evidence."""
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,15 +23,39 @@ def _launcher_path(test_file: Path) -> Path:
     raise FileNotFoundError("compiler test asset run_with_comgr.py is absent")
 
 
-@pytest.fixture
-def launcher(monkeypatch):
+def _load_launcher(monkeypatch):
     path = _launcher_path(Path(__file__).resolve())
     spec = importlib.util.spec_from_file_location("compiler_test_launcher", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.delenv("ROCKE_COMGR_LIB", raising=False)
-    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    # The launcher writes its compiler default directly to os.environ. Record
+    # restoration even when the parent did not provide an override.
+    for key in ("ROCKE_COMGR_LIB", "ROCKE_LLVM_FLAVOR"):
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
     return module
+
+
+@pytest.fixture
+def launcher(monkeypatch):
+    return _load_launcher(monkeypatch)
+
+
+@pytest.mark.parametrize("initial", [None, "existing-selection"])
+def test_launcher_fixture_restores_environment(monkeypatch, initial):
+    keys = ("ROCKE_COMGR_LIB", "ROCKE_LLVM_FLAVOR")
+    for key in keys:
+        monkeypatch.setenv(key, initial or "")
+        if initial is None:
+            monkeypatch.delenv(key)
+    with pytest.MonkeyPatch.context() as fixture_patch:
+        module = _load_launcher(fixture_patch)
+        # Exercise the same in-process launcher mutation as the lowering case,
+        # then check the environment after its fixture has been torn down.
+        test_lowering_command_receives_owner_profile(module, fixture_patch)
+    for key in keys:
+        actual = os.environ.get(key)
+        assert actual == initial
 
 
 @pytest.mark.parametrize("override", [None, "missing-compiler"])

@@ -105,11 +105,12 @@ def _load_lib() -> ctypes.CDLL:
         raise HipError("no HIP runtime candidate; provision SDK HIP or ROCKE_HIP_LIB")
     if os.path.isfile(selected):
         selected = str(Path(selected).resolve())
-    mapped = _loaded_libraries.loaded_runtimes()
+    mapped = []
     retained = None
     compilers = []
     accepted = False
     try:
+        mapped = _loaded_libraries.loaded_runtimes()
         matches = []
         for item in mapped:
             try:

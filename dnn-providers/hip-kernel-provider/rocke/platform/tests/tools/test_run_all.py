@@ -379,10 +379,15 @@ def test_corpus_selectors_label_the_overall_result_focused(
     assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
 
 
-def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
-    runner, monkeypatch, tmp_path, capsys
+@pytest.mark.parametrize("built", [False, True])
+def test_source_scripts_do_not_claim_an_unbuilt_native_suite_is_ready(
+    runner, monkeypatch, tmp_path, capsys, built
 ):
     (tmp_path / "CTestTestfile.cmake").touch()
+    binary = tmp_path / "native_test"
+    if built:
+        binary.touch()
+    prefix = [runner.sys.executable, str(runner.TOOLS / "run_with_comgr.py"), "--"]
 
     def run(command, **kwargs):
         listing = {
@@ -390,14 +395,20 @@ def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
                 {
                     "name": "rocke_arch_domain_reproducibility",
                     "command": [runner.sys.executable, "generator.py", "--check"],
-                }
+                },
+                {
+                    "name": "rocke_compiler_discovery_source",
+                    "command": prefix + [runner.sys.executable, "-m", "pytest"],
+                },
+                {"name": "rocke_storage", "command": prefix + [str(binary)]},
             ]
         }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
 
     monkeypatch.setattr(runner.subprocess, "run", run)
-    assert not runner.ctest_ready(tmp_path, "Release")
-    assert "no built registered tests" in capsys.readouterr().out
+    assert runner.ctest_ready(tmp_path, "Release") is built
+    if not built:
+        assert "no built registered tests" in capsys.readouterr().out
 
 
 def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):

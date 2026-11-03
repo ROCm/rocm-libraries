@@ -131,6 +131,9 @@ def _load_lib(explicit_path: str | None = None) -> ctypes.CDLL:
                 from dataclasses import replace
 
                 info = replace(info, comgr_path=item.path)
+            hip = _session.session.hip
+            if hip is not None:
+                _session.check_pair(getattr(hip, "_name", None), item.path)
             item.library._rocke_admission = (selected, info)
             item.library._rocke_actual_path = item.path
             item.library._rocke_signature = item.signature

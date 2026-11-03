@@ -127,7 +127,9 @@ def ctest_tests(
     return json.loads(listing.stdout)["tests"]
 
 
-_CTEST_READINESS_EXEMPT = frozenset({"rocke_arch_domain_reproducibility"})
+_CTEST_READINESS_EXEMPT = frozenset(
+    {"rocke_arch_domain_reproducibility", "rocke_compiler_discovery_source"}
+)
 
 
 def native_ctest_command(command: list[str]) -> list[str]:

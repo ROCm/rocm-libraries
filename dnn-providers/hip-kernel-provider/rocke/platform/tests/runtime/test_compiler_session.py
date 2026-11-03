@@ -309,6 +309,82 @@ def test_external_compiler_is_checked_before_new_hip(
     assert owner.compiler is None
 
 
+@pytest.mark.parametrize("pair", ["coherent", "alias", "foreign"])
+@pytest.mark.parametrize("selection", ["same-file", "distinct-same-version"])
+def test_mapped_compiler_validates_retained_hip(
+    owner, tmp_path, monkeypatch, pair, selection
+):
+    from rocke.runtime._compiler_query import file_signature
+    from rocke.runtime._loaded_libraries import LoadedLibrary
+
+    windows = sys.platform == "win32"
+    companion = tmp_path / ("amd_comgr.dll" if windows else "libamd_comgr.so.3")
+    hip = tmp_path / ("amdhip64.dll" if windows else "libamdhip64.so.7")
+    companion.touch()
+    hip.touch()
+    provider = companion
+    if pair != "coherent":
+        provider = tmp_path / "mapped-compiler"
+        if pair == "alias":
+            os.link(companion, provider)
+        else:
+            provider.touch()
+    selected = provider
+    if selection == "distinct-same-version":
+        selected = tmp_path / "selected-compiler"
+        selected.touch()
+    handle = SimpleNamespace(_name=str(provider), _handle=0)
+    mapped = LoadedLibrary(handle, str(provider), file_signature(provider))
+    owner.hip = SimpleNamespace(_name=str(hip))
+    inventory, cleanup = Mock(return_value=[mapped]), Mock()
+    info = comgr.CompilerInfo(
+        (23, 0, 1), "fixture", str(selected), str(provider), str(provider)
+    )
+    monkeypatch.setattr(comgr, "_candidate_lib_paths", lambda *args: [str(selected)])
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_compilers", inventory)
+    monkeypatch.setattr(comgr._loaded_libraries, "release", cleanup)
+    monkeypatch.setattr(comgr, "query_info", Mock(return_value=info))
+    monkeypatch.setattr(comgr, "probe_version", Mock(return_value=info))
+    monkeypatch.setattr(
+        comgr.ctypes, "CDLL", Mock(side_effect=AssertionError("second compiler"))
+    )
+    if pair == "foreign":
+        with pytest.raises(comgr.ComgrError, match="coherent exact-file pair"):
+            comgr._resolve_lib()
+        assert owner.compiler is None and owner.compiler_info is None
+        assert not hasattr(handle, "_rocke_admission")
+        cleanup.assert_called_once_with(mapped)
+    else:
+        assert comgr._resolve_lib() is handle
+        assert comgr._resolve_lib() is handle
+        assert owner.compiler is handle
+        cleanup.assert_not_called()
+    inventory.assert_called_once()
+    comgr.ctypes.CDLL.assert_not_called()
+
+
+def test_runtime_inventory_failure_preserves_hip_error_contract(owner, monkeypatch):
+    from rocke.runtime import hip_module
+
+    inventory = Mock(side_effect=comgr.ComgrError("runtime inventory unavailable"))
+    monkeypatch.setattr(hip_module, "_candidate_lib_paths", lambda *args: ["hip"])
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", inventory)
+    monkeypatch.setattr(
+        hip_module.ctypes, "CDLL", Mock(side_effect=AssertionError("HIP load"))
+    )
+    with pytest.raises(hip_module.HipError, match="runtime inventory unavailable"):
+        hip_module._resolve_hip()
+    for query in (
+        hip_module.get_device_arch,
+        hip_module.get_device_target_id,
+        hip_module.get_device_name,
+    ):
+        assert query() is None
+    assert owner.hip is None and owner.compiler is None
+    assert inventory.call_count == 4
+    hip_module.ctypes.CDLL.assert_not_called()
+
+
 def test_cached_evidence_bypasses_all_cold_work(owner, monkeypatch):
     def version(*outputs):
         for output, value in zip(outputs, (23, 0, 1)):
@@ -449,6 +525,70 @@ print('OK')
 """
     result = subprocess.run(
         rocke_python_command("-c", script, str(foreign), str(candidate), mode),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "OK"
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not shutil.which("cc"),
+    reason="ELF runtime pair fixtures",
+)
+@pytest.mark.parametrize("order", ["compile-first", "hip-first"])
+@pytest.mark.parametrize("pair", ["coherent", "foreign"])
+def test_preloaded_runtime_compiler_pair_both_orders(tmp_path, order, pair):
+    site = tmp_path / "site-packages"
+    companion = sdk(site)
+    provider = (
+        companion
+        if pair == "coherent"
+        else library(tmp_path / "foreign", "compiler.so")
+    )
+    hip = companion.parent / "libamdhip64.so.7"
+    # No compiler dependency: HIP-only use need not bootstrap COMGR. The SDK
+    # metadata still declares the physical companion required for compilation.
+    subprocess.run(
+        ["cc", "-shared", "-fPIC", "-x", "c", "-", "-o", str(hip)],
+        input="int hipInit(unsigned x){return 0;}\nint hipGetDeviceCount(int*x){*x=0;return 0;}\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    env = rocke_subprocess_env()
+    for key in ("ROCKE_COMGR_LIB", "ROCKE_HIP_LIB", "ROCKE_LLVM_FLAVOR"):
+        env.pop(key, None)
+    env["PYTHONPATH"] = str(site) + os.pathsep + env["PYTHONPATH"]
+    script = r"""
+import ctypes,os,sys
+from rocke.runtime import comgr,hip_module,_session
+provider,hip,order,pair=sys.argv[1:]
+external_compiler=ctypes.CDLL(provider)
+external_hip=ctypes.CDLL(hip)
+if order=='hip-first':
+    assert os.path.samefile(hip_module._resolve_hip()._name,hip)
+    assert _session.session.compiler is None
+try:
+    info=comgr._require_compiler_info()
+    assert info.llvm_version==(23,0,1)
+    assert os.path.samefile(info.comgr_path,provider)
+    assert os.path.samefile(hip_module._resolve_hip()._name,hip)
+except (comgr.ComgrError,hip_module.HipError) as error:
+    assert pair=='foreign',str(error)
+    assert 'coherent exact-file pair' in str(error)
+    if order=='hip-first':assert _session.session.compiler is None
+    else:assert _session.session.hip is None
+else:
+    assert pair=='coherent','incoherent pair admitted'
+    _session.check_pair(hip,info.comgr_path)
+    comgr._loaded_libraries.loaded_compilers=lambda:(_ for _ in ()).throw(AssertionError('warm inventory'))
+    for _ in range(3):assert comgr._require_compiler_info() is info
+print('OK')
+"""
+    result = subprocess.run(
+        rocke_python_command("-c", script, str(provider), str(hip), order, pair),
         env=env,
         capture_output=True,
         text=True,
