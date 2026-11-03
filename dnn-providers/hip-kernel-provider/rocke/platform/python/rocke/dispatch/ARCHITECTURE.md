@@ -1467,7 +1467,7 @@ class UnifiedSpace(WavesPerEuSpace):            # outer knob: waves_per_eu
     def inert(self, base, kernel):              # a KQ pad the kernel lays out as none
         ...
 
-    def validate(self, base, kernel):           # gfx950 2D: LDS budget, padded K vs aliased Q
+    def validate(self, base, kernel):           # gfx950 2D: LDS budget
         ...
 
     def production(self, base, axes, is_valid):  # the curated stacks
@@ -1509,11 +1509,12 @@ product (sampled) at the `full` level -- while production traffic keeps taking
 the heuristic's choice through the route registry.
 
 `validate` exists because the tiled 2D validator does not model LDS: an
-over-budget spec only fails in codegen, and a padded K LDS that Q aliases
-computes wrong output. The LDS model is the pool the LLVM lowering packs
-(`_gfx950_2d_lds_bytes`, pinned to the lowered IR by a test), and `is_valid`
-applies it while walking, so the LDS-saving enabler axes that lead the axis
-order can still make a large tile legal.
+over-budget spec only fails in codegen. (A padded K slot that Q aliases is
+refused by the kernel spec itself, so it is a kernel-validator rejection.) The
+LDS model is the pool the LLVM lowering packs (`_gfx950_2d_lds_bytes`, pinned
+to the lowered IR by a test), and `is_valid` applies it while walking, so the
+LDS-saving enabler axes that lead the axis order can still make a large tile
+legal.
 
 `WavesPerEuSpace` (`rocke.dispatch.tuning.waves`) is a thin `KnobSpace`
 subclass that both attention spaces (and GDN decode's) derive from. It is where
@@ -1755,13 +1756,13 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
   policies, knobs the body does not read for that spec, knobs out of scope for
   this problem, knobs only another codepath emits, gated sub-knobs with the
   gate off, a gfx950 KQ LDS pad the kernel lays out as none (double-buffered K,
-  native-FP8 K, misaligned slabs). Knobs that are illegal are refused with a
+  native-FP8 K, misaligned slabs, zero width). Knobs that are illegal are refused with a
   reason: `KNOWN_WRONG_KNOBS`, fields that are not knobs of the variant,
   changing a knob the variant's codepath fixes, anything the kernel validator
-  rejects, and on the gfx950 2D path a spec over the LDS budget or a padded K
-  that Q aliases. Values are first converted to the type their axis declares
-  (`True` / `1`, `2` / `2.0` name one configuration, since they hash alike);
-  a value with no lossless conversion is refused.
+  rejects (a gfx950 padded K slot that holds Q among them), and on the gfx950
+  2D path a spec over the LDS budget. Values are first converted to the type
+  their axis declares (`True` / `1`, `2` / `2.0` name one configuration, since
+  they hash alike); a value with no lossless conversion is refused.
 - **Per-problem defaults are recorded.** Knobs are overrides of the
   variant's default spec. Where that default is resolved per problem (gfx942
   dense picks persistence from the work size and `waves_per_eu` from the
