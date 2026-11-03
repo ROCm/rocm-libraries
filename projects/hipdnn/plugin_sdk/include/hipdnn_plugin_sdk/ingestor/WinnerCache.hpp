@@ -141,20 +141,12 @@ struct RecordedKernelKeyHash
     }
 };
 
-// NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter) - identity adapter so
-// kernelOf(Entry) works uniformly for both Entry=KernelDefinition and Entry=KernelDefinition*;
-// callers only ever pass in lvalues drawn from a CatalogView/vector, never a temporary.
-inline const KernelDefinition& kernelOf(const KernelDefinition& kernel)
-{
-    return kernel;
-}
-
 inline const KernelDefinition& kernelOf(const KernelDefinition* kernel)
 {
     return *kernel;
 }
 
-/// The public helpers below, over kernels or a catalog view's pointers to them.
+/// The public helpers below, over a catalog's kernel pointers.
 template <typename Entry>
 bool recordCoversImpl(const WinnerRecord& record, const std::vector<Entry>& kernels)
 {
@@ -229,18 +221,8 @@ std::optional<std::vector<Entry>> orderIfFullyCoveredImpl(const WinnerRecord& re
 ///
 /// Linear in `record.size() + kernels.size()`: the record's ids are hashed once rather
 /// than scanned per kernel, since a record can cover tens of thousands of candidates.
-/// Linear in `record.size() + kernels.size()`: the record's ids are hashed once rather
-/// than scanned per kernel, since a record can cover tens of thousands of candidates.
-/// `recordCoversView` is the same function, named where the distinction reads better.
 inline bool recordCovers(const WinnerRecord& record,
                          const std::vector<const KernelDefinition*>& kernels)
-{
-    return detail::recordCoversImpl(record, kernels);
-}
-
-/// @copydoc recordCovers(const WinnerRecord&, const std::vector<const KernelDefinition*>&)
-inline bool recordCoversView(const WinnerRecord& record,
-                             const std::vector<const KernelDefinition*>& kernels)
 {
     return detail::recordCoversImpl(record, kernels);
 }
@@ -252,17 +234,8 @@ inline bool recordCoversView(const WinnerRecord& record,
 /// Each record entry resolves to the FIRST kernel in @p kernels carrying its triple, and
 /// an entry repeated in the record repeats its kernel, exactly as a linear scan per entry
 /// would; the kernels are indexed once so the whole call is linear rather than quadratic.
-/// orderByRecord() over a catalog view: the same order, as pointers.
 inline std::vector<const KernelDefinition*>
     orderByRecord(const WinnerRecord& record, const std::vector<const KernelDefinition*>& kernels)
-{
-    return detail::orderByRecordImpl(record, kernels);
-}
-
-/// @copydoc orderByRecord(const WinnerRecord&, const std::vector<const KernelDefinition*>&)
-inline std::vector<const KernelDefinition*>
-    orderByRecordView(const WinnerRecord& record,
-                      const std::vector<const KernelDefinition*>& kernels)
 {
     return detail::orderByRecordImpl(record, kernels);
 }
@@ -272,18 +245,9 @@ inline std::vector<const KernelDefinition*>
 /// `recordCovers` matches by `kernelId` alone, `orderByRecord` requires the full
 /// `(kernelId, packId, dispatchId)` triple -- so an entry covered by id but whose pack
 /// has since moved declines the whole record rather than serving what still resolves.
-/// orderIfFullyCovered() over a catalog view.
 inline std::optional<std::vector<const KernelDefinition*>>
     orderIfFullyCovered(const WinnerRecord& record,
                         const std::vector<const KernelDefinition*>& kernels)
-{
-    return detail::orderIfFullyCoveredImpl(record, kernels);
-}
-
-/// @copydoc orderIfFullyCovered(const WinnerRecord&, const std::vector<const KernelDefinition*>&)
-inline std::optional<std::vector<const KernelDefinition*>>
-    orderIfFullyCoveredView(const WinnerRecord& record,
-                            const std::vector<const KernelDefinition*>& kernels)
 {
     return detail::orderIfFullyCoveredImpl(record, kernels);
 }

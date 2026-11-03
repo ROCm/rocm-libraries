@@ -31,9 +31,8 @@ using KernelPrepareFn = std::shared_ptr<const void> (*)(const KernelDefinition&)
 
 /// One kernel an engine can dispatch. KernelIngestorStateManager owns every definition
 /// in an immutable set; catalogs and rankings reference them by pointer, valid for the
-/// manager's lifetime. The state manager hands out views of its own immutable
-/// definitions (CatalogView) and copies of them (Catalog), never a reference into a
-/// mutable cache.
+/// manager's lifetime. Every Catalog the state manager hands out points at its own
+/// immutable definitions, never a reference into a mutable cache.
 struct KernelDefinition
 {
     DescriptorId kernelId;
