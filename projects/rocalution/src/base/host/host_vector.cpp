@@ -392,8 +392,18 @@ namespace rocalution
         srand(seed);
         for(int64_t i = 0; i < this->size_; ++i)
         {
-            this->vec_[i]
-                = a + static_cast<ValueType>(rand()) / static_cast<ValueType>(RAND_MAX) * (b - a);
+            if constexpr(std::is_integral_v<ValueType>)
+            {
+                // Uniform over the integers a to b
+                const double u = static_cast<double>(rand()) / (static_cast<double>(RAND_MAX) + 1);
+                this->vec_[i]  = a + static_cast<ValueType>(u * (static_cast<double>(b - a) + 1));
+            }
+            else
+            {
+                this->vec_[i]
+                    = a
+                      + static_cast<ValueType>(rand()) / static_cast<ValueType>(RAND_MAX) * (b - a);
+            }
         }
     }
 

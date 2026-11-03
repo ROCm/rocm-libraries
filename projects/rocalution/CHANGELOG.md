@@ -43,6 +43,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed `LocalMatrix::Check()` on the host accepting CSR column indices equal to the number of columns and values of minus infinity, and rejecting complex matrices with a stored zero.
 * Fixed `LocalVector::Check()` on the host rejecting integer and complex vectors with a zero entry, and accepting complex vectors with an infinite entry.
+* Fixed `LocalVector::SetRandomUniform()` on the host setting every entry of an integer vector to the lower bound. Integer vectors now get values uniformly distributed from the lower to the upper bound.
 
 ## (Unreleased) rocALUTION 4.1.1
 

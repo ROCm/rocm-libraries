@@ -1030,10 +1030,8 @@ TYPED_TEST(local_vector_random_integers, uniform_integers_cover_the_range)
     EXPECT_GE(*std::min_element(values.begin(), values.end()), 0);
     EXPECT_LE(*std::max_element(values.begin(), values.end()), 10);
 
-    KNOWN_BUG("HostVector::SetRandomUniform divides rand() by RAND_MAX in integer arithmetic, so "
-              "almost every value is the lower bound");
     std::sort(values.begin(), values.end());
-    EXPECT_GE(std::unique(values.begin(), values.end()) - values.begin(), 10);
+    EXPECT_EQ(std::unique(values.begin(), values.end()) - values.begin(), 11);
 }
 
 // Binary files, which store float as double and have no complex and bool version
