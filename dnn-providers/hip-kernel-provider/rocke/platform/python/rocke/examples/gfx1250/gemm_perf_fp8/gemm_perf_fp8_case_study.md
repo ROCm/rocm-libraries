@@ -27,20 +27,19 @@ Every compared arm passed an on-silicon numeric gate in the measured run.
 ## 1. The change
 
 One argument. `helpers/spec.py::choose_load_vec` caps the vector at
-`16 // elem_bytes` — the 4-dword `buffer_load` limit — and
-`gemm_universal._choose_load_vec` never passed `elem_bytes`. The picker's
-default of 2 therefore capped a **1-byte** operand at 8 elements, spending
-half of every A/B load:
+`16 // elem_bytes` — the 4-dword `buffer_load` limit. Sized by the operand's
+element (`_elem_bytes(spec)`, one byte for fp8), a **1-byte** operand gets the
+full 16-element load; sized at 2 bytes, as the picker's default is, it gets 8,
+spending half of every A/B load:
 
 ```
 before:  load <8  x i8>, ptr addrspace(1) ..., align 8
 after:   load <16 x i8>, ptr addrspace(1) ..., align 16
 ```
 
-The fix resolves the width from `data.dtype_a` via `_ab_dtype_bytes`, which
-already existed. `TraitSpec.ab_load_elem_bytes: Optional[int] = None` overrides
-it; `None` resolves from the dtype, an explicit `2` reproduces the older
-emission. The knob exists so both widths can be built in one binary and
+`TraitSpec.ab_load_elem_bytes: Optional[int] = None` overrides the width;
+`None` resolves it from the dtype, an explicit `2` reproduces the 8-element
+load. The knob exists so both widths can be built in one binary and
 compared — which, per §3, turned out to be the only trustworthy way to measure
 anything on this machine.
 
@@ -71,11 +70,9 @@ environment had changed between the two runs (§5). The sign of the result was
 wrong, not just the magnitude.
 
 **(c) The first explanation for (b) was also wrong.** The drift was attributed
-to a drop between two memory-clock levels, with a roofline argument built on
-top. A machine-config snapshot taken days earlier showed `pp_dpm_mclk` offering
-**one** level, identical to the current state; the higher figure had been the
-shader clock (SCLK). There had been no clock change, and the real cause (§5)
-was in the software stack, not the hardware. The lesson is narrow and worth stating: a
+to a change in the machine's configuration, with a roofline argument built on
+top. A machine-config snapshot taken days earlier was identical to the current
+state, and the real cause (§5) was in the software stack. The lesson is narrow and worth stating: a
 plausible mechanism that explains the size of an effect is not evidence that
 the mechanism occurred.
 
@@ -133,9 +130,8 @@ An identical spec, re-measured through the identical code path used for the
 original figure, came back **~10–15% slower** hours later. Three explanations
 were considered and two were wrong.
 
-*Not thermal*: junction and memory temperatures were well below any throttling
-point. *Not clocks*: the DPM tables were
-byte-identical to a snapshot taken days earlier (§2c). *Not another tenant*:
+*Not the machine configuration*: it was identical to a snapshot taken days
+earlier (§2c). *Not another tenant*:
 `rocm-smi --showpids` and `/sys/class/kfd/kfd/proc/` both report **zero**
 compute processes attached to the device.
 
@@ -170,7 +166,7 @@ Consequences, which apply to any future work in this folder:
 
 - Ratios from a single interleaved process are sound. Absolute levels are not
   comparable across sessions, and a toolchain switch makes them incomparable
-  even on an otherwise idle, thermally stable, clock-stable machine.
+  even on an otherwise idle machine.
 - A stored champion from an earlier ladder is **not** a valid baseline. Re-run
   the ladder in full, or interleave.
 - **The HSACO cache key does not include the toolchain.** `sweep._spec_hash`
@@ -359,20 +355,6 @@ output indicating anything had been missed.
 5. Investigate *why* the wider load helps, before generalising it to other
    1-byte paths — notably `moe_gemm_fused`, which still passes the default
    width and would inherit the same halving.
-6. The DirectToLDS load path hardcodes 2 bytes per element, in **both** engines
-   (`_DTL_HALVES = _DTL_DWORDS * 2` with `_DTL_BYTES_PER_LANE = _DTL_DWORDS * 4`;
-   `a_half_bytes = block_m * block_k * 2` in `gemm_build_load.cpp`). For a
-   1-byte operand it budgets 16 bytes per lane chunk while moving 8, and it
-   disagrees with its own LDS allocation, which *is* sized correctly from
-   `_ab_dtype_bytes`.
-
-   It is **not** reachable from this path — `direct_to_lds` is rejected on the
-   gfx1250 WMMA pipeline — but it **is** reachable with fp8/bf8 on gfx950 and
-   gfx942, so this is a live defect on CDNA rather than a latent one. It is not
-   fixed here because the arches that can reach it are not the arch this work
-   has hardware for: changing both engines would turn the byte-identity gate
-   GREEN by making them agree, without any numeric check that they agree on the
-   *right* answer — which is how the defect arose in the first place.
 
 ---
 
@@ -426,10 +408,8 @@ same instruction:
 | integers in −5..5 (the exact-check inputs) | 0.83 |
 | `normal(0, 0.1)` rounded to e4m3 | 0.74 |
 
-More toggling in the datapath draws more power and the clock comes down; the
-cycle count per WMMA does not change. The GEMM shows the same effect: the
-same kernel runs the same cycles on both input sets, at a lower clock on the
-random one.
+The instruction stream is the same in every case; only the operand data
+differs. The GEMM shows the same dependence on its input set.
 
 **So a GEMM is compared only against the ceiling measured on matching data,
 in the same session.** Comparing an integer-input GEMM with the constant-data
@@ -492,12 +472,9 @@ random-data ceiling at peak.
 ## 15. Peak and sustained are different regimes
 
 The peak protocol idles the GPU for 25 ms before every sample and times 1
-warmup plus 3 launches, which fits inside the clock's boost window. Run
-back-to-back (20 warmup, 400 timed), the same kernel settles at a much lower
-clock: it keeps about 65% of its peak throughput on random data, while the
-register-resident probe keeps about 96%. A shader-clock counter
-read inside the kernel confirmed it: equal cycle counts in both regimes, a
-lower clock under sustained load (`clock_probe --sustained`). Trait ratios are similar in both regimes,
+warmup plus 3 launches. Run back-to-back (20 warmup, 400 timed), the same
+kernel measures well below its peak throughput, and much further below it than
+the register-resident probe does. Trait ratios are similar in both regimes,
 but **an absolute figure means nothing without its protocol**, and a
 percentage of the ceiling is only meaningful at peak, against the peak
 ceiling.
@@ -511,7 +488,7 @@ sessions' and are listed so nobody repeats the experiments without a new
 reason.
 
 * **K=64 atom with fences or prefetch.** Fewer cycles in the trace did not
-  survive in-kernel clock measurement: equal cycles to the K=128 atom.
+  survive in-kernel cycle measurement: equal cycles to the K=128 atom.
 * **8 waves per SIMD** (two workgroups per CU at smaller tiles): about 0.94×
   of the best 4-wave configuration. 1 wave per SIMD reaches well under half
   the WMMA rate; 4 is the working point.
@@ -552,21 +529,16 @@ What made the ratios above stable, in the order the mistakes were made:
    until it has been empty for a minute, and poll it throughout the run;
    discard the run if anything appears. `fp8_trait_ab` reports the process
    list at its start and end, which is necessary, not sufficient.
-5. **Watch for a degraded device.** Once, a few compute units drifted into a
-   state where they needed 13–25% more cycles for identical work, at an equal
-   or higher clock; it followed the hardware location, not the tile, and a
-   reboot cleared it. The GEMM arms and the TDM feed probe both run exactly
-   one round of workgroups, so a few slow units set their time while the
-   WMMA probe's large grid hides them: the symptoms are GEMM arms and a TDM
-   feed time per K-step far off an earlier session while the WMMA ceiling
-   looks normal. `clock_probe` checks for it directly: it stamps each wave's
-   shader cycles and realtime at start and end, and flags the slowest
-   workgroup when it needs more than 10% more cycles than the rest for the
-   same work. Compare realtime only within a wave: on one boot a fixed half
-   of the workgroups read realtime about half a millisecond ahead of the
-   other half, with identical lifetimes, so cross-workgroup start and end
-   times were meaningless; the probe detects that against the event-timed
-   launch and says so.
+5. **Check the device before a session.** The GEMM arms and the TDM feed
+   probe both run exactly one round of workgroups, so a few slow compute
+   units set their time while the WMMA probe's large grid hides them: GEMM
+   arms and a TDM feed time per K-step far off an earlier session while the
+   WMMA ceiling looks normal mean the session is suspect. `clock_probe`
+   checks for it directly: it stamps each wave's shader cycles and realtime
+   at start and end, and flags the slowest workgroup when it needs more than
+   10% more cycles than the rest for the same work. Compare realtime only
+   within a wave; the probe checks whether cross-workgroup realtime is
+   comparable against the event-timed launch and says when it is not.
 
 ## 18. Where the remaining gap is
 

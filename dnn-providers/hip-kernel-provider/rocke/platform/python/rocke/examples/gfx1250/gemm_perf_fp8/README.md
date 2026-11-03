@@ -35,10 +35,12 @@ stages narrow the candidate set while *increasing* rigor:
 | `final` | nothing | every candidate, in rank order | **fresh process**, `final_samples` + 1 (first discarded) |
 | `lever` | one registered lever per arm | every arm | **fresh process**, same as `final` |
 
-On the shipped `configs/sq4k.json` that is 180 geometry candidates plus 800
-trait candidates plus 1 lever arm — **981 builds against a full cross product
-of 7,200**, a 7.3× saving, with the expensive, trustworthy measurement spent
-only on the handful that survive.
+On the shipped `configs/sq4k.json` that is 180 geometry candidates, then up
+to 80 trait candidates for each geometry that survives stage 1 (the top 20,
+plus any within `finalist_margin_pct` of the 20th, at most 40) — a few
+thousand builds against a full valid cross product of 14,144, with the
+expensive, trustworthy measurement spent only on the handful that survive.
+The shipped configs define no lever arms.
 
 The warp grid is `[2, 4, 8]` on both axes. `8×8` is not in the 180 because
 `block_size 2048 > 1024 (hardware cap) on gfx1250` rejects it; `8×4` and
@@ -181,7 +183,7 @@ K-loop recovers, against ceilings measured in the same session:
 | `fp8_trait_ab` | the K-loop traits on the case study's geometry (`tdm_d2`, `split_barrier`, `alternate_issuers`, `early_refill`, each adding one trait), interleaved in one process |
 | `wmma_roofline_probe` | the register-resident WMMA ceiling, on constant, integer or random operand data |
 | `memory_probe` | streaming read/copy bandwidth, and the TDM feed floor: the champion's loop with the math removed |
-| `clock_probe` | per-wave shader cycles and realtime stamped inside a diagnostic copy of one arm: the clock under peak and sustained load, and a device health check |
+| `clock_probe` | per-wave shader cycles and realtime stamped inside a diagnostic copy of one arm, under peak and sustained load, and a device health check |
 | `fp8_data` | the two input sets both A/B tools share (exact integers; e4m3-rounded `normal(0, 0.1)`) |
 
 `fp8_trait_ab` verifies every arm before timing any — bit-exact on the integer
@@ -251,14 +253,12 @@ Two symptoms mean the numbers should not be trusted, whatever the ratios say:
 the GEMM arms far below an earlier session while the WMMA ceiling looks
 normal, or the TDM feed's time per K-step well above its usual value. Both
 GEMM and feed probe run exactly one round of workgroups, so a few slow
-compute units set their time while the probe's large grid hides them. That
-state has been seen on this hardware and cleared by a reboot.
+compute units set their time while the probe's large grid hides them.
 `clock_probe` checks for it directly: the slowest workgroup needing more than
 10% more shader cycles than the rest for the same work is that state. Its
 start and end columns compare realtime across workgroups, which is only
 meaningful when their counter bases agree; the probe checks that against the
-event-timed launch and says when they do not (seen on one boot: half the
-workgroups offset by about half a millisecond, lifetimes identical).
+event-timed launch and says when they do not.
 
 Correctness lanes that need no timing:
 
@@ -294,32 +294,10 @@ the arms interleaved in one process rather than one fresh process per arm.
 
 ## Where Phase 1 actually lived
 
-*Landed* (`TraitSpec.ab_load_elem_bytes`, default: resolved from the dtype, so
-fp8 loads 16 bytes; `2` reproduces the old emission). Kept for the reasoning;
-case study Part 1 has the result. Before the fix, the emitted IR for a
-128×128×64 fp8 tile read:
-
-```
-%gv862 = load <8 x i8>, ptr addrspace(1) %gep.2, align 8
-```
-
-8-byte global loads for A and B, where fp8 permits 16. The cause is one
-argument: `gemm_universal._choose_load_vec` calls
-`helpers.spec.choose_load_vec(...)` **without** `elem_bytes`, so the helper
-uses its default of 2 and caps the vector at `16 // 2 = 8` elements. For
-1-byte operands that is 8 bytes, half the hardware's 4-dword maximum.
-
-`choose_load_vec` already accepts `elem_bytes`, and `_ab_dtype_bytes(spec)`
-already exists from Phase 0 — so the widening itself is small. Two notes
-before anyone treats it as a one-liner:
-
-- It changes emitted IR, so it needs the C++ mirror and its own parity config
-  in the same change, and the lever must be a **defaulted** spec field
-  (`AGENTS.md`: a new spec field defaults to the currently-shipped value) or
-  every existing descriptor breaks.
-- Blast radius is narrow: f16/bf16 already pass `elem_bytes=2`, which equals
-  the default, so only 1-byte operands change. Parity configs 0–10 stay
-  byte-identical; only the fp8 config moves.
+The load width: the A/B load vector is sized by the operand's element, so an
+fp8 operand gets a 16-byte load rather than 8. Case study §1 has the IR before
+and after, the `ab_load_elem_bytes` override that rebuilds the narrow load, and
+the blast radius.
 
 ## Shape choice, and what to expect at 4096×4096×8192
 

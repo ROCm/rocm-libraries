@@ -16,17 +16,15 @@ From the stamps it reports, over peak (and optionally sustained) launches:
 * **dispatch and finish spread**: when workgroups start and end relative to
   the first; with one round of workgroups they should all start together.
   This compares realtime counters across workgroups, so it is only shown
-  when their bases agree: on one boot of the test device a fixed half of the
-  workgroups read realtime about half a millisecond ahead of the other half,
-  with identical lifetimes. The probe detects that by comparing the stamped
-  span of a launch with the event-timed launch, and says so;
+  when their bases agree, which the probe checks by comparing the stamped
+  span of a launch with the event-timed launch; it says when they do not;
 * **straggler**: the slowest workgroup, by its own lifetime (a difference on
   one counter, so free of any base offset), and its shader cycles against
   the rest. One workgroup, not a few, so a single degraded unit is not
   averaged away.
   Equal cycles mean a slow workgroup only started late or ran at a lower
-  clock; *more* cycles for identical work, at an equal or higher clock, is the
-  degraded-device signature the case study describes (§17);
+  clock; *more* cycles for identical work points at the device (case study
+  §17);
 * **clock**: each wave's average shader clock over its lifetime, from cycles
   over realtime with the realtime rate calibrated against the host clock.
 

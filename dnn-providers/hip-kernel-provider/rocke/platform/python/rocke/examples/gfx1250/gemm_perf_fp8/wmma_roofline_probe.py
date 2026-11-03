@@ -114,7 +114,7 @@ def _catalog() -> dict[str, Inst]:
         for accn, acc in (("f32", "v8f"), ("f16", "v8h")):
             for pair in ("fp8_fp8", "fp8_bf8", "bf8_fp8", "bf8_bf8"):
                 nm = f"{accn}_16x16x{k}_{pair}"
-                note = "correct but ~5.6x slow" if (k == 128 and accn == "f16") else ""
+                note = "correct but slow" if (k == 128 and accn == "f16") else ""
                 add(
                     Inst(
                         nm,
