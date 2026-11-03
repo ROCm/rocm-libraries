@@ -26,6 +26,14 @@ _FORMAT = {
 }
 UNIFORM_BASIS_OFFSETS = (0, 64, 128, 192)
 UNIFORM_FOCUSED_ROWS = (0, 62, 63, 64, 127, 128, 255)
+# KV head h scales its V profile by 2**h, so heads are distinguishable: a kernel
+# that reads the wrong V head, uses a wrong head stride, or writes one output head
+# everywhere moves every legal coordinate by at least a factor of two. A power of
+# two is exact in both dtypes and commutes with every rounding the kernel performs
+# (the P cast, FP32 accumulation, normalization, the output cast), so each head's
+# correct output is the head-0 output shifted in exponent and the zero-ULP
+# argument is unchanged. The cap keeps outputs well inside the FP16 range.
+_MAX_KV_HEADS = 8
 
 
 class UniformMutation(str, Enum):
@@ -65,6 +73,10 @@ class UniformCase:
                 raise ValueError(f"{name} must be positive")
         if self.nhead_q % self.nhead_k:
             raise ValueError("nhead_q must be a multiple of nhead_k")
+        if self.nhead_k > _MAX_KV_HEADS:
+            raise ValueError(
+                f"nhead_k must be at most {_MAX_KV_HEADS} for distinct head scales"
+            )
         if self.dtype not in _DTYPES:
             raise ValueError(f"dtype must be one of {sorted(_DTYPES)}")
         if self.mask not in _MASKS:
@@ -84,6 +96,14 @@ class UniformCase:
     def key_shape(self) -> tuple[int, int, int, int]:
         """Return the runner's logical ``[B, Sk, Hkv, D]`` K/V shape."""
         return (self.batch, self.seqlen_k, self.nhead_k, self.head_dim)
+
+    @property
+    def head_scale_exponents(self) -> tuple[int, ...]:
+        """Per query head, the exponent of its KV head's V scale ``2**h_kv``.
+
+        Query head ``h_q`` reads KV head ``h_q // (nhead_q // nhead_k)``."""
+        group = self.nhead_q // self.nhead_k
+        return tuple(head // group for head in range(self.nhead_q))
 
     @property
     def case_id(self) -> str:
@@ -471,31 +491,39 @@ def _deterministic_k(case: UniformCase) -> np.ndarray:
     return (values.astype(np.float32) / 8.0).copy()
 
 
+def _kv_head_scales(case: UniformCase) -> np.ndarray:
+    """Return the per-KV-head V scales ``2**h``."""
+    return np.ldexp(np.float32(1.0), np.arange(case.nhead_k)).astype(np.float32)
+
+
 def uniform_inputs(
     case: UniformCase, basis_offset: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build zero-Q, nonconstant-K, shifted-identity-V inputs."""
+    """Build zero-Q, nonconstant-K, shifted-identity-V inputs, V scaled per head."""
     if basis_offset < 0:
         raise ValueError("basis_offset must be non-negative")
     q = np.zeros(case.output_shape, dtype=np.float32)
     k = _deterministic_k(case)
     v = np.zeros(case.key_shape, dtype=np.float32)
+    scales = _kv_head_scales(case)
     for dim in range(case.head_dim):
         key = basis_offset + dim
         if key < case.seqlen_k:
-            v[:, key, :, dim] = 1.0
+            v[:, key, :, dim] = scales
     return q, k, v
 
 
 def uniform_inputs_folded(
     case: UniformCase,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build folded-basis V, where key ``k`` maps to dimension ``k mod D``."""
+    """Build folded-basis V, where key ``k`` maps to dimension ``k mod D``,
+    scaled per head like the basis profiles."""
     q = np.zeros(case.output_shape, dtype=np.float32)
     k = _deterministic_k(case)
     v = np.zeros(case.key_shape, dtype=np.float32)
+    scales = _kv_head_scales(case)
     for key in range(case.seqlen_k):
-        v[:, key, :, key % case.head_dim] = 1.0
+        v[:, key, :, key % case.head_dim] = scales
     return q, k, v
 
 
@@ -623,10 +651,23 @@ def uniform_expected_bits(
                 case, exposure, dim, first, last
             )
             if represented:
-                output[:, query, :, dim] = target_bits(
-                    represented, denominator, case.dtype
+                output[:, query, :, dim] = _head_target_bits(
+                    case, represented, denominator
                 )
     return output
+
+
+def _head_target_bits(
+    case: UniformCase, represented: int, denominator: int
+) -> np.ndarray:
+    """Per query head, the correctly rounded ``represented * 2**h_kv / N`` bits."""
+    return np.array(
+        [
+            target_bits(represented << exponent, denominator, case.dtype)
+            for exponent in case.head_scale_exponents
+        ],
+        dtype=np.uint16,
+    )
 
 
 def correct_uniform_observation(
@@ -645,6 +686,23 @@ def correct_uniform_observation(
         for offset in offsets
     ]
     exposures.append(("folded", uniform_expected_bits(case, "folded")))
+    return UniformObservation(tuple(exposures))
+
+
+def broadcast_query_head(
+    observation: UniformObservation, head: int = 0
+) -> UniformObservation:
+    """Copy one query head's output into every head of every exposure.
+
+    The observation a kernel with a head-indexing bug would produce (every head
+    reading one V head, or one output head written everywhere). The head-specific
+    V scales must make the policy reject it."""
+    exposures = []
+    for name, values in observation.exposures:
+        if not 0 <= head < values.shape[2]:
+            raise IndexError(head)
+        broadcast = np.repeat(values[:, :, head : head + 1, :], values.shape[2], 2)
+        exposures.append((name, broadcast))
     return UniformObservation(tuple(exposures))
 
 
@@ -770,8 +828,12 @@ def analyze_uniform_policy(
     focus = {query: 0.0 for query in focused_rows if 0 <= query < case.seqlen_q}
     groups: dict[str, dict[int, _MutableNqStats]] = {}
 
+    # Magnitude diagnostics are in probability units: each head's values are
+    # divided by its exact power-of-two V scale. Target-bit ULP checks use the
+    # raw bits against the scaled targets, so they stay head-aware.
+    head_scales = np.ldexp(1.0, np.array(case.head_scale_exponents))
     for exposure, raw in observation.exposures:
-        decoded = decode_bits(raw, case.dtype)
+        decoded = decode_bits(raw, case.dtype) / head_scales[None, None, :, None]
         fraction_bits, exponent_bits, _ = _FORMAT[case.dtype]
         exponent_mask = ((1 << exponent_bits) - 1) << fraction_bits
         finite = (raw & np.uint16(exponent_mask)) != np.uint16(exponent_mask)
@@ -823,11 +885,11 @@ def analyze_uniform_policy(
                     masked_row_mass[:, query, :] += coordinate_magnitudes
                     continue
 
-                target = target_bits(represented, denominator, case.dtype)
-                target_value = float(decode_bits(target, case.dtype))
+                targets = _head_target_bits(case, represented, denominator)
+                target_value = decode_bits(targets, case.dtype) / head_scales
                 distances = np.abs(
                     _ordered_array(value_bits).astype(np.int64)
-                    - np.int64(ordered_bits(target))
+                    - _ordered_array(targets).astype(np.int64)[None, :]
                 )
                 valid_distances = distances[valid]
                 compared = int(valid_distances.size)

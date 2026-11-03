@@ -29,6 +29,7 @@ from ._analytical import (
     UniformObservation,
     UniformSpecFingerprint,
     analyze_uniform_policy,
+    broadcast_query_head,
     correct_uniform_observation,
     decode_bits,
     encode_bits,
@@ -168,6 +169,67 @@ def test_uniform_generators_cover_basis_and_folded_profiles() -> None:
     locations = np.argwhere(folded[0, :, 0, :] == 1.0)
     assert len(locations) == UNIFORM_CAUSAL_FP16.seqlen_k
     assert all(dim == key % UNIFORM_CAUSAL_FP16.head_dim for key, dim in locations)
+
+
+@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
+def test_v_profiles_scale_each_kv_head_by_a_distinct_power_of_two(
+    case: UniformCase,
+) -> None:
+    profiles = [uniform_inputs(case, offset)[2] for offset in UNIFORM_BASIS_OFFSETS]
+    profiles.append(uniform_inputs_folded(case)[2])
+    for v in profiles:
+        head_zero = v[:, :, 0, :]
+        for head in range(case.nhead_k):
+            np.testing.assert_array_equal(v[:, :, head, :], head_zero * 2.0**head)
+    assert case.head_scale_exponents == tuple(range(case.nhead_q))
+
+
+_HEAD_MIXUPS = {
+    "head-0-broadcast": lambda bits: np.repeat(bits[:, :, :1, :], bits.shape[2], 2),
+    "last-head-broadcast": lambda bits: np.repeat(bits[:, :, -1:, :], bits.shape[2], 2),
+    "heads-reversed": lambda bits: bits[:, :, ::-1, :].copy(),
+    "heads-0-1-swapped": lambda bits: bits[:, :, [1, 0, *range(2, bits.shape[2])], :],
+}
+
+
+@pytest.mark.parametrize("mixup", sorted(_HEAD_MIXUPS))
+@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
+def test_head_indexing_mixups_are_rejected(case: UniformCase, mixup: str) -> None:
+    """A wrong V head, a wrong head stride, or one output head written everywhere
+    must not pass: per-head V scales move every legal coordinate of a wrong head."""
+    correct = correct_uniform_observation(case)
+    mixed = UniformObservation(
+        tuple((name, _HEAD_MIXUPS[mixup](values)) for name, values in correct.exposures)
+    )
+    result = analyze_uniform_policy(case, mixed, budget=0)
+    assert any(item.startswith("target_ulp=") for item in result.violations)
+    assert any(item.startswith("stored_row_sum=") for item in result.violations)
+
+
+def test_broadcast_query_head_matches_the_head_zero_mixup() -> None:
+    case = UNIFORM_CAUSAL_FP16
+    correct = correct_uniform_observation(case)
+    broadcast = broadcast_query_head(correct, 0)
+    for (_, actual), (_, source) in zip(broadcast.exposures, correct.exposures):
+        np.testing.assert_array_equal(actual, _HEAD_MIXUPS["head-0-broadcast"](source))
+    assert analyze_uniform_policy(case, broadcast, budget=0).violations
+    with pytest.raises(IndexError):
+        broadcast_query_head(correct, case.nhead_q)
+
+
+def test_gqa_query_heads_take_their_kv_heads_scale() -> None:
+    case = UniformCase(1, 8, 8, 4, 2, 4, "fp16", "causal")
+    assert case.head_scale_exponents == (0, 0, 1, 1)
+    correct = correct_uniform_observation(case)
+    assert analyze_uniform_policy(case, correct, budget=0).violations == ()
+    assert analyze_uniform_policy(
+        case, broadcast_query_head(correct, 0), budget=0
+    ).violations
+
+
+def test_kv_head_count_is_capped_for_distinct_scales() -> None:
+    with pytest.raises(ValueError, match="nhead_k must be at most 8"):
+        UniformCase(1, 8, 8, 16, 16, 4, "fp16", "causal")
 
 
 @pytest.mark.parametrize(

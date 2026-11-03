@@ -10,14 +10,29 @@ alone, rounded correctly into the subject dtype.
 
 Each case runs five launches on the same zero-Q, finite, nonconstant K:
 
-| Exposure | V | Expected `O[q,d]` |
+| Exposure | V for KV head `h` | Expected `O[q,h_q,d]`, with `s = 2^h_kv(h_q)` |
 |---|---|---|
-| `basis@o`, `o in {0,64,128,192}` | `V[k,d] = 1` iff `k = o + d` | `1/\|A(q)\|` if `o + d` is legal, else `0` |
-| `folded` | `V[k,d] = 1` iff `d = k mod D` | `\|{k in A(q) : k mod D = d}\| / \|A(q)\|` |
+| `basis@o`, `o in {0,64,128,192}` | `V[k,h,d] = 2^h` iff `k = o + d` | `s/\|A(q)\|` if `o + d` is legal, else `0` |
+| `folded` | `V[k,h,d] = 2^h` iff `d = k mod D` | `s * \|{k in A(q) : k mod D = d}\| / \|A(q)\|` |
 
 The four basis launches expose each of the 256 probability columns exactly
 once. The folded launch observes the same row through sums of several
 probabilities, which catches errors that cancel across basis launches.
+
+Each KV head scales its V profile by a distinct power of two, `2^h`, and query
+head `h_q` expects its KV head's scale, `h_kv = h_q // (Hq / Hkv)`. Without
+that, every head would carry identical outputs, so a kernel that reads one V head
+for all heads, uses a wrong head stride, or writes one output head everywhere
+would pass. With it, every legal coordinate of a wrong head is off by at least a
+factor of two. A power of two is exact in FP16 and BF16 and commutes with every
+rounding the kernel performs (the P cast, FP32 accumulation, normalization, the
+output cast), so head `h`'s correct output is head 0's shifted in exponent and
+the zero-ULP argument is unchanged. `nhead_k` is capped at 8 to keep the scales
+distinct and the outputs in range.
+
+Not covered by design: with Q zero, the logits do not depend on Q or K, so a
+wrong Q or K head index is invisible. Query heads that share one KV head (GQA)
+also share a scale, so swapping heads within one group is invisible.
 
 ## Device path
 
@@ -74,6 +89,12 @@ be rejected, or the test fails regardless of calibration:
 |---|---|
 | causal | `include_future_key`, `exclude_last_key`, `denominator_plus_one` |
 | window | `include_old_window_key`, `exclude_oldest_window_key`, `denominator_plus_one` |
+
+The same real output with query head 0 copied into every head
+(`broadcast_query_head`) must also be rejected, which shows the run can tell
+heads apart. Magnitude diagnostics (masked mass, row-sum residuals) are reported
+in probability units, divided by each head's scale, so the calibration records
+do not depend on the head scaling.
 
 ## Calibration and scope
 

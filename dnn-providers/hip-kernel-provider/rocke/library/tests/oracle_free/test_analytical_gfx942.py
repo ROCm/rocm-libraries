@@ -30,6 +30,7 @@ from ._analytical import (
     UniformObservation,
     UniformResult,
     analyze_uniform_policy,
+    broadcast_query_head,
     encode_bits,
     format_uniform_result,
     require_calibration,
@@ -148,6 +149,15 @@ def test_uniform_masked_probabilities(case: UniformCase) -> None:
             f"{format_uniform_result(mutated)}"
         )
         results[mutation.value] = mutated
+    # Head sensitivity on the same real output: head 0 written into every head
+    # (one V head read for all, or one output head broadcast) must be rejected.
+    broadcast = analyze_uniform_policy(
+        case, broadcast_query_head(observation, 0), budget=0
+    )
+    assert broadcast.violations, (
+        f"{_case_label(case)}: checker failed to reject a head-0 broadcast; "
+        f"{format_uniform_result(broadcast)}"
+    )
 
     _capture_calibration(case, subject, results)
 
