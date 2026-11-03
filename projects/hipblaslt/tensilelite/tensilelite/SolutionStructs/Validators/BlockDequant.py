@@ -197,10 +197,17 @@ def validateBlockDequantCombination(state, printRejectionReason):
         reject(state, printRejectionReason,
                "UseScaleAB=Block and MXBlockA/B are two different scaling paths")
         return False
-    # The GSU conversion kernel declares ScaleA/ScaleB as ComputeDataType
-    # pointers and applies them in the epilogue; a block scale is neither.
-    if state["GlobalSplitU"] != 1:
-        reject(state, printRejectionReason, "UseScaleAB=Block requires GlobalSplitU=1")
+    # Split-K is fine: the kernel forces contiguous K ranges and starts the scale
+    # pointers at its range (blockScaleAGsuOffset), the partials are already
+    # dequantized, and neither reduction path applies a Block scale again. Only
+    # the buffered reductions are supported; atomics would round each partial.
+    if state["GlobalSplitU"] not in (1, -1) and state["GlobalSplitU"] <= 0:
+        reject(state, printRejectionReason, "UseScaleAB=Block requires GlobalSplitU >= 1 or -1")
+        return False
+    if state["GlobalSplitU"] != 1 and state["GlobalSplitUAlgorithm"] not in (
+            "MultipleBuffer", "MultipleBufferSingleKernel"):
+        reject(state, printRejectionReason,
+               "UseScaleAB=Block split-K requires a MultipleBuffer GlobalSplitUAlgorithm")
         return False
 
     # --- tail loop is a separate global-read path with no scale support yet ---

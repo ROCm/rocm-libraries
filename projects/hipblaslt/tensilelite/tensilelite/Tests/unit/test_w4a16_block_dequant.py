@@ -204,7 +204,8 @@ def test_block_dequant_solution_is_valid(toolchain):
         ({"glvwA": 16}, "one dword per A load"),         # >1 dword per load
         ({"problemType": {"TransposeA": False}}, "TransposeA"),
         ({"ConvertAfterDS": True}, "ConvertAfterDS"),
-        ({"GlobalSplitU": 2}, "GlobalSplitU"),
+        # Atomic split-K would round every partial; only buffered reductions.
+        ({"GlobalSplitU": 2, "GlobalSplitUAlgorithm": "SingleBuffer"}, "GlobalSplitUAlgorithm"),
         ({"StaggerU": 32}, "StaggerU"),
         # SIA=1 and PGR>=2 are each fine alone; only together do they
         # desynchronise the scale from the A data it scales.
@@ -214,6 +215,26 @@ def test_block_dequant_solution_is_valid(toolchain):
 def test_block_dequant_rejects_unsupported_shapes(toolchain, kw, reason):
     sol = _solution(toolchain, **kw)
     assert sol.get("Valid") is not True, f"expected a reject mentioning {reason!r}"
+
+
+@pytest.mark.parametrize("gsu", [2, -1])
+@pytest.mark.parametrize("algorithm", ["MultipleBuffer", "MultipleBufferSingleKernel"])
+@pytest.mark.parametrize("blockSize,depthU", [(32, 64), (128, 64)])
+def test_split_k_starts_the_scale_pointer_at_its_k_range(toolchain, gsu, algorithm, blockSize, depthU):
+    """Split-K workgroups start K at an iteration offset. The kernel forces the
+    contiguous split (GSUC), whatever the host asks, and moves the scale
+    pointers past the groups before its range; with DepthU < G the group
+    counter starts mid-group."""
+    sol = _solution(toolchain, blockSize=blockSize, depthU=depthU,
+                    GlobalSplitU=gsu, GlobalSplitUAlgorithm=algorithm)
+    assert sol.get("Valid") is True
+    _, src = _emit_solution(toolchain, sol)
+    assert "block scale: contiguous split-K" in src
+    entry = src.index("block scale: contiguous split-K")
+    offset = src.index("scaleA: groups before this split")
+    assert entry < offset < src.index("openLoopL")
+    assert "scaleA: skip groups before the split (lower)" in src
+    assert ("scaleA: position of the first iteration in its group" in src) == (depthU < blockSize)
 
 
 @pytest.mark.parametrize("kw", [{"PrefetchGlobalRead": 2}, {"ScheduleIterAlg": 1}])

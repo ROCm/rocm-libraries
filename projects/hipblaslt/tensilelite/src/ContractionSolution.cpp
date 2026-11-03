@@ -4225,7 +4225,9 @@ namespace TensileLite
             }
         }
 
-        if(!problemType.useScaleAB.empty()) // GSU dep
+        // A Block scale is applied in the GEMM kernel's dequantize; the reduction
+        // is the plain kernel and takes no scale pointers.
+        if(!problemType.useScaleAB.empty() && problemType.useScaleAB != "Block") // GSU dep
         {
             args.template append<void const*>("scaleA", inputs.scaleA);
             args.template append<void const*>("scaleB", inputs.scaleB);
