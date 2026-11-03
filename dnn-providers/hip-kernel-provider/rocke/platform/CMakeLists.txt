@@ -692,7 +692,9 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-    # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
+    # dense block-order decodes, the gfx942 dense spec/IR suite and its IR golden,
+    # the shared attention band helpers,
+    # spec-wrapper parity gate, the 3D decode split rule
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
@@ -703,6 +705,9 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_gfx942.py"
+        "tests/library/tests/test_attention_dense_gfx942_golden.py"
+        "tests/library/tests/test_attention_band_helpers.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
@@ -906,6 +911,7 @@ if(ROCKE_INSTALL_TESTS)
     # install tree.
     set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_gfx950_numeric.py"
+        "tests/library/tests/test_attention_unified_mask_gfx950_numeric.py"
         "tests/library/tests/test_extended_parity_attention.py")
     set(_ROCKE_LIBRARY_ATTENTION_GPU_TESTS "")
     foreach(_rocke_attn_gpu_test ${_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS})
@@ -957,6 +963,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
+        "tests/library/tests/test_attention_unified_mask_gfx942_numeric.py"
+        "tests/library/tests/test_attention_band_gfx942_numpy_numeric.py"
         "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"

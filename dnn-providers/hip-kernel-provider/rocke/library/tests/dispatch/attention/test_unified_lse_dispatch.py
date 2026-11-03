@@ -97,13 +97,15 @@ def test_pinned_split_kv_spec_follows_the_request(arch):
 # What a long-lived cache stored for ``_decode_request`` before emit_lse existed:
 # the unpinned spec_hash, and the split-KV pin with its spec_hash. These are
 # develop's own values (gfx950's split-KV config_key moved with the
-# additive-bias field); emit_lse must leave them exactly as develop computes them.
+# additive-bias field, gfx942's with the band fields ``causal_top_left`` /
+# ``right_bound`` its tiled specs gained); emit_lse must leave them exactly as
+# develop computes them.
 # Both split-KV config_keys moved again once decode kept K/V cacheable when it
 # fits the last-level cache: this shape's 64 MiB of K/V now records
 # kv_cache_policy="all", not "stream".
 _PRE_LSE_UNPINNED_SPEC_HASH = "65416b2a8b9ffa90"
 _PRE_LSE_PIN = {
-    "gfx942": ("splitkv_seg16_t1xb_wpenone@4bcc4e4cecb32443", "7fed9a709925a807"),
+    "gfx942": ("splitkv_seg16_t1xb_wpenone@8704739b58cc687c", "5f60850414a02ac3"),
     "gfx950": ("splitkv_seg16_t1xb_wpenone@2e6392907c305942", "2aa486d787146a27"),
 }
 
@@ -125,12 +127,13 @@ def test_pre_lse_cache_entries_still_resolve_with_lse_off(arch):
 
 # What a long-lived cache stored for ``_prefill_request`` before the 2D specs
 # had emit_lse: unpinned spec_hash, narrow pin + hash. Develop's own values
-# (gfx950's pin moved with the additive-bias field, then with use_qblock_reverse).
+# (gfx950's pin moved with the additive-bias field, then with use_qblock_reverse;
+# gfx942's with the band fields ``causal_top_left`` / ``right_bound``).
 _PRE_LSE_2D_UNPINNED_SPEC_HASH = "c7dd16a4a52afb9d"
 _PRE_LSE_2D_PIN = {
     "gfx942": (
-        "narrow_nw1_mw16_t1xb_llvm_wpenone@98141a2e646271d9",
-        "738d09721910c8ad",
+        "narrow_nw1_mw16_t1xb_llvm_wpenone@0d8c80da1e729c87",
+        "94325d86eaf48a9a",
     ),
     "gfx950": (
         "narrow_nw1_mw16_t1xb_llvm_wpenone@7a7cfcc8a5d56e43",

@@ -318,6 +318,56 @@ class TestStoredPinsAcrossReleases(unittest.TestCase):
             self.assertIsInstance(raised.exception, ValueError)
             self.assertEqual(raised.exception.tuning_id, pin.tuning_id)
 
+    def test_gfx942_tiled_pins_from_before_the_band_are_refused(self):
+        # tuning_ids the gfx942 tiled 2D / 3D candidates produced before their
+        # kernel specs gained the band fields (causal_top_left, right_bound).
+        # The new defaults move every config_key of those variants, so a pin a
+        # cache stored then must be refused and name its replacement, never
+        # rebuilt as whatever the old knobs now mean.
+        knobs_3d = (
+            ("kv_cache_policy", "all"),
+            ("use_kv_lds_swizzle", True),
+            ("use_wave_page_id_load", True),
+            ("use_wide_kv_load", True),
+        )
+        cases = (
+            (
+                "gfx942_u2d_narrow_nw1_mw16_t1xb_llvm",
+                "narrow_nw1_mw16_t1xb_llvm_wpenone@98141a2e646271d9",
+                (),
+                dict(seqlen_q=256, seqlen_k=256),
+            ),
+            (
+                "gfx942_u3d_splitkv_seg16_t1xb",
+                "splitkv_seg16_t1xb_wpenone@4db23c7158dc9333",
+                knobs_3d,
+                dict(batch=4, seqlen_q=1, seqlen_k=4096),
+            ),
+        )
+        for spec_id, stored_id, knobs, shape in cases:
+            with self.subTest(spec_id):
+                req = _req(arch="gfx942", mask_type=2, **shape)
+                pin = replace(
+                    req,
+                    algorithm=_candidate(spec_id).algorithm,
+                    spec_id=spec_id,
+                    tuning_id=stored_id,
+                    tuning_knobs=knobs,
+                )
+                new_id = attention_tuning_spec(pin, spec_id).tuning_id
+                self.assertNotEqual(new_id, stored_id)
+                self.assertEqual(new_id.split("@")[0], stored_id.split("@")[0])
+                with self.assertRaises(PinRefused) as raised:
+                    dispatch_attention(pin)
+                self.assertEqual(raised.exception.tuning_id, stored_id)
+                self.assertIn(stored_id, str(raised.exception))
+                self.assertIn(new_id, str(raised.exception))
+                # The replacement id replays.
+                self.assertEqual(
+                    dispatch_attention(replace(pin, tuning_id=new_id)).spec.tuning_id,
+                    new_id,
+                )
+
     def test_the_display_stem_is_not_compared(self):
         stored = tuning_spec_with_knobs(_req(), _DENSE, {"pv_priority": 2})
         restemmed = replace(

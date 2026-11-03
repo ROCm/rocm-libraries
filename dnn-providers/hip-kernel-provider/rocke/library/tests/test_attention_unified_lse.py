@@ -486,16 +486,22 @@ def test_runner_without_lse_keeps_the_2d_graph(runner):
     assert runner.graphed == 1 and runner.vals2d is None
 
 
+# A mask no LSE-writing body serves on any arch: ALiBi is only defined for causal
+# masks, so a right bound with ALiBi is declined by the mask-semantics gate.
+_UNSERVABLE_MASK = dict(right_bound=8, use_alibi=True)
+
+
 def test_auto_lse_refusal_names_why_both_lse_paths_declined(runner):
-    """gfx942 tiled 2D and split-KV both decline the top-left mask; the scalar
-    tail writes no LSE, so the refusal names both reasons and nothing launches."""
+    """gfx942 tiled 2D and split-KV both decline a right bound with ALiBi; the
+    scalar tail writes no LSE, so the refusal names both reasons and nothing
+    launches."""
     prefill = _problem(
         total_q=256,
         num_seqs=1,
         max_seqlen_q=256,
         max_seqlen_k=256,
         emit_lse=True,
-        causal_top_left=True,
+        **_UNSERVABLE_MASK,
     )
     assert prefill.select_path() == "2d"
     with pytest.raises(NotImplementedError, match="LSE") as refused:
@@ -504,16 +510,33 @@ def test_auto_lse_refusal_names_why_both_lse_paths_declined(runner):
     assert runner.red_vals is None and runner.vals2d is None
 
 
+def test_runner_serves_top_left_lse_through_tiled_2d(runner):
+    """gfx942 tiled 2D implements the top-left band and writes LSE, so a
+    top-left prefill that asks for LSE launches the 2D kernel with the buffer."""
+    lse = object()
+    _run(_prefill_problem("gfx942", emit_lse=True, causal_top_left=True), lse=lse)
+    assert runner.vals2d["lse_ptr"] is lse
+    assert runner.red_vals is None
+
+
 def test_runner_reports_why_split_kv_declined_an_lse_request(runner):
-    """``auto`` routes this decode to split-KV, whose gfx942 gate declines the
-    top-left mask. The refusal must name that reason, not blame the 2D path."""
-    top_left = _problem(emit_lse=True, causal_top_left=True)
-    assert top_left.select_path() == "3d"
-    with pytest.raises(NotImplementedError, match="split-KV.*top-left") as refused:
-        _run(top_left, lse=object())
+    """``auto`` routes this decode to split-KV, which declines a mask it does
+    not serve. The refusal must name that reason, not blame the 2D path."""
+    unservable = _problem(emit_lse=True, **_UNSERVABLE_MASK)
+    assert unservable.select_path() == "3d"
+    with pytest.raises(NotImplementedError, match="split-KV.*ALiBi") as refused:
+        _run(unservable, lse=object())
     assert "tiled 2D:" in str(refused.value)
     assert runner.vals2d is None
     assert runner.red_vals is None
+
+
+def test_runner_serves_top_left_lse_through_split_kv(runner):
+    """gfx942 split-KV implements the top-left band, so a top-left decode that
+    asks for LSE launches the reduce with the LSE buffer instead of refusing."""
+    lse = object()
+    _run(_problem(emit_lse=True, causal_top_left=True), lse=lse)
+    assert runner.red_vals["lse_ptr"] is lse
 
 
 def _gfx942_d256_bs32_prefill(**overrides):

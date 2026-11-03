@@ -15,6 +15,7 @@ from typing import Mapping, Optional, Tuple
 from kernels.common.attention_unified import (
     _GFX942_4WARP_LSE_REFUSAL,
     UnifiedAttentionProblem,
+    band_spec_fields,
     _kv_block_bytes,
     _kv_cache_policy_3d,
     _num_segments,
@@ -119,20 +120,6 @@ def resolve_num_segments(
     return _num_segments(problem, arch) if num_segments == 0 else num_segments
 
 
-def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
-    """Mask spec fields; only the gfx950 tiled specs declare them."""
-    if problem.default_mask:
-        return {}
-    if arch != "gfx950":
-        raise ValueError(f"non-default attention mask is gfx950-only, got {arch}")
-    fields: dict = {}
-    if problem.causal_top_left:
-        fields["causal_top_left"] = True
-    if problem.right_bound != 0:
-        fields["right_bound"] = problem.right_bound
-    return fields
-
-
 def _semantic_fields(
     problem: UnifiedAttentionProblem, builder_kind: str = "tiled"
 ) -> dict:
@@ -229,7 +216,7 @@ def make_explicit_attention_2d_spec(
     knobs = _checked_knobs(config.knob_dict())
     spec = spec_type(
         **_semantic_fields(problem, config.builder_kind),
-        **_mask_fields(problem, arch),
+        **band_spec_fields(problem, arch),
         num_warps=int(config.num_warps),
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
@@ -327,7 +314,7 @@ def make_explicit_attention_3d_specs(
         )
     segment = spec_type(
         **semantic,
-        **_mask_fields(problem, arch),
+        **band_spec_fields(problem, arch),
         num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
         tile_size_override=(None if tile == int(problem.block_size) else int(tile)),

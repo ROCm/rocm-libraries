@@ -49,6 +49,30 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/unified_attention_scalar_lower_
                rocke_unified_attention_scalar_lower_to_llvm)
 endif()
 
+# The gfx950 tiled 2D, fastKV register-P and tiled 3D C entry points refuse
+# causal_top_left (top-left causal is Python-only on gfx950) and still lower the
+# default spec. The same refusals are tested through the pybind binding, which
+# CI does not build; this calls the C entries directly.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_tiled_band_rejects.cpp")
+  add_executable(rocke_attention_tiled_band_rejects
+                 instances/attention_tiled_band_rejects.cpp)
+  target_link_libraries(rocke_attention_tiled_band_rejects PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_tiled_band_rejects PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_tiled_band_rejects
+           COMMAND rocke_attention_tiled_band_rejects)
+  set_tests_properties(rocke_attention_tiled_band_rejects
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_tiled_band_rejects)
+  set_target_properties(rocke_attention_tiled_band_rejects
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_tiled_band_rejects
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_tiled_band_rejects)
+endif()
+
 # Spec-validation parity for the two C++ fused-MoE mega builders: the
 # whole-kernel LDS budget, the scaled-f8f6f4 arch gate and the fp8 wave-size
 # gate. The byte-identity gate only compares specs both engines accept, so an

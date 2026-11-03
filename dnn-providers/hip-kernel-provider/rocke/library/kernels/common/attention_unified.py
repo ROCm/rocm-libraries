@@ -30,6 +30,7 @@ from rocke.core.ir import (
 )
 from rocke.helpers.compile import compile_kernel
 from rocke.runtime.launcher import (
+    DeviceMem,
     KernelLauncher,
     LaunchConfig,
     LaunchSummary,
@@ -61,6 +62,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
+from ._attention_band import check_right_bound, diagonal_offset, right_bound_tag
 from ._lse_store import validate_unified_lse
 
 # Alias the promoted log2-domain softcap helper under the local name used by
@@ -144,7 +146,7 @@ class UnifiedAttentionProblem:
     # implemented, hence the default), True = top-left (``context_len = 0``); at
     # ``q_len == kv_len`` they coincide. The defaults are the existing causal body.
     # Anything else (top-left, a right bound other than 0) is implemented on gfx950
-    # (tiled 2D/3D) and in the scalar kernels; other arches reject it.
+    # and gfx942 (tiled 2D/3D) and in the scalar kernels; other arches reject it.
     causal_top_left: bool = False
     right_bound: int = 0
     # Optional FP32 natural-log softmax normalizer, [total_q, num_query_heads, 1].
@@ -158,10 +160,7 @@ class UnifiedAttentionProblem:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
-        if self.right_bound < -1:
-            raise ValueError(
-                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
-            )
+        check_right_bound(self.right_bound)
         # Changes the kernel ABI (4 appended params), so a truthy non-bool such as
         # "false" must not silently enable it.
         if type(self.use_additive_bias) is not bool:
@@ -550,15 +549,44 @@ def _reject_mask_semantics(
     return None
 
 
+# Arches whose unified tiled kernels implement the whole attention band (top-left
+# and a right bound). The one list: dispatch reads it too (``_has_no_mask_kernel``).
+_BAND_KERNEL_ARCHES = ("gfx950", "gfx942")
+
+
 def _reject_mask_on_arch(
     problem: UnifiedAttentionProblem, arch: str
 ) -> Optional[Tuple[bool, str]]:
-    """Only gfx950's tiled kernels implement non-default masks (see the fields)."""
-    if not problem.default_mask and arch != "gfx950":
+    """Only gfx950's and gfx942's tiled kernels implement non-default masks (see the
+    fields). On gfx942 the 4-warp GQA cohorts decline ``right_bound != 0`` in
+    ``_gfx942_4warp_eligible``, so such a problem builds the generic tiled 2D spec."""
+    if not problem.default_mask and arch not in _BAND_KERNEL_ARCHES:
         return False, (
             f"{arch} tiled attention does not implement {_mask_label(problem)} masks"
         )
     return None
+
+
+def band_spec_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
+    """Band fields (``causal_top_left`` / ``right_bound``) for a tiled spec.
+
+    Set only off the default mask, so the default bottom-right causal mask builds
+    exactly the spec (and IR) it always did. A non-default mask on an arch without
+    band kernels raises (the tiled gates reject it first, see
+    ``_reject_mask_on_arch``).
+    """
+    if problem.default_mask:
+        return {}
+    if arch not in _BAND_KERNEL_ARCHES:
+        raise ValueError(
+            f"non-default attention mask is gfx950/gfx942-only, got {arch}"
+        )
+    fields: dict = {}
+    if problem.causal_top_left:
+        fields["causal_top_left"] = True
+    if problem.right_bound != 0:
+        fields["right_bound"] = problem.right_bound
+    return fields
 
 
 _LSE_ARCHES = ("gfx942", "gfx950")
@@ -1128,6 +1156,9 @@ def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> boo
         and not problem.use_sinks
         and not _has_score_bias(problem)
         and problem.max_seqlen_q > 1
+        # The 4-warp builder implements top-left but not a right bound other than
+        # 0 (lookahead / unbounded); those fall to the generic tiled 2D spec.
+        and problem.right_bound == 0
         # The natural-QK builder uses i32 paged element addressing (like the
         # shipped default builder). Exclude caches > 2 GiB, which need the i64
         # path -- they fall back to the correct default builder.
@@ -4554,8 +4585,24 @@ class _Attention3DGraph:
     stream: int
 
 
+def _is_raw_device_buffer(x) -> bool:
+    """Whether ``x`` is a raw device buffer (a ``data_ptr()`` duck type such as a
+    ``rocke.runtime.DeviceMem`` wrapper) rather than a torch-style tensor. Torch
+    tensors -- and the torch fakes the host tests install -- carry a device;
+    raw buffers expose ``data_ptr()`` but no device (absent or ``None``), so they
+    take the torch-free launch path. Anything without ``data_ptr`` (e.g. the
+    ``None`` placeholders of host-only routing tests) is not a raw buffer."""
+    return hasattr(x, "data_ptr") and getattr(x, "device", None) is None
+
+
 def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
     """Keep allocation and complete pair submission on the owner's stream."""
+    if execution is None and _is_raw_device_buffer(q):
+        # Raw device buffers (``data_ptr()`` duck types, e.g. rocke.runtime
+        # DeviceMem wrappers): no torch device, stream or allocator to bind, so
+        # launch eagerly on the caller's HIP stream with HIP-allocated scratch.
+        kwargs["use_graph"] = False
+        return _run_3d_tiled_on_stream(q=q, stream=int(stream), **kwargs)
     import torch
     from rocke.runtime.torch_interop import resolve_stream
 
@@ -4731,11 +4778,21 @@ def _run_3d_tiled_on_stream(
         tuning_spec=tuning_spec,
         strided_kv=kv_cache_layout is not None,
     )
-    import torch
-
     # External and internal captures own separate graph-private allocation.
     # Eager reuse is safe only under the owner's whole-pair submission lock.
-    if execution is None or capturing or execution._workspace is None:
+    if _is_raw_device_buffer(q):
+        # Raw device buffers (see ``_run_3d_tiled``). The launch fences or
+        # retains its arguments until the stream drains, so the scratch outlives
+        # the kernels. gfx1250 needs filled scratch, which DeviceMem cannot do.
+        if _launch_arch == "gfx1250":
+            raise NotImplementedError("gfx1250 3D attention requires torch tensors")
+        workspace = tuple(
+            DeviceMem(spec.nbytes())
+            for spec in _attention_3d_workspace_specs(problem, num_segments, None)
+        )
+    elif execution is None or capturing or execution._workspace is None:
+        import torch
+
         workspace = tuple(
             torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
             for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
@@ -6101,6 +6158,11 @@ def run_unified_attention_torch(
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
 
+    The paged 2D, 3D and scalar paths also accept raw device buffers instead of
+    torch tensors: objects with ``data_ptr()``, ``stride(dim)`` and ``shape``
+    (for example a ``rocke.runtime.DeviceMem`` wrapper). Those launch eagerly on
+    ``stream`` as given, with no internal graph replay, and need no torch.
+
     ``lse`` is the optional caller-owned natural-log softmax normalizer, a
     contiguous FP32 ``[total_q, num_query_heads, 1]`` tensor, written only when
     ``problem.emit_lse`` is set. The gfx942/gfx950 split-KV (3D) and tiled 2D
@@ -6428,6 +6490,7 @@ def run_unified_attention_torch(
             tuning_spec is None
             and not problem.emit_lse
             and _enable_2d_graph_replay(problem, _launch_arch)
+            and not _is_raw_device_buffer(q)
             and not _torch_stream_capturing()
         ):
             graphed = _run_2d_graphed(
@@ -6613,7 +6676,7 @@ def _right_bound_flag(p: UnifiedAttentionProblem) -> dict:
     """Kernel-name token for a non-causal right bound: ``rbu`` (unbounded) or ``rb<R>``."""
     if p.right_bound == 0:
         return {}
-    return {("rbu" if p.right_bound < 0 else f"rb{p.right_bound}"): True}
+    return {right_bound_tag(p.right_bound): True}
 
 
 def _scalar_context_len(b: IRBuilder, p: UnifiedAttentionProblem, kv_len, q_len):
@@ -6621,9 +6684,7 @@ def _scalar_context_len(b: IRBuilder, p: UnifiedAttentionProblem, kv_len, q_len)
 
     bottom-right: ``kv_len - q_len``; top-left: 0.
     """
-    if p.causal_top_left:
-        return b.const_i32(0)
-    return b.sub(kv_len, q_len)
+    return diagonal_offset(b, p.causal_top_left, kv_len, q_len)
 
 
 def _scalar_band_ok(

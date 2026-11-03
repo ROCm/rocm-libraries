@@ -375,6 +375,23 @@ _CONFIGS = {
         use_decode_grid=True,
         waves_per_eu=2,
     ),
+    # Top-left causal (seqlen_q != seqlen_k): context_len = 0, so the causal
+    # limit, KV-loop bound, sliding window and ALiBi + qq_bias offsets follow it.
+    23: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=1024,
+        has_softcap=False,
+        use_alibi=True,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+        causal_top_left=True,
+    ),
 }
 
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).

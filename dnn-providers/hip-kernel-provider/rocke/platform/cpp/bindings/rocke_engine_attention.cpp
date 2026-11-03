@@ -782,8 +782,20 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== gfx942 / gfx950 tiled-2d ======================== */
 
+/* right_bound (the attention band's right edge) is a Python-only spec field: the
+ * C struct has none, so a non-zero value must fail loudly instead of silently
+ * building the causal (right_bound == 0) kernel. */
+static void reject_right_bound(const py::dict& d, const char* fn)
+{
+    int rb = a_int(d, "right_bound", 0);
+    if(rb != 0)
+        throw std::runtime_error(std::string(fn) + ": right_bound=" + std::to_string(rb)
+                                 + " is not supported by the C++ engine (Python-only)");
+}
+
 rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
 {
+    reject_right_bound(d, "t2d_build");
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
@@ -823,6 +835,7 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
     s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
     s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
+    s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     /* Every other field the C struct shares with the Python spec. A field left
      * out here silently keeps its C default, so the native builder would build
@@ -1002,6 +1015,7 @@ std::vector<std::string> t950_verify(const py::dict& d, const std::string& arch)
 
 rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
 {
+    reject_right_bound(d, "fkv_build");
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
     /* make_base() defaults from the standalone emitter */
     s.head_size = a_int(d, "head_size", 64);
@@ -1029,6 +1043,8 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
         = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
+    /* read so the builder's gfx942-only causal_top_left reject is reachable */
+    s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     std::string v;
     if(a_str(d, "dtype", v))
@@ -1108,6 +1124,7 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 
 rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
 {
+    reject_right_bound(d, "t3d_build");
     rocke_unified_attention_3d_tiled_spec_t s = rocke_unified_attention_3d_tiled_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
@@ -1136,6 +1153,7 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.use_decode_grid = a_bool(d, "use_decode_grid", s.use_decode_grid);
     s.use_kv_lds_swizzle = a_bool(d, "use_kv_lds_swizzle", s.use_kv_lds_swizzle);
     s.use_wave_page_id_load = a_bool(d, "use_wave_page_id_load", s.use_wave_page_id_load);
+    s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1454,6 +1472,7 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["use_i64_kv_addr"] = s.use_i64_kv_addr;
     d["use_k_single_buffer"] = s.use_k_single_buffer;
     d["use_fp8_mfma_qk"] = s.use_fp8_mfma_qk;
+    d["causal_top_left"] = s.causal_top_left;
     d["emit_lse"] = s.emit_lse;
     return d;
 }

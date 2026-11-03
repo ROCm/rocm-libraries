@@ -31,8 +31,8 @@ from .candidate import (
     DENSE_PERSIST_ALGORITHM,
     make_dense_candidate,
 )
-from .common import AttentionRequest, normalize_band
-from .dense_rules import dense_kv_segments, dense_wave_segments
+from .common import AttentionRequest
+from .dense_rules import dense_band, dense_kv_segments, dense_wave_segments, is_ragged
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -111,46 +111,6 @@ GFX950_DENSE_VARIANT_BY_NAME = {v.candidate_name: v for v in GFX950_DENSE_VARIAN
 GFX950_DENSE_VARIANT_BY_SPEC_ID = {v.spec_id: v for v in GFX950_DENSE_VARIANTS}
 
 
-_DENSE_BR_BAND_ERROR = (
-    "dense: a window or lookahead with bottom-right alignment and "
-    "seqlen_q != seqlen_k is not implemented"
-)
-
-
-def _is_ragged(sq: int, sk: int, block_m: int, block_n: int) -> bool:
-    """Lengths that are not tile multiples run the on-chip-padded ragged body (any
-    mask: the padded keys / query rows are handled by the key-pad mask and the
-    guarded store, not by the diagonal)."""
-    return sq % block_m != 0 or sk % block_n != 0
-
-
-def _dense_band(req: AttentionRequest) -> Tuple[bool, int, bool]:
-    """``(causal, right_bound, moving_bottom_right)`` the dense body computes for
-    ``req``. Raises ``ValueError`` for a band dense cannot serve.
-
-    ``causal`` False is the unbounded right side; ``right_bound`` is the lookahead
-    (0 = plain causal). The dense body anchors its window / lookahead on the
-    top-left diagonal; only the plain causal mask has a compile-time shifted
-    (bottom-right) variant, so a window or lookahead at bottom-right alignment with
-    ``seqlen_q != seqlen_k`` is rejected here instead of being computed top-left.
-    """
-    band = normalize_band(req, uniform_lengths=True)
-    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    window = int(req.sliding_window)
-    causal = band.right_bound is not None
-    right_bound = band.right_bound or 0
-    if band.top_left or sq == sk:
-        return causal, right_bound, False  # the diagonals coincide, or top-left
-    # Bottom-right alignment with seqlen_q != seqlen_k.
-    if not causal:
-        if window > 0:
-            raise ValueError(_DENSE_BR_BAND_ERROR)
-        return False, 0, False  # full attention: alignment is moot
-    if window > 0 or right_bound > 0:
-        raise ValueError(_DENSE_BR_BAND_ERROR)
-    return True, 0, True  # plain causal, compile-time shifted diagonal
-
-
 def _default_block_m(req: AttentionRequest, variant: Gfx950DenseVariant) -> int:
     """Query tile of the variant's default spec.
 
@@ -176,7 +136,7 @@ def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
     the on-chip ragged path."""
     block_m = int(knobs.get("block_m", base.block_m))
     block_n = int(knobs.get("block_n", base.block_n))
-    ragged = _is_ragged(int(base.seqlen_q), int(base.seqlen_kv), block_m, block_n)
+    ragged = is_ragged(int(base.seqlen_q), int(base.seqlen_kv), block_m, block_n)
     return {"ragged": ragged}
 
 
@@ -213,11 +173,11 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bn = int(geometry["block_n"])
-    causal, right_bound, moving_bottom_right = _dense_band(req)
+    causal, right_bound, moving_bottom_right = dense_band(req)
     # The sliding-window tile keeps its own geometry; otherwise the shared tile,
     # halved on an under-filled wide-DMA grid.
     bm = int(geometry["block_m"]) if window_tile else _default_block_m(req, variant)
-    ragged = _is_ragged(sq, sk, bm, bn)
+    ragged = is_ragged(sq, sk, bm, bn)
     kv_segments = 1
     if (
         moving_bottom_right
@@ -237,7 +197,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         if -(-sq // bm) * batch_heads < cus:
             small = DENSE_TILE_GEOMETRIES["bm128"]
             sbm, sbn = int(small["block_m"]), int(small["block_n"])
-            if not _is_ragged(sq, sk, sbm, sbn):
+            if not is_ragged(sq, sk, sbm, sbn):
                 bm, bn, ragged = sbm, sbn, False
                 kv_segments = dense_kv_segments(
                     -(-sq // bm) * batch_heads, cus, max_segments=max_seg
@@ -250,7 +210,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             )
     if ragged and variant.wide_lds_dma:
         for tile in DENSE_TILE_GEOMETRIES.values():
-            if not _is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
+            if not is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
                 bm, bn, ragged = int(tile["block_m"]), int(tile["block_n"]), False
                 break
     return Gfx950AttentionDenseSpec(
@@ -298,7 +258,7 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     try:
-        causal, right_bound, moving_bottom_right = _dense_band(req)
+        causal, right_bound, moving_bottom_right = dense_band(req)
     except ValueError:
         return ()
     geometry = DENSE_TILE_GEOMETRIES[_DENSE_TILE]

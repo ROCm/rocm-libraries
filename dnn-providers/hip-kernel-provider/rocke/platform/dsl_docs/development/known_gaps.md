@@ -18,9 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green, with one exception: §5 (additive bias) covers a
-Python-engine-only feature that *is* reachable from a valid config — see that
-section for why the gate stays green anyway. They fall into three kinds:
+gate is fully green, with two exceptions: §5 (additive bias) and §9 (attention
+band) cover Python-engine-only features that *are* reachable from a valid
+config — see those sections for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -322,6 +322,49 @@ retiring the C engine. Until then, keep dense emission changes gated by the
 cross-engine parity test and the representative golden above.
 
 **Sign-off:** rocKE attention maintainer, 2026-10-30.
+
+---
+
+## 9. Unified attention band (`right_bound`, non-causal windows) — Python engine only
+
+**Subsystem:** `instances/gfx942/attention_tiled_{2d,3d}*`,
+`instances/gfx950/attention_tiled_{2d,3d}*`, `cpp/bindings/rocke_engine_attention.cpp`
+
+The attention band generalizes the causal mask to a `[left, right]` diagonal
+window: `causal_top_left` moves the diagonal, `right_bound` sets its right edge
+(`-1` unbounded, `> 0` lookahead), and `sliding_window` with either gives the
+non-causal windows. Only part of it has a C++ twin.
+
+| Body | C++ twin | Python only |
+|---|---|---|
+| gfx942 tiled 2D / 3D | `causal_top_left` (with and without `sliding_window`) | `right_bound != 0` and every window it enables |
+| gfx950 tiled 2D / 3D, scalar 2D | — | the whole band, including `causal_top_left` |
+
+The C++ specs carry no `right_bound`, so a C-built kernel is always the
+`right_bound == 0` body. Nothing builds a wrong kernel silently:
+
+- the pybind dict readers `t2d_build`, `t3d_build` and `fkv_build` raise on any
+  `right_bound != 0`;
+- the gfx950 C++ tiled 2D / 3D entry points (and the fastKV register-P wrapper)
+  reject `causal_top_left`.
+
+[`test_attention_tiled_binding_band_rejects.py`](../../tests/instances/test_attention_tiled_binding_band_rejects.py) pins both
+rejections. The C++ provider cannot request either field, so Python and C++
+selection agree on every problem the provider can express, and the gate stays
+green.
+
+**What is gated:** the Python IR of each band variant is pinned by representative
+golden cases in [`rocke_ir_parity_harness.py`](../../tests/instances/rocke_ir_parity_harness.py) (`attention/gfx942/{2d,3d}_*_{top_left,rb16,rbu,left_only_sw64,two_sided_sw64_rb16}`,
+the gfx950 `2d_*`, `3d_*` and `scalar2d_*` band cases, and the gfx942 4-warp GQA
+`*_top_left` cases), and each case asserts the kernel-name tag of the body it
+pins.
+
+**What closes it:** a `right_bound` field on the C tiled 2D / 3D spec structs and
+the band body (row band, K-tile range, empty-row handling) ported into the gfx942
+and gfx950 C++ twins, the gfx950 `causal_top_left` twin, the binding readers
+switched from rejecting to forwarding the field, and band configs added to the
+`gfx9{42,50}_attention_tiled_{2d,3d}_emit` parity emitters so
+`check_byte_identity` gates them. This is a tracked follow-up.
 
 ---
 

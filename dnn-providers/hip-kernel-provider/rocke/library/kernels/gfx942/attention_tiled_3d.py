@@ -38,6 +38,12 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._attention_band import (
+    BandMask,
+    check_right_bound,
+    diagonal_offset,
+    tiled_band_name_parts,
+)
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
@@ -166,6 +172,14 @@ class UnifiedAttention3DTiledSpec:
     # so no page-table load sits on the KV loop's critical path. Paged K/V;
     # implemented for fp16/bf16, which can be extended to the fp8 loader.
     use_wave_page_id_load: bool = False
+    # Top-left causal (unshifted diagonal, ``context_len = 0``); see the gfx950
+    # spec. ALiBi / qq_bias offsets follow ``context_len``. At ``q_len == 1``
+    # the single query row attends only key 0 -- correct by definition.
+    causal_top_left: bool = False
+    # Right bound of the attention band; see the gfx950
+    # ``UnifiedAttention2DTiledSpec.right_bound`` (0 = causal, R > 0 = R keys of
+    # lookahead, -1 = unbounded).
+    right_bound: int = 0
 
     def __post_init__(self):
         if self.num_segments < 1:
@@ -180,6 +194,11 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError(
                 "strided KV requires fp16/bf16 async loads without paged i64 addressing"
             )
+        check_right_bound(
+            self.right_bound,
+            use_alibi=self.use_alibi,
+            use_qq_bias=self.use_qq_bias,
+        )
         if self.use_i64_kv_addr:
             raise NotImplementedError(
                 "gfx942 tiled 3D kernel does not support use_i64_kv_addr "
@@ -265,6 +284,8 @@ class UnifiedAttention3DTiledSpec:
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
             "kvswz" if self.use_kv_lds_swizzle else "",
             "wpid" if self.use_wave_page_id_load else "",
+            *tiled_band_name_parts(self.causal_top_left, self.right_bound),
+            # Last: the C++ twin appends ``_stridedkv`` after its name function.
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -489,7 +510,13 @@ def build_unified_attention_3d_tiled(
         q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(seq_len, cur_batch_q_len)
+    context_len = diagonal_offset(b, spec.causal_top_left, seq_len, cur_batch_q_len)
+
+    # Right bound of the band (see the spec field). ``band_mask`` emits every compare
+    # derived from it (kernels.common._attention_band); all of them are the
+    # pre-existing causal IR when ``RIGHT == 0``.
+    RIGHT = spec.right_bound
+    band_mask = BandMask(b, RIGHT)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
     with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
@@ -629,8 +656,9 @@ def build_unified_attention_3d_tiled(
 
     # ---------------- Per-segment tile range ----------------
     bm1_div_nqk = (BLOCK_M - 1) // NQK
-    msp_raw = b.add(b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1))
-    max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
+    max_seq_prefix_len = band_mask.max_prefix_len(
+        context_len, qb_start_pos, bm1_div_nqk, seq_len
+    )
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
     tile_start = b.mul(seg_idx, tps)
@@ -1160,9 +1188,9 @@ def build_unified_attention_3d_tiled(
                     b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))),
                     tok_in_blk,
                 )
-                causal_ok = b.cmp_le(col_abs, causal_lim)
+                causal_ok = band_mask.upper_ok(col_abs, causal_lim)
                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                m_ok = band_mask.row_mask(row_ok, causal_ok, in_prefix)
                 if SLIDING_WINDOW > 0:
                     dist = b.sub(causal_lim, col_abs)
                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
