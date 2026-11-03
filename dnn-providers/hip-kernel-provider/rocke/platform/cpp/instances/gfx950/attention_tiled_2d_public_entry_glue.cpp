@@ -1022,7 +1022,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
                                                     char* out,
                                                     size_t out_cap)
 {
-    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
+    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32], smxil_buf[32];
     int nqh, nkv;
 
@@ -1031,6 +1031,9 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
 
     nqh = s->num_query_heads;
     nkv = s->num_kv_heads;
+    /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
+    if(nkv <= 0)
+        return ROCKE_ERR_VALUE;
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
@@ -1040,6 +1043,11 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
         t_buf[0] = '\0';
     /* Head counts are kernargs; only the GQA ratio is baked. */
     snprintf(hkv_buf, sizeof(hkv_buf), "g%d", nqh / nkv);
+    /* Except on the fast paged-KV descriptor path, whose shifts bake them. */
+    if(s->use_fast_paged_kv_desc)
+        snprintf(fhkv_buf, sizeof(fhkv_buf), "h%dkv%d", nqh, nkv);
+    else
+        fhkv_buf[0] = '\0';
     if(s->kv_storage_dtype)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
@@ -1082,6 +1090,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             b_buf,
             t_buf,
             hkv_buf,
+            fhkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
             /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */

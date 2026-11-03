@@ -523,6 +523,9 @@ static rocke_status_t
 
     nqh = s->num_query_heads;
     nkv = s->num_kv_heads;
+    /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
+    if(nkv <= 0)
+        return ROCKE_ERR_VALUE;
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);

@@ -992,7 +992,10 @@ def test_i64_kv_addressing_is_in_the_2d_kernel_name(routing_env, arch, num_cus):
     assert names[0].replace("_bf16_", "_bf16_i64_", 1) == names[1]
 
 
-def test_gfx942_fast_paged_kv_desc_names_its_head_counts():
+@pytest.mark.parametrize(
+    "spec_cls", [Gfx942Spec2D, Gfx950Spec2D], ids=["gfx942", "gfx950"]
+)
+def test_fast_paged_kv_desc_names_its_head_counts(spec_cls):
     # The fast paged-KV descriptor body shifts by a 64/8 K/V stride instead of
     # reading the head-count kernargs, so its name must not share the plain
     # g8 symbol that serves every head pair at that ratio.
@@ -1008,7 +1011,7 @@ def test_gfx942_fast_paged_kv_desc_names_its_head_counts():
         sliding_window=0,
         has_softcap=False,
     )
-    plain = Gfx942Spec2D(**base).kernel_name()
-    fast = Gfx942Spec2D(**base, use_fast_paged_kv_desc=True).kernel_name()
+    plain = spec_cls(**base).kernel_name()
+    fast = spec_cls(**base, use_fast_paged_kv_desc=True).kernel_name()
     assert "h64kv8" not in plain.split("_")
     assert fast == plain.replace("_g8_", "_g8_h64kv8_", 1) + "_fastkvdesc"

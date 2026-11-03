@@ -394,6 +394,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
     snprintf(b_part, sizeof(b_part), "b%d", s->block_size);
     /* Head counts are kernargs; only the GQA ratio is baked. */
+    if(s->num_kv_heads <= 0)
+    {
+        return -1;
+    }
     snprintf(h_part, sizeof(h_part), "g%d", s->num_query_heads / s->num_kv_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
