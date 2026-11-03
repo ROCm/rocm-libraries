@@ -3,7 +3,7 @@
 """On-GPU bounds guard for the gfx942 4-warp GQA D128 body on decode.
 
 The D128 body of ``build_gfx942_4warp_gqa`` reads a whole Q block (128 rows, or
-32 tokens when folded) and whole KV tiles. Without its ``q_last`` / ``k_last``
+32 tokens when folded) and whole KV tiles. Without its Q-row and K/V-page
 clamps, a one-token decode sequence reads up to 127 Q rows past its token -- off
 the end of the Q tensor for the last sequences, which faulted the MI325X decode
 sweep at this file's shape -- and a KV length that is not a tile multiple reads

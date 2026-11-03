@@ -6191,12 +6191,16 @@ def build_gfx942_4warp_gqa(
     HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
+    if BS & (BS - 1):
+        raise NotImplementedError("4-warp GQA kernel needs a power-of-two block_size")
+    BS_LOG2 = BS.bit_length() - 1
     HD128 = HD == 128
     # Double-buffer prefetch pipeline (BN=32 LDS-staged K/V + swizzle) is D128 AND bs<=32.
     # bs64 forces BN>=64 (1 block/tile min); BN=64 double-buffer overflows 64KB LDS, so
     # bs64-D128 runs the single-buffer (D256-style) path at BN=64 (bs64 extension).
     HD128_PIPE = HD128 and BS <= 32
     BN = 32 if HD128_PIPE else 64
+    BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8() if spec.dtype == "bf16" else MfmaAtom.f16_32x32x8()
     APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
     NKEYT = BN // 32
@@ -6339,21 +6343,23 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
-    # Every K/V key is bounded by the last valid key and every Q row by the last
-    # token of its sequence, as in the lean body: the KV tiles and the TOKBLK-row Q
-    # block otherwise read block-table entries, K/V rows and Q rows past the
-    # sequence when its length is not a tile multiple (decode reads 127 Q rows past
-    # a 1-token sequence, off the end of the Q tensor). Clamped keys are masked to
-    # -inf (P = 0) and clamped rows are never stored, so only the addresses change.
-    k_last = b.sub(klen, b.const_i32(1))
+    # Every Q row is bounded by the last token of its sequence and every K/V page by
+    # its last page: the TOKBLK-row Q block and the KV tiles otherwise read Q rows
+    # and block-table entries past the sequence when its length is not a tile
+    # multiple (decode reads 127 Q rows past a 1-token sequence, off the end of the
+    # Q tensor). Unlike the lean body this clamps the page, not the key, so the
+    # per-lane page/offset split stays out of the KV loop (a per-tile key clamp
+    # cost 3-7% on the fold cohort); keys past klen read rows of the last valid
+    # page. Those keys are masked to -inf (P = 0) and clamped rows are never
+    # stored, so only the addresses change.
+    k_last_page = b.lshr(b.sub(klen, b.const_i32(1)), b.const_i32(BS_LOG2))
     q_last = b.sub(cu_q_stop, b.const_i32(1))
 
     def phys_key(kv, keytile):
-        key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
-        key = b.select(b.cmp_lt(key, k_last), key, k_last)
-        lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
+        page = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+        lblk = b.add(b.mul(sid, bt_stride_p), b.smin(page, k_last_page))
         pb = b.global_load_i32(BT, lblk)
-        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
+        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
 
     sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
     ninf = b.const_f32(-1e30)

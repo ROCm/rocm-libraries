@@ -147,7 +147,7 @@ def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window, bs):
 
     ``bs`` matches the block sizes the routing anchor above asserts are
     fold-eligible, so everything the predicate ships is numerically checked.
-    The two are NOT redundant: BN // BS is the number of paged KV blocks
+    The two are NOT redundant: BPT = BN // BS is the number of paged KV blocks
     consumed per 32-key tile, so bs=32 walks one block-table entry per tile and
     bs=16 walks two -- a different gather, and a stride/index error in the
     second entry is invisible at bs=32.
