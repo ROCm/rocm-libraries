@@ -162,6 +162,40 @@ class TestAttentionBand(unittest.TestCase):
             False,
             AttentionBand(256, None, TL),
         ),
+        # At bottom-right alignment the one query row sits on the diagonal at its
+        # last key, so an unbounded right side is the causal one: the bottom-right
+        # causal window strided decode serves. Dense (uniform lengths) keeps it.
+        "single_token_bottom_right_window_is_causal": (
+            dict(
+                mask_type=NO_MASK,
+                sliding_window=256,
+                seqlen_q=1,
+                diagonal_alignment=BR_ALIGN,
+            ),
+            False,
+            AttentionBand(256, 0, BR),
+        ),
+        "gfx942_single_token_bottom_right_window_is_causal": (
+            dict(
+                mask_type=NO_MASK,
+                arch="gfx942",
+                sliding_window=256,
+                seqlen_q=1,
+                diagonal_alignment=BR_ALIGN,
+            ),
+            False,
+            AttentionBand(256, 0, BR),
+        ),
+        "single_token_bottom_right_window_dense_keeps_its_band": (
+            dict(
+                mask_type=NO_MASK,
+                sliding_window=256,
+                seqlen_q=1,
+                diagonal_alignment=BR_ALIGN,
+            ),
+            True,
+            AttentionBand(256, None, BR),
+        ),
         "two_sided_bottom_right": (
             dict(
                 mask_type=NO_MASK,
@@ -473,7 +507,7 @@ class TestBandNormalization(unittest.TestCase):
 
     def test_dense_still_folds_equal_length_alignment(self):
         # Dense takes uniform lengths, so the alignments really do coincide there.
-        from dispatch.attention.gfx950_dense import _dense_band
+        from dispatch.attention.dense_rules import dense_band as _dense_band
 
         eq = dict(seqlen_q=1024, seqlen_k=1024)
         for kw in (
@@ -548,6 +582,51 @@ class TestBandNormalization(unittest.TestCase):
                 )
                 self.assertFalse(ok)
                 self.assertIn("band", why)
+
+    def test_strided_decode_serves_the_bottom_right_decode_window(self):
+        """NO_MASK + window at bottom-right alignment and seqlen_q == 1 is the
+        bottom-right causal window strided decode bakes. gfx942 serves it there, as
+        develop did, and an unpinned dense-layout request routes to it."""
+        from dispatch.attention import strided_decode
+
+        candidate = strided_decode.make_candidate()
+        band = dict(mask_type=NO_MASK, sliding_window=256, diagonal_alignment=BR_ALIGN)
+        strided = dict(kv_layout="strided", kv_block_size=64, seqlen_q=1, seqlen_k=65)
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                ok, why = candidate.admits(_req(arch=arch, **band, **strided))
+                self.assertTrue(ok, why)
+                routed = dispatch_attention(
+                    _req(arch=arch, layout="dense", seqlen_q=1, **band)
+                )
+                self.assertEqual(routed.candidate.name, "attention_strided_decode")
+
+    def test_strided_decode_refuses_a_top_left_causal_decode(self):
+        """Strided decode bakes the bottom-right diagonal only, so a top-left causal
+        band reached through NO_MASK / SLIDING_WINDOW + right_bound=0 is refused on
+        both arches instead of running bottom-right."""
+        from dispatch.attention import strided_decode
+
+        candidate = strided_decode.make_candidate()
+        strided = dict(
+            kv_layout="strided",
+            kv_block_size=64,
+            seqlen_q=1,
+            seqlen_k=65,
+            right_bound=0,
+            diagonal_alignment=TL_ALIGN,
+        )
+        for arch in ("gfx942", "gfx950"):
+            for kw in (
+                dict(mask_type=NO_MASK),
+                dict(mask_type=NO_MASK, sliding_window=128),
+                dict(mask_type=SLIDING_WINDOW, sliding_window=128),
+            ):
+                with self.subTest(arch=arch, **kw):
+                    self.assertEqual(
+                        candidate.admits(_req(arch=arch, **kw, **strided)),
+                        (False, "strided decode uses bottom-right causal alignment"),
+                    )
 
 
 class TestBandDistinctIdentity(unittest.TestCase):
