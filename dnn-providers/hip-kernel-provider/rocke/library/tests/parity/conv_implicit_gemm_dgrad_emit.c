@@ -285,7 +285,7 @@ static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
     spec->lds_xor = true;
     spec->has_waves_per_eu = true;
     spec->waves_per_eu = 2;
-    if(idx == 77 || idx == 80)
+    if(idx == 77 || idx >= 80)
     {
         spec->tapk_prefetch = 3;
         spec->tapk_ilv = 4;
@@ -304,6 +304,21 @@ static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
         spec->xh_tap_rsrc = true;
         spec->tapk_ztrim = idx == 77 ? 2 : 0;
         spec->cshuffle_m_chunks = 2;
+    }
+    if(idx >= 81)
+    {
+        spec->xh_yring = idx == 81 ? 130 : 66;
+        spec->tapk_ztrim = 1;
+        spec->no_agpr = idx != 83;
+        if(idx == 81)
+            spec->xh_order = 7;
+        else if(idx == 82)
+            spec->xh_defer = 0;
+        else
+        {
+            spec->xh_order = 1;
+            spec->xh_defer = 2;
+        }
     }
     if(idx == 78)
     {
@@ -330,7 +345,7 @@ static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
-    if(idx >= 77 && idx <= 80)
+    if(idx >= 77 && idx <= 83)
         return make_cfg_3d_xh(idx, spec, arch);
     if(idx >= 71 && idx <= 76)
         return make_cfg_3d_pp(idx, spec, arch);

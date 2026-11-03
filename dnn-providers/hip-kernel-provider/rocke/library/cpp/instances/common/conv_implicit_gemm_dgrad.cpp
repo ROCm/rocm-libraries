@@ -661,9 +661,19 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     }
     /* Branch knobs the C++ engine does not implement yet. */
     const bool xh_ok = s->tapk_xhalo && s->tap_outer_k;
+    if(s->xh_yring && (!xh_ok || s->tapk_prefetch != 3 || !s->xhalo_exact || !s->xh_a_k4 || !s->xh_b_wide
+                       || s->tapk_ztrim != 1 || s->split_k > 1 || s->xh_persist))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "xh_yring (dgrad) needs the x-halo prefetch loop (tpf 3) with xhalo_exact, xh_a_k4, "
+                 "xh_b_wide, tapk_ztrim 1 (zt0 failed verify on s2), no split-K / xh_persist, and a "
+                 "ring of P = k * Wi >= tile_m + X - 1 rows within the A slab");
+        return false;
+    }
     if((s->tapk_ilv && !xh_ok) || (s->xhalo_exact && !xh_ok) || (s->m_band && !xh_ok)
        || (s->xh_stride_m && !xh_ok) || s->xh_dlds || (s->xh_epi_lin && !xh_ok)
-       || (s->xh_tap_rsrc && !xh_ok) || s->xh_yring || (s->tapk_lds_ahead && !xh_ok)
+       || (s->xh_tap_rsrc && !xh_ok) || (s->xh_yring && !xh_ok) || (s->tapk_lds_ahead && !xh_ok)
        || (s->tapk_lds_barrier && !xh_ok) || (s->tapk_setprio && !xh_ok)
        || (s->lds_xor && !s->tapk_pingpong && !xh_ok) || (s->xh_b_wide && !xh_ok)
        || (s->xh_b_kpad && !xh_ok)
@@ -4326,6 +4336,7 @@ static rocke_kernel_def_t*
             }
             xh_b_off[x] = spec->xh_b_wide ? x * block_n : 0;
         }
+    bool xh_yr_done = false; /* xh_yring emitted both branches' epilogues */
     rocke_value_t* pp_bf16[ROCKE_CONV_MAX_ACCS]; /* _pp_state["bf16"] */
     int pp_bf16_n = 0;
     /* tapk_prefetch=2: the second A buffer of the ping-pong. */
@@ -5464,6 +5475,49 @@ static rocke_kernel_def_t*
     }
     else if(spec->tap_outer_k && spec->tapk_xhalo)
     {
+      /* xh_yring: ring tiles (no (n, d) plane starts inside the reused rows)
+       * run the ring loop, the others the full-load loop, each with its own
+       * A / B LDS buffers and epilogue (Python: an scf_if_else over them). */
+      const bool yr = spec->xh_yring > 0;
+      rocke_if_else_t yr_ie;
+      memset(&yr_ie, 0, sizeof(yr_ie));
+      if(yr)
+      {
+          rocke_value_t* bm2 = rocke_b_add(b, block_m_off_v, rocke_b_const_i32(b, 2 - spec->problem.X));
+          rocke_value_t* yr_first = rocke_b_smax(b, bm2, c0);
+          rocke_value_t *yr_q, *yr_r;
+          _magic_divmod(b, yr_first, &hw_div, &yr_q, &yr_r);
+          rocke_value_t* req = rocke_b_cmp_eq(b, yr_r, c0);
+          rocke_value_t* q1 = rocke_b_add(b, yr_q, rocke_b_const_i32(b, 1));
+          rocke_value_t* qm = rocke_b_mul(b, q1, hw_div.value);
+          rocke_value_t* yr_next = rocke_b_select(b, req, yr_first, qm);
+          rocke_value_t* bme = rocke_b_add(b, block_m_off_v, rocke_b_const_i32(b, block_m));
+          rocke_value_t* ge = rocke_b_cmp_ge(b, yr_next, bme);
+          rocke_value_t* s1v = rocke_b_select(b, ge, rocke_b_const_i32(b, 1), c0);
+          rocke_value_t* yr_ok = rocke_b_readfirstlane(b, s1v);
+          rocke_value_t* ne = rocke_b_cmp_ne(b, yr_ok, c0);
+          yr_ie = rocke_b_scf_if_else(b, ne);
+      }
+      rocke_value_t* A_smem_keep = A_smem;
+      rocke_value_t* B_smem_keep = B_smem;
+      rocke_value_t* B_smem_x_keep[8];
+      for(int x = 0; x < 8; ++x)
+          B_smem_x_keep[x] = B_smem_x[x];
+      for(int yr_pass = 0; yr_pass < (yr ? 2 : 1); ++yr_pass)
+      {
+        const bool ring = yr && yr_pass == 0;
+        if(yr)
+        {
+            rocke_b_region_enter(b, yr_pass == 0 ? yr_ie.then_region : yr_ie.else_region);
+            if(yr_pass == 1)
+            {
+                A_smem = rocke_b_smem_alloc(b, ab_ir, a_shape, 2, "A_smem_yf");
+                int bw_shape[2] = {spec->problem.X * block_n + _dgrad_b_load_vec(spec), b_shape_arr[1]};
+                B_smem = rocke_b_smem_alloc(b, b_ir, bw_shape, 2, "B_smem_yf");
+                for(int x = 0; x < spec->problem.X && x < 8; ++x)
+                    B_smem_x[x] = B_smem;
+            }
+        }
         /* Python _emit_tap_outer_xhalo_loop + _xhalo_prefetch (_xh_plain):
          * (z, y) taps outer, chunks inner, the X x taps unrolled over one
          * staged dY halo tile. Ported: tapk_prefetch 1/3, xhalo_exact,
@@ -5489,6 +5543,14 @@ static rocke_kernel_def_t*
         rocke_value_t* c_zero_row = rocke_b_const_i32(b, lds_rows - 1);
         /* cap */
         rocke_value_t *cap_dh = NULL, *cap_dd = NULL, *cap_kb = NULL, *cap_w_k0 = NULL;
+        /* xh_yring state (the ring loads and row maps replace the exact ones) */
+        bool ring_on_ = false;
+        bool use_ring_load = false, use_ring_rmap = false, ring_full_cur = true;
+        int ring_shift_cur = 0, ring_shift_ld = 0;
+        std::function<void(bool, int, rocke_value_t*, rocke_ctl_staged_t*)> ring_load_fn;
+        std::function<rocke_value_t*(int, int, rocke_value_t*)> ring_rmap_fn;
+        std::function<void(int, int)> ring_rmap_make;
+        (void)ring_on_;
         /* _xhalo_exact_parts */
         if(!spec->xhalo_exact)
         {
@@ -5977,11 +6039,17 @@ static rocke_kernel_def_t*
             }
             const bool b_first = spec->xh_order & 1;
             a_st->count = 0;
+            auto a_ld = [&]() {
+                if(use_ring_load)
+                    ring_load_fn(ring_full_cur, ring_shift_ld, dy_t, a_st);
+                else
+                    halo_load(dy_t, a_st);
+            };
             if(!b_first)
-                halo_load(dy_t, a_st);
+                a_ld();
             w_wide_load(w_t, w_st);
             if(b_first)
-                halo_load(dy_t, a_st);
+                a_ld();
         };
         auto store_tile = [&](const rocke_ctl_staged_t* a_st, const rocke_ctl_staged_t* w_st) {
             /* xh_store(halo, A_smem, a) with xh_a_k4 slabs */
@@ -6102,7 +6170,12 @@ static rocke_kernel_def_t*
             }
             xh_rmap rms[8];
             for(int x = 0; x < XB; ++x)
-                rms[x] = mk_rmap(x);
+            {
+                if(use_ring_rmap)
+                    ring_rmap_make(x, ring_shift_cur);
+                else
+                    rms[x] = mk_rmap(x);
+            }
             rocke_lane_decode_t dec = rocke_decode_mfma_lanes(b, atom, lane);
             rocke_value_t* wmo = rocke_warp_grid_warp_m_off(b, &grid);
             rocke_value_t* wno = rocke_warp_grid_warp_n_off(b, &grid);
@@ -6138,7 +6211,8 @@ static rocke_kernel_def_t*
                             rocke_value_t* t = rocke_b_add(b, c_, dec.m_in_atom);
                             a_row = rocke_b_add(b, wmo, t);
                         }
-                        row_cache[xi][mi] = apply_rmap(rms[xi], a_row);
+                        row_cache[xi][mi] = use_ring_rmap ? ring_rmap_fn(xi, ring_shift_cur, a_row)
+                                                          : apply_rmap(rms[xi], a_row);
                     }
                     f->a[mi] = xh_a_read(row_cache[xi][mi], col_base, a_per_lane);
                     if(xsm)
@@ -6184,6 +6258,425 @@ static rocke_kernel_def_t*
             else
                 rocke_b_sync(b);
         };
+        auto xh_schedule = [&](int n_vmem_all) {
+            const int ilv = spec->tapk_ilv;
+            const int lda = spec->tapk_lds_ahead;
+            if(lda)
+            {
+                int n_vmem = n_vmem_all;
+                const int per_step = mfmas_m * mfmas_n;
+                const int n_steps = XB * k_atoms;
+                const int reads_n = mfmas_m + mfmas_n;
+                auto rd = [&](int s_) {
+                    if(xsm && s_ >= k_atoms)
+                        return 1 + mfmas_n;
+                    return reads_n;
+                };
+                if(!ilv)
+                {
+                    rocke_b_sched_group_barrier(b, 0x020, n_vmem, 0);
+                    n_vmem = 0;
+                }
+                rocke_b_sched_group_barrier(b, 0x100, rd(0), 0);
+                int left_vmem = n_vmem;
+                const int n_pre = n_steps - spec->xh_defer;
+                int left_ds = 0;
+                for(int s_i = 0; s_i < n_pre; ++s_i)
+                {
+                    left_ds = s_i + 1 < n_steps ? rd(s_i + 1) : 0;
+                    if(spec->xh_defer && s_i == n_pre - 1)
+                    {
+                        left_ds = 0;
+                        for(int t = s_i + 1; t < n_steps; ++t)
+                            left_ds += rd(t);
+                    }
+                    for(int jj = 0; jj < per_step; ++jj)
+                    {
+                        rocke_b_sched_group_barrier(b, 0x008, 1, 0);
+                        if(left_ds > 0)
+                        {
+                            const int k = lda < left_ds ? lda : left_ds;
+                            rocke_b_sched_group_barrier(b, 0x100, k, 0);
+                            left_ds -= k;
+                        }
+                        const int g = s_i * per_step + jj;
+                        if(ilv && left_vmem > 0 && g % ilv == ilv - 1)
+                        {
+                            rocke_b_sched_group_barrier(b, 0x020, 1, 0);
+                            left_vmem--;
+                        }
+                    }
+                }
+                if(left_vmem > 0)
+                    rocke_b_sched_group_barrier(b, 0x020, left_vmem, 0);
+                if(spec->xh_defer && left_ds > 0)
+                    rocke_b_sched_group_barrier(b, 0x100, left_ds, 0);
+                rocke_b_sched_barrier(b, 0);
+            }
+            else if(ilv)
+            {
+                const int n_mfma = (XB * k_atoms - spec->xh_defer) * mfmas_m * mfmas_n;
+                int used = 0;
+                for(int v = 0; v < n_vmem_all; ++v)
+                {
+                    rocke_b_sched_group_barrier(b, 0x020, 1, 0);
+                    const int k = ilv < n_mfma - used ? ilv : n_mfma - used;
+                    if(k > 0)
+                    {
+                        rocke_b_sched_group_barrier(b, 0x008, k, 0);
+                        used += k;
+                    }
+                }
+                rocke_b_sched_barrier(b, 0);
+            }
+        };
+        auto xh_store_deferred = [&](const rocke_ctl_staged_t* ra_, const rocke_ctl_staged_t* rb_, rocke_value_t** acc_out) {
+            const rocke_ctl_staged_t& ra = *ra_;
+            const rocke_ctl_staged_t& rb = *rb_;
+            if(n_deferred)
+            {
+                store_tile(ra_, rb_);
+                for(int d = 0; d < n_deferred; ++d)
+                {
+                    int flat = 0;
+                    for(int mi = 0; mi < mfmas_m; ++mi)
+                        for(int ni = 0; ni < mfmas_n; ++ni, ++flat)
+                            acc_out[flat] = xh_mfma(frags[d].a[mi], frags[d].bc[ni], acc_out[flat]);
+                }
+                const int n_m = n_deferred * mfmas_m * mfmas_n;
+                const int a_pieces = load_vec_a / 4 > 1 ? load_vec_a / 4 : 1;
+                const int n_w = ra.count * a_pieces + (rb.count / bw_kp) * bw_lv;
+                int per_w = n_m / (n_w > 1 ? n_w : 1);
+                per_w = per_w < 1 ? 1 : per_w;
+                per_w = per_w > 2 ? 2 : per_w;
+                const int lim = n_w < n_m ? n_w : n_m;
+                for(int i = 0; i < lim; ++i)
+                {
+                    rocke_b_sched_group_barrier(b, 0x200, 1, 0);
+                    rocke_b_sched_group_barrier(b, 0x008, per_w, 0);
+                }
+                rocke_b_sched_barrier(b, 0);
+            }
+            else
+                store_tile(ra_, rb_);
+        };
+        /* ---- _xh_yring_dispatch (xh_yring) ---- */
+        if(yr)
+        {
+            const int wi_ = spec->xh_yring % 1000;
+            const int need = block_m + back;
+            const int P = (need + wi_ - 1) / wi_ * wi_;
+            const int n_main = wi_ - back;
+            const int Yn = spec->problem.Y;
+            const int d_ = spec->xh_yring / 1000;
+            if(!xh_ak4 || load_vec_a != 8 || XB < 2 || d_ == 1 || P + 2 > ak4_mp)
+            {
+                rocke_i_set_err(b, ROCKE_ERR_VALUE, "xh_yring: the ring geometry does not fit this spec");
+                return NULL;
+            }
+            bool fulls[16];
+            int shifts[16];
+            for(int y = 0; y < Yn; ++y)
+                fulls[y] = y == 0 || (d_ && y % d_ == 0);
+            for(int y = 0; y < Yn; ++y)
+            {
+                int y_f = 0;
+                for(int t = 0; t <= y; ++t)
+                    if(fulls[t])
+                        y_f = t;
+                shifts[y] = ((y - y_f) * wi_) % P;
+            }
+            rocke_value_t* c_junk = rocke_b_const_i32(b, P);
+            rocke_value_t* c_zrow = rocke_b_const_i32(b, P + 1);
+            rocke_value_t* c_threads_r = rocke_b_const_i32(b, threads);
+            const int span = block_k / load_vec_a;
+            rocke_value_t* c_span_r = rocke_b_const_i32(b, span);
+            rocke_value_t* c_lv_r = rocke_b_const_i32(b, load_vec_a);
+            int n_full = 0;
+            rocke_coalesced_tile_loader_vecs_per_thread(&main_ld, &n_full);
+            const int rows_per_pass = threads / span;
+            const int n_part = n_main / rows_per_pass;
+            auto main_slot = [&](int e, rocke_value_t* row, int shift) -> rocke_value_t* {
+                const int lo = e * rows_per_pass - shift;
+                const int hi = lo + rows_per_pass - 1;
+                if(shift == 0)
+                    return row;
+                if(hi < 0)
+                    return rocke_b_add(b, row, rocke_b_const_i32(b, P - shift));
+                if(lo >= 0)
+                    return rocke_b_sub(b, row, rocke_b_const_i32(b, shift));
+                rocke_value_t* v_ = rocke_b_sub(b, row, rocke_b_const_i32(b, shift));
+                rocke_value_t* lt = rocke_b_cmp_lt(b, v_, c0);
+                rocke_value_t* ad = rocke_b_add(b, v_, rocke_b_const_i32(b, P));
+                return rocke_b_select(b, lt, ad, v_);
+            };
+            auto back_cb = [&](int shift) { return (((-back - shift) % P) + P) % P; };
+            /* ring_layout(full, shift): the (row, col) the ring stores use */
+            auto ring_layout = [&](bool full, int shift, rocke_ctl_staged_t* out) {
+                out->count = 0;
+                for(int e = 0; e < (full ? n_full : n_part); ++e)
+                {
+                    rocke_value_t* em = rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads_r);
+                    rocke_value_t* vec_idx = rocke_b_add(b, em, tid);
+                    /* col-mode _decode_row_col */
+                    rocke_value_t* row = rocke_b_div(b, vec_idx, c_span_r);
+                    rocke_value_t* cm = rocke_b_mod(b, vec_idx, c_span_r);
+                    rocke_value_t* col = rocke_b_mul(b, cm, c_lv_r);
+                    out->vecs[out->count].row = main_slot(e, row, shift);
+                    out->vecs[out->count].col = col;
+                    out->vecs[out->count].v = NULL;
+                    out->count++;
+                }
+                rocke_value_t* j = rocke_b_div(b, tid, c_span_r);
+                rocke_value_t* tm = rocke_b_mod(b, tid, c_span_r);
+                rocke_value_t* col = rocke_b_mul(b, tm, c_lv_r);
+                rocke_value_t* lane_ok = rocke_b_cmp_lt(b, tid, rocke_b_const_i32(b, n_back_vec));
+                rocke_value_t* jc = rocke_b_add(b, j, rocke_b_const_i32(b, back_cb(shift)));
+                out->vecs[out->count].row = rocke_b_select(b, lane_ok, jc, c_junk);
+                out->vecs[out->count].col = col;
+                out->vecs[out->count].v = NULL;
+                out->count++;
+            };
+            /* ring_load(full, shift, rsrc) */
+            auto ring_load = [&](bool full, int shift, rocke_value_t* rsrc, rocke_ctl_staged_t* out) {
+                const int ne = full ? n_full : n_part;
+                main_ld.vec_lo = 0;
+                main_ld.vec_hi = ne;
+                int k_ = 0;
+                xh_desc_env renv;
+                renv.fn = [&](rocke_value_t* row, rocke_value_t* col, rocke_value_t** ov) -> rocke_value_t* {
+                    if(fa_armed)
+                        fa_ctr = k_;
+                    k_++;
+                    return xh_dy(row, col, ov);
+                };
+                rocke_ctl_staged_t st;
+                rocke_coalesced_tile_loader_load_global(b, &main_ld, tid, xh_desc_tramp, &renv, rsrc, NULL, &st);
+                main_ld.vec_hi = 0;
+                out->count = 0;
+                for(int e = 0; e < st.count; ++e)
+                {
+                    out->vecs[out->count].row = main_slot(e, st.vecs[e].row, shift);
+                    out->vecs[out->count].col = st.vecs[e].col;
+                    out->vecs[out->count].v = st.vecs[e].v;
+                    out->count++;
+                }
+                rocke_value_t* j = rocke_b_div(b, tid, c_span_r);
+                rocke_value_t* tm = rocke_b_mod(b, tid, c_span_r);
+                rocke_value_t* col = rocke_b_mul(b, tm, c_lv_r);
+                rocke_value_t* lane_ok = rocke_b_cmp_lt(b, tid, rocke_b_const_i32(b, n_back_vec));
+                if(fa_armed)
+                    fa_ctr = n_rec - 1;
+                rocke_value_t* jb = rocke_b_sub(b, j, rocke_b_const_i32(b, back));
+                rocke_value_t* valid = NULL;
+                rocke_value_t* off = xh_dy(jb, col, &valid);
+                valid = rocke_b_land(b, valid, lane_ok);
+                rocke_value_t* ob = rocke_b_mul(b, off, rocke_b_const_i32(b, adt == rocke_f32() ? 4 : 2));
+                rocke_value_t* oobv = rocke_b_const_i32(b, 2147483647);
+                rocke_value_t* off_b = rocke_b_select(b, valid, ob, oobv);
+                rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, off_b, c0, adt, load_vec_a);
+                rocke_value_t* jc = rocke_b_add(b, j, rocke_b_const_i32(b, back_cb(shift)));
+                out->vecs[out->count].row = rocke_b_select(b, lane_ok, jc, c_junk);
+                out->vecs[out->count].col = col;
+                out->vecs[out->count].v = v;
+                out->count++;
+            };
+            ring_on_ = ring;
+            ring_load_fn = ring_load;
+            /* ring_rmap(shift)(x): created once per (x, shift) */
+            static bool rm_made[8][256];
+            memset(rm_made, 0, sizeof(rm_made));
+            ring_shift_cur = 0;
+            ring_rmap_fn = [&](int x, int shift, rocke_value_t* a_row) -> rocke_value_t* {
+                const int tot = x + shift;
+                if(tot == 0)
+                    return a_row;
+                rocke_value_t* v_ = rocke_b_sub(b, a_row, rocke_b_const_i32(b, tot));
+                rocke_value_t* lt = rocke_b_cmp_lt(b, v_, c0);
+                rocke_value_t* ad = rocke_b_add(b, v_, rocke_b_const_i32(b, P));
+                return rocke_b_select(b, lt, ad, v_);
+            };
+            ring_rmap_make = [&](int x, int shift) {
+                if(!rm_made[x][shift])
+                {
+                    rm_made[x][shift] = true;
+                    (void)rocke_b_const_i32(b, x); /* rm()'s c_x */
+                }
+            };
+            auto sh = [&](int y) { return ring ? shifts[y] : 0; };
+            int y_load = 0;
+            auto yr_set = [&](rocke_value_t* kb, int y, rocke_value_t* z) {
+                set_tile(kb, rocke_b_const_i32(b, y), is_3d ? z : NULL);
+            };
+            auto yr_load = [&](int y, rocke_ctl_staged_t* a_st, rocke_ctl_staged_t* w_st) {
+                const bool full = fulls[y] || !ring;
+                ring_full_cur = full;
+                ring_shift_ld = sh(y);
+                use_ring_load = true;
+                load_tile(a_st, w_st);
+                use_ring_load = false;
+            };
+            /* the zero row of the ring */
+            {
+                rocke_value_t* zk0 = rocke_b_mod(b, tid, rocke_b_const_i32(b, block_k / 4));
+                rocke_value_t* zm = rocke_b_mul(b, zk0, rocke_b_const_i32(b, ak4_mp));
+                rocke_value_t* zr = ak4_row(c_zrow);
+                rocke_value_t* za = rocke_b_add(b, zm, zr);
+                rocke_value_t* zv = rocke_b_zero_vec(b, adt, 4);
+                rocke_value_t* idx[2] = {za, c0};
+                rocke_b_smem_store_vN(b, A_smem, idx, 2, zv, 4);
+            }
+            rocke_value_t* nkc = rocke_b_div(b, c_kd, c_block_k);
+            rocke_value_t* z0 = is_3d ? c0 : NULL;
+            rocke_value_t* z_cnt_ = is_3d ? ctx.p_Z : c1;
+            if(spec->tapk_ztrim && is_3d)
+                ztrim_range(&z0, &z_cnt_);
+            rocke_value_t* n_iter_r = rocke_b_mul(b, z_cnt_, nkc);
+            yr_set(c0, 0, z0);
+            rocke_ctl_staged_t st0a, st0b;
+            yr_load(0, &st0a, &st0b);
+            store_tile(&st0a, &st0b);
+            rocke_b_sync(b);
+            yr_set(c0, 1, z0);
+            rocke_ctl_staged_t st1a, st1b;
+            yr_load(1, &st1a, &st1b);
+            const int n_regs_r = st1a.count + st1b.count;
+            const char* pf = ring ? "yr" : "yf";
+            rocke_iter_arg_t rit[256];
+            static char rnames[256][32];
+            int n_rit = 0;
+            for(int i = 0; i < num_accs; ++i, ++n_rit)
+            {
+                snprintf(rnames[n_rit], 32, "%s_%s", iter_args[i].name, pf);
+                rit[n_rit].name = rnames[n_rit];
+                rit[n_rit].init = iter_args[i].init;
+            }
+            for(int i = 0; i < n_regs_r; ++i, ++n_rit)
+            {
+                snprintf(rnames[n_rit], 32, "%s_r%d", pf, i);
+                rit[n_rit].name = rnames[n_rit];
+                rit[n_rit].init = i < st1a.count ? st1a.vecs[i].v : st1b.vecs[i - st1a.count].v;
+            }
+            snprintf(rnames[n_rit], 32, "%s_kb", pf);
+            rit[n_rit].name = rnames[n_rit];
+            rit[n_rit].init = c0;
+            ++n_rit;
+            if(is_3d)
+            {
+                snprintf(rnames[n_rit], 32, "%s_z", pf);
+                rit[n_rit].name = rnames[n_rit];
+                rit[n_rit].init = z0;
+                ++n_rit;
+            }
+            char tname[16];
+            snprintf(tname, sizeof(tname), "%s_t", pf);
+            rocke_for_t rl = rocke_b_scf_for_iter(b, c0, n_iter_r, c1, rit, n_rit, tname, false, true);
+            rocke_b_region_enter(b, rl.body);
+            {
+                rocke_value_t** iv = rl.iter_vars;
+                rocke_value_t* cur[ROCKE_CONV_MAX_ACCS];
+                for(int i = 0; i < num_accs; ++i)
+                    cur[i] = iv[i];
+                rocke_value_t* const* regs = iv + num_accs;
+                rocke_value_t* kb = iv[num_accs + n_regs_r];
+                rocke_value_t* z = is_3d ? iv[num_accs + n_regs_r + 1] : NULL;
+                rocke_value_t* nk = rocke_b_add(b, kb, c_block_k);
+                rocke_value_t* wrap = rocke_b_cmp_ge(b, nk, c_kd);
+                rocke_value_t* kb_n = rocke_b_select(b, wrap, c0, nk);
+                rocke_value_t* z_n = NULL;
+                if(is_3d)
+                {
+                    rocke_value_t* sz = rocke_b_select(b, wrap, c1, c0);
+                    z_n = rocke_b_add(b, z, sz);
+                }
+                rocke_ctl_staged_t prev_a, prev_b; /* st_next */
+                prev_a.count = prev_b.count = 0;
+                for(int y = 0; y < Yn; ++y)
+                {
+                    if(y + 2 < Yn)
+                    {
+                        yr_set(kb, y + 2, z);
+                        y_load = y + 2;
+                    }
+                    else
+                    {
+                        yr_set(kb_n, y + 2 - Yn, z_n);
+                        y_load = y + 2 - Yn;
+                    }
+                    rocke_ctl_staged_t tmpl_a;
+                    tmpl_a.count = 0;
+                    if(y == 0)
+                        ring_layout(fulls[1 % Yn] || !ring, sh(1 % Yn), &tmpl_a);
+                    /* yr_step(cur, y, store_st) */
+                    if((spec->xh_order & 2) && y == 0)
+                        rocke_b_s_waitcnt(b, -1, 0, -1);
+                    const int sprio = spec->tapk_setprio;
+                    if(sprio)
+                    {
+                        rocke_b_sched_barrier(b, 0);
+                        rocke_b_s_setprio(b, 1);
+                    }
+                    rocke_ctl_staged_t sa, sb;
+                    yr_load(y_load, &sa, &sb);
+                    const int ilv = spec->tapk_ilv;
+                    const int lda = spec->tapk_lds_ahead;
+                    if(!ilv && !lda)
+                        rocke_b_sched_barrier(b, 0);
+                    rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+                    ring_shift_cur = sh(y);
+                    use_ring_rmap = true;
+                    mfma(cur, new_accs);
+                    use_ring_rmap = false;
+                    xh_schedule(sa.count + sb.count);
+                    if(sprio)
+                    {
+                        rocke_b_sched_barrier(b, 0);
+                        rocke_b_s_setprio(b, 0);
+                    }
+                    lds_bar();
+                    rocke_ctl_staged_t ssa, ssb;
+                    if(y == 0)
+                    {
+                        /* rebuild([tmpl_a] + staged[1:], regs) */
+                        ssa = tmpl_a;
+                        ssb = sb;
+                        for(int i = 0; i < ssa.count; ++i)
+                            ssa.vecs[i].v = regs[i];
+                        for(int i = 0; i < ssb.count; ++i)
+                            ssb.vecs[i].v = regs[ssa.count + i];
+                    }
+                    else
+                    {
+                        ssa = prev_a;
+                        ssb = prev_b;
+                    }
+                    xh_store_deferred(&ssa, &ssb, new_accs);
+                    lds_bar();
+                    for(int i = 0; i < num_accs; ++i)
+                        cur[i] = new_accs[i];
+                    prev_a = sa;
+                    prev_b = sb;
+                }
+                rocke_value_t* yv[256];
+                int nyv = 0;
+                for(int i = 0; i < num_accs; ++i)
+                    yv[nyv++] = cur[i];
+                for(int i = 0; i < prev_a.count; ++i)
+                    yv[nyv++] = prev_a.vecs[i].v;
+                for(int i = 0; i < prev_b.count; ++i)
+                    yv[nyv++] = prev_b.vecs[i].v;
+                yv[nyv++] = kb_n;
+                if(is_3d)
+                    yv[nyv++] = z_n;
+                rocke_b_scf_yield(b, yv, nyv);
+            }
+            rocke_b_region_leave(b);
+            for(int i = 0; i < num_accs; i++)
+                final_accs[i] = rl.op->results[i];
+            num_final = num_accs;
+        }
+        else
+        {
         /* ---- _xh_plain ---- */
         const int n_st = is_3d ? 3 : 2;
         const char* st_names[3] = {"xp_kb", "xp_y", "xp_z"};
@@ -6276,75 +6769,7 @@ static rocke_kernel_def_t*
                 rocke_i_set_err(b, ROCKE_ERR_VALUE, "tapk_setprio 2 is Python-only");
                 return;
             }
-            const int n_vmem_all = sa.count + sb.count;
-            if(lda)
-            {
-                int n_vmem = n_vmem_all;
-                const int per_step = mfmas_m * mfmas_n;
-                const int n_steps = XB * k_atoms;
-                const int reads_n = mfmas_m + mfmas_n;
-                auto rd = [&](int s_) {
-                    if(xsm && s_ >= k_atoms)
-                        return 1 + mfmas_n;
-                    return reads_n;
-                };
-                if(!ilv)
-                {
-                    rocke_b_sched_group_barrier(b, 0x020, n_vmem, 0);
-                    n_vmem = 0;
-                }
-                rocke_b_sched_group_barrier(b, 0x100, rd(0), 0);
-                int left_vmem = n_vmem;
-                const int n_pre = n_steps - spec->xh_defer;
-                int left_ds = 0;
-                for(int s_i = 0; s_i < n_pre; ++s_i)
-                {
-                    left_ds = s_i + 1 < n_steps ? rd(s_i + 1) : 0;
-                    if(spec->xh_defer && s_i == n_pre - 1)
-                    {
-                        left_ds = 0;
-                        for(int t = s_i + 1; t < n_steps; ++t)
-                            left_ds += rd(t);
-                    }
-                    for(int jj = 0; jj < per_step; ++jj)
-                    {
-                        rocke_b_sched_group_barrier(b, 0x008, 1, 0);
-                        if(left_ds > 0)
-                        {
-                            const int k = lda < left_ds ? lda : left_ds;
-                            rocke_b_sched_group_barrier(b, 0x100, k, 0);
-                            left_ds -= k;
-                        }
-                        const int g = s_i * per_step + jj;
-                        if(ilv && left_vmem > 0 && g % ilv == ilv - 1)
-                        {
-                            rocke_b_sched_group_barrier(b, 0x020, 1, 0);
-                            left_vmem--;
-                        }
-                    }
-                }
-                if(left_vmem > 0)
-                    rocke_b_sched_group_barrier(b, 0x020, left_vmem, 0);
-                if(spec->xh_defer && left_ds > 0)
-                    rocke_b_sched_group_barrier(b, 0x100, left_ds, 0);
-                rocke_b_sched_barrier(b, 0);
-            }
-            else if(ilv)
-            {
-                const int n_mfma = (XB * k_atoms - spec->xh_defer) * mfmas_m * mfmas_n;
-                int used = 0;
-                for(int v = 0; v < n_vmem_all; ++v)
-                {
-                    rocke_b_sched_group_barrier(b, 0x020, 1, 0);
-                    const int k = ilv < n_mfma - used ? ilv : n_mfma - used;
-                    if(k > 0)
-                    {
-                        rocke_b_sched_group_barrier(b, 0x008, k, 0);
-                        used += k;
-                    }
-                }
-                rocke_b_sched_barrier(b, 0);
-            }
+            xh_schedule(sa.count + sb.count);
             if(sprio)
             {
                 rocke_b_sched_barrier(b, 0);
@@ -6360,32 +6785,7 @@ static rocke_kernel_def_t*
                 for(int i = 0; i < rb.count; ++i)
                     rb.vecs[i].v = regs[ra.count + i];
             }
-            if(n_deferred)
-            {
-                store_tile(&ra, &rb);
-                for(int d = 0; d < n_deferred; ++d)
-                {
-                    int flat = 0;
-                    for(int mi = 0; mi < mfmas_m; ++mi)
-                        for(int ni = 0; ni < mfmas_n; ++ni, ++flat)
-                            acc_out[flat] = xh_mfma(frags[d].a[mi], frags[d].bc[ni], acc_out[flat]);
-                }
-                const int n_m = n_deferred * mfmas_m * mfmas_n;
-                const int a_pieces = load_vec_a / 4 > 1 ? load_vec_a / 4 : 1;
-                const int n_w = ra.count * a_pieces + (rb.count / bw_kp) * bw_lv;
-                int per_w = n_m / (n_w > 1 ? n_w : 1);
-                per_w = per_w < 1 ? 1 : per_w;
-                per_w = per_w > 2 ? 2 : per_w;
-                const int lim = n_w < n_m ? n_w : n_m;
-                for(int i = 0; i < lim; ++i)
-                {
-                    rocke_b_sched_group_barrier(b, 0x200, 1, 0);
-                    rocke_b_sched_group_barrier(b, 0x008, per_w, 0);
-                }
-                rocke_b_sched_barrier(b, 0);
-            }
-            else
-                store_tile(&ra, &rb);
+            xh_store_deferred(&ra, &rb, acc_out);
             lds_bar();
             rocke_value_t* nx[3] = {};
             advance(st, nx);
@@ -6463,6 +6863,24 @@ static rocke_kernel_def_t*
                 final_accs[i] = tail.op->results[i];
             num_final = num_accs;
         }
+        } /* _xh_plain */
+        if(yr)
+        {
+            /* this branch's epilogue */
+            rocke_value_t* yr_epi[ROCKE_CONV_MAX_ACCS];
+            rocke_conv_apply_accumulator_epilogue(b, &spec->acc_epilogue, final_accs, num_final, yr_epi);
+            dispatch_dgrad_epilogue(yr_epi, num_final);
+            rocke_b_region_leave(b);
+        }
+      } /* yr passes */
+      if(yr)
+      {
+          A_smem = A_smem_keep;
+          B_smem = B_smem_keep;
+          for(int x = 0; x < 8; ++x)
+              B_smem_x[x] = B_smem_x_keep[x];
+          xh_yr_done = true;
+      }
     }
     else if(spec->tap_outer_k && spec->tapk_prefetch)
     {
@@ -7650,6 +8068,8 @@ static rocke_kernel_def_t*
         num_final = for_op.op->num_results;
     }
 
+    if(xh_yr_done)
+        return rocke_ir_builder_ok(b) ? b->kernel : NULL;
     // ---- accumulator epilogue ----
     rocke_value_t* epi_accs[ROCKE_CONV_MAX_ACCS];
     rocke_conv_apply_accumulator_epilogue(b, &spec->acc_epilogue, final_accs, num_final, epi_accs);

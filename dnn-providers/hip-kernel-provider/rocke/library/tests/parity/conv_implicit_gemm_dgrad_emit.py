@@ -1481,6 +1481,10 @@ _GFX942_3D_XH = {
     79: dict(tapk_prefetch=1, tapk_ztrim=1, xh_fast_a=1, xh_tap_rsrc=True, xh_epi=1,
              tapk_lds_ahead=1, xh_defer=2),
     80: dict(_XH_FULL, tapk_ztrim=0),
+    # 81-83: the y-ring (xh_yring) forms
+    81: dict(_XH_FULL, xh_order=7, xh_yring=130, tapk_ztrim=1, no_agpr=True),
+    82: dict(_XH_FULL, xh_yring=66, tapk_ztrim=1, no_agpr=True, xh_defer=0),
+    83: dict(_XH_FULL, xh_yring=66, tapk_ztrim=1, xh_order=1, xh_defer=2),
 }
 
 
