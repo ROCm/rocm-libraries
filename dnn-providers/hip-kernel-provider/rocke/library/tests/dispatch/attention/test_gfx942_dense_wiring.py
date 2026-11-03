@@ -429,8 +429,9 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                         list(specs[0].runtime_kernarg_fields),
                     )
 
-        # Baked control on gfx950: the persistent body there declares no shape
-        # params, so heads and seqlens stay in the symbol and split identity.
+        # Baked control on gfx950: the ragged persistent body there declares no shape
+        # params, so heads and seqlens stay in the symbol and split identity. (The
+        # dispatched gfx950 persistent spec is on the runtime path like gfx942's.)
         from kernels.gfx950.attention_dense import (
             Gfx950AttentionDenseSpec,
         )
@@ -438,14 +439,28 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             attention_dense_signature as gfx950_signature,
         )
 
+        dispatched = attention_tuning_spec(
+            _req(arch="gfx950", algorithm="auto", spec_id="auto"),
+            "gfx950_dense_persist",
+        ).kernel_spec
+        self.assertTrue(dispatched.persistent and dispatched.runtime_shape)
         baked = [
-            attention_tuning_spec(
-                _req(arch="gfx950", algorithm="auto", spec_id="auto", **kw),
-                "gfx950_dense_persist",
-            ).kernel_spec
+            Gfx950AttentionDenseSpec(
+                batch=kw["batch"],
+                seqlen_q=2048,
+                seqlen_kv=2048,
+                num_query_heads=kw["nhead_q"],
+                num_kv_heads=kw["nhead_k"],
+                head_size=128,
+                causal=True,
+                dtype="bf16",
+                persistent=True,
+                ragged=True,
+                num_persistent=256,
+                persist_decode="qb_major",
+            )
             for kw in shapes
         ]
-        self.assertTrue(all(isinstance(s, Gfx950AttentionDenseSpec) for s in baked))
         self.assertTrue(all(s.persistent and not s.runtime_shape for s in baked))
         by_heads: dict[tuple[int, int], set[str]] = {}
         for kw, s in zip(shapes, baked):
