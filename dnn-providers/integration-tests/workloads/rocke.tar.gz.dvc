@@ -1,0 +1,13 @@
+md5: 7f8ae43ceea4f026a1326b8ec6d50732
+frozen: true
+deps:
+- path: Workloads/microbench/rocke.tar.gz
+  repo:
+    url: https://github.com/ROCm/dnn-benchmarking
+    rev_lock: d2a43302cdd136af26fa421529bdc4e6ca0c1bb1
+outs:
+- md5: 7faf8011c078fde2b4641acda80a5e2d
+  size: 16256
+  hash: md5
+  remote: dnn-benchmarking
+  path: rocke.tar.gz
