@@ -819,16 +819,14 @@ function(hkp_probe_comgr_resolvable out_ok out_detail)
         set(_probe_extra_env
             "ROCKE_COMGR_LIB=${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
     endif()
-    # ctypes records the path it opened on the loaded handle, so comparing that
-    # against the override is what distinguishes "the override loaded" from
-    # "something else did". Compared through realpath: the ROCm layout reaches
-    # one library through several symlinked names.
+    # Compare actual physical file ownership, not alias spelling; a retained
+    # compiler can have another symlink/hard-link name for the same override.
     set(_probe_py "import os, sys
 from rocke.runtime import comgr
 lib = comgr._resolve_lib()
 want = os.environ.get(\"ROCKE_COMGR_LIB\")
-got = getattr(lib, \"_name\", None)
-if want and (not got or os.path.realpath(got) != os.path.realpath(want)):
+got = comgr.resolved_lib_path()
+if want and (not got or not os.path.samefile(got, want)):
     sys.exit(f\"comgr loaded {got!r} instead of the requested {want!r}\")
 ")
     # Each assignment must reach `-E env` as ONE argv element: the Windows

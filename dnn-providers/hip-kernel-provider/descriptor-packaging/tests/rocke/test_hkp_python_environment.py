@@ -252,6 +252,10 @@ def _configure_comgr_consumer(environment, *, sdk, package=True):
         "_ctypes_bind.py",
         "runtime_coexistence.py",
         "_sdk_comgr.py",
+        "_session.py",
+        "_loaded_libraries.py",
+        "_compiler_query.py",
+        "_compiler_probe.py",
     ):
         shutil.copyfile(source_runtime / name, runtime / name)
         runtime_files[f"rocke/runtime/{name}"] = (source_runtime / name).read_text(
