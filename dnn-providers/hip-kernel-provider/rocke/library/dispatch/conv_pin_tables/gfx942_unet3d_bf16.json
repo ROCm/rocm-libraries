@@ -273,7 +273,7 @@
     "dgrad_s7": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 512 --in_d 34 -H 18 -W 18 -k 512 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 0 -q 0 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 2 -t 1 -V 0",
      "calls": 2,
-     "kernel": "dgrad-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-s1x1-d1x1-sk8-xcd6-lxor-tapk-tpf1-bkp4-mch2-bpp4-pps12-pbs3-sapl-elb-pbx7-msg1024-wave64-gfx942-llvm22",
+     "kernel": "dgrad-implicit_gemm-bf16-3d-t256x256x32-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-s1x1-d1x1-sk8-xcd6-lxor-tapk-tpf1-bkp4-mch2-bpp4-pps12-pbs3-sapl-elb-pbx77-msg1024-wave64-gfx942-llvm22",
      "sessions": 12,
      "deterministic": false
     },
@@ -385,7 +385,7 @@
     "wgrad_s3": {
      "cmd": "MIOpenDriver convbfp16 -n 1 -c 256 --in_d 130 -H 66 -W 66 -k 128 --fil_d 3 -y 3 -x 3 --pad_d 0 -p 0 -q 0 --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 --in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F 4 -t 1 -V 0",
      "calls": 1,
-     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe2-sk2-2stage-wsr1-pfr1-kp2-xcd6-xw3-xg2-xpp8-xgn2-wave64-gfx942-llvm22 @split_k=38",
+     "kernel": "wgrad-implicit_gemm-bf16-3d-t128x192x32-w2x2-a16x16x16-v8x8x1-mem-default-grp-kpad4-wpe3-sk2-2stage-wsr2-pfr1-kp2-xcd6-pfs1-xw3-wave64-gfx942-llvm22 @split_k=38",
      "sessions": 12,
      "deterministic": false
     },
