@@ -220,7 +220,7 @@ _EQUALITY_DIRNAME = "Equality"
 
 def _placeholder_identity(yaml_path: Path) -> Dict[str, object]:
     """The header fields, effective ``PerfMetric`` and effective
-    ``ProblemType`` that name a logic file's placeholder library.
+    ``ProblemType`` that a Range file and its Equality sibling must share.
     ``ProblemType`` is compared after TensileLite fills in its defaults, so a
     file that writes a default out explicitly and one that omits it compare
     equal; ``PerfMetric`` likewise defaults to ``DeviceEfficiency``, the one
@@ -248,11 +248,12 @@ def find_range_sibling_violations(
     """A ``Range`` logic file with a same-basename ``Equality`` sibling in its
     logic tree must declare the same ``ScheduleName``, ``ArchitectureName``,
     ``CUCount``, ``DeviceNames``, effective ``PerfMetric`` and effective
-    ``ProblemType``. Those decide the
-    placeholder library a file loads into, and the Range rows are meant to sit
-    in the Equality file's placeholder beside its rows (the gfx950 skinny TN
-    custom kernels rely on this). A Range file that drifts from its sibling
-    gets a placeholder of its own instead.
+    ``ProblemType``. The Range rows are meant to sit in the Equality file's
+    placeholder library beside its rows (the gfx950 skinny TN custom kernels
+    rely on this), and a Range file whose placeholder fields drift from its
+    sibling's gets a placeholder of its own instead. The check is stricter
+    than the placeholder name: it also requires fields the name leaves out,
+    such as ``ScheduleName`` and every ``ProblemType`` field, to match.
 
     Only Range files are held to this. Same-basename Equality, GridBased and
     Origami siblings do diverge in the shipped corpus today, so a general

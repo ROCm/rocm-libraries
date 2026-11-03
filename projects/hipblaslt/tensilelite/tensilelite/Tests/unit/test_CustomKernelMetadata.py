@@ -1490,8 +1490,6 @@ _HALF = 4
 _GFX950_HEADER = {
     "ScheduleName": "gfx950",
     "ArchitectureName": "gfx950",
-    "CUCount": 256,
-    "DeviceNames": ["Device 75a0"],
 }
 
 
