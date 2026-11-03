@@ -2529,11 +2529,10 @@ struct p2p_enabler
         HIP_EXPECT_SUCCESS(hipDeviceCanAccessPeer(&can_access, src_id, peer_id));
         if(can_access == 1)
         {
-            const auto err = hipDeviceEnablePeerAccess(peer_id, 0);
-            if(err == hipSuccess)
+            // Failing to enable peer access is not fatal either; the D2D copy
+            // then stages through host memory, same as can_access == 0.
+            if(hipDeviceEnablePeerAccess(peer_id, 0) == hipSuccess)
                 enabled_by_us = true;
-            else if(err != hipErrorPeerAccessAlreadyEnabled)
-                HIP_EXPECT_SUCCESS(err);
         }
         // can_access == 0 is not fatal. Some multi-GPU systems (Navi 32 on
         // Windows) cannot enable peer access; hipMemcpyPeerAsync then stages
