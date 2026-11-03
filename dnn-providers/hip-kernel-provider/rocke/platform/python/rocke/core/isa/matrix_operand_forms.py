@@ -168,16 +168,19 @@ class ZeroPadded(_Form):
     payload_words: int
 
     def __post_init__(self) -> None:
+        if isinstance(self.payload_words, bool) or not isinstance(
+            self.payload_words, int
+        ):
+            raise TypeError(
+                "ZeroPadded payload_words is a word count (int), got "
+                f"{self.payload_words!r}"
+            )
         for t in self._every_register_type():
             if not (isinstance(t, VectorType) and t.elem == I32):
                 raise TypeError(
                     f"ZeroPadded register type must be a vector of i32 words, got {t.name}"
                 )
-            if (
-                isinstance(self.payload_words, bool)
-                or not isinstance(self.payload_words, int)
-                or not 1 <= self.payload_words <= t.count
-            ):
+            if not 1 <= self.payload_words <= t.count:
                 raise ValueError(
                     f"ZeroPadded payload of {self.payload_words!r} words does not fit "
                     f"{t.name}; it is 1 to {t.count} words"
@@ -310,7 +313,9 @@ def f8f6f4_operand_form(dtype: str, register_type: VectorType) -> AsIs | ZeroPad
         fp6e2m3   vec<i32x12>      --zero words-> <16 x i32>
         fp4e2m1   vec<i32x8>       --zero words-> <16 x i32>
 
-    Raises ``ValueError`` when ``dtype`` is not one of the five matrix formats.
+    ``register_type`` is a plain vector: no f8f6f4 register changed spelling
+    across LLVM flavors. Raises ``ValueError`` when ``dtype`` is not one of the
+    five matrix formats.
     """
     if dtype_info(require_matrix_format(dtype)).encoded_bits == 8:
         return AsIs(register_type)

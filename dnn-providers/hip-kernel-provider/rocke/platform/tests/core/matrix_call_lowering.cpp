@@ -384,7 +384,7 @@ static void test_as_is_results()
         MmaOp m(f32x4, f32x4, f32x4, lw.vec(rocke_f32(), 8));
         check_equal(error_of([&] { rocke_ll_emit_matrix_call(&lw.L, &m.op, "example", &k_f32); }),
                     "MMA result of 'example' is vec<f32x8> (256 bits); the instruction returns "
-                    "vec<f32x4> (128 bits)",
+                    "vec<f32x4> (128 bits) -- declare a 128-bit result",
                     "a result of another bit width");
     }
 }
@@ -404,8 +404,8 @@ static void test_results_of_another_number_format()
                             &lw.L, &m.op, op_id, rocke_matrix_call_for(op_id));
                     }),
                     "MMA result of 'wmma_gfx1250_bf16f32_16x16x32_bf16' holds f16 values; the "
-                    "instruction returns bf16 -- declare the result with one of those element "
-                    "types",
+                    "instruction returns bf16 -- declare the result in an element type it "
+                    "returns",
                     "an f16 result of a bf16 instruction");
     }
     {
@@ -417,7 +417,7 @@ static void test_results_of_another_number_format()
                             &lw.L, &m.op, "wmma_f16_16x16x16_f16", &k_even_halves);
                     }),
                     "MMA result of 'wmma_f16_16x16x16_f16' holds i16 values; the instruction "
-                    "returns f16 -- declare the result with one of those element types",
+                    "returns f16 -- declare the result in an element type it returns",
                     "an i16 result of an f16 instruction in the even halves");
     }
 }
@@ -554,6 +554,18 @@ static void test_the_schema()
     check_equal(error_of([&] { rocke_matrix_call_check(&padded_halves); }),
                 "ZeroPadded register type must be a vector of i32 words, got vec<f16x8>",
                 "zero padding needs i32 words");
+
+    const rocke_matrix_call_t as_is_with_payload = {"llvm.amdgcn.x",
+                                                    k_abc,
+                                                    3,
+                                                    {ROCKE_MATRIX_FORM_AS_IS, reg("i32", 8), 4},
+                                                    as_is("f32", 0),
+                                                    as_is("f32", 0),
+                                                    as_is("f32", 0),
+                                                    NULL};
+    check_equal(error_of([&] { rocke_matrix_call_check(&as_is_with_payload); }),
+                "only a ZeroPadded form has payload words, got 4",
+                "payload words belong to the zero-padding form");
 
     for(int payload_words : {0, 9})
     {

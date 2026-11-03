@@ -39,38 +39,34 @@ const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_rol
     return op->operands[index];
 }
 
-/* The catalog dtype MMA operand `role` holds (Python _CATALOG_DTYPE_FIELD). */
-static const char* operand_dtype(const rocke_mma_op_t* catalog_op, rocke_mma_role_t role)
+/* The MMA catalog row of target `gfx` for `op_id`, or NULL when its catalog
+ * does not list it. */
+static const rocke_mma_op_t* catalog_row(const char* op_id, const char* gfx)
 {
-    return role == ROCKE_MMA_ROLE_A   ? catalog_op->a_dtype
-           : role == ROCKE_MMA_ROLE_B ? catalog_op->b_dtype
-                                      : catalog_op->c_dtype;
+    const rocke_arch_target_t* arch = rocke_arch_target_from_gfx(gfx);
+    if(!arch)
+        throw ckc::ValueError(
+            ckc::format_error("no MMA catalog for target '%s'", gfx ? gfx : "(null)"));
+    return rocke_mma_catalog_by_op_id(&arch->mma, op_id);
 }
 
 /* The element types a value may hold in another shape than `register_type`
  * (Python _admitted_elements), sorted by name as Python joins them: the
  * register's own element type (a reshape, such as vec<f32x1> for f32) and the
- * element type of the dtype `catalog_dtype` reads from the MMA catalog row of
- * `gfx` for `op_id` (the instruction's packed values, such as vec<i8x16> for
- * vec<i32x4>) unless it is packed-only. Writes one or two types; returns how
- * many. */
-template <class CatalogDtype>
-static int admitted_elements(const char* op_id,
-                             CatalogDtype catalog_dtype,
-                             const rocke_type_t* register_type,
-                             const char* gfx,
+ * element type of `catalog_dtype`, the dtype the MMA catalog row records for
+ * the value (the instruction's packed values, such as vec<i8x16> for
+ * vec<i32x4>). NULL (an op_id the catalog does not list) admits only the
+ * first, and so does a packed-only catalog element. Writes one or two types;
+ * returns how many. */
+static int admitted_elements(const rocke_type_t* register_type,
+                             const char* catalog_dtype,
                              const rocke_type_t* elements[2])
 {
     int count = 0;
     elements[count++] = rocke_i_elem_of(register_type);
-    const rocke_arch_target_t* arch = rocke_arch_target_from_gfx(gfx);
-    if(!arch)
-        throw ckc::ValueError(
-            ckc::format_error("no MMA catalog for target '%s'", gfx ? gfx : "(null)"));
-    const rocke_mma_op_t* catalog_op = rocke_mma_catalog_by_op_id(&arch->mma, op_id);
-    if(!catalog_op)
+    if(!catalog_dtype)
         return count;
-    const rocke_type_t* catalog_element = rocke_require_ir_type(catalog_dtype(catalog_op));
+    const rocke_type_t* catalog_element = rocke_require_ir_type(catalog_dtype);
     /* A packed-only catalog element (i4 for the iu4 instructions) is never a
      * value's element type, so those values arrive in the register type. */
     if(rocke_i_is_packed_only(catalog_element))
@@ -93,7 +89,7 @@ static void require_reshape(const std::string& label,
                             const rocke_type_t* register_type,
                             const rocke_type_t* const admitted[2],
                             int num_admitted,
-                            const char* format_hint,
+                            const std::string& format_hint,
                             const std::string& width_hint)
 {
     const rocke_type_t* element = rocke_i_elem_of(value_type);
@@ -108,7 +104,7 @@ static void require_reshape(const std::string& label,
                                                 admitted[0]->name,
                                                 num_admitted == 2 ? " or " : "",
                                                 num_admitted == 2 ? admitted[1]->name : "",
-                                                format_hint));
+                                                format_hint.c_str()));
     const int value_bits = rocke_i_type_bits(value_type);
     const int register_bits = rocke_i_type_bits(register_type);
     if(value_bits != register_bits)
@@ -133,13 +129,14 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
         throw ckc::ValueError("an MMA operand role is A, B or C");
     if(rocke_type_eq(operand_type, register_type))
         return false;
+    const rocke_mma_op_t* catalog_op = catalog_row(op_id, gfx);
+    const char* catalog_dtype = !catalog_op                ? NULL
+                                : role == ROCKE_MMA_ROLE_A ? catalog_op->a_dtype
+                                : role == ROCKE_MMA_ROLE_B ? catalog_op->b_dtype
+                                                           : catalog_op->c_dtype;
     const rocke_type_t* admitted[2];
-    const int num_admitted = admitted_elements(
-        op_id,
-        [role](const rocke_mma_op_t* catalog_op) { return operand_dtype(catalog_op, role); },
-        register_type,
-        gfx,
-        admitted);
+    const int num_admitted = admitted_elements(register_type, catalog_dtype, admitted);
+    const int register_bits = rocke_i_type_bits(register_type);
     require_reshape(std::string("MMA operand ") + role_name(role) + " of '" + op_id + "'",
                     "takes",
                     operand_type,
@@ -147,8 +144,7 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
                     admitted,
                     num_admitted,
                     " -- convert the values first",
-                    " -- pass a " + std::to_string(rocke_i_type_bits(register_type))
-                        + "-bit value");
+                    " -- pass a " + std::to_string(register_bits) + "-bit value");
     return true;
 }
 
@@ -159,16 +155,18 @@ bool rocke_mma_result_needs_reinterpret(const char* op_id,
 {
     if(rocke_type_eq(result_type, register_type))
         return false;
+    const rocke_mma_op_t* catalog_op = catalog_row(op_id, gfx);
     const rocke_type_t* admitted[2];
-    const int num_admitted
-        = admitted_elements(op_id, rocke_mma_op_dst_dtype, register_type, gfx, admitted);
+    const int num_admitted = admitted_elements(
+        register_type, catalog_op ? rocke_mma_op_dst_dtype(catalog_op) : NULL, admitted);
+    const int register_bits = rocke_i_type_bits(register_type);
     require_reshape(std::string("MMA result of '") + op_id + "'",
                     "returns",
                     result_type,
                     register_type,
                     admitted,
                     num_admitted,
-                    " -- declare the result with one of those element types",
-                    "");
+                    " -- declare the result in an element type it returns",
+                    " -- declare a " + std::to_string(register_bits) + "-bit result");
     return true;
 }

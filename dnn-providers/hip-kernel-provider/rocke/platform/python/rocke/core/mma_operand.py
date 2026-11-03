@@ -13,9 +13,10 @@ register type is a reinterpretation of the same bits, never a conversion.
 Each lowerer renders its answer in its own language (LLVM ``bitcast``, HIP
 ``__builtin_bit_cast``), so both lowerers of both engines accept and refuse the
 same operands with the same text. :func:`mma_result_needs_reinterpret` is the
-same rule for the value the instruction returns. The C++ engine's twins are
-``rocke_mma_operand_needs_reinterpret`` and ``rocke_mma_result_needs_reinterpret``
-in ``cpp/core/mma_operand.cpp``.
+same rule for the value an instruction returns; the LLVM lowering of the calls
+in :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS` applies it, in both
+engines. The C++ engine's twins are ``rocke_mma_operand_needs_reinterpret``
+and ``rocke_mma_result_needs_reinterpret`` in ``cpp/core/mma_operand.cpp``.
 """
 
 from __future__ import annotations
@@ -41,32 +42,22 @@ def _element_type(t: Type) -> Type:
     return t.elem if isinstance(t, VectorType) else t
 
 
-# The MmaOp field holding each operand role's dtype, and the result's.
-_CATALOG_DTYPE_FIELD: dict[MmaOperandRole, str] = {
-    "a": "a_dtype",
-    "b": "b_dtype",
-    "c": "c_dtype",
-}
-_CATALOG_RESULT_DTYPE_FIELD = "dst_dtype"
-
-
 def _admitted_elements(
-    op_id: str, dtype_field: str, register_type: Type, arch: ArchTarget
+    register_type: Type, catalog_dtype: str | None
 ) -> frozenset[Type]:
     """The element types a value may hold in another shape than ``register_type``.
 
     They are the register's own element type (a reshape, such as ``vec<f32x1>``
-    for ``f32``) and the element type of field ``dtype_field`` of ``arch``'s
-    MMA catalog row for ``op_id`` (the instruction's packed values,
-    such as ``vec<i8x16>`` for ``vec<i32x4>``). An op_id the catalog does not
-    list admits only the first, and so does a catalog element that is
+    for ``f32``) and the element type of ``catalog_dtype``, the dtype the MMA
+    catalog row records for the value (the instruction's packed values, such
+    as ``vec<i8x16>`` for ``vec<i32x4>``). ``None`` (an op_id the catalog does
+    not list) admits only the first, and so does a catalog element that is
     packed-only (``i4`` for the iu4 instructions): no value has that element
     type, so its values arrive in the register type.
     """
     elements = {_element_type(register_type)}
-    catalog_op = arch.mma.by_op_id(op_id)
-    if catalog_op is not None:
-        catalog_element = dtype_to_ir_type(getattr(catalog_op, dtype_field))
+    if catalog_dtype is not None:
+        catalog_element = dtype_to_ir_type(catalog_dtype)
         if not is_packed_only(catalog_element):
             elements.add(catalog_element)
     return frozenset(elements)
@@ -82,10 +73,12 @@ def _require_reshape(
     format_hint: str,
     width_hint: str,
 ) -> None:
-    """Refuse ``value_type`` unless it is ``register_type``'s bits in another
-    shape: an ``admitted`` element type at the register's bit width. ``verb``
-    says what the instruction does with the register ("takes" or "returns");
-    each hint ends its refusal."""
+    """Refuse ``value_type`` unless it is ``register_type``'s bits in another shape.
+
+    It must hold an ``admitted`` element type at the register's bit width.
+    ``label`` names the value, ``verb`` says what the instruction does with the
+    register ("takes" or "returns"), and each hint ends its refusal.
+    """
     element = _element_type(value_type)
     if element not in admitted:
         names = " or ".join(sorted(t.name for t in admitted))
@@ -123,14 +116,25 @@ def mma_operand_needs_reinterpret(
     """
     if operand_type == register_type:
         return False
+    catalog_op = arch.mma.by_op_id(op_id)
+    catalog_dtype = (
+        None
+        if catalog_op is None
+        else {
+            "a": catalog_op.a_dtype,
+            "b": catalog_op.b_dtype,
+            "c": catalog_op.c_dtype,
+        }[role]
+    )
+    register_bits = type_bits(register_type)
     _require_reshape(
         f"MMA operand {role} of {op_id!r}",
         "takes",
         operand_type,
         register_type,
-        _admitted_elements(op_id, _CATALOG_DTYPE_FIELD[role], register_type, arch),
+        _admitted_elements(register_type, catalog_dtype),
         format_hint=" -- convert the values first",
-        width_hint=f" -- pass a {type_bits(register_type)}-bit value",
+        width_hint=f" -- pass a {register_bits}-bit value",
     )
     return True
 
@@ -154,13 +158,16 @@ def mma_result_needs_reinterpret(
     """
     if result_type == register_type:
         return False
+    catalog_op = arch.mma.by_op_id(op_id)
+    catalog_dtype = None if catalog_op is None else catalog_op.dst_dtype
+    register_bits = type_bits(register_type)
     _require_reshape(
         f"MMA result of {op_id!r}",
         "returns",
         result_type,
         register_type,
-        _admitted_elements(op_id, _CATALOG_RESULT_DTYPE_FIELD, register_type, arch),
-        format_hint=" -- declare the result with one of those element types",
-        width_hint="",
+        _admitted_elements(register_type, catalog_dtype),
+        format_hint=" -- declare the result in an element type it returns",
+        width_hint=f" -- declare a {register_bits}-bit result",
     )
     return True

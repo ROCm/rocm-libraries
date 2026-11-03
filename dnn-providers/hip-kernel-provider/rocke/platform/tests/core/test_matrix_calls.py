@@ -290,7 +290,7 @@ def test_as_is_refuses_a_result_of_another_number_format(op_id, result, returns)
         )
     assert str(error.value) == (
         f"MMA result of {op_id!r} holds {result.elem.name} values; the instruction "
-        f"returns {returns} -- declare the result with one of those element types"
+        f"returns {returns} -- declare the result in an element type it returns"
     )
 
 
@@ -303,7 +303,7 @@ def test_even_halves_refuses_a_result_of_another_number_format():
         emit_matrix_call(_lowerer("gfx1151"), op, _EVEN_HALVES)
     assert str(error.value) == (
         "MMA result of 'wmma_f16_16x16x16_f16' holds i16 values; the instruction "
-        "returns f16 -- declare the result with one of those element types"
+        "returns f16 -- declare the result in an element type it returns"
     )
 
 
@@ -320,7 +320,7 @@ def test_as_is_refuses_a_result_of_another_bit_width():
     with pytest.raises(
         ValueError,
         match=r"^MMA result of 'example' is vec<f32x8> \(256 bits\); the instruction "
-        r"returns vec<f32x4> \(128 bits\)$",
+        r"returns vec<f32x4> \(128 bits\) -- declare a 128-bit result$",
     ):
         emit_matrix_call(
             _lowerer("gfx942"),
@@ -499,13 +499,22 @@ def test_forms_refuse_a_register_type_they_cannot_fill():
         EvenHalves(VectorType(F32, 8))
 
 
-@pytest.mark.parametrize("payload_words", [0, 9, True, 4.0])
+@pytest.mark.parametrize("payload_words", [0, 9])
 def test_a_zero_padded_payload_fits_its_register(payload_words):
     with pytest.raises(ValueError) as error:
         ZeroPadded(VectorType(I32, 8), payload_words)
     assert str(error.value) == (
-        f"ZeroPadded payload of {payload_words!r} words does not fit vec<i32x8>; "
+        f"ZeroPadded payload of {payload_words} words does not fit vec<i32x8>; "
         "it is 1 to 8 words"
+    )
+
+
+@pytest.mark.parametrize("payload_words", [True, 4.0])
+def test_a_zero_padded_payload_is_a_word_count(payload_words):
+    with pytest.raises(TypeError) as error:
+        ZeroPadded(VectorType(I32, 8), payload_words)
+    assert str(error.value) == (
+        f"ZeroPadded payload_words is a word count (int), got {payload_words!r}"
     )
 
 

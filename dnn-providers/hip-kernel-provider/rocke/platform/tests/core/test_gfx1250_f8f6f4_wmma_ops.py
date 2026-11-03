@@ -357,6 +357,29 @@ def test_both_engines_call_the_f4_32x16x128_intrinsic(flavor):
     assert "zeroinitializer, <16 x i32>" not in text
 
 
+def test_both_engines_refuse_an_f4_32x16x128_operand_short_of_its_register():
+    """128 fp4 values of A fill sixteen words: eight words are half of A, an
+    incomplete matrix, so the call refuses them rather than padding them."""
+    op = _op(_F4_OP_ID)
+    b = IRBuilder("gfx1250_short_f4_32x16x128")
+    out = b.param("D", PtrType(dtype_to_ir_type(op.c_dtype), "global"))
+    d = b.mma(
+        op,
+        b.zero_vec(I32, 8),
+        b.zero_vec(I32, 8),
+        b.zero_vec(dtype_to_ir_type(op.c_dtype), op.c_frag_len),
+    )
+    b.global_store(out, b.thread_id_x(), b.vec_extract(d, 0))
+    b.ret()
+    assert_both_engines_reject(
+        b.kernel,
+        "gfx1250",
+        ValueError,
+        f"MMA operand a of {_F4_OP_ID!r} is vec<i32x8> (256 bits); the instruction "
+        "takes vec<i32x16> (512 bits) -- pass a 512-bit value",
+    )
+
+
 @pytest.mark.parametrize("dtype", ["fp6e2m3", "fp6e3m2", "fp4e2m1"])
 def test_both_engines_refuse_a_narrow_operand_short_of_its_packed_words(dtype):
     """64 fp6 values are twelve packed words and 64 fp4 values eight. One word

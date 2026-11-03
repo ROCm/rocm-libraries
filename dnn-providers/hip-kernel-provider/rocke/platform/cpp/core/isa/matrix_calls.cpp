@@ -736,6 +736,11 @@ static void check_form(const rocke_matrix_form_t& form)
                                           flavor ? flavor : "(null)",
                                           flavor_choices().c_str()));
     }
+    /* Only a zero-padding form has payload words (Python AsIs and EvenHalves
+     * have no such field). */
+    if(form.kind != ROCKE_MATRIX_FORM_ZERO_PADDED && form.payload_words != 0)
+        throw ValueError(
+            format_error("only a ZeroPadded form has payload words, got %d", form.payload_words));
     if(form.kind == ROCKE_MATRIX_FORM_ZERO_PADDED)
     {
         const int words = form.payload_words;

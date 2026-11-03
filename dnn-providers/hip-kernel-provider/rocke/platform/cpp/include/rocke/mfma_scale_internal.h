@@ -39,18 +39,20 @@ constexpr int rocke_matrix_format_bits(int format)
 /* The values per lane an f8f6f4 operand register of `words` 32-bit words holds
  * in every format: room for that many 8-bit values (the count of Python
  * matrix_operand_packing). */
-constexpr int rocke_matrix_operand_values(int words)
+constexpr int rocke_matrix_operand_value_count(int words)
 {
     return 4 * words;
 }
 
 /* The low words of a `words`-word register that an operand of format code
- * `format` fills; the rest are zero (Python
- * matrix_operand_packing(dtype, words).live_carriers): 16 words hold 16 for
- * fp8 / bf8, 12 for fp6 / bf6 and 8 for fp4. */
+ * `format` fills; the rest are zero: 16 words hold 16 for fp8 / bf8, 12 for
+ * fp6 / bf6 and 8 for fp4. The constexpr twin of Python
+ * matrix_operand_packing(dtype, words).live_carriers (FragmentPacking's
+ * whole carriers of payload): the call tables that use it are consteval, which
+ * rocke_fragment_packing_t's C functions cannot feed. */
 constexpr int rocke_matrix_operand_payload_words(int format, int words)
 {
-    return (rocke_matrix_operand_values(words) * rocke_matrix_format_bits(format) + 31) / 32;
+    return (rocke_matrix_operand_value_count(words) * rocke_matrix_format_bits(format) + 31) / 32;
 }
 
 /* One (A, B) pair of format codes. */
@@ -277,7 +279,7 @@ static inline int rocke_require_matrix_format(const char* dtype)
 }
 
 /* Where each value of one f8f6f4 operand of format `dtype` sits: `words`
- * 32-bit words holding rocke_matrix_operand_values(words) values per lane,
+ * 32-bit words holding rocke_matrix_operand_value_count(words) values per lane,
  * packed from the low bit;
  * lane l holds row l % lanes_per_group of A (that column of B), and its values
  * are runs of consecutive K, 16 long for an 8-bit format and 32 for a 6-bit or
@@ -291,7 +293,7 @@ static inline rocke_matrix_fragment_layout_t
     rocke_matrix_fragment_layout_t layout;
     if(words < 0 || !rocke_bit_packing_init(&packing, bits, 0)
        || !rocke_fragment_packing_init(
-           &fragment, &packing, (uint64_t)rocke_matrix_operand_values(words), 32, words)
+           &fragment, &packing, (uint64_t)rocke_matrix_operand_value_count(words), 32, words)
        || !rocke_matrix_fragment_layout_init(
            &layout, &fragment, bits == 8 ? 16 : 32, lane_groups, lanes_per_group))
         throw ckc::ValueError("invalid matrix fragment chunk layout");

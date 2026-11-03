@@ -140,7 +140,7 @@ static bool is_register(const rocke_matrix_form_t& form, const char* elem, int c
 
 /* The form an operand of format code `format` takes in a `words`-word
  * register: an 8-bit format as is; a 6-bit or 4-bit one zero-padded from
- * exactly its packed words, bits * words / 8 of them (12 or 8 of 16). */
+ * exactly its packed words, bits * words / 8 of them (6 or 4 of 8). */
 static bool is_operand_form(const rocke_matrix_form_t& form, int format, int words)
 {
     const int bits = rocke_matrix_format_bits(format);
