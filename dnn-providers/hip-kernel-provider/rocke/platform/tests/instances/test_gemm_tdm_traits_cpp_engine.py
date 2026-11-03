@@ -144,6 +144,17 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
             spec = _spec()
             spec = replace(spec, data=replace(spec.data, dtype_c="fp16"))
             lower_universal_gemm(spec, arch=ARCH, backend="both", want_ir=True)
+        with self.subTest("warp_k=2"):  # issuers are launched waves, not warps
+            spec = _spec()
+            spec = replace(
+                spec,
+                tile=replace(
+                    spec.tile, tile_m=16, tile_n=16, warp_m=1, warp_n=1, warp_k=2
+                ),
+                trait=replace(spec.trait, tdm_depth=1, lds_k_pad=0),
+                block_size=spec.wave_size,
+            )
+            lower_universal_gemm(spec, arch=ARCH, backend="both", want_ir=True)
 
     def test_both_engines_apply_the_same_storage_rule(self):
         """One fp8/bf8 storage rule per engine: same verdict and same reason."""

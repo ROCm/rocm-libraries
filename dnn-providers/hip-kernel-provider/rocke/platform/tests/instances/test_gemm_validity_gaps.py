@@ -460,5 +460,50 @@ class TestAbLoadElemBytesBounds(unittest.TestCase):
                 self.assertIn("ab_load_elem_bytes", why)
 
 
+class TestTdmIssuersAreLaunchedWaves(unittest.TestCase):
+    """A TDM fill must be issued by a wave the block launches.
+
+    ``block_size`` is ``warp_m * warp_n`` waves; ``warp_k`` does not add any.
+    Counting ``warp_k`` made a one-wave ``warp_k=2`` block hand the B fill to
+    wave 1, which does not exist, so B was never loaded.
+    """
+
+    def test_warp_k_2_gates_no_fill_on_an_unlaunched_wave(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import (
+            build_universal_gemm,
+            is_valid_spec,
+        )
+
+        base = _fp8_spec(tile_k=128, epilogue="default")
+        spec = replace(
+            base,
+            tile=replace(base.tile, tile_m=16, tile_n=16, warp_m=1, warp_n=1, warp_k=2),
+            trait=replace(base.trait, tdm_depth=1, lds_k_pad=0),
+            block_size=32,
+        )
+        ok, why = is_valid_spec(spec, arch=ARCH)
+        self.assertTrue(ok, why)
+        waves = spec.block_size // spec.wave_size
+        self.assertEqual(waves, 1)
+
+        ll = lower_kernel_to_llvm(
+            build_universal_gemm(spec, arch=ARCH), arch=ARCH, llvm_flavor="llvm23"
+        )
+        self.assertIn("tensor.load.to.lds(", ll)
+        # The wave id is readfirstlane(tid / wave_size).
+        wave_ids = re.findall(
+            r"(%[\w.]+) = call i32 @llvm\.amdgcn\.readfirstlane\.i32\(i32 %div",
+            ll,
+        )
+        for wid in wave_ids:
+            for m in re.finditer(rf"icmp eq i32 {re.escape(wid)}, (\d+)\b", ll):
+                self.assertLess(
+                    int(m.group(1)),
+                    waves,
+                    f"a fill is gated on wave {m.group(1)}; the block has {waves}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

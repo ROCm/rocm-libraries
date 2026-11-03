@@ -1491,7 +1491,10 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.tdm_b_lds_base = rocke_b_smem_addr_of(b, ctx.B_smem);
         ctx.tdm_a_buf_bytes = ctx.block_m * ctx.lds_k * ctx.tdm_elem_bytes;
         ctx.tdm_b_buf_bytes = ctx.block_n * ctx.lds_k * ctx.tdm_elem_bytes;
-        ctx.tdm_waves = spec->tile.warp_m * spec->tile.warp_n * spec->tile.warp_k;
+        /* The waves the kernel launches. Not warp_m * warp_n * warp_k: with
+         * warp_k > 1 that counts waves a block_size of warp_m * warp_n waves
+         * never launches, and a fill gated on one of them never happens. */
+        ctx.tdm_waves = spec->block_size / spec->wave_size;
         if(ctx.tdm_waves > 1)
         {
             ctx.tdm_wave_id = rocke_b_readfirstlane(b, rocke_b_div(b, ctx.tid, ctx.c_wave));

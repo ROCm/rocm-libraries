@@ -249,7 +249,7 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* tdm_b_lds_base; /* smem_addr_of(B_smem)          */
     int tdm_a_buf_bytes; /* block_m * lds_k * tdm_elem_bytes         */
     int tdm_b_buf_bytes; /* block_n * lds_k * tdm_elem_bytes         */
-    int tdm_waves; /* warp_m * warp_n * warp_k                 */
+    int tdm_waves; /* launched waves: block_size / wave_size    */
     rocke_value_t* tdm_wave_id; /* readfirstlane(tid/wave_size) or 0  */
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */

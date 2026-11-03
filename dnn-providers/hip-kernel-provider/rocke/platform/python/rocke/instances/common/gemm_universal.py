@@ -1710,7 +1710,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # many bytes per parity step.
         _tdm_a_buf_bytes = block_m * _lds_k * _tdm_elem_bytes
         _tdm_b_buf_bytes = block_n * _lds_k * _tdm_elem_bytes
-        _tdm_waves = t.warp_m * t.warp_n * t.warp_k
+        # The waves the kernel launches. Not warp_m * warp_n * warp_k: with
+        # warp_k > 1 that counts waves a block_size of warp_m * warp_n waves
+        # never launches, and a fill gated on one of them never happens.
+        _tdm_waves = spec.block_size // spec.wave_size
         _tdm_wave_id = (
             b.readfirstlane(b.div(tid, c_wave)) if _tdm_waves > 1 else b.const_i32(0)
         )
