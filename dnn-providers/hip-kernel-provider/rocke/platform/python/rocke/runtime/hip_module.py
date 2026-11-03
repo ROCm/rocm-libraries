@@ -107,6 +107,7 @@ def _load_lib() -> ctypes.CDLL:
         selected = str(Path(selected).resolve())
     mapped = _loaded_libraries.loaded_runtimes()
     retained = None
+    compilers = []
     accepted = False
     try:
         matches = []
@@ -148,6 +149,26 @@ def _load_lib() -> ctypes.CDLL:
         if retained is not None:
             accepted = True
             return retained.library
+        if compiler is None:
+            # An external consumer may already own COMGR even when this session
+            # has never acquired it. Check before HIP can load its dependencies;
+            # do not bootstrap a compiler for precompiled code-object launches.
+            compilers = _loaded_libraries.loaded_compilers()
+            if len(compilers) > 1:
+                raise HipError("multiple mapped compiler providers are ambiguous")
+            if compilers:
+                existing = compilers[0]
+                try:
+                    unchanged = file_signature(existing.path) == existing.signature
+                except OSError as error:
+                    raise HipError(
+                        f"mapped compiler identity unavailable: {error}"
+                    ) from error
+                if not unchanged:
+                    raise HipError(
+                        "mapped compiler identity changed before HIP acquisition"
+                    )
+                _session.check_pair(selected, existing.path)
         directory = _add_dll_dir(selected)
         try:
             library = ctypes.CDLL(selected)
@@ -161,6 +182,8 @@ def _load_lib() -> ctypes.CDLL:
     except ComgrError as error:
         raise HipError(str(error)) from error
     finally:
+        for item in compilers:
+            _loaded_libraries.release(item)
         for item in mapped:
             if not accepted or item is not retained:
                 _loaded_libraries.release(item)

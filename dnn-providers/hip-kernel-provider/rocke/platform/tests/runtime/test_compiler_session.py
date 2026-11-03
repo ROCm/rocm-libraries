@@ -240,6 +240,75 @@ def test_preloaded_hip_alias_uses_existing_handle(owner, tmp_path, monkeypatch):
     hip_module.ctypes.CDLL.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "mode", ["foreign", "same-file", "alias", "multiple", "changed", "missing"]
+)
+def test_external_compiler_is_checked_before_new_hip(
+    owner, tmp_path, monkeypatch, mode
+):
+    from rocke.runtime import hip_module
+    from rocke.runtime._compiler_query import file_signature
+    from rocke.runtime._loaded_libraries import LoadedLibrary
+
+    windows = sys.platform == "win32"
+    companion = tmp_path / ("amd_comgr.dll" if windows else "libamd_comgr.so.3")
+    hip = tmp_path / ("amdhip64.dll" if windows else "libamdhip64.so.7")
+    companion.touch()
+    hip.touch()
+    foreign = tmp_path / "foreign-compiler"
+    foreign.touch()
+    selected = companion if mode in ("same-file", "alias") else foreign
+    if mode == "alias":
+        selected = tmp_path / "compiler-alias"
+        os.link(companion, selected)
+    signature = file_signature(str(selected))
+    if mode == "changed":
+        signature = (signature[0], signature[1] + 1, *signature[2:])
+    if mode == "missing":
+        selected.unlink()
+    provider = LoadedLibrary(
+        SimpleNamespace(_name=str(selected), _handle=0), str(selected), signature
+    )
+    providers = [provider]
+    if mode == "multiple":
+        providers.append(
+            LoadedLibrary(
+                SimpleNamespace(_handle=0),
+                str(companion),
+                file_signature(str(companion)),
+            )
+        )
+    inventory = Mock(return_value=providers)
+    cleanup = Mock()
+    runtime = SimpleNamespace(_name=str(hip))
+    load = Mock(return_value=runtime)
+    monkeypatch.setenv("ROCKE_HIP_LIB", str(hip))
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", lambda: [])
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_compilers", inventory)
+    monkeypatch.setattr(comgr._loaded_libraries, "release", cleanup)
+    monkeypatch.setattr(hip_module, "_add_dll_dir", lambda path: None)
+    monkeypatch.setattr(hip_module.ctypes, "CDLL", load)
+    monkeypatch.setattr(
+        comgr, "_resolve_lib", lambda: pytest.fail("HIP bootstrapped COMGR")
+    )
+    if mode in ("same-file", "alias"):
+        assert hip_module._resolve_hip() is runtime
+        assert hip_module._resolve_hip() is runtime
+        load.assert_called_once_with(str(hip))
+    else:
+        message = (
+            "coherent exact-file pair"
+            if mode == "foreign"
+            else "ambiguous" if mode == "multiple" else "identity"
+        )
+        with pytest.raises(hip_module.HipError, match=message):
+            hip_module._resolve_hip()
+        load.assert_not_called()
+    inventory.assert_called_once()
+    assert cleanup.call_count == len(providers)
+    assert owner.compiler is None
+
+
 def test_cached_evidence_bypasses_all_cold_work(owner, monkeypatch):
     def version(*outputs):
         for output, value in zip(outputs, (23, 0, 1)):
