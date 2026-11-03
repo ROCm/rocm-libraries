@@ -523,8 +523,10 @@ namespace
     }
 
     // The default triangular solves, and iterative ones with enough iterations to
-    // reach the direct solve. The host iterative analyses assert in every build, so a
-    // move that does not clear them fails in Release as well.
+    // reach the direct solve. The host ItLUAnalyse and ItLLAnalyse assert in every
+    // build that no analysis is left, so an ILU, ItILU0, ILUT, IC or LU move that does
+    // not clear them fails in Release as well. The L and U analyses of GS and SGS do
+    // not notice a second analysis, so the clears in their moves are not covered.
     template <typename T>
     std::vector<std::pair<std::string, rocalution::SolverDescr>> triangular_solves()
     {
