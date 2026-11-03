@@ -155,6 +155,11 @@ if(BUILD_CODE_COVERAGE)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "BUILD_CODE_COVERAGE requires a clang compiler, e.g. amdclang++")
   endif()
+  # The profile runtime is linked into the library with link options, which a
+  # static library does not have, so rocalution-test would write no profile
+  if(NOT BUILD_SHARED_LIBS)
+    message(FATAL_ERROR "BUILD_CODE_COVERAGE requires BUILD_SHARED_LIBS=ON")
+  endif()
 
   # Locate the host profile runtime so coverage targets can link it directly.
   # Passing -fprofile-instr-generate to a HIP link instead puts the device
@@ -309,6 +314,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_%m.profraw" ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -DPROFRAW_DIR=${CMAKE_BINARY_DIR}/coverage-report/profraw -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckCoverageProfile.cmake
     ${COVERAGE_UNIT_TEST_COMMANDS}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running rocalution coverage analysis"

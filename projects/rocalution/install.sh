@@ -507,6 +507,10 @@ pushd .
           echo "Code coverage is disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
           exit 1
       fi
+      if [[ "${build_static}" == true ]]; then
+          echo "Code coverage requires the shared library, it cannot be combined with --static; aborting";
+          exit 1
+      fi
       cmake_common_options="${cmake_common_options} -DBUILD_CODE_COVERAGE=ON"
   fi
 

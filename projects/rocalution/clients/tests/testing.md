@@ -407,7 +407,9 @@ compiler and instruments the host code of the library (the `rocalution_objects` 
 `librocalution` and the unit tests are built from) and of `librocalution_hip` with
 `-fprofile-instr-generate -fcoverage-mapping`; the device code and the tests themselves are not
 instrumented. `install.sh
---codecoverage` selects `amdclang++` and requires a Debug or RelWithDebInfo build. Complex
+--codecoverage` selects `amdclang++` and requires a Debug or RelWithDebInfo build. Coverage
+needs the shared library: CMake stops with `BUILD_SHARED_LIBS=OFF`, and `install.sh` rejects
+`--static --codecoverage`. Complex
 support stays on, so the unit tests cover the complex instantiations; `rocalution-test` tests
 the real types only.
 
