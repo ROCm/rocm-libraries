@@ -37,6 +37,7 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
+#include "device/ScopedDevice.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
@@ -718,8 +719,20 @@ struct PreparedStep
 class DeviceTables
 {
 public:
-    DeviceTables(const dgrad::Workspace& region, const std::vector<PreparedStep>& steps)
+    DeviceTables(int deviceOrdinal,
+                 const dgrad::Workspace& region,
+                 const std::vector<PreparedStep>& steps)
+        : _deviceOrdinal(deviceOrdinal)
     {
+        // The table must land on the kernel's launch device: prepare() runs on whatever
+        // device happens to be current, which HandleDeviceResolver may resolve to a
+        // different one than the stream's (it prefers the stream's device over the
+        // current one), and kernelFor() admits another device of the same architecture.
+        const device::ScopedDevice scope(_deviceOrdinal);
+        if(!scope.bound())
+        {
+            checkHip(hipErrorInvalidDevice, "sub-GEMM table alloc: binding device");
+        }
         checkHip(hipMalloc(&_data, static_cast<size_t>(region.bytes)), "sub-GEMM table alloc");
         for(const auto& [code, step] : steps)
         {
@@ -744,6 +757,9 @@ public:
     DeviceTables& operator=(DeviceTables&&) = delete;
     ~DeviceTables()
     {
+        // Same device the allocation was made on: hipFree is bound to the allocating
+        // context, not whatever device happens to be current when this runs.
+        const device::ScopedDevice scope(_deviceOrdinal);
         // A failure here (a device already reset) leaves nothing to release.
         static_cast<void>(hipFree(_data));
     }
@@ -755,6 +771,7 @@ public:
 
 private:
     void* _data = nullptr;
+    int _deviceOrdinal;
 };
 
 /// The workspace the caller provides for @p plan: every region but SUB_GEMM, which the
@@ -893,7 +910,7 @@ public:
         {
             if(region.name == dgrad::Buffer::SUB_GEMM)
             {
-                tables = std::make_unique<DeviceTables>(region, steps);
+                tables = std::make_unique<DeviceTables>(context.deviceId, region, steps);
                 continue;
             }
             workspaces.push_back(region);
