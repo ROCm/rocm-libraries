@@ -65,8 +65,23 @@ namespace
         }
     }
 
+    // Captures hipblaslt_cerr for the life of the object, then restores it.
+    struct CaptureErrorStream
+    {
+        hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
+        CaptureErrorStream()
+        {
+            hipblaslt_cerr = hipblaslt_internal_ostream{};
+        }
+        ~CaptureErrorStream()
+        {
+            hipblaslt_cerr = std::move(saved);
+        }
+    };
+
     // Runs the hipblaslt-bench -v checks of D (norm and allclose) through check() on host
-    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed.
+    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed. With
+    // auxiliary, D matches and E is checked against result instead.
     template <typename T = float>
     struct BenchVerifyD
     {
@@ -76,6 +91,7 @@ namespace
         hipblasLtBatchMode_t       mode;
         std::vector<HipHostBuffer> gold, result;
         double                     norm_error = 0, atol = 1, rtol = 1;
+        int64_t                    extra_failures = 0; // failed checks of E in the last run
 
         BenchVerifyD(int64_t m, int64_t n, int64_t batches, hipblasLtBatchMode_t mode)
             : m(m)
@@ -130,6 +146,7 @@ namespace
             std::vector<double>        tol{0};
             double                     max_ulp = 0, avg_ulp = 0;
             const int64_t              before = hipblaslt_bench_options::verification_failures();
+            const int64_t extra_before = hipblaslt_bench_options::extra_check_failures();
             check(nullptr,
                   arg,
                   gemm_count,
@@ -164,6 +181,7 @@ namespace
                   output_type,
                   HIP_R_32F,
                   mode);
+            extra_failures = hipblaslt_bench_options::extra_check_failures() - extra_before;
             return hipblaslt_bench_options::verification_failures() - before;
         }
     };
@@ -300,8 +318,22 @@ namespace
                 for(int64_t i = 0; i < 32; i++)
                     d.at(d.result, b, i) *= 1.000004f;
             EXPECT_EQ(d.run(HIP_R_32F, HIP_R_32F, true, true, auxiliary), 0);
+            EXPECT_EQ(d.extra_failures, 0);
             EXPECT_GT(d.norm_error, 1e-5);
         }
+    }
+
+    // A wrong E is reported by name but counted apart from D, so --verify_strict ignores it.
+    TEST(BenchVerify, smoke_WrongAuxiliaryIsReportedButNotCountedForD)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        d.at(d.result, 2, 5) = 7;
+        CaptureErrorStream capture;
+        EXPECT_EQ(d.run(HIP_R_32F, HIP_R_32F, false, false, true), 0);
+        EXPECT_EQ(d.extra_failures, 1);
+        EXPECT_NE(hipblaslt_cerr.str().find("norm check failed for E of gemm 0: batch 2 has"),
+                  std::string::npos)
+            << hipblaslt_cerr.str();
     }
 
     TEST(BenchVerify, smoke_NormAssertRejectsOneBadBatch)
@@ -312,6 +344,7 @@ namespace
             BenchVerifyD d(1, 1, 8, HIPBLASLT_BATCH_MODE_STRIDED);
             d.at(d.gold, 7, 0)   = 1.0f;
             d.at(d.result, 7, 0) = 1.00004f;
+            CaptureErrorStream            capture;
             ::testing::TestPartResultArray failures;
             {
                 ::testing::ScopedFakeTestPartResultReporter reporter(
@@ -321,6 +354,10 @@ namespace
             }
             ASSERT_EQ(failures.size(), 1);
             EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+            // The failure is printed before the assertion stops the run.
+            const std::string line = std::string("norm check failed for ")
+                                     + (auxiliary ? "E" : "D") + " of gemm 0: batch 7 has";
+            EXPECT_NE(hipblaslt_cerr.str().find(line), std::string::npos) << hipblaslt_cerr.str();
             EXPECT_GT(d.norm_error, 1e-5);
             EXPECT_LT(d.norm_error / d.batches, 1e-5);
         }
@@ -378,15 +415,7 @@ namespace
         BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
         EXPECT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
         EXPECT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
-        struct RestoreErrorStream
-        {
-            hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
-            ~RestoreErrorStream()
-            {
-                hipblaslt_cerr = std::move(saved);
-            }
-        } restore_error_stream;
-        hipblaslt_cerr        = hipblaslt_internal_ostream{};
+        CaptureErrorStream capture;
         const auto failures   = d.run(HIP_R_4F_E2M1, HIP_R_4F_E2M1, false);
         const auto diagnostic = hipblaslt_cerr.str();
         EXPECT_EQ(failures, 1);
