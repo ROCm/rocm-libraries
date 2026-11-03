@@ -818,6 +818,51 @@ def _reference_ctests(published):
     return names
 
 
+def _categorized_labels(parser, categories, ctests):
+    result = subprocess.run(
+        [sys.executable, str(parser), str(categories), str(ctests)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return {
+        name: set(value.split(";"))
+        for name, value in re.findall(
+            r'set_tests_properties\("([^"]+)" PROPERTIES LABELS "([^"]*)"\)',
+            result.stdout,
+        )
+    }
+
+
+def test_counted_gate_categories_produce_final_tier_and_kind_labels(tmp_path):
+    provider = _PLATFORM.parent.parent
+    categories = provider / "ROCKE_ENGINE_test_categories_external.yaml"
+    parser = provider.parent.parent / "shared/ctest/parse_ctest_categories.py"
+    for path in (categories, parser):
+        if not path.is_file():
+            pytest.skip(f"no provider CTest categories to check: {path} does not exist")
+    pytest.importorskip("yaml", reason="the shared category parser needs PyYAML")
+    ctests = tmp_path / "CTestTestfile.cmake"
+    ctests.write_text(
+        "add_test(rocke_library_counted_ir_gate python)\n"
+        "add_test(rocke_library_counted_isa_gate python)\n",
+        encoding="utf-8",
+    )
+    labels = _categorized_labels(parser, categories, ctests)
+    structural = labels["rocke_library_counted_ir_gate"]
+    compiler = labels["rocke_library_counted_isa_gate"]
+    assert {
+        "standard",
+        "comprehensive",
+        "full",
+        "structural",
+        "attention",
+    } <= structural
+    assert "quick" not in structural
+    assert {"comprehensive", "full", "compiler", "attention"} <= compiler
+    assert not {"quick", "standard"} & compiler
+
+
 def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
     """The provider category patterns must keep matching the registered names.
 
@@ -845,19 +890,7 @@ def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
     ctests.write_text(
         "".join(f"add_test({name} python)\n" for name in [shared, *names])
     )
-    result = subprocess.run(
-        [sys.executable, str(parser), str(categories), str(ctests)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    labels = {
-        name: set(value.split(";"))
-        for name, value in re.findall(
-            r'set_tests_properties\("([^"]+)" PROPERTIES LABELS "([^"]*)"\)',
-            result.stdout,
-        )
-    }
+    labels = _categorized_labels(parser, categories, ctests)
     assert labels.get(shared), f"{categories.name} no longer labels {shared}"
     for name in names:
         missing = labels[shared] - labels.get(name, set())

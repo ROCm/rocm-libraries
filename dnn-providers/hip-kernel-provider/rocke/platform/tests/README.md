@@ -135,7 +135,8 @@ artifact path.
 
 ## Execution categories
 
-Four distinct things run here; don't conflate them:
+Four platform-runner categories run here; don't conflate them. Installed
+library CTests add the explicit host-gate category described below.
 
 1. **Default developer pre-merge runner** (`python tests/run_all.py`):
    relative-path guard -> byte-identity gate (`tools/check_byte_identity.py`) ->
@@ -257,6 +258,33 @@ builds and installed provider CI.
   unavailable; this preserves existing behavior for the migration.
 - Probe batching, worker tuning, caching, and timeout/retry policy remain future
   efficiency work now that CI supplies execution evidence for the standalone gate.
+### Library unit and explicit host gates
+
+For new or migrated library cohorts, `test_*.py` discovery is the quick unit tier.
+Exhaustive or compiler-dependent matrices use non-discovered modules, explicit
+stages in `library/tests/run_all.py`, and separately categorized installed
+CTests. Legacy violations remain tracked as TESTING.md gap G9.
+
+| CTest entry | Scope | Tier / resources |
+|---|---|---|
+| `rocke_library_attention_cpu_pytest` | Fast counted-sync contracts alongside the existing attention host units | quick and higher |
+| `rocke_library_counted_ir_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | standard and higher; host-only structural gate |
+| `rocke_library_counted_isa_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the active supported toolchain | comprehensive and full; compiler preflight required |
+
+Each compiler-gate invocation accepts one eligible code-object lane (`llvm22`,
+`llvm23`, or `llvm24`) when the requested profile matches the active COMGR
+compiler, and records COMGR provenance in every resource result. A green result
+proves that active lane only; aggregate coverage of every eligible lane requires
+separate compiler-specific CI jobs. The older `llvm20` profile remains covered by
+offline emission/parity.
+The two counted gates share the `rocke_counted_sync_gate` CTest resource
+lock. The installed compiler gate forces required mode; an unsupported flavor,
+missing target support, unknown COMGR provenance, or missing `llvm-objdump` fails
+once at preflight. The source runner treats that gate as optional unless passed
+`--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
+plain `GREEN`.
+See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
+for the reusable placement contract.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 

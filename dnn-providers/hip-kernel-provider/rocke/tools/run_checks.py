@@ -7,9 +7,10 @@
 # on-GPU numeric lane only exercises the arch of whatever GPU is visible on this
 # machine, so it does not cover every supported arch. Run it on each arch you can.
 #
-# AUTO-DISCOVERS tests: adding a new test_*.py or a new <family>_emit.{py,c}
-# parity pair requires NO edit to this script or any checklist doc -- it is
-# picked up automatically, so a new test never has to be registered by hand.
+# AUTO-DISCOVERS ordinary unit tests and parity pairs: adding a new test_*.py
+# or <family>_emit.{py,c} needs no edit here. Resource-bound explicit gates are
+# intentionally non-discovered and need the runner/CTest/category ownership
+# contract documented in TESTING.md.
 #
 # Stages, selected with --steps (default: all, in this order):
 #   guard          -- relative-path guard
@@ -174,7 +175,8 @@ def main() -> int:
         "--flavor",
         choices=FLAVORS,
         default="",
-        help="pin one LLVM flavor (default: all supported flavors)",
+        help="pin byte-identity/corpus checks to one LLVM flavor; the counted "
+        "compiler gate validates its active COMGR flavor",
     )
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_checks")
@@ -221,6 +223,18 @@ def main() -> int:
         pt = ", ".join(str(d.relative_to(ROCKE)) for d in pytest_dirs) or "NONE FOUND"
         print(
             f"  pytest dirs  : {pt + (f' (-k {op})' if op else '') if 'pytest' in steps else 'skip'}"
+        )
+        print(
+            "  library gates: "
+            + (
+                "skip (--op is focused unit iteration)"
+                if "pytest" in steps and op
+                else (
+                    "counted-ir, counted-isa (compiler required)"
+                    if "pytest" in steps
+                    else "skip"
+                )
+            )
         )
         pinned = ", ".join(p.name for p in pinned_tests) or "NONE FOUND"
         print(
@@ -359,6 +373,29 @@ def main() -> int:
             cmd += [f"--ignore={p}" for p in pinned_tests]
             cmd += [str(d) for d in pytest_dirs]
             status |= _run("pytest", cmd, env, cwd=ROCKE)
+            if op:
+                print(
+                    f"\n== library explicit gates: SKIPPED (--op {op}; focused unit iteration) =="
+                )
+            else:
+                status |= _run(
+                    "pytest [library explicit gates]",
+                    [
+                        sys.executable,
+                        str(LIBRARY / "tests" / "run_all.py"),
+                        "--gate",
+                        "counted-ir",
+                        "--gate",
+                        "counted-isa",
+                        "--require-compiler-gate",
+                        "--",
+                        "-q",
+                        "-p",
+                        "no:cacheprovider",
+                    ],
+                    env,
+                    cwd=LIBRARY,
+                )
             # pinned GPU references -- never -k scoped; -rs prints why they skipped
             if pinned_tests:
                 with tempfile.TemporaryDirectory() as tmp:

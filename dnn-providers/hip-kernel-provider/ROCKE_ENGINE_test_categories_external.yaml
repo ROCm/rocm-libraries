@@ -8,21 +8,18 @@
 # these tests directly via add_test(), not through a GTest binary categorized
 # by a shared YAML (rocKE's C++ client API and its GTest binaries were
 # removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
-# Without an entry here they carry no quick/standard/comprehensive/full
-# label: the install-tree copy only has a hardcoded literal "quick" label
-# baked in by rocke/platform/CMakeLists.txt (nothing gives it
-# standard/comprehensive/full), and the build-tree copies registered by
-# rocke/platform/tests/cmake/*.cmake have no tier label at all. Either way
-# they silently drop out of `ctest -L <tier>` selection, which is how
-# TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
-# suites.
+# Without an entry here a pre-registered test carries no cumulative
+# quick/standard/comprehensive/full tier labels and silently drops out of
+# `ctest -L <tier>` selection, which is how TheRock CI runs these suites.
+# The category parser supplies the category key and its higher-tier cascade;
+# `labels` below are additional descriptive labels, not a repetition of the
+# tier name.
 #
-# Most tests carry no Full*/Standard*/Comprehensive* variant, so every tier
-# runs the same coverage. The arch-domain reproducibility gate is intentionally
-# standard-tier: it probes the external LLVM toolchain across the full
-# intrinsic/architecture matrix and does not belong in quick or FFM. It is
-# registered in both build-tree and installed-artifact CTest, so developers and
-# provider CI execute the same logical gate against their respective package data.
+# Most rocKE entries have no tiered variant and remain in quick (therefore in
+# every higher tier through the cascade). The arch-domain reproduction and
+# counted-sync structural gates start at standard; the counted-sync compiler,
+# ISA, and resource gate starts at comprehensive. Their uncategorized
+# installed-tree fallback labels are baked into CMake too.
 #
 # The pinned GPU reference entries are regex patterns, unlike the other
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -192,3 +189,30 @@ test_categories:
       - "host"
       - "toolchain"
       - "generated-artifact"
+
+  counted-structural:
+    description: "rocKE counted-sync exhaustive host structural gate"
+    test_patterns:
+      - "rocke_library_counted_ir_gate"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "structural"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  comprehensive:
+    description: "rocKE counted-sync compiler, ISA, and resource gate"
+    test_patterns:
+      - "rocke_library_counted_isa_gate"
+    labels:
+      - "host"
+      - "compiler"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
