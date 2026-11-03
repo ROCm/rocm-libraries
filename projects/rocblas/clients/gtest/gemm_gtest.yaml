@@ -3600,13 +3600,27 @@ Tests:
   function:
     - gemm: *single_precision
   matrix_size:
-    - { M: 67108863, N: 1, K: 32, lda: 67108863, ldb: 32, ldc: 67108863}
-    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864}
+    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864} # index signed int32 overflow
   transA: [ N    ]
   transB: [ N    ]
   alpha: 1
   beta: 1
   # batched counterpart: gemm_batched_PyTorch_offset_overflow
+
+# A holds M * K == 2^31 elements, so its element index overflows signed int32.
+# For transA == T, lda = K and the overflow comes from column (M) * lda.
+- name: gemm_index_overflow
+  category: nightly
+  function:
+    - gemm: *single_precision
+  arguments:
+    - { transA: N, transB: N, M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864 }
+    - { transA: N, transB: T, M: 67108864, N: 1, K: 32, lda: 67108864, ldb:  1, ldc: 67108864 }
+    - { transA: T, transB: N, M: 67108864, N: 1, K: 32, lda:       32, ldb: 32, ldc: 67108864 }
+    - { transA: T, transB: T, M: 67108864, N: 1, K: 32, lda:       32, ldb:  1, ldc: 67108864 }
+  alpha: 1
+  beta: 1
+  gpu_arch: '9??'
 
 - name: gemm_ILP64
   category: stress

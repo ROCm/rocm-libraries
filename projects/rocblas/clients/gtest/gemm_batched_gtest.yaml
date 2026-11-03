@@ -601,17 +601,34 @@ Tests:
   repeatability_check: true
 
 # Match gemm_PyTorch_offset_overflow on the pointer-batched path.
-# lda=2^26, K=32, fp32: K * lda * sizeof overflows signed 32-bit.
+# lda=2^26, K=32, fp32: K * lda overflows signed 32-bit.
 - name: gemm_batched_PyTorch_offset_overflow
   category: nightly
   function:
     - gemm_batched: *single_precision
   matrix_size:
-    - { M: 67108863, N: 1, K: 32, lda: 67108863, ldb: 32, ldc: 67108863 }
-    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864 }
+    - { M: 67108863, N: 1, K: 32, lda: 67108863, ldb: 32, ldc: 67108863 } # index signed int32 overflow
+    - { M: 16777217, N: 1, K: 32, lda: 16777217, ldb: 32, ldc: 16777217 } # byte offset overflows uint32
   transA: [ N ]
   transB: [ N ]
   alpha: 1
   beta: 1
   batch_count: [ 2 ]
+
+# Match gemm_PyTorch_index_overflow on the pointer-batched path.
+# A holds M * K == 2^31 elements, so its element index overflows signed int32.
+# For transA == T, lda = K and the overflow comes from column (M) * lda.
+- name: gemm_batched_index_overflow
+  category: nightly
+  function:
+    - gemm_batched: *single_precision
+  arguments:
+    - { transA: N, transB: N, M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864 }
+    - { transA: N, transB: T, M: 67108864, N: 1, K: 32, lda: 67108864, ldb:  1, ldc: 67108864 }
+    - { transA: T, transB: N, M: 67108864, N: 1, K: 32, lda:       32, ldb: 32, ldc: 67108864 }
+    - { transA: T, transB: T, M: 67108864, N: 1, K: 32, lda:       32, ldb:  1, ldc: 67108864 }
+  alpha: 1
+  beta: 1
+  batch_count: [ 2 ]
+  gpu_arch: '9??'
 ...
