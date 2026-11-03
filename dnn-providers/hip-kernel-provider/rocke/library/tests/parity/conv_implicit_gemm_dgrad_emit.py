@@ -1410,6 +1410,7 @@ def _split_k_cshuffle_spec(idx: int):
 #   63: 58 on the 2-D problem
 #   64: 58 ungrouped (groups 1; xcd_remap also serves it)
 #   65: 57 with pad (0, 1, 1)
+#   66-70: 58 + tapk_pingpong (see the table)
 _GFX942_3D = {
     57: ("s6", {}),
     58: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
@@ -1420,6 +1421,17 @@ _GFX942_3D = {
     63: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
     64: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
     65: ("s6", {}),
+    # 66-70: the tapk_pingpong block ping-pong (8 waves) on 58
+    66: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=4,
+                    tapk_pp_sched=2, lds_xor=True)),
+    67: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=4,
+                    tapk_pp_sched=5, lds_xor=True, tapk_pp_bslab=3)),
+    68: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=4,
+                    tapk_pp_sched=12, lds_xor=True, tapk_pp_bslab=2)),
+    69: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=5,
+                    tapk_pp_sched=1, lds_xor=True)),
+    70: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=3,
+                    tapk_pp_sched=2, lds_xor=True)),
 }
 
 

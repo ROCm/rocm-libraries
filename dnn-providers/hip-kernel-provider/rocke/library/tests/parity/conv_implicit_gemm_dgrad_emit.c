@@ -202,6 +202,19 @@ static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch
         spec->tapk_prefetch = 3;
         spec->b_kpack = 4;
     }
+    if(idx >= 66 && idx <= 70)
+    {
+        static const int pp[5] = {4, 4, 4, 5, 3};
+        static const int pps[5] = {2, 5, 12, 1, 2};
+        static const int pbs[5] = {0, 3, 2, 0, 0};
+        spec->tapk_prefetch = 1;
+        spec->b_kpack = 4;
+        spec->xcd_remap = 6;
+        spec->lds_xor = true;
+        spec->tapk_pingpong = pp[idx - 66];
+        spec->tapk_pp_sched = pps[idx - 66];
+        spec->tapk_pp_bslab = pbs[idx - 66];
+    }
     return 0;
 }
 
@@ -209,7 +222,7 @@ static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
-    if(idx >= 57 && idx <= 65)
+    if(idx >= 57 && idx <= 70)
         return make_cfg_3d(idx, spec, arch);
     return -1;
 }
