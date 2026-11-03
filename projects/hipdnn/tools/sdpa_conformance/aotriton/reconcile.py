@@ -151,6 +151,26 @@ def read_rows(path):
     return rows
 
 
+def open_rows_for_append(path):
+    """``path`` (a results CSV) opened for appending rows, its parent created. A last line without
+    its newline, which a writer killed mid-row leaves and :func:`read_rows` drops, is cut first, so
+    a resumed run never glues its first row onto it; a file left empty gets the header.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        data = path.read_bytes()
+        if data and not data.endswith(b"\n"):
+            with open(path, "r+b") as f:
+                f.truncate(data.rfind(b"\n") + 1)
+    empty = not path.exists() or not path.stat().st_size
+    f = open(path, "a")
+    if empty:
+        f.write(",".join(FIELDS) + "\n")
+        f.flush()
+    return f
+
+
 def shard_dirs(run_dir):
     """The shard directories of a run (``<suite>-<k>of<N>``), ordered by suite, then ``k`` numerically."""
     found = []

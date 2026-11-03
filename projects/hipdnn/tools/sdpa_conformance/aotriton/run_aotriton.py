@@ -677,12 +677,8 @@ class Runner:
 def _not_enumerable_rows(pass_dir, messages):
     """Write ``pass_dir``'s ``results.csv``: a ``not-enumerable`` row per case of ``messages`` that
     has none yet. No pytest run is involved."""
-    path = pass_dir / reconcile.CSV_NAME
     done = recorded_ids(pass_dir)
-    new = not path.exists() or not path.stat().st_size
-    with open(path, "a") as f:
-        if new:
-            f.write(",".join(reconcile.FIELDS) + "\n")
+    with reconcile.open_rows_for_append(pass_dir / reconcile.CSV_NAME) as f:
         for nodeid, message in messages.items():
             if nodeid not in done:
                 f.write(

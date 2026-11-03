@@ -716,11 +716,7 @@ class _CsvController:
     def __init__(self, path):
         self.seen = set()
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = open(self.path, "a")
-        if self.path.stat().st_size == 0:
-            self.file.write(",".join(reconcile.FIELDS) + "\n")
-            self.file.flush()
+        self.file = reconcile.open_rows_for_append(self.path)
 
     def pytest_runtest_logreport(self, report):
         rows = [json.loads(v) for k, v in report.user_properties if k == ROW_KEY]

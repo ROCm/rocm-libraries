@@ -994,3 +994,31 @@ def test_a_dead_worker_row_names_the_pinned_candidates(monkeypatch):
     report = type("Report", (), {"nodeid": "t.py::t", "longrepr": "worker died"})()
     got = plugin._crash_row(report)
     assert (got["outcome"], got["bwd_candidate"]) == ("crash", "1")
+
+
+@pytest.mark.parametrize(
+    "torn, kept",
+    [
+        ("a::t2,pa", ["a::t1"]),  # a writer killed mid-row
+        ("", ["a::t1"]),  # nothing torn
+    ],
+)
+def test_the_csv_writer_resumes_after_a_torn_last_row(tmp_path, torn, kept):
+    path = tmp_path / reconcile.CSV_NAME
+    done = {**dict.fromkeys(reconcile.FIELDS, ""), "nodeid": "a::t1", "outcome": "pass"}
+    path.write_text(
+        ",".join(reconcile.FIELDS) + "\n" + reconcile.format_row(done) + torn
+    )
+    writer = plugin._CsvController(path)
+    new = {**done, "nodeid": "a::t3"}
+    report = type("Report", (), {"user_properties": [(plugin.ROW_KEY, json.dumps(new))], "when": "call"})()  # fmt: skip
+    writer.pytest_runtest_logreport(report)
+    writer.close()
+    assert [r["nodeid"] for r in reconcile.read_rows(path)] == kept + ["a::t3"]
+
+
+def test_the_csv_writer_rewrites_a_header_cut_short(tmp_path):
+    path = tmp_path / reconcile.CSV_NAME
+    path.write_text(",".join(reconcile.FIELDS)[:7])
+    plugin._CsvController(path).close()
+    assert path.read_text() == ",".join(reconcile.FIELDS) + "\n"
