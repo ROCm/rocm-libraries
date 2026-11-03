@@ -21,7 +21,7 @@
 
 #  include _THRUST_STD_INCLUDE(__cccl/preprocessor.h)
 
-#  define THRUST_HAS_INCLUDE(_X)          _CCCL_HAS_INCLUDE(_X)
+#  define THRUST_HAS_INCLUDE(_X)          __has_include(_X)
 #  define THRUST_TO_STRING(_STR)          _CCCL_TO_STRING(_STR)
 #  define THRUST_PP_EXPAND(...)           _CCCL_PP_EXPAND(__VA_ARGS__)
 #  define THRUST_PP_INC(_X)               _CCCL_PP_INC(_X)
