@@ -200,8 +200,7 @@ def _form(identity: KernelIdentity) -> tuple:
 
 
 def test_the_catalog_converts_and_reproduces_its_identities(catalog):
-    # gfx950_dgrad.json was pruned from 454 to 406 instances (users/barkocot/
-    # gfx950-dgrad-aot-catalog-prune-150): 414 with weight-transform helpers.
+    # 406 selectable instances plus their weight-transform helpers: 414 total.
     assert len(catalog) > 400
     algorithms = set()
     for ident, spec in catalog:
