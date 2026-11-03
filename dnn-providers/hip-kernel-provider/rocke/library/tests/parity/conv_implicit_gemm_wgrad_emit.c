@@ -498,10 +498,39 @@ static int make_cfg_3d_xwin(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec
     return 0;
 }
 
+/* Grouped (grid-per-group) cshuffle epilogues 86-88 on gfx942; mirrors
+ * _grouped_cshuffle_spec() in the Python emitter (the index table is there). */
+static int make_cfg_grouped_cshuffle(int idx,
+                                     rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                     const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
+    *arch = "gfx942";
+    spec->problem = rocke_conv_problem_make(2, 10, 10, 24, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = 2;
+    spec->dtype_a = "fp16";
+    spec->dtype_b = "fp16";
+    spec->dtype_d = idx == 88 ? "fp32" : "fp16";
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->split_k = idx == 86 ? 1 : 2;
+    return 0;
+}
+
 /* The gfx942 3-D configs by their own number (from 55); mirrors
  * _gfx942_3d_any() in the Python emitter. */
 static int make_cfg_3d_any(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 86 && idx <= 88)
+        return make_cfg_grouped_cshuffle(idx, spec, arch);
     if(idx >= 79 && idx <= 81)
     {
         /* xwin_kord on 73 (ping-pong), 70 (plain loop) and 78 (2-D) */

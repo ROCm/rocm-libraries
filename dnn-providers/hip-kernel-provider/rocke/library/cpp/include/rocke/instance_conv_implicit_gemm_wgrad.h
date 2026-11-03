@@ -194,14 +194,14 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      *                     to the per-arch default pool of the arch they are
      *                     given (rocke_wgrad_conv_streamk_default_pool).
      * "off" keeps every existing config byte-identical.  Stream-K folds the
-     * conv groups into GEMM-M, so it is the one path on which this port
-     * accepts groups > 1. */
+     * conv groups into GEMM-M; with "off", groups > 1 runs grid-per-group
+     * (the group index on block_id_z), as in Python. */
     const char* streamk; /* default "off" */
     const char* streamk_reduction; /* default "linear" */
     int streamk_ctas; /* default -1 */
 
-    /* WgradConvSpec.group_merge.  Only 1 is ported: stream-K folds the
-     * groups into GEMM-M itself, and the grid-per-group path is Python-only. */
+    /* WgradConvSpec.group_merge.  Only 1 is ported off the stream-K path
+     * (grid-per-group); stream-K folds the groups into GEMM-M itself. */
     int group_merge; /* default 1 */
     /* prefetch_addr: carry each A/B chunk's global byte offset across K
      * iterations, so every iteration issues its buffer loads first and derives

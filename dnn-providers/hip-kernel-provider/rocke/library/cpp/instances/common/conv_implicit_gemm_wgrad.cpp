@@ -3360,7 +3360,8 @@ static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
 // vec_c is the spec's vector_size_c when set; otherwise it uses split_k=1
 // semantics (same as the non-atomic cshuffle path) because the cshuffle atomic
 // path is not contraindicated by wide store_vec.
-// groups > 1 is not supported for C++ wgrad (rejected by the validator).
+// Grouped (grid-per-group): vec_c follows cpg, block_m_off shifts by
+// group*kpg and the M bound is the group's slab end group*kpg + kpg.
 // ---------------------------------------------------------------------------
 static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                  const rocke_conv_build_ctx_t* ctx,
@@ -3372,23 +3373,30 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
     (void)wg_M; /* bounds come from the ctx kernargs now */
     (void)wg_N;
-    /* wgrad_atomic_store_vec(): vector_size_c, else split_k=1 semantics. */
+    const bool grouped = ctx->group_idx != NULL;
+    /* wgrad_atomic_store_vec(): vector_size_c, else split_k=1 semantics (cpg
+     * when grouped). */
     const int vec_c = wgrad_atomic_store_vec(spec);
+
+    /* Grouped: eff_grid.block_m_off = block_m_off + group*kpg and the M
+     * bound is group*kpg + kpg (Python emits the two products in this order). */
+    rocke_warp_grid_t eff_grid = ctx->grid;
+    rocke_value_t* wg_M_v = ctx->p_wg_M;
+    if(grouped)
+    {
+        eff_grid.block_m_off
+            = rocke_b_add(b, ctx->grid.block_m_off, rocke_b_mul(b, ctx->group_idx, ctx->p_kpg));
+        wg_M_v = rocke_b_add(b, rocke_b_mul(b, ctx->group_idx, ctx->p_kpg), ctx->p_kpg);
+    }
 
     /* WMMA reads the result through op.dst_layout() (Python _cshuffle_epilogue). */
     rocke_cshuffle_epilogue_t cepi
-        = ctx->is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx->op, &ctx->grid, vec_c)
-                       : rocke_cshuffle_epilogue_from_grid(ctx->atom, &ctx->grid, vec_c);
+        = ctx->is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx->op, &eff_grid, vec_c)
+                       : rocke_cshuffle_epilogue_from_grid(ctx->atom, &eff_grid, vec_c);
     cepi.out_dtype = dtype_d;
 
-    rocke_cshuffle_epilogue_atomic_store(b,
-                                         &cepi,
-                                         ctx->final_accs,
-                                         ctx->num_final_accs,
-                                         dw_ptr,
-                                         ctx->p_wg_N,
-                                         ctx->p_wg_M,
-                                         ctx->p_wg_N);
+    rocke_cshuffle_epilogue_atomic_store(
+        b, &cepi, ctx->final_accs, ctx->num_final_accs, dw_ptr, ctx->p_wg_N, wg_M_v, ctx->p_wg_N);
 }
 
 // ---------------------------------------------------------------------------
@@ -8036,6 +8044,14 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
         {
             dw_addr_ctx.dW_desc = ctx.is_pointwise ? NULL : wgrad_build_dw_descriptor(b, &ctx);
+            /* Grouped (grid-per-group): dw_addr folds group*kpg into k_out and
+             * the store width follows cpg (Python _emit_wgrad_cshuffle_epilogue). */
+            const bool cs_grouped = ctx.group_idx != NULL && !ctx.is_pointwise;
+            if(cs_grouped)
+            {
+                dw_addr_ctx.group = ctx.group_idx;
+                dw_addr_ctx.c_kpg = ctx.p_kpg;
+            }
             /* _emit_wgrad_cshuffle_epilogue: CShuffleEpilogue.from_grid(...).store(...)
              * with max_store_vec = spec.vector_size_c when set, else
              * default_vector_sizes(C, K, dtype_d, split_k=1)[2]: the same width

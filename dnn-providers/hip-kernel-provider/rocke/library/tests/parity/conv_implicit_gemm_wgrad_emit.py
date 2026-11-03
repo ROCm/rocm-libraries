@@ -1172,7 +1172,39 @@ def _gfx942_3d_any(idx: int):
         return _gfx942_3d_spec(idx)
     if idx in _GFX942_3D_KNOBS:
         return _gfx942_3d_knob_spec(idx)
+    if 86 <= idx <= 88:
+        return _grouped_cshuffle_spec(idx)
     raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
+
+
+# Grouped (grid-per-group) cshuffle epilogues on gfx942: cpg=12 (store width 4,
+# while C=24 alone would give 8), group*kpg folded into the dW row. Keep in
+# lockstep with make_cfg_grouped_cshuffle() in conv_implicit_gemm_wgrad_emit.c.
+#   86: split_k=1 cshuffle store, fp16
+#   87: split_k=2 cshuffle packed fp16 atomics (block_m_off + group*kpg,
+#       M bound group*kpg + kpg)
+#   88: 87 with fp32 dW (scalar f32 atomics)
+def _grouped_cshuffle_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    p = ConvProblem(N=2, Hi=10, Wi=10, C=24, K=48, Y=3, X=3, pH=1, pW=1, groups=2)
+    dt_d = "fp32" if idx == 88 else "fp16"
+    spec = WgradConvSpec(
+        problem=p,
+        data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dt_d),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        split_k=1 if idx == 86 else 2,
+    )
+    return spec, "gfx942"
 
 
 # gfx942 3-D grouped (grid-per-group) configs on the 3x3x3 / pad-1 problem the
