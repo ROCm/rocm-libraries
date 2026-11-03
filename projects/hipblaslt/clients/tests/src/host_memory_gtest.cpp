@@ -43,8 +43,46 @@ namespace
             GTEST_SKIP() << "could not pin " #PTR " on this host"; \
     } while(0)
 
+    // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, or unsets it for nullptr, for one scope, and then
+    // restores the value the run started with.
+    class ScopedLimit
+    {
+    public:
+        explicit ScopedLimit(const char* value)
+        {
+            if(const char* old = std::getenv(kName))
+                saved = old;
+            set(value);
+        }
+        ~ScopedLimit()
+        {
+            set(saved ? saved->c_str() : nullptr);
+        }
+        ScopedLimit(const ScopedLimit&)            = delete;
+        ScopedLimit& operator=(const ScopedLimit&) = delete;
+
+    private:
+        static constexpr const char* kName = "HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT";
+
+        static void set(const char* value)
+        {
+#ifdef _WIN32
+            _putenv_s(kName, value ? value : "");
+#else
+            if(value)
+                setenv(kName, value, 1);
+            else
+                unsetenv(kName);
+#endif
+        }
+
+        std::optional<std::string> saved;
+    };
+
     TEST(HostMemory_pre_checkin, large_buffer_released_after_a_test_that_does_not_reuse_it)
     {
+        // The pool refuses to pin beyond a host memory limit, and these sizes are the test.
+        ScopedLimit no_limit(nullptr);
         memory_pool<h_memory>::ReleaseCached();
         {
             HipHostBuffer large(HIP_R_8I, kHostPoolRetainLimit);
@@ -96,6 +134,7 @@ namespace
     {
         if(memory_pool<h_memory>::FreesBeforeEachGet())
             GTEST_SKIP() << "the pool on this host frees its idle buffers before every request";
+        ScopedLimit no_limit(nullptr);
         memory_pool<h_memory>::ReleaseCached();
         auto first = memory_pool<h_memory>::Get(kHostPoolRetainLimit);
         SKIP_UNLESS_PINNED(first.get());
@@ -117,6 +156,7 @@ namespace
 
     TEST(HostMemory_pre_checkin, large_miss_releases_what_earlier_tests_left)
     {
+        ScopedLimit no_limit(nullptr);
         // A test of another shape needs a new large buffer; the previous test's ones are
         // released before more memory is pinned, not after this test ends. On any miss the
         // pool already drops the largest buffer that is too small, so two are left here.
@@ -140,6 +180,7 @@ namespace
 
     TEST(HostMemory_pre_checkin, buffers_at_the_retain_limit_get_no_slack)
     {
+        ScopedLimit no_limit(nullptr);
         // The pool adds 20% to small requests so that a slightly larger one can reuse them. A
         // large buffer is reused only by the same shape, so the extra would only add pinned
         // memory.
@@ -186,38 +227,6 @@ namespace
 
 #ifndef _WIN32
     constexpr uint64_t kGiB = uint64_t(1) << 30;
-
-    // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, or unsets it for nullptr, for one scope, and then
-    // restores the value the run started with.
-    class ScopedLimit
-    {
-    public:
-        explicit ScopedLimit(const char* value)
-        {
-            if(const char* old = std::getenv(kName))
-                saved = old;
-            set(value);
-        }
-        ~ScopedLimit()
-        {
-            set(saved ? saved->c_str() : nullptr);
-        }
-        ScopedLimit(const ScopedLimit&)            = delete;
-        ScopedLimit& operator=(const ScopedLimit&) = delete;
-
-    private:
-        static constexpr const char* kName = "HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT";
-
-        static void set(const char* value)
-        {
-            if(value)
-                setenv(kName, value, 1);
-            else
-                unsetenv(kName);
-        }
-
-        std::optional<std::string> saved;
-    };
 
     // A temporary stand-in for /proc/meminfo, /proc/self/cgroup and /sys/fs/cgroup.
     class FakeHost
