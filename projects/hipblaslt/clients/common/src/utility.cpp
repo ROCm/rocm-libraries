@@ -280,14 +280,6 @@ hipblaslt_local_handle::hipblaslt_local_handle()
     auto status = hipblasLtCreate(&m_handle);
     if(status != HIPBLAS_STATUS_SUCCESS)
         throw std::runtime_error(hipblas_status_to_string(status));
-
-#ifdef GOOGLE_TEST
-    if(t_set_stream_callback)
-    {
-        (*t_set_stream_callback)(m_handle);
-        t_set_stream_callback.reset();
-    }
-#endif
 }
 
 static void portable_setenv(const char* name, const char* value)

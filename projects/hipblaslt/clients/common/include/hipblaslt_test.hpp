@@ -315,7 +315,6 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
                 }                                                                            \
             }                                                                                \
         }                                                                                    \
-        g_stream_pool.reset(devices, streams);                                               \
         if(threads)                                                                          \
             LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                         \
         else                                                                                 \
@@ -339,30 +338,7 @@ public:
     void submit(std::function<void()> func, std::promise<void> promise);
 };
 
-class stream_pool
-{
-    std::vector<std::vector<hipStream_t>> m_streams;
-
-public:
-    stream_pool() = default;
-
-    void reset(size_t numDevices = 0, size_t numStreams = 0);
-
-    ~stream_pool()
-    {
-        reset();
-    }
-
-    auto& operator[](size_t deviceId)
-    {
-        return m_streams.at(deviceId);
-    }
-};
-
-extern stream_pool g_stream_pool;
 extern thread_pool g_thread_pool;
-
-extern thread_local std::unique_ptr<std::function<void(hipblasLtHandle_t)>> t_set_stream_callback;
 
 /* ============================================================================================ */
 /*! \brief  Normalized test name to conform to Google Tests */

@@ -88,42 +88,7 @@ void thread_pool::submit(std::function<void()> func, std::promise<void> promise)
     m_cond.notify_one();
 }
 
-/*********************************************
- * stream pool functions
- *********************************************/
-void stream_pool::reset(size_t numDevices, size_t numStreams)
-{
-    for(auto& streamvec : m_streams)
-        for(auto& stream : streamvec)
-            CHECK_HIP_ERROR(hipStreamDestroy(stream));
-
-    m_streams.clear();
-
-    for(size_t i = 0; i < (numDevices > 1 ? numDevices : 1); ++i)
-    {
-        if(numDevices)
-            CHECK_HIP_ERROR(hipSetDevice(i));
-        std::vector<hipStream_t> temp;
-        for(size_t j = 0; j < numStreams; ++j)
-        {
-            hipStream_t stream;
-            CHECK_HIP_ERROR(hipStreamCreate(&stream));
-            temp.push_back(stream);
-        }
-        m_streams.push_back(std::move(temp));
-    }
-}
-
-/*********************************************
- * thread and stream pool variables
- *********************************************/
 thread_pool g_thread_pool;
-stream_pool g_stream_pool;
-
-/*********************************************
- * callback function
- *********************************************/
-thread_local std::unique_ptr<std::function<void(hipblasLtHandle_t)>> t_set_stream_callback;
 
 /*********************************************
  * Signal-handling for detecting test faults *
@@ -275,11 +240,6 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
         CHECK_HIP_ERROR(hipSetDevice(i));
         for(size_t j = 0; j < streams; ++j)
         {
-            if(numStreams)
-                t_set_stream_callback.reset(
-                    new std::function<void(hipblasLtHandle_t)>([=](hipblasLtHandle_t handle) {
-                        //TODO tell test to run on a specific stream.
-                    }));
             catch_signals_and_exceptions_as_failures(test, true);
         }
     }
