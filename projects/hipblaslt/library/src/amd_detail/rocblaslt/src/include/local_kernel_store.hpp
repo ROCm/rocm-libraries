@@ -20,7 +20,7 @@
  *   <root>/objects/<hash>.co           payload code objects, content addressed
  *   <root>/<scope>/journal-<build>     append-only, one record per line:
  *
- *     V <format> <build>
+ *     V <format> <build> <journalId>
  *     R <datHash> <coHash> <dat|dat.zlib> <sum>
  *     E <datHash> <coHash> <payloadIndex> <m> <n> <batch> <k> <sum>
  *
@@ -31,10 +31,13 @@
  * saved code object takes the kernel arguments its build's launch code
  * passes, so each build keeps its own journal. The V line starts every
  * journal, and a journal whose V line is not this build's is not read.
+ * <journalId> is random, so a journal that is deleted and created again is
+ * told apart from the one a reader had read part of.
  *
  * <sum> is a checksum of the rest of the line, so a line cut short by a crash
- * is rejected even where what remains would parse. Records of unknown kinds
- * are skipped, as are lines that do not parse.
+ * is rejected even where what remains would parse. An append that fails is
+ * truncated away, so the next one cannot complete it. Records of unknown
+ * kinds are skipped, as are lines that do not parse.
  *
  * A payload is identified by both hashes, since one shard can be paired with
  * different code objects. E records name a solution by its index within the
@@ -45,8 +48,11 @@
  * and not be group- or world-writable.
  *
  * Writers hold an exclusive flock on the journal; readers hold a shared one.
- * Objects are written to a temporary name and renamed, so a reader never sees
- * a partial object, and are durable before a record refers to them.
+ * Neither waits more than a few seconds for it, so a process stopped while
+ * holding it makes the others fail rather than hang. Objects are written to a
+ * temporary name and renamed, so a reader never sees a partial object, and
+ * are durable before a record refers to them. Temporary files a crashed
+ * writer left behind are removed after an hour.
  ******************************************************************************/
 
 namespace rocblaslt
@@ -106,6 +112,48 @@ namespace rocblaslt
                              PayloadRecord*     out,
                              std::string*       error);
 
+        /** How far a reader has read one journal. */
+        struct JournalCursor
+        {
+            // The journal's V line, which tells this file from one that replaced it.
+            std::string journal;
+            uint64_t    offset = 0;
+        };
+
+        /**
+         * A payload's objects on their way into the library; see
+         * Store::stageObjects. Temporary copies not yet published are removed
+         * with it.
+         */
+        class StagedObjects
+        {
+        public:
+            StagedObjects()                                = default;
+            StagedObjects(StagedObjects const&)            = delete;
+            StagedObjects& operator=(StagedObjects const&) = delete;
+            ~StagedObjects();
+
+            /** The file to read the shard from until it is published. */
+            std::string const& shardFile() const
+            {
+                return m_shard.temp.empty() ? m_shard.final : m_shard.temp;
+            }
+
+        private:
+            friend class Store;
+
+            struct Object
+            {
+                std::string temp, final;
+                // `final` existed but did not match its name.
+                bool replace = false;
+                // publishObjects created `final`.
+                bool created = false;
+            };
+
+            Object m_shard, m_co;
+        };
+
         class Store
         {
         public:
@@ -126,15 +174,29 @@ namespace rocblaslt
             std::string codeObjectPath(PayloadId const& id) const;
 
             /**
-             * Copies a payload into objects/, hashing the bytes as they are
-             * written, and sets `record->id` to those hashes, which name the
-             * copies. A file that changes after it was identified is therefore
-             * saved under the name of what was copied.
+             * Prepares a payload identified by identifyPayload for saving. An
+             * object already saved under a file's hash, and still matching
+             * it, is used as it is. Otherwise the file is copied to a
+             * temporary name in objects/, hashed as it is written, and
+             * `record->id` takes that hash, so a file that changed after it
+             * was identified is named by what was copied. Nothing is visible
+             * under an object's name until publishObjects.
              */
-            bool storeObjects(std::string const& shardFile,
+            bool stageObjects(std::string const& shardFile,
                               std::string const& coPath,
                               PayloadRecord*     record,
+                              StagedObjects*     staged,
                               std::string*       error) const;
+
+            /** Moves staged copies to their names, which they then keep. */
+            bool publishObjects(StagedObjects* staged, std::string* error) const;
+
+            /**
+             * Removes the objects publishObjects created, for a payload found
+             * unusable after they were published. Objects that were already
+             * there may belong to other payloads and are kept.
+             */
+            void unpublishObjects(StagedObjects* staged) const;
 
             /**
              * Whether a payload's saved objects are private to this user, as
@@ -156,21 +218,22 @@ namespace rocblaslt
                              std::string*       error) const;
 
             /**
-             * Reads the records that start at or after byte `offset` of the
-             * journal for `scope`, and sets `end` to the offset after the last
-             * complete line. A missing journal reads as empty.
+             * Reads the records of the journal for `scope` after `cursor`, and
+             * moves the cursor past the last complete line. A journal that is
+             * not the one the cursor was in, because it was replaced, or that
+             * is now shorter, is read from the start. A missing journal reads
+             * as empty. The cursor is unchanged on failure.
              */
             bool read(std::string const&         scope,
-                      uint64_t                   offset,
+                      JournalCursor*             cursor,
                       std::vector<JournalEntry>* entries,
-                      uint64_t*                  end,
                       std::string*               error) const;
 
         private:
             /** What appends have read of one journal, so each reads only what is new. */
             struct JournalState
             {
-                uint64_t            device = 0, inode = 0, offset = 0;
+                JournalCursor       cursor;
                 std::set<PayloadId> payloads;
                 // The last mapping at each [m, n, batch, k].
                 std::map<std::array<uint64_t, 4>, ExactRecord> lastExact;

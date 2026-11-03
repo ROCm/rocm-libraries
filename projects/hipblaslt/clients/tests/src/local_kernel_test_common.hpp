@@ -469,6 +469,18 @@ namespace local_kernel_test
         return arch.substr(0, arch.find(':'));
     }
 
+    inline bool haveTwoMatchingDevices()
+    {
+        int count = 0;
+        if(hipGetDeviceCount(&count) != hipSuccess || count < 2)
+            return false;
+        hipDeviceProp_t a, b;
+        if(hipGetDeviceProperties(&a, 0) != hipSuccess
+           || hipGetDeviceProperties(&b, 1) != hipSuccess)
+            return false;
+        return std::strcmp(a.gcnArchName, b.gcnArchName) == 0;
+    }
+
     inline std::string otherArch()
     {
         return deviceArch() == "gfx90a" ? "gfx942" : "gfx90a";

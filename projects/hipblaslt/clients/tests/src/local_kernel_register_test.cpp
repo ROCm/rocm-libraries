@@ -168,18 +168,6 @@ namespace
     }
 
     // Two devices of one architecture, so a payload for one serves both.
-    bool haveTwoMatchingDevices()
-    {
-        int count = 0;
-        if(hipGetDeviceCount(&count) != hipSuccess || count < 2)
-            return false;
-        hipDeviceProp_t a, b;
-        if(hipGetDeviceProperties(&a, 0) != hipSuccess
-           || hipGetDeviceProperties(&b, 1) != hipSuccess)
-            return false;
-        return std::strcmp(a.gcnArchName, b.gcnArchName) == 0;
-    }
-
     void expectNothingRegistered(hipblasLtHandle_t handle)
     {
         size_t registered = 123, selectable = 123;
