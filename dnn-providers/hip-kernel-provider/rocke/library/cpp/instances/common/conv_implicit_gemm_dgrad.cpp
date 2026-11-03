@@ -691,11 +691,15 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || (s->tapk_lds_barrier && !xh_ok) || (s->tapk_setprio && !xh_ok)
        || (s->lds_xor && !s->tapk_pingpong && !xh_ok) || (s->xh_b_wide && !xh_ok)
        || (s->xh_b_kpad && !xh_ok) || (s->tapk_pp_epi && !(s->tapk_pp_epi == 2 && s->split_k <= 1))
-       || s->split_atomic_pairs || s->tapk_pp_persist || s->tapk_pp_xhalo
-       || (s->tapk_ztrim && !xh_ok && !s->tapk_pingpong) || (s->tapk_pp_bslab && !s->tapk_pingpong)
-       || (s->xh_a_k4 && !xh_ok) || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok)
-       || (s->xh_fast_a && !xh_ok) || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk
-       || s->pp_sk_mode || s->pp_zskip
+       || (s->split_atomic_pairs
+           && !(s->tapk_pingpong && (s->pp_boxes == 7 || s->pp_boxes == 77) && s->split_k > 1
+                && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0 && s->wave_size == 64))
+       || (s->tapk_pingpong && s->split_k > 1 && s->pp_boxes && !s->pp_box_det
+           && !s->split_atomic_pairs)
+       || s->tapk_pp_persist || s->tapk_pp_xhalo || (s->tapk_ztrim && !xh_ok && !s->tapk_pingpong)
+       || (s->tapk_pp_bslab && !s->tapk_pingpong) || (s->xh_a_k4 && !xh_ok)
+       || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok) || (s->xh_fast_a && !xh_ok)
+       || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode || s->pp_zskip
        || ((s->pp_boxes || s->pp_box_cus || s->pp_box_order) && !s->tapk_pingpong)
        || (s->pp_box_det && !(s->pp_box_det == 1 && s->pp_boxes && s->split_k > 1))
        || (s->epi_lds_barriers && !s->pp_boxes && !xh_ok) || (s->no_agpr && !xh_ok)
@@ -4754,6 +4758,33 @@ static rocke_kernel_def_t*
             rocke_value_t* gt = rocke_b_cmp_gt(b, bx_sk, rocke_b_const_i32(b, 1));
             rocke_if_else_t ie = rocke_b_scf_if_else(b, gt);
             rocke_b_region_enter(b, ie.then_region);
+            if(!spec->pp_box_det)
+            {
+                /* the cshuffle packed-atomic store; sapl on pixel-list boxes:
+                 * pair lanes, the rows' map batched, LDS-only barriers, and
+                 * the listed pixel index as the dX row (_box_row). */
+                rocke_cshuffle_epilogue_t epi
+                    = rocke_cshuffle_epilogue_from_grid(atom, &grid, _dgrad_store_vec(spec));
+                epi.out_dtype = spec->dtype_d;
+                if(spec->cshuffle_m_chunks > 1)
+                    epi.m_chunks = spec->cshuffle_m_chunks;
+                epi.atomic_pair_lanes = true;
+                epi.atomic_row_batch = true;
+                epi.lds_barriers = true;
+                struct rm_user_t
+                {
+                    rocke_value_t* base;
+                    rocke_value_t* buf;
+                } rmu = {rm_base, sub_gemm_buf};
+                epi.atomic_row_map = [](rocke_ir_builder_t* b_, rocke_value_t* m, void* u) {
+                    rm_user_t* r = (rm_user_t*)u;
+                    return rocke_b_global_load_i32(b_, r->buf, rocke_b_add(b_, r->base, m), 4);
+                };
+                epi.atomic_row_map_user = &rmu;
+                rocke_cshuffle_epilogue_atomic_store(
+                    b, &epi, epi_accs_, n_epi, dX, c_C, rec_gemm_m, c_dg_N);
+            }
+            else
             {
                 /* _pbd_store_slot */
                 const int n_w = spec->warp_m * spec->warp_n;

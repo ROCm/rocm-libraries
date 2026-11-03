@@ -218,7 +218,7 @@ static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch
     return 0;
 }
 
-/* 71-76: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
+/* 71-76, 84-87: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
  * Python emitter (the table is there). */
 static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
@@ -257,6 +257,37 @@ static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
         spec->tapk_ztrim = 1;
         spec->tapk_pp_bslab = 3;
         spec->cshuffle_m_chunks = 7;
+        return 0;
+    }
+    if(idx >= 85 && idx <= 87)
+    {
+        /* split_atomic_pairs on pixel-list boxes */
+        if(idx > 85)
+        {
+            spec->tile_m = 256;
+            spec->tile_n = 256;
+            spec->tile_k = 32;
+            spec->warp_m = 4;
+            spec->warp_n = 2;
+            spec->tapk_pp_sched = 12;
+            spec->tapk_pp_bslab = 3;
+            spec->cshuffle_m_chunks = idx == 86 ? 2 : 4;
+            spec->pp_boxes = idx == 86 ? 77 : 7;
+            spec->epi_lds_barriers = true;
+            if(idx == 87)
+            {
+                spec->pp_box_cus = 456;
+                spec->pp_box_order = 2;
+            }
+        }
+        else
+        {
+            spec->tapk_pp_sched = 2;
+            spec->pp_boxes = 7;
+            spec->pp_box_order = 1;
+        }
+        spec->split_k = 8;
+        spec->split_atomic_pairs = true;
         return 0;
     }
     const int i = idx - 71;
@@ -362,7 +393,7 @@ static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** 
 {
     if(idx >= 77 && idx <= 83)
         return make_cfg_3d_xh(idx, spec, arch);
-    if((idx >= 71 && idx <= 76) || idx == 84)
+    if((idx >= 71 && idx <= 76) || (idx >= 84 && idx <= 87))
         return make_cfg_3d_pp(idx, spec, arch);
     if(idx >= 57 && idx <= 70)
         return make_cfg_3d(idx, spec, arch);

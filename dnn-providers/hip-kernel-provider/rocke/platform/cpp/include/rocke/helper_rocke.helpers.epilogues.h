@@ -189,6 +189,14 @@ typedef struct rocke_cshuffle_epilogue
     /* Workgroup barriers of the epilogue as LDS-only barriers (Python
      * lds_barriers -> sync_lds_only). Default false. */
     bool lds_barriers;
+    /* atomic_pair_lanes: every pair's LDS read issued first, and (rows
+     * wave-uniform, one iteration per lane at most) the rows' map done once
+     * and read back with v_readlane (Python atomic_row_batch). Default false. */
+    bool atomic_row_batch;
+    /* atomic_store(row_map=): the destination row of tile row m (NULL = m).
+     * Read by the atomic_pair_lanes paths. Default NULL. */
+    rocke_value_t* (*atomic_row_map)(rocke_ir_builder_t* b, rocke_value_t* m, void* user);
+    void* atomic_row_map_user;
 } rocke_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",

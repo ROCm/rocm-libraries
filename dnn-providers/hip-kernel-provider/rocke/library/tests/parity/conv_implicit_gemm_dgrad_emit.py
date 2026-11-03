@@ -1563,6 +1563,38 @@ _GFX942_3D_PP = {
         tapk_pp_bslab=3,
         cshuffle_m_chunks=7,
     ),
+    # 85-87: split_atomic_pairs on pixel-list boxes (the packed-atomic box
+    # store: pair lanes, batched row map, LDS-only barriers).
+    85: dict(
+        _T128,
+        tapk_pp_sched=2,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_order=1,
+        split_atomic_pairs=True,
+    ),
+    86: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=8,
+        pp_boxes=77,
+        split_atomic_pairs=True,
+        epi_lds_barriers=True,
+    ),
+    87: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=4,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_cus=456,
+        pp_box_order=2,
+        split_atomic_pairs=True,
+        epi_lds_barriers=True,
+    ),
 }
 
 
