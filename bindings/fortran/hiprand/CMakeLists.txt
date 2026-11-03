@@ -309,8 +309,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hiprand-fortran-config.cmake"
 # From this tree's root, not hiprand_VERSION, which standalone is the INSTALLED
 # hipRAND.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _hiprand_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hiprand/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hiprand/CMakeLists.txt" _hiprand_root)
   # hipRAND sets VERSION_STRING and passes the variable to rocm_setup_version.
   string(REGEX MATCH "set\\([ \t]*VERSION_STRING[ \t]+\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
          _m "${_hiprand_root}")

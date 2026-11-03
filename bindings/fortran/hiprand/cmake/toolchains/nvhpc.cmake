@@ -23,7 +23,7 @@
 # SOFTWARE.
 
 # NVIDIA HPC SDK toolchain (nvfortran).
-# Usage, from projects/hiprand/fortran:
+# Usage, from bindings/fortran/hiprand:
 #   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/nvhpc.cmake
 
 set(CMAKE_Fortran_COMPILER nvfortran CACHE FILEPATH "Fortran compiler")
