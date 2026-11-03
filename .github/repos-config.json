@@ -341,6 +341,15 @@
       "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocsparse",
+      "url": "ROCm/rocm-libraries",
+      "branch": "develop",
+      "category": "bindings/fortran",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     }
   ]
 }
