@@ -649,6 +649,17 @@ void rocke_gfx950_attn2d_emit_preloop_prefetch(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
     ctx->iter_args[idx] = rocke_b_const_i32(B, 0);
     ctx->iter_args_count = idx + 1;
+    if(page_prefetch
+       && ctx->iter_args_count + 2 * ctx->N_BLOCKS_PER_TILE > ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS)
+    {
+        B->status = ROCKE_ERR_VALUE;
+        snprintf(B->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "%d loop carries exceed the %d-entry iter_args table",
+                 ctx->iter_args_count + 2 * ctx->N_BLOCKS_PER_TILE,
+                 ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS);
+        return;
+    }
     if(page_prefetch)
     {
         for(int j = 0; j < ctx->N_BLOCKS_PER_TILE; ++j)

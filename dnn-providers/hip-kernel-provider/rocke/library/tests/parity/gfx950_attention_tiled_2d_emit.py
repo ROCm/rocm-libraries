@@ -923,6 +923,38 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_transposed_mask_limit=True,
     ),
+    # cfg57/58: page copies at the 16-page prefetch bound (page ids carried)
+    # and past it (page ids read in place).
+    57: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        tile_size=256,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+    ),
+    58: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        tile_size=288,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+    ),
 }
 
 

@@ -2116,8 +2116,11 @@ def build_unified_attention_2d_tiled(
     # With page copies, the loop carries the page ids of the current and the
     # next tile and reads the ids of the tile after next one iteration ahead,
     # so no copy waits on a table read issued just before it. The schedules
-    # that load two tiles ahead (the K ring, grouped KV2) read in place.
-    PAGE_PREFETCH = PAGE_COPIES and not RING3 and not GROUPED_KV2
+    # that load two tiles ahead (the K ring, grouped KV2) read in place, and so
+    # do tiles of more than 16 pages, which the C++ twin's carry arrays bound.
+    PAGE_PREFETCH = (
+        PAGE_COPIES and not RING3 and not GROUPED_KV2 and N_BLOCKS_PER_TILE <= 16
+    )
     # Page ids already read for a tile, by the tile index value.
     tile_pages = {}
     if FAST_PAGED_KV_DESC:

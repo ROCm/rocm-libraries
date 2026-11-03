@@ -265,7 +265,8 @@ static rocke_value_t*
 bool rocke_gfx950_attn2d_page_prefetch(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     /* The C++ port has no deep K ring (kv_ring_depth != 2 is refused). */
-    return rocke__page_copies(ctx) && !ctx->GROUPED_KV2;
+    return rocke__page_copies(ctx) && !ctx->GROUPED_KV2
+           && ctx->N_BLOCKS_PER_TILE <= ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES;
 }
 
 void rocke_gfx950_attn2d_tile_page_ids(rocke_gfx950_attn2d_build_ctx_t* ctx,

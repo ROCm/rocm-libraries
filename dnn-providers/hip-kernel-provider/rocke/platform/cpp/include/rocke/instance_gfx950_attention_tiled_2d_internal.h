@@ -87,6 +87,9 @@ extern "C" {
 #define ROCKE_GFX950_ATTN2D_MAX_ACCS 64
 /* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS + cur_buf. */
 #define ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS 96
+/* Most pages per tile whose ids the KV loop carries; larger tiles read them in
+ * place (Python's PAGE_PREFETCH applies the same bound). */
+#define ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES 16
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE 16
 /* QK / PV K-iters (HD/QK_K_STEP or T/PV_K_STEP); HD<=256, T<=128 -> <=16. */
@@ -277,13 +280,13 @@ typedef struct rocke_gfx950_attn2d_build_ctx
      * and the one after it (prologue), the current and next tile, and the tile
      * after next read one iteration ahead. */
     rocke_value_t* page_start_tile;
-    rocke_value_t* page_start[16];
-    rocke_value_t* page_start_next[16];
+    rocke_value_t* page_start[ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_start_next[ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES];
     rocke_value_t* page_cur_tile;
-    rocke_value_t* page_cur[16];
+    rocke_value_t* page_cur[ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES];
     rocke_value_t* page_next_tile;
-    rocke_value_t* page_next[16];
-    rocke_value_t* page_after_next[16];
+    rocke_value_t* page_next[ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_after_next[ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES];
     rocke_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE        */
     rocke_value_t* zero_soff_v; /* const_i32(0) soffset            */
     rocke_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64             */

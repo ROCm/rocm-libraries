@@ -774,6 +774,15 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
             return false;
         }
         out->calls_per_block = out->BS / out->tokens_per_call;
+        /* The prologue caches each call's in-page token offset in call_tok_b. */
+        if(out->calls_per_block > 64)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "%d calls per page exceed the 64-entry offset table",
+                            out->calls_per_block);
+            return false;
+        }
     }
 
     out->fp8_elems_per_chunk = 8;
