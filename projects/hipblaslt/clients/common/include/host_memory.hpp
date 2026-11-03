@@ -23,11 +23,12 @@ struct HostMemorySources
 // no memory is left, for example in a full container.
 std::optional<size_t> available_host_memory_bytes(const HostMemorySources& sources = {});
 
-// HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, when set, caps the host memory the test and bench clients
-// assume they can allocate: on a machine with no cgroup limit, or to make a test skip. It can only
-// lower the budget. The value is a byte count with an optional K, M, G or T suffix in powers of
-// 1024, such as 64G. An unset variable gives nothing; an unreadable value gives nothing and a
-// warning.
+// HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, when set, caps the free host memory that each query reports
+// to the test and bench clients: on a machine with no cgroup limit, or to make a test skip. It can
+// only lower that figure. It is not a limit on what the process allocates in total, and it
+// reserves nothing against other processes: each check compares one case or one buffer with it.
+// The value is a byte count with an optional K, M, G or T suffix in powers of 1024, such as 64G.
+// An unset variable gives nothing; an unreadable value gives nothing and a warning.
 std::optional<size_t> host_memory_limit_override();
 
 // The byte count `text` names in the format above, or nothing when it names none.
