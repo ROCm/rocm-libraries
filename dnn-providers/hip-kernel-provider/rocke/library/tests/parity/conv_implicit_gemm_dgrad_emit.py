@@ -1757,6 +1757,12 @@ _GFX942_3D_XH = {
 # 95-96: xh_fast_a without xh_tap_rsrc (the tap offset per load) on 77 and 79.
 _GFX942_3D_XH[95] = dict(_GFX942_3D_XH[77], xh_tap_rsrc=False)
 _GFX942_3D_XH[96] = dict(_GFX942_3D_XH[79], xh_tap_rsrc=False)
+# 110: tapk_setprio 2 (phase-clustered loads / LDS reads / MFMAs) on 77's loop
+# without tapk_ilv / tapk_lds_ahead / xh_defer / xh_stride_m.
+_XH_PLAIN = dict(tapk_ilv=0, tapk_lds_ahead=0, xh_defer=0, xh_stride_m=False)
+_GFX942_3D_XH[110] = dict(_GFX942_3D_XH[77], tapk_setprio=2, **_XH_PLAIN)
+# 111: the y-ring (82) through the per-tap MFMA phase (no lds_ahead / defer).
+_GFX942_3D_XH[111] = dict(_GFX942_3D_XH[82], **_XH_PLAIN)
 
 
 def _gfx942_3d_xh_spec(idx: int):

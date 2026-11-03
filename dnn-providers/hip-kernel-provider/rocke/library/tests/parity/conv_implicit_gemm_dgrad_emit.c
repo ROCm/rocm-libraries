@@ -508,6 +508,20 @@ static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** 
         spec->xh_tap_rsrc = false;
         return r;
     }
+    if(idx == 110 || idx == 111)
+    {
+        /* 110: tapk_setprio 2 on 77's loop; 111: the y-ring (82) through the
+         * per-tap MFMA phase. Both without tapk_ilv / tapk_lds_ahead /
+         * xh_defer / xh_stride_m. */
+        const int r = make_cfg_3d_xh(idx == 110 ? 77 : 82, spec, arch);
+        if(idx == 110)
+            spec->tapk_setprio = 2;
+        spec->tapk_ilv = 0;
+        spec->tapk_lds_ahead = 0;
+        spec->xh_defer = 0;
+        spec->xh_stride_m = false;
+        return r;
+    }
     if(idx >= 77 && idx <= 83)
         return make_cfg_3d_xh(idx, spec, arch);
     if((idx >= 71 && idx <= 76) || (idx >= 84 && idx <= 94) || (idx >= 97 && idx <= 109))

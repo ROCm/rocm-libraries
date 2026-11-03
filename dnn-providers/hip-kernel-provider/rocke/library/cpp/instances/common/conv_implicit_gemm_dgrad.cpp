@@ -6584,7 +6584,14 @@ static rocke_kernel_def_t*
                         out[i] = acc_in[i];
                     for(int x = 0; x < XB; ++x)
                     {
-                        xh_rmap rm = mk_rmap(x);
+                        /* xh_yring: the ring row map replaces the exact one */
+                        const bool rr = use_ring_rmap;
+                        const int rsh = ring_shift_cur;
+                        xh_rmap rm = {};
+                        if(rr)
+                            ring_rmap_make(x, rsh);
+                        else
+                            rm = mk_rmap(x);
                         rocke_lane_decode_t dec = rocke_decode_mfma_lanes(b, atom, lane);
                         rocke_value_t* wmo = rocke_warp_grid_warp_m_off(b, &grid);
                         rocke_value_t* wno = rocke_warp_grid_warp_n_off(b, &grid);
@@ -6601,7 +6608,7 @@ static rocke_kernel_def_t*
                                 rocke_value_t* c_ = rocke_b_const_i32(b, mi * spec->warp_tile_m);
                                 rocke_value_t* t = rocke_b_add(b, c_, dec.m_in_atom);
                                 rocke_value_t* a_row = rocke_b_add(b, wmo, t);
-                                a_row = apply_rmap(rm, a_row);
+                                a_row = rr ? ring_rmap_fn(x, rsh, a_row) : apply_rmap(rm, a_row);
                                 ar[mi] = xh_a_read(a_row, col_base, a_per_lane);
                             }
                             for(int ni = 0; ni < mfmas_n; ++ni)
@@ -7240,8 +7247,15 @@ static rocke_kernel_def_t*
                     mfma(acc_in, acc_out);
                     if(sprio == 2)
                     {
-                        rocke_i_set_err(b, ROCKE_ERR_VALUE, "tapk_setprio 2 is Python-only");
-                        return;
+                        /* Phase-clustered: the next tile's global loads, then
+                         * every LDS fragment read of the tile, then all its
+                         * MFMAs. */
+                        const int n_mfma = XB * k_atoms * mfmas_m * mfmas_n;
+                        const int n_rd = XB * k_atoms * (mfmas_m + mfmas_n);
+                        rocke_b_sched_group_barrier(b, 0x020, sa.count + sb.count, 0);
+                        rocke_b_sched_group_barrier(b, 0x100, n_rd, 0);
+                        rocke_b_sched_group_barrier(b, 0x008, n_mfma, 0);
+                        rocke_b_sched_barrier(b, 0);
                     }
                     xh_schedule(sa.count + sb.count);
                     if(sprio)
