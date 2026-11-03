@@ -54,6 +54,8 @@ from bundle_discovery import (  # noqa: E402
     load_json,
     read_sweep_cases,
     sidecar_for_graph,
+    single_graph_expected_rejection,
+    sweep_case_expected_rejection,
 )
 from support_claim_schema import (  # noqa: E402
     validate_single_graph_schema,
@@ -820,6 +822,10 @@ def collect_sweep_units(
     units = []
     for case in cases:
         case_id = case["id"]
+        # See collect_single_graph_unit: an expected-rejection case is not a
+        # supported graph, so it is no unit even if a claim names it.
+        if sweep_case_expected_rejection(case):
+            continue
         # The order of loadIntegrationTestBundle(), so the first defect
         # reported is the one the harness trips on.
         try:
@@ -866,6 +872,13 @@ def collect_single_graph_unit(
     """
     support_path = sidecar_for_graph(graph_path)
     claims = load_sidecar(support_path, validate_single_graph_schema, errors)
+
+    # An expected-rejection bundle is an invalid graph the engine must reject:
+    # it is not a graph the tree supports, so it joins no denominator. Checked
+    # before anything reads the graph, so a claim wrongly naming it (which
+    # verify_support_claims reports) cannot make it a unit.
+    if single_graph_expected_rejection(graph_path):
+        return None
 
     graph = read_json_object(graph_path, errors)
     if graph is None:
