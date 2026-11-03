@@ -1,0 +1,83 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+!
+! SPDX-License-Identifier: MIT
+!
+! Permission is hereby granted, free of charge, to any person obtaining a copy
+! of this software and associated documentation files (the "Software"), to deal
+! in the Software without restriction, including without limitation the rights
+! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+! copies of the Software, and to permit persons to whom the Software is
+! furnished to do so, subject to the following conditions:
+!
+! The above copyright notice and this permission notice shall be included in
+! all copies or substantial portions of the Software.
+!
+! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+! AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+! THE SOFTWARE.
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+program hiprand_mtgp32_uniform_double_test
+
+    use iso_c_binding
+    use hip
+    use hiprand
+
+    implicit none
+
+    integer(c_size_t), parameter :: N = 65536
+    integer(c_size_t), parameter :: Nbytes = N * 8
+    integer(c_int64_t), parameter :: seed = 12345_c_int64_t
+    real(c_double), parameter :: expected_mean = 0.5_c_double, delta = 0.01_c_double
+    real(c_double), parameter :: expected_std = 0.28867513459481287_c_double ! 1/sqrt(12)
+
+    type(c_ptr) :: gen = c_null_ptr
+
+    real(c_double), allocatable, target, dimension(:) :: hx
+    type(c_ptr) :: dx = c_null_ptr
+    real(c_double) :: sample_mean, sample_std
+
+    write(*,"(a)",advance="no") "-- Running test 'MTGP32_UNIFORM_DOUBLE' (Fortran 2003 interfaces) - "
+
+    call hiprandCheck(hiprandCreateGenerator(gen, HIPRAND_RNG_PSEUDO_MTGP32))
+    call hiprandCheck(hiprandSetPseudoRandomGeneratorSeed(gen, seed))
+
+    allocate(hx(N))
+    call hipCheck(hipMalloc(dx, Nbytes))
+
+    ! Uniform (0,1] samples have mean 1/2 and stddev 1/sqrt(12).
+    call hiprandCheck(hiprandGenerateUniformDouble(gen, dx, N))
+    call hipCheck(hipDeviceSynchronize())
+    call hipCheck(hipMemcpy(c_loc(hx(1)), dx, Nbytes, hipMemcpyDeviceToHost))
+
+    ! hipRAND's uniform output lies in (0, 1]; written so that a NaN fails.
+    if (.not. all(hx > 0.0_c_double .and. hx <= 1.0_c_double)) then
+        write(*,*) "FAILED! sample outside (0, 1]: ", minval(hx), maxval(hx)
+        call exit(1)
+    end if
+
+    sample_mean = sum(hx) / real(N, kind(sample_mean))
+    if (.not. (abs(sample_mean - expected_mean) <= delta)) then
+        write(*,*) "FAILED! mean out of tolerance: ", sample_mean
+        call exit(1)
+    end if
+    sample_std = sqrt(sum((hx - expected_mean)**2) / real(N, kind(sample_std)))
+    if (.not. (abs(sample_std - expected_std) <= delta)) then
+        write(*,*) "FAILED! stddev out of tolerance: ", sample_std
+        call exit(1)
+    end if
+
+    call hipCheck(hipFree(dx))
+    deallocate(hx)
+    call hiprandCheck(hiprandDestroyGenerator(gen))
+
+    write(*,*) "PASSED!"
+
+end program hiprand_mtgp32_uniform_double_test
