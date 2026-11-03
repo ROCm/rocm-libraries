@@ -88,8 +88,8 @@ performance knobs (`state_load_hint`, `state_store_hint`, `dpp_reduce`,
 `xcd_remap`, `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`,
 `out_lds`, `waves_per_eu`) change how the warp-tiled body computes (the two
 state hints and `waves_per_eu` also apply to the reference body); each
-defaults to the code emitted before it existed, and `auto` keeps every one
-off. Their rules live in
+defaults to the code emitted before it existed, and `auto` turns on a measured
+stack of them per case. Their rules live in
 [`ALGORITHM.md` §4.10](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
 `is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
@@ -151,27 +151,22 @@ GDN and KDA each register the same 180 stable tile identities
 for KDA). `is_valid_spec()` filters that configured space per request; the
 default D128 request admits 54. KDA accepts only D128 today, so its other 126
 tiles stay registered but unselectable until that limit is lifted.
-Production `auto` deterministically prefers GDN's `(num_warps=2,
-warp_threads_k=16, blocks_per_v_dim=8)` whenever it is legal. It never measures
-at runtime and does not select by batch. An explicit `spec_id`, such as
-`nw4_wtk16_bpv8`, selects an exact legal tile for benchmarking or replay.
+Production `auto` runs one static configuration per case: gate kind x fused
+(either flag) x state width, a tile plus a knob stack (an `f16` state uses the
+`bf16` row). It never measures at runtime and does not select by batch, head
+count or `batch * num_v_heads`. Fused cases use `blocks_per_v_dim == 1` tiles,
+which fused requests need. The table, its provenance and the fallback when a
+case's tile is illegal live once in
+[`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
+An explicit `spec_id`, such as `nw4_wtk16_bpv8`, selects an exact legal tile for
+benchmarking or replay.
 
 Each registered tile is a tuned candidate (the shared `rocke.dispatch.tuning`
 template) whose knob space holds the performance knobs: every (tile x knob)
 configuration is listed by `dispatch_gdn_decode_all` and pinnable by
-`spec_id` plus `tuning_id` / `tuning_knobs`, and `auto` runs the tile's base
-configuration. The sweep levels and the pin and scope rules are in
-[`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
-
-KDA `auto` keeps its separately measured table keyed by
-`work = batch * num_v_heads`, so tensor-parallel head sharding maps to the same
-key as an equivalent amount of batch work. Re-measure KDA with
-`library/builders/gfx950/gdn/tune.py`; exact measurements live outside the
-public source tree.
-
-Fused requests (`fuse_conv` and/or `fuse_out_norm`) need `blocks_per_v_dim ==
-1`, so `auto` prefers an interim static fused tile for both gate kinds; its
-choice, provenance and fallback live once in
+`spec_id` plus `tuning_id` / `tuning_knobs`. A bare `spec_id` pin runs the
+tile's base configuration, and `auto`'s configuration is one of these. The
+sweep levels and the pin and scope rules are in
 [`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
 
 ## Dispatch
@@ -192,7 +187,7 @@ rejects.
 
 gfx950 only. Through dispatch, `bf16` and `f16` activation dtypes and `bf16`,
 `f16` and `f32` state dtypes are supported and need not match, for both gate
-kinds; an `f32` state does not change the tile `auto` picks. `fuse_conv` and
+kinds; the state width selects its case's `auto` row. `fuse_conv` and
 `fuse_out_norm` are request fields (real bools; `fuse_conv` also needs
 `num_k_heads == num_v_heads`), and the result's signature is the fused ABI, so
 the launch packs the fused tensors from `prepare()`. Head geometry is

@@ -145,6 +145,27 @@ def test_the_generator_reads_through_the_python_reader(gen) -> None:
     }
 
 
+def test_only_aliases_the_loader_would_follow_are_emitted(gen) -> None:
+    """C++ applies the same own-column and committed-source precedence as Python."""
+    fake = SimpleNamespace(
+        committed_flavors=lambda: ("llvm98", "llvm99"),
+        load=lambda flavor: SimpleNamespace(keys=lambda: (), arches=lambda key: ()),
+        is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
+        COLUMN_ALIASES={
+            "llvm100": "llvm99",
+            "llvm98": "llvm99",
+            "llvm101": "llvm97",
+        },
+    )
+    text = gen.render(fake)
+    assert '    {"llvm100", "llvm99"},' in text
+    assert '"llvm98", "llvm99"' not in text
+    assert '"llvm101"' not in text
+    assert "    {nullptr, nullptr},\n};" in text
+
+
 def test_an_empty_column_is_a_null_entry_not_an_empty_array(gen) -> None:
     """A zero-length array does not compile, and a flavor whose column has no
     negative cell is normal -- every probe could come back ``ok``."""
@@ -268,5 +289,9 @@ def test_the_engine_carries_the_python_readers_table() -> None:
     view = _python_view()
     for flavor, cells in view.items():
         assert [tuple(c) for c in engine.arch_domain_column(flavor)] == cells, flavor
+    for lane, source in arch_domain.COLUMN_ALIASES.items():
+        if lane not in view and source in view:
+            got = [tuple(c) for c in engine.arch_domain_column(lane)]
+            assert got == view[source], lane
     assert engine.arch_domain_column("llvm-that-nobody-ships") == []
     assert engine.arch_domain_default_mode() == arch_domain.DEFAULT_MODE

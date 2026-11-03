@@ -264,6 +264,65 @@ def _spec(idx: int) -> UniversalGemmSpec:
             block_size=1024,
             batched=False,
         )
+    if idx == 11:
+        # fp64 on gfx942: compv4 double buffer, default epilogue, pad_m/n/k.
+        return (
+            UniversalGemmSpec(
+                name="test_f64",
+                tile=TileSpec(
+                    tile_m=64,
+                    tile_n=64,
+                    tile_k=16,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=4,
+                ),
+                trait=TraitSpec(
+                    pipeline="compv4",
+                    epilogue="default",
+                    pad_m=True,
+                    pad_n=True,
+                    pad_k=True,
+                ),
+                data=DataSpec(
+                    dtype_a="fp64", dtype_b="fp64", dtype_c="fp64", dtype_acc="fp64"
+                ),
+                wave_size=64,
+                block_size=256,
+                batched=False,
+            ),
+            "gfx942",
+        )
+    if idx == 12:
+        # fp64 on gfx942: single-wave tile (scalar global -> LDS copy), compv3,
+        # cshuffle epilogue.
+        return (
+            UniversalGemmSpec(
+                name="test_f64_cshuffle",
+                tile=TileSpec(
+                    tile_m=16,
+                    tile_n=16,
+                    tile_k=4,
+                    warp_m=1,
+                    warp_n=1,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=4,
+                ),
+                trait=TraitSpec(pipeline="compv3", epilogue="cshuffle"),
+                data=DataSpec(
+                    dtype_a="fp64", dtype_b="fp64", dtype_c="fp64", dtype_acc="fp64"
+                ),
+                wave_size=64,
+                block_size=64,
+                batched=False,
+            ),
+            "gfx942",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -271,7 +330,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..10>\n",
+        usage="usage: gemm_emit.py <config_index 0..12>\n",
     )
 
 
