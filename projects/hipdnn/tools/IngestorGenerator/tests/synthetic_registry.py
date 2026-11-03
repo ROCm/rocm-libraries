@@ -16,9 +16,13 @@ rocKE's catalog, tiles, names or admission rules do:
   fields (``C``, ``K``, ``G``) the spec does not carry;
 - the *split probe* family: a rule-driven candidate, as a split-KV decode is, whose
   one spec per request takes ``num_segments`` from ``batch`` and ``seqlen`` and
-  copies ``batch`` into an IR-neutral ``num_seqs``.
+  copies ``batch`` into an IR-neutral ``num_seqs``;
+- the *GQA probe* family: a rule-driven candidate whose head counts are runtime
+  values and whose GQA ratio, a spec property, is baked: ``num_segments`` comes from
+  ``batch`` and the KV head count, so head pairs sharing a ratio pick different
+  segments.
 
-``provider(tmp_path, monkeypatch)`` binds all three to a throw-away provider root.
+``provider(tmp_path, monkeypatch)`` binds all four to a throw-away provider root.
 """
 
 from __future__ import annotations
@@ -354,6 +358,115 @@ def split_probe_manifest(provider_root) -> dict:
                 "feature": ["dtype", "hdim"],
                 "performance": [{"name": "num_segments"}],
                 "ignored": ["num_seqs"],
+            }
+        },
+    }
+
+
+@dataclasses.dataclass(frozen=True)
+class GqaProbeRequest:
+    algorithm: str = "gqa"
+    spec_id: str = "rule"
+    arch: str = ARCH
+    hdim: int = 64
+    dtype: str = "fp16"
+    nhead_q: int = 1
+    nhead_k: int = 1
+    batch: int = 1
+
+
+@dataclasses.dataclass(frozen=True)
+class GqaProbeSpec:
+    dtype: str
+    hdim: int
+    num_query_heads: int
+    num_kv_heads: int
+    num_segments: int
+
+    @property
+    def num_queries_per_kv(self) -> int:
+        return self.num_query_heads // self.num_kv_heads
+
+
+class GqaProbeCandidate:
+    name, algorithm, spec_id = "gqa_probe", "gqa", "rule"
+
+    def admits(self, request: GqaProbeRequest):
+        ok = request.nhead_q % request.nhead_k == 0
+        return ok, "" if ok else "heads must divide"
+
+    def select_spec(self, request: GqaProbeRequest):
+        return GqaProbeSpec(
+            dtype=request.dtype,
+            hdim=request.hdim,
+            num_query_heads=request.nhead_q,
+            num_kv_heads=request.nhead_k,
+            num_segments=max(1, 8 // (request.batch * request.nhead_k)),
+        )
+
+    def sweep_space(self, request: GqaProbeRequest):
+        return [self.select_spec(request)]
+
+
+def gqa_probe_candidates():
+    return [GqaProbeCandidate()]
+
+
+def gqa_probe_manifest(provider_root) -> dict:
+    """A full-space manifest over the GQA probe family, one cell per GQA ratio.
+    Head pairs (4, 1) and (8, 2) share ratio 4; (2, 1) is ratio 2; (2, 2) ratio 1.
+    With batch 1 and 2 they pick segments: (4, 1) 8 and 4, (8, 2) 4 and 2, (2, 1) 8
+    and 4, (2, 2) 4 and 2."""
+    names = ["dtype", "hdim", "num_queries_per_kv"]
+    return {
+        "dialect": "packaged",
+        "authored_subpath": "synthetic/gqa_probe",
+        "engine": {
+            "name": "hipkernel:GqaProbe",
+            "sdk_version": "1.0.0",
+            "knobs": ["num_segments"],
+            "heuristic": "native",
+        },
+        "kmd_fields": [
+            {"name": n, "type": "string" if n == "dtype" else "int"} for n in names
+        ],
+        "specialization": {
+            "metadata_fields": names,
+            "matcher_only_fields": [],
+            "vocabulary": {"dtype": {"fp16": "FP16", "bf16": "BF16"}},
+            "bindings": {n: {"field": n} for n in names},
+        },
+        "kernel_source_kind": "rocke",
+        "workspace_policy": "none",
+        "pack": "gqa_probe",
+        "arch": ARCH,
+        "provider_root": str(provider_root),
+        "source": "kernels/gqa_probe.py",
+        "builder": "build_gqa_probe",
+        "kernel_name_template": "gqa_probe.{dtype}_d{hdim}_g{num_queries_per_kv}",
+        "enumerate": {
+            "candidates": f"{_MODULE}:gqa_probe_candidates",
+            "request": f"{_MODULE}:GqaProbeRequest",
+            "pin": {"algorithm": "gqa", "spec_id": "rule"},
+            "fixed": {"arch": ARCH, "dtype": "fp16", "hdim": 64},
+            "cells": [
+                {
+                    "fields": ["nhead_q", "nhead_k"],
+                    "values": [[4, 1], [2, 1], [8, 2], [2, 2]],
+                },
+                {"fields": ["batch"], "values": [1, 2]},
+            ],
+            "sweep_level": "production",
+            "space": "full",
+            "selector_fields": ["nhead_q", "nhead_k", "batch"],
+            "neutral_fields": ["num_query_heads", "num_kv_heads"],
+            "cell_keyed_by": ["num_queries_per_kv"],
+        },
+        "reduction": {
+            "fields": {
+                "feature": ["dtype", "hdim", "num_queries_per_kv"],
+                "performance": [{"name": "num_segments"}],
+                "ignored": [],
             }
         },
     }

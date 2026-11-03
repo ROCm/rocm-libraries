@@ -937,6 +937,8 @@ enumerate:
   # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
   # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
   # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
+  # spec_overrides: {kv_cache_policy: stream}  # optional: pin a spec field the candidate picks
+  # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
@@ -968,7 +970,7 @@ or flat kernel may carry `default: true`, the variant its cell always keeps. An 
 kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
 config's `launches` rules below, checked when the generated config loads.
 
-Two optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+Four optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
 request and picks a knob from request fields (rocKE's strided split-KV decode picks
 `num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
 field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
@@ -992,10 +994,29 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   grid is proven by rocKE's `test_num_seqs_is_ir_neutral_on_the_decode_grid`
   (`dnn-providers/hip-kernel-provider/rocke/library/tests/test_attention_tiled_3d_module.py`).
   A neutral field must be a spec field and must not be a `feature` or `performance` field.
+- `spec_overrides` maps spec fields to one value every spec takes, applied first, before
+  `neutral_fields` and the merge. It is a deliberate departure from the candidate's own
+  pick, for a field that changes the kernel but whose other values the catalog chooses not
+  to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream`, which a cold-memory
+  A/B found never slower than `all` (AICK-2892). The spec's own validation decides whether
+  the value builds; a value it refuses exits 2 naming the request. An overridden field must
+  be a spec field, and must not be a `feature`, `performance` or neutral field. The g3
+  regeneration gate compares the shipped catalog against the overridden picks.
+- `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
+  that also key the merged cell, so combos merge only when they agree on them. It serves
+  a kernel that reads some shape values at run time but bakes a value derived from
+  them: the gfx942 split-KV decode reads the head counts as kernel arguments and bakes
+  only the GQA ratio, so `nhead_q`/`nhead_k` are selector fields, `num_query_heads`/
+  `num_kv_heads` neutral (rocKE's `test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio`),
+  and `cell_keyed_by: [num_queries_per_kv]` keeps one cell per ratio. The merged cell
+  carries the attribute, so the name template and metadata can use it, and `--shapes`
+  keys a shape by its own pick's value. A keyed attribute must not be a cell field, and
+  every spec a cell holds must keep the cell's values, or the run exits 2: a neutral
+  field or sweep spec that moves one would silently file a kernel in the wrong cell.
 
-Without either key (or with both empty) the output is byte-identical to a manifest that
-never had them. `--plan-space` counts merged cells and prints the combo count beside them;
-duplicate kernel names after merging still exit 2.
+Without any of the four keys (or with all empty) the output is byte-identical to a manifest
+that never had them. `--plan-space` counts merged cells and prints the combo count beside
+them; duplicate kernel names after merging still exit 2.
 
 A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
 inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard

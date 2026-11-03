@@ -132,13 +132,27 @@ def _validate_manifest(path: str, manifest: dict) -> None:
         )
     decl = manifest["enumerate"]
     _require(isinstance(decl, dict), path, "enumerate", "a mapping")
-    for key in ("free_fields", "spec_fields", "selector_fields", "neutral_fields"):
+    for key in (
+        "free_fields",
+        "spec_fields",
+        "selector_fields",
+        "neutral_fields",
+        "cell_keyed_by",
+    ):
         _require(
             decl.get(key) is None or _is_names(decl[key]),
             path,
             f"enumerate.{key}",
             "a list of field names",
         )
+    overrides = decl.get("spec_overrides")
+    _require(
+        overrides is None
+        or (isinstance(overrides, dict) and all(isinstance(k, str) for k in overrides)),
+        path,
+        "enumerate.spec_overrides",
+        "a mapping of spec field names to values",
+    )
     limit = decl.get("max_kernels")
     _require(
         limit is None
@@ -403,6 +417,8 @@ class Registry:
                 f"enumerate.cells fields {self.cell_fields}."
             )
         self.neutral_fields = list(decl.get("neutral_fields") or [])
+        self.spec_overrides = _mapping(decl, "spec_overrides")
+        self.cell_keyed_by = list(decl.get("cell_keyed_by") or [])
         for name in itertools.chain(self.pin, self.fixed, self.cell_fields):
             if name not in self.request_fields:
                 raise EnumerationError(
@@ -645,7 +661,12 @@ def _feature_matched(spaces: list, classification: Classification) -> list:
     for base, specs in spaces:
         names = set(_spec_fields(base))
         for kind in ("feature", "performance", "ignored"):
-            unknown = [n for n in getattr(classification, kind) if n not in names]
+            # A feature may be a derived attribute (a property): it only filters.
+            unknown = [
+                n
+                for n in getattr(classification, kind)
+                if n not in names and not (kind == "feature" and hasattr(base, n))
+            ]
             if unknown:
                 raise EnumerationError(
                     f"reduction.fields.{kind} names {unknown}, which the registry "
@@ -776,31 +797,69 @@ class CellSpaces:
     combos: int
 
 
+def _overridden(spec, overrides: dict, combo: dict):
+    """``spec`` with every ``enumerate.spec_overrides`` field set; the spec's own
+    validation decides whether the value builds."""
+    moved = {n: v for n, v in overrides.items() if getattr(spec, n) != v}
+    if not moved:
+        return spec
+    try:
+        return dataclasses.replace(spec, **moved)
+    except (TypeError, ValueError) as exc:
+        raise EnumerationError(
+            f"enumerate.spec_overrides {moved} does not build for request "
+            f"{_show(combo)}: {exc}"
+        ) from exc
+
+
 def cell_spaces(registry: Registry, classification: Classification) -> CellSpaces:
     """The registry's space per catalog cell.
 
-    With neither ``selector_fields`` nor ``neutral_fields`` every request combo is
-    a cell and its space is the registry's, unchanged. Otherwise:
+    With none of ``spec_overrides``, ``selector_fields``, ``neutral_fields`` or
+    ``cell_keyed_by`` every request combo is a cell and its space is the
+    registry's, unchanged. Otherwise:
 
+    0. every spec takes the ``spec_overrides`` values (the manifest's deliberate
+       departure from the candidate's own pick);
     1. each spec's ``neutral_fields`` take the value of the cell's default spec;
-    2. combos equal outside ``selector_fields`` merge into one cell, ordered by its
-       first combo in catalog order, and without the selector fields;
+    2. combos equal outside ``selector_fields`` and in every ``cell_keyed_by``
+       attribute of their ``select_spec`` merge into one cell, ordered by its first
+       combo in catalog order, without the selector fields and with the keyed
+       attributes;
     3. that cell's default spec is its first combo's ``select_spec``, and its specs
        are the union, first occurrence kept, of each combo's ``select_spec`` then
-       its ``sweep_space`` specs, combo by combo in catalog order.
+       its ``sweep_space`` specs, combo by combo in catalog order. Every one of them
+       must keep the cell's keyed values.
     """
     combos = registry.cells()
     raw = [registry.space(cell) for cell in combos]
     selectors, neutral = registry.selector_fields, registry.neutral_fields
-    if not combos or (not selectors and not neutral):
+    overrides, keyed = registry.spec_overrides, registry.cell_keyed_by
+    if not combos or (not selectors and not neutral and not overrides and not keyed):
         return CellSpaces(combos, raw, [], len(combos))
-    names = _spec_fields(raw[0][0])
-    unknown = [n for n in neutral if n not in names]
-    if unknown:
+    absent = [a for a in keyed if not hasattr(raw[0][0], a)]
+    if absent:
         raise EnumerationError(
-            f"enumerate.neutral_fields names {unknown}, which the registry spec "
+            f"enumerate.cell_keyed_by names {absent}, which the registry spec "
             f"{type(raw[0][0]).__name__} does not have."
         )
+    taken = [a for a in keyed if a in registry.cell_fields]
+    if taken:
+        raise EnumerationError(
+            f"enumerate.cell_keyed_by names {taken}, which are enumerate.cells "
+            f"fields: a cell field already keys the cell."
+        )
+    names = _spec_fields(raw[0][0])
+    for key, declared in (
+        ("neutral_fields", neutral),
+        ("spec_overrides", list(overrides)),
+    ):
+        unknown = [n for n in declared if n not in names]
+        if unknown:
+            raise EnumerationError(
+                f"enumerate.{key} names {unknown}, which the registry spec "
+                f"{type(raw[0][0]).__name__} does not have."
+            )
     for key, declared in (("selector_fields", selectors), ("neutral_fields", neutral)):
         for kind in ("feature", "performance"):
             clash = [n for n in declared if n in getattr(classification, kind)]
@@ -810,13 +869,42 @@ def cell_spaces(registry: Registry, classification: Classification) -> CellSpace
                     f"also names: a {kind} field defines a kernel, so it cannot "
                     f"only steer the selector or leave the IR unchanged."
                 )
+    for kind in ("feature", "performance"):
+        clash = [n for n in overrides if n in getattr(classification, kind)]
+        if clash:
+            raise EnumerationError(
+                f"enumerate.spec_overrides names {clash}, which reduction.fields.{kind} "
+                f"also names: a pinned field takes one value, so it is no {kind} axis."
+            )
+    both = sorted(set(overrides) & set(neutral))
+    if both:
+        raise EnumerationError(
+            f"enumerate.spec_overrides and enumerate.neutral_fields both name {both}."
+        )
+    if overrides:
+        raw = [
+            (
+                _overridden(base, overrides, combo),
+                list(
+                    OrderedDict(
+                        (_identity(s), s)
+                        for s in (_overridden(s, overrides, combo) for s in specs)
+                    ).values()
+                ),
+            )
+            for combo, (base, specs) in zip(combos, raw)
+        ]
+    if not selectors and not neutral and not keyed:
+        return CellSpaces(combos, raw, [], len(combos))
     merged: "OrderedDict[tuple, list]" = OrderedDict()
     for cell, space in zip(combos, raw):
         key = tuple((f, v) for f, v in cell.items() if f not in selectors)
+        key += tuple((a, getattr(space[0], a)) for a in keyed)
         merged.setdefault(key, []).append((cell, space))
     cells, spaces, picks = [], [], []
     for key, members in merged.items():
         default = members[0][1][0]
+        keyed_values = {a: getattr(default, a) for a in keyed}
 
         def normalised(spec, combo):
             moved = {
@@ -840,6 +928,18 @@ def cell_spaces(registry: Registry, classification: Classification) -> CellSpace
             base = normalised(base, combo)
             cell_picks.append((combo, base))
             for spec in (base, *(normalised(s, combo) for s in specs)):
+                drift = {
+                    a: getattr(spec, a)
+                    for a, v in keyed_values.items()
+                    if getattr(spec, a) != v
+                }
+                if drift:
+                    raise EnumerationError(
+                        f"enumerate.cell_keyed_by: request {_show(combo)} puts "
+                        f"{spec} in the cell keyed {keyed_values}, but its {drift} "
+                        f"differ (a neutral field or a sweep spec changes a keyed "
+                        f"attribute)."
+                    )
                 union.setdefault(_identity(spec), spec)
         cells.append(dict(key))
         spaces.append((default, list(union.values())))
@@ -1168,7 +1268,7 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
         print(
             f"  cells: {len(cells)} ({merged.combos} request combos merged on "
             f"selector_fields {registry.selector_fields}, neutral_fields "
-            f"{registry.neutral_fields})",
+            f"{registry.neutral_fields}, cell_keyed_by {registry.cell_keyed_by})",
             file=out,
         )
     else:
@@ -1225,9 +1325,19 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
 
     A shape's cell is keyed without ``enumerate.selector_fields``: they only steer
     the registry's rule, a merged cell carries none of them (`cell_spaces`), and a
-    graph need not set them or take a listed value."""
+    graph need not set them or take a listed value. It is keyed with every
+    ``enumerate.cell_keyed_by`` attribute of the registry's pick, as the cells are."""
     fields = [f for f in registry.cell_fields if f not in registry.selector_fields]
-    listed = {tuple(cell.get(f) for f in fields) for cell in registry.cells()}
+    keyed = registry.cell_keyed_by
+
+    def keyed_values(spec) -> tuple:
+        return tuple(getattr(_unwrap(spec), a) for a in keyed)
+
+    listed = {
+        tuple(cell.get(f) for f in fields)
+        + (keyed_values(registry.space(cell)[0]) if keyed else ())
+        for cell in registry.cells()
+    }
     controlled = set(registry.fixed) | set(registry.cell_fields)
     categories = OrderedDict(
         (name, {"shapes": 0, "cells": set(), "detail": Counter()})
@@ -1259,9 +1369,10 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
             # as it always was; only a missing attribute is the registry itself
             # being unusable.
             try:
-                ok, why = registry.candidate.admits(
-                    registry.request_cls(**{**registry.fixed, **kwargs, **registry.pin})
+                request = registry.request_cls(
+                    **{**registry.fixed, **kwargs, **registry.pin}
                 )
+                ok, why = registry.candidate.admits(request)
             except (TypeError, ValueError) as exc:
                 ok, why = False, f"request rejected: {exc}"
             except AttributeError as exc:
@@ -1270,6 +1381,12 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
                     f"(AttributeError): {exc}"
                 ) from exc
             cell_text = _show(dict(zip(fields, key)))
+            if ok and keyed:
+                picked = keyed_values(registry.candidate.select_spec(request))
+                key += picked
+                cell_text = _show(
+                    {**dict(zip(fields, key)), **dict(zip(keyed, picked))}
+                )
             if not ok:
                 category, detail = "declined by registry", f"{cell_text}: {why}"
             elif key in listed:

@@ -630,6 +630,22 @@ def test_a_combo_pick_the_merged_cell_drops_is_refused(split):
         _kernels(_dedup(split, neutral=()))
 
 
+def test_spec_overrides_pin_a_varying_field_so_its_combos_merge(split):
+    """The pick varies num_seqs (refused above); pinning it ships every combo's
+    pick with the pinned value instead."""
+    manifest = _dedup(split, neutral=())
+    manifest["enumerate"]["spec_overrides"] = {"num_seqs": 4}
+    kernels = _kernels(manifest)
+    specs = [k["kernel_source"]["spec"] for k in kernels]
+    assert {s["num_seqs"] for s in specs} == {4}
+    cell = [s for s in specs if s["hdim"] == 64]
+    assert [s["num_segments"] for s in cell] == [1, 4, 8]
+
+
+def _override_and_neutral(m):
+    m["enumerate"]["spec_overrides"] = {"num_seqs": 4}
+
+
 def test_plan_space_counts_after_merging(split, tmp_path, capsys):
     path = synth.write_manifest(tmp_path / "m.engine.yaml", _dedup(split))
     assert re_.main(["--manifest", str(path), "--plan-space"]) == 0
@@ -675,6 +691,19 @@ def _also_performance(m):
         ),
         (_also_feature, ["selector_fields", "hdim", "feature"]),
         (_also_performance, ["neutral_fields", "num_segments", "performance"]),
+        (
+            lambda m: m["enumerate"].update(spec_overrides=["num_seqs"]),
+            ["spec_overrides", "mapping"],
+        ),
+        (
+            lambda m: m["enumerate"].update(spec_overrides={"no_such": 1}),
+            ["spec_overrides", "no_such"],
+        ),
+        (
+            lambda m: m["enumerate"].update(spec_overrides={"num_segments": 2}),
+            ["spec_overrides", "num_segments", "performance"],
+        ),
+        (_override_and_neutral, ["spec_overrides", "neutral_fields", "num_seqs"]),
     ],
     ids=[
         "selector-not-a-list",
@@ -684,6 +713,10 @@ def _also_performance(m):
         "neutral-unknown",
         "selector-is-feature",
         "neutral-is-performance",
+        "overrides-not-a-mapping",
+        "overrides-unknown",
+        "overrides-is-performance",
+        "overrides-is-neutral",
     ],
 )
 @pytest.mark.parametrize("mode", ["--plan-space", "--out"])
@@ -769,3 +802,76 @@ def test_a_shape_outside_the_merged_cells_is_still_a_gap(split, tmp_path, capsys
     out = _shapes_run(_dedup(split), tmp_path, capsys, [{"hdim": 256}, {"hdim": 64}])
     assert "  covered: 1 shapes, 1 cells\n" in out, out
     assert "  GAP: 1 shapes, 1 cells\n    1 x {hdim: 256}\n" in out, out
+
+
+# cell_keyed_by: head counts are runtime values and only the GQA ratio, a spec
+# property, is baked, so head pairs sharing a ratio merge into one cell.
+
+
+@pytest.fixture
+def gqa(tmp_path, monkeypatch):
+    return synth.gqa_probe_manifest(synth.provider(tmp_path, monkeypatch))
+
+
+def test_cell_keyed_by_merges_head_pairs_per_ratio(gqa):
+    kernels = _kernels(gqa)
+    by_ratio = OrderedDict()
+    for k in kernels:
+        by_ratio.setdefault(k["metadata"]["num_queries_per_kv"], []).append(k)
+    # Cells in first-combo order: (4, 1) is ratio 4, then (2, 1), then (2, 2).
+    assert list(by_ratio) == [4, 2, 1]
+    segments = {
+        r: [k["kernel_source"]["spec"]["num_segments"] for k in ks]
+        for r, ks in by_ratio.items()
+    }
+    # Ratio 4 holds both pairs' picks: (4, 1) 8 and 4, (8, 2) 4 and 2.
+    assert segments == {4: [8, 2, 4], 2: [8, 4], 1: [4, 2]}
+    assert [k["name"] for k in by_ratio[4]] == [
+        f"gqa_probe.fp16_d64_g4_num_segments{n}" for n in (8, 2, 4)
+    ]
+    # The neutral head counts take the cell default's: one kernel per ratio.
+    assert {
+        (
+            k["kernel_source"]["spec"]["num_query_heads"],
+            k["kernel_source"]["spec"]["num_kv_heads"],
+        )
+        for k in by_ratio[4]
+    } == {(4, 1)}
+
+
+def test_a_neutral_field_that_moves_the_keyed_ratio_is_refused(gqa):
+    """Only num_query_heads neutral: (8, 2) would become (4, 2), ratio 2, in the
+    ratio-4 cell."""
+    gqa["enumerate"]["neutral_fields"] = ["num_query_heads"]
+    with pytest.raises(
+        re_.EnumerationError, match=r"cell_keyed_by.*num_queries_per_kv"
+    ):
+        _kernels(gqa)
+
+
+def test_the_shapes_report_keys_a_shape_by_its_picks_ratio(gqa, tmp_path, capsys):
+    """(16, 4) is a pair no cell lists but ratio 4 is shipped; (3, 1) is ratio 3."""
+    out = _shapes_run(
+        gqa,
+        tmp_path,
+        capsys,
+        [{"nhead_q": 16, "nhead_k": 4}, {"nhead_q": 3, "nhead_k": 1}],
+    )
+    assert "  covered: 1 shapes, 1 cells\n" in out, out
+    assert "  GAP: 1 shapes, 1 cells\n    1 x {num_queries_per_kv: 3}\n" in out, out
+
+
+@pytest.mark.parametrize(
+    "keyed, words",
+    [
+        (["no_such"], ["cell_keyed_by", "no_such"]),
+        (["batch"], ["cell_keyed_by", "batch"]),
+    ],
+    ids=["unknown-attribute", "a-cell-field"],
+)
+def test_a_bad_cell_keyed_by_is_exit_2_naming_it(gqa, tmp_path, capsys, keyed, words):
+    gqa["enumerate"]["cell_keyed_by"] = keyed
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", gqa)
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
+    err = capsys.readouterr().err
+    assert all(w in err for w in words), err
