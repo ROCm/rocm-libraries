@@ -562,6 +562,19 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) &&
                                         BlockFmhaShape::Gemm1BlockWarps::at(number<1>{}) == 1;
     static constexpr index_t kVReadAhead = 2; // fragments in flight ahead of the current one
+    // WMMAs one gemm0 K fragment feeds (MIter x KIter): the work that hides the next read
+    static constexpr index_t kKFragWmmas = kM0 /
+                                           (BlockFmhaShape::Gemm0BlockWarps::at(number<0>{}) *
+                                            BlockFmhaShape::Gemm0WarpTile::at(number<0>{})) *
+                                           (kK0 / BlockFmhaShape::Gemm0WarpTile::at(number<2>{}));
+    // fp8 runs gemm0 one 16-row K fragment at a time (Gemm0ByKFragment): kKReadAhead + 1
+    // fragments of K are live instead of the whole tile. Needs one gemm0 K slice and one N warp;
+    // with fewer than 6 WMMAs per fragment the reads are not hidden, so d32-d128 / d256 / d512
+    // keep the whole tile.
+    static constexpr bool kKFragments =
+        is_any_of<KDataType, fp8_t, bf8_t>::value && kK0 == kQKHeaddim &&
+        BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1 && kKFragWmmas >= 6;
+    static constexpr index_t kKReadAhead = 2; // fragments in flight ahead of the current one
     // The prefetched K descale is clamped where the next tile reads it (clamp_k_descale), so the
     // clamp's scalar wait does not have to precede this tile's fenced gemm1.
     static constexpr bool kDeferKDescaleClamp = kVFragments;
@@ -778,6 +791,40 @@ struct BlockFmhaPipelineQRKSVSTdm
             __builtin_amdgcn_sched_barrier(0);
         });
         move_tile_window(v_frag_window, {0, -kFragN * (kNIter - 1)});
+    }
+
+    // gemm0 by K fragment, the counterpart of Gemm1ByVFragment: k_pre holds the first
+    // kKReadAhead fragments, read where the whole K tile used to be (k_frag_window left on the
+    // last of them); later fragments are read kKReadAhead ahead of their WMMAs.
+    template <typename SAcc, typename QTile, typename KFrags, typename KFragWindow>
+    CK_TILE_DEVICE static void Gemm0ByKFragment(SAcc& s_acc,
+                                                const QTile& q_tile,
+                                                const KFrags& k_pre,
+                                                KFragWindow& k_frag_window)
+    {
+        using Gemm0 = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
+        using KFrag = remove_cvref_t<decltype(k_pre[0])>;
+        constexpr index_t kNIter = Gemm0::NIterPerWarp;
+        constexpr index_t kFragN = Gemm0::WarpGemm::kN;
+        static_assert(kNIter > kKReadAhead, "fewer K fragments than the read-ahead");
+
+        KFrag k_bufs[kKReadAhead + 1];
+        static_for<0, kKReadAhead, 1>{}(
+            [&](auto i) { k_bufs[decltype(i)::value] = k_pre[decltype(i)::value]; });
+
+        static_for<0, kNIter, 1>{}([&](auto i_n) {
+            constexpr index_t n = decltype(i_n)::value;
+            if constexpr(n + kKReadAhead < kNIter)
+            {
+                move_tile_window(k_frag_window, {kFragN, 0});
+                k_bufs[(n + kKReadAhead) % (kKReadAhead + 1)] = load_tile(k_frag_window);
+            }
+            Policy::template RunQKFragment<Problem>(
+                s_acc, q_tile, k_bufs[n % (kKReadAhead + 1)], i_n);
+            // A full fence keeps the fragment order, as in Gemm1ByVFragment.
+            __builtin_amdgcn_sched_barrier(0);
+        });
+        move_tile_window(k_frag_window, {-kFragN * (kNIter - 1), 0});
     }
 
     // Single V, double K LDS buffer path.
@@ -1872,6 +1919,23 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeVRegTileDistribution<Problem>());
 
+        constexpr index_t kKFragN = remove_cvref_t<decltype(gemm_0)>::WarpGemm::kN;
+        auto k_frag_window =
+            make_tile_window(k_lds_read_view,
+                             make_tuple(number<kKFragN>{}, number<kK0>{}),
+                             {0, 0},
+                             Policy::template MakeKRegTileDistribution<Problem, kKFragN>());
+        // The first kKReadAhead K fragments, k_frag_window left on the last of them
+        auto load_k_fragments = [&]() {
+            array<decltype(load_tile(k_frag_window)), kKReadAhead> frags;
+            static_for<0, kKReadAhead, 1>{}([&](auto i) {
+                if constexpr(decltype(i)::value > 0)
+                    move_tile_window(k_frag_window, {kKFragN, 0});
+                frags[decltype(i)::value] = load_tile(k_frag_window);
+            });
+            return frags;
+        };
+
         constexpr index_t kVFragN = remove_cvref_t<decltype(gemm_1)>::WarpGemm::kN;
         auto v_frag_window =
             make_tile_window(v_lds_read_view,
@@ -1940,7 +2004,12 @@ struct BlockFmhaPipelineQRKSVSTdm
         // first LDS read). If the prologue prefetch count changes, update this
         // value or risk a silent data hazard / unnecessary stall.
         s_wait_tensorcnt_barrier<2>();
-        auto k_tile = load_tile(k_lds_read_window);
+        auto k_tile = [&]() {
+            if constexpr(kKFragments)
+                return load_k_fragments();
+            else
+                return load_tile(k_lds_read_window);
+        }();
 
         __builtin_amdgcn_sched_barrier(0);
 
@@ -2162,7 +2231,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            if constexpr(!kStagedKPairs && Problem::kProgressiveDsLoadK)
+            if constexpr(kKFragments)
+            {
+                static_assert(k0_loops == 1 && kMergedWarBarriers);
+                Gemm0ByKFragment(s_acc, q_tile, k_tile, k_frag_window);
+            }
+            else if constexpr(!kStagedKPairs && Problem::kProgressiveDsLoadK)
             {
                 // Retain the reload-overlap traversal when consuming the final
                 // head-dimension slice, even though this slice has no reload.
@@ -2589,7 +2663,15 @@ struct BlockFmhaPipelineQRKSVSTdm
             // 0 also retires gemm1's V reads, which frees the V buffer for the next call.
             s_wait_tensorcnt_barrier<2, kMergedWarBarriers ? 0 : waitcnt_arg::kMaxLgkmCnt>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
-            k_tile = load_tile(k_lds_read_window);
+            if constexpr(kKFragments)
+            {
+                k_frag_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                k_tile = load_k_fragments();
+            }
+            else
+            {
+                k_tile = load_tile(k_lds_read_window);
+            }
 
             if constexpr(kVFragments)
             {
