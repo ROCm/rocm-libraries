@@ -10,13 +10,19 @@ Tuning scheduler concurrency
 
 hipThreads launches a fixed number of execution slots, called virtual cores (vcores), on each workgroup processor (WGP). The default number of vcores per WGP is 16. You can change this value to accommodate different workloads and architectures.
 
-The total vcore count is calculated by multiplying the number of WGPs on the device (``multiprocessorCount``) by the number of vcores per WGP:
+The total vcore count, returned by ``hip::wthread::hardware_concurrency()``, is the number of WGPs on the current device multiplied by the number of vcores per WGP, capped at the number of vcores the device can run at once:
 
 .. code-block:: text
 
-   hardware_concurrency() = multiprocessorCount * vcoresPerWgp
+   hardware_concurrency() = min(WGPs * vcoresPerWgp, maximum resident vcores)
+
+* On Instinct (CDNA) GPUs, which have no WGPs, every two compute units count as one WGP, so the same setting gives the same density on every architecture.
+* The maximum resident vcores is the number of scheduler blocks the device can hold at the same time, as reported by ``hipOccupancyMaxActiveBlocksPerMultiprocessor``.
+  Vcores beyond it could not start until others exit, and ``hardware_concurrency()`` must not promise more simultaneous wthreads than can actually run (see :ref:`limitations <limitations>`).
+  When the cap applies, hipThreads prints a message such as ``[hipthreads] device 0: requested 3072 vcores, but the occupancy-based maximum is 2112 ...; using 2112.``
 
 Increasing the number of vcores per WGP raises the number of work items that can run concurrently, which might improve throughput.
+Requesting more than the device can hold has the same effect as requesting the maximum.
 
 .. note::
 
