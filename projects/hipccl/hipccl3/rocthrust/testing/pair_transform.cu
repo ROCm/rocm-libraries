@@ -17,15 +17,10 @@
 
 #include <thrust/host_vector.h>
 #include <thrust/transform.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(utility)
 
 #include <unittest/unittest.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 struct make_pair_functor
 {

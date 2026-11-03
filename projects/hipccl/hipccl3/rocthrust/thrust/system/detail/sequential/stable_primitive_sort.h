@@ -69,7 +69,7 @@ struct logical_not_first
   template <typename Tuple>
   THRUST_HOST_DEVICE bool operator()(Tuple t)
   {
-    return !thrust::get<0>(t);
+    return !_THRUST_STD::get<0>(t);
   }
 };
 

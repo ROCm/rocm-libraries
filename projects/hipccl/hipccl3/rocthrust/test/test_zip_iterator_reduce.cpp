@@ -30,7 +30,8 @@ struct TuplePlus
   THRUST_HOST_DEVICE Tuple operator()(Tuple x, Tuple y) const
   {
     using namespace thrust;
-    return make_tuple(get<0>(x) + get<0>(y), get<1>(x) + get<1>(y));
+    return _THRUST_STD::make_tuple(
+      _THRUST_STD::get<0>(x) + _THRUST_STD::get<0>(y), _THRUST_STD::get<1>(x) + _THRUST_STD::get<1>(y));
   }
 }; // end SumTuple
 
@@ -57,7 +58,7 @@ TYPED_TEST(ZipIteratorReduceTests, TestZipIteratorReduce)
       device_vector<T> d_data0 = h_data0;
       device_vector<T> d_data1 = h_data1;
 
-      using Tuple = tuple<T, T>;
+      using Tuple = _THRUST_STD::tuple<T, T>;
 
       // run on host
       Tuple h_result = thrust::reduce(
@@ -73,8 +74,8 @@ TYPED_TEST(ZipIteratorReduceTests, TestZipIteratorReduce)
         make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
 
-      ASSERT_EQ(get<0>(h_result), get<0>(d_result));
-      ASSERT_EQ(get<1>(h_result), get<1>(d_result));
+      ASSERT_EQ(_THRUST_STD::get<0>(h_result), _THRUST_STD::get<0>(d_result));
+      ASSERT_EQ(_THRUST_STD::get<1>(h_result), _THRUST_STD::get<1>(d_result));
     }
   }
 }
