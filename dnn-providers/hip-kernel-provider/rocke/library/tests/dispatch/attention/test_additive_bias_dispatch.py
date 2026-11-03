@@ -401,6 +401,20 @@ class TestBinding(unittest.TestCase):
             with self.subTest(case=label), self.assertRaisesRegex(ValueError, message):
                 self._launch(bias)
 
+    def test_unit_key_stride_is_required_even_for_one_key(self):
+        # The unified runner refuses any key stride but 1, so the binding must
+        # too, including Sk == 1 where the stride of a size-1 dim is arbitrary.
+        from dispatch.attention.bindings import _tuning_additive_bias
+
+        req = _req(seqlen_q=1, seqlen_k=1, batch=2)
+        problem = replace(_problem(req), use_additive_bias=True)
+        broadcast = _Tensor((2, 32, 1, 1), "torch.float32", strides=(0, 0, 0, 0))
+        with self.assertRaisesRegex(ValueError, "key dimension must have stride 1"):
+            _tuning_additive_bias(req, problem, {"attn_bias": broadcast})
+        unit = _Tensor((2, 32, 1, 1), "torch.float32", strides=(32, 1, 1, 1))
+        kwargs = _tuning_additive_bias(req, problem, {"attn_bias": unit})
+        self.assertEqual(kwargs["additive_bias_head_stride"], 1)
+
     def test_bias_off_request_refuses_a_bias_tensor(self):
         candidate = self.candidate
         req = _pinned(candidate, use_attn_bias=False)

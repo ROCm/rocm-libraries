@@ -364,13 +364,13 @@ def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
 
 # Bias combined with the other features the routed candidates declare: the
 # top-left causal and no-mask alignments, attention sinks, an fp8 K/V cache and
-# (split-KV only) the LSE output. feature -> (problem fields, paths).
+# the LSE output (2D and split-KV). feature -> (problem fields, paths).
 _FEATURES = {
     "top_left": ({"causal_top_left": True, "right_bound": 0}, ("2d", "3d")),
     "no_mask": ({"right_bound": -1}, ("2d", "3d")),
     "sinks": ({"use_sinks": True}, ("2d", "3d")),
     "fp8_kv": ({"use_fp8": True}, ("2d", "3d")),
-    "lse": ({"emit_lse": True}, ("3d",)),
+    "lse": ({"emit_lse": True}, ("2d", "3d")),
 }
 _FEATURE_PATHS = {
     "2d": ("tiled", [(37, 101), (64, 64), (5, 130)]),
@@ -479,6 +479,7 @@ def _check_feature_case(
     shift = (ref - ref_nobias).abs().max().item()
     assert shift > 10 * tol, f"{label}: bias too weak to observe (shift={shift:.3e})"
     if lse is not None:
+        assert not torch.isnan(lse).any(), f"{label}: NaN in the LSE"
         assert torch.equal(torch.isneginf(lse), torch.isneginf(ref_lse)), label
         finite = torch.isfinite(ref_lse)
         lse_err = (lse[finite] - ref_lse[finite]).abs().max().item()

@@ -219,6 +219,7 @@ rocke_unified_attention_problem_t au_build(const py::dict& d, Store& st)
     p.sliding_window = a_int(d, "sliding_window", p.sliding_window);
     p.softcap = a_double(d, "softcap", p.softcap);
     p.use_sinks = a_bool(d, "use_sinks", p.use_sinks);
+    p.use_additive_bias = a_bool(d, "use_additive_bias", p.use_additive_bias);
     std::string v;
     if(a_str(d, "dtype", v))
         p.dtype = st.keep(v);
@@ -1031,6 +1032,7 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.use_additive_bias = a_bool(d, "use_additive_bias", s.use_additive_bias);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);

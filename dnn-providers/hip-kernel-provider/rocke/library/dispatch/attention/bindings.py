@@ -446,6 +446,13 @@ def _tuning_additive_bias(request, problem, tensors: Mapping[str, Any]) -> dict:
             f"attn_bias dtype must be fp32 for the unified kernels, got {bias_kind}"
         )
     batch, head, query = _attn_bias_strides(request, attn_bias, None)
+    # The unified kernels read keys at stride 1 whatever Sk is, and the runner
+    # refuses any other key stride, so refuse it here too, Sk == 1 included.
+    if int(attn_bias.stride(3)) != 1:
+        raise ValueError(
+            "attn_bias key dimension must have stride 1 for the unified kernels, "
+            f"got stride {int(attn_bias.stride(3))}"
+        )
     return {
         "additive_bias": attn_bias,
         "additive_bias_batch_stride": batch,

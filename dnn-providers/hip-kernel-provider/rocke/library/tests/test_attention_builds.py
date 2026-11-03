@@ -5938,5 +5938,41 @@ def test_every_declared_budget_was_exercised():
     ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
 
 
+@pytest.mark.parametrize(
+    ("entry", "config", "reason"),
+    [
+        (
+            "gfx950_attention_tiled_2d_fastkv_regp_lower_llvm",
+            {"use_transposed_mask_once": False},
+            "fastKV register-P experiment does not support additive bias",
+        ),
+        (
+            "attention_unified_lower_llvm",
+            {
+                "head_size": 128,
+                "block_size": 16,
+                "num_query_heads": 8,
+                "num_kv_heads": 2,
+                "total_q": 64,
+                "max_seqlen_q": 64,
+                "max_seqlen_k": 64,
+                "num_seqs": 1,
+                "dtype": "bf16",
+            },
+            "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only",
+        ),
+    ],
+)
+def test_native_builders_refuse_additive_bias(entry, config, reason):
+    # The C++ fastKV and scalar builders take no bias. Through the rocke_engine
+    # binding (built with ROCKE_BUILD_PYBIND=ON; CI does not build it) a biased
+    # config must hit their reject, not build a kernel that drops the bias.
+    engine = pytest.importorskip("rocke_engine")
+    lower = getattr(engine, entry)
+    assert lower(config, "gfx950")
+    with pytest.raises(RuntimeError, match=reason):
+        lower({**config, "use_additive_bias": True}, "gfx950")
+
+
 if __name__ == "__main__":
     unittest.main()
