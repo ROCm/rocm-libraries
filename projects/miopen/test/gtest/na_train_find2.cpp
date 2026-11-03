@@ -194,6 +194,7 @@ struct verify_fwd_batchnorm_spatial_activ
             const auto run_ret = miopenRunSolution(
                 &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
+            EXPECT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
         }
 
         baout.data       = handle.Read<T>(out_dev, baout.data.size());
@@ -380,6 +381,7 @@ struct verify_bwd_batchnorm_spatial_activ
             const auto run_ret = miopenRunSolution(
                 &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
+            EXPECT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
         }
 
         dx.data     = handle.Read<T>(dxout_dev, dx.data.size());
@@ -547,6 +549,7 @@ struct verify_fwd_batchnorm_peract_activ
             const auto run_ret = miopenRunSolution(
                 &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
+            EXPECT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
         }
 
         baout.data       = handle.Read<T>(out_dev, baout.data.size());
@@ -722,6 +725,7 @@ struct verify_bwd_batchnorm_peract_activ
             const auto run_ret = miopenRunSolution(
                 &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
+            EXPECT_EQ(miopenDestroySolution(solution), miopenStatusSuccess);
         }
 
         dx.data     = handle.Read<T>(dxout_dev, dx.data.size());
