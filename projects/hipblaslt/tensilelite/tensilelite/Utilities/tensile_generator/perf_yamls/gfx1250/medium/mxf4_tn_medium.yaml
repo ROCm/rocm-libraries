@@ -10,6 +10,7 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
+  MXDataGenerator: False
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeD: 3

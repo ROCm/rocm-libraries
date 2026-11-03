@@ -29,6 +29,7 @@ The things that can quietly break the lane:
 from __future__ import annotations
 
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -47,6 +48,7 @@ PLATFORM = Path(__file__).resolve().parents[2]
 LOWER_LLVM = PLATFORM / "python" / "rocke" / "core" / "lower_llvm.py"
 CPP_CORE = PLATFORM / "cpp" / "core" / "lower_llvm" / "core.cpp"
 CHECK_GATE = PLATFORM / "tools" / "check_arch_domain.py"
+_RUN_ALL_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
 
 # Three tests below read the *sources* -- the Python emitter, the C++ core, the
 # gate script -- which `install(DIRECTORY tests/)` does not ship. Skip those
@@ -783,8 +785,13 @@ def test_the_cpp_fallback_does_not_warn_twice(monkeypatch: pytest.MonkeyPatch) -
 
 @_needs_sources
 def test_the_corpus_gate_is_green() -> None:
-    """Delegates to the gate rather than re-deriving its rules, so the tool and
-    the test cannot disagree about what the lane is allowed to say."""
+    """Delegate unless this runner invocation already proved the full corpus.
+
+    Standalone and installed pytest do not receive the private completion marker,
+    so they continue to own the same fail-closed corpus check.
+    """
+    if os.environ.get(_RUN_ALL_COMPLETE_ENV) == "1":
+        pytest.skip("run_all.py already completed the full arch-domain gate")
     tool = PLATFORM / "tools" / "check_arch_domain.py"
     proc = subprocess.run([sys.executable, str(tool)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
