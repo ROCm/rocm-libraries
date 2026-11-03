@@ -311,3 +311,12 @@ def test_single_wave_rows_are_constant(toolchain, tile0):
     assert re.search(r"v_add_nc_u32 v\[vgprGlobalReadOffsetA\+0\], 0x10, v\d+\s+// gROA_0: unroll \+ prepad", src)
     for row in range(1, tile0):
         assert "gROA_%u: + unroll" % row in src
+
+
+def test_gsu1_decode_kernel_has_no_split_k_scale_code(toolchain):
+    """A short-wave decode kernel with GlobalSplitU 1 knows it is never split, so
+    it carries neither the forced contiguous split (GSUC) nor the scale pointers'
+    split offset."""
+    src = _emit_solution(toolchain, _solution(toolchain))[1]
+    assert "block scale: contiguous split-K" not in src
+    assert "scaleA: skip groups before the split" not in src

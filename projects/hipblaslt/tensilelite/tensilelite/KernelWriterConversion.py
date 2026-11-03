@@ -126,8 +126,10 @@ class KernelWriterConversion(KernelWriterBase):
         biasPtrStr = self.state["ProblemType"]["BiasDataType"].toDevice(self.language)
         kStr += "  " + biasPtrStr + "* " + "Bias;" + self.endLine
 
-    # ScaleAB
-    if self.state["ProblemType"]["UseScaleAB"]:
+    # ScaleAB. A Block scale is applied while dequantizing, before the partials
+    # are written, so the reduction takes no scale pointers -- and must not: its
+    # name carries no ScaleAB tag, so it is the same kernel a plain GEMM uses.
+    if self.state["ProblemType"]["UseScaleAB"] in ("Scalar", "Vector"):
       scalePtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
       kStr += "  " + scalePtrStr + " * " + "ScaleA;" + self.endLine
       kStr += "  " + scalePtrStr + " * " + "ScaleB;" + self.endLine
