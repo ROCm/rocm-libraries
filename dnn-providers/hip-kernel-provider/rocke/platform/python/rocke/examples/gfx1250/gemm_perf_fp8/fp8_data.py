@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from rocke.instances.common.manifest_runner.gemm import (
     _fp8e4m3_decode_table,
-    _fp8e4m3_encode,
+    fp8e4m3_encode,
 )
 
 #: Largest finite e4m3 magnitude; rounding saturates here (the format has no
@@ -71,7 +71,7 @@ def int_operands(np, m: int, n: int, k: int) -> tuple[object, object, object, ob
     rng = np.random.default_rng(INT_SEED)
     a = rng.integers(-5, 6, size=(m, k), dtype=np.int16).astype(np.float32)
     b = rng.integers(-5, 6, size=(n, k), dtype=np.int16).astype(np.float32)
-    return _fp8e4m3_encode(np, a), _fp8e4m3_encode(np, b), a, b
+    return fp8e4m3_encode(np, a), fp8e4m3_encode(np, b), a, b
 
 
 def rand_operands(np, m: int, n: int, k: int) -> tuple[object, object, object, object]:

@@ -77,14 +77,14 @@ def run_gemm_manifest_problem(
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         if is_bf16:
-            from ....dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+            from ....dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
 
             # Reference: fp32 accumulation (exact for small-integer inputs),
             # then round-to-nearest-even to bf16 matching the kernel's fptrunc.
-            ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)
-            ref_f32 = _f32_from_bf16(np, ref_u16)
+            ref_u16 = bf16_from_f32(np, A_f32 @ B_f32.T)
+            ref_f32 = f32_from_bf16(np, ref_u16)
             # Decode raw output bytes as bf16, not fp16.
-            out_f32 = _f32_from_bf16(np, C.view(np.uint16))
+            out_f32 = f32_from_bf16(np, C.view(np.uint16))
         else:
             ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
             ref_f32 = ref.astype(np.float32)
@@ -191,12 +191,12 @@ def _bf8e5m2_decode_table(np):
     return val
 
 
-def _fp8e4m3_encode(np, x):
+def fp8e4m3_encode(np, x):
     """Encode f32 values to OCP e4m3 bytes, rejecting anything inexact."""
     return _encode_exact(np, x, _fp8e4m3_decode_table(np), "fp8e4m3")
 
 
-def _bf8e5m2_encode(np, x):
+def bf8e5m2_encode(np, x):
     """Encode f32 values to OCP e5m2 bytes, rejecting anything inexact."""
     return _encode_exact(np, x, _bf8e5m2_decode_table(np), "bf8e5m2")
 
@@ -204,7 +204,7 @@ def _bf8e5m2_encode(np, x):
 # The 8-bit operand dtype (as spelled in the manifest's ``A`` pointer type) ->
 # its exact encoder. The kernel decodes the bytes in its own format, so feeding
 # a bf8 kernel e4m3 bytes fails every element of a correct kernel.
-_F8_ENCODERS = {"fp8e4m3": _fp8e4m3_encode, "bf8e5m2": _bf8e5m2_encode}
+_F8_ENCODERS = {"fp8e4m3": fp8e4m3_encode, "bf8e5m2": bf8e5m2_encode}
 
 
 def _gemm_f8_dtype(manifest: dict) -> str:
@@ -329,12 +329,12 @@ def run_gemm_fp8_manifest_problem(
         if not verify:
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
-        from ....dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+        from ....dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
 
         dot = A_f32 @ B_f32.T
         if c_dtype == "bf16":
-            ref_f32 = _f32_from_bf16(np, _bf16_from_f32(np, dot))
-            out_f32 = _f32_from_bf16(np, C)
+            ref_f32 = f32_from_bf16(np, bf16_from_f32(np, dot))
+            out_f32 = f32_from_bf16(np, C)
         else:
             ref_f32 = dot.astype(np.float16).astype(np.float32)
             out_f32 = C.view(np.float16).astype(np.float32)

@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     import numpy as np
 
     from rocke.core.lower_llvm import lower_kernel_to_llvm
-    from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+    from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
     from rocke.instances.common.gemm_universal import build_universal_gemm
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir
     from rocke.runtime.hip_module import Runtime
@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     a8, b8, a32, b32 = int_operands(np, m, n, k)
-    ref = _f32_from_bf16(np, _bf16_from_f32(np, a32 @ b32.T))
+    ref = f32_from_bf16(np, bf16_from_f32(np, a32 @ b32.T))
     del a32, b32
     rt = Runtime()
     c_bytes = m * n * 2
@@ -259,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         rt.memset(c_dev, 0, c_bytes + stamp_bytes)
         launch(key, 0.0, 0, 1)
         rt.memcpy_d2h(_as_u8_buffer(c_host), c_dev, c_bytes)
-        exact = np.array_equal(_f32_from_bf16(np, c_host), ref)
+        exact = np.array_equal(f32_from_bf16(np, c_host), ref)
         print(f"[clock] verify {key:<5} int exact: {exact}")
         if not exact:
             raise SystemExit("[clock] verification failed; nothing reported")

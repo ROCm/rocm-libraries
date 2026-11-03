@@ -42,8 +42,8 @@ from rocke.examples.common.universal_gemm_verify import (
 from rocke.instances.common.manifest_runner.gemm import (
     _F8_ENCODERS,
     _bf8e5m2_decode_table,
-    _bf8e5m2_encode,
-    _fp8e4m3_encode,
+    bf8e5m2_encode,
+    fp8e4m3_encode,
     _gemm_f8_dtype,
     _gemm_is_bf16,
 )
@@ -274,7 +274,7 @@ class TestEightBitEncoders(unittest.TestCase):
 
         t = _bf8e5m2_decode_table(np)
         finite = np.flatnonzero(np.isfinite(t) & (np.arange(256) != 0x80))
-        codes = _bf8e5m2_encode(np, t[finite])
+        codes = bf8e5m2_encode(np, t[finite])
         self.assertTrue(np.array_equal(codes, finite.astype(np.uint8)))
 
     def test_encoders_reject_what_their_format_cannot_hold(self):
@@ -282,9 +282,9 @@ class TestEightBitEncoders(unittest.TestCase):
 
         # 1.125 needs three significand bits: exact in e4m3, not in e5m2.
         x = np.array([1.125], dtype=np.float32)
-        self.assertEqual(int(_fp8e4m3_encode(np, x)[0]), 0x39)
+        self.assertEqual(int(fp8e4m3_encode(np, x)[0]), 0x39)
         with self.assertRaisesRegex(ValueError, "bf8e5m2"):
-            _bf8e5m2_encode(np, x)
+            bf8e5m2_encode(np, x)
 
     def test_test_inputs_are_exact_in_both_formats(self):
         import numpy as np

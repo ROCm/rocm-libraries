@@ -22,6 +22,65 @@ from rocke.examples.gfx1250.gemm_perf_fp8 import wmma_roofline_probe as probe
 from rocke.instances.common.manifest_runner.gemm import _fp8e4m3_decode_table
 
 
+def _smi_listing(stdout: str):
+    """Make ``rocm-smi --showpids`` print ``stdout`` to the contention check."""
+    from contextlib import ExitStack
+
+    from rocke.examples.gfx1250.gemm_perf_fp8 import gpu_contention
+
+    stack = ExitStack()
+    stack.enter_context(
+        mock.patch.object(gpu_contention.shutil, "which", return_value="rocm-smi")
+    )
+    stack.enter_context(
+        mock.patch.object(
+            gpu_contention.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout=stdout),
+        )
+    )
+    return stack
+
+
+class _FakeRuntime:
+    """Records host->device copies; enough for PreparedProblem.create."""
+
+    def __init__(self):
+        self.copies = {}
+        self._next = 0
+
+    def alloc(self, nbytes):
+        self._next += 1
+        return self._next
+
+    def memcpy_h2d(self, ptr, buf, nbytes):
+        self.copies[ptr] = bytes(buf)[:nbytes]
+
+    def memset(self, ptr, value, nbytes):
+        pass
+
+
+class TestSweepExactSet(unittest.TestCase):
+    def test_sweep_uploads_fp8_data_int_operands(self):
+        """The sweep's exact set is fp8_data's, so the two cannot drift."""
+        from rocke.examples.gfx1250.gemm_perf_fp8 import fp8_gemm_sweep
+
+        m, n, k, padded_n = 8, 6, 16, 8
+        with mock.patch.object(fp8_gemm_sweep, "Runtime", _FakeRuntime):
+            prob = fp8_gemm_sweep.PreparedProblem.create(
+                (m, n, k), padded_n, with_reference=True
+            )
+        a8, b8, a32, b32 = fp8_data.int_operands(np, m, n, k)
+        b_padded = np.zeros((padded_n, k), dtype=np.uint8)
+        b_padded[:n] = b8
+        self.assertEqual(prob.rt.copies[prob.a_dev], a8.tobytes())
+        self.assertEqual(prob.rt.copies[prob.b_dev], b_padded.tobytes())
+        from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
+
+        ref = f32_from_bf16(np, bf16_from_f32(np, a32 @ b32.T))
+        self.assertTrue(np.array_equal(prob.reference, ref))
+
+
 class TestE4m3Round(unittest.TestCase):
     def test_every_finite_value_round_trips(self):
         table = _fp8e4m3_decode_table(np)
@@ -106,17 +165,26 @@ class TestTraitAbArms(unittest.TestCase):
             f"{os.getpid()}\tpython3\t1\n"
             "4242\tother_job\t1\n"
         )
-        with mock.patch.object(
-            fp8_trait_ab.shutil, "which", return_value="rocm-smi"
-        ), mock.patch.object(
-            fp8_trait_ab.subprocess, "run", return_value=SimpleNamespace(stdout=listing)
-        ):
+        with _smi_listing(listing):
             self.assertEqual(fp8_trait_ab.other_gpu_processes(), ["4242"])
-        empty = SimpleNamespace(stdout="No KFD PIDs currently running")
-        with mock.patch.object(
-            fp8_trait_ab.shutil, "which", return_value="rocm-smi"
-        ), mock.patch.object(fp8_trait_ab.subprocess, "run", return_value=empty):
+        with _smi_listing("No KFD PIDs currently running"):
             self.assertEqual(fp8_trait_ab.other_gpu_processes(), [])
+
+    def test_sweep_and_trait_ab_share_one_contention_check(self):
+        """Both tools must name the same foreign processes from one listing."""
+        from rocke.examples.gfx1250.gemm_perf_fp8 import fp8_gemm_sweep
+
+        listing = (
+            "PID\tPROCESS NAME\tGPU(s)\tVRAM USED\tSDMA USED\tCU OCCUPANCY\n"
+            f"{os.getpid()}\tpython3\t1\t1024\t0\t0\n"
+            "4242\tother_job\t1\t2048\t0\t0\n"
+        )
+        with _smi_listing(listing):
+            state = fp8_gemm_sweep.machine_state("t")
+            pids = fp8_trait_ab.other_gpu_processes()
+        self.assertEqual(state["foreign_kfd_count"], 1)
+        self.assertFalse(state["clean"])
+        self.assertEqual(pids, ["4242"])
 
     def test_a_nan_error_fails_the_random_bound(self):
         # max() and <= both let a NaN through; the verify step must not.

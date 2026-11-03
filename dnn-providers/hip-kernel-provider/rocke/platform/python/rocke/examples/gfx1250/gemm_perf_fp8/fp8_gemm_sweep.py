@@ -96,7 +96,6 @@ import itertools
 import json
 import math
 import os
-import shutil
 import socket
 import statistics
 import struct
@@ -116,6 +115,10 @@ from rocke.instances.common.gemm_universal import (
     is_valid_spec,
 )
 from rocke.runtime.hip_module import Runtime
+from rocke.examples.gfx1250.gemm_perf_fp8.gpu_contention import (
+    is_ours,
+    kfd_processes,
+)
 from rocke.sweep import BuildRecord, build_all_instances
 
 CONFIG_DIR = Path(__file__).with_name("configs")
@@ -773,65 +776,10 @@ def required_padded_n(n: int, specs: Sequence[UniversalGemmSpec]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _kfd_processes() -> Tuple[List[Dict[str, Any]], str]:
-    """Processes currently holding the GPU, and where the answer came from.
-
-    ``rocm-smi --showpids`` first; ``/sys/class/kfd/kfd/proc`` when rocm-smi is
-    absent or unparseable. Returns ``([], "unavailable")`` rather than raising:
-    a missing GPU must not take down a host-only run.
-    """
-    smi = shutil.which("rocm-smi")
-    if smi:
-        try:
-            out = subprocess.run(
-                [smi, "--showpids"], capture_output=True, text=True, timeout=30
-            ).stdout
-            procs: List[Dict[str, Any]] = []
-            for line in out.splitlines():
-                parts = line.split()
-                # Rows are "<pid> <name> <gpus> <vram> <sdma> <cu>"; the header
-                # and the banner lines do not start with a bare integer.
-                if len(parts) >= 4 and parts[0].isdigit():
-                    procs.append(
-                        {
-                            "pid": int(parts[0]),
-                            "name": parts[1],
-                            "vram_bytes": int(parts[3]) if parts[3].isdigit() else None,
-                        }
-                    )
-            return procs, "rocm-smi"
-        except (OSError, subprocess.SubprocessError, ValueError):
-            pass
-    proc_dir = Path("/sys/class/kfd/kfd/proc")
-    if proc_dir.is_dir():
-        return (
-            [
-                {"pid": int(p.name), "name": None, "vram_bytes": None}
-                for p in proc_dir.iterdir()
-                if p.name.isdigit()
-            ],
-            "sysfs",
-        )
-    return [], "unavailable"
-
-
-def _is_ours(pid: int) -> bool:
-    """Whether ``pid`` belongs to this run (us, or a worker we forked)."""
-    if pid == os.getpid():
-        return True
-    try:
-        # field 6 of /proc/<pid>/stat is the session id; our forked workers
-        # share ours. comm can contain spaces, so split on the closing paren.
-        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        return int(fields[3]) == os.getsid(0)
-    except (OSError, IndexError, ValueError):
-        return False
-
-
 def machine_state(label: str) -> Dict[str, Any]:
     """A snapshot to attach to a measurement, so it can be judged later."""
-    procs, source = _kfd_processes()
-    foreign = [p for p in procs if not _is_ours(p["pid"])]
+    procs, source = kfd_processes()
+    foreign = [p for p in procs if not is_ours(p["pid"])]
     return {
         "label": label,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -852,7 +800,7 @@ def warn_if_contended(state: Dict[str, Any]) -> None:
         others = ", ".join(
             f"{p['pid']}({p['name']})"
             for p in state["kfd_processes"]
-            if not _is_ours(p["pid"])
+            if not is_ours(p["pid"])
         )
         print(
             f"WARNING [{state['label']}]: {state['foreign_kfd_count']} foreign KFD "
@@ -905,7 +853,7 @@ class PreparedProblem:
     ) -> "PreparedProblem":
         import numpy as np
 
-        from rocke.instances.common.manifest_runner.gemm import _fp8e4m3_encode
+        from rocke.examples.gfx1250.gemm_perf_fp8.fp8_data import int_operands
 
         m, n, k = shape
         if 25 * k >= (1 << 24):
@@ -914,21 +862,19 @@ class PreparedProblem:
                 f"(25*K must stay below 2^24, so K <= {_MAX_EXACT_K}); "
                 "lower K or replace the exact gate with a justified tolerance"
             )
-        rng = np.random.default_rng(0xC0FFEE)
-        a_f32 = rng.integers(-5, 6, size=(m, k), dtype=np.int16).astype(np.float32)
-        b_f32 = rng.integers(-5, 6, size=(n, k), dtype=np.int16).astype(np.float32)
-        a = _fp8e4m3_encode(np, a_f32)
+        # The exact integer set fp8_trait_ab and clock_probe verify against.
+        a, b_bytes, a_f32, b_f32 = int_operands(np, m, n, k)
         b = np.zeros((padded_n, k), dtype=np.uint8)
-        b[:n] = _fp8e4m3_encode(np, b_f32)
+        b[:n] = b_bytes
         c = np.empty((m, n), dtype=np.uint16)
 
         reference = None
         if with_reference:
-            from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+            from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
 
             # The reference reproduces the kernel's final RNE to bf16; every
             # step before it is exact, so this is an equality, not a bound.
-            reference = _f32_from_bf16(np, _bf16_from_f32(np, a_f32 @ b_f32.T))
+            reference = f32_from_bf16(np, bf16_from_f32(np, a_f32 @ b_f32.T))
 
         rt = Runtime()
         a_dev = rt.alloc(a.nbytes)
@@ -1088,7 +1034,7 @@ def verify_record(
     """Exact compare.  See the module docstring for why this is not a tolerance."""
     import numpy as np
 
-    from rocke.dispatch.gemm.binding import _f32_from_bf16
+    from rocke.dispatch.gemm.binding import f32_from_bf16
 
     if problem.reference is None or not record.ok:
         return False
@@ -1103,7 +1049,7 @@ def verify_record(
         problem.rt.memcpy_d2h(
             _as_u8_buffer(problem.c_host), problem.c_dev, problem.c_host.nbytes
         )
-        actual = _f32_from_bf16(np, problem.c_host)
+        actual = f32_from_bf16(np, problem.c_host)
         error = np.abs(actual - problem.reference)
         incorrect = count_incorrect(np, actual, problem.reference)
         result.update(

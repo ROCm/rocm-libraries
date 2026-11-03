@@ -33,7 +33,7 @@ args_signature dtype
     False for fp16, False when the key is absent.
 
 e4m3 codec
-    ``_fp8e4m3_decode_table`` / ``_fp8e4m3_encode`` checked against the OCP
+    ``_fp8e4m3_decode_table`` / ``fp8e4m3_encode`` checked against the OCP
     e4m3 (``fn``) format rather than against a transcription of themselves --
     a second hand-written table could drift from the hardware's in exactly
     the way the first one did.  The encoder must *refuse* inexact values
@@ -63,13 +63,13 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
 from rocke.examples.gfx1201.wmma_probe import probe_manifest
 from rocke.helpers.compile import KernelArtifact
 from rocke.helpers.manifest import gemm_args_signature
 from rocke.instances.common.manifest_runner.gemm import (
     _fp8e4m3_decode_table,
-    _fp8e4m3_encode,
+    fp8e4m3_encode,
     _gemm_is_bf16,
     _gemm_c_dtype,
     run_gemm_fp8_manifest_problem,
@@ -216,13 +216,13 @@ class TestGemmManifestRunnerBf16(unittest.TestCase):
         B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
 
         # Correct output: fp32 matmul -> RNE -> bf16 raw bytes
-        ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)  # (M, N) uint16
+        ref_u16 = bf16_from_f32(np, A_f32 @ B_f32.T)  # (M, N) uint16
 
         # Verify the reviewer-cited -871 -> -872 rounding is present.
         dot = A_f32 @ B_f32.T
         self.assertTrue(np.any(dot.ravel() == -871), "-871 not in seeded inputs")
-        minus871_u16 = _bf16_from_f32(np, np.array([-871.0], dtype=np.float32))[0]
-        minus872_f32 = _f32_from_bf16(np, np.array([minus871_u16], dtype=np.uint16))[0]
+        minus871_u16 = bf16_from_f32(np, np.array([-871.0], dtype=np.float32))[0]
+        minus872_f32 = f32_from_bf16(np, np.array([minus871_u16], dtype=np.uint16))[0]
         self.assertEqual(float(minus872_f32), -872.0, "-871 must RNE to -872")
 
         def inject_correct(rt: _FakeRuntime, c_ptr: int) -> None:
@@ -243,15 +243,15 @@ class TestGemmManifestRunnerBf16(unittest.TestCase):
         A_f32 = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float32)
         B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
 
-        ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)  # (M, N) uint16
+        ref_u16 = bf16_from_f32(np, A_f32 @ B_f32.T)  # (M, N) uint16
         # Confirm 292 is present in the reference (reviewer-cited).
-        ref_vals = _f32_from_bf16(np, ref_u16)
+        ref_vals = f32_from_bf16(np, ref_u16)
         self.assertTrue(np.any(ref_vals == 292.0), "292 not in reference")
 
         corrupted_u16 = ref_u16.copy()
         idx = np.argwhere(ref_vals == 292.0)[0]  # first occurrence
         # Replace 292 with 300 (nearest representable bf16).
-        corrupted_u16[tuple(idx)] = _bf16_from_f32(
+        corrupted_u16[tuple(idx)] = bf16_from_f32(
             np, np.array([300.0], dtype=np.float32)
         )[0]
 
@@ -393,7 +393,7 @@ class TestFp8E4M3Codec(unittest.TestCase):
     def test_every_finite_code_round_trips(self):
         table = _fp8e4m3_decode_table(np)
         finite = np.flatnonzero(np.isfinite(table)).astype(np.uint8)
-        got = _fp8e4m3_encode(np, table[finite])
+        got = fp8e4m3_encode(np, table[finite])
         # -0.0 encodes to +0.0's code: they are numerically equal, so the
         # encoder cannot distinguish them and must not claim to. Compare the
         # decoded values instead of the codes.
@@ -405,7 +405,7 @@ class TestFp8E4M3Codec(unittest.TestCase):
         # the device against numbers it was never given.
         vals = np.arange(-5, 6, dtype=np.float32)
         table = _fp8e4m3_decode_table(np)
-        self.assertTrue(np.array_equal(table[_fp8e4m3_encode(np, vals)], vals))
+        self.assertTrue(np.array_equal(table[fp8e4m3_encode(np, vals)], vals))
 
     def test_inexact_values_are_refused_rather_than_rounded(self):
         # A silent round here is the failure mode that matters: it would demote
@@ -413,12 +413,12 @@ class TestFp8E4M3Codec(unittest.TestCase):
         for bad in (0.3, 1.1, 2.0**-10, 449.0, 1e30):
             with self.subTest(value=bad):
                 with self.assertRaises(ValueError):
-                    _fp8e4m3_encode(np, np.array([bad], dtype=np.float32))
+                    fp8e4m3_encode(np, np.array([bad], dtype=np.float32))
 
     def test_encode_preserves_shape(self):
         x = np.zeros((3, 5), dtype=np.float32)
-        self.assertEqual(_fp8e4m3_encode(np, x).shape, (3, 5))
-        self.assertEqual(_fp8e4m3_encode(np, x).dtype, np.uint8)
+        self.assertEqual(fp8e4m3_encode(np, x).shape, (3, 5))
+        self.assertEqual(fp8e4m3_encode(np, x).dtype, np.uint8)
 
 
 class TestGemmFp8ManifestRunner(unittest.TestCase):
@@ -451,8 +451,8 @@ class TestGemmFp8ManifestRunner(unittest.TestCase):
         dot = A @ B.T
         # Same RNE landmark the bf16 case uses; it survives the fp8 operands.
         self.assertEqual(float(dot[0, 0]), -871.0, "seeded fp8 dot[0,0] != -871")
-        ref_u16 = _bf16_from_f32(np, dot)
-        self.assertEqual(float(_f32_from_bf16(np, ref_u16)[0, 0]), -872.0)
+        ref_u16 = bf16_from_f32(np, dot)
+        self.assertEqual(float(f32_from_bf16(np, ref_u16)[0, 0]), -872.0)
 
         raw = ref_u16.view(np.uint8).tobytes()
         rt.memcpy_h2d(c_ptr, memoryview(bytearray(raw)), len(raw))
@@ -467,11 +467,9 @@ class TestGemmFp8ManifestRunner(unittest.TestCase):
         rt, ptrs, check_fn, a_ptr, b_ptr, c_ptr = _run_fp8()
         A, B = _fp8_operands(rt, a_ptr, b_ptr, _SHAPE)
 
-        corrupted = _bf16_from_f32(np, A @ B.T)
-        orig = float(_f32_from_bf16(np, corrupted[:1, :1])[0, 0])
-        corrupted[0, 0] = _bf16_from_f32(np, np.array([orig + 8.0], dtype=np.float32))[
-            0
-        ]
+        corrupted = bf16_from_f32(np, A @ B.T)
+        orig = float(f32_from_bf16(np, corrupted[:1, :1])[0, 0])
+        corrupted[0, 0] = bf16_from_f32(np, np.array([orig + 8.0], dtype=np.float32))[0]
 
         raw = corrupted.view(np.uint8).tobytes()
         rt.memcpy_h2d(c_ptr, memoryview(bytearray(raw)), len(raw))
@@ -607,7 +605,7 @@ class TestGemmFp8ManifestRunnerCDtype(unittest.TestCase):
                     out = dot.astype(np.float16).view(np.uint16).copy()
                     out[0, 0] = 0x7E00  # f16 quiet NaN
                 else:
-                    out = _bf16_from_f32(np, dot).copy()
+                    out = bf16_from_f32(np, dot).copy()
                     out[0, 0] = 0x7FC0  # bf16 quiet NaN
                 _put_c(rt, c_ptr, out)
                 max_err, bad, _total = check_fn(rt, ptrs)

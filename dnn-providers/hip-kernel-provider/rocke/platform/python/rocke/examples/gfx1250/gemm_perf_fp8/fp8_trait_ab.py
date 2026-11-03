@@ -32,11 +32,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
-import shutil
 import statistics
 import struct
-import subprocess
 import tempfile
 import time
 from collections.abc import Sequence
@@ -44,6 +41,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from rocke.examples.gfx1250.gemm_perf_fp8.gpu_contention import (
+    foreign_kfd_processes,
+)
 from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
@@ -125,31 +125,15 @@ def interleaved_order(arms: Sequence[str], rnd: int) -> list[str]:
 
 
 def other_gpu_processes() -> list[str] | None:
-    """PIDs other than this process that ``rocm-smi --showpids`` reports, or
-    None if it cannot be asked.
+    """PIDs of the GPU processes that are not this run's, or None if the
+    process list cannot be read (see :mod:`gpu_contention`).
 
     Another tenant's kernels share the device and skew every arm, so the run
     reports them at its start and end. Short jobs in between can still slip
     past; poll the process list externally for a guarantee.
     """
-    smi = shutil.which("rocm-smi")
-    if smi is None:
-        return None
-    try:
-        out = subprocess.run(
-            [smi, "--showpids"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if "No KFD PIDs" in out:
-        return []
-    own = str(os.getpid())
-    pids = [line.split()[0] for line in out.splitlines() if line[:1].isdigit()]
-    return [pid for pid in pids if pid != own]
+    procs = foreign_kfd_processes()
+    return None if procs is None else [str(p["pid"]) for p in procs]
 
 
 def _finite_or_inf(x: float) -> float:
@@ -195,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     import numpy as np
 
-    from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+    from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
     from rocke.runtime.hip_module import Runtime
     from rocke.sweep import build_all_instances
 
@@ -223,7 +207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"[ab] preparing {m}x{n}x{k} inputs and host references ...", flush=True)
     inputs: dict[str, Any] = {}
     a8, b8, a32, b32 = int_operands(np, m, n, k)
-    ref_int = _f32_from_bf16(np, _bf16_from_f32(np, a32 @ b32.T))
+    ref_int = f32_from_bf16(np, bf16_from_f32(np, a32 @ b32.T))
     inputs["int"] = (a8, b8)
     a8r, b8r, a32r, b32r = rand_operands(np, m, n, k)
     ref_rand = a32r @ b32r.T
@@ -271,7 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         rt.launch(a["fn"], a["grid"], a["block"], kargs)
         rt.wait_stream(0)
         rt.memcpy_d2h(_as_u8_buffer(c_host), c_dev, c_host.nbytes)
-        return _f32_from_bf16(np, c_host)
+        return f32_from_bf16(np, c_host)
 
     # ---- verify every arm before timing any ---------------------------------
     verdicts: dict[str, dict[str, Any]] = {}

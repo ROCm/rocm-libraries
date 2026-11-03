@@ -595,7 +595,8 @@ percentage of the ceiling is the `early_refill` arm's figure in the
 `peak_rand` column divided by the same-session probe figure on the random set.
 
 **Artifacts.** `fp8_trait_ab.py` (arms, verification, interleaved timing),
-`fp8_data.py` (the two input sets and the random-set bound),
+`fp8_data.py` (the two input sets and the random-set bound; the sweep's exact
+set too), `gpu_contention.py` (the GPU process check both tools report),
 `wmma_roofline_probe.py` (the ceiling), `memory_probe.py` (bandwidth and the
 TDM feed floor), `clock_probe.py` (in-kernel clock and the health check);
 their CPU tests are `tests/test_fp8_trait_ab.py`, `tests/test_memory_probe.py`
