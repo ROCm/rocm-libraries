@@ -59,14 +59,32 @@ void PrintTo(const CandidateSelectionParams& p, std::ostream* os)
 // Default validation function: accepts all kernel/split_k combinations
 inline constexpr auto accept_all_combinations = [](int, int) { return true; };
 
+// Files required for every test: the input encoder (run live) and the metadata. The config encoder
+// is NOT listed here -- it is deliberately dropped from the shipped artifacts (the precomputed
+// kernel_config_embeddings table replaces it), so its absence must not fail file-presence checks.
 auto GetCandidateSelectionModelFiles(const CandidateSelectionParams& params)
 {
     const auto db_path = miopen::GetSystemDbPath();
     return std::vector<miopen::fs::path>{
         db_path / (params.arch + "_" + params.solver + "_input_encoder.tn.model"),
-        db_path / (params.arch + "_" + params.solver + "_kernel_config_encoder.tn.model"),
         db_path / (params.arch + "_" + params.solver + "_metadata.tn.model")};
 }
+
+// The config encoder is optional (dropped when the embedding table ships). Tests that construct the
+// live CandidateSelectionModel (which loads it) skip when it is absent.
+bool ConfigEncoderPresent(const CandidateSelectionParams& params)
+{
+    return miopen::fs::exists(miopen::GetSystemDbPath() / (params.arch + "_" + params.solver +
+                                                           "_kernel_config_encoder.tn.model"));
+}
+
+// Guard for tests that build the live CandidateSelectionModel: the config encoder is dropped from
+// shipped artifacts (the precomputed table replaces it), so those tests skip in a table-only build
+// instead of failing on the missing submodel. A macro so GTEST_SKIP returns from the test body.
+#define SKIP_IF_NO_CONFIG_ENCODER(params)                                     \
+    if(!ConfigEncoderPresent(params))                                         \
+    GTEST_SKIP() << "config encoder dropped (precomputed-table build); live " \
+                    "CandidateSelectionModel path not exercised"
 
 auto GetMissingModelFiles(const CandidateSelectionParams& params)
 {
@@ -156,6 +174,7 @@ TEST_P(GPU_CandidateSelection_FP32, FilesExist_Test)
 TEST_P(GPU_CandidateSelection_FP32, MetadataAndModelInit_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     ASSERT_NO_THROW({
         CandidateSelectionMetadata meta(params.arch, params.solver);
         CandidateSelectionModel model(params.arch, params.solver);
@@ -165,8 +184,9 @@ TEST_P(GPU_CandidateSelection_FP32, MetadataAndModelInit_Test)
 TEST_P(GPU_CandidateSelection_FP32, ModelCaching_Test)
 {
     const auto& params = GetParam();
-    auto& model1       = GetCandidateSelectionModel(params.arch, params.solver);
-    auto& model2       = GetCandidateSelectionModel(params.arch, params.solver);
+    SKIP_IF_NO_CONFIG_ENCODER(params);
+    auto& model1 = GetCandidateSelectionModel(params.arch, params.solver);
+    auto& model2 = GetCandidateSelectionModel(params.arch, params.solver);
     ASSERT_EQ(&model1, &model2)
         << "GetCandidateSelectionModel did not return the same cached object!";
 }
@@ -174,6 +194,7 @@ TEST_P(GPU_CandidateSelection_FP32, ModelCaching_Test)
 TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
@@ -186,6 +207,7 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
 TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigs_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
@@ -202,6 +224,7 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigs_Test)
 TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> empty_features;
@@ -232,6 +255,7 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
 TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigsEdgeCases_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
@@ -290,6 +314,7 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeKernelParamsBadValueThrows_Test)
 TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
@@ -315,6 +340,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
 TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     std::vector<float> encoded_features;
     std::vector<std::vector<float>> encoded_configs;
@@ -325,6 +351,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
 TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
 {
     const auto& params = GetParam();
+    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
@@ -1023,6 +1050,62 @@ TEST_P(GPU_CandidateSelection_FP32, StaticKernelDecodes_Test)
     ASSERT_EQ(encoded.size(), 1u) << "static kernel candidate was unexpectedly skipped";
     EXPECT_EQ(encoded[0].size(),
               meta.output_params().size() - meta.GetConstantOutputIndices().size());
+}
+
+// The kernel-config derived block is produced by the metadata-driven registry in
+// EngineerCandidateSelectionKernelConfigFeatures. This pins the SplitK encoding this PR added --
+// log2_splitk (log2 over the {1,2,...} ladder) plus a separate is_autodeduce flag for the SplitK<1
+// (autodeduce / -1) mode -- which replaced feeding SplitK as a raw numeric that systematically
+// mis-ranked Wrw SplitK. Runs on the Wrw solvers, whose metadata declares 015_SplitK and the
+// Wavelet kernel used here to build a candidate carrying an appended SplitK.
+TEST_P(GPU_CandidateSelection_FP32, KernelConfigSplitKDerived_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+
+    const auto& derived_names = meta.kernel_config_derived_features();
+    const auto name_slot      = [&](const std::string& n) -> int {
+        const auto it = std::find(derived_names.begin(), derived_names.end(), n);
+        return it == derived_names.end() ? -1 : static_cast<int>(it - derived_names.begin());
+    };
+    const int log2_idx = name_slot("log2_splitk");
+    const int auto_idx = name_slot("is_autodeduce");
+    if(log2_idx < 0 || auto_idx < 0)
+        GTEST_SKIP() << params.solver
+                     << " metadata predates the SplitK derived features (legacy schema)";
+    // SplitK must be routed through the derived block, not raw passthrough, else it is
+    // double-counted.
+    EXPECT_FALSE(meta.kernel_config_raw_exclude().empty())
+        << "a SplitK-derived model must exclude its SplitK param from raw passthrough";
+
+    if(!MetadataHasKernel(meta, kWaveletKernel))
+        GTEST_SKIP() << "Wavelet kernel (used to build a SplitK candidate) not in " << params.solver
+                     << " metadata";
+
+    // Encode a candidate with a known appended SplitK via the production path, then run the derived
+    // registry over it. The derived block is the final derived_names.size() entries of the output.
+    const auto derived_of = [&](const std::string& split_k) {
+        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
+        candidate.push_back(split_k); // appended SplitK (mirrors ExpandKernelParamsWithSplitK)
+        auto raw = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
+        EXPECT_EQ(raw.size(), 1u) << "SplitK candidate was unexpectedly skipped";
+        auto eng = EngineerCandidateSelectionKernelConfigFeatures(raw.at(0), meta);
+        EXPECT_GE(eng.size(), derived_names.size());
+        return std::vector<float>(eng.end() - static_cast<long>(derived_names.size()), eng.end());
+    };
+
+    // Real split-k ladder value: log2(8) = 3, not autodeduce.
+    {
+        const auto d = derived_of("8");
+        EXPECT_FLOAT_EQ(d.at(log2_idx), std::log2(8.0f)) << "log2_splitk(8) must be 3";
+        EXPECT_FLOAT_EQ(d.at(auto_idx), 0.0f) << "is_autodeduce must be 0 for SplitK=8";
+    }
+    // Autodeduce (-1): log2_splitk collapses to 0, is_autodeduce flags the mode.
+    {
+        const auto d = derived_of("-1");
+        EXPECT_FLOAT_EQ(d.at(log2_idx), 0.0f) << "log2_splitk must be 0 for autodeduce SplitK";
+        EXPECT_FLOAT_EQ(d.at(auto_idx), 1.0f) << "is_autodeduce must be 1 for SplitK=-1";
+    }
 }
 
 // === INSTANTIATION ===

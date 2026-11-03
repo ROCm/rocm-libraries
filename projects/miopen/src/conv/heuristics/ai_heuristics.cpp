@@ -1828,8 +1828,10 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                          (version == 1 || version == 2 || version == 3) && key_dtype == 0 &&
                          emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
                          (version == 3 ? file_size >= rows_end : file_size == rows_end);
-        // Fail closed when a v2 table was built from a different config encoder than the one
-        // installed (model retrained but the table not regenerated).
+        // The table is the shipped artifact; the config encoder it was generated from is normally
+        // NOT shipped (see above). Only when the encoder IS installed do we verify the table's
+        // embedded hash against it, failing closed when they differ (encoder retrained but the
+        // table not regenerated). An absent encoder is the expected case and the table is trusted.
         if(header_ok && (version == 2 || version == 3))
         {
             const auto enc_path =
@@ -1844,7 +1846,7 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                 enc.seekg(0, std::ios::beg);
                 enc.read(enc_bytes.data(), static_cast<std::streamsize>(enc_sz));
             }
-            if(enc_bytes.empty() || miopen::md5(enc_bytes) != table_enc_md5)
+            if(!enc_bytes.empty() && miopen::md5(enc_bytes) != table_enc_md5)
             {
                 MIOPEN_LOG_W("Config embedding table "
                              << path
