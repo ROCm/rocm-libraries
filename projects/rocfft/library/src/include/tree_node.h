@@ -21,9 +21,11 @@
 #ifndef TREE_NODE_H
 #define TREE_NODE_H
 
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -91,23 +93,28 @@ struct GridParam
         , lds_bytes(0)
     {
     }
-
-    // Stockham kernels flatten blockIdx over x and y, so any exact split of `blocks` is equivalent.
-    // Keep everything in x unless x would exceed 2^32 work items.
-    void set_stockham_grid(size_t blocks, unsigned int wgs, const hipDeviceProp_t& deviceProp)
-    {
-        constexpr size_t max_items = std::numeric_limits<uint32_t>::max();
-        const size_t     max_y     = deviceProp.maxGridSize[1];
-        size_t           y         = DivRoundingUp<size_t>(blocks * wgs, max_items);
-        while(y <= max_y && blocks % y)
-            ++y;
-        if(y > max_y)
-            y = 1;
-        b_x   = blocks / y;
-        b_y   = y;
-        wgs_x = wgs;
-    }
 };
+
+// Number of rows (grid y) to split a Stockham launch of `blocks` thread blocks of
+// `wgs` threads into, so that no row exceeds 2^32 - 1 work items; 1 if no split is
+// needed.  Kernels generated for a split launch flatten blockIdx over x and y, so any
+// exact divisor of `blocks` is equivalent.
+static inline size_t
+    stockham_grid_y(size_t blocks, unsigned int wgs, const hipDeviceProp_t& deviceProp)
+{
+    constexpr size_t max_items = std::numeric_limits<uint32_t>::max();
+    const size_t     max_y     = deviceProp.maxGridSize[1];
+    const size_t     min_y     = DivRoundingUp<size_t>(blocks * wgs, max_items);
+    if(min_y <= 1)
+        return 1;
+    for(size_t y = min_y; y <= max_y; ++y)
+        if(blocks % y == 0)
+            return y;
+    throw std::runtime_error(
+        ROCFFT_CURRENT_FUNCTION + ": " + std::to_string(blocks) + " blocks x " + std::to_string(wgs)
+        + " threads exceed 2^32-1 work items in grid x and no divisor"
+        + " of the block count fits in grid y (max " + std::to_string(max_y) + ")");
+}
 
 // get the arch name, as a part of key of solution map
 static std::string get_arch_name(const hipDeviceProp_t& prop)
@@ -1091,6 +1098,31 @@ public:
         return 0;
     }
     virtual void SetupGridParam_internal(GridParam& gp) = 0;
+
+    // Thread blocks and threads per block of this node's Stockham launch, for nodes
+    // whose launch can exceed 2^32 work items in grid x; {0, 0} for all others.
+    // SetupGridParam and the kernel generator both go through StockhamGridY, so the
+    // launch grid and the generated kernel always agree on whether it is split.
+    virtual std::pair<size_t, unsigned int> StockhamLaunchSize() const
+    {
+        return {0, 0};
+    }
+
+    // Number of grid rows this node's Stockham launch is split into (1 = not split).
+    size_t StockhamGridY() const
+    {
+        const auto [blocks, threads] = StockhamLaunchSize();
+        return blocks ? stockham_grid_y(blocks, threads, deviceProp) : 1;
+    }
+
+    // Set gp's blocks and threads from StockhamLaunchSize, split over grid y if needed.
+    void SetStockhamGrid(GridParam& gp) const
+    {
+        const auto [blocks, threads] = StockhamLaunchSize();
+        gp.b_y                       = StockhamGridY();
+        gp.b_x                       = blocks / gp.b_y;
+        gp.wgs_x                     = threads;
+    }
 
 public:
     // leaf node would print additional informations about kernel setting

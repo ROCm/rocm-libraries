@@ -746,6 +746,28 @@ INSTANTIATE_TEST_SUITE_P(
                                               adhoc_64_bit_idx_twiddle_large_slow_tokens)),
     accuracy_test::TestName);
 
+// Stockham launches of more than 2^32 - 1 work items, which rocFFT splits over grid y
+// (generating kernels that flatten blockIdx over x and y).  Too large for most GPUs, so
+// sample them like the other very large transforms.
+const auto adhoc_stockham_grid_y_split_slow_tokens = {
+    // clang-format off
+    // reported case (ROCM-32021); splits SBRC_TRANSPOSE_XY_Z on gfx1201
+    "complex_forward_len_512_512_512_single_ip_batch_128_istride_262144_512_1_CI_ostride_262144_512_1_CI_idist_134217728_odist_134217728_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
+    "complex_inverse_len_512_512_512_single_ip_batch_128_istride_262144_512_1_CI_ostride_262144_512_1_CI_idist_134217728_odist_134217728_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
+    // 1D large: splits SBRC on gfx1201
+    "complex_forward_len_131072_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_131072_odist_131072_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
+    // 1D large: splits both SBCC and SBRC on gfx1201
+    "complex_forward_len_262144_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_262144_odist_262144_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
+    "complex_inverse_len_262144_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_262144_odist_262144_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_stockham_grid_y_split_slow,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob* very_large_prob_factor,
+                                              adhoc_stockham_grid_y_split_slow_tokens)),
+    accuracy_test::TestName);
+
 inline auto param_even_real_odd_base_index()
 {
     std::vector<fft_params> params;

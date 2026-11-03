@@ -223,8 +223,9 @@ protected:
     {
     }
 
-    void   SetupGridParam_internal(GridParam& gp) override;
-    size_t sbrc_3D_alignment_dimension() const override
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
+    size_t                          sbrc_3D_alignment_dimension() const override
     {
         return length[2];
     }
@@ -250,8 +251,9 @@ protected:
     {
     }
 
-    void   SetupGridParam_internal(GridParam& gp) override;
-    size_t sbrc_3D_alignment_dimension() const override
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
+    size_t                          sbrc_3D_alignment_dimension() const override
     {
         // return length[1] * length[2];
         return length[1];
@@ -279,8 +281,9 @@ protected:
         twd_attach_halfN = true;
     }
 
-    void   SetupGridParam_internal(GridParam& gp) override;
-    size_t sbrc_3D_alignment_dimension() const override
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
+    size_t                          sbrc_3D_alignment_dimension() const override
     {
         // return length[1] * length[2];
         return length[1];

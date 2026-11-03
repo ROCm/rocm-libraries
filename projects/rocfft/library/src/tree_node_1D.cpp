@@ -1130,10 +1130,15 @@ void SBCCNode::SetupGridParam_internal(GridParam& gp)
 
     lds = length[0] * bwd;
 
-    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
-                             * batch,
-                         wgs,
-                         deviceProp);
+    SetStockhamGrid(gp);
+}
+
+std::pair<size_t, unsigned int> SBCCNode::StockhamLaunchSize() const
+{
+    const auto kernel = GetKernel();
+    return {DivRoundingUp<size_t>(length[1], kernel.transforms_per_block)
+                * product(length.begin() + 2, length.end()) * batch,
+            kernel.workgroup_size};
 }
 
 std::vector<size_t> SBCCNode::CollapsibleDims()
@@ -1161,18 +1166,21 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
 
     lds = length[0] * bwd;
 
-    gp.b_x = ((length[1]) - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
-    gp.wgs_x = wgs;
-
     // Grid arrangement is different than regular SBCC
     // for improved global memory access patterns.  A block covers every
     // off-dimension point that this kernel's partial pass transforms.
-    auto factor = product(kernelFactorsPP.begin(), kernelFactorsPP.end());
+    lds *= product(kernelFactorsPP.begin(), kernelFactorsPP.end());
 
-    gp.b_x /= factor;
-    gp.wgs_x *= factor;
-    lds *= factor;
+    SetStockhamGrid(gp);
+}
+
+std::pair<size_t, unsigned int> SBCCPPNode::StockhamLaunchSize() const
+{
+    const auto kernel = GetKernel();
+    const auto factor = product(kernelFactorsPP.begin(), kernelFactorsPP.end());
+    return {DivRoundingUp<size_t>(length[1], kernel.transforms_per_block)
+                * product(length.begin() + 2, length.end()) * batch / factor,
+            static_cast<unsigned int>(kernel.workgroup_size * factor)};
 }
 
 bool SBCCPPNode::CreateDeviceResources()
@@ -1284,10 +1292,15 @@ void SBRCNode::SetupGridParam_internal(GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
-    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
-                             * batch,
-                         wgs,
-                         deviceProp);
+    SetStockhamGrid(gp);
+}
+
+std::pair<size_t, unsigned int> SBRCNode::StockhamLaunchSize() const
+{
+    const auto kernel = pool.get_kernel(GetKernelKey());
+    return {DivRoundingUp<size_t>(length[1], kernel.transforms_per_block)
+                * product(length.begin() + 2, length.end()) * batch,
+            kernel.workgroup_size};
 }
 
 SBRC_TRANSPOSE_TYPE SBRCNode::sbrc_transpose_type(unsigned int blockWidth) const
@@ -1404,12 +1417,15 @@ void SBCRNode::SetupGridParam_internal(GridParam& gp)
     const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
 
     lds = (length[0] + lds_padding) * bwd;
-    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * product(length.begin() + 2, length.end())
-                             * batch,
-                         wgs,
-                         deviceProp);
+    SetStockhamGrid(gp);
+}
 
-    return;
+std::pair<size_t, unsigned int> SBCRNode::StockhamLaunchSize() const
+{
+    const auto kernel = pool.get_kernel(GetKernelKey());
+    return {DivRoundingUp<size_t>(length[1], kernel.transforms_per_block)
+                * product(length.begin() + 2, length.end()) * batch,
+            kernel.workgroup_size};
 }
 
 bool SBCRNode::CreateDeviceResources()

@@ -78,6 +78,11 @@ struct StockhamGeneratorSpecs
 
     EmbeddedType ebtype = EmbeddedType::NONE;
 
+    // true if the launch is split over grid x and y, because it would exceed
+    // 2^32 work items in grid x alone; the kernel then flattens blockIdx over
+    // both.  Only such launches pay for the extra index math.
+    bool grid_y = false;
+
     // this value indicating if the wgs, tpt are excatly what we want
     // (i.e. were already derived somewhere)
     // to tell StockhamKernel not to do its auto-derivation again.
