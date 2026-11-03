@@ -14,8 +14,9 @@ fixture is re-blessed.
 
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
 and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
-combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
-gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128
+combined), and the ragged on-chip padding path at self- and cross-length. Every case is
+in the gfx942 supported set; varlen is rejected on gfx942, so unlike the gfx950
+sibling it is absent here. The opt-in bf16 D128
 K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
 (``v_reg_prefetch=True``) knobs are pinned individually and together on supported
 persistent grids (including LSE); no shipped default reaches the new pipeline paths.
@@ -322,6 +323,16 @@ def _cases():
             causal_diag_split=True,
             kv_segments=4,
             block_m=128,
+        ),
+        # --- ragged (lengths that are not tile multiples): on-chip padding, the
+        #     bounds-checked Q load, key-pad mask and guarded store. Self-length
+        #     causal and cross-length full attention, as on gfx950. ---
+        "attention_dense_gfx942/ragged_causal_sq500": mk(
+            seqlen_q=500, seqlen_kv=500, ragged=True
+        ),
+        # Non-causal cross-length ragged is a gfx942-spec admission.
+        "attention_dense_gfx942/ragged_full_cross_197x400": mk_gfx942(
+            seqlen_q=197, seqlen_kv=400, ragged=True, causal=False
         ),
         "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": mk(
             emit_lse=True,
