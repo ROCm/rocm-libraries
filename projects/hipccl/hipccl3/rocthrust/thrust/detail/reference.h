@@ -31,11 +31,13 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/reference_forward_declaration.h>
+#include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/memory.h>
 #include <thrust/system/detail/generic/select_system.h>
 
 #include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_comparable.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
 #include _THRUST_STD_INCLUDE(__utility/move.h)
@@ -323,6 +325,102 @@ public:
     *this = tmp;
     return derived();
   }
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<detail::ref_can_compare_equal<Pointer, OtherPointer>, bool>
+  operator==(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) noexcept(
+    _THRUST_STD::__is_cpp17_nothrow_equality_comparable_v<value_type, _THRUST_STD::remove_cvref_t<OtherElement>>)
+  { // MSVC cannot directly compare the references thinking its a recursive function call
+    const value_type& lhs_ref                                = *&lhs;
+    const _THRUST_STD::remove_cvref_t<OtherElement>& rhs_ref = *&rhs;
+    return lhs_ref == rhs_ref;
+  }
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<!detail::ref_can_compare_equal<Pointer, OtherPointer>, bool>
+  operator==(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) = delete;
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<detail::ref_can_compare_equal<Pointer, OtherPointer>, bool>
+  operator!=(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) noexcept(
+    _THRUST_STD::__is_cpp17_nothrow_equality_comparable_v<value_type, _THRUST_STD::remove_cvref_t<OtherElement>>)
+  {
+    const value_type& lhs_ref                                = *&lhs;
+    const _THRUST_STD::remove_cvref_t<OtherElement>& rhs_ref = *&rhs;
+    return !(lhs_ref == rhs_ref);
+  }
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<!detail::ref_can_compare_equal<Pointer, OtherPointer>, bool>
+  operator!=(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) = delete;
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator<(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) noexcept(
+    _THRUST_STD::__is_cpp17_nothrow_less_than_comparable_v<value_type, _THRUST_STD::remove_cvref_t<OtherElement>>)
+  { // MSVC cannot directly compare the references thinking its a recursive function call
+    const value_type& lhs_ref                                = *&lhs;
+    const _THRUST_STD::remove_cvref_t<OtherElement>& rhs_ref = *&rhs;
+    return lhs_ref < rhs_ref;
+  }
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<!detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator<(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) = delete;
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator>=(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) noexcept(
+    _THRUST_STD::__is_cpp17_nothrow_less_than_comparable_v<value_type, _THRUST_STD::remove_cvref_t<OtherElement>>)
+  { // MSVC cannot directly compare the references thinking its a recursive function call
+    const value_type& lhs_ref                                = *&lhs;
+    const _THRUST_STD::remove_cvref_t<OtherElement>& rhs_ref = *&rhs;
+    return !(lhs_ref < rhs_ref);
+  }
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<!detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator>=(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) = delete;
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator>(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) noexcept(
+    _THRUST_STD::__is_cpp17_nothrow_less_than_comparable_v<value_type, _THRUST_STD::remove_cvref_t<OtherElement>>)
+  { // MSVC cannot directly compare the references thinking its a recursive function call
+    const value_type& lhs_ref                                = *&lhs;
+    const _THRUST_STD::remove_cvref_t<OtherElement>& rhs_ref = *&rhs;
+    return rhs_ref < lhs_ref;
+  }
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<!detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator>(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) = delete;
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator<=(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) noexcept(
+    _THRUST_STD::__is_cpp17_nothrow_less_than_comparable_v<value_type, _THRUST_STD::remove_cvref_t<OtherElement>>)
+  { // MSVC cannot directly compare the references thinking its a recursive function call
+    const value_type& lhs_ref                                = *&lhs;
+    const _THRUST_STD::remove_cvref_t<OtherElement>& rhs_ref = *&rhs;
+    return !(rhs_ref < lhs_ref);
+  }
+
+  template <typename OtherElement, typename OtherPointer, typename OtherDerived>
+  [[nodiscard]]
+  THRUST_HOST_DEVICE friend _THRUST_STD::enable_if_t<!detail::ref_can_compare_less_than<Pointer, OtherPointer>, bool>
+  operator<=(reference const& lhs, reference<OtherElement, OtherPointer, OtherDerived> const& rhs) = delete;
 
 private:
   pointer const ptr;
