@@ -50,9 +50,7 @@ struct TestZipFunctionCtor
   {
     ASSERT_EQUAL(thrust::zip_function<SumThree>()(_THRUST_STD::tuple(1, 2, 3)), SumThree{}(1, 2, 3));
     ASSERT_EQUAL(thrust::zip_function<SumThree>(SumThree{})(_THRUST_STD::tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#ifdef __cpp_deduction_guides
     ASSERT_EQUAL(thrust::zip_function(SumThree{})(_THRUST_STD::tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#endif // __cpp_deduction_guides
   }
 };
 SimpleUnitTest<TestZipFunctionCtor, type_list<int>> TestZipFunctionCtorInstance;
