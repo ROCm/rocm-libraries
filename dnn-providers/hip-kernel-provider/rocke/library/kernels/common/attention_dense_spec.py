@@ -393,6 +393,45 @@ class AttentionDenseSpec:
         """
         return ()
 
+    @property
+    def runtime_shape(self) -> bool:
+        """Whether the body reads the problem shape only from its kernel params.
+        False here, matching the base contract that the whole shape is baked; each
+        arch spec that owns a runtime-shape body overrides it."""
+        return False
+
+    @property
+    def fastdiv_divisors(self) -> tuple[str, ...]:
+        """The runtime divisors the persistent work decode divides by on every
+        grid-stride iteration, in kernarg order. Empty off the runtime-shape
+        persistent grid (the non-persistent grid divides once per CTA).
+
+        Each one gets a host-computed magic multiplier and shift
+        (:func:`~kernels.common.attention_dense_decode.fastdiv_kernargs`), so the
+        in-loop divide stays a mul-hi, an add and a shift instead of the backend's
+        software integer division. Each decode class declares its own
+        (``PersistDecode.fastdiv_divisors``); a decode without the kv head as a digit
+        lists ``gqa`` for ``hkv = hq / gqa``.
+
+        A function of the resolved decode order only, never of the shape, so it is
+        fixed by the cache key: the key carries the resolved order on the persistent
+        grid (``attention_dense_cache_key``)."""
+        if not (self.persistent and self.runtime_shape):
+            return ()
+        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
+
+    @property
+    def runtime_kernarg_fields(self) -> tuple[str, ...]:
+        """The full runtime-kernarg ABI after ``scale``: :attr:`runtime_param_fields`,
+        then a ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per
+        :attr:`fastdiv_divisors` entry. The body's param declarations, the arch's
+        ``attention_dense_signature`` and ``attention_dense_runtime_args`` all read
+        this one tuple. The fast-division pairs are derived values, not spec fields,
+        so they play no part in the cache key."""
+        return self.runtime_param_fields + tuple(
+            f"{d}_{part}" for d in self.fastdiv_divisors for part in ("magic", "shift")
+        )
+
     def _layout_name_parts(self) -> tuple[str, ...]:
         return ()
 

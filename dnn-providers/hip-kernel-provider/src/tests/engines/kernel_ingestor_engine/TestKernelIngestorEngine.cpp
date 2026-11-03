@@ -542,6 +542,27 @@ TEST(TestKernelIngestorEngine, NoNoteWithoutAResolvableDispatch)
         setWithKernels({{KernelSourceKind::KPACK}}, unregistered)));
 }
 
+TEST(TestKernelIngestorEngine, ASlottedSetIsNotSaveableThoughItsSlotsPacksWouldBe)
+{
+    // RFC 0021 §11: a slot program is not serialized (RFC 0009), so a slotted set advertises
+    // no serialization even when every slot's pack holds only saveable kernels.
+    const DescriptorSet unslotted
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
+    ASSERT_TRUE(supportsExecutionPlanSerialization(unslotted));
+
+    DescriptorSet slotted;
+    slotted.dispatches = unslotted.dispatches;
+    for(const auto& pack : unslotted.packs)
+    {
+        slotted.slots.emplace_back().packs.push_back(pack);
+    }
+    slotted.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
+
+    EXPECT_FALSE(supportsExecutionPlanSerialization(slotted));
+    EXPECT_EQ(withComputedBehaviorNotes(slotted).engine.behaviorNotes,
+              std::vector<int32_t>{RUNTIME_COMPILATION_NOTE});
+}
+
 TEST(TestKernelIngestorEngine, WithComputedBehaviorNotesAddsTheNoteOnce)
 {
     DescriptorSet saveable
