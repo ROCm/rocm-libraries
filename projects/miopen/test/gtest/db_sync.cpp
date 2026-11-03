@@ -982,9 +982,12 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
     // reuse the runtime selector GetSysDbSelectionCu against the real device CU (base
     // Handle::GetMaxComputeUnits, bypassing the TestHandle override) -- the test then validates
     // exactly what this device would load. num_cu==0 params (gfx11xx) keep their existing behavior.
-    const auto real_cu = static_cast<int>(handle.miopen::Handle::GetMaxComputeUnits());
-    if(num_cu != 0 && miopen::GetSysDbSelectionCu(arch, real_cu) != static_cast<int>(num_cu))
-        GTEST_SKIP();
+    const auto real_cu  = static_cast<int>(handle.miopen::Handle::GetMaxComputeUnits());
+    const auto sysdb_cu = miopen::GetSysDbSelectionCu(arch, real_cu);
+    if(num_cu != 0 && sysdb_cu != static_cast<int>(num_cu))
+        GTEST_SKIP() << "Skipping " << arch << " param " << num_cu << ": this device reports "
+                     << real_cu << " compute units and selects the system db for " << sysdb_cu
+                     << ", which differs from this param.";
     handle.num_cu = num_cu;
     SetupPaths(fdb_file_path, pdb_file_path, kdb_file_path, handle);
     std::cout << "Handle CU count: " << handle.GetMaxComputeUnits()
