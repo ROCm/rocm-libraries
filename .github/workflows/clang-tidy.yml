@@ -124,7 +124,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: amontoison/TheRock
-          ref: 5c0404d190d4b8375fd51460394ba5ef69c56b3b # TEST ONLY: ROCm/TheRock#9446
+          ref: 0aabf8377b973a9bc5d61cd45d479457eaba1a82 # TEST ONLY: ROCm/TheRock#9446
           path: TheRock
 
       - name: Install base dependencies
