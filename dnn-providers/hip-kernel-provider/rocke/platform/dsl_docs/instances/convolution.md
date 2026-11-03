@@ -925,6 +925,8 @@ class DirectDepthwiseDgradWindowedSpec:
     w_fold: int = 1         # mfma: images per 16x16 tile (1, 2, 4)
     prefetch_rows: int = 1  # mfma: dY rows in flight
     wave_size: int = 64
+    fwd: bool = False       # mfma: rotated filter -- the forward pass
+    out_stride: int = 1     # fwd: 2 keeps every 2nd row/col of the grid
 ```
 
 The filter, the padding and the dtype are baked (the kernel name carries
@@ -989,6 +991,29 @@ ceil(H / block_h))`. Extra constraints: `groups % 8 == 0` (a plan-time rule),
 resident-fragment estimate `mfma_frag_vgprs()` within
 `DW_DGRAD_MFMA_MAX_FRAG_VGPRS`, and `mfma_lds_bytes()` within
 `DW_DGRAD_MFMA_LDS_BUDGET`.
+
+**Forward pass (`fwd=True`, MFMA form only).** The kernel reads the filter
+rotated by 180 degrees (`W[k, KH-1-r, s]` instead of `W[k, r, KW-1-s]`), which
+makes it the stride-1 depthwise *forward* convolution of the transposed
+problem: dY is the forward input, dX the forward output and `PAD` is
+`KH - 1 - pad` (`dw_win_fwd_problem`; square filters only, the same `PAD` for
+"same" padding). The kernel name gains `_fwd`, and the kernel takes the
+*forward* kernarg block (A = input, D = output); the transposed problem only
+sizes the spec's grid and checks. `out_stride=2` (name `_s2`) runs a
+stride-2 forward pass: the kernel walks the stride-1 grid of `2 Ho x 2 Wo`,
+skips the odd rows' MFMAs and stages / stores only the even columns
+(`block_h` must be even). AOT variant `direct_depthwise_win` (direction fwd,
+3x3..9x9 "same" padding, stride 1 and 2), registered in the gfx950 forward
+dispatcher list (the stride-1 depthwise instances ahead of the tiled ones).
+
+The forward pass also takes a grouped problem with `cpg = kpg` a multiple of 8
+up to `DW_WIN_MAX_GROUP_CH` (64): a wave still owns 8 output channels, its A
+fragments are the group's dense weights `W[k, ., ., 8h .. 8h+7]` (one 16-byte
+load per input chunk `h`) instead of the one-hot diagonal, and it contracts
+the `cpg / 8` input chunks of its group from the staged window (one MFMA per
+chunk). A block must hold whole groups (`block_ch % cpg == 0`); the kernel
+name gains `_g<cpg>`, and `p_groups * cpg` bounds the channels. The AOT grid
+carries the 3x3 ResNeXt/RegNet groups (`DW_WIN_FWD_GROUP_CH`).
 
 Non-finite semantics differ between the forms. The VALU forms (including
 `dot2`) keep an Inf / NaN in dY inside its channel and receptive field. The
@@ -1337,10 +1362,10 @@ the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` over
 ## Winograd Forward (gfx1250)
 
 `library/kernels/common/conv_winograd_*.py` (C++ twins
-`instance_conv_winograd_{fwd,gemm_wmma,gen,fused_1d_wmma}.h`). A stride-1, 2-D
-forward convolution computed as Winograd `F(m, r)` per axis, with fp16 / bf16
-I/O and fp16 GEMM operands (bf16 operands only for `F(2x2, 3x3)` with bf16
-I/O). Three implementations:
+`instance_conv_winograd_{fwd,fwd_rt,gemm_wmma,gen,fused_1d_wmma}.h`). A stride-1,
+2-D forward convolution computed as Winograd `F(m, r)` per axis, with fp16 /
+bf16 I/O and fp16 GEMM operands (bf16 operands only for `F(2x2, 3x3)` with
+bf16 I/O). Four implementations:
 
 - **Unfused 3x3** (`conv_winograd_fwd` + `conv_winograd_gemm_wmma`), output
   tile `mh x mw` with `mh, mw` in {2, 4, 6}:
@@ -1363,6 +1388,31 @@ I/O). Three implementations:
   K1 and the first input-transform stage can run as one merged launch
   (`WinogradMergedSpec`). Problems past the 32-bit buffer offsets run as
   batch chunks sharing U.
+- **Unfused 3x3, shape-generic (AOT)** (`conv_winograd_fwd_rt` +
+  `conv_winograd_gemm_wmma`): the same K1 / K2a / K2 / K4 stages, workspace
+  layouts and arithmetic, with every problem extent a kernel argument, so one
+  binary serves every problem its knobs fit and the pipeline is compiled
+  ahead of time like the direct and implicit-GEMM instances. One spec per
+  stage (`RtFilterSpec`, `RtPrescaleSpec`, `RtInputSpec`, `RtOutputSpec`);
+  the compile-time knobs are the tile, the dtypes, the channel vector width
+  (the stage's channel extent must be a multiple of it), the workgroup size,
+  the K2 register run or LDS region, and the prescale. Divisions by runtime
+  extents are a multiply-high by a host-computed magic number (`magic_div`,
+  exact for 31-bit indices). The fused prescale reduces the tile maxima over
+  a runtime number of channel lanes (up to the workgroup size); the default
+  is the smallest block (256, 512 or 1024) that holds all lanes, since a
+  larger block caps the registers per lane and spills. Wider C (and tiles over
+  36 bins past 512 lanes) runs the split form (K2a). `stage_launch(spec, RtGeometry(...))` gives a stage's
+  grid, block and scalar kernargs; `aot_stage_specs()` is the AOT grid and
+  `default_stage_specs(problem, tile, dtype)` the binaries a pipeline uses by
+  default (the JIT pipeline's tuned knobs, narrowed to the problem's channel
+  extents). There is no merged K1 + K2 launch.
+  `benchmarks/common/benchmark_winograd_aot.py` compiles the grid
+  (`--compile-all`) and runs cases from it (`--run-from-cache`), choosing each
+  stage's binary by timing and verifying the assembled pipeline.
+  `benchmark_conv_compare.py --run-from-cache` runs it beside the direct-conv
+  and implicit-GEMM sweeps when the cache directory holds its binaries, and
+  `--results` merges the three engines' rows.
 - **Generalized** (`conv_winograd_gen` + K3 with `taps`): any `F(m, r)` per
   axis (1-D `1 x r` / `r x 1`, 5x5), and segmented long filters: `S`
   segments of `F(m, m)` share one input transform and K3 sums
@@ -1377,7 +1427,9 @@ The transforms use exact Toom-Cook matrices (`toom_cook_gen`, default
 interpolation points per `F(m, r)`), applied in fp32. Every transform load
 and store goes through a buffer resource; padding, dilation holes and tails
 read zero / drop the store, so the kernels have no bounds branches. The
-transform kernels bake the problem extents in; K3 takes them as kernargs.
+`conv_winograd_fwd` / `conv_winograd_gen` transform kernels bake the problem
+extents in; K3 and the `conv_winograd_fwd_rt` transforms take them as
+kernargs.
 
 **Plan selection.** `conv_winograd_select.select_winograd(problem, dtype,
 model=WinogradCostModel(num_cus=...))` returns the safe plan of lowest model
@@ -1397,7 +1449,10 @@ K3 GEMM lowers at `llvm23` only, so at `llvm20` / `llvm22` the unfused plans
 are refused and only the fused 1-D plans remain. `launch_plan_for` returns the
 plan's `ConvLaunchPlan`: one step per kernel (each built for the problem,
 kernargs named per step) over the buffers `x`, `w`, `y` and the workspaces
-`U`, `V`, `M` (and `e`).
+`U`, `V`, `M` (and `e`). A second opt-in candidate, `conv_winograd_fwd_aot`
+(`algorithm="winograd_aot"`), runs the selector's 3x3 plans on the
+shape-generic binaries (plan kind `unfused2d_rt`): each transform step is
+named by its binary's kernel name and carries the problem in its kernargs.
 
 ## Direct Wgrad Kernels
 
