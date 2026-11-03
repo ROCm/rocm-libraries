@@ -68,7 +68,7 @@ inline bool isSupportedGfx942AttentionDenseTile(int64_t headSize, int64_t blockM
         return false;
     }
     if(blockM <= 0 || blockM % GFX942_ATTENTION_DENSE_TILE_QUANTUM != 0
-       || blockM / GFX942_ROWS_PER_WAVE * GFX942_WAVE_LANES > GFX942_MAX_WORKGROUP_THREADS)
+       || blockM / GFX942_ROWS_PER_WAVE > GFX942_MAX_WORKGROUP_THREADS / GFX942_WAVE_LANES)
     {
         return false;
     }
@@ -96,6 +96,9 @@ inline bool isSupportedGfx942AttentionDenseTile(int64_t headSize, int64_t blockM
  *
  * A zero window (no window) always passes. Callers must have validated the tile with
  * isSupportedGfx942AttentionDenseTile and the extents as positive.
+ *
+ * This is per query block. A block can pass while its last rows see no key at all; the
+ * graph matcher declines those windows (seqlen_q - seqlen_kv >= window) on its own.
  */
 inline bool gfx942AttentionDenseWindowReachesKeys(
     int64_t blockM, int64_t blockN, int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
@@ -157,7 +160,7 @@ inline Gfx942AttentionDenseGeometry gfx942AttentionDenseGeometry(int64_t blockM,
                                                                  const std::string& kernelName)
 {
     if(blockM <= 0 || blockM % GFX942_ATTENTION_DENSE_TILE_QUANTUM != 0
-       || blockM / GFX942_ROWS_PER_WAVE * GFX942_WAVE_LANES > GFX942_MAX_WORKGROUP_THREADS)
+       || blockM / GFX942_ROWS_PER_WAVE > GFX942_MAX_WORKGROUP_THREADS / GFX942_WAVE_LANES)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

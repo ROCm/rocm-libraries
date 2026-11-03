@@ -213,6 +213,8 @@ struct GraphSpec
     std::optional<std::vector<int64_t>> oStridesOverride;
 
     std::optional<int64_t> virtualUid;
+    // The one operand that names a ragged offset tensor (packed sequences).
+    std::optional<int64_t> raggedUid;
     std::optional<int64_t> passByValueUid;
 
     // Mask. Defaults to top-left causal.
@@ -312,16 +314,19 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                data_objects::DataType dataType,
                                const std::vector<int64_t>* strides,
                                const std::vector<int64_t>& dims) {
-        return data_objects::CreateTensorAttributesDirect(builder,
-                                                          uid,
-                                                          nullptr,
-                                                          dataType,
-                                                          strides,
-                                                          spec.omitDimsUid == uid ? nullptr : &dims,
-                                                          spec.virtualUid == uid,
-                                                          data_objects::TensorValue::NONE,
-                                                          0,
-                                                          spec.passByValueUid == uid);
+        return data_objects::CreateTensorAttributesDirect(
+            builder,
+            uid,
+            nullptr,
+            dataType,
+            strides,
+            spec.omitDimsUid == uid ? nullptr : &dims,
+            spec.virtualUid == uid,
+            data_objects::TensorValue::NONE,
+            0,
+            spec.passByValueUid == uid,
+            spec.raggedUid == uid ? ::flatbuffers::Optional<int64_t>(EXTRA_UID)
+                                  : ::flatbuffers::Optional<int64_t>());
     };
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -1371,6 +1376,19 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandWithNoDims)
         SCOPED_TRACE(uid);
         GraphSpec spec;
         spec.omitDimsUid = uid;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesARaggedOperand)
+{
+    // A ragged offset tensor packs the sequences back to back; the kernel indexes every
+    // operand as dense (B, S, H, D).
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE(uid);
+        GraphSpec spec;
+        spec.raggedUid = uid;
         EXPECT_FALSE(matchGraph(spec).has_value());
     }
 }

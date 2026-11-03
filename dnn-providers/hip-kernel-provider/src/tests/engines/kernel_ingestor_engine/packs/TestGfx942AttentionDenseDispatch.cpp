@@ -460,9 +460,11 @@ TEST(TestGfx942AttentionDenseDispatch, BindsTheSoftmaxScaleAsItsIeeeBitPattern)
 
 /// The two tokens kernelMatches() compares against a candidate's baked metadata. The
 /// causal flag is DERIVED -- hipDNN has no such boolean -- so it is a value this pack
-/// invents, and the sliding window is a constant zero that exists so a variant built with
-/// a window cannot be matched by a graph that never asked for one. Both mask shapes are
-/// read here because a flag stuck at one value matches half the catalog wrongly.
+/// invents. The sliding window is bound from the graph's causal left_bound (L keys,
+/// sliding_window L; TestGfx942AttentionDenseMatchers covers that) and is zero for both
+/// graphs here, which carry no window, so a variant built with a window cannot match them.
+/// Both mask shapes are read because a flag stuck at one value matches half the catalog
+/// wrongly.
 TEST(TestGfx942AttentionDenseDispatch, BindsTheDerivedMaskAndAZeroSlidingWindow)
 {
     const AttentionGraph causal(0.125F, Mask::TOP_LEFT_CAUSAL);

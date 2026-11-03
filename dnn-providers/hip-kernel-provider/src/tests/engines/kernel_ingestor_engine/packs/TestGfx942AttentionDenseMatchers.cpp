@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -107,6 +108,8 @@ struct GraphSpec
     std::optional<int64_t> statsUid;
     std::optional<int64_t> attnMaskUid;
     std::optional<int64_t> seqLenQUid;
+    // The one operand that names a ragged offset tensor (packed sequences).
+    std::optional<int64_t> raggedUid;
 };
 
 flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
@@ -121,15 +124,27 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const auto oStrides = bshdStrides(spec.numQueryHeads, spec.seqLenQ, spec.headSize);
     const auto kvStrides = bshdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
 
+    const auto operand
+        = [&](int64_t uid, const std::vector<int64_t>& strides, const std::vector<int64_t>& dims) {
+              return data_objects::CreateTensorAttributesDirect(
+                  builder,
+                  uid,
+                  nullptr,
+                  spec.dataType,
+                  &strides,
+                  &dims,
+                  false,
+                  data_objects::TensorValue::NONE,
+                  0,
+                  false,
+                  spec.raggedUid == uid ? ::flatbuffers::Optional<int64_t>(EXTRA_UID)
+                                        : ::flatbuffers::Optional<int64_t>());
+          };
     const std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
-        data_objects::CreateTensorAttributesDirect(
-            builder, Q_UID, nullptr, spec.dataType, &qStrides, &qDims, false),
-        data_objects::CreateTensorAttributesDirect(
-            builder, K_UID, nullptr, spec.dataType, &kvStrides, &kvDims, false),
-        data_objects::CreateTensorAttributesDirect(
-            builder, V_UID, nullptr, spec.dataType, &kvStrides, &kvDims, false),
-        data_objects::CreateTensorAttributesDirect(
-            builder, O_UID, nullptr, spec.dataType, &oStrides, &qDims, false),
+        operand(Q_UID, qStrides, qDims),
+        operand(K_UID, kvStrides, kvDims),
+        operand(V_UID, kvStrides, kvDims),
+        operand(O_UID, oStrides, qDims),
     };
 
     data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -397,6 +412,47 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesALeftBoundOfZero)
     EXPECT_FALSE(matchGraph(windowGraph(0)).has_value());
 }
 
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesARaggedOperand)
+{
+    // A ragged offset tensor packs the sequences back to back; the kernel indexes every
+    // operand as dense (B, S, H, D).
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE(uid);
+        GraphSpec spec;
+        spec.raggedUid = uid;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
+}
+
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey)
+{
+    // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none,
+    // and the kernel has no empty-row path. One key short of that is served. 4096/512 is
+    // also supports_attention_dense's per-block refusal at 256/64 (the last block's window
+    // starts at key tile 58 of 8): on every tile-divisible shape, which kernel match
+    // checks first, a block-level failure is a row-level one, so the block guard is
+    // reached only through TestGfx942AttentionDenseGeometry.
+    for(const auto& [seqLenQ, seqLenKv, served] : {std::tuple{512, 256, false},
+                                                   std::tuple{4096, 512, false},
+                                                   std::tuple{512, 384, false},
+                                                   std::tuple{512, 385, true},
+                                                   std::tuple{512, 512, true}})
+    {
+        SCOPED_TRACE(std::to_string(seqLenQ) + "/" + std::to_string(seqLenKv));
+        auto spec = windowGraph(128);
+        spec.seqLenQ = seqLenQ;
+        spec.seqLenKv = seqLenKv;
+        EXPECT_EQ(matchGraph(spec).has_value(), served);
+
+        // Without a window every row keeps key 0.
+        GraphSpec causal;
+        causal.seqLenQ = seqLenQ;
+        causal.seqLenKv = seqLenKv;
+        EXPECT_TRUE(matchGraph(causal).has_value());
+    }
+}
+
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksStatsMaskTensorAndVarlen)
 {
     GraphSpec sinks;
@@ -502,24 +558,6 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowOnlyFromTheCandidateBuilt
     EXPECT_FALSE(matches(GraphSpec{}, w128));
     // left_bound 129 asks for 129 keys, which no block_n-aligned build carries.
     EXPECT_FALSE(matches(windowGraph(129), w128));
-}
-
-TEST(TestGfx942AttentionDenseKernelMatch, RefusesAWindowThatLeavesTheLastQueryBlockNoKeys)
-{
-    // Sq 4096 over Skv 512 at 256/64 with a 128-key window: the last query block's window
-    // starts at key tile 58 of 8 (supports_attention_dense's verdict).
-    auto spec = windowGraph(128);
-    spec.seqLenQ = 4096;
-    spec.seqLenKv = 512;
-    KernelSpec w128;
-    w128.slidingWindow = 128;
-    EXPECT_FALSE(matches(spec, w128));
-
-    // The same graph without a window is served.
-    GraphSpec causal;
-    causal.seqLenQ = 4096;
-    causal.seqLenKv = 512;
-    EXPECT_TRUE(matches(causal, KernelSpec{}));
 }
 
 TEST(TestGfx942AttentionDenseKernelMatch, DivisibilityIsAgainstTheCandidatesOwnTile)

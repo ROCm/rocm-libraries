@@ -242,7 +242,7 @@ std::vector<KnobCase> knobCases()
                 const auto& [hq, hkv] = heads[row++ % std::size(heads)];
                 cases.push_back(
                     {prefix + "NoMask_" + tileName(tile),
-                     makeShape(dataType, headSize, hkv, hkv, Mask::NO_MASK, 0, 1, 512, 512),
+                     makeShape(dataType, headSize, hq, hkv, Mask::NO_MASK, 0, 1, 512, 512),
                      FORCED,
                      tile});
             }

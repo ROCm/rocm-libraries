@@ -97,8 +97,10 @@ TEST(TestGfx942AttentionDenseGeometry, NonPositiveExtentsThrow)
 TEST(TestGfx942AttentionDenseGeometry, UnbuildableBlockMThrowsBeforeDividingByIt)
 {
     // Zero divides by zero; 48 floors to a wave count that leaves rows uncovered; 1024
-    // needs a 2048-thread CTA, past the workgroup limit.
-    for(const int64_t blockM : {int64_t{0}, int64_t{-256}, int64_t{48}, int64_t{1024}})
+    // needs a 2048-thread CTA, past the workgroup limit; 2^62 is 32-aligned metadata whose
+    // thread count would overflow int64_t if it were multiplied out.
+    for(const int64_t blockM :
+        {int64_t{0}, int64_t{-256}, int64_t{48}, int64_t{1024}, int64_t{1} << 62})
     {
         EXPECT_THROW(geometryFor(blockM, 512, 8, 4), HipdnnPluginException) << blockM;
     }
@@ -214,6 +216,7 @@ TEST(TestGfx942AttentionDenseTile, RefusesNamedNeighboursOfTheLegalSet)
 {
     EXPECT_FALSE(isSupportedGfx942AttentionDenseTile(128, 64, 128)); // block_m % block_n
     EXPECT_FALSE(isSupportedGfx942AttentionDenseTile(128, 1024, 64)); // 2048-thread CTA
+    EXPECT_FALSE(isSupportedGfx942AttentionDenseTile(128, int64_t{1} << 62, 64)); // no overflow
     EXPECT_FALSE(isSupportedGfx942AttentionDenseTile(128, 256, 0)); // block_n positive
     EXPECT_FALSE(isSupportedGfx942AttentionDenseTile(128, 256, 48)); // block_n % 32
     EXPECT_FALSE(isSupportedGfx942AttentionDenseTile(128, 0, 64)); // block_m positive
@@ -241,6 +244,8 @@ TEST(TestGfx942AttentionDenseWindow, MatchesThePythonVerdictAtEachWitness)
         int64_t blockM, blockN, seqLenQ, seqLenKv, window;
         bool accepted;
     };
+    // The guard alone. Some accepted witnesses (768/256 W512, 1024/256 W576, 128/64 W64)
+    // leave their last rows no key, so the graph matcher declines them before this runs.
     const std::vector<Witness> witnesses{
         {256, 64, 512, 512, 128, true},
         {256, 64, 2048, 2048, 128, true},

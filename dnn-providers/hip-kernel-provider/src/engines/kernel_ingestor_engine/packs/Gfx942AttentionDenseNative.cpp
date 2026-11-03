@@ -41,6 +41,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
  * @file Gfx942AttentionDenseNative.cpp
@@ -143,23 +144,9 @@ const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
     return &node.attributesAs<data_objects::SdpaAttributes>();
 }
 
-/// The product of @p factors, or nullopt when it does not fit in int64_t.
-///
-/// Every product of graph-controlled extents goes through this. The extents are whatever
-/// the graph claims, so an unchecked product is signed overflow -- undefined, and in
-/// practice a wrapped value that can equal a stride or pass a bound it should fail.
-std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
-{
-    int64_t product = 1;
-    for(const int64_t factor : factors)
-    {
-        if(__builtin_mul_overflow(product, factor, &product))
-        {
-            return std::nullopt;
-        }
-    }
-    return product;
-}
+// Every product of graph-controlled extents goes through this: an unchecked product is
+// signed overflow. Every factor here is an extent isWellFormedOperand already held positive.
+using pack_features::checkedProduct;
 
 /// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
 /// checked before anything indexes an axis.
@@ -181,7 +168,10 @@ bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
         }
     }
 
-    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
+    // A ragged offset tensor packs the sequences back to back; the kernel indexes the buffer
+    // as dense (B, S, H, D) and would read and write past each sequence.
+    return !tensor.virtual_() && !tensor.ragged_offset_tensor_uid().has_value()
+           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
 }
 
 /**
@@ -368,6 +358,11 @@ struct AttentionDenseMask
  * the diagonal, and rejects L == 0. Bottom-right alignment coincides with top-left exactly
  * when seqlen_q == seqlen_kv, and is declined otherwise. A band with a right bound other
  * than 0 is not causal; the kernel computes no lookahead and no non-causal window.
+ *
+ * A top-left window with seqlen_q - seqlen_kv >= W leaves the last query rows no key: row
+ * q sees (q - W, q] and q - W + 1 >= seqlen_kv. The kernel has no empty-row path (every
+ * score of such a row is the mask value, so it averages V over the tiles it visits), so
+ * those windows are declined.
  */
 std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& attributes,
                                           const AttentionDenseProblem& problem)
@@ -427,7 +422,17 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
                                    << "; the kernel's window is top-left");
             return std::nullopt;
         }
-        return AttentionDenseMask{1, band.leftBound + 1};
+        const int64_t window = band.leftBound + 1;
+        if(problem.seqLenQ - problem.seqLenKv >= window)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                                   << "a " << window << "-key window over seqlen_q "
+                                   << problem.seqLenQ << " and seqlen_kv " << problem.seqLenKv
+                                   << " leaves the last query rows no key; the kernel has no "
+                                      "empty-row path");
+            return std::nullopt;
+        }
+        return AttentionDenseMask{1, window};
     }
     default:
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "mask type " << static_cast<int>(planMask)
@@ -484,7 +489,7 @@ std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& 
             HIPDNN_PLUGIN_LOG_INFO(Declined{"operand"}
                                    << describeOperand(role, *tensor)
                                    << " must be a rank-4 (B, H, S, D) tensor with positive "
-                                      "extents, not virtual and not pass-by-value");
+                                      "extents, not virtual, not ragged and not pass-by-value");
             return std::nullopt;
         }
     }

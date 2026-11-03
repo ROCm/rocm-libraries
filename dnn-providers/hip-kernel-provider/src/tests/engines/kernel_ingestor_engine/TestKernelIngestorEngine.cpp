@@ -649,6 +649,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
+        "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch",
 #ifdef HIPDNN_ENGINE_FLYDSL

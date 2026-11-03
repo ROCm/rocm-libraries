@@ -174,7 +174,10 @@ bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
         }
     }
 
-    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
+    // A ragged offset tensor packs the sequences back to back; the kernel indexes the buffer
+    // as dense (B, S, H, D) and would read and write past each sequence.
+    return !tensor.virtual_() && !tensor.ragged_offset_tensor_uid().has_value()
+           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
 }
 
 /**
@@ -431,7 +434,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
             HIPDNN_PLUGIN_LOG_INFO(Declined{"operand"}
                                    << describeOperand(role, *tensor)
                                    << " must be a rank-4 (B, H, S, D) tensor with positive "
-                                      "extents, not virtual and not pass-by-value");
+                                      "extents, not virtual, not ragged and not pass-by-value");
             return std::nullopt;
         }
     }

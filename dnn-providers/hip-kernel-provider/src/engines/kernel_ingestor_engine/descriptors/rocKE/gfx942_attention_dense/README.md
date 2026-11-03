@@ -11,13 +11,17 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - dtype: bf16, fp16.
 - head_size: 64, 128.
 - Mask: causal (top-left), unmasked, and causal sliding windows of 128, 512, 1024 and 2048
-  keys (graph `left_bound` 127, 511, 1023 and 2047).
-- Knobs: `block_m`, `block_n`, `lds_row_pad`, `pv_priority`.
+  keys (graph `left_bound` 128, 512, 1024 and 2048: `left_bound` L keeps L keys, the
+  diagonal included, SdpaSemanticsRegister SEM-001). A window with
+  seqlen_q - seqlen_kv >= W is declined: its last query rows see no key.
+- Knobs: `block_m`, `block_n` (the UED's). The variants also differ in `lds_row_pad` and
+  `pv_priority`, KMD fields the native score ranks; they are not knobs.
 - Batch, sequence lengths and both head counts are runtime kernel arguments, so every
   variant serves any shape its tile divides. Each variant is built at batch 1,
   seqlen_q = seqlen_kv = 512 and 8 query/KV heads.
-- Fixed in every variant: not ragged, not varlen, not paged, not persistent, no sinks, no
-  LSE output.
+- Fixed in every variant: not ragged, not varlen, not paged, no sinks, no LSE output, and
+  the grid the native dispatch launches (non-persistent, `qb_minor` block order, one KV
+  segment), which the registry candidate `gfx942_dense_qbminor` holds fixed.
 
 ## Files
 
