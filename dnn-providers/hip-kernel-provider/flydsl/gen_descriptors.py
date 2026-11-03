@@ -339,6 +339,52 @@ def installed_models(
     return installed
 
 
+RoleMaps = dict[str, dict[str, list[tuple[str | None, str]]]]
+
+
+def bind_installed(roles: RoleMaps, installed: RoleMaps) -> None:
+    """Bind every installed model into @p roles, in place of the slot of its metric."""
+    for role, by_arch in installed.items():
+        for arch, models in by_arch.items():
+            slot = roles.setdefault(role, {}).setdefault(arch, [])
+            for metric, model_id in models:
+                # A trained model takes its metric's place, as promote's rebinding does.
+                slot[:] = [entry for entry in slot if entry[0] != metric]
+                slot.append((metric, model_id))
+
+
+def role_maps(roles: RoleMaps) -> dict[str, dict[str, str | list[str]]]:
+    """The UED form of @p roles: `default` first, then arch keys; one id or a list."""
+    return {
+        role: {
+            arch: ids[0][1] if len(ids) == 1 else [model for _, model in ids]
+            for arch, ids in sorted(
+                by_arch.items(), key=lambda item: (item[0] != "default", item[0])
+            )
+        }
+        for role, by_arch in roles.items()
+    }
+
+
+def estimate_document(uhd_id: str, name: str, symbol: str) -> dict[str, Any]:
+    """The engine estimate's `default` slot: a native UHD no scorer is registered under."""
+    return {
+        "version": DESCRIPTOR_VERSION,
+        "id": uhd_id,
+        "name": f"flydsl {name} engine estimate",
+        "provenance": (
+            "Default slot for the engine estimate: a trained model installed "
+            "under heuristics/ for an arch takes precedence there. No scorer is "
+            "registered under this symbol, so on any other arch the loader "
+            "disables the estimate and keeps the engine."
+        ),
+        "adapter": "native",
+        "objective": "max",
+        "score": {"metric": ENGINE_ESTIMATE_METRIC},
+        "native": {"symbol": symbol},
+    }
+
+
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
 # is itself derived from a URL rather than being a magic constant. The names are
@@ -601,19 +647,13 @@ class OpDescriptors:
         }
         # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
         # catalog on every arch, and the engine estimate's slot.
-        roles: dict[str, dict[str, list[tuple[str | None, str]]]] = {
+        roles: RoleMaps = {
             "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
             "predict_engine": {
                 "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
             },
         }
-        for role, by_arch in self.installed.items():
-            for arch, models in by_arch.items():
-                slot = roles.setdefault(role, {}).setdefault(arch, [])
-                for metric, model_id in models:
-                    # A trained model takes its metric's place, as promote's rebinding does.
-                    slot[:] = [entry for entry in slot if entry[0] != metric]
-                    slot.append((metric, model_id))
+        bind_installed(roles, self.installed)
         # The UHD pipeline keys every role of an engine one way: once a ranker is bound for
         # an arch, it trains an estimate for that arch only if `predict_engine` binds the
         # arch too. So each such arch gets the estimate's slot, which the loader disables
@@ -624,29 +664,11 @@ class OpDescriptors:
             roles["predict_engine"].setdefault(
                 arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
             )
-        for role, by_arch in roles.items():
-            engine[role] = {
-                arch: ids[0][1] if len(ids) == 1 else [model for _, model in ids]
-                for arch, ids in sorted(
-                    by_arch.items(), key=lambda item: (item[0] != "default", item[0])
-                )
-            }
+        engine.update(role_maps(roles))
         estimate = {
-            f"{self.stem}_engine_estimate.uhd.json": {
-                "version": DESCRIPTOR_VERSION,
-                "id": self.estimate_uhd_id,
-                "name": f"flydsl {self.op} engine estimate",
-                "provenance": (
-                    "Default slot for the engine estimate: a trained model installed "
-                    "under heuristics/ for an arch takes precedence there. No scorer is "
-                    "registered under this symbol, so on any other arch the loader "
-                    "disables the estimate and keeps the engine."
-                ),
-                "adapter": "native",
-                "objective": "max",
-                "score": {"metric": ENGINE_ESTIMATE_METRIC},
-                "native": {"symbol": f"{self.symbols}.engine_estimate"},
-            }
+            f"{self.stem}_engine_estimate.uhd.json": estimate_document(
+                self.estimate_uhd_id, self.op, f"{self.symbols}.engine_estimate"
+            )
         }
         engine["metadata"] = self.kmd_id
         engine["knobs"] = knob_fields(self.op, self.fields)
@@ -879,30 +901,53 @@ def _require_disjoint_ids(slots: dict[str, list[dict[str, Any]]]) -> None:
 
 
 class SplitEngine:
-    """The split engine's descriptor-only content: its UED 1.1.
+    """The split engine's descriptor-only content: its UED 1.1 and engine estimate.
 
     Each slot names its own KMD and carries only the tuning fields of its own schema as
     knobs. The engine has no ranker (the loader falls back to priority, then id), no
     top-level ``metadata``, ``sort_kernel_catalog``, ``knobs`` or
     ``predict_applicable_kernels``, and does not author the serialization note: a slotted
-    engine's plans cannot be saved.
+    engine's plans cannot be saved. Its estimate is engine-level and models the whole
+    program (RFC 0021): the `default` slot every engine carries, plus each trained model
+    installed under ``sdpa_bwd_split/heuristics/``.
     """
 
-    def __init__(self, slot_ops: dict[str, OpDescriptors]) -> None:
+    def __init__(
+        self,
+        slot_ops: dict[str, OpDescriptors],
+        installed: RoleMaps | None = None,
+    ) -> None:
         self.slot_ops = slot_ops
         self.stem = f"flydsl_{SPLIT_ENGINE}"
         self.symbols = f"hipkernel.{self.stem}"
+        self.ued_id = _uuid(f"ued/{SPLIT_ENGINE}")
+        self.estimate_uhd_id = _uuid(f"uhd/{SPLIT_ENGINE}/predict_engine")
+        self.installed = installed or {}
+        # A slot ranker belongs to one slot (RFC 0021), which the installed layout has no
+        # level for; binding one engine-wide would order every slot's catalog with it.
+        if "sort_kernel_catalog" in self.installed:
+            raise HkpPackError(
+                f"{SPLIT_ENGINE}: a sort_kernel_catalog model is installed, but the split "
+                "engine ranks per slot; only predict_engine models bind engine-wide"
+            )
 
     def documents(self) -> dict[str, dict[str, Any]]:
+        roles: RoleMaps = {
+            "predict_engine": {
+                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            },
+        }
+        bind_installed(roles, self.installed)
         return {
             f"{self.stem}.ued.json": {
                 "version": SLOTTED_VERSION,
-                "id": _uuid(f"ued/{SPLIT_ENGINE}"),
+                "id": self.ued_id,
                 "name": f"hipkernel:{self.stem}",
                 # Pass-by-value scalars (softmax scale, dropout seed and offset).
                 "sdk_version": PASS_BY_VALUE_SDK_VERSION,
                 "graph_match": {"native": f"{self.symbols}.graph_match"},
                 "shared_workspace": SPLIT_SHARED_WORKSPACE,
+                **role_maps(roles),
                 "slots": [
                     {
                         "name": slot.slot,
@@ -911,7 +956,10 @@ class SplitEngine:
                     }
                     for slot in self.slot_ops.values()
                 ],
-            }
+            },
+            f"{self.stem}_engine_estimate.uhd.json": estimate_document(
+                self.estimate_uhd_id, SPLIT_ENGINE, f"{self.symbols}.engine_estimate"
+            ),
         }
 
 
@@ -949,7 +997,10 @@ def build_documents(
                 f"no content for {missing}"
             )
         _require_disjoint_ids(slot_packs)
-        engine = SplitEngine({op: slot_ops[op] for op in SPLIT_SLOT_OPS})
+        engine = SplitEngine(
+            {op: slot_ops[op] for op in SPLIT_SLOT_OPS},
+            installed_models(content_dir / SPLIT_ENGINE, _uuid(f"ued/{SPLIT_ENGINE}")),
+        )
         folders[Path(SPLIT_ENGINE)] = engine.documents()
     return folders
 

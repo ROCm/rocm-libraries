@@ -113,13 +113,14 @@ def _rows() -> list[gd.KernelEntry]:
     return rows
 
 
-def _split(rows: list[gd.KernelEntry] | None = None) -> dict:
-    return gd.build_documents(_rows() if rows is None else rows, ARCH)
+def _split(
+    rows: list[gd.KernelEntry] | None = None, content_dir: Path = gd.CONTENT_DIR
+) -> dict:
+    return gd.build_documents(_rows() if rows is None else rows, ARCH, content_dir)
 
 
 def _ued(folders: dict) -> dict:
-    (document,) = folders[Path("sdpa_bwd_split")].values()
-    return document
+    return folders[Path("sdpa_bwd_split")]["flydsl_sdpa_bwd_split.ued.json"]
 
 
 def _kdp(folders: dict, op: str) -> dict:
@@ -189,6 +190,47 @@ def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
     assert "behavior_notes" not in ued
     # No ranker at all: the runtime orders a slot by priority, then id.
     assert not any("sort_kernel_catalog" in slot for slot in ued["slots"])
+
+
+def _install_estimate(content_dir: Path, role: str, arch: str, model_id: str) -> None:
+    ued_id = gd._uuid("ued/sdpa_bwd_split")
+    folder = (
+        content_dir / "sdpa_bwd_split" / "heuristics" / ued_id / role / arch / "tflops"
+    )
+    folder.mkdir(parents=True)
+    (folder / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "id": model_id,
+                "score": {"metric": "tflops"},
+                "trained_against": {"ued": {"id": ued_id}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_the_engine_estimate_is_engine_level_and_binds_installed_models(
+    tmp_path: Path,
+) -> None:
+    # Every engine carries the estimate's `default` slot; a trained whole-program model
+    # installed for an arch binds under that arch beside it (RFC 0021: engine-level).
+    folders = _split(content_dir=tmp_path)
+    docs = folders[Path("sdpa_bwd_split")]
+    estimate = docs["flydsl_sdpa_bwd_split_engine_estimate.uhd.json"]
+    assert estimate["score"] == {"metric": "tflops"}
+    assert _ued(folders)["predict_engine"] == {"default": estimate["id"]}
+
+    _install_estimate(tmp_path, "predict_engine", "gfx950", "model-950")
+    ued = _ued(_split(content_dir=tmp_path))
+    assert ued["predict_engine"] == {"default": estimate["id"], "gfx950": "model-950"}
+    assert not any("sort_kernel_catalog" in slot for slot in ued["slots"])
+
+
+def test_an_engine_wide_ranker_is_refused_on_the_split_engine(tmp_path: Path) -> None:
+    _install_estimate(tmp_path, "sort_kernel_catalog", "gfx950", "ranker-950")
+    with pytest.raises(gd.HkpPackError, match="ranks per slot"):
+        _split(content_dir=tmp_path)
 
 
 def test_a_slots_knobs_are_its_own_tuning_fields() -> None:

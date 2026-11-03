@@ -7,6 +7,9 @@
     "native": "hipkernel.flydsl_sdpa_bwd_split.graph_match"
   },
   "shared_workspace": "ws.bytes",
+  "predict_engine": {
+    "default": "cce91ef0-6b53-5888-ab97-18aa6f8cec29"
+  },
   "slots": [
     {
       "name": "prep",
