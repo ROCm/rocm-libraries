@@ -650,6 +650,7 @@ namespace FixedPointEmulation
         float    t_batch_attr_ms  = 0.f; /* 6× MatrixLayoutSetAttribute for strided-batch   */
         unsigned effective_s_used = 0u; /* ADP: actual s chosen (= num_moduli in fixed mode) */
         unsigned n_sub_gemms      = 0u;
+        unsigned chunk_size_used  = 0u; /* moduli per INT8 GEMM pass, smallest over sub-GEMMs */
     };
 
     /* ── Generic index dispatcher ──────────────────────────────────────────────────────── */
@@ -1906,6 +1907,10 @@ namespace FixedPointEmulation
             prof->t_batch_attr_ms += _t_batch_attr;
             prof->effective_s_used = std::max(prof->effective_s_used, effective_s);
             prof->n_sub_gemms += 1u;
+            const unsigned used_chunk = std::min(chunk_size, effective_s);
+            prof->chunk_size_used     = prof->chunk_size_used
+                                            ? std::min(prof->chunk_size_used, used_chunk)
+                                            : used_chunk;
         }
         return rocblaslt_status_success;
     }
@@ -2348,7 +2353,8 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
         (void)hipEventElapsedTime(&t_total, ev_start, ev_end);
 
         const unsigned       prof_s = accum.effective_s_used ? accum.effective_s_used : num_moduli;
-        const unsigned       chunk_size       = compute_chunk_size(m, n, k, prof_s, ~size_t{0});
+        /* Report what ran with the caller's workspace, not an unlimited one. */
+        const unsigned       chunk_size       = accum.chunk_size_used ? accum.chunk_size_used : prof_s;
         const unsigned       scale_chunk_size = chunk_size;
         const bool           tA               = (opA != HIPBLAS_OP_N);
         const bool           tB               = (opB != HIPBLAS_OP_N);
@@ -2363,7 +2369,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                                          k,
                                          adp_expected_num_moduli(adp_bits_prof_64, num_moduli),
                                          device,
-                                         ~size_t{0},
+                                         decision.workspace_bytes,
                                          HIP_R_64F);
 
         std::FILE* _f = std::fopen(_pf, "a");
@@ -2719,7 +2725,8 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
         (void)hipEventElapsedTime(&t_total, ev_start, ev_end);
 
         const unsigned       prof_s = accum.effective_s_used ? accum.effective_s_used : num_moduli;
-        const unsigned       chunk_size       = compute_chunk_size(m, n, k, prof_s, ~size_t{0});
+        /* Report what ran with the caller's workspace, not an unlimited one. */
+        const unsigned       chunk_size       = accum.chunk_size_used ? accum.chunk_size_used : prof_s;
         const unsigned       scale_chunk_size = chunk_size;
         const bool           tA               = (opA != HIPBLAS_OP_N);
         const bool           tB               = (opB != HIPBLAS_OP_N);
@@ -2734,7 +2741,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                                          k,
                                          adp_expected_num_moduli(adp_bits_prof_32, num_moduli),
                                          device,
-                                         ~size_t{0},
+                                         decision.workspace_bytes,
                                          HIP_R_32F);
 
         std::FILE* _f = std::fopen(_pf, "a");
