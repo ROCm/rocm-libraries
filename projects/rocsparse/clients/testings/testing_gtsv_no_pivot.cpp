@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,30 @@
 
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
+
+// near_check treats only NaN/Inf in its first argument as special. A non-finite
+// solution makes A*x non-finite, both tolerance comparisons are false, and the
+// test passes. Fail once, with the count and the first bad index.
+template <typename T>
+bool solution_is_finite(int64_t n, const T* x)
+{
+    int64_t count = 0;
+    int64_t first = -1;
+    for(int64_t i = 0; i < n; ++i)
+    {
+        if(rocsparse_isnan(x[i]) || rocsparse_isinf(x[i]))
+        {
+            if(first < 0)
+                first = i;
+            ++count;
+        }
+    }
+    if(count == 0)
+        return true;
+    std::cerr << "solution is not finite: " << count << " entries, first at index " << first
+              << std::endl;
+    return false;
+}
 
 template <typename T>
 void testing_gtsv_no_pivot_bad_arg(const Arguments& arg)
@@ -107,12 +131,15 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     host_vector<T> hd(m);
     host_vector<T> hdu(m);
 
+    // A zero matrix selects the identity. Every other matrix is tridiagonal.
+    const bool diagonal = arg.matrix == rocsparse_matrix_zero;
+
     // initialize tri-diagonal matrix
     for(rocsparse_int i = 0; i < m; ++i)
     {
-        hdl[i] = random_cached_generator<T>(1, 8);
-        hd[i]  = random_cached_generator<T>(17, 32);
-        hdu[i] = random_cached_generator<T>(1, 8);
+        hdl[i] = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
+        hd[i]  = diagonal ? static_cast<T>(1) : random_cached_generator<T>(17, 32);
+        hdu[i] = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
     }
 
     hdl[0]     = std::numeric_limits<T>::infinity();
@@ -175,6 +202,15 @@ void testing_gtsv_no_pivot(const Arguments& arg)
                 hresult[ldb * j + i] = hdl[i] * hB[ldb * j + i - 1] + hd[i] * hB[ldb * j + i]
                                        + hdu[i] * hB[ldb * j + i + 1];
             }
+        }
+
+        if(!solution_is_finite<T>(ldb * n, hB.data()))
+        {
+#ifdef GOOGLE_TEST
+            FAIL();
+#else
+            exit(EXIT_FAILURE);
+#endif
         }
 
         near_check_segments<T>(ldb * n, hB_original.data(), hresult.data());

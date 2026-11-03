@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "d5b00000-0000-4000-8000-00000000000a",
+  "name": "dq dispatch",
+  "dispatch_symbol": "hipkernel.slotted_multi_launch.dq_dispatch"
+}

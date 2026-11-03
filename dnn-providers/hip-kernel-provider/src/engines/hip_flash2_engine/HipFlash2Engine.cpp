@@ -7,9 +7,11 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
+#include "core/Utils.hpp"
 
 namespace hip_flash2_engine
 {
@@ -22,6 +24,16 @@ void HipFlash2Engine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
 bool HipFlash2Engine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[HipFlash2Engine::isApplicable] ";
+
+    const auto& tensorMap = opGraph.getTensorMap();
+    HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
+                               "Ragged tensors are not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
+        "All tensors must be aligned to a multiple of 16 bytes");
+
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))

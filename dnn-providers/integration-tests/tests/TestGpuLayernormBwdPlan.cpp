@@ -16,10 +16,10 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "LayernormBwdGraphTestUtils.hpp"
 #include "RaggedGraphTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuLayernormBwdPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuLayernormBwdSignatureKey.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
@@ -455,7 +455,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         cpuVariantPack[INV_VARIANCE_UID] = rstdTensor.rawHostData();
     }
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
     cpuDx.markHostModified();
     cpuDscale.markHostModified();

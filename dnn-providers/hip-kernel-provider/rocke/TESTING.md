@@ -714,6 +714,61 @@ Repeat the native lane in a clean
 relocated install without source directories or native caches available; a
 source-only pass cannot establish installed-artifact support.
 
+#### 5.1.4 Installed CTest environment contracts
+
+An installed CTest entry's `ENVIRONMENT` property is part of its external
+contract. It is generated during configuration, evaluated from a relocated test
+tree, and can change whether a test runs, skips, or fails. Keep these concerns
+separate:
+
+- **Tool discovery** says where an executable or resource can be found, such as
+  compiler directories in `PATH` or `HIP_DEVICE_LIB_PATH`.
+- **Enforcement policy** says that a normally optional check is mandatory, such
+  as `ROCKE_REQUIRE_COMPILER_TOOLS=1` turning an unavailable-tool skip into a
+  failure.
+
+A shared discovery environment does not imply shared policy. Add an enforcement
+variable only to CTest entries whose tests consume it, and validate every
+consumer when changing a shared environment list. Exact environment assertions
+are intentional: an unexpected variable is observable behavior, especially when
+it changes skip/fail semantics.
+
+The current installed compiler-tool contract is:
+
+| Runtime environment | Compiler paths injected | MLA compiler checks required |
+|---|---:|---:|
+| Linux with `ROCM_PATH` | yes | yes |
+| Linux without `ROCM_PATH` | no | no |
+| Windows | no Unix-derived paths | no inferred requirement |
+
+The table describes values added by the generated manifest. CTest still passes
+through its parent process environment, so a caller that explicitly exports
+`ROCKE_REQUIRE_COMPILER_TOOLS=1` opts into strict checks independently of this
+automatic policy.
+
+These are native-host contracts. Linux tests must not pretend to cover Windows
+by patching Python platform values. If a Windows TheRock lane must require the
+MLA compiler checks, give that lane an explicit capability contract and its own
+tool-discovery rules; do not copy Unix `ROCM_PATH` layout assumptions or infer
+capability from the operating system alone.
+
+The source breadcrumb beside the environment construction in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt) names the focused regression
+test. Run it after changing an installed Python test environment:
+
+```bash
+python -m pytest \
+  platform/tests/test_engine_linkage.py::test_installed_ctest_entries_get_scoped_environment_contracts \
+  -q
+```
+
+The test reads the standalone and provider-layout generated manifests through
+CTest, rejects duplicate variable names, and compares the complete environments
+of `rocke_pytest` and `rocke_library_mla_pytest` with and without a synthetic
+`ROCM_PATH`. Keep the expectations independently constructed rather than reusing
+the production CMake lists; otherwise production and test can repeat the same
+mistake.
+
 ### 5.2 Single-arch tests: `arch_specific`
 
 A test that names one gfx target can hide a gap. The code under test may support more targets.
