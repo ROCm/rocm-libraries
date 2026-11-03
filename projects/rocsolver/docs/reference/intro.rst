@@ -25,12 +25,14 @@ LAPACK auxiliary functions
     :ref:`rocsolver_lacgv <lacgv>`, x, x, x, x
     :ref:`rocsolver_laswp <laswp>`, x, x, x, x
     :ref:`rocsolver_lauum <lauum>`, x, x, x, x
+    :ref:`rocsolver_lacpy <lacpy>`, x, x, x, x
 
 .. csv-table:: Norms and condition number estimators
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`rocsolver_lange <lange>`, x, x, x, x
     :ref:`rocsolver_gecon <gecon>`, x, x, x, x
+    :ref:`rocsolver_sycon <sycon>`, x, x, x, x
 
 .. csv-table:: Householder reflections
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -158,6 +160,7 @@ LAPACK main functions
     :ref:`rocsolver_potri <potri>`, x, x, x, x
     :ref:`rocsolver_potrs <potrs>`, x, x, x, x
     :ref:`rocsolver_posv <posv>`, x, x, x, x
+    :ref:`rocsolver_sysv <sysv>`, x, x, x, x
     :ref:`rocsolver_sytrs <sytrs>`, x, x, x, x
 
 .. csv-table:: Least-square solvers

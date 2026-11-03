@@ -35,6 +35,7 @@ set(roclapack_test_source
   lapack/gesv_gtest.cpp
   lapack/potrs_gtest.cpp
   lapack/posv_gtest.cpp
+  lapack/sysv_gtest.cpp
   lapack/potri_gtest.cpp
   lapack/trtri_gtest.cpp
   lapack/geblttrs_gtest.cpp
@@ -83,6 +84,7 @@ set(rocauxiliary_test_source
   # vector & matrix manipulations
   auxiliary/lacgv_gtest.cpp
   auxiliary/laswp_gtest.cpp
+  auxiliary/lacpy_gtest.cpp
   # householder reflections
   auxiliary/larf_gtest.cpp
   auxiliary/larfg_gtest.cpp
@@ -91,6 +93,7 @@ set(rocauxiliary_test_source
   # norm and condition number
   auxiliary/lange_gtest.cpp
   auxiliary/gecon_gtest.cpp
+  auxiliary/sycon_gtest.cpp
   # plane rotations
   auxiliary/lasr_gtest.cpp
   # orthonormal/unitary matrices

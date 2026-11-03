@@ -38,6 +38,7 @@
 #include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
+#include "common/auxiliary/testing_lacpy.hpp"
 #include "common/auxiliary/testing_lahr2.hpp"
 #include "common/auxiliary/testing_lange.hpp"
 #include "common/auxiliary/testing_larf.hpp"
@@ -70,6 +71,7 @@
 #include "common/auxiliary/testing_steqr.hpp"
 #include "common/auxiliary/testing_sterf.hpp"
 #include "common/auxiliary/testing_sy2sb_he2hb.hpp"
+#include "common/auxiliary/testing_sycon.hpp"
 
 // lapack
 #include "common/lapack/testing_cholqr.hpp"
@@ -112,6 +114,7 @@
 #include "common/lapack/testing_sygvdx_hegvdx.hpp"
 #include "common/lapack/testing_sygvj_hegvj.hpp"
 #include "common/lapack/testing_sygvx_hegvx.hpp"
+#include "common/lapack/testing_sysv.hpp"
 #include "common/lapack/testing_sytf2_sytrf.hpp"
 #include "common/lapack/testing_sytrs.hpp"
 #include "common/lapack/testing_sytrs2.hpp"
@@ -158,6 +161,10 @@ class rocsolver_dispatcher
             {"lange_64", testing_lange<T, int64_t>},
             {"gecon", testing_gecon<T, rocblas_int>},
             {"gecon_64", testing_gecon<T, int64_t>},
+            {"sycon", testing_sycon<T, rocblas_int>},
+            {"sycon_64", testing_sycon<T, int64_t>},
+            {"lacpy", testing_lacpy<T, rocblas_int>},
+            {"lacpy_64", testing_lacpy<T, int64_t>},
             {"larfg", testing_larfg<T, rocblas_int>},
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},
@@ -202,6 +209,10 @@ class rocsolver_dispatcher
             {"posv", testing_posv<false, false, T>},
             {"posv_batched", testing_posv<true, true, T>},
             {"posv_strided_batched", testing_posv<false, true, T>},
+            // sysv
+            {"sysv", testing_sysv<false, false, T>},
+            {"sysv_batched", testing_sysv<true, true, T>},
+            {"sysv_strided_batched", testing_sysv<false, true, T>},
             // potri
             {"potri", testing_potri<false, false, T>},
             {"potri_batched", testing_potri<true, true, T>},

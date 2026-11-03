@@ -158,9 +158,9 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
         }
         __syncthreads();
 
-        if(std::max(absakk, colmax) == 0)
+        if(std::max(absakk, colmax) == 0 || absakk != absakk)
         {
-            // singularity found
+            // singularity found (or a NaN pivot, as in LAPACK's xSYTF2)
             if(tid == 0 && _info == 0)
                 _info = k + 1;
             kp = k;
@@ -220,6 +220,10 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
                     kstep = 2;
                 }
             }
+
+            // all threads must have read the diagonal element used to choose the pivot (and
+            // agree on kp and kstep) before it is overwritten by the interchange
+            __syncthreads();
 
             kk = k - kstep + 1;
             kkw = nb + kk - n;
@@ -401,9 +405,9 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         }
         __syncthreads();
 
-        if(std::max(absakk, colmax) == 0)
+        if(std::max(absakk, colmax) == 0 || absakk != absakk)
         {
-            // singularity found
+            // singularity found (or a NaN pivot, as in LAPACK's xSYTF2)
             if(tid == 0 && _info == 0)
                 _info = k + 1;
             kp = k;
@@ -468,6 +472,10 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
                     kstep = 2;
                 }
             }
+
+            // all threads must have read the diagonal element used to choose the pivot (and
+            // agree on kp and kstep) before it is overwritten by the interchange
+            __syncthreads();
 
             kk = k + kstep - 1;
             if(kp != kk)

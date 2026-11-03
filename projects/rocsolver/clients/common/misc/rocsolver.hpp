@@ -2169,6 +2169,104 @@ inline rocblas_status rocsolver_gecon(rocblas_handle handle,
 }
 /*****************************************************/
 
+/******************** SYCON ********************/
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int n,
+                                      float* A,
+                                      rocblas_int lda,
+                                      rocblas_int* ipiv,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_ssycon(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int n,
+                                      double* A,
+                                      rocblas_int lda,
+                                      rocblas_int* ipiv,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_dsycon(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int n,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_int* ipiv,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_csycon(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int n,
+                                      rocblas_double_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_int* ipiv,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_zsycon(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t n,
+                                      float* A,
+                                      int64_t lda,
+                                      int64_t* ipiv,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_ssycon_64(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t n,
+                                      double* A,
+                                      int64_t lda,
+                                      int64_t* ipiv,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_dsycon_64(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t n,
+                                      rocblas_float_complex* A,
+                                      int64_t lda,
+                                      int64_t* ipiv,
+                                      const float* anorm,
+                                      float* rcond)
+{
+    return rocsolver_csycon_64(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+
+inline rocblas_status rocsolver_sycon(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t n,
+                                      rocblas_double_complex* A,
+                                      int64_t lda,
+                                      int64_t* ipiv,
+                                      const double* anorm,
+                                      double* rcond)
+{
+    return rocsolver_zsycon_64(handle, uplo, n, A, lda, ipiv, anorm, rcond);
+}
+/*****************************************************/
+
 /******************** LACGV ********************/
 inline rocblas_status
     rocsolver_lacgv(rocblas_handle handle, rocblas_int n, rocblas_float_complex* x, rocblas_int incx)
@@ -2192,6 +2290,104 @@ inline rocblas_status
     rocsolver_lacgv(rocblas_handle handle, int64_t n, rocblas_double_complex* x, int64_t incx)
 {
     return rocsolver_zlacgv_64(handle, n, x, incx);
+}
+/*****************************************************/
+
+/******************** LACPY ********************/
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      float* A,
+                                      rocblas_int lda,
+                                      float* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_slacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      double* A,
+                                      rocblas_int lda,
+                                      double* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_dlacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_float_complex* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_clacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_double_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_double_complex* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_zlacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      float* A,
+                                      int64_t lda,
+                                      float* B,
+                                      int64_t ldb)
+{
+    return rocsolver_slacpy_64(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      double* A,
+                                      int64_t lda,
+                                      double* B,
+                                      int64_t ldb)
+{
+    return rocsolver_dlacpy_64(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      rocblas_float_complex* A,
+                                      int64_t lda,
+                                      rocblas_float_complex* B,
+                                      int64_t ldb)
+{
+    return rocsolver_clacpy_64(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      rocblas_double_complex* A,
+                                      int64_t lda,
+                                      rocblas_double_complex* B,
+                                      int64_t ldb)
+{
+    return rocsolver_zlacpy_64(handle, uplo, m, n, A, lda, B, ldb);
 }
 /*****************************************************/
 
@@ -5058,6 +5254,178 @@ inline rocblas_status rocsolver_posv(bool STRIDED,
                                      rocblas_int batch_count)
 {
     return rocsolver_zposv_batched(handle, uplo, n, nrhs, A, lda, B, ldb, info, batch_count);
+}
+/********************************************************/
+
+/******************** SYSV ********************/
+// normal and strided_batched
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     float* A,
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     float* B,
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    if(STRIDED)
+        return rocsolver_ssysv_strided_batched(handle, uplo, n, nrhs, A, lda, stA, ipiv, stP, B,
+                                               ldb, stB, info, bc);
+    else
+        return rocsolver_ssysv(handle, uplo, n, nrhs, A, lda, ipiv, B, ldb, info);
+}
+
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     double* A,
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     double* B,
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    if(STRIDED)
+        return rocsolver_dsysv_strided_batched(handle, uplo, n, nrhs, A, lda, stA, ipiv, stP, B,
+                                               ldb, stB, info, bc);
+    else
+        return rocsolver_dsysv(handle, uplo, n, nrhs, A, lda, ipiv, B, ldb, info);
+}
+
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     rocblas_float_complex* A,
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     rocblas_float_complex* B,
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    if(STRIDED)
+        return rocsolver_csysv_strided_batched(handle, uplo, n, nrhs, A, lda, stA, ipiv, stP, B,
+                                               ldb, stB, info, bc);
+    else
+        return rocsolver_csysv(handle, uplo, n, nrhs, A, lda, ipiv, B, ldb, info);
+}
+
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     rocblas_double_complex* A,
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     rocblas_double_complex* B,
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    if(STRIDED)
+        return rocsolver_zsysv_strided_batched(handle, uplo, n, nrhs, A, lda, stA, ipiv, stP, B,
+                                               ldb, stB, info, bc);
+    else
+        return rocsolver_zsysv(handle, uplo, n, nrhs, A, lda, ipiv, B, ldb, info);
+}
+
+// batched
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     float* const A[],
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     float* const B[],
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    return rocsolver_ssysv_batched(handle, uplo, n, nrhs, A, lda, ipiv, stP, B, ldb, info, bc);
+}
+
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     double* const A[],
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     double* const B[],
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    return rocsolver_dsysv_batched(handle, uplo, n, nrhs, A, lda, ipiv, stP, B, ldb, info, bc);
+}
+
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     rocblas_float_complex* const A[],
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     rocblas_float_complex* const B[],
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    return rocsolver_csysv_batched(handle, uplo, n, nrhs, A, lda, ipiv, stP, B, ldb, info, bc);
+}
+
+inline rocblas_status rocsolver_sysv(bool STRIDED,
+                                     rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int nrhs,
+                                     rocblas_double_complex* const A[],
+                                     rocblas_int lda,
+                                     rocblas_stride stA,
+                                     rocblas_int* ipiv,
+                                     rocblas_stride stP,
+                                     rocblas_double_complex* const B[],
+                                     rocblas_int ldb,
+                                     rocblas_stride stB,
+                                     rocblas_int* info,
+                                     rocblas_int bc)
+{
+    return rocsolver_zsysv_batched(handle, uplo, n, nrhs, A, lda, ipiv, stP, B, ldb, info, bc);
 }
 /********************************************************/
 

@@ -89,6 +89,26 @@ rocsolver_<type>lauum()
    :outline:
 .. doxygenfunction:: rocsolver_slauum
 
+.. _lacpy:
+
+rocsolver_<type>lacpy()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlacpy_64
+   :outline:
+.. doxygenfunction:: rocsolver_clacpy_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlacpy_64
+   :outline:
+.. doxygenfunction:: rocsolver_slacpy_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlacpy
+   :outline:
+.. doxygenfunction:: rocsolver_clacpy
+   :outline:
+.. doxygenfunction:: rocsolver_dlacpy
+   :outline:
+.. doxygenfunction:: rocsolver_slacpy
+
 
 .. _normcon:
 
@@ -138,6 +158,26 @@ rocsolver_<type>gecon()
 .. doxygenfunction:: rocsolver_dgecon
    :outline:
 .. doxygenfunction:: rocsolver_sgecon
+
+.. _sycon:
+
+rocsolver_<type>sycon()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zsycon_64
+   :outline:
+.. doxygenfunction:: rocsolver_csycon_64
+   :outline:
+.. doxygenfunction:: rocsolver_dsycon_64
+   :outline:
+.. doxygenfunction:: rocsolver_ssycon_64
+   :outline:
+.. doxygenfunction:: rocsolver_zsycon
+   :outline:
+.. doxygenfunction:: rocsolver_csycon
+   :outline:
+.. doxygenfunction:: rocsolver_dsycon
+   :outline:
+.. doxygenfunction:: rocsolver_ssycon
 
 
 

@@ -74,6 +74,8 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_larfg.cpp
     common/auxiliary/testing_lange.cpp
     common/auxiliary/testing_gecon.cpp
+    common/auxiliary/testing_sycon.cpp
+    common/auxiliary/testing_lacpy.cpp
     common/auxiliary/testing_larf.cpp
     common/auxiliary/testing_larft.cpp
     common/auxiliary/testing_larfb.cpp
@@ -138,6 +140,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/lapack/testing_sytf2_sytrf.cpp
     common/lapack/testing_sytrs.cpp
     common/lapack/testing_sytrs2.cpp
+    common/lapack/testing_sysv.cpp
     common/lapack/testing_sytxx_hetxx.cpp
     common/lapack/testing_sygsx_hegsx.cpp
     common/lapack/testing_syev_heev.cpp

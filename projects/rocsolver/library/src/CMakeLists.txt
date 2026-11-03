@@ -64,6 +64,9 @@ set(rocsolver_lapack_source
   lapack/roclapack_posv.cpp
   lapack/roclapack_posv_batched.cpp
   lapack/roclapack_posv_strided_batched.cpp
+  lapack/roclapack_sysv.cpp
+  lapack/roclapack_sysv_batched.cpp
+  lapack/roclapack_sysv_strided_batched.cpp
   #- symmetric indefinite matrices
   lapack/roclapack_sytrs.cpp
   lapack/roclapack_sytrs_batched.cpp
@@ -258,9 +261,12 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_larf.cpp
   auxiliary/rocauxiliary_larft.cpp
   auxiliary/rocauxiliary_larfb.cpp
+  # copies
+  auxiliary/rocauxiliary_lacpy.cpp
   # norm and condition number
   auxiliary/rocauxiliary_lange.cpp
   auxiliary/rocauxiliary_gecon.cpp
+  auxiliary/rocauxiliary_sycon.cpp
   # plane rotations
   auxiliary/rocauxiliary_lasr.cpp
   # orthonormal/unitary matrices

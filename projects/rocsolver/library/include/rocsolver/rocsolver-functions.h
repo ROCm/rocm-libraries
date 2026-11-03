@@ -231,6 +231,112 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlacgv_64(rocblas_handle handle,
 //! @}
 
 /*! @{
+    \brief LACPY copies all or part of an ``m``-by-``n`` matrix ``A`` to a matrix ``B``.
+
+    \details
+    If uplo indicates upper, only the upper trapezoidal part of A (the elements A[i,j] with i <= j) is
+    copied; if uplo indicates lower, only the lower trapezoidal part (i >= j); if uplo indicates full,
+    all of A. The other elements of B are not modified.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    uplo        rocblas_fill.
+                Specifies the part of A that is copied.
+    @param[in]
+    m           rocblas_int. m >= 0.
+                The number of rows of the matrices A and B.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of columns of the matrices A and B.
+    @param[in]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                The matrix A.
+    @param[in]
+    lda         rocblas_int. lda >= m.
+                The leading dimension of A.
+    @param[out]
+    B           pointer to type. Array on the GPU of dimension ldb*n.
+                On exit, B contains the copied part of A.
+    @param[in]
+    ldb         rocblas_int. ldb >= m.
+                The leading dimension of B.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_slacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 float* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dlacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 double* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_clacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_float_complex* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zlacpy(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_double_complex* B,
+                                                 const rocblas_int ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_slacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    float* B,
+                                                    const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dlacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    double* B,
+                                                    const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_clacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_float_complex* B,
+                                                    const int64_t ldb);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zlacpy_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_double_complex* B,
+                                                    const int64_t ldb);
+//! @}
+
+/*! @{
     \brief The LANGE functions compute the norm of a general ``m``-by-``n`` matrix ``A``.
 
     \details
@@ -429,6 +535,125 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgecon_64(rocblas_handle handle,
                                                     const int64_t n,
                                                     rocblas_double_complex* A,
                                                     const int64_t lda,
+                                                    const double* anorm,
+                                                    double* rcond);
+//! @}
+
+/*! @{
+    \brief SYCON estimates the reciprocal of the condition number of a symmetric ``n``-by-``n``
+    matrix ``A`` in the 1-norm, using its factorization computed by \ref rocsolver_ssytrf "SYTRF".
+
+    \details
+    The reciprocal condition number is computed as
+
+    \f[
+        \text{rcond} = \frac{1}{\|A\|_1 \cdot \|A^{-1}\|_1}
+    \f]
+
+    where A is given by its factorization \f$A = U D U^T\f$ or \f$A = L D L^T\f$ as returned by SYTRF,
+    and the 1-norm of A, ``anorm``, is given (it can be computed with LANGE, or LANSY, before the
+    factorization). The norm of \f$A^{-1}\f$ is estimated with the method of LAPACK's xLACN2, which
+    gives a lower bound (up to rounding errors) and only needs to solve systems with A.
+    For the complex versions, A is complex symmetric (\f$A = A^T\f$).
+
+    As in LAPACK, rcond is set to zero if anorm <= 0, or if D is singular (a 1-by-1 diagonal block is
+    exactly zero). If the solves overflow, A is numerically singular and rcond is set to zero.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    uplo        rocblas_fill.
+                Specifies whether the factorization is upper or lower triangular.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of rows and columns of the matrix A.
+    @param[in]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                The block diagonal matrix D and the multipliers of the factorization returned by
+                \ref rocsolver_ssytrf "SYTRF".
+    @param[in]
+    lda         rocblas_int. lda >= n.
+                The leading dimension of A.
+    @param[in]
+    ipiv        pointer to rocblas_int. Array on the GPU of dimension n.
+                The vector of pivot indices returned by \ref rocsolver_ssytrf "SYTRF".
+    @param[in]
+    anorm       pointer to real type. Scalar on the GPU.
+                The 1-norm of the original matrix A.
+    @param[out]
+    rcond       pointer to real type. Scalar on the GPU.
+                The estimate of the reciprocal condition number. It is one if n = 0.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssycon(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ipiv,
+                                                 const float* anorm,
+                                                 float* rcond);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsycon(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ipiv,
+                                                 const double* anorm,
+                                                 double* rcond);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_csycon(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ipiv,
+                                                 const float* anorm,
+                                                 float* rcond);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsycon(rocblas_handle handle,
+                                                 const rocblas_fill uplo,
+                                                 const rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_int* ipiv,
+                                                 const double* anorm,
+                                                 double* rcond);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssycon_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    int64_t* ipiv,
+                                                    const float* anorm,
+                                                    float* rcond);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsycon_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    int64_t* ipiv,
+                                                    const double* anorm,
+                                                    double* rcond);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_csycon_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    int64_t* ipiv,
+                                                    const float* anorm,
+                                                    float* rcond);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsycon_64(rocblas_handle handle,
+                                                    const rocblas_fill uplo,
+                                                    const int64_t n,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    int64_t* ipiv,
                                                     const double* anorm,
                                                     double* rcond);
 //! @}
@@ -13446,6 +13671,367 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zposv_strided_batched(rocblas_handle h
                                                                 rocblas_double_complex* A,
                                                                 const rocblas_int lda,
                                                                 const rocblas_stride strideA,
+                                                                rocblas_double_complex* B,
+                                                                const rocblas_int ldb,
+                                                                const rocblas_stride strideB,
+                                                                rocblas_int* info,
+                                                                const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief SYSV solves a symmetric system of ``n`` linear equations on ``n`` variables.
+
+    \details
+    It solves the system
+
+    \f[
+        A X = B
+    \f]
+
+    where A is a real symmetric (complex symmetric) ``n``-by-``n`` matrix. A is first factored with
+    Bunch-Kaufman diagonal pivoting as
+
+    \f[
+        \begin{array}{cl}
+        A = U D U^T & \: \text{if uplo is upper, or}\\
+        A = L D L^T & \: \text{if uplo is lower,}
+        \end{array}
+    \f]
+
+    as returned by \ref rocsolver_ssytrf "SYTRF" (see SYTRF for the form of the factors), and then the
+    factored form of A is used to solve the system, as in \ref rocsolver_ssytrs "SYTRS". As in
+    LAPACK, A is factored even if nrhs = 0. If D is singular, info is set and B is not modified.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    uplo        rocblas_fill.
+                Specifies whether the upper or lower triangular part of A is stored.
+                If uplo indicates lower (or upper), then the upper (or lower) part of A is not used.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the system, that is, the number of columns and rows of A.
+    @param[in]
+    nrhs        rocblas_int. nrhs >= 0.
+                The number of right hand sides, that is, the number of columns of the matrix B.
+    @param[inout]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                On entry, the symmetric matrix A.
+                On exit, the factors L (or U) and D of the factorization of A.
+    @param[in]
+    lda         rocblas_int. lda >= n.
+                The leading dimension of A.
+    @param[out]
+    ipiv        pointer to rocblas_int. Array on the GPU of dimension n.
+                The vector of pivot indices of the factorization, as returned by SYTRF.
+    @param[inout]
+    B           pointer to type. Array on the GPU of dimension ldb*nrhs.
+                On entry, the right hand side matrix B.
+                On exit, the solution matrix X, unless info > 0.
+    @param[in]
+    ldb         rocblas_int. ldb >= n.
+                The leading dimension of B.
+    @param[out]
+    info        pointer to a rocblas_int on the GPU.
+                If info = 0, successful exit.
+                If info = i > 0, D(i,i) is exactly zero; the factorization has been completed, but D
+                is singular and the solution has not been computed.
+   ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssysv(rocblas_handle handle,
+                                                const rocblas_fill uplo,
+                                                const rocblas_int n,
+                                                const rocblas_int nrhs,
+                                                float* A,
+                                                const rocblas_int lda,
+                                                rocblas_int* ipiv,
+                                                float* B,
+                                                const rocblas_int ldb,
+                                                rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsysv(rocblas_handle handle,
+                                                const rocblas_fill uplo,
+                                                const rocblas_int n,
+                                                const rocblas_int nrhs,
+                                                double* A,
+                                                const rocblas_int lda,
+                                                rocblas_int* ipiv,
+                                                double* B,
+                                                const rocblas_int ldb,
+                                                rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_csysv(rocblas_handle handle,
+                                                const rocblas_fill uplo,
+                                                const rocblas_int n,
+                                                const rocblas_int nrhs,
+                                                rocblas_float_complex* A,
+                                                const rocblas_int lda,
+                                                rocblas_int* ipiv,
+                                                rocblas_float_complex* B,
+                                                const rocblas_int ldb,
+                                                rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsysv(rocblas_handle handle,
+                                                const rocblas_fill uplo,
+                                                const rocblas_int n,
+                                                const rocblas_int nrhs,
+                                                rocblas_double_complex* A,
+                                                const rocblas_int lda,
+                                                rocblas_int* ipiv,
+                                                rocblas_double_complex* B,
+                                                const rocblas_int ldb,
+                                                rocblas_int* info);
+//! @}
+
+/*! @{
+    \brief SYSV_BATCHED solves a batch of symmetric systems of ``n`` linear equations on ``n`` variables.
+
+    \details
+    For each instance l in the batch, it solves the system
+
+    \f[
+        A_l X_l = B_l
+    \f]
+
+    where \f$A_l\f$ is a real symmetric (complex symmetric) ``n``-by-``n`` matrix. \f$A_l\f$ is
+    first factored with Bunch-Kaufman diagonal pivoting as
+
+    \f[
+        \begin{array}{cl}
+        A_l = U_l D_l U_l^T & \: \text{if uplo is upper, or}\\
+        A_l = L_l D_l L_l^T & \: \text{if uplo is lower,}
+        \end{array}
+    \f]
+
+    as returned by \ref rocsolver_ssytrf_batched "SYTRF_BATCHED" (see SYTRF for the form of the factors), and
+    then the factored form of \f$A_l\f$ is used to solve the system. As in LAPACK, \f$A_l\f$ is
+    factored even if nrhs = 0. If \f$D_l\f$ is singular, info[l] is set and \f$B_l\f$ is not modified.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    uplo        rocblas_fill.
+                Specifies whether the upper or lower triangular part of A_l is stored.
+                If uplo indicates lower (or upper), then the upper (or lower) part of A_l is not used.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the system, that is, the number of columns and rows of A_l.
+    @param[in]
+    nrhs        rocblas_int. nrhs >= 0.
+                The number of right hand sides, that is, the number of columns of the matrices B_l.
+    @param[inout]
+    A           array of pointers to type. Each pointer points to an array on the GPU of dimension lda*n.
+                On entry, the symmetric matrices A_l.
+                On exit, the factors L_l (or U_l) and D_l of the factorization of A_l.
+    @param[in]
+    lda         rocblas_int. lda >= n.
+                The leading dimension of A_l.
+    @param[out]
+    ipiv        pointer to rocblas_int. Array on the GPU (the size depends on the value of strideP).
+                The vectors ipiv_l of pivot indices of the factorizations, as returned by SYTRF.
+    @param[in]
+    strideP     rocblas_stride.
+                Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
+                There is no restriction for the value of strideP. The normal use case is strideP >= n.
+    @param[inout]
+    B           array of pointers to type. Each pointer points to an array on the GPU of dimension ldb*nrhs.
+                On entry, the right hand side matrices B_l.
+                On exit, the solution matrix X_l of each system in the batch, unless info[l] > 0.
+    @param[in]
+    ldb         rocblas_int. ldb >= n.
+                The leading dimension of B_l.
+    @param[out]
+    info        pointer to rocblas_int. Array of batch_count integers on the GPU.
+                If info[l] = 0, successful exit for system l.
+                If info[l] = i > 0, D_l(i,i) is exactly zero; the factorization of A_l has been
+                completed, but D_l is singular and the solution of system l has not been computed.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of instances (systems) in the batch.
+   ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssysv_batched(rocblas_handle handle,
+                                                        const rocblas_fill uplo,
+                                                        const rocblas_int n,
+                                                        const rocblas_int nrhs,
+                                                        float* const A[],
+                                                        const rocblas_int lda,
+                                                        rocblas_int* ipiv,
+                                                        const rocblas_stride strideP,
+                                                        float* const B[],
+                                                        const rocblas_int ldb,
+                                                        rocblas_int* info,
+                                                        const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsysv_batched(rocblas_handle handle,
+                                                        const rocblas_fill uplo,
+                                                        const rocblas_int n,
+                                                        const rocblas_int nrhs,
+                                                        double* const A[],
+                                                        const rocblas_int lda,
+                                                        rocblas_int* ipiv,
+                                                        const rocblas_stride strideP,
+                                                        double* const B[],
+                                                        const rocblas_int ldb,
+                                                        rocblas_int* info,
+                                                        const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_csysv_batched(rocblas_handle handle,
+                                                        const rocblas_fill uplo,
+                                                        const rocblas_int n,
+                                                        const rocblas_int nrhs,
+                                                        rocblas_float_complex* const A[],
+                                                        const rocblas_int lda,
+                                                        rocblas_int* ipiv,
+                                                        const rocblas_stride strideP,
+                                                        rocblas_float_complex* const B[],
+                                                        const rocblas_int ldb,
+                                                        rocblas_int* info,
+                                                        const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsysv_batched(rocblas_handle handle,
+                                                        const rocblas_fill uplo,
+                                                        const rocblas_int n,
+                                                        const rocblas_int nrhs,
+                                                        rocblas_double_complex* const A[],
+                                                        const rocblas_int lda,
+                                                        rocblas_int* ipiv,
+                                                        const rocblas_stride strideP,
+                                                        rocblas_double_complex* const B[],
+                                                        const rocblas_int ldb,
+                                                        rocblas_int* info,
+                                                        const rocblas_int batch_count);
+//! @}
+
+/*! @{
+    \brief SYSV_STRIDED_BATCHED solves a batch of symmetric systems of ``n`` linear equations on ``n`` variables.
+
+    \details
+    For each instance l in the batch, it solves the system
+
+    \f[
+        A_l X_l = B_l
+    \f]
+
+    where \f$A_l\f$ is a real symmetric (complex symmetric) ``n``-by-``n`` matrix. \f$A_l\f$ is
+    first factored with Bunch-Kaufman diagonal pivoting as
+
+    \f[
+        \begin{array}{cl}
+        A_l = U_l D_l U_l^T & \: \text{if uplo is upper, or}\\
+        A_l = L_l D_l L_l^T & \: \text{if uplo is lower,}
+        \end{array}
+    \f]
+
+    as returned by \ref rocsolver_ssytrf_strided_batched "SYTRF_STRIDED_BATCHED" (see SYTRF for the form of the factors), and
+    then the factored form of \f$A_l\f$ is used to solve the system. As in LAPACK, \f$A_l\f$ is
+    factored even if nrhs = 0. If \f$D_l\f$ is singular, info[l] is set and \f$B_l\f$ is not modified.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    uplo        rocblas_fill.
+                Specifies whether the upper or lower triangular part of A_l is stored.
+                If uplo indicates lower (or upper), then the upper (or lower) part of A_l is not used.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The order of the system, that is, the number of columns and rows of A_l.
+    @param[in]
+    nrhs        rocblas_int. nrhs >= 0.
+                The number of right hand sides, that is, the number of columns of the matrices B_l.
+    @param[inout]
+    A           pointer to type. Array on the GPU (the size depends on the value of strideA).
+                On entry, the symmetric matrices A_l.
+                On exit, the factors L_l (or U_l) and D_l of the factorization of A_l.
+    @param[in]
+    lda         rocblas_int. lda >= n.
+                The leading dimension of A_l.
+    @param[in]
+    strideA     rocblas_stride.
+                Stride from the start of one matrix A_l to the next one A_(l+1).
+                There is no restriction for the value of strideA. The normal use case is strideA >= lda*n.
+    @param[out]
+    ipiv        pointer to rocblas_int. Array on the GPU (the size depends on the value of strideP).
+                The vectors ipiv_l of pivot indices of the factorizations, as returned by SYTRF.
+    @param[in]
+    strideP     rocblas_stride.
+                Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
+                There is no restriction for the value of strideP. The normal use case is strideP >= n.
+    @param[inout]
+    B           pointer to type. Array on the GPU (the size depends on the value of strideB).
+                On entry, the right hand side matrices B_l.
+                On exit, the solution matrix X_l of each system in the batch, unless info[l] > 0.
+    @param[in]
+    ldb         rocblas_int. ldb >= n.
+                The leading dimension of B_l.
+    @param[in]
+    strideB     rocblas_stride.
+                Stride from the start of one matrix B_l to the next one B_(l+1).
+                There is no restriction for the value of strideB. The normal use case is strideB >= ldb*nrhs.
+    @param[out]
+    info        pointer to rocblas_int. Array of batch_count integers on the GPU.
+                If info[l] = 0, successful exit for system l.
+                If info[l] = i > 0, D_l(i,i) is exactly zero; the factorization of A_l has been
+                completed, but D_l is singular and the solution of system l has not been computed.
+    @param[in]
+    batch_count rocblas_int. batch_count >= 0.
+                Number of instances (systems) in the batch.
+   ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssysv_strided_batched(rocblas_handle handle,
+                                                                const rocblas_fill uplo,
+                                                                const rocblas_int n,
+                                                                const rocblas_int nrhs,
+                                                                float* A,
+                                                                const rocblas_int lda,
+                                                                const rocblas_stride strideA,
+                                                                rocblas_int* ipiv,
+                                                                const rocblas_stride strideP,
+                                                                float* B,
+                                                                const rocblas_int ldb,
+                                                                const rocblas_stride strideB,
+                                                                rocblas_int* info,
+                                                                const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsysv_strided_batched(rocblas_handle handle,
+                                                                const rocblas_fill uplo,
+                                                                const rocblas_int n,
+                                                                const rocblas_int nrhs,
+                                                                double* A,
+                                                                const rocblas_int lda,
+                                                                const rocblas_stride strideA,
+                                                                rocblas_int* ipiv,
+                                                                const rocblas_stride strideP,
+                                                                double* B,
+                                                                const rocblas_int ldb,
+                                                                const rocblas_stride strideB,
+                                                                rocblas_int* info,
+                                                                const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_csysv_strided_batched(rocblas_handle handle,
+                                                                const rocblas_fill uplo,
+                                                                const rocblas_int n,
+                                                                const rocblas_int nrhs,
+                                                                rocblas_float_complex* A,
+                                                                const rocblas_int lda,
+                                                                const rocblas_stride strideA,
+                                                                rocblas_int* ipiv,
+                                                                const rocblas_stride strideP,
+                                                                rocblas_float_complex* B,
+                                                                const rocblas_int ldb,
+                                                                const rocblas_stride strideB,
+                                                                rocblas_int* info,
+                                                                const rocblas_int batch_count);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zsysv_strided_batched(rocblas_handle handle,
+                                                                const rocblas_fill uplo,
+                                                                const rocblas_int n,
+                                                                const rocblas_int nrhs,
+                                                                rocblas_double_complex* A,
+                                                                const rocblas_int lda,
+                                                                const rocblas_stride strideA,
+                                                                rocblas_int* ipiv,
+                                                                const rocblas_stride strideP,
                                                                 rocblas_double_complex* B,
                                                                 const rocblas_int ldb,
                                                                 const rocblas_stride strideB,
