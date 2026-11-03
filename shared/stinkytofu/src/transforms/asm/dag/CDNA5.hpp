@@ -2662,6 +2662,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // The stall in front of a barrier wait (s_wait_dscnt / s_wait_tensorcnt, not simulated)
             // lets the queued WMMAs finish: take the WMMA queue as empty.
             if (isBarrierWait(*barrier->inst)) resetActiveWindow();
+            // This barrier may be opening a ds stage whose batches were counted from its planned
+            // window. It can issue later than that (a predecessor was held, an SCC chain, an open
+            // barrier pair). Count the batches from here; the stage's planned end stays.
+            dsSpread_.noteOpen(barrier->id, wmmaIssuedCountThisRegion_);
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -3709,6 +3713,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             int start = 0;
             int end = INT_MAX;
             int drain = 0;  // the drain of the barrier that sets `end`
+            // The nearest cut that sets `start`: the barrier this load waits behind. noteOpen
+            // moves the stage when that barrier issues. A farther cut replaces it only by being
+            // strictly later; a tie keeps the nearer cut, then the smaller node id.
+            unsigned opener = UINT_MAX;
+            int openerHop = INT_MAX;
             for (const auto* edges : {&deps.dag.graph, &predsRef}) {
                 const bool forward = edges == &deps.dag.graph;
                 std::vector<unsigned> frontier{id};
@@ -3719,7 +3728,17 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                             const int w = cutWindow(m);
                             if (w >= 0) {
                                 if (!forward) {
-                                    start = std::max({start, w, earliestAt[m]});
+                                    const int at = std::max(w, earliestAt[m]);
+                                    const bool first = opener == UINT_MAX;
+                                    const bool later = at > start;
+                                    const bool nearer = at == start && hop < openerHop;
+                                    const bool smallerId =
+                                        at == start && hop == openerHop && m < opener;
+                                    if (first || later || nearer || smallerId) {
+                                        start = at;
+                                        opener = m;
+                                        openerHop = hop;
+                                    }
                                 } else if (w < end) {
                                     end = w;
                                     drain = barrierDrain(*deps.dag.nodes[m].inst);
@@ -3733,7 +3752,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     frontier = std::move(next);
                 }
             }
-            loads.push_back({id, start, end, earliestAt[id], drain});
+            loads.push_back({id, start, end, earliestAt[id], drain, opener});
         }
         const int batch = std::max(1, dagFeatures.dsBatchWmmas);
         // The most loads the LDS takes in one batch: its credits (readQueueDepth, each held
