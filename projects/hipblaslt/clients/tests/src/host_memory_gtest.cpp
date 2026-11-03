@@ -75,6 +75,8 @@ namespace
 
     TEST(HostMemory_pre_checkin, next_test_of_the_same_shape_reuses_the_large_buffer)
     {
+        if(memory_pool<h_memory>::FreesBeforeEachGet())
+            GTEST_SKIP() << "the pool on this host frees its idle buffers before every request";
         memory_pool<h_memory>::ReleaseCached();
         auto first = memory_pool<h_memory>::Get(kHostPoolRetainLimit);
         ASSERT_NE(first.get(), nullptr);

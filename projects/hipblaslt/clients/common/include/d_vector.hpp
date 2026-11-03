@@ -251,6 +251,20 @@ public:
         Instance().restore(dm);
     }
 
+    // True on a Windows system with not enough system memory for pool management: every request
+    // frees the idle buffers before it allocates, so nothing is reused.
+    static bool FreesBeforeEachGet()
+    {
+#ifdef _WIN32
+        MEMORYSTATUSEX memStatus = {};
+        memStatus.dwLength       = sizeof(memStatus);
+        // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
+        return GlobalMemoryStatusEx(&memStatus) && memStatus.ullTotalPhys <= (128ULL << 30);
+#else
+        return false;
+#endif
+    }
+
     // Release only idle buffers returned to the pool; live allocations remain owned by callers.
     static void ReleaseCached()
     {
@@ -312,21 +326,8 @@ private:
     M get(size_t bytes, bool use_HMM = false)
     {
         auto& pool = use_HMM ? m_pool_managed : m_pool;
-        
-        // For Windows system with not enough system memory, 
-        // not suitable for memory pool management when it needs another allocation
-        #ifdef _WIN32
-        MEMORYSTATUSEX memStatus = {};
-        memStatus.dwLength = sizeof(memStatus);
-        if(GlobalMemoryStatusEx(&memStatus))
-        {
-            // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
-            if(memStatus.ullTotalPhys <= (128ULL << 30))
-            {
-                pool.clear();
-            }
-        }
-        #endif
+        if(FreesBeforeEachGet())
+            pool.clear();
 
         auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
         bool  hit  = it != pool.end() && // found a buffer that is large enough ..

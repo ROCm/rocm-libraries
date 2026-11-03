@@ -169,7 +169,7 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
         if(!why__.empty())                                     \
         {                                                      \
             hipblaslt_cerr << "error: " << why__ << std::endl; \
-            return;                                            \
+            exit(EXIT_FAILURE);                                \
         }                                                      \
     } while(0)
 
