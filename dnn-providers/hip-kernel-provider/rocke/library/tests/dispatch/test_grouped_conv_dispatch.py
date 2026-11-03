@@ -24,6 +24,7 @@ CPU only: nothing is compiled or launched.
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import json
 from pathlib import Path
 
@@ -626,6 +627,45 @@ def test_launch_plan_of_the_runtime_channel_mfma_dgrad():
         "direct_dgrad_transpose_rtc",
         "direct_dgrad_reorganize_rtc",
     ]
+    plan = gc.launch_plan_for(req, spec)
+    got = [
+        (
+            s.identity,
+            s.grid,
+            s.block,
+            [a["name"] for a in s.signature],
+            s.buffers,
+            plan.values(s, _PTRS, _SIZES),
+        )
+        for s in plan.steps
+    ]
+    want, workspaces, _ = _cache_side_plan(spec, req, _PTRS, _SIZES)
+    assert got == want
+    assert dict(plan.workspaces) == workspaces
+
+
+def test_launch_plan_of_an_fprop_single_instance_with_cpg_ne_kpg():
+    """Every registered fused/4c row has cpg == kpg (direct_grouped_dgrad_4c
+    fixes cpg == kpg == 4 by construction), where the transposed problem
+    equals the original -- not enough to catch a launch plan reading the
+    wrong one. Pin a fused instance with cpg != kpg against the AOT run path,
+    which is unambiguous about which problem is transposed."""
+    (base,) = [
+        i.identity
+        for i in gc.registered_conv_grouped_instances("gfx950", direction="dgrad")
+        if i.identity.algorithm == "direct_grouped_dgrad_fused" and i.identity.cpg == 8
+    ][:1]
+    identity = dataclasses.replace(base, cpg=8, kpg=16)
+    spec = gc.ConvInstanceSpec(
+        name=identity.label(),
+        identity=identity,
+        block=gc._instance_block(identity),
+        helpers=gc._instance_helpers(identity),
+    )
+    req = _req(arch="gfx950", direction="dgrad", N=2, C=32, K=64, G=4, Hi=56, Wi=56)
+    ok, why = gc._admits(identity, req)
+    assert ok, why
+    assert not spec.helpers
     plan = gc.launch_plan_for(req, spec)
     got = [
         (

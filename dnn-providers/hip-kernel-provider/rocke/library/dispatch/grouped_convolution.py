@@ -781,11 +781,16 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
     if not spec.helpers:
         # FPROP_SINGLE dgrad (direct_grouped_dgrad_4c / _fused) is a forward
         # pass over the transposed problem too, with no weight-transform
-        # helpers to gate on -- see _signature()'s matching branch.
-        args_direction = (
-            "fwd" if ident.algorithm in DIRECT_DGRAD_FPROP_SINGLE else spec.direction
-        )
-        args = ConvArgs.from_problem(problem, direction=args_direction)
+        # helpers to gate on -- see _signature()'s matching branch. Its
+        # kernargs must come from the transposed problem (as the AOT run path
+        # and direct_kernel_sweep.plan_for do), not the original: they agree
+        # only when cpg == kpg (every registered row today), so using
+        # ``problem`` here is silently wrong once cpg != kpg is registered.
+        if ident.algorithm in DIRECT_DGRAD_FPROP_SINGLE:
+            launch_spec, _ = _direct_launch_spec(ident, req)
+            args = ConvArgs.from_problem(launch_spec.problem, direction="fwd")
+        else:
+            args = ConvArgs.from_problem(problem, direction=spec.direction)
         return ConvLaunchPlan((step(args),))
     split_c = _split_c(ident)
     if split_c > 1:
