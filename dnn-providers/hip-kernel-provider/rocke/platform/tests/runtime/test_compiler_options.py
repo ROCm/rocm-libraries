@@ -4,29 +4,47 @@
 """The measured table of ``-mllvm`` options each compiler accepts, and the
 check that keeps an option the loaded compiler does not know away from COMGR.
 
+Most tests run in this process and need no COMGR: every public compile entry
+point is called with the loaded compiler's identity pinned to one the table
+records as refusing the option, and must refuse before COMGR is reached.
+
 LLVM's option parser exits the whole process on an unknown option, so the
-tests that compile do it in a child process: a regression that lets the option
-through ends the child, and the test reports it instead of pytest dying.
+tests that compile with the real loaded compiler do it in a child process: a
+regression that lets the option through ends the child, and the test reports
+it instead of pytest dying.
+
+Whether the committed answers match the loaded compiler is the CTest gate
+``rocke_compiler_options_reproducibility`` (``tools/gen_compiler_options.py
+--check``), not a test here.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
-import sys
 import textwrap
-from pathlib import Path
+from collections.abc import Callable, Iterator
+from unittest import mock
 
 import pytest
-from rocke.runtime import comgr
+from rocke.core.ir import KernelDef, Region
+from rocke.helpers.compile import (
+    KernelModule,
+    accepted_comgr_options,
+    compile_kernel,
+    compile_module,
+    lower_kernel_for_comgr,
+)
+from rocke.runtime import CompilerOptionNotAccepted, comgr
 from rocke.runtime import compiler_options as table
-from rocke.runtime.comgr import CompilerInfo
-from rocke.runtime.compiler_options import CompilerOptionNotAccepted
+from rocke.runtime.comgr import (
+    CompilerInfo,
+    build_hsaco_from_llvm_ir,
+    build_hsaco_from_llvm_modules,
+)
+from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 OPTION = "-amdgpu-mfma-vgpr-form"
-PLATFORM = Path(__file__).resolve().parents[2]
-PKG_ROOT = str(PLATFORM / "python")
+ISA = "amdgcn-amd-amdhsa--gfx942"
 
 
 def _compiler(*version: int) -> CompilerInfo:
@@ -42,26 +60,85 @@ def _compiler(*version: int) -> CompilerInfo:
 
 def _measured_major(accepted: bool) -> int:
     """An LLVM major whose committed answer for OPTION is ``accepted``."""
-    for major in json.loads(table.TABLE_PATH.read_text())["options"][OPTION]:
-        if table.lookup(OPTION, int(major)).accepted is accepted:
-            return int(major)
+    for major, answer in table.measured_answers()[OPTION].items():
+        if answer.accepted is accepted:
+            return major
     pytest.fail(f"the table has no LLVM version that {accepted=} for {OPTION}")
+
+
+def _vgpr_form_kernel(name: str) -> KernelDef:
+    """An empty kernel that asks for VGPR-form MFMAs, so it needs OPTION."""
+    kernel = KernelDef(name, [], Region("entry"))
+    kernel.attrs["mfma_vgpr_form"] = True
+    return kernel
+
+
+def _empty_ir(name: str) -> str:
+    return f"define amdgpu_kernel void @{name}() {{\n  ret void\n}}\n"
 
 
 # --- the table ------------------------------------------------------------------
 
 
 def test_table_answers_are_measured_facts() -> None:
-    doc = json.loads(table.TABLE_PATH.read_text(encoding="utf-8"))
-    assert doc["schema"] == table.SCHEMA
-    assert OPTION in table.measured_options()
-    for name, column in doc["options"].items():
+    answers = table.measured_answers()
+    assert OPTION in answers
+    for name, column in answers.items():
         assert column, f"{name} has no measured compiler"
-        for major, cell in column.items():
-            assert isinstance(cell["accepted"], bool)
-            assert cell["verified_on"].startswith(f"LLVM {major}.")
+        for major, answer in column.items():
+            assert answer == table.lookup(name, major)
+            assert answer.verified_on.startswith(f"LLVM {major}.")
             # A refusal carries the compiler's own words; an acceptance none.
-            assert bool(cell["evidence"]) is not cell["accepted"], (name, major)
+            assert bool(answer.evidence) is not answer.accepted, (name, major)
+
+
+def test_committed_file_is_what_format_table_writes() -> None:
+    """The tool writes with format_table, so a regenerated table differs from
+    the committed one only where a measurement changed."""
+    text = table.TABLE_PATH.read_text(encoding="utf-8")
+    assert table.format_table(table.parse_table(text)) == text
+    assert table.parse_table(text) == table.measured_answers()
+
+
+def _committed_with(old: str, new: str) -> str:
+    """The committed table text with its first ``old`` replaced by ``new``."""
+    text = table.TABLE_PATH.read_text(encoding="utf-8")
+    assert old in text
+    return text.replace(old, new, 1)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            table.SCHEMA,
+            "rocke.compiler_options/v0",
+            (
+                r"schema='rocke\.compiler_options/v0', expected "
+                r"'rocke\.compiler_options/v1'"
+            ),
+        ),
+        # bool("false") is True: a string here must be refused, not read.
+        (
+            '"accepted": false',
+            '"accepted": "false"',
+            r"on LLVM 20 accepted='false', expected true or false",
+        ),
+        (
+            '"verified_on": "LLVM 20.0.0"',
+            '"verified_on": 20',
+            r"on LLVM 20 evidence=.* and verified_on=20, expected strings",
+        ),
+        ('"evidence": ', '"reason": ', r"exactly the keys accepted, evidence"),
+        ('"20": {', '"llvm20": {', r"expected an object keyed by LLVM major"),
+    ],
+    ids=["schema", "accepted_not_bool", "verified_on_not_str", "key", "major"],
+)
+def test_parse_table_refuses_a_malformed_table(
+    old: str, new: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        table.parse_table(_committed_with(old, new))
 
 
 def test_backend_options_reads_only_mllvm_values() -> None:
@@ -73,6 +150,14 @@ def test_backend_options_reads_only_mllvm_values() -> None:
         table.backend_options(["-O3", "-mllvm"])
     with pytest.raises(ValueError, match="'-mllvm=' names no option"):
         table.backend_options(["-O3", "-mllvm="])
+
+
+def test_the_refusal_is_public_in_rocke_runtime() -> None:
+    import rocke.runtime
+
+    assert "CompilerOptionNotAccepted" in rocke.runtime.__all__
+    assert CompilerOptionNotAccepted is table.CompilerOptionNotAccepted
+    assert issubclass(CompilerOptionNotAccepted, ValueError)
 
 
 # --- the check, against the committed answers -------------------------------------
@@ -90,7 +175,6 @@ def test_refuses_an_option_the_compiler_does_not_accept() -> None:
     assert "kernel 'k_vgpr_form'" in text
     assert f"'-mllvm {OPTION}'" in text
     assert f"LLVM {major}.0.0" in text
-    assert isinstance(err.value, ValueError)
 
 
 def test_accepts_an_option_the_compiler_accepts() -> None:
@@ -123,38 +207,134 @@ def test_options_without_mllvm_need_no_compiler_identity() -> None:
         table.require_accepted(["-mllvm", OPTION], compiler=_compiler(), needed_by="k")
 
 
-# --- real COMGR, in a child process -------------------------------------------------
+# --- every public entry point refuses, in this process ------------------------------
 
 
-def _loaded_major() -> int:
+@pytest.fixture
+def refusing_compiler_loaded() -> Iterator[CompilerInfo]:
+    """Report, for this test, a loaded compiler the table records as refusing
+    OPTION.
+
+    The identity is the only thing replaced: nothing reaches COMGR while the
+    check holds, so this runs on any host. An entry point that lost its check
+    would go on to the real COMGR, and whatever happens there (a compile, a
+    ``ComgrError``, or the process ending where the real compiler refuses the
+    option) fails the test.
+    """
+    refusing = _compiler(_measured_major(accepted=False), 0, 0)
+    with mock.patch.object(comgr, "loaded_compiler_info", return_value=refusing):
+        yield refusing
+
+
+# Each public entry point that can hand OPTION to COMGR, called as a user
+# would, and the name its refusal gives to what is being compiled.
+_ENTRY_POINTS: dict[str, tuple[Callable[[], object], str]] = {
+    "compile_kernel": (
+        lambda: compile_kernel(
+            _vgpr_form_kernel("k_vgpr_form"), arch="gfx942", backend="python"
+        ),
+        "kernel 'k_vgpr_form'",
+    ),
+    "compile_module": (
+        lambda: compile_module(
+            KernelModule(
+                primary=_vgpr_form_kernel("k_primary"),
+                companions={"merge": _vgpr_form_kernel("k_merge")},
+            ),
+            arch="gfx942",
+            backend="python",
+        ),
+        "KernelModule kernels ['k_primary', 'k_merge']",
+    ),
+    "lower_kernel_for_comgr": (
+        lambda: lower_kernel_for_comgr(
+            _vgpr_form_kernel("k_vgpr_form"), arch="gfx942", backend="python"
+        ),
+        "kernel 'k_vgpr_form'",
+    ),
+    "accepted_comgr_options": (
+        lambda: accepted_comgr_options(_vgpr_form_kernel("k_vgpr_form")),
+        "kernel 'k_vgpr_form'",
+    ),
+    "build_hsaco_from_llvm_ir": (
+        lambda: build_hsaco_from_llvm_ir(
+            _empty_ir("k"), isa=ISA, options=["-O3", "-mllvm", OPTION]
+        ),
+        "this COMGR compile",
+    ),
+    "build_hsaco_from_llvm_ir_fresh_process": (
+        lambda: build_hsaco_from_llvm_ir(
+            _empty_ir("k"),
+            isa=ISA,
+            options=["-O3", "-mllvm", OPTION],
+            fresh_process=True,
+        ),
+        "this COMGR compile",
+    ),
+    "build_hsaco_from_llvm_ir_joined_spelling": (
+        lambda: build_hsaco_from_llvm_ir(
+            _empty_ir("k"), isa=ISA, options=["-O3", f"-mllvm={OPTION}"]
+        ),
+        "this COMGR compile",
+    ),
+    "build_hsaco_from_llvm_modules": (
+        lambda: build_hsaco_from_llvm_modules(
+            [_empty_ir("k_a"), _empty_ir("k_b")],
+            isa=ISA,
+            options=["-O3", "-mllvm", OPTION],
+        ),
+        "this COMGR compile",
+    ),
+}
+
+
+@pytest.mark.parametrize("entry_point", list(_ENTRY_POINTS))
+def test_every_entry_point_refuses_before_comgr(
+    entry_point: str, refusing_compiler_loaded: CompilerInfo
+) -> None:
+    call, needed_by = _ENTRY_POINTS[entry_point]
+    with pytest.raises(CompilerOptionNotAccepted) as err:
+        call()
+    text = str(err.value)
+    assert text.startswith(f"{needed_by} needs the compiler option '-mllvm {OPTION}'")
+    assert refusing_compiler_loaded.describe() in text
+
+
+# --- the child-process environment --------------------------------------------------
+
+
+def _loaded_compiler() -> CompilerInfo:
     info = comgr.loaded_compiler_info()
     if info is None or info.llvm_version is None:
         pytest.skip("no queryable COMGR library loads on this host")
-    return info.llvm_version[0]
+    return info
 
 
-def _child_env() -> dict:
-    """This process's environment, with the COMGR it loaded named explicitly.
+def test_comgr_child_env_names_the_loaded_library() -> None:
+    info = _loaded_compiler()
+    env = comgr.comgr_child_env({"KEPT": "1", "AMD_COMGR_CACHE": "1"})
+    assert env == {
+        "KEPT": "1",
+        "ROCKE_COMGR_LIB": info.comgr_path or info.requested_comgr,
+        "AMD_COMGR_CACHE": "0",
+    }
 
-    A child that resolved COMGR on its own could load a different compiler (for
-    example the system one, where this process loaded torch's), and then answer
-    for a compiler other than the one the expected outcome was read for.
-    """
-    info = comgr.loaded_compiler_info()
-    env = dict(os.environ, AMD_COMGR_CACHE="0")
-    if info is not None and (info.comgr_path or info.requested_comgr):
-        env["ROCKE_COMGR_LIB"] = info.comgr_path or info.requested_comgr
-    return env
+
+def test_comgr_child_env_refuses_without_a_loaded_library() -> None:
+    with (
+        mock.patch.object(comgr, "loaded_compiler_info", return_value=None),
+        pytest.raises(comgr.ComgrError, match="COMGR could not be loaded"),
+    ):
+        comgr.comgr_child_env()
+
+
+# --- real COMGR, in a child process -------------------------------------------------
 
 
 def _run_child(body: str) -> subprocess.CompletedProcess:
-    env = _child_env()
-    env["PYTHONPATH"] = os.pathsep.join(
-        p for p in (PKG_ROOT, env.get("PYTHONPATH", "")) if p
-    )
     script = textwrap.dedent(
         """
-        from rocke.runtime.compiler_options import CompilerOptionNotAccepted
+        from rocke.runtime import CompilerOptionNotAccepted
         try:
             n = run()
         except CompilerOptionNotAccepted as ex:
@@ -166,10 +346,10 @@ def _run_child(body: str) -> subprocess.CompletedProcess:
         """
     )
     return subprocess.run(
-        [sys.executable, "-c", textwrap.dedent(body) + script],
+        rocke_python_command("-c", textwrap.dedent(body) + script),
         capture_output=True,
         text=True,
-        env=env,
+        env=rocke_subprocess_env(comgr.comgr_child_env()),
         timeout=600,
         check=False,
     )
@@ -203,16 +383,14 @@ def run():
 """
 
 
-def _raw_compile(options: list) -> str:
+def _raw_compile(options: list[str]) -> str:
     """A child body that hands ``options`` to the public COMGR entry point."""
     return f"""
 from rocke.runtime.comgr import build_hsaco_from_llvm_ir
 
 def run():
-    ir = "define amdgpu_kernel void @k() {{\\n  ret void\\n}}\\n"
-    hsaco, _ = build_hsaco_from_llvm_ir(
-        ir, isa="amdgcn-amd-amdhsa--gfx942", options={options!r}
-    )
+    ir = {_empty_ir("k")!r}
+    hsaco, _ = build_hsaco_from_llvm_ir(ir, isa={ISA!r}, options={options!r})
     return len(hsaco)
 """
 
@@ -235,7 +413,7 @@ def test_compile_follows_the_table_and_never_exits_the_process(body: str) -> Non
     """On a compiler that accepts the option the kernel compiles as before; on
     one that does not, the compile is refused with the kernel, option and
     compiler named. Either way the process survives to say so."""
-    expected = _expected_outcome(_loaded_major())
+    expected = _expected_outcome(_loaded_compiler().llvm_version[0])
     proc = _run_child(body)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert proc.stdout.startswith(expected), proc.stdout + proc.stderr
@@ -243,22 +421,3 @@ def test_compile_follows_the_table_and_never_exits_the_process(body: str) -> Non
         assert f"'-mllvm {OPTION}'" in proc.stdout
     if expected == "REFUSED" and body in (_KERNEL, _KERNEL_OPTIONS):
         assert "kernel 'k_vgpr_form'" in proc.stdout
-
-
-def test_committed_column_matches_this_compiler() -> None:
-    """Re-measuring this host's compiler gives the committed answers."""
-    tool = PLATFORM / "tools" / "gen_compiler_options.py"
-    if not tool.is_file():
-        pytest.skip(f"source-tree check: {tool.name} is not installed")
-    major = _loaded_major()
-    if table.lookup(OPTION, major) is None:
-        pytest.skip(f"no committed column for LLVM {major}")
-    proc = subprocess.run(
-        [sys.executable, str(tool), "--check"],
-        capture_output=True,
-        text=True,
-        env=_child_env(),
-        timeout=600,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stdout + proc.stderr

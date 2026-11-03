@@ -27,7 +27,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import NoReturn
 
-from rocke.runtime.compiler_options import CompilerOptionNotAccepted
+from rocke.runtime import CompilerOptionNotAccepted
 
 __all__ = [
     "REQUIRE_COMPILER_TOOLS_ENV",

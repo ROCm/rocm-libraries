@@ -8,7 +8,7 @@ has to be known before COMGR is called. This tool writes its table,
 ``python/rocke/runtime/data/compiler_options.json``.
 
 For every option in the table (plus any ``--option``), a child process loads
-the COMGR this process resolved and compiles an empty kernel with
+the COMGR this process loaded and compiles an empty kernel with
 ``-O3 -mllvm <option>``. The child goes straight to the COMGR pipeline, past
 the table check, because measuring is what fills the table:
 
@@ -20,6 +20,10 @@ the table check, because measuring is what fills the table:
 
 A host can only measure its own compiler, so a run writes one column, keyed by
 the loaded compiler's LLVM major version, and leaves the others alone.
+``--check`` writes nothing and fails when that column differs from the
+measurement or is missing; CTest runs it as
+``rocke_compiler_options_reproducibility``, so CI fails when its compiler's
+committed answers drift.
 
 Usage:
   python rocke/platform/tools/gen_compiler_options.py            # update this compiler's column
@@ -30,20 +34,20 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-ROCKE = HERE.parent  # tools -> rocke/platform
-PYTHON_ROOT = ROCKE / "python"
-if str(PYTHON_ROOT) not in sys.path:
+# A source checkout keeps the package beside tools/. An installed test
+# artifact stages this script elsewhere and supplies the package on
+# PYTHONPATH instead.
+PYTHON_ROOT = Path(__file__).resolve().parents[1] / "python"
+if (PYTHON_ROOT / "rocke").is_dir() and str(PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_ROOT))
 
 from rocke.runtime import comgr
 from rocke.runtime import compiler_options as table
+from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 # The limit on one probe compile, which runs in its own child process.
 PROBE_TIMEOUT_S = 120
@@ -62,17 +66,13 @@ print("accepted")
 _UNKNOWN = "Unknown command line argument"
 
 
-def measure(option: str, lib_path: str) -> tuple:
-    """``(accepted, evidence)`` for one option on the COMGR at ``lib_path``."""
-    env = dict(os.environ, ROCKE_COMGR_LIB=lib_path, AMD_COMGR_CACHE="0")
-    env["PYTHONPATH"] = os.pathsep.join(
-        p for p in (str(PYTHON_ROOT), env.get("PYTHONPATH", "")) if p
-    )
+def measure(option: str) -> tuple[bool, str]:
+    """``(accepted, evidence)`` for one option on the COMGR this process loaded."""
     proc = subprocess.run(
-        [sys.executable, "-c", _CHILD, option],
+        rocke_python_command("-c", _CHILD, option),
         capture_output=True,
         text=True,
-        env=env,
+        env=rocke_subprocess_env(comgr.comgr_child_env()),
         timeout=PROBE_TIMEOUT_S,
         check=False,
     )
@@ -110,42 +110,38 @@ def main() -> int:
         raise SystemExit(
             f"cannot identify the loaded compiler: {info and info.describe()}"
         )
-    lib_path = info.comgr_path or info.requested_comgr
-    if not lib_path:
-        raise SystemExit(
-            f"the loaded COMGR has no path to hand the probe: {info.describe()}"
-        )
-    major = str(info.llvm_version[0])
+    major = info.llvm_version[0]
     verified_on = "LLVM " + ".".join(map(str, info.llvm_version))
 
-    doc = json.loads(table.TABLE_PATH.read_text(encoding="utf-8"))
-    options = doc["options"]
-    names = list(options) + [o for o in args.option if o not in options]
+    answers = table.measured_answers()
+    names = list(answers) + [o for o in args.option if o not in answers]
     drift = []
     for name in names:
-        accepted, evidence = measure(name, lib_path)
+        accepted, evidence = measure(name)
         print(f"{name}: {'accepted' if accepted else 'not accepted'} on {verified_on}")
-        committed = options.get(name, {}).get(major)
-        if committed is None or committed["accepted"] != accepted:
+        committed = answers.get(name, {}).get(major)
+        if committed is None:
+            drift.append(f"{name} on LLVM {major}: no committed answer")
+        elif committed.accepted != accepted:
             drift.append(
-                f"{name} on LLVM {major}: committed {committed}, measured {accepted}"
+                f"{name} on LLVM {major}: committed accepted={committed.accepted}, "
+                f"measured accepted={accepted}"
             )
-        options.setdefault(name, {})[major] = {
-            "accepted": accepted,
-            "evidence": evidence,
-            "verified_on": verified_on,
-        }
+        answers.setdefault(name, {})[major] = table.Answer(
+            accepted=accepted, evidence=evidence, verified_on=verified_on
+        )
 
     if args.check:
         if drift:
             print(
-                "compiler option table differs from this compiler:", *drift, sep="\n  "
+                "compiler option table differs from this compiler; run this tool "
+                "without --check to update it:",
+                *drift,
+                sep="\n  ",
             )
             return 1
         return 0
-    for name in options:
-        options[name] = dict(sorted(options[name].items(), key=lambda kv: int(kv[0])))
-    table.TABLE_PATH.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    table.TABLE_PATH.write_text(table.format_table(answers), encoding="utf-8")
     print(f"wrote {table.TABLE_PATH}")
     return 0
 

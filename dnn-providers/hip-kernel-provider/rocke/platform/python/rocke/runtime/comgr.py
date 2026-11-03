@@ -33,6 +33,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -482,6 +483,33 @@ def require_options_accepted(options: Sequence[str] | None, *, needed_by: str) -
     require_accepted(options, compiler=_require_compiler_info(), needed_by=needed_by)
 
 
+def comgr_child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment for a child process that must compile with this
+    process's COMGR.
+
+    Starts from ``base`` (default: this process's environment) and sets
+    ``ROCKE_COMGR_LIB`` to the COMGR library this process loaded, so the child
+    cannot resolve another one (for example the system library where this
+    process loaded torch's), and ``AMD_COMGR_CACHE=0``, so COMGR's on-disk
+    cache cannot hand the child an object another process compiled. Raises
+    :class:`ComgrError` when no COMGR loads in this process.
+    """
+    info = loaded_compiler_info()
+    # The loader's own path for the mapped file when it reports one; the name
+    # this process asked the loader for otherwise.
+    lib_path = info and (info.comgr_path or info.requested_comgr)
+    if not lib_path:
+        raise ComgrError(
+            "no COMGR library is loaded in this process to give a child process "
+            f"({info.describe() if info else 'COMGR could not be loaded'}); set "
+            "ROCKE_COMGR_LIB to an explicit library"
+        )
+    env = dict(os.environ if base is None else base)
+    env["ROCKE_COMGR_LIB"] = lib_path
+    env["AMD_COMGR_CACHE"] = "0"
+    return env
+
+
 def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
     """Reject a known p8-generation mismatch against the loaded compiler.
 
@@ -684,10 +712,10 @@ def _build_in_fresh_process(
     """Compile one module in a new Python process that compiles nothing else.
 
     The child (:mod:`rocke.runtime._comgr_fresh_process`) loads the comgr
-    library this process resolved (passed as ``ROCKE_COMGR_LIB``, so a
-    torch-bundled library is kept even though the child does not import torch),
-    imports this rocke package (its root is put first on ``PYTHONPATH``) and
-    runs with comgr's own on-disk cache off (``AMD_COMGR_CACHE=0``).
+    library this process loaded and runs with comgr's own on-disk cache off
+    (:func:`comgr_child_env`; a torch-bundled library is kept even though the
+    child does not import torch), and imports this rocke package (its root is
+    put first on ``PYTHONPATH``).
     Raises :class:`ComgrError` with the child's message for a compile error and
     :class:`ComgrProcessDied` when the child dies.
     """
@@ -696,15 +724,8 @@ def _build_in_fresh_process(
     import tempfile
 
     # The parent's own checks first: the same library, the same flavor gate.
-    lib = _resolve_lib()
     _assert_ir_flavor_matches_lib(ir_text)
-    env = dict(os.environ)
-    lib_path = getattr(lib, "_name", None) or resolved_lib_path()
-    if lib_path:
-        env["ROCKE_COMGR_LIB"] = lib_path
-    # The child compiles the module itself: comgr's on-disk cache could hand
-    # back an object some other process compiled with another history.
-    env["AMD_COMGR_CACHE"] = "0"
+    env = comgr_child_env()
     pkg_root = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     )
