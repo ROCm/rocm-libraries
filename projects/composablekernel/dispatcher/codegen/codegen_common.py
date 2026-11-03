@@ -1468,11 +1468,12 @@ COMP_TDM_PC_WARP_K_REJECT_REASON = (
 # through the epilogue, so it needs an epilogue that accumulates (CShuffle); the TDM
 # epilogue overwrites C. Linear and tree reduction sum the partials in a workspace and
 # store C once, so either epilogue works; the TDM one also clips a ragged N/M tile.
-# comp_tdm and comp_tdm_v2 are the gfx1250-only pipelines StreamKKernel has been
-# validated with.
+# comp_tdm, comp_tdm_v2 and comp_tdm_pc are the gfx1250-only pipelines StreamKKernel
+# has been validated with.
 STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
-STREAMK_GFX1250_PIPELINES = ("comp_tdm", "comp_tdm_v2")
-# StreamKKernel static_asserts a row-major C for these pipelines.
+STREAMK_GFX1250_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
+# StreamKKernel static_asserts a row-major C for comp_tdm and comp_tdm_v2, and the
+# CShuffle epilogue stores nothing else (streamk_c_reject_reason).
 STREAMK_TDM_C_LAYOUT_REJECT_REASON = (
     "stream_k with a TDM pipeline supports row-major C only"
 )
@@ -1649,7 +1650,7 @@ def gfx1250_pipeline_reject_reason(
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
     support (only plain, batched and preshuffle GEMM are, and Stream-K GEMM for
-    STREAMK_GFX1250_PIPELINES; comp_tdm_pc is plain only). ``pads`` is
+    STREAMK_GFX1250_PIPELINES; comp_tdm_pc is plain and Stream-K only). ``pads`` is
     (pad_m, pad_n, pad_k); None means unknown and skips the
     pad rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
     (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
