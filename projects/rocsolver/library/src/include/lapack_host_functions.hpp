@@ -45,7 +45,7 @@ static void call_lamch(char& cmach, float& eps)
     switch(cmach)
     {
     case 'E':
-    case 'e': eps = std::numeric_limits<float>::epsilon(); return;
+    case 'e': eps = std::numeric_limits<float>::epsilon() / 2; return; // (as LAPACK's xLAMCH)
     case 'S':
     case 's': eps = std::numeric_limits<float>::min(); return;
     case 'B':
@@ -59,7 +59,7 @@ static void call_lamch(char& cmach, double& eps)
     switch(cmach)
     {
     case 'E':
-    case 'e': eps = std::numeric_limits<double>::epsilon(); return;
+    case 'e': eps = std::numeric_limits<double>::epsilon() / 2; return; // (as LAPACK's xLAMCH)
     case 'S':
     case 's': eps = std::numeric_limits<double>::min(); return;
     case 'B':
@@ -139,6 +139,50 @@ static void call_las2(T& f, T& g, T& h, T& ssmin, T& ssmax)
 template <typename T, typename S>
 static void call_lartg(T& f, T& g, S& cs, T& sn, T& r)
 {
+    if constexpr(!rocblas_is_complex<T>)
+    {
+        // real rotation as in LAPACK 3.12 (la_xlartg): r = sign(f) sqrt(f^2 + g^2), cs = |f|/|r|
+        // and sn = g/r, scaling f and g if they are out of range (the complex algorithm below
+        // computes cs = sqrt(f2/h2), which is systematically rounded down when g is small)
+        S const safmin = std::numeric_limits<S>::min();
+        S const safmax = 1 / safmin;
+        S const rtmin = std::sqrt(safmin);
+        S const rtmax = std::sqrt(safmax / 2);
+        S const f1 = std::abs(f);
+        S const g1 = std::abs(g);
+        if(g == 0)
+        {
+            cs = 1;
+            sn = 0;
+            r = f;
+        }
+        else if(f == 0)
+        {
+            cs = 0;
+            sn = std::copysign(S(1), g);
+            r = g1;
+        }
+        else if(f1 > rtmin && f1 < rtmax && g1 > rtmin && g1 < rtmax)
+        {
+            S const d = std::sqrt(f * f + g * g);
+            cs = f1 / d;
+            r = std::copysign(d, f);
+            sn = g / r;
+        }
+        else
+        {
+            S const u = std::min(safmax, std::max(safmin, std::max(f1, g1)));
+            S const fu = f / u;
+            S const gu = g / u;
+            S const d = std::sqrt(fu * fu + gu * gu);
+            cs = std::abs(fu) / d;
+            r = std::copysign(d, f);
+            sn = gu / r;
+            r *= u;
+        }
+        return;
+    }
+
     // ------------------------------------------------------
     // lartg generates a plane rotation so that
     // [  cs  sn ] * [ f ] = [ r ]
@@ -250,101 +294,99 @@ static void call_lartg(T& f, T& g, S& cs, T& sn, T& r)
             has_work = ((scale >= safmx2) && (count < 20));
         } while(has_work);
     }
-    else
+    else if(scale <= safmn2)
     {
-        if(scale <= safmn2)
+        if((g == czero) || disnan(std::abs(g)))
         {
-            if((g == czero) || disnan(std::abs(g)))
-            {
-                cs = one;
-                sn = czero;
-                r = f;
-                return;
-            }
-            do
-            {
-                count = count - 1;
-                fs = fs * safmx2;
-                gs = gs * safmx2;
-                scale = scale * safmx2;
-                has_work = (scale <= safmn2);
-            } while(has_work);
+            cs = one;
+            sn = czero;
+            r = f;
+            return;
         }
-        f2 = abssq(fs);
-        g2 = abssq(gs);
-        if(f2 <= std::max(g2, one) * safmin)
+        do
         {
-            //
-            //        this is a rare case: f is very small.
-            //
-            if(f == czero)
-            {
-                cs = zero;
-                r = dlapy2(dble(g), dimag(g));
-                //           do complex/real division explicitly with two real divisions
-                d = dlapy2(dble(gs), dimag(gs));
-                sn = dcmplx(dble(gs) / d, -dimag(gs) / d);
-                return;
-            }
-            f2s = dlapy2(dble(fs), dimag(fs));
-            //        g2 and g2s are accurate
-            //        g2 is at least safmin, and g2s is at least safmn2
-            g2s = std::sqrt(g2);
-            //        error in cs from underflow in f2s is at most
-            //        unfl / safmn2  <  sqrt(unfl*eps) .lt. eps
-            //        if max(g2,one)=g2,  then f2  <  g2*safmin,
-            //        and so cs  <  sqrt(safmin)
-            //        if max(g2,one)=one,  then f2  <  safmin
-            //        and so cs  <  sqrt(safmin)/safmn2 = sqrt(eps)
-            //        therefore, cs = f2s/g2s / sqrt( 1 + (f2s/g2s)**2 ) = f2s/g2s
-            cs = f2s / g2s;
-            //        make sure abs(ff) = 1
-            //        do complex/real division explicitly with 2 real divisions
-            if(abs1(f) > one)
-            {
-                d = dlapy2(dble(f), dimag(f));
-                ff = dcmplx(dble(f) / d, dimag(f) / d);
-            }
-            else
-            {
-                dr = safmx2 * dble(f);
-                di = safmx2 * dimag(f);
-                d = dlapy2(dr, di);
-                ff = dcmplx(dr / d, di / d);
-            }
-            sn = ff * dcmplx(dble(gs) / g2s, -dimag(gs) / g2s);
-            r = cs * f + sn * g;
+            count = count - 1;
+            fs = fs * safmx2;
+            gs = gs * safmx2;
+            scale = scale * safmx2;
+            has_work = (scale <= safmn2);
+        } while(has_work);
+    }
+    f2 = abssq(fs);
+    g2 = abssq(gs);
+    if(f2 <= std::max(g2, one) * safmin)
+    {
+        //
+        //        this is a rare case: f is very small.
+        //
+        if(f == czero)
+        {
+            cs = zero;
+            r = dlapy2(dble(g), dimag(g));
+            //           do complex/real division explicitly with two real divisions
+            d = dlapy2(dble(gs), dimag(gs));
+            sn = dcmplx(dble(gs) / d, -dimag(gs) / d);
+            return;
+        }
+        f2s = dlapy2(dble(fs), dimag(fs));
+        //        g2 and g2s are accurate
+        //        g2 is at least safmin, and g2s is at least safmn2
+        g2s = std::sqrt(g2);
+        //        error in cs from underflow in f2s is at most
+        //        unfl / safmn2  <  sqrt(unfl*eps) .lt. eps
+        //        if max(g2,one)=g2,  then f2  <  g2*safmin,
+        //        and so cs  <  sqrt(safmin)
+        //        if max(g2,one)=one,  then f2  <  safmin
+        //        and so cs  <  sqrt(safmin)/safmn2 = sqrt(eps)
+        //        therefore, cs = f2s/g2s / sqrt( 1 + (f2s/g2s)**2 ) = f2s/g2s
+        cs = f2s / g2s;
+        //        make sure abs(ff) = 1
+        //        do complex/real division explicitly with 2 real divisions
+        if(abs1(f) > one)
+        {
+            d = dlapy2(dble(f), dimag(f));
+            ff = dcmplx(dble(f) / d, dimag(f) / d);
         }
         else
         {
-            //
-            //        this is the most common case.
-            //        neither f2 nor f2/g2 are less than safmin
-            //        f2s cannot overflow, and it is accurate
-            //
-            f2s = std::sqrt(one + g2 / f2);
-            //        do the f2s(real)*fs(complex) multiply with two real multiplies
-            r = dcmplx(f2s * dble(fs), f2s * dimag(fs));
-            cs = one / f2s;
-            d = f2 + g2;
-            //        do complex/real division explicitly with two real divisions
-            sn = dcmplx(dble(r) / d, dimag(r) / d);
-            sn = sn * dconjg(gs);
-            if(count != 0)
+            dr = safmx2 * dble(f);
+            di = safmx2 * dimag(f);
+            d = dlapy2(dr, di);
+            ff = dcmplx(dr / d, di / d);
+        }
+        sn = ff * dcmplx(dble(gs) / g2s, -dimag(gs) / g2s);
+        r = cs * f + sn * g;
+    }
+    else
+    {
+        //
+        //        this is the most common case.
+        //        neither f2 nor f2/g2 are less than safmin
+        //        h2 cannot overflow
+        //
+        //        (as in LAPACK 3.10: cs = 1/sqrt(1 + g2/f2) would round 1 + g2/f2 to 1
+        //        for small g2/f2, so that cs**2 + abs(sn)**2 > 1 in many rotations)
+        S const h2 = f2 + g2;
+        cs = std::sqrt(f2 / h2);
+        //        do the complex/real divisions explicitly with two real divisions
+        r = dcmplx(dble(fs) / cs, dimag(fs) / cs);
+        d = std::sqrt(f2) * std::sqrt(h2);
+        sn = dcmplx(dble(fs) / d, dimag(fs) / d);
+        sn = sn * dconjg(gs);
+        if(count != 0)
+        {
+            if(count > 0)
             {
-                if(count > 0)
+                for(i = 1; i <= count; i++)
                 {
-                    for(i = 1; i <= count; i++)
-                    {
-                        r = r * safmx2;
-                    };
-                }
-                else
+                    r = r * safmx2;
+                };
+            }
+            else
+            {
+                for(i = 1; i <= -count; i++)
                 {
-                    for(i = 1; i <= -count; i++)
-                    {
-                        r = r * safmn2;
-                    }
+                    r = r * safmn2;
                 }
             }
         }
