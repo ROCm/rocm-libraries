@@ -51,6 +51,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
   files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
   from the build tree without an install.
+* [Conv] The bundled AI heuristic models (`*.tn.model` and `*.ktn.model`) are now Keras 3 exports
+  and require frugally-deep v0.21.0 or newer (fixes ROCm/rocm-libraries#889). Older frugally-deep
+  versions cannot load them, and MIOpen then silently falls back to the non-AI heuristic.
 
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
