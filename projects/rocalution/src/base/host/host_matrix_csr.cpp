@@ -3792,13 +3792,10 @@ namespace rocalution
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::Transpose(void)
     {
-        if(this->nnz_ > 0)
-        {
-            HostMatrixCSR<ValueType> tmp(this->local_backend_);
+        HostMatrixCSR<ValueType> tmp(this->local_backend_);
 
-            tmp.CopyFrom(*this);
-            tmp.Transpose(this);
-        }
+        tmp.CopyFrom(*this);
+        tmp.Transpose(this);
 
         return true;
     }
@@ -3812,11 +3809,11 @@ namespace rocalution
 
         assert(cast_T != NULL);
 
+        cast_T->Clear();
+        cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
+
         if(this->nnz_ > 0)
         {
-            cast_T->Clear();
-            cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
-
             for(int64_t i = 0; i < cast_T->nnz_; ++i)
             {
                 cast_T->mat_.row_offset[this->mat_.col[i] + 1] += 1;

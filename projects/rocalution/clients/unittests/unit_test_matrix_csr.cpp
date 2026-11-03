@@ -1864,8 +1864,6 @@ TYPED_TEST(host_matrix_csr, transpose_of_a_matrix_without_entries_swaps_the_size
 {
     using T = typename TypeParam::value_type;
 
-    KNOWN_BUG("the transpose of a matrix without entries keeps the sizes");
-
     HostMatrixCSR<T> A(descriptor());
     A.AllocateCSR(0, 3, 5);
     HostMatrixCSR<T> At(descriptor());
