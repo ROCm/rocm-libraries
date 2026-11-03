@@ -2019,26 +2019,6 @@ class SplitKVQrTdmTiles(unittest.TestCase):
         # hdim_q <= 32. get_fwd_splitkv_blobs drops those as unreachable.
         self.assertEqual(sorted({kernel.F_hdim for kernel in exact}), [64, 128, 256])
 
-    def test_qr_keeps_the_soft_cap_head_dim_fallback(self):
-        # hdim % 8 != 0 is the one thing qr_tdm declines, soft cap or not, and
-        # the head-dim padded qr entry is the only predicate that accepts it.
-        kernels = get_fwd_splitkv_blobs(
-            targets=["gfx1250"],
-            kernel_filter="",
-            receipt=600,
-            mask_impl="simplified",
-            optdim_list=[-1],
-        )
-        fallback = {
-            kernel.F_hdim
-            for kernel in kernels
-            if kernel.F_pipeline.tag == "qr"
-            and kernel.F_pipeline.F_logits == "t"
-            and kernel.F_pipeline.F_dpad == "t"
-            and kernel.F_dtype in ("fp16", "bf16")
-        }
-        self.assertEqual(sorted(fallback), [32, 64, 128, 256])
-
 
 if __name__ == "__main__":
     unittest.main()

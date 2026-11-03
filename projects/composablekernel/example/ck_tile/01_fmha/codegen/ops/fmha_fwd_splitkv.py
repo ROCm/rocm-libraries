@@ -944,19 +944,10 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-            # qr: for fp16/bf16 the only job left is the head dims qr_tdm
-            # declines (hdim % 8 != 0, see dcheck). Its head-dim predicate is
-            # unconditionally true, so this one entry catches them for every
-            # bias and for soft cap alike; the dpad == f rungs would only ever
-            # match what qr_tdm already took.
-            for logits, mask, bias, pagedkv, sink in itertools.product(
-                ["t", "f"],
-                get_mask_map(mask_impl).keys(),
-                BIAS_MAP.keys(),
-                ["t", "f"],
-                ["t", "f"],
-            ):
-                pipelines.append(Pipeline("qr", "row", "t", "t", "t", "t", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+            # No qr entry for fp16/bf16. qr_tdm's head-dim predicate is
+            # hdim % 8 == 0 even on its padded rung, so dropping qr narrows
+            # gfx125 split-kv to head dims that are a multiple of 8 -- a
+            # hdim like 100 returns -1 here while prefill still serves it.
         elif dtype in ["fp8", "bf8"]:
             squant = "t" if dtype == "fp8" else "f"
             for logits, mask, bias in itertools.product(
