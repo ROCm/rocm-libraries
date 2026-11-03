@@ -33,7 +33,11 @@ if test_type == "quick":
     # Under ASAN, the M=N=128 spmm_strided_batched smoke cases take ~40-360 ms each instead
     # of ~7 ms, adding 43-67 minutes on gfx942/gfx950. The standard tests still run them.
     test_filter.append(
-        "--gtest_filter=*smoke*-*known_bug*:*smoke_spmm_strided_batched*_128_128_*"
+        "--gtest_filter=*smoke*-*known_bug*"
+        ":*smoke_spmm_strided_batched*_NN_128_128_*"
+        ":*smoke_spmm_strided_batched*_NT_128_128_*"
+        ":*smoke_spmm_strided_batched*_TN_128_128_*"
+        ":*smoke_spmm_strided_batched*_TT_128_128_*"
     )
 elif test_type == "standard":
     test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
