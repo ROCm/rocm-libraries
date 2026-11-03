@@ -1561,6 +1561,65 @@ static void conv_run_loop(rocke_conv_build_ctx_t* ctx,
             else
                 rocke_b_sched_barrier(b, 0);
             ctx->k_off_capture = f.iv;
+            if(spec->defer_mfma)
+            {
+                rocke_conv_frag_t* dfr = (rocke_conv_frag_t*)rocke_arena_alloc(
+                    &b->arena, (size_t)spec->defer_mfma * sizeof(rocke_conv_frag_t));
+                ctx->defer_on = true;
+                ctx->defer_n = spec->defer_mfma;
+                ctx->defer_frags = dfr;
+                ctx->defer_cnt = 0;
+                /* (An x-halo kernel's fallback loop keeps its priority.) */
+                if(spec->rpf_setprio && !spec->uk_xhalo)
+                    rocke_b_s_setprio(b, spec->rpf_setprio);
+                rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
+                ctx->after_first_reads = NULL;
+                ctx->defer_on = false;
+                rocke_b_sched_barrier(b, 0);
+                if(spec->rpf_setprio && !spec->uk_xhalo)
+                    rocke_b_s_setprio(b, 0);
+                rocke_b_sync_lds_only(b);
+                conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
+                for(int d = 0; d < ctx->defer_cnt; ++d)
+                {
+                    int flat = 0;
+                    for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+                        for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+                        {
+                            acc_a[flat] = rocke_conv_emit_mfma(
+                                b, ctx->atom, dfr[d].a[mi], dfr[d].b[ni], acc_a[flat]);
+                            ++flat;
+                        }
+                }
+                ctx->defer_cnt = 0;
+                if(spec->defer_mfma_per_write)
+                {
+                    for(int w = 0; w < st->a.count + st->b.count; ++w)
+                    {
+                        rocke_b_sched_group_barrier(b, ROCKE_SCHED_DS_WRITE, 1, 0);
+                        rocke_b_sched_group_barrier(
+                            b, ROCKE_SCHED_MFMA, spec->defer_mfma_per_write, 0);
+                    }
+                }
+                else
+                {
+                    /* 1 ds_write : 2 MFMAs */
+                    for(int w = 0; w < 8; ++w)
+                    {
+                        rocke_b_sched_group_barrier(b, ROCKE_SCHED_DS_WRITE, 1, 0);
+                        rocke_b_sched_group_barrier(b, ROCKE_SCHED_MFMA, 2, 0);
+                    }
+                }
+                rocke_b_sched_barrier(b, 0);
+                rocke_b_sync_lds_only(b);
+                for(int i = 0; i < n_state; ++i)
+                    acc_a[n_acc + i] = st1[i];
+                rocke_b_scf_yield(b, acc_a, n_acc + n_state);
+                rocke_b_region_leave(b);
+                for(int i = 0; i < n_acc; ++i)
+                    out_accs[i] = f.op->results[i];
+                return;
+            }
             if(spec->rpf_setprio)
                 rocke_b_s_setprio(b, spec->rpf_setprio);
             rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);

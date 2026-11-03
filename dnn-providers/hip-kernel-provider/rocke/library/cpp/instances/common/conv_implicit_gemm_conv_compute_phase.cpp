@@ -691,18 +691,59 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
         return;
     }
 
-    rocke_value_t* a_rows[ROCKE_CONV_MAX_ACCS];
-    rocke_value_t* b_cols[ROCKE_CONV_MAX_ACCS];
+    /* lds_ahead: step kk+1's fragment reads issue before step kk's MFMAs. */
+    const bool lds_ahead = spec->lds_ahead && !(ov != NULL && ov->a_operand_override != NULL);
+    rocke_conv_frag_t* fr2
+        = (rocke_conv_frag_t*)rocke_arena_alloc(&b->arena, 2 * sizeof(rocke_conv_frag_t));
+    if(fr2 == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv mfma phase: arena alloc failed");
+        return;
+    }
+    int cur = 0;
+    if(lds_ahead)
+        conv_load_frags(e, 0, fr2[0].a, &fr2[0].na, fr2[0].b, &fr2[0].nb);
     for(int kk = 0; kk < ctx->k_atoms; ++kk)
     {
-        int na = 0, nb = 0;
-        conv_load_frags(e, kk, a_rows, &na, b_cols, &nb);
+        rocke_value_t** a_rows;
+        rocke_value_t** b_cols;
+        if(lds_ahead)
+        {
+            a_rows = fr2[cur].a;
+            b_cols = fr2[cur].b;
+            if(kk + 1 < ctx->k_atoms)
+            {
+                rocke_conv_frag_t* nx = &fr2[cur ^ 1];
+                conv_load_frags(e, kk + 1, nx->a, &nx->na, nx->b, &nx->nb);
+            }
+            cur ^= 1;
+        }
+        else
+        {
+            conv_load_frags(e, kk, fr2[0].a, &fr2[0].na, fr2[0].b, &fr2[0].nb);
+            a_rows = fr2[0].a;
+            b_cols = fr2[0].b;
+        }
         if(kk == 0 && ctx->after_first_reads != NULL)
         {
             /* rpf_fetch_late: the next tile's global reads go here, behind the
              * first LDS fragment reads and ahead of every MFMA. */
             rocke_b_sched_barrier(b, 0);
             ctx->after_first_reads(ctx->after_first_reads_user);
+        }
+        if(ctx->defer_on && kk >= ctx->k_atoms - ctx->defer_n)
+        {
+            /* defer_mfma: the fragments are read now; their MFMAs are emitted
+             * by the caller after the barrier, interleaved with the next
+             * tile's LDS store. */
+            rocke_conv_frag_t* d = &ctx->defer_frags[ctx->defer_cnt++];
+            for(int i = 0; i < ctx->mfmas_m; ++i)
+                d->a[i] = a_rows[i];
+            for(int i = 0; i < ctx->mfmas_n; ++i)
+                d->b[i] = b_cols[i];
+            d->na = ctx->mfmas_m;
+            d->nb = ctx->mfmas_n;
+            continue;
         }
         int flat = 0;
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)

@@ -269,6 +269,15 @@ typedef struct rocke_implicit_gemm_conv_spec
      * prologue load when its range is empty. */
     bool fb_skip_empty; /* default false */
 
+    /* lds_ahead: the LDS fragment reads of kk step kk+1 issue before the
+     * MFMAs of step kk (reg_prefetch loops). */
+    bool lds_ahead; /* default false */
+    /* defer_mfma: the MFMAs of the last defer_mfma kk steps of a tile run after
+     * the barrier that retires its LDS reads, interleaved with the next tile's
+     * LDS store (reg_prefetch=1 loop). */
+    int defer_mfma; /* default 0 */
+    /* defer_mfma_per_write: MFMAs per ds_write of that store phase. */
+    int defer_mfma_per_write; /* default 0 */
     /* vmem_interleave: the next tile's buffer_loads go one per that many
      * MFMAs of the reg_prefetch / rpf_pingpong phase (hint pipelines). */
     int vmem_interleave; /* default 0 */

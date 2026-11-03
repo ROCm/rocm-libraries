@@ -1101,6 +1101,37 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->rpf_fetch_late = idx != 121;
         spec->sched_strategy = idx == 123 ? 2 : 0;
         return 0;
+    case 124:
+    case 125:
+    case 126:
+        if(make_cfg_3d_base(56, spec, arch) != 0)
+            return -1;
+        spec->lds_ahead = true;
+        if(idx == 124)
+        {
+            spec->pipeline = "compv4";
+            spec->uniform_k_decode = true;
+            spec->reg_prefetch = 1;
+            spec->xcd_remap = 6;
+            spec->lds_xor = true;
+            spec->uk_tap_fast = true;
+            spec->lds_kpack_read = true;
+            spec->defer_mfma = 3;
+            spec->vmem_interleave = 4;
+            return 0;
+        }
+        spec->pipeline = "compv3";
+        spec->reg_prefetch = idx == 125 ? 1 : 2;
+        spec->defer_mfma = idx == 125 ? 2 : 0;
+        spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
+        return 0;
+    case 127:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = 1;
+        spec->defer_mfma = 1;
+        spec->rpf_setprio = 2;
+        return 0;
     case 102:
         if(make_cfg_3d_base(55, spec, arch) != 0)
             return -1;

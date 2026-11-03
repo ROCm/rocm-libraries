@@ -1018,6 +1018,7 @@ _GFX942_3D_OFFSET = 32
 #  119: 116 + xh_yring=14 (the input-row ring, early reload)
 #  120: 116 + xh_yring=2
 #  121-123: 55 + reg_prefetch=1 with rpf_lds_barrier / rpf_fetch_late / sched_strategy
+#  124-127: 56 / 55 + lds_ahead / defer_mfma / defer_mfma_per_write
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1321,8 +1322,33 @@ def _gfx942_3d_spec(idx: int):
     knobs[122] = (55, dict(uniform_k_decode=True, reg_prefetch=1, rpf_fetch_late=True))
     knobs[123] = (
         55,
-        dict(reg_prefetch=1, rpf_fetch_late=True, rpf_lds_barrier=True, sched_strategy=2),
+        dict(
+            reg_prefetch=1, rpf_fetch_late=True, rpf_lds_barrier=True, sched_strategy=2
+        ),
     )
+    # 124-127: lds_ahead / defer_mfma (+ defer_mfma_per_write) K-loop schedules.
+    _lah = dict(
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        xcd_remap=6,
+        lds_xor=True,
+        uk_tap_fast=True,
+        lds_kpack_read=True,
+        lds_ahead=True,
+    )
+    knobs[124] = (56, dict(_lah, pipeline="compv4", defer_mfma=3, vmem_interleave=4))
+    knobs[125] = (
+        56,
+        dict(
+            pipeline="compv3",
+            reg_prefetch=1,
+            lds_ahead=True,
+            defer_mfma=2,
+            defer_mfma_per_write=3,
+        ),
+    )
+    knobs[126] = (56, dict(pipeline="compv3", reg_prefetch=2, lds_ahead=True))
+    knobs[127] = (55, dict(reg_prefetch=1, defer_mfma=1, rpf_setprio=2))
     _pp.update(
         {
             110: dict(_p84, xcd_remap=0, split_streamk=True),

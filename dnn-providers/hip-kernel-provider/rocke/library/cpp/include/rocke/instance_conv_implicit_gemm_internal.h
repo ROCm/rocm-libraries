@@ -653,6 +653,13 @@ typedef struct rocke_conv_build_ctx
      * spreads over its MFMAs (vmem_interleave). */
     struct rocke_conv_frag* pp_read;
     int pp_read_n;
+    /* defer_mfma (Python _mfma_defer): while defer_on, emit_mfma_phase reads
+     * the fragments of its last defer_n kk steps into defer_frags and leaves
+     * their MFMAs to the caller. */
+    bool defer_on;
+    int defer_n;
+    struct rocke_conv_frag* defer_frags;
+    int defer_cnt;
     const struct rocke_conv_frag* pp_use;
     int pp_i0;
     int pp_i1;

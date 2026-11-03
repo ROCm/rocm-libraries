@@ -465,7 +465,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* (sakd, adir: Python-only, off.) */
     ROCKE_FLAG(s->uk_tap_fast, "tapf");
     ROCKE_FLAG(s->uk_chunk_group > 0, "cg%d", s->uk_chunk_group);
-    /* (lah, dfr: Python-only, off.) */
+    ROCKE_FLAG(s->lds_ahead, "lah");
+    ROCKE_FLAG(s->defer_mfma > 0, "dfr%d", s->defer_mfma);
     ROCKE_FLAG(s->vmem_interleave > 0, "vmi%d", s->vmem_interleave);
     ROCKE_FLAG(s->lds_kpack_read, "kprd");
     ROCKE_FLAG(s->rpf_lds_barrier, "lbar");
@@ -503,7 +504,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->xh_yring > 0, "xyr%d", s->xh_yring);
     ROCKE_FLAG(s->epi_quad_xpose > 0, "eqx%d", s->epi_quad_xpose);
     ROCKE_FLAG(s->uk_nopad, "nopad");
-    /* (dpw: Python-only, off.) */
+    ROCKE_FLAG(s->defer_mfma_per_write > 0, "dpw%d", s->defer_mfma_per_write);
     /* The occupancy target changes the register allocation. */
     ROCKE_FLAG(s->has_waves_per_eu, "wpe%d", s->waves_per_eu);
     /* Gm changes the emitted body, so it must reach the symbol: without it two
@@ -1235,7 +1236,7 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "uk_nopad drops the bounds checks of the uniform_k_decode loop only");
-    if(s->vmem_interleave)
+    if(s->lds_ahead || s->defer_mfma || s->vmem_interleave || s->defer_mfma_per_write)
     {
         if(s->wave_size != 64 || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
            || s->async_dma)
@@ -1243,8 +1244,33 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "lds_ahead/defer_mfma/vmem_interleave schedule the sync wave64 "
                             "MFMA K loop");
-        if(s->vmem_interleave < 0)
+        if(s->lds_ahead && !s->reg_prefetch)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "lds_ahead is implemented in the reg_prefetch / prefetch_regs "
+                            "loops only");
+        if(s->defer_mfma < 0 || s->vmem_interleave < 0)
             ROCKE_SPEC_FAIL(reason, reason_cap, "defer_mfma and vmem_interleave must be >= 0");
+        if(s->defer_mfma_per_write
+           && (s->defer_mfma_per_write < 0 || !s->defer_mfma || s->uk_xhalo))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "defer_mfma_per_write shapes the rpf1 loop's defer_mfma store phase");
+        if(s->defer_mfma)
+        {
+            if(s->reg_prefetch != 1)
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "defer_mfma is implemented in the reg_prefetch=1 loop only");
+            const int kk_ = s->tile_k / s->warp_tile_k;
+            if(s->defer_mfma > kk_ || (s->defer_mfma == kk_ && !s->uk_xhalo))
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "defer_mfma must leave at least one kk step before the barrier");
+        }
+    }
+    if(s->vmem_interleave)
+    {
         if(!(s->reg_prefetch == 1 || s->reg_prefetch == 2))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
@@ -1329,6 +1355,12 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "rpf_pingpong pairs the two waves of each SIMD: it needs 8 waves");
+        if(s->lds_ahead || s->defer_mfma || s->rpf_fetch_late || s->rpf_lds_barrier
+           || (s->uk_xhalo && s->rpf_pingpong < 4))
+            ROCKE_SPEC_FAIL(
+                reason,
+                reason_cap,
+                "rpf_pingpong has its own schedule (no lah/dfr/vmi/flate/lbar/adir/uxh)");
     }
     if(s->pp_b_double)
     {
@@ -1375,7 +1407,7 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                         reason_cap,
                         "rpf_fetch_late is implemented in the reg_prefetch=1 loop without "
                         "vmem_interleave");
-    if(s->rpf_lds_barrier && s->reg_prefetch != 1)
+    if(s->rpf_lds_barrier && (s->reg_prefetch != 1 || s->defer_mfma))
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "rpf_lds_barrier is implemented in the reg_prefetch=1 loop only "
@@ -1443,7 +1475,7 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     if(s->fxh_dma < 0
        || (s->fxh_dma
            && !(s->xh_stride_m && s->lds_kpack_read && s->lds_xor && s->tile_k == 32
-                && !s->vmem_interleave && s->split_k <= 1)))
+                && !s->defer_mfma && !s->vmem_interleave && s->split_k <= 1)))
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "fxh_dma needs xh_stride_m, lds_kpack_read, lds_xor, tile_k 32 and no "
@@ -1802,6 +1834,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                     + rocke_conv_xhalo_b_rows(s) * lds_layout.row_stride)
                    * ab_dtype_bytes;
 
+        /* Only async_dma, unroll_k and reg_prefetch=2 alternate between two
+         * LDS buffers; "compv4" alone shares the single-buffer body (Python
+         * _lds_budget). */
         double_buf = (s->async_dma || s->unroll_k || s->reg_prefetch == 2) ? 1 : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
         if(s->pp_b_double)
