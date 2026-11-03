@@ -1097,3 +1097,10 @@ def test_exhaustive_is_refused_with_fake_or_a_preset_candidate(
     monkeypatch.setenv("HIPDNN_BWD_CANDIDATE", "1")
     with pytest.raises(SystemExit, match="HIPDNN_BWD_CANDIDATE"):
         runner([], "--workers", "1", "--out", str(tmp_path), "--exhaustive")
+
+
+def test_not_enumerable_rows_resume_after_a_torn_last_row(tmp_path):
+    path = tmp_path / reconcile.CSV_NAME
+    path.write_text(",".join(reconcile.FIELDS) + "\n" + "x::a,not-enum")
+    run_aotriton._not_enumerable_rows(tmp_path, {"x::a": "why a", "x::b": "why b"})
+    assert [r["nodeid"] for r in reconcile.read_rows(path)] == ["x::a", "x::b"]
