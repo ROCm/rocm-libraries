@@ -135,7 +135,6 @@ module hipfft
 
   interface hipfftPlan1d
     function hipfftPlan1d_(plan,nx,myType,batch) bind(c, name="hipfftPlan1d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftPlan1d_
@@ -148,7 +147,6 @@ module hipfft
 
   interface hipfftPlan2d
     function hipfftPlan2d_(plan,nx,ny,myType) bind(c, name="hipfftPlan2d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftPlan2d_
@@ -161,7 +159,6 @@ module hipfft
 
   interface hipfftPlan3d
     function hipfftPlan3d_(plan,nx,ny,nz,myType) bind(c, name="hipfftPlan3d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftPlan3d_
@@ -176,7 +173,6 @@ module hipfft
   interface hipfftPlanMany
     function hipfftPlanMany_(plan,rank,n,inembed,istride,idist,onembed,ostride,odist,myType,batch) &
         bind(c, name="hipfftPlanMany")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftPlanMany_
@@ -206,7 +202,6 @@ module hipfft
 
   interface hipfftCreate
     function hipfftCreate_(plan) bind(c, name="hipfftCreate")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftCreate_
@@ -216,7 +211,6 @@ module hipfft
 
   interface hipfftExtPlanScaleFactor
     function hipfftExtPlanScaleFactor_(plan,scalefactor) bind(c, name="hipfftExtPlanScaleFactor")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftExtPlanScaleFactor_
@@ -227,7 +221,6 @@ module hipfft
 
   interface hipfftMakePlan1d
     function hipfftMakePlan1d_(plan,nx,myType,batch,workSize) bind(c, name="hipfftMakePlan1d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftMakePlan1d_
@@ -243,7 +236,6 @@ module hipfft
 
   interface hipfftMakePlan2d
     function hipfftMakePlan2d_(plan,nx,ny,myType,workSize) bind(c, name="hipfftMakePlan2d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftMakePlan2d_
@@ -259,7 +251,6 @@ module hipfft
 
   interface hipfftMakePlan3d
     function hipfftMakePlan3d_(plan,nx,ny,nz,myType,workSize) bind(c, name="hipfftMakePlan3d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftMakePlan3d_
@@ -278,7 +269,6 @@ module hipfft
     function hipfftMakePlanMany_(plan,rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch,workSize) &
         bind(c, name="hipfftMakePlanMany")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftMakePlanMany_
@@ -313,7 +303,6 @@ module hipfft
     function hipfftMakePlanMany64_(plan,rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch,workSize) &
         bind(c, name="hipfftMakePlanMany64")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftMakePlanMany64_
@@ -346,7 +335,6 @@ module hipfft
 
   interface hipfftEstimate1d
     function hipfftEstimate1d_(nx,myType,batch,workSize) bind(c, name="hipfftEstimate1d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftEstimate1d_
@@ -361,7 +349,6 @@ module hipfft
 
   interface hipfftEstimate2d
     function hipfftEstimate2d_(nx,ny,myType,workSize) bind(c, name="hipfftEstimate2d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftEstimate2d_
@@ -376,7 +363,6 @@ module hipfft
 
   interface hipfftEstimate3d
     function hipfftEstimate3d_(nx,ny,nz,myType,workSize) bind(c, name="hipfftEstimate3d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftEstimate3d_
@@ -394,7 +380,6 @@ module hipfft
     function hipfftEstimateMany_(rank,n,inembed,istride,idist,onembed,ostride,odist,myType,batch, &
         workSize) &
         bind(c, name="hipfftEstimateMany")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftEstimateMany_
@@ -426,7 +411,6 @@ module hipfft
 
   interface hipfftGetSize1d
     function hipfftGetSize1d_(plan,nx,myType,batch,workSize) bind(c, name="hipfftGetSize1d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetSize1d_
@@ -442,7 +426,6 @@ module hipfft
 
   interface hipfftGetSize2d
     function hipfftGetSize2d_(plan,nx,ny,myType,workSize) bind(c, name="hipfftGetSize2d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetSize2d_
@@ -458,7 +441,6 @@ module hipfft
 
   interface hipfftGetSize3d
     function hipfftGetSize3d_(plan,nx,ny,nz,myType,workSize) bind(c, name="hipfftGetSize3d")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetSize3d_
@@ -477,7 +459,6 @@ module hipfft
     function hipfftGetSizeMany_(plan,rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch,workSize) &
         bind(c, name="hipfftGetSizeMany")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetSizeMany_
@@ -512,7 +493,6 @@ module hipfft
     function hipfftGetSizeMany64_(plan,rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch,workSize) &
         bind(c, name="hipfftGetSizeMany64")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetSizeMany64_
@@ -545,7 +525,6 @@ module hipfft
 
   interface hipfftGetSize
     function hipfftGetSize_(plan,workSize) bind(c, name="hipfftGetSize")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetSize_
@@ -558,7 +537,6 @@ module hipfft
 
   interface hipfftSetAutoAllocation
     function hipfftSetAutoAllocation_(plan,autoAllocate) bind(c, name="hipfftSetAutoAllocation")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftSetAutoAllocation_
@@ -569,7 +547,6 @@ module hipfft
 
   interface hipfftSetWorkArea
     function hipfftSetWorkArea_(plan,workArea) bind(c, name="hipfftSetWorkArea")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftSetWorkArea_
@@ -580,7 +557,6 @@ module hipfft
 
   interface hipfftXtSetWorkArea
     function hipfftXtSetWorkArea_(plan,workArea) bind(c, name="hipfftXtSetWorkArea")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtSetWorkArea_
@@ -591,7 +567,6 @@ module hipfft
 
   interface hipfftExecC2C
     function hipfftExecC2C_(plan,idata,odata,direction) bind(c, name="hipfftExecC2C")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftExecC2C_
@@ -616,7 +591,6 @@ module hipfft
 
   interface hipfftExecR2C
     function hipfftExecR2C_(plan,idata,odata) bind(c, name="hipfftExecR2C")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftExecR2C_
@@ -640,7 +614,6 @@ module hipfft
 
   interface hipfftExecC2R
     function hipfftExecC2R_(plan,idata,odata) bind(c, name="hipfftExecC2R")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftExecC2R_
@@ -664,7 +637,6 @@ module hipfft
 
   interface hipfftExecZ2Z
     function hipfftExecZ2Z_(plan,idata,odata,direction) bind(c, name="hipfftExecZ2Z")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftExecZ2Z_
@@ -689,7 +661,6 @@ module hipfft
 
   interface hipfftExecD2Z
     function hipfftExecD2Z_(plan,idata,odata) bind(c, name="hipfftExecD2Z")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftExecD2Z_
@@ -713,7 +684,6 @@ module hipfft
 
   interface hipfftExecZ2D
     function hipfftExecZ2D_(plan,idata,odata) bind(c, name="hipfftExecZ2D")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftExecZ2D_
@@ -737,7 +707,6 @@ module hipfft
 
   interface hipfftSetStream
     function hipfftSetStream_(plan,stream) bind(c, name="hipfftSetStream")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftSetStream_
@@ -748,7 +717,6 @@ module hipfft
 
   interface hipfftDestroy
     function hipfftDestroy_(plan) bind(c, name="hipfftDestroy")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftDestroy_
@@ -758,7 +726,6 @@ module hipfft
 
   interface hipfftGetVersion
     function hipfftGetVersion_(version) bind(c, name="hipfftGetVersion")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetVersion_
@@ -770,7 +737,6 @@ module hipfft
 
   interface hipfftGetProperty
     function hipfftGetProperty_(myType,myValue) bind(c, name="hipfftGetProperty")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftGetProperty_
@@ -784,7 +750,6 @@ module hipfft
   interface hipfftXtSetCallback
     function hipfftXtSetCallback_(plan,callbacks,cbtype,callbackData) &
         bind(c, name="hipfftXtSetCallback")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtSetCallback_
@@ -797,7 +762,6 @@ module hipfft
 
   interface hipfftXtClearCallback
     function hipfftXtClearCallback_(plan,cbtype) bind(c, name="hipfftXtClearCallback")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtClearCallback_
@@ -809,7 +773,6 @@ module hipfft
   interface hipfftXtSetCallbackSharedSize
     function hipfftXtSetCallbackSharedSize_(plan,cbtype,sharedSize) &
         bind(c, name="hipfftXtSetCallbackSharedSize")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtSetCallbackSharedSize_
@@ -823,7 +786,6 @@ module hipfft
     function hipfftXtSetJITCallback_(plan,symbol_name,bitcode_data,bitcode_len_bytes,cbtype, &
         cbdata) &
         bind(c, name="hipfftXtSetJITCallback")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtSetJITCallback_
@@ -840,7 +802,6 @@ module hipfft
     function hipfftXtMakePlanMany_(plan,rank,n,inembed,istride,idist,inputType,onembed,ostride, &
         odist,outputType,batch,workSize,executionType) &
         bind(c, name="hipfftXtMakePlanMany")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtMakePlanMany_
@@ -861,13 +822,22 @@ module hipfft
     end function
 
     module procedure hipfftXtMakePlanMany_typed
+
+#ifdef USE_ASSUMED_RANK
+    module procedure hipfftXtMakePlanMany_assumed_rank
+#else
+#ifdef USE_ASSUMED_SHAPE
+    module procedure &
+      hipfftXtMakePlanMany_rank_0,&
+      hipfftXtMakePlanMany_rank_1
+#endif
+#endif
   end interface
 
   interface hipfftXtGetSizeMany
     function hipfftXtGetSizeMany_(plan,rank,n,inembed,istride,idist,inputType,onembed,ostride, &
         odist,outputType,batch,workSize,executionType) &
         bind(c, name="hipfftXtGetSizeMany")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtGetSizeMany_
@@ -888,11 +858,20 @@ module hipfft
     end function
 
     module procedure hipfftXtGetSizeMany_typed
+
+#ifdef USE_ASSUMED_RANK
+    module procedure hipfftXtGetSizeMany_assumed_rank
+#else
+#ifdef USE_ASSUMED_SHAPE
+    module procedure &
+      hipfftXtGetSizeMany_rank_0,&
+      hipfftXtGetSizeMany_rank_1
+#endif
+#endif
   end interface
 
   interface hipfftXtExec
     function hipfftXtExec_(plan,input,output,direction) bind(c, name="hipfftXtExec")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExec_
@@ -905,7 +884,6 @@ module hipfft
 
   interface hipfftXtSetGPUs
     function hipfftXtSetGPUs_(plan,count,gpus) bind(c, name="hipfftXtSetGPUs")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtSetGPUs_
@@ -913,11 +891,20 @@ module hipfft
       integer(c_int),value :: count
       type(c_ptr),value :: gpus
     end function
+
+#ifdef USE_ASSUMED_RANK
+    module procedure hipfftXtSetGPUs_assumed_rank
+#else
+#ifdef USE_ASSUMED_SHAPE
+    module procedure &
+      hipfftXtSetGPUs_rank_0,&
+      hipfftXtSetGPUs_rank_1
+#endif
+#endif
   end interface
 
   interface hipfftXtMalloc
     function hipfftXtMalloc_(plan,desc,myFormat) bind(c, name="hipfftXtMalloc")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtMalloc_
@@ -929,7 +916,6 @@ module hipfft
 
   interface hipfftXtMemcpy
     function hipfftXtMemcpy_(plan,dest,src,myType) bind(c, name="hipfftXtMemcpy")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtMemcpy_
@@ -942,7 +928,6 @@ module hipfft
 
   interface hipfftXtFree
     function hipfftXtFree_(desc) bind(c, name="hipfftXtFree")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtFree_
@@ -953,7 +938,6 @@ module hipfft
   interface hipfftXtExecDescriptorC2C
     function hipfftXtExecDescriptorC2C_(plan,input,output,direction) &
         bind(c, name="hipfftXtExecDescriptorC2C")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExecDescriptorC2C_
@@ -966,7 +950,6 @@ module hipfft
 
   interface hipfftXtExecDescriptorR2C
     function hipfftXtExecDescriptorR2C_(plan,input,output) bind(c, name="hipfftXtExecDescriptorR2C")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExecDescriptorR2C_
@@ -978,7 +961,6 @@ module hipfft
 
   interface hipfftXtExecDescriptorC2R
     function hipfftXtExecDescriptorC2R_(plan,input,output) bind(c, name="hipfftXtExecDescriptorC2R")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExecDescriptorC2R_
@@ -991,7 +973,6 @@ module hipfft
   interface hipfftXtExecDescriptorZ2Z
     function hipfftXtExecDescriptorZ2Z_(plan,input,output,direction) &
         bind(c, name="hipfftXtExecDescriptorZ2Z")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExecDescriptorZ2Z_
@@ -1004,7 +985,6 @@ module hipfft
 
   interface hipfftXtExecDescriptorD2Z
     function hipfftXtExecDescriptorD2Z_(plan,input,output) bind(c, name="hipfftXtExecDescriptorD2Z")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExecDescriptorD2Z_
@@ -1016,7 +996,6 @@ module hipfft
 
   interface hipfftXtExecDescriptorZ2D
     function hipfftXtExecDescriptorZ2D_(plan,input,output) bind(c, name="hipfftXtExecDescriptorZ2D")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExecDescriptorZ2D_
@@ -1029,7 +1008,6 @@ module hipfft
   interface hipfftXtExecDescriptor
     function hipfftXtExecDescriptor_(plan,input,output,direction) &
         bind(c, name="hipfftXtExecDescriptor")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtExecDescriptor_
@@ -1042,7 +1020,6 @@ module hipfft
 
   interface hipfftMpAttachComm
     function hipfftMpAttachComm_(plan,comm_type,comm_handle) bind(c, name="hipfftMpAttachComm")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftMpAttachComm_
@@ -1056,7 +1033,6 @@ module hipfft
     function hipfftXtSetDistribution_(plan,rank,input_lower,input_upper,output_lower,output_upper, &
         input_stride,output_stride) &
         bind(c, name="hipfftXtSetDistribution")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtSetDistribution_
@@ -1074,7 +1050,6 @@ module hipfft
   interface hipfftXtSetSubformatDefault
     function hipfftXtSetSubformatDefault_(plan,subformat_forward,subformat_inverse) &
         bind(c, name="hipfftXtSetSubformatDefault")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: hipfftXtSetSubformatDefault_
@@ -1090,8 +1065,9 @@ module hipfft
     subroutine hipfftCheck(status)
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: status
-      character(len=:), allocatable :: name
+      character(len=32) :: name
       if (status /= HIPFFT_SUCCESS) then
+        name = "unknown status"
         select case (status)
         case (HIPFFT_INVALID_PLAN)
           name = "HIPFFT_INVALID_PLAN"
@@ -1123,15 +1099,12 @@ module hipfft
           name = "HIPFFT_NOT_IMPLEMENTED"
         case (HIPFFT_NOT_SUPPORTED)
           name = "HIPFFT_NOT_SUPPORTED"
-        case default
-          name = "unknown status"
         end select
-        write (*, "(a,i0,a)") "HIPFFT ERROR: " // name // " (code ", status, ")"
+        write (*, "(a,i0,a)") "HIPFFT ERROR: " // trim(name) // " (code ", status, ")"
         stop 1
       end if
     end subroutine hipfftCheck
     function hipfftMakePlan1d_typed(plan,nx,myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlan1d_typed
       type(c_ptr), value :: plan
@@ -1144,7 +1117,6 @@ module hipfft
     end function
 
     function hipfftMakePlan2d_typed(plan,nx,ny,myType,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlan2d_typed
       type(c_ptr), value :: plan
@@ -1157,7 +1129,6 @@ module hipfft
     end function
 
     function hipfftMakePlan3d_typed(plan,nx,ny,nz,myType,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlan3d_typed
       type(c_ptr), value :: plan
@@ -1172,7 +1143,6 @@ module hipfft
 
     function hipfftMakePlanMany_typed(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany_typed
       type(c_ptr), value :: plan
@@ -1194,7 +1164,6 @@ module hipfft
 
     function hipfftMakePlanMany64_typed(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany64_typed
       type(c_ptr), value :: plan
@@ -1215,7 +1184,6 @@ module hipfft
     end function
 
     function hipfftEstimate1d_typed(nx,myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftEstimate1d_typed
       integer(c_int) :: nx
@@ -1227,7 +1195,6 @@ module hipfft
     end function
 
     function hipfftEstimate2d_typed(nx,ny,myType,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftEstimate2d_typed
       integer(c_int) :: nx
@@ -1239,7 +1206,6 @@ module hipfft
     end function
 
     function hipfftEstimate3d_typed(nx,ny,nz,myType,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftEstimate3d_typed
       integer(c_int) :: nx
@@ -1253,7 +1219,6 @@ module hipfft
 
     function hipfftEstimateMany_typed(rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftEstimateMany_typed
       integer(c_int) :: rank
@@ -1273,7 +1238,6 @@ module hipfft
     end function
 
     function hipfftGetSize1d_typed(plan,nx,myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSize1d_typed
       type(c_ptr), value :: plan
@@ -1286,7 +1250,6 @@ module hipfft
     end function
 
     function hipfftGetSize2d_typed(plan,nx,ny,myType,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSize2d_typed
       type(c_ptr), value :: plan
@@ -1299,7 +1262,6 @@ module hipfft
     end function
 
     function hipfftGetSize3d_typed(plan,nx,ny,nz,myType,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSize3d_typed
       type(c_ptr), value :: plan
@@ -1314,7 +1276,6 @@ module hipfft
 
     function hipfftGetSizeMany_typed(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany_typed
       type(c_ptr), value :: plan
@@ -1336,7 +1297,6 @@ module hipfft
 
     function hipfftGetSizeMany64_typed(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany64_typed
       type(c_ptr), value :: plan
@@ -1357,7 +1317,6 @@ module hipfft
     end function
 
     function hipfftGetSize_typed(plan,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSize_typed
       type(c_ptr), value :: plan
@@ -1367,7 +1326,6 @@ module hipfft
     end function
 
     function hipfftGetVersion_typed(version)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetVersion_typed
       integer(c_int),target :: version
@@ -1376,7 +1334,6 @@ module hipfft
     end function
 
     function hipfftGetProperty_typed(myType,myValue)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetProperty_typed
       integer(kind(HIPFFT_MAJOR_VERSION)) :: myType
@@ -1387,7 +1344,6 @@ module hipfft
 
     function hipfftXtMakePlanMany_typed(plan,rank,n,inembed,istride,idist,inputType,onembed, &
         ostride,odist,outputType,batch,workSize,executionType)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftXtMakePlanMany_typed
       type(c_ptr), value :: plan
@@ -1411,7 +1367,6 @@ module hipfft
 
     function hipfftXtGetSizeMany_typed(plan,rank,n,inembed,istride,idist,inputType,onembed, &
         ostride,odist,outputType,batch,workSize,executionType)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftXtGetSizeMany_typed
       type(c_ptr), value :: plan
@@ -1439,7 +1394,6 @@ module hipfft
 #ifdef USE_ASSUMED_RANK
     function hipfftPlanMany_assumed_rank(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftPlanMany_assumed_rank
       type(c_ptr) :: plan
@@ -1461,7 +1415,6 @@ module hipfft
 #else
     function hipfftPlanMany_rank_0(plan,rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftPlanMany_rank_0
       type(c_ptr) :: plan
@@ -1482,7 +1435,6 @@ module hipfft
 
     function hipfftPlanMany_rank_1(plan,rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftPlanMany_rank_1
       type(c_ptr) :: plan
@@ -1505,7 +1457,6 @@ module hipfft
 #ifdef USE_ASSUMED_RANK
     function hipfftMakePlanMany_assumed_rank(plan,rank,n,inembed,istride,idist,onembed,ostride, &
         odist,myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany_assumed_rank
       type(c_ptr), value :: plan
@@ -1528,7 +1479,6 @@ module hipfft
 #else
     function hipfftMakePlanMany_rank_0(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany_rank_0
       type(c_ptr), value :: plan
@@ -1550,7 +1500,6 @@ module hipfft
 
     function hipfftMakePlanMany_rank_1(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany_rank_1
       type(c_ptr), value :: plan
@@ -1574,7 +1523,6 @@ module hipfft
 #ifdef USE_ASSUMED_RANK
     function hipfftMakePlanMany64_assumed_rank(plan,rank,n,inembed,istride,idist,onembed,ostride, &
         odist,myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany64_assumed_rank
       type(c_ptr), value :: plan
@@ -1597,7 +1545,6 @@ module hipfft
 #else
     function hipfftMakePlanMany64_rank_0(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany64_rank_0
       type(c_ptr), value :: plan
@@ -1619,7 +1566,6 @@ module hipfft
 
     function hipfftMakePlanMany64_rank_1(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftMakePlanMany64_rank_1
       type(c_ptr), value :: plan
@@ -1643,7 +1589,6 @@ module hipfft
 #ifdef USE_ASSUMED_RANK
     function hipfftEstimateMany_assumed_rank(rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftEstimateMany_assumed_rank
       integer(c_int) :: rank
@@ -1665,7 +1610,6 @@ module hipfft
 #else
     function hipfftEstimateMany_rank_0(rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftEstimateMany_rank_0
       integer(c_int) :: rank
@@ -1686,7 +1630,6 @@ module hipfft
 
     function hipfftEstimateMany_rank_1(rank,n,inembed,istride,idist,onembed,ostride,odist,myType, &
         batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftEstimateMany_rank_1
       integer(c_int) :: rank
@@ -1709,7 +1652,6 @@ module hipfft
 #ifdef USE_ASSUMED_RANK
     function hipfftGetSizeMany_assumed_rank(plan,rank,n,inembed,istride,idist,onembed,ostride, &
         odist,myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany_assumed_rank
       type(c_ptr), value :: plan
@@ -1732,7 +1674,6 @@ module hipfft
 #else
     function hipfftGetSizeMany_rank_0(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany_rank_0
       type(c_ptr), value :: plan
@@ -1754,7 +1695,6 @@ module hipfft
 
     function hipfftGetSizeMany_rank_1(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany_rank_1
       type(c_ptr), value :: plan
@@ -1778,7 +1718,6 @@ module hipfft
 #ifdef USE_ASSUMED_RANK
     function hipfftGetSizeMany64_assumed_rank(plan,rank,n,inembed,istride,idist,onembed,ostride, &
         odist,myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany64_assumed_rank
       type(c_ptr), value :: plan
@@ -1801,7 +1740,6 @@ module hipfft
 #else
     function hipfftGetSizeMany64_rank_0(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany64_rank_0
       type(c_ptr), value :: plan
@@ -1823,7 +1761,6 @@ module hipfft
 
     function hipfftGetSizeMany64_rank_1(plan,rank,n,inembed,istride,idist,onembed,ostride,odist, &
         myType,batch,workSize)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftGetSizeMany64_rank_1
       type(c_ptr), value :: plan
@@ -1846,7 +1783,6 @@ module hipfft
 #endif
 #ifdef USE_ASSUMED_RANK
     function hipfftExecC2C_assumed_rank(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2C_assumed_rank
       type(c_ptr), value :: plan
@@ -1859,7 +1795,6 @@ module hipfft
 
 #else
     function hipfftExecC2C_rank_0(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2C_rank_0
       type(c_ptr), value :: plan
@@ -1871,7 +1806,6 @@ module hipfft
     end function
 
     function hipfftExecC2C_rank_1(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2C_rank_1
       type(c_ptr), value :: plan
@@ -1883,7 +1817,6 @@ module hipfft
     end function
 
     function hipfftExecC2C_rank_2(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2C_rank_2
       type(c_ptr), value :: plan
@@ -1895,7 +1828,6 @@ module hipfft
     end function
 
     function hipfftExecC2C_rank_3(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2C_rank_3
       type(c_ptr), value :: plan
@@ -1909,7 +1841,6 @@ module hipfft
 #endif
 #ifdef USE_ASSUMED_RANK
     function hipfftExecR2C_assumed_rank(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecR2C_assumed_rank
       type(c_ptr), value :: plan
@@ -1921,7 +1852,6 @@ module hipfft
 
 #else
     function hipfftExecR2C_rank_0(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecR2C_rank_0
       type(c_ptr), value :: plan
@@ -1932,7 +1862,6 @@ module hipfft
     end function
 
     function hipfftExecR2C_rank_1(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecR2C_rank_1
       type(c_ptr), value :: plan
@@ -1943,7 +1872,6 @@ module hipfft
     end function
 
     function hipfftExecR2C_rank_2(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecR2C_rank_2
       type(c_ptr), value :: plan
@@ -1954,7 +1882,6 @@ module hipfft
     end function
 
     function hipfftExecR2C_rank_3(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecR2C_rank_3
       type(c_ptr), value :: plan
@@ -1967,7 +1894,6 @@ module hipfft
 #endif
 #ifdef USE_ASSUMED_RANK
     function hipfftExecC2R_assumed_rank(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2R_assumed_rank
       type(c_ptr), value :: plan
@@ -1979,7 +1905,6 @@ module hipfft
 
 #else
     function hipfftExecC2R_rank_0(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2R_rank_0
       type(c_ptr), value :: plan
@@ -1990,7 +1915,6 @@ module hipfft
     end function
 
     function hipfftExecC2R_rank_1(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2R_rank_1
       type(c_ptr), value :: plan
@@ -2001,7 +1925,6 @@ module hipfft
     end function
 
     function hipfftExecC2R_rank_2(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2R_rank_2
       type(c_ptr), value :: plan
@@ -2012,7 +1935,6 @@ module hipfft
     end function
 
     function hipfftExecC2R_rank_3(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecC2R_rank_3
       type(c_ptr), value :: plan
@@ -2025,7 +1947,6 @@ module hipfft
 #endif
 #ifdef USE_ASSUMED_RANK
     function hipfftExecZ2Z_assumed_rank(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2Z_assumed_rank
       type(c_ptr), value :: plan
@@ -2038,7 +1959,6 @@ module hipfft
 
 #else
     function hipfftExecZ2Z_rank_0(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2Z_rank_0
       type(c_ptr), value :: plan
@@ -2050,7 +1970,6 @@ module hipfft
     end function
 
     function hipfftExecZ2Z_rank_1(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2Z_rank_1
       type(c_ptr), value :: plan
@@ -2062,7 +1981,6 @@ module hipfft
     end function
 
     function hipfftExecZ2Z_rank_2(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2Z_rank_2
       type(c_ptr), value :: plan
@@ -2074,7 +1992,6 @@ module hipfft
     end function
 
     function hipfftExecZ2Z_rank_3(plan,idata,odata,direction)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2Z_rank_3
       type(c_ptr), value :: plan
@@ -2088,7 +2005,6 @@ module hipfft
 #endif
 #ifdef USE_ASSUMED_RANK
     function hipfftExecD2Z_assumed_rank(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecD2Z_assumed_rank
       type(c_ptr), value :: plan
@@ -2100,7 +2016,6 @@ module hipfft
 
 #else
     function hipfftExecD2Z_rank_0(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecD2Z_rank_0
       type(c_ptr), value :: plan
@@ -2111,7 +2026,6 @@ module hipfft
     end function
 
     function hipfftExecD2Z_rank_1(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecD2Z_rank_1
       type(c_ptr), value :: plan
@@ -2122,7 +2036,6 @@ module hipfft
     end function
 
     function hipfftExecD2Z_rank_2(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecD2Z_rank_2
       type(c_ptr), value :: plan
@@ -2133,7 +2046,6 @@ module hipfft
     end function
 
     function hipfftExecD2Z_rank_3(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecD2Z_rank_3
       type(c_ptr), value :: plan
@@ -2146,7 +2058,6 @@ module hipfft
 #endif
 #ifdef USE_ASSUMED_RANK
     function hipfftExecZ2D_assumed_rank(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2D_assumed_rank
       type(c_ptr), value :: plan
@@ -2158,7 +2069,6 @@ module hipfft
 
 #else
     function hipfftExecZ2D_rank_0(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2D_rank_0
       type(c_ptr), value :: plan
@@ -2169,7 +2079,6 @@ module hipfft
     end function
 
     function hipfftExecZ2D_rank_1(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2D_rank_1
       type(c_ptr), value :: plan
@@ -2180,7 +2089,6 @@ module hipfft
     end function
 
     function hipfftExecZ2D_rank_2(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2D_rank_2
       type(c_ptr), value :: plan
@@ -2191,7 +2099,6 @@ module hipfft
     end function
 
     function hipfftExecZ2D_rank_3(plan,idata,odata)
-      use iso_c_binding
       implicit none
       integer(kind(HIPFFT_SUCCESS)) :: hipfftExecZ2D_rank_3
       type(c_ptr), value :: plan
@@ -2199,6 +2106,187 @@ module hipfft
       real(c_double),target,dimension(:,:,:) :: odata
       !
       hipfftExecZ2D_rank_3 = hipfftExecZ2D_(plan,c_loc(idata),c_loc(odata))
+    end function
+
+#endif
+#ifdef USE_ASSUMED_RANK
+    function hipfftXtMakePlanMany_assumed_rank(plan,rank,n,inembed,istride,idist,inputType, &
+        onembed,ostride,odist,outputType,batch,workSize,executionType)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtMakePlanMany_assumed_rank
+      type(c_ptr), value :: plan
+      integer(c_int) :: rank
+      integer(c_int64_t),target,dimension(..) :: n
+      integer(c_int64_t),target,dimension(..) :: inembed
+      integer(c_int64_t) :: istride
+      integer(c_int64_t) :: idist
+      integer(c_int) :: inputType
+      integer(c_int64_t),target,dimension(..) :: onembed
+      integer(c_int64_t) :: ostride
+      integer(c_int64_t) :: odist
+      integer(c_int) :: outputType
+      integer(c_int64_t) :: batch
+      integer(c_size_t),target :: workSize
+      integer(c_int) :: executionType
+      !
+      hipfftXtMakePlanMany_assumed_rank = hipfftXtMakePlanMany_(plan,rank,c_loc(n),c_loc(inembed), &
+        istride,idist,inputType,c_loc(onembed),ostride,odist,outputType,batch,c_loc(workSize), &
+        executionType)
+    end function
+
+#else
+    function hipfftXtMakePlanMany_rank_0(plan,rank,n,inembed,istride,idist,inputType,onembed, &
+        ostride,odist,outputType,batch,workSize,executionType)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtMakePlanMany_rank_0
+      type(c_ptr), value :: plan
+      integer(c_int) :: rank
+      integer(c_int64_t),target :: n
+      integer(c_int64_t),target :: inembed
+      integer(c_int64_t) :: istride
+      integer(c_int64_t) :: idist
+      integer(c_int) :: inputType
+      integer(c_int64_t),target :: onembed
+      integer(c_int64_t) :: ostride
+      integer(c_int64_t) :: odist
+      integer(c_int) :: outputType
+      integer(c_int64_t) :: batch
+      integer(c_size_t),target :: workSize
+      integer(c_int) :: executionType
+      !
+      hipfftXtMakePlanMany_rank_0 = hipfftXtMakePlanMany_(plan,rank,c_loc(n),c_loc(inembed), &
+        istride,idist,inputType,c_loc(onembed),ostride,odist,outputType,batch,c_loc(workSize), &
+        executionType)
+    end function
+
+    function hipfftXtMakePlanMany_rank_1(plan,rank,n,inembed,istride,idist,inputType,onembed, &
+        ostride,odist,outputType,batch,workSize,executionType)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtMakePlanMany_rank_1
+      type(c_ptr), value :: plan
+      integer(c_int) :: rank
+      integer(c_int64_t),target,dimension(:) :: n
+      integer(c_int64_t),target,dimension(:) :: inembed
+      integer(c_int64_t) :: istride
+      integer(c_int64_t) :: idist
+      integer(c_int) :: inputType
+      integer(c_int64_t),target,dimension(:) :: onembed
+      integer(c_int64_t) :: ostride
+      integer(c_int64_t) :: odist
+      integer(c_int) :: outputType
+      integer(c_int64_t) :: batch
+      integer(c_size_t),target :: workSize
+      integer(c_int) :: executionType
+      !
+      hipfftXtMakePlanMany_rank_1 = hipfftXtMakePlanMany_(plan,rank,c_loc(n),c_loc(inembed), &
+        istride,idist,inputType,c_loc(onembed),ostride,odist,outputType,batch,c_loc(workSize), &
+        executionType)
+    end function
+
+#endif
+#ifdef USE_ASSUMED_RANK
+    function hipfftXtGetSizeMany_assumed_rank(plan,rank,n,inembed,istride,idist,inputType,onembed, &
+        ostride,odist,outputType,batch,workSize,executionType)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtGetSizeMany_assumed_rank
+      type(c_ptr), value :: plan
+      integer(c_int) :: rank
+      integer(c_int64_t),target,dimension(..) :: n
+      integer(c_int64_t),target,dimension(..) :: inembed
+      integer(c_int64_t) :: istride
+      integer(c_int64_t) :: idist
+      integer(c_int) :: inputType
+      integer(c_int64_t),target,dimension(..) :: onembed
+      integer(c_int64_t) :: ostride
+      integer(c_int64_t) :: odist
+      integer(c_int) :: outputType
+      integer(c_int64_t) :: batch
+      integer(c_size_t),target :: workSize
+      integer(c_int) :: executionType
+      !
+      hipfftXtGetSizeMany_assumed_rank = hipfftXtGetSizeMany_(plan,rank,c_loc(n),c_loc(inembed), &
+        istride,idist,inputType,c_loc(onembed),ostride,odist,outputType,batch,c_loc(workSize), &
+        executionType)
+    end function
+
+#else
+    function hipfftXtGetSizeMany_rank_0(plan,rank,n,inembed,istride,idist,inputType,onembed, &
+        ostride,odist,outputType,batch,workSize,executionType)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtGetSizeMany_rank_0
+      type(c_ptr), value :: plan
+      integer(c_int) :: rank
+      integer(c_int64_t),target :: n
+      integer(c_int64_t),target :: inembed
+      integer(c_int64_t) :: istride
+      integer(c_int64_t) :: idist
+      integer(c_int) :: inputType
+      integer(c_int64_t),target :: onembed
+      integer(c_int64_t) :: ostride
+      integer(c_int64_t) :: odist
+      integer(c_int) :: outputType
+      integer(c_int64_t) :: batch
+      integer(c_size_t),target :: workSize
+      integer(c_int) :: executionType
+      !
+      hipfftXtGetSizeMany_rank_0 = hipfftXtGetSizeMany_(plan,rank,c_loc(n),c_loc(inembed),istride, &
+        idist,inputType,c_loc(onembed),ostride,odist,outputType,batch,c_loc(workSize),executionType)
+    end function
+
+    function hipfftXtGetSizeMany_rank_1(plan,rank,n,inembed,istride,idist,inputType,onembed, &
+        ostride,odist,outputType,batch,workSize,executionType)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtGetSizeMany_rank_1
+      type(c_ptr), value :: plan
+      integer(c_int) :: rank
+      integer(c_int64_t),target,dimension(:) :: n
+      integer(c_int64_t),target,dimension(:) :: inembed
+      integer(c_int64_t) :: istride
+      integer(c_int64_t) :: idist
+      integer(c_int) :: inputType
+      integer(c_int64_t),target,dimension(:) :: onembed
+      integer(c_int64_t) :: ostride
+      integer(c_int64_t) :: odist
+      integer(c_int) :: outputType
+      integer(c_int64_t) :: batch
+      integer(c_size_t),target :: workSize
+      integer(c_int) :: executionType
+      !
+      hipfftXtGetSizeMany_rank_1 = hipfftXtGetSizeMany_(plan,rank,c_loc(n),c_loc(inembed),istride, &
+        idist,inputType,c_loc(onembed),ostride,odist,outputType,batch,c_loc(workSize),executionType)
+    end function
+
+#endif
+#ifdef USE_ASSUMED_RANK
+    function hipfftXtSetGPUs_assumed_rank(plan,count,gpus)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtSetGPUs_assumed_rank
+      type(c_ptr), value :: plan
+      integer(c_int) :: count
+      integer(c_int),target,dimension(..) :: gpus
+      !
+      hipfftXtSetGPUs_assumed_rank = hipfftXtSetGPUs_(plan,count,c_loc(gpus))
+    end function
+
+#else
+    function hipfftXtSetGPUs_rank_0(plan,count,gpus)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtSetGPUs_rank_0
+      type(c_ptr), value :: plan
+      integer(c_int) :: count
+      integer(c_int),target :: gpus
+      !
+      hipfftXtSetGPUs_rank_0 = hipfftXtSetGPUs_(plan,count,c_loc(gpus))
+    end function
+
+    function hipfftXtSetGPUs_rank_1(plan,count,gpus)
+      implicit none
+      integer(kind(HIPFFT_SUCCESS)) :: hipfftXtSetGPUs_rank_1
+      type(c_ptr), value :: plan
+      integer(c_int) :: count
+      integer(c_int),target,dimension(:) :: gpus
+      !
+      hipfftXtSetGPUs_rank_1 = hipfftXtSetGPUs_(plan,count,c_loc(gpus))
     end function
 
 #endif
