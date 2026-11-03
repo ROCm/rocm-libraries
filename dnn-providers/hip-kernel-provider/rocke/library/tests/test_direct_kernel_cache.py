@@ -1835,3 +1835,51 @@ def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
         (step,) = plan.steps
         waves = json.loads(plan.identity.knobs)["block_waves"]
         assert step.block == (waves * 32, 1, 1), plan.identity.label()
+
+
+@pytest.mark.parametrize("variant", [DIRECT_FWD_WMMA, DIRECT_FWD_SMALLK_WMMA])
+def test_direct_wmma_fwd_rect_and_per_axis_pad_jobs_round_trip(variant):
+    """The 1 x R, rectangular and per-axis-padded WMMA forward rows (the 1x7
+    small-K one too) come back from their identity, name and all, as
+    ``reproduce_kernel`` rebuilds them."""
+    from benchmarks.common.reproduce_kernel import job_and_builder
+    from kernels.conv import direct_aot_jobs as daj
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    arch = "gfx1250"
+    target = ArchTarget.from_gfx(arch)
+    direction, rows = daj.DIRECT_CAPABILITIES[variant]
+    rows = [c for c in rows if c.kw or c.pad_w >= 0]
+    assert rows, variant
+    n = 0
+    for caps in rows:
+        _, cell = daj._caps_jobs(
+            arch, target.wave_size, variant, direction, caps, "fp16"
+        )
+        for _, job in cell:
+            ident = job.identity
+            assert (ident.filter_h, ident.pad_h) != (ident.filter_w, ident.pad_w)
+            label = ident.label()
+            assert KernelIdentity.from_label(label) == ident, label
+            assert daj.direct_job_for_identity(ident) == job
+            assert job_and_builder(KernelIdentity.from_label(label))[0] == job
+            n += 1
+    assert n > 0
+
+
+def test_direct_job_for_identity_still_rejects_per_axis_pad_elsewhere():
+    """Per-axis padding stays rejected for a variant without it."""
+    from kernels.conv import direct_aot_jobs as daj
+
+    ident = daj._identity(
+        _ARCH,
+        64,
+        "direct_grouped",
+        "direct_fwd",
+        daj.DirectCaps(KH=3, PAD=1, stride=1, cpg=16, kpg=16),
+        dict(block_q=16, block_groups=2, double_buffer=True),
+        "fp16",
+    )
+    daj.direct_job_for_identity(ident)
+    with pytest.raises(LookupError):
+        daj.direct_job_for_identity(replace(ident, pad_w=0))

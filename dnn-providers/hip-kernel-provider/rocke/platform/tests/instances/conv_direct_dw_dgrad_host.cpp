@@ -21,10 +21,13 @@
  *     columns by PAD, which must refuse it; the direct and small-K WMMA
  *     forwards offset columns by PAD_W and must take it (pad_w below -1
  *     is refused everywhere);
- *   - the knob sets of the direct WMMA forward whose kernel would read wrong
- *     data, which its validator must refuse with Python's reason (and the
- *     neighbouring sets it must keep): a padded polyphase view whose chunk is
- *     wider than one wave zeroes.
+ *   - the knob sets of the direct and tap-outer WMMA forwards whose kernel
+ *     would read wrong data or wait too little, which their validators must
+ *     refuse with Python's reason (and the neighbouring sets they must keep):
+ *     a grouped KxK strided view, a polyphase view whose column padding is
+ *     below S / 2, a zero ck (refused, not divided by), a padded polyphase
+ *     view whose chunk is wider than one wave zeroes, and a tap-outer TDM
+ *     split over more than 2 stages.
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -36,6 +39,7 @@
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
+#include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
@@ -346,6 +350,76 @@ static void test_fwd_wmma_padded_poly_view_chunk(void)
     expect_fwd_wmma("ck 256, pad_w 1", &s, NULL);
 }
 
+/* A KxK strided_view patch run is KW * cpg contiguous channels only when one
+ * group holds a pixel's channels; a 1x1 one still serves grouped convs. */
+static void test_fwd_wmma_strided_view_refusals(void)
+{
+    rocke_direct_fwd_wmma_spec_t s = rocke_direct_fwd_wmma_spec_default();
+    s.strided_view = true;
+    s.problem = dense_problem(13, 21, 64, 64);
+    s.problem.groups = 2;
+    s.problem.KH = 2;
+    s.problem.KW = 2;
+    s.problem.PAD = 0;
+    s.problem.stride = 2;
+    expect_fwd_wmma("a grouped 2x2 strided_view", &s, "a KxK strided_view serves ungrouped convs");
+    s.problem.groups = 1;
+    expect_fwd_wmma("a dense 2x2 strided_view", &s, NULL);
+    s.problem.groups = 2;
+    s.problem.KH = 1;
+    s.problem.KW = 1;
+    expect_fwd_wmma("a grouped 1x1 strided_view", &s, NULL);
+    s.problem = dense_problem(13, 21, 64, 96);
+    s.problem.KH = 2;
+    s.problem.KW = 2;
+    s.problem.PAD = 0;
+    s.problem.stride = 2;
+    s.ck = 0;
+    expect_fwd_wmma("a strided_view with ck 0", &s, "ck 0 must be a positive multiple of 32");
+}
+
+/* Below S / 2 the view's last pixel is all input, not a trailing zero; a zero
+ * ck is refused, not divided by. */
+static void test_fwd_wmma_poly_view_refusals(void)
+{
+    rocke_direct_fwd_wmma_spec_t s = poly_view_spec(512, 64, 96, 8, 4, 1);
+    expect_fwd_wmma(
+        "poly_view S 4, pad_w 1", &s, "poly_view needs column padding 0 or at least S / 2");
+    s = poly_view_spec(512, 64, 96, 8, 4, 2);
+    expect_fwd_wmma("poly_view S 4, pad_w 2", &s, NULL);
+    s = poly_view_spec(600, 64, 96, 4, 2, 1);
+    s.ck = 0;
+    expect_fwd_wmma(
+        "poly_view with ck 0", &s, "a chunk must lie in one input pixel (cpg 64, ck 0)");
+}
+
+/* A slab in the top padding issues no transfer, so a partial tensorcnt wait
+ * can pass early: tdm_split > 1 needs 2 stages. */
+static void test_fwd_tapouter_tdm_split_stages(void)
+{
+    char reason[ERR_CAP];
+    rocke_fwd_tapouter_wmma_spec_t s = rocke_fwd_tapouter_wmma_spec_default();
+    s.problem = dense_problem(29, 37, 64, 96);
+    s.problem.PAD = 12;
+    s.problem.dil_h = 12;
+    s.problem.dil_w = 12;
+    s.tdm_split = 2;
+    for(int stages : {3, 4})
+    {
+        s.stages = stages;
+        CHECK(!rocke_fwd_tapouter_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+              "tap-outer accepted tdm_split 2 with %d stages",
+              stages);
+        CHECK(strcmp(reason, "tdm_split 2 needs 2 stages (a skipped slab breaks the wait)") == 0,
+              "tap-outer reason: %s",
+              reason);
+    }
+    s.stages = 2;
+    CHECK(rocke_fwd_tapouter_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "tap-outer refused tdm_split 2 with 2 stages: %s",
+          reason);
+}
+
 static rocke_direct_conv_problem_t stem_problem(int KH, int stride, int PAD)
 {
     rocke_direct_conv_problem_t p = dense_problem(32, 48, 3, 64);
@@ -382,7 +456,10 @@ int main(void)
     test_tiled_dgrad_refuses_cpl();
     test_wmma_kernels_refuse_per_axis_padding();
     test_stem_wmma_kernels_refuse_per_axis_padding();
+    test_fwd_wmma_strided_view_refusals();
+    test_fwd_wmma_poly_view_refusals();
     test_fwd_wmma_padded_poly_view_chunk();
+    test_fwd_tapouter_tdm_split_stages();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d check(s) failed\n", g_failures);
