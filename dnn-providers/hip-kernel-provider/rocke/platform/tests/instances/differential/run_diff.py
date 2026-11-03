@@ -416,7 +416,10 @@ PY_REF_ROOT = PYROOT
 SHIM_DIR = None
 
 
-def _python_emitter_env(src_dir: Path) -> dict[str, str]:
+def python_emitter_env(src_dir: Path) -> dict[str, str]:
+    """The environment a Python emitter in ``src_dir`` runs in: the reference
+    rocke package, the library and the parity directories on ``PYTHONPATH``,
+    and no debug-location capture."""
     env = dict(os.environ)
     # The C emitters build their IR natively and so have no Python authoring
     # stack to record; letting location capture through here would give the
@@ -470,7 +473,7 @@ def _run_python_batch(
                 stdout=subprocess.PIPE,
                 stderr=errors,
                 text=True,
-                env=_python_emitter_env(src_dir),
+                env=python_emitter_env(src_dir),
             )
             assert process.stdout is not None
             records: queue.Queue[str | None] = queue.Queue()
@@ -509,16 +512,7 @@ def _run_python_batch(
                             raise ValueError(
                                 "batch worker returned different config index"
                             )
-                        if canonical and digest_in_worker:
-                            emission = Emission(
-                                record["returncode"],
-                                record["has_output"],
-                                record["sha256"],
-                                record["stderr"],
-                                record["canonical_sha"],
-                                record["canonical_error"],
-                            )
-                        elif canonical:
+                        if canonical and not digest_in_worker:
                             output = (output_dir / f"{record['idx']}.out").read_bytes()
                             emission = _emission(
                                 record["returncode"],
@@ -531,12 +525,7 @@ def _run_python_batch(
                                     "batch worker output hash changed in transit"
                                 )
                         else:
-                            emission = Emission(
-                                record["returncode"],
-                                record["has_output"],
-                                record["sha256"],
-                                record["stderr"],
-                            )
+                            emission = emission_from_record(record, canonical=canonical)
                     except (
                         KeyError,
                         OSError,
@@ -593,6 +582,20 @@ def mode_unsupported(emission: Emission) -> bool:
         return False
     lines = [line.strip() for line in emission.error.splitlines() if line.strip()]
     return bool(lines) and lines[-1].lower().startswith(_MODE_REJECTION_PREFIXES)
+
+
+def emission_from_record(record: dict, *, canonical: bool = False) -> Emission:
+    """The emission one ``python_batch_worker.py`` record reports; with
+    ``canonical``, also the canonical hash the worker computed (``--canonical``),
+    which the record must carry."""
+    return Emission(
+        record["returncode"],
+        record["has_output"],
+        record["sha256"],
+        record["stderr"],
+        record["canonical_sha"] if canonical else None,
+        record["canonical_error"] if canonical else None,
+    )
 
 
 def _is_end_emission(emission: Emission) -> bool:
