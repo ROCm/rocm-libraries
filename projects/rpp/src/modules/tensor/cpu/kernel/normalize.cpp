@@ -23,6 +23,7 @@ SOFTWARE.
 */
 
 #include <atomic>
+#include <vector>
 
 #include "host_tensor_executors.hpp"
 #include "rpp_cpu_simd_math.hpp"
@@ -488,11 +489,18 @@ RppStatus normalize_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGe
         maxSize = std::max(maxSize, size);
     }
 
-    if (!computeMeanStddev) {
-        for (Rpp32u i = 0; i < maxSize; i++)
-            stdDevTensorPtr[i] = (!stdDevTensorPtr[i]) ? 1.0f : scale / stdDevTensorPtr[i];
-        maxSize = 0;
+    // stdDevTensor is consumed downstream as a (scale / stddev) multiplier. Convert a
+    // caller-supplied stddev into scratch so the caller's buffer is left unchanged.
+    std::vector<Rpp32f> stdDevScratch;
+    if (!(computeMeanStddev & 2)) {
+        // both supplied: one shared param set broadcast to every sample; mean computed: per sample
+        Rpp32u paramCount = computeMeanStddev ? maxSize * batchSize : maxSize;
+        stdDevScratch.resize(paramCount);
+        for (Rpp32u i = 0; i < paramCount; i++)
+            stdDevScratch[i] = (!stdDevTensorPtr[i]) ? 1.0f : scale / stdDevTensorPtr[i];
+        stdDevTensorPtr = stdDevScratch.data();
     }
+    if (!computeMeanStddev) maxSize = 0;
 
     std::atomic<RppStatus> axisMaskStatus{RPP_SUCCESS};
     omp_set_dynamic(0);
@@ -742,11 +750,18 @@ RppStatus normalize_generic_host_tensor(T1* srcPtr, RpptGenericDescPtr srcGeneri
                         : roiTensor[(tensorDims * 2 * batch) + tensorDims + i];
         maxSize = std::max(maxSize, size);
     }
-    if (!computeMeanStddev) {
-        for (Rpp32u i = 0; i < maxSize; i++)
-            stdDevTensorPtr[i] = (!stdDevTensorPtr[i]) ? 1.0f : scale / stdDevTensorPtr[i];
-        maxSize = 0;
+    // stdDevTensor is consumed downstream as a (scale / stddev) multiplier. Convert a
+    // caller-supplied stddev into scratch so the caller's buffer is left unchanged.
+    std::vector<Rpp32f> stdDevScratch;
+    if (!(computeMeanStddev & 2)) {
+        // both supplied: one shared param set broadcast to every sample; mean computed: per sample
+        Rpp32u paramCount = computeMeanStddev ? maxSize * batchSize : maxSize;
+        stdDevScratch.resize(paramCount);
+        for (Rpp32u i = 0; i < paramCount; i++)
+            stdDevScratch[i] = (!stdDevTensorPtr[i]) ? 1.0f : scale / stdDevTensorPtr[i];
+        stdDevTensorPtr = stdDevScratch.data();
     }
+    if (!computeMeanStddev) maxSize = 0;
 
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
