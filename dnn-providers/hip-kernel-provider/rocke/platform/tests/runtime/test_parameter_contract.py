@@ -21,7 +21,17 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 from rocke.core.intexpr import product_of
-from rocke.core.ir import F16, I16, I32, I64, IRBuilder, Param, PtrType
+from rocke.core.ir import (
+    F16,
+    GPU_CHECK_UNREAD_REASON,
+    I16,
+    I32,
+    I64,
+    IRBuilder,
+    Param,
+    PtrType,
+    kernel_checks_on_gpu,
+)
 from rocke.helpers.compile import (
     KernelArtifact,
     KernelModule,
@@ -30,6 +40,8 @@ from rocke.helpers.compile import (
     compile_module,
 )
 from rocke.helpers.manifest import write_artifact
+from rocke.portable_ir.src import launch
+from rocke.portable_ir.utils.recipe_expand import ExpandError
 from rocke.runtime.contract import LaunchRefused, parameter_contract
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.launcher import (
@@ -45,6 +57,11 @@ from rocke.runtime.launcher import (
 )
 from rocke.runtime.torch_interop import launch_torch_kernel
 from rocke.tests.gpu import current_device_arch
+from rocke.tests.gpu_check_recipes import (
+    GPU_CHECK_REFUSAL,
+    gpu_check_recipe,
+    gpu_checked_kernel,
+)
 
 
 def _gemm_like_kernel():
@@ -223,6 +240,33 @@ def test_write_artifact_refuses_a_kernel_that_checks_on_the_gpu(tmp_path):
         "launch it through KernelLauncher.from_artifact"
     )
     assert not list(tmp_path.iterdir())
+
+
+def test_every_door_refuses_a_check_whose_marker_was_optimized_away(tmp_path):
+    """Nothing uses the checked value, so optimization drops the check's range
+    marker and keeps its failure path, which still stores to the GPU-check word.
+    write_artifact, which reads the parameter contract, and the recipe launch
+    plan both decide by that failure path, so both refuse, with one reason."""
+    kernel = gpu_checked_kernel(result_used=False)
+    contract = parameter_contract(kernel)
+    assert contract.gpu_checks == (), "the marker is gone"
+    assert kernel_checks_on_gpu(kernel), "the failure path stays"
+    assert contract.code_object_refusal() == GPU_CHECK_UNREAD_REASON
+    assert str(contract).endswith(
+        "  checked on the GPU (a false fact fails the launch with GpuCheckFailed):\n"
+        "    a check whose value nothing uses (optimization dropped its description; "
+        "the check stays)"
+    )
+    with pytest.raises(ValueError) as written:
+        write_artifact(_artifact(kernel), tmp_path, {})
+    assert str(written.value) == (
+        f"gpu_checked: {GPU_CHECK_UNREAD_REASON} -- "
+        "launch it through KernelLauncher.from_artifact"
+    )
+    assert not list(tmp_path.iterdir())
+    with pytest.raises(ExpandError) as planned:
+        launch.plan(gpu_check_recipe(result_used=False), {}, {})
+    assert str(planned.value) == GPU_CHECK_REFUSAL
 
 
 def test_write_artifact_names_an_exact_workgroup_size_as_its_reason(tmp_path):

@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.intexpr import eval_intexpr
 from rocke.core.ir import (
+    GPU_CHECK_FAILED_OP,
     GPU_CHECK_UNREAD_REASON,
     LAUNCH_THROUGH_FROM_ARTIFACT,
     PARAM_FACTS_UNCHECKED_REASON,
@@ -373,9 +374,10 @@ def _refuse_stated_facts(flat: dict[str, Any], kernel_name: str) -> None:
 
 
 def _refuse_gpu_checks(flat: dict[str, Any], kernel_name: str) -> None:
-    """Mirrors rv_plan_gpu_checks in recipe_vm.cpp, with its message."""
+    """Mirrors rv_plan_gpu_checks in recipe_vm.cpp, with its message: the
+    recipe form of ``kernel_checks_on_gpu``, which looks for the same op."""
     if any(
-        instr.get("op") == "emit" and instr.get("opcode") == "tile.gpu_check_failed"
+        instr.get("op") == "emit" and instr.get("opcode") == GPU_CHECK_FAILED_OP
         for instr in walk_instrs(flat["program"])
     ):
         raise ExpandError(

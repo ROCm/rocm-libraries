@@ -27,6 +27,11 @@ from rocke.portable_ir.examples import recipe_toy
 from rocke.portable_ir.src import launch
 from rocke.portable_ir.src.recipe_bundle import build_bundle, cbor_encode
 from rocke.portable_ir.utils.recipe_expand import ExpandError
+from rocke.tests.gpu_check_recipes import (
+    GPU_CHECK_AND_FACTS_REFUSAL,
+    GPU_CHECK_REFUSAL,
+    gpu_check_recipe,
+)
 
 # grid.x = ceil(D / 64), the shape of a real elementwise dispatch.
 CEIL_DIV_D_64 = {"div": [{"add": [{"spec": "D"}, 63]}, 64]}
@@ -235,38 +240,6 @@ class TestExactWorkgroupSize(unittest.TestCase):
         self.assertEqual(str(cm.exception), NO_BLOCK_REFUSAL)
 
 
-def gpu_check_recipe(*, with_facts=False):
-    """A recorded kernel that checks a loaded value with ``gpu_checked_value``,
-    with launch geometry. ``with_facts`` also states a fact on a parameter."""
-    from rocke.core.ir import I32, IRBuilder, PtrType
-    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
-
-    b = IRBuilder("gpu_checked")
-    out = b.param("out", PtrType(I32, "global"))
-    if with_facts:
-        b.param("n", I32, ge=1)
-    loaded = b.readfirstlane(b.global_load(out, b.block_id_x(), I32))
-    b.global_store(out, b.const_i32(0), b.gpu_checked_value(loaded, ge=0, le=100))
-    b.ret()
-    return launch.attach_launch(
-        kerneldef_to_recipe(b.kernel), grid=[1, 1, 1], block=[64, 1, 1]
-    )
-
-
-GPU_CHECK_REFUSAL = (
-    "gpu_checked: only rocke's runtime reads this kernel's GPU-check word, so a "
-    "false gpu_checked_value fact would go unseen -- launch it through "
-    "KernelLauncher.from_artifact"
-)
-
-
-GPU_CHECK_AND_FACTS_REFUSAL = (
-    "gpu_checked: parameters carry facts, which a launch from a code object or "
-    "from a launch plan does not check -- launch it through "
-    "KernelLauncher.from_artifact"
-)
-
-
 class TestGpuChecks(unittest.TestCase):
     """A lane whose gpu_checked_value fact is false stores to the kernel's
     GPU-check word and returns. A plan's caller never reads that word, so the
@@ -278,6 +251,14 @@ class TestGpuChecks(unittest.TestCase):
         self.assertNotIn("tile.gpu_check_failed", top_level, "the check is nested")
         with self.assertRaises(ExpandError) as cm:
             launch.plan(recipe, {}, {})
+        self.assertEqual(str(cm.exception), GPU_CHECK_REFUSAL)
+
+    def test_a_check_whose_marker_was_optimized_away_is_refused(self):
+        """Nothing uses the checked value, so optimization drops its range
+        marker; the failure path still stores to the word, so the plan is
+        refused all the same."""
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(gpu_check_recipe(result_used=False), {}, {})
         self.assertEqual(str(cm.exception), GPU_CHECK_REFUSAL)
 
     def test_stated_facts_are_named_first(self):

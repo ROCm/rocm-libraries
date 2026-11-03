@@ -530,6 +530,7 @@ def test_standalone_cli_plans_and_refuses_like_python(tmp_path):
     from rocke.portable_ir.src import launch
     from rocke.portable_ir.tests import test_launch as cases
     from rocke.portable_ir.utils.recipe_expand import ExpandError
+    from rocke.tests import gpu_check_recipes
 
     planned = {
         "toy": (cases.toy(), {"D": 1000}, {"dtype": "f32"}),
@@ -544,10 +545,17 @@ def test_standalone_cli_plans_and_refuses_like_python(tmp_path):
 
     refused = {
         "facts": (cases.facts_recipe(), cases.FACTS_REFUSAL),
-        "gpu_check": (cases.gpu_check_recipe(), cases.GPU_CHECK_REFUSAL),
+        "gpu_check": (
+            gpu_check_recipes.gpu_check_recipe(),
+            gpu_check_recipes.GPU_CHECK_REFUSAL,
+        ),
+        "gpu_check_unused_result": (
+            gpu_check_recipes.gpu_check_recipe(result_used=False),
+            gpu_check_recipes.GPU_CHECK_REFUSAL,
+        ),
         "gpu_check_and_facts": (
-            cases.gpu_check_recipe(with_facts=True),
-            cases.GPU_CHECK_AND_FACTS_REFUSAL,
+            gpu_check_recipes.gpu_check_recipe(with_facts=True),
+            gpu_check_recipes.GPU_CHECK_AND_FACTS_REFUSAL,
         ),
         "wrong_block": (
             cases.exact_block_recipe((32, 1, 1)),

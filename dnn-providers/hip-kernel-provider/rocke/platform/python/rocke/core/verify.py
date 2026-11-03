@@ -59,6 +59,7 @@ from .ir import (
     PtrType,
     SmemType,
     _gpu_check_failed_op_error,
+    GPU_CHECK_FAILED_OP,
     _trap_op_error,
 )
 from .value_sources import ASSUME_RANGE_OP
@@ -495,7 +496,7 @@ class _Verifier:
             error = _trap_op_error(op)
             if error:
                 self.err(error, op)
-        elif name == "tile.gpu_check_failed":
+        elif name == GPU_CHECK_FAILED_OP:
             error = _gpu_check_failed_op_error(op)
             if error:
                 self.err(error, op)

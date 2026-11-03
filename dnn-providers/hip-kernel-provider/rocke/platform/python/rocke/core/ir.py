@@ -1169,6 +1169,32 @@ def gpu_check_word_symbol(kernel_name: str) -> str:
     return f"rocke_gpu_check_failed_{kernel_name}"
 
 
+# The op on a gpu_checked_value's failure path: a lane whose fact is false
+# stores to the kernel's GPU-check word and returns. The builder emits it, and
+# kernel_checks_on_gpu and the recipe launch plan look for it by this name.
+GPU_CHECK_FAILED_OP = "tile.gpu_check_failed"
+
+
+def kernel_checks_on_gpu(kernel: KernelDef) -> bool:
+    """Whether ``kernel`` holds a ``tile.gpu_check_failed`` op, so a false
+    ``gpu_checked_value`` fact stores to its GPU-check word.
+
+    This is the one test of whether a kernel checks a value on the GPU, and the
+    C++ engine's ``rocke_i_kernel_checks_on_gpu`` is its twin. It looks for the
+    failure op, not the range marker: optimization drops a marker whose result
+    nothing uses, while the failure path, which stores, stays.
+    """
+    return _region_checks_on_gpu(kernel.body.ops)
+
+
+def _region_checks_on_gpu(ops: list[Op]) -> bool:
+    return any(
+        op.name == GPU_CHECK_FAILED_OP
+        or any(_region_checks_on_gpu(region.ops) for region in op.regions)
+        for op in ops
+    )
+
+
 # Why a kernel holding a gpu_checked_value must not be launched from its code
 # object alone: nothing but rocke.runtime reads its GPU-check word, so a false
 # fact would go unseen. Every door that hands out a code object or a plan to
@@ -2438,7 +2464,7 @@ class IRBuilder:
             for other in fails[1:]:
                 fail = self.lor(fail, other)
             with self.scf_if(fail):
-                self._op("tile.gpu_check_failed")
+                self._op(GPU_CHECK_FAILED_OP)
         lower_bound = stated.get(lower_word) if lower_word is not None else None
         upper_bound = stated.get(upper_word) if upper_word is not None else None
         return self._assume_range(

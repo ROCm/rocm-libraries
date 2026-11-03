@@ -55,6 +55,7 @@ from ..core.ir import (
     Op,
     PtrType,
     Value,
+    kernel_checks_on_gpu,
     marker_facts,
     param_fact_errors,
 )
@@ -162,6 +163,10 @@ class ParameterContract:
     checks; ``promises`` (``(param, attr text)``) and ``gpu_checks`` (one text
     per ``gpu_checked_value``) are listed and not checked. ``params`` is the
     parameter list, ``(name, type name)`` in argument order.
+    ``has_gpu_check_word`` is whether a false fact stores to the kernel's
+    GPU-check word (``kernel_checks_on_gpu``). It can be true with no
+    ``gpu_checks`` text: optimization drops the marker of a check whose result
+    nothing uses, and keeps the check.
     """
 
     kernel_name: str
@@ -171,6 +176,7 @@ class ParameterContract:
     workgroup_size: int | None
     promises: tuple[tuple[str, str], ...]
     gpu_checks: tuple[str, ...]
+    has_gpu_check_word: bool
 
     def code_object_refusal(self) -> str | None:
         """Why a launch from the kernel's code-object bytes alone would drop
@@ -194,9 +200,19 @@ class ParameterContract:
         ]
         if reasons:
             return "; ".join(reasons)
-        if self.gpu_checks:
+        if self.has_gpu_check_word:
             return GPU_CHECK_UNREAD_REASON
         return None
+
+    def _gpu_check_rows(self) -> list[str]:
+        """One row per ``gpu_checked_value`` whose marker remains, or one row
+        for a check whose marker optimization dropped."""
+        if self.has_gpu_check_word and not self.gpu_checks:
+            return [
+                "a check whose value nothing uses (optimization dropped its "
+                "description; the check stays)"
+            ]
+        return list(self.gpu_checks)
 
     def check(
         self,
@@ -282,7 +298,7 @@ class ParameterContract:
             (
                 "checked on the GPU (a false fact fails the launch with "
                 "GpuCheckFailed)",
-                list(self.gpu_checks),
+                self._gpu_check_rows(),
             ),
         )
         lines = [f"parameter contract of {self.kernel_name}:"]
@@ -327,6 +343,7 @@ def parameter_contract(kernel: KernelDef) -> ParameterContract:
         workgroup_size=None if size is None else int(size),
         promises=tuple(promises),
         gpu_checks=tuple(_gpu_check_text(op) for op in _gpu_checks(kernel.body.ops)),
+        has_gpu_check_word=kernel_checks_on_gpu(kernel),
     )
 
 
