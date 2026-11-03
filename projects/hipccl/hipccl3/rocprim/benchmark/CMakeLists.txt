@@ -24,6 +24,12 @@ if(NOT WIN32)
   find_package(amd_smi REQUIRED)
 endif()
 
+set(ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS "1" CACHE STRING
+    "Device compiler workers for the segmented radix sort pairs benchmark")
+if(NOT ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS must be a positive integer")
+endif()
+
 option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various configs" OFF)
 option(BENCHMARK_AUTOTUNED_TYPES_ONLY "Benchmark autotuned types only, which lowers the benchmarking runtime" OFF)
 
@@ -95,6 +101,11 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     endif()
   else()
     add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+    if(BENCHMARK_TARGET STREQUAL "benchmark_device_segmented_radix_sort_pairs"
+       AND ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS GREATER 1)
+      set_property(SOURCE ${BENCHMARK_SOURCE} APPEND PROPERTY COMPILE_OPTIONS
+                   "--offload-jobs=${ROCPRIM_SEGMENTED_PAIRS_OFFLOAD_JOBS}")
+    endif()
   endif()
 
   # NOTE(hipccl3): two extra ".." vs upstream (rocm-libraries/projects/rocprim)
