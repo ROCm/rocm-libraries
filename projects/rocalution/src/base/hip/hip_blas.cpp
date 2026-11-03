@@ -529,22 +529,6 @@ namespace rocalution
         return rocblas_idamax(handle, n, x, incx, result);
     }
 
-    template <>
-    rocblas_status rocblasTamax(
-        rocblas_handle handle, int n, const std::complex<float>* x, int incx, int* result)
-    {
-        //    return rocblas_iscamax(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
-    }
-
-    template <>
-    rocblas_status rocblasTamax(
-        rocblas_handle handle, int n, const std::complex<double>* x, int incx, int* result)
-    {
-        //    return rocblas_idzamax(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
-    }
-
     // rocblas_asum
     template <>
     rocblas_status
@@ -558,28 +542,6 @@ namespace rocalution
         rocblasTasum(rocblas_handle handle, int n, const double* x, int incx, double* result)
     {
         return rocblas_dasum(handle, n, x, incx, result);
-    }
-
-    template <>
-    rocblas_status rocblasTasum(rocblas_handle             handle,
-                                int                        n,
-                                const std::complex<float>* x,
-                                int                        incx,
-                                std::complex<float>*       result)
-    {
-        //    return rocblas_scasum(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
-    }
-
-    template <>
-    rocblas_status rocblasTasum(rocblas_handle              handle,
-                                int                         n,
-                                const std::complex<double>* x,
-                                int                         incx,
-                                std::complex<double>*       result)
-    {
-        //    return rocblas_dzasum(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
     }
 
     // rocblas_gemv

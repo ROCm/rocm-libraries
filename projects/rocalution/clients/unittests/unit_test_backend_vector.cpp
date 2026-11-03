@@ -348,50 +348,47 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
         }
     };
 
-    auto equal_magnitude_checks = [this, expect_magnitude] {
-        std::vector<T> equal_magnitudes(8);
-        for(size_t i = 0; i < equal_magnitudes.size(); ++i)
-        {
-            equal_magnitudes[i] = i % 2 == 0 ? from_int<T>(7) : T(0) - from_int<T>(7);
-        }
-        T       value = T(0);
-        int64_t index = this->vec(equal_magnitudes)->Amax(value);
-        EXPECT_GE(index, 0);
-        EXPECT_LT(index, 8);
-        expect_magnitude(value, from_int<T>(7));
-    };
-
-    auto position_checks = [this, expect_magnitude] {
-        for(int position : {0, 5, 11})
-        {
-            for(int sign : {1, -1})
-            {
-                SCOPED_TRACE("at " + std::to_string(position) + " with sign "
-                             + std::to_string(sign));
-
-                std::vector<T> a = x<T>();
-                a[position]      = from_int<T>(sign * 20);
-
-                T       value = T(0);
-                int64_t index = this->vec(a)->Amax(value);
-                EXPECT_EQ(index, position);
-                expect_magnitude(value, a[position]);
-            }
-        }
-    };
-
-    if(TypeParam::backend == Backend::Accelerator && is_complex_v<T>)
+    std::vector<T> equal_magnitudes(8);
+    for(size_t i = 0; i < equal_magnitudes.size(); ++i)
     {
-        KNOWN_BUG("the complex rocblasTamax is a FATAL_ERROR stub");
-        expect_in_child([&] {
-            equal_magnitude_checks();
-            position_checks();
-        });
-        return;
+        equal_magnitudes[i] = i % 2 == 0 ? from_int<T>(7) : T(0) - from_int<T>(7);
+    }
+    T       value = T(0);
+    int64_t index = this->vec(equal_magnitudes)->Amax(value);
+    EXPECT_GE(index, 0);
+    EXPECT_LT(index, 8);
+    expect_magnitude(value, from_int<T>(7));
+
+    for(int position : {0, 5, 11})
+    {
+        for(int sign : {1, -1})
+        {
+            SCOPED_TRACE("at " + std::to_string(position) + " with sign " + std::to_string(sign));
+
+            std::vector<T> a = x<T>();
+            a[position]      = from_int<T>(sign * 20);
+
+            index = this->vec(a)->Amax(value);
+            EXPECT_EQ(index, position);
+            expect_magnitude(value, a[position]);
+        }
     }
 
-    equal_magnitude_checks();
-    position_checks();
+    if constexpr(is_complex_v<T>)
+    {
+        // The largest modulus |z|, not the largest |re| + |im| of BLAS icamax
+        index = this->vec(std::vector<T>{T(3, 3), T(4.5, 0)})->Amax(value);
+        EXPECT_EQ(index, 1);
+        EXPECT_EQ(value, T(4.5));
+
+        // The squares of the parts overflow, the modulus does not
+        using R     = real_t<T>;
+        const R big = std::ldexp(R(1), std::numeric_limits<R>::max_exponent - 4);
+        index
+            = this->vec(std::vector<T>{T(big, 0), T(3 * big, 4 * big), T(4 * big, 0)})->Amax(value);
+        EXPECT_EQ(index, 1);
+        EXPECT_EQ(value, T(5 * big));
+    }
 }
 
 // Both return the last element of the result. In place the source is the vector itself.
