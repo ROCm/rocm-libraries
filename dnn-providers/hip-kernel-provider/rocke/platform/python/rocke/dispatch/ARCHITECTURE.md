@@ -1466,7 +1466,7 @@ class UnifiedSpace(WavesPerEuSpace):            # outer knob: waves_per_eu
     def inert(self, base, kernel):              # a KQ pad the kernel lays out as none
         ...
 
-    def validate(self, base, kernel):           # gfx950 2D: LDS budget, padded K vs aliased Q
+    def validate(self, base, kernel):           # gfx950 2D: LDS budget
         ...
 
     def production(self, base, axes, is_valid):  # the curated stacks
@@ -1508,8 +1508,9 @@ product (sampled) at the `full` level -- while production traffic keeps taking
 the heuristic's choice through the route registry.
 
 `validate` exists because the tiled 2D validator does not model LDS: an
-over-budget spec only fails in codegen, and a padded K LDS that Q aliases
-computes wrong output. The LDS model is the pool the LLVM lowering packs
+over-budget spec only fails in codegen. (A padded K LDS that Q aliases computes
+wrong output; the gfx950 kernel spec refuses it, so `validate` does not.) The
+LDS model is the pool the LLVM lowering packs
 (`_gfx950_2d_lds_bytes`, pinned to the lowered IR by a test), and `is_valid`
 applies it while walking, so the LDS-saving enabler axes that lead the axis
 order can still make a large tile legal.
@@ -1753,8 +1754,8 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
   native-FP8 K, misaligned slabs). Knobs that are illegal are refused with a
   reason: `KNOWN_WRONG_KNOBS`, fields that are not knobs of the variant,
   changing a knob the variant's codepath fixes, anything the kernel validator
-  rejects, and on the gfx950 2D path a spec over the LDS budget or a padded K
-  that Q aliases. Values are first converted to the type their axis declares
+  rejects (on gfx950, a padded K that Q aliases), and on the gfx950 2D path a
+  spec over the LDS budget. Values are first converted to the type their axis declares
   (`True` / `1`, `2` / `2.0` name one configuration, since they hash alike);
   a value with no lossless conversion is refused.
 - **Per-problem defaults are recorded.** Knobs are overrides of the

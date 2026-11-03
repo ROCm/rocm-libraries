@@ -65,8 +65,8 @@ field on the tiled kernel specs is a declared `KnobAxis` in `axes.py`
 fails if a kernel field is on no axis. Axes are ordered prerequisites-first,
 and the space is walked depth-first with the kernel's own spec validator
 pruning illegal prefixes, plus `UnifiedSpace.validate` on gfx950 2D (the LDS
-budget and the padded-K / aliased-Q rule, which the tiled 2D validator does
-not model). There is no size cap: the full space is millions of
+budget, which the tiled 2D validator does not model; the gfx950 spec itself
+refuses a padded K that Q aliases). There is no size cap: the full space is millions of
 specs per shape on the transposed paths, so `sweep_space` is a lazy stream and
 `sample_space(req, n, seed)` draws `n` random legal specs per candidate. Held
 out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They reject
@@ -141,8 +141,8 @@ configuration). Knobs that compile to the default are dropped (default
 values, restated policies, knobs the body does not read, a gfx950 KQ pad the
 kernel lays out as none); illegal ones are refused with the reason
 (`KNOWN_WRONG_KNOBS`, fields on no axis, codepath-fixed knobs,
-kernel-validator rejections, and on gfx950 2D the LDS budget and padded K with
-aliased Q). So one kernel has one id, and a knob pin cannot reach a
+kernel-validator rejections, among them padded K with aliased Q on gfx950,
+and on gfx950 2D the LDS budget). So one kernel has one id, and a knob pin cannot reach a
 configuration a sweep would not.
 
 gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`

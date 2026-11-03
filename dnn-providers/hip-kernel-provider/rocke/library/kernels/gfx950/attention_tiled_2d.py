@@ -854,6 +854,71 @@ class UnifiedAttention2DTiledSpec:
                     f"tile_size must be a positive multiple of block_size "
                     f"(got tile_size={self.tile_size}, block_size={self.block_size})"
                 )
+        # The Q staging store indexes K_lds as plain ``[slot, row, col]``, which
+        # misaddresses the padded slab layout and gives wrong output.
+        if self.kq_lds_pad_active and self.q_aliases_k_lds:
+            raise ValueError(
+                "gfx950 tiled 2D spec failed - use_kq_lds_pad=True with Q staged "
+                "in K_lds (use_q_reread=False, use_q_direct_reg=False), expected "
+                "use_q_reread or use_q_direct_reg: the padded K_lds slabs cannot "
+                "hold an aliased Q"
+            )
+
+    @property
+    def k_lds_slots(self) -> int:
+        """K_lds slots: one for single-buffer K, the ring depth for a deeper
+        ring, else the two of the double buffer."""
+        if self.use_k_single_buffer:
+            return 1
+        return max(2, self.kv_ring_depth)
+
+    @property
+    def kq_lds_slab_rows(self) -> int:
+        """K rows one wave's 1024-byte async-DMA slab fills: ``512 // HD``, or 0
+        when ``head_size`` does not divide 512."""
+        return 512 // self.head_size if 512 % self.head_size == 0 else 0
+
+    @property
+    def kq_lds_pad_off_reason(self) -> str | None:
+        """Why a requested K_lds slab pad is laid out as no pad at all, or None
+        when the pad is applied or was not requested."""
+        if not self.use_kq_lds_pad:
+            return None
+        if self.kv_storage_dtype == "fp8e4m3" and self.use_fp8_mfma_qk:
+            # The fp8 K read does not apply the pad's slab remap.
+            return "the KQ LDS pad is off under native-FP8 K LDS"
+        slab_rows = self.kq_lds_slab_rows
+        if (
+            not slab_rows
+            or self.tile_size_eff % slab_rows
+            or self.kq_lds_pad_halves <= 0
+            or self.kq_lds_pad_halves % 8
+        ):
+            return "the KQ LDS pad needs an aligned slab layout"
+        if self.k_lds_slots != 1:
+            return "the KQ LDS pad is only laid out for a single-K schedule"
+        return None
+
+    @property
+    def kq_lds_pad_active(self) -> bool:
+        """Whether K_lds is allocated with the padded slab layout."""
+        return self.use_kq_lds_pad and self.kq_lds_pad_off_reason is None
+
+    @property
+    def q_aliases_k_lds(self) -> bool:
+        """Whether Q is staged in K_lds rather than its own slab.
+
+        It needs a working-dtype K_lds (not the native-FP8 one) and a Q that
+        survives no K prefetch (no Q re-read) and is staged at all (no direct
+        register gather), and Q must fit the rows of at most the first two
+        slots: ``BLOCK_M <= T`` in one slot, or ``BLOCK_M <= 2 * T`` spilling
+        into the second when K_lds has two.
+        """
+        if self.use_q_reread or self.use_q_direct_reg:
+            return False
+        if self.kv_storage_dtype == "fp8e4m3" and self.use_fp8_mfma_qk:
+            return False
+        return self.block_m <= min(self.k_lds_slots, 2) * self.tile_size_eff
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -1200,25 +1265,13 @@ def build_unified_attention_2d_tiled(
     # Slab-granularity K_lds pad. The async DMA writes one WAVE_BYTES (=1024 B =
     # SLAB_ROWS*HD*2) contiguous slab per wave per call, so padding BETWEEN slabs
     # keeps the write contiguous while breaking the row-aliased bank conflict on
-    # the QK read. Correct (write+read consistent) -> numerics preserved.
-    KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if spec.use_kq_lds_pad else 0
+    # the QK read. Correct (write+read consistent) -> numerics preserved. The
+    # spec decides whether the pad is laid out; ``kq_lds_pad_off_reason`` names
+    # why a requested pad is not (the fp8 K read does not remap, unsupported
+    # geometry, more than one K slot), so the write and the read always agree.
+    KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if spec.kq_lds_pad_active else 0
     # SLAB_ROWS = rows filled by one wave's 1024-B (WAVE=64 lanes x 16 B) slab.
-    KQ_SLAB_ROWS = (512 // HD) if KQ_LDS_PAD else 0
-    # The slab pad's remap is only implemented for the non-fp8 K read (see the K
-    # read path below). The async-DMA write pads whenever KQ_LDS_PAD is set, but
-    # the fp8 K read does NOT remap -- an fp8+pad combo would address different
-    # slots -> silent numeric corruption. So disable the pad under fp8 (and under
-    # unsupported geometry) so write and read stay consistent. Byte-identical for
-    # the supported bf16 D256 path (FP8_MFMA_QK is False there).
-    if KQ_LDS_PAD and (
-        FP8_MFMA_QK
-        or 512 % HD != 0
-        or KQ_SLAB_ROWS == 0
-        or T % KQ_SLAB_ROWS != 0
-        or KQ_LDS_PAD % 8 != 0
-    ):
-        KQ_LDS_PAD = 0
-        KQ_SLAB_ROWS = 0
+    KQ_SLAB_ROWS = spec.kq_lds_slab_rows if KQ_LDS_PAD else 0
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -1488,28 +1541,18 @@ def build_unified_attention_2d_tiled(
     K_LDS_DTYPE = FP8E4M3 if FP8_MFMA_QK else dtype
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
-    Q_BYTES = BLOCK_M * HD * 2
-    # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
-    K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
-    K_BUF_BYTES = T * HD * K_LDS_ELEM_BYTES
-    K_TOTAL_BYTES = 2 * K_BUF_BYTES  # K_lds has 2 double-buffer slots
-    # Q can alias K_lds when (a) the dtypes match and (b) it fits in the
-    # full K_lds region (both slots). When ``BLOCK_M <= T`` Q fits in one
-    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills
-    # into K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather +
-    # store use ``(buf, row, col)`` indexing in both cases.
+    # Q can alias K_lds when the dtypes match and Q fits the K_lds rows. When
+    # ``BLOCK_M <= T`` Q fits in one slot (rows 0..BLOCK_M of K_lds[0]); when
+    # ``BLOCK_M > T`` Q spills into K_lds[1] (rows T..2T map to
+    # K_lds[1, row-T, :]). The gather + store use ``(buf, row, col)`` indexing in
+    # both cases, which the spec validator keeps off the padded slab layout.
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
-    Q_ALIAS_K = (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
     # Q re-read needs a dedicated Q_lds that survives the K prefetch (aliased Q
-    # gets overwritten by K[0]), so it cannot share K_lds.
-    if spec.use_q_reread:
-        Q_ALIAS_K = False
-    # direct-to-register Q gather: Q never touches LDS (no Q_lds at all),
-    # so it cannot alias K either.
+    # gets overwritten by K[0]), and the direct-to-register Q gather never
+    # touches LDS, so neither aliases K. The rule lives on the spec.
+    Q_ALIAS_K = spec.q_aliases_k_lds
     Q_DIRECT_REG = bool(spec.use_q_direct_reg)
-    if Q_DIRECT_REG:
-        Q_ALIAS_K = False
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
     # Deep K prefetch ring. kv_ring_depth=3 allocates K_lds as 3 slots
     # so K[i], K[i+1], K[i+2] are resident simultaneously (vs the depth-2
@@ -1521,11 +1564,7 @@ def build_unified_attention_2d_tiled(
     # fits the 32 KB / 2-WG/CU budget at HD=128). Validated to be incompatible
     # with the ring (>2) and V-double-buffer paths in __post_init__.
     K_SINGLE_BUFFER = bool(spec.use_k_single_buffer)
-    K_BUFS = 1 if K_SINGLE_BUFFER else (KV_RING_DEPTH if KV_RING_DEPTH > 2 else 2)
-    if KQ_LDS_PAD and K_BUFS != 1:
-        # Slab pad only wired for the single-buffer K path; disable otherwise.
-        KQ_LDS_PAD = 0
-        KQ_SLAB_ROWS = 0
+    K_BUFS = spec.k_lds_slots
     if KQ_LDS_PAD:
         # Slab-granularity layout: [K_BUFS, T/SLAB_ROWS, SLAB_ROWS*HD + PAD].
         # Each DMA wave-slab (SLAB_ROWS contiguous rows) lands in one padded

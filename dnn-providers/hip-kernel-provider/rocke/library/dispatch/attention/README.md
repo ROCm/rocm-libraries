@@ -215,13 +215,13 @@ base values. The checks run in this order:
   codepath (softmax interleave off the transposed body, `sched_barrier` off
   the 16x16 loop), because they would re-emit the same IR under a new name.
   Then `tuning_specs.py` builds the kernel spec, so the spec's `__post_init__`
-  and the kernel's `supports_tiled_*` run. On gfx950 2D, `UnifiedSpace.validate`
-  then checks what that validator does not model: the LDS footprint
-  (`_gfx950_2d_lds_bytes`, the pool the LLVM lowering packs) against the
-  arch's LDS capacity, and a padded K LDS that Q aliases, which computes wrong
-  output. Both were confirmed on MI355X: the over-budget specs fail codegen,
-  and padded-K / aliased-Q specs mismatched the reference (most of them, some
-  nondeterministically).
+  and the kernel's `supports_tiled_*` run. The gfx950 spec's `__post_init__`
+  refuses a padded K LDS that Q aliases, which computes wrong output (padded-K /
+  aliased-Q specs mismatched the reference on MI355X, most of them, some
+  nondeterministically). On gfx950 2D, `UnifiedSpace.validate` then checks what
+  that validator does not model: the LDS footprint (`_gfx950_2d_lds_bytes`, the
+  pool the LLVM lowering packs) against the arch's LDS capacity; over-budget
+  specs fail codegen on MI355X.
 - **Dense:** `DenseSpace` (through `KnobSpace.canonicalize`) applies the
   knobs to the base spec, so the dataclass validators run. It drops any
   setting that would compile to the same IR as another under a new symbol:
@@ -259,8 +259,8 @@ knob dict (`waves_per_eu` included):
 - **refused**, with the reason: `KNOWN_WRONG_KNOBS`, fields no axis of that
   variant sets (problem fields, variant geometry, untunable knobs, knobs out
   of scope for the problem), changing a knob the codepath fixes, whatever the
-  kernel spec or validator rejects, and on gfx950 2D a spec over the LDS
-  budget or a padded K that Q aliases.
+  kernel spec or validator rejects (on gfx950, a padded K that Q aliases), and
+  on gfx950 2D a spec over the LDS budget.
 
 What remains is the canonical knob dict the spec carries as `knobs`, and the
 input to its `tuning_id`.
@@ -571,9 +571,9 @@ between fields or candidate-specific policy:
 
 Per tuning spec, legality is the kernel's own validators plus, on the gfx950
 2D path, `UnifiedSpace.validate`: the tiled 2D validator does not model LDS,
-so a static LDS budget rejects specs codegen would refuse, and a padded K
-LDS is refused when Q aliases K (it computes wrong output). A pad the kernel
-lays out as no pad (double-buffered K, native-FP8 K, misaligned slabs) is
+so a static LDS budget rejects specs codegen would refuse. A padded K LDS that
+Q aliases computes wrong output, and the gfx950 spec itself refuses it. A pad
+the kernel lays out as no pad (double-buffered K, native-FP8 K, misaligned slabs) is
 inert and dropped, so it does not mint a second id. Points they reject are
 omitted before they enter `sweep_space`; kernel builders are not responsible
 for repairing dispatcher tuning points.
