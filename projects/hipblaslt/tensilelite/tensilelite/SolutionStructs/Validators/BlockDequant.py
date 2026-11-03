@@ -137,9 +137,11 @@ def validateBlockDequantCombination(state, printRejectionReason):
     # the dequantize pairs a tile with the wrong group's scale. Either setting
     # alone is fine -- measured correct on gfx1151 -- but the combination is
     # silently wrong, so it is rejected rather than left to produce bad numbers.
-    if state["ScheduleIterAlg"] != 0 and state["PrefetchGlobalRead"] >= 2:
+    # ScheduleIterAlg=3 issues each read right after the local write it feeds and
+    # keeps the prologue's load order, so it is measured correct with PGR>=2.
+    if state["ScheduleIterAlg"] not in (0, 3) and state["PrefetchGlobalRead"] >= 2:
         reject(state, printRejectionReason,
-               "UseScaleAB=Block requires ScheduleIterAlg=0 when PrefetchGlobalRead>=2 "
+               "UseScaleAB=Block requires ScheduleIterAlg 0 or 3 when PrefetchGlobalRead>=2 "
                "(got SIA=%d, PGR=%d)" % (state["ScheduleIterAlg"], state["PrefetchGlobalRead"]))
         return False
 

@@ -496,6 +496,35 @@ def test_client_config_carries_block_scale(toolchain, tmp_path):
     assert "param('scale-a-type', problemType.bType.toName())" in src
 
 
+@pytest.mark.parametrize("ldsb", [0, 1])
+def test_pgr2_sia3_loop_issues_every_global_read(toolchain, ldsb):
+    """With PrefetchGlobalRead 2, ScheduleIterAlg 3 pairs each global read with a
+    local write. The scale loads have no local write of their own, so there is one
+    more read module than write slots; the last B load used to be dropped from the
+    loop and every iteration after the prologue multiplied a stale B chunk. The
+    loop must load each register the prologue loads, once."""
+    _, src = _emit(
+        toolchain, blockSize=32, depthU=64,
+        problemType={"ScaleBlockSizesA": [32, 64, 128], "Int4EncodingA": "UnsignedBias8"},
+        MatrixInstruction=[16, 16, 16, 1, 1, 2, 2, 2, 2], WorkGroup=[32, 4, 1],
+        PrefetchGlobalRead=2, ScheduleIterAlg=3, PrefetchLocalRead=0, ClusterLocalRead=0,
+        TransposeLDS=1, LdsPadA=8, LdsPadB=8, LdsBlockSizePerPadA=128, LdsBlockSizePerPadB=128,
+        VectorWidthA=1, VectorWidthB=1, StoreVectorWidth=1, GlobalReadVectorWidthB=8,
+        SourceSwap=True, WorkGroupMapping=1, ExpandPointerSwap=False, **{"1LDSBuffer": ldsb})
+    loop = src.split("label_LoopBeginL:")[1].split("label_LoopEndL:")[0]
+    # The prologue's second prefetch, skipped when there is a single K iteration.
+    prefetch2 = src.split("label_skipPGR2_1:")[0].split("label_skipPGR2_1")[-1]
+
+    def loads(code):
+        return [m.group(1) for m in re.finditer(r"^\s*buffer_load_\S+\s+(v\[[^\]]+\])", code, re.M)]
+
+    expected = loads(prefetch2)
+    assert any("G2LB" in r for r in expected) and any("G2LScaleA" in r for r in expected)
+    got = loads(loop)
+    assert sorted(got) == sorted(set(expected)), \
+        f"loop loads {sorted(got)}, prologue prefetches {sorted(set(expected))}"
+
+
 def test_no_vgpr_aliasing_between_scale_and_other_state(toolchain):
     """GlobalReadOffsetScaleA / G2LScaleA are carved out of the static VGPR
     layout; make sure they do not overlap A/B state or each other."""
