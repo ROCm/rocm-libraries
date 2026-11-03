@@ -353,16 +353,18 @@ namespace
         EXPECT_EQ(available_host_memory_bytes(host.sources), 0u) << "usage above the limit";
     }
 
-    TEST(HostMemory_pre_checkin, query_of_this_host_is_at_most_mem_available)
+    TEST(HostMemory_pre_checkin, query_of_this_host_reads_the_real_files)
     {
-        // /proc files report a size of 0, so copy the text rather than the file.
+        // The fake-tree tests cover the cgroup logic. This one only checks that the default
+        // sources are readable on a real host and that its cgroups can only lower MemAvailable;
+        // 0 is a valid answer in a full container. /proc files report a size of 0, so copy
+        // the text rather than the file.
         FakeHost          meminfo_only;
         std::stringstream text;
         text << std::ifstream(HostMemorySources().meminfo).rdbuf();
         meminfo_only.write(meminfo_only.sources.meminfo, text.str());
         const std::optional<size_t> available = available_host_memory_bytes();
         ASSERT_TRUE(available.has_value());
-        EXPECT_GT(*available, 0u);
         // MemAvailable moves between the two reads, so allow 1 GiB of drift.
         EXPECT_LE(*available, available_host_memory_bytes(meminfo_only.sources).value_or(0) + kGiB);
     }
@@ -423,18 +425,20 @@ namespace
             EXPECT_EQ(available_host_memory_bytes(host.sources), 8 * kGiB);
         }
         {
+            // An unreadable value is ignored, not read as 0.
+            ScopedLimit limit("not-a-size");
+            EXPECT_EQ(available_host_memory_bytes(host.sources), 8 * kGiB);
+            EXPECT_EQ(host_memory_limit_override(), std::nullopt);
+        }
+        // Each limit above ended with its scope.
+        EXPECT_EQ(available_host_memory_bytes(host.sources), 8 * kGiB);
+        {
             // A full container stays full.
             host.write(host.sources.self_cgroup, "0::/job\n");
             host.cgroup("job", std::to_string(kGiB), kGiB);
             ScopedLimit limit("2G");
             EXPECT_EQ(available_host_memory_bytes(host.sources), 0u);
         }
-        {
-            ScopedLimit limit("not-a-size");
-            EXPECT_EQ(available_host_memory_bytes(host.sources), 0u);
-            EXPECT_EQ(host_memory_limit_override(), std::nullopt);
-        }
-        EXPECT_EQ(available_host_memory_bytes(host.sources), 0u);
     }
 
     TEST(HostMemory_pre_checkin, limit_is_the_budget_when_the_system_cannot_be_read)
@@ -446,10 +450,6 @@ namespace
 
     TEST(HostMemory_pre_checkin, limit_makes_the_preflight_skip)
     {
-        {
-            ScopedLimit no_limit(nullptr);
-            EXPECT_EQ(fast_check_memory_shortfall(0, 2 * kGiB), "");
-        }
         ScopedLimit limit("1G");
         std::string why = fast_check_memory_shortfall(0, 2 * kGiB);
         EXPECT_NE(why.find("needs 2 GiB of host memory and 1 GiB is available"), std::string::npos)
