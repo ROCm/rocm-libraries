@@ -47,11 +47,17 @@ dim3_t runtime_options::read_gemm_pick_from_env() {
   return {0, 0, 0};
 }
 
+bool runtime_options::read_leveled_estimation_from_env() {
+  const char* env = std::getenv("ORIGAMI_LEVELED_ESTIMATION");
+  return env != nullptr && std::strtol(env, nullptr, 10) != 0;
+}
+
 void runtime_options::update_from_env() {
   debug_enabled       = read_debug_from_env();
   heuristics_enabled  = read_heuristics_from_env();
   heuristics_variance = read_heuristics_variance_from_env();
   gemm_pick           = read_gemm_pick_from_env();
+  leveled_estimation  = read_leveled_estimation_from_env();
 }
 
 int datatype_to_bits(data_type_t type) {

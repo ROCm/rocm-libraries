@@ -349,6 +349,14 @@ struct ORIGAMI_EXPORT runtime_options {
   /// Format: "MxNxK" e.g. "128x128x64". When set, non-matching configs get max latency.
   dim3_t gemm_pick{0, 0, 0};
 
+  /// Rank GEMM configs with the leveled estimation cascade instead of a single pass
+  /// (reads from ORIGAMI_LEVELED_ESTIMATION env var; any non-zero decimal integer enables it).
+  /// The cascade scores every config with a cheap proxy and runs the full model only on
+  /// the best of them. The configs it prunes follow the ranked ones in proxy order, with
+  /// the maximum latency, so the ranking holds the same configs as without the cascade.
+  /// Off by default.
+  bool leveled_estimation = false;
+
   /**
    * @brief Constructor with explicit values (does not read from environment).
    */
@@ -388,6 +396,13 @@ struct ORIGAMI_EXPORT runtime_options {
    * @return dim3_t MT size from ANALYTICAL_GEMM_PICK, or {0,0,0} if not set
    */
   static dim3_t read_gemm_pick_from_env();
+
+  /**
+   * @brief Read the leveled-estimation setting from environment variable.
+   * @return true if ORIGAMI_LEVELED_ESTIMATION is set to a non-zero decimal integer, false
+   *         otherwise
+   */
+  static bool read_leveled_estimation_from_env();
 
   /**
    * @brief Update runtime options from environment variables.

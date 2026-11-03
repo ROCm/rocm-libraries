@@ -361,6 +361,7 @@ Accumulated rows are flushed to disk in two situations:
 |----------|-------------|
 | `ANALYTICAL_GEMM_DEBUG` | Set to `1` to enable debug code paths in the latency model |
 | `ORIGAMI_LOG_FILE` | Path for log output; `.csv` extension selects CSV format, any other extension selects text |
+| `ORIGAMI_LEVELED_ESTIMATION` | Set to a non-zero decimal integer to rank GEMM configs with the leveled estimation cascade (a cheap first pass over all configs, then the full model on the best of them). Off by default |
 
 ## Contribute
 

@@ -123,6 +123,7 @@ add_dependencies(origami origami-headers_verify_interface_header_sets)
 target_sources(
     origami
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/attention.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/estimation_leveled.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/heuristics.cpp"

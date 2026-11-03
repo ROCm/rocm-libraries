@@ -10,6 +10,7 @@
 #include <map>
 #include <tuple>
 
+#include "estimation_leveled.hpp"
 #include "origami/attention.hpp"
 #include "origami/gemm.hpp"
 #include "origami/logger.hpp"
@@ -672,13 +673,34 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   valid_configs.reserve(configs.size());
   invalid_configs.reserve(configs.size());
 
-  for (const auto& config : configs) {
-    const double latency = compute_ranked_latency(problem, hardware, config, model);
+  // Leveled estimation cascade (opt-in): only the configs that survive the cheap
+  // first pass are scored with the full model. It applies to GEMM estimation only.
+  // The pruned configs are appended after the ranked survivors (see below), so the
+  // result holds the same configs as the single-pass ranking. When the cascade finds
+  // no valid config, the single-pass ranking below runs instead, so the fallback is
+  // the same as without the cascade.
+  std::vector<std::size_t> leveled_pruned;
+  if (model == model_t::gemm && runtime_options::get().leveled_estimation &&
+      std::all_of(configs.begin(), configs.end(), [](const config_t& config) {
+        return config.prediction_mode == prediction_modes_t::estimation;
+      })) {
+    auto leveled = gemm::rank_leveled_estimation(problem, hardware, configs);
+    for (const auto& [latency, idx] : leveled.scored) {
+      valid_configs.push_back({latency, std::cref(configs[idx])});
+    }
+    leveled_pruned = std::move(leveled.pruned);
+  }
 
-    if (latency != kRejectedLatency) {
-      valid_configs.push_back({latency, std::cref(config)});
-    } else {
-      invalid_configs.push_back({latency, std::cref(config)});
+  if (valid_configs.empty()) {
+    leveled_pruned.clear();
+    for (const auto& config : configs) {
+      const double latency = compute_ranked_latency(problem, hardware, config, model);
+
+      if (latency != kRejectedLatency) {
+        valid_configs.push_back({latency, std::cref(config)});
+      } else {
+        invalid_configs.push_back({latency, std::cref(config)});
+      }
     }
   }
 
@@ -843,6 +865,17 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                 std::abs(static_cast<double>(b.config.occupancy) - need);
                        });
     }
+  }
+
+  // Leveled estimation: append the configs pruned by the proxy, in proxy order, after
+  // the tie-broken survivors. They were not scored with the full model, so they carry
+  // the rejected-config latency (the maximum double), as configs without a usable
+  // prediction do elsewhere in rank_configs(). Appending them after the tie-breakers
+  // keeps them out of the top tie group, and callers that filter the ranking still see
+  // every config the single-pass ranking would return.
+  results.reserve(results.size() + leveled_pruned.size());
+  for (const std::size_t idx : leveled_pruned) {
+    results.push_back({kRejectedLatency, configs[idx]});
   }
 
   OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << "," << results[0].config.mt.n
