@@ -201,9 +201,6 @@ public:
             delim = ",";
         };
 
-#if __cplusplus >= 201703L
-        // C++17
-        //(ArgumentsHelper::apply<Args>(print, arg, T{}), ...);
         switch(Tc)
         {
         case HIP_R_32F:
@@ -229,35 +226,6 @@ public:
             (ArgumentsHelper::apply<Args>(print, arg, float{}), ...);
             break;
         }
-#else
-        // C++14. TODO: Remove when C++17 is used
-        //(void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, T{}), 0)...};
-        switch(Tc)
-        {
-        case HIP_R_32F:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, float{}), 0)...};
-            break;
-        case HIP_R_64F:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, double{}), 0)...};
-            break;
-        case HIP_C_32F:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<float>{}), 0)...};
-            break;
-        case HIP_C_64F:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<double>{}), 0)...};
-            break;
-        case HIP_R_16F:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, hipblasLtHalf{}), 0)...};
-            break;
-        case HIP_R_32I:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, int32_t{}), 0)...};
-            break;
-        default:
-            hipblaslt_cerr << "Error type in log_args" << std::endl;
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, float{}), 0)...};
-            break;
-        }
-#endif
 
         // Additional name and value list
         if(splitK > 0)
