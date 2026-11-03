@@ -3028,12 +3028,12 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
 }
 
 // ---------------------------------------------------------------------------
-// HIPDNN_INGESTOR_CANDIDATE_LIMIT shortlists the ranked candidates
+// HIPDNN_INGESTOR_SHORTLIST_LIMIT shortlists the ranked candidates
 // ---------------------------------------------------------------------------
 
 /// Clears both process-wide overrides, so the knob and the limit each case sets are the
 /// only things deciding its outcome.
-class TestIngestorGenericPlanBuilderCandidateLimit : public ::testing::Test
+class TestIngestorGenericPlanBuilderShortlistLimit : public ::testing::Test
 {
 protected:
     void setLimit(const std::string& value)
@@ -3045,10 +3045,10 @@ private:
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarkingGuard{
         hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _limitGuard{
-        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME};
+        hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME};
 };
 
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, InitializeExecutionSettingsReadsTheLimit)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, InitializeExecutionSettingsReadsTheLimit)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
@@ -3062,20 +3062,20 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, InitializeExecutionSettings
 
     KnobFilterSettings unset;
     builder.initializeExecutionSettings(0, graph, engineConfig, unset);
-    EXPECT_EQ(unset.ingestorSettings.candidateLimit, std::nullopt)
+    EXPECT_EQ(unset.ingestorSettings.shortlistLimit, std::nullopt)
         << "no limit unless the variable asks for one";
 
     setLimit("2");
     KnobFilterSettings limited;
     builder.initializeExecutionSettings(0, graph, engineConfig, limited);
-    EXPECT_EQ(limited.ingestorSettings.candidateLimit, std::optional<size_t>(2));
+    EXPECT_EQ(limited.ingestorSettings.shortlistLimit, std::optional<size_t>(2));
     EXPECT_TRUE(limited.ingestorSettings.knobFilter.empty())
         << "the limit is not a metadata filter entry";
 }
 
 /// Benchmarking under a limit of 1 measures the ranked front alone: the plan sizes for
 /// kernel_64 (64), not the 256 the unlimited three-candidate run reports.
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, BenchmarkingMeasuresOnlyTheShortlist)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, BenchmarkingMeasuresOnlyTheShortlist)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -3106,7 +3106,7 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, BenchmarkingMeasuresOnlyThe
 
 /// With benchmarking off the limit applies too: kernel_64 cannot prepare, and with only
 /// one candidate allowed nothing falls back to kernel_128.
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, AppliesWithBenchmarkingOff)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, AppliesWithBenchmarkingOff)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -3151,7 +3151,7 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, AppliesWithBenchmarkingOff)
 /// next build is served from it; without the limit it no longer covers the candidates and
 /// the whole set is benchmarked again. The timer makes kernel_64, the shortlist's front,
 /// fastest, so a served hit (64) and a re-benchmark (256) differ in workspace.
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, ARecordTakenUnderTheLimitServesTheSameLimit)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, ARecordTakenUnderTheLimitServesTheSameLimit)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -3201,10 +3201,10 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, ARecordTakenUnderTheLimitSe
 }
 
 /// predictConfiguration must name the same kernel buildPlan actually serves under a
-/// limit: both apply applyCandidateLimit to the same filtered catalog before ranking, so
+/// limit: both apply applyShortlistLimit to the same filtered catalog before ranking, so
 /// a benchmark record taken under the limit (shortlisting kernel_64, kernel_128) cannot
 /// make the prediction fall back to the unlimited winner (kernel_256).
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit,
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit,
        PredictConfigurationAgreesWithBuildPlanUnderTheLimit)
 {
     using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;

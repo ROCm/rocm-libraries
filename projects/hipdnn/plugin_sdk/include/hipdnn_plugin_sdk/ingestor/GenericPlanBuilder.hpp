@@ -112,7 +112,7 @@ struct IngestorSettings
     /// How many of the best-ranked knob-filtered candidates buildPlan() considers; unset
     /// considers all of them. Applied with benchmarking on or off, so a record benchmarked
     /// under a limit covers the same candidates a later build under it walks.
-    std::optional<size_t> candidateLimit;
+    std::optional<size_t> shortlistLimit;
 };
 
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
@@ -389,7 +389,7 @@ public:
         settings.workspaceLimit = heuristics::workspaceLimit(engineConfig);
         settings.benchmarkingEnabled
             = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
-        executionSettings.ingestorSettings.candidateLimit = ingestorCandidateLimitFromEnv();
+        executionSettings.ingestorSettings.shortlistLimit = ingestorShortlistLimitFromEnv();
     }
 
     /// Kernel choice follows the engine configuration's ranking metric (RFC 0019 §11.4):
@@ -419,7 +419,7 @@ public:
         {
             throwUnsatisfiableKnobFilter(0, settings.knobFilter, catalog.entries.size());
         }
-        applyCandidateLimit(filtered, settings.candidateLimit);
+        applyShortlistLimit(filtered, settings.shortlistLimit);
 
         // Orderability is decided once, on the full catalog, in sortedCatalog(); `filtered` is
         // that measured order restricted. Re-asking against `filtered` would let a pin change
@@ -446,9 +446,9 @@ public:
 
         // Under a candidate limit a benchmark measures only the shortlist, so its record
         // never covers the whole catalog. The same limit yields the same shortlist
-        // (applyCandidateLimit), and a record covering all of it serves that build.
+        // (applyShortlistLimit), and a record covering all of it serves that build.
         if(catalog.measuredRecord == nullptr && record.has_value()
-           && settings.candidateLimit.has_value())
+           && settings.shortlistLimit.has_value())
         {
             if(const auto ranked = orderIfFullyCovered(*record, filtered);
                ranked.has_value()
@@ -816,14 +816,14 @@ public:
         auto filtered = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         // Mirrors buildPlan: under a limit, the configuration this answers must be one plan
         // build would actually shortlist, not a candidate beyond it (RFC 0019 §11.4).
-        applyCandidateLimit(filtered, executionSettings.ingestorSettings.candidateLimit);
+        applyShortlistLimit(filtered, executionSettings.ingestorSettings.shortlistLimit);
         std::string modelId;
         // Mirrors buildPlan's serveRecordedOrder/orderIfFullyCovered: under a limit, a
         // per-graph winner-cache record that covers only the shortlist (not the whole
         // catalog, so catalog.measuredRecord stays null) still decides buildPlan's order.
         std::optional<WinnerRecord> perGraphRecord;
         if(catalog.measuredRecord == nullptr
-           && executionSettings.ingestorSettings.candidateLimit.has_value()
+           && executionSettings.ingestorSettings.shortlistLimit.has_value()
            && _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
         {
             const WinnerKey winnerKey{
@@ -2008,7 +2008,7 @@ private:
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
     /// lookup, so coverage is judged against the shortlist a benchmark under the same
     /// limit measured, not against the whole catalog.
-    void applyCandidateLimit(std::vector<const KernelDefinition*>& candidates,
+    void applyShortlistLimit(std::vector<const KernelDefinition*>& candidates,
                              const std::optional<size_t>& limit) const
     {
         if(!limit.has_value() || candidates.size() <= *limit)
@@ -2019,7 +2019,7 @@ private:
         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' keeps the best-ranked "
                                                     << *limit << " of " << candidates.size()
                                                     << " candidate(s) ("
-                                                    << INGESTOR_CANDIDATE_LIMIT_ENV_NAME << ")");
+                                                    << INGESTOR_SHORTLIST_LIMIT_ENV_NAME << ")");
         candidates.resize(*limit);
     }
 

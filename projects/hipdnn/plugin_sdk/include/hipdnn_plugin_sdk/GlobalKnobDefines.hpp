@@ -66,16 +66,16 @@ inline std::optional<bool> benchmarkingOverrideFromEnv()
 /// record that only covers that (smaller) set serve the build instead of being ignored as
 /// partial coverage -- so turning the limit on and off changes whether an existing record is
 /// trusted, not just how many candidates are tried.
-static constexpr const char* INGESTOR_CANDIDATE_LIMIT_ENV_NAME = "HIPDNN_INGESTOR_CANDIDATE_LIMIT";
+static constexpr const char* INGESTOR_SHORTLIST_LIMIT_ENV_NAME = "HIPDNN_INGESTOR_SHORTLIST_LIMIT";
 
-/// Reads and parses HIPDNN_INGESTOR_CANDIDATE_LIMIT per call, never cached. A positive
+/// Reads and parses HIPDNN_INGESTOR_SHORTLIST_LIMIT per call, never cached. A positive
 /// decimal integer, surrounding whitespace allowed, is the limit. Unset, empty, and
 /// whitespace-only are silent and return std::nullopt, meaning no limit. Anything else --
 /// zero, a sign, trailing text, a value past size_t -- logs a WARN naming the variable and
 /// the value and also returns std::nullopt: a typo must not quietly shortlist.
-inline std::optional<size_t> ingestorCandidateLimitFromEnv()
+inline std::optional<size_t> ingestorShortlistLimitFromEnv()
 {
-    const auto raw = hipdnn_data_sdk::utilities::getEnv(INGESTOR_CANDIDATE_LIMIT_ENV_NAME);
+    const auto raw = hipdnn_data_sdk::utilities::getEnv(INGESTOR_SHORTLIST_LIMIT_ENV_NAME);
     const std::string normalized = hipdnn_data_sdk::utilities::trim(raw);
     if(normalized.empty())
     {
@@ -91,7 +91,7 @@ inline std::optional<size_t> ingestorCandidateLimitFromEnv()
         return limit;
     }
 
-    HIPDNN_PLUGIN_LOG_WARN("ignoring invalid value for " << INGESTOR_CANDIDATE_LIMIT_ENV_NAME
+    HIPDNN_PLUGIN_LOG_WARN("ignoring invalid value for " << INGESTOR_SHORTLIST_LIMIT_ENV_NAME
                                                          << ": '" << raw
                                                          << "'; expected a positive integer");
     return std::nullopt;

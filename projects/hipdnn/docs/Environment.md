@@ -10,7 +10,7 @@ This document describes the environment variables and runtime configuration opti
   - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
-  - [Ingestor Candidate Limit](#ingestor-candidate-limit)
+  - [Ingestor Shortlist Limit](#ingestor-shortlist-limit)
   - [Engine Applicability Threading](#engine-applicability-threading)
   - [Caching](#caching)
   - [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)
@@ -296,9 +296,9 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample, so each sample reads what the previous one wrote. The winner runs last, but the final contents are correct only when in-place execution is idempotent. `Graph::autotune()` also runs its winner last, after every timed pass, and waits for that run to finish, so on success the buffers you passed hold the winner's output, with the same in-place caveat.
 
-### Ingestor Candidate Limit
+### Ingestor Shortlist Limit
 
-#### HIPDNN_INGESTOR_CANDIDATE_LIMIT
+#### HIPDNN_INGESTOR_SHORTLIST_LIMIT
 
 A process-wide cap on how many of the best-ranked candidates the generic kernel ingestor
 (`GenericPlanBuilder`) builds a plan from. Only kernel-ingestor engines consult it; it has no
@@ -313,7 +313,7 @@ and every prediction query -- there is no process-wide cache of the parsed value
 
 **Example:**
 ```bash
-export HIPDNN_INGESTOR_CANDIDATE_LIMIT=8
+export HIPDNN_INGESTOR_SHORTLIST_LIMIT=8
 ```
 
 **Notes:**

@@ -66,7 +66,7 @@
 // engine accepts with dX poisoned (NaN) beforehand, checks it against
 // CpuReferenceGraphExecutor, and requires every instance to have run at least once.
 // The per-graph suite runs an unbenchmarked plan (whole-catalog and per-family counts) and
-// a benchmark under HIPDNN_INGESTOR_CANDIDATE_LIMIT.
+// a benchmark under HIPDNN_INGESTOR_SHORTLIST_LIMIT.
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -891,8 +891,8 @@ protected:
     ScopedTestCacheDir _cacheDir{"gfx950-conv-dgrad", ScopedTestCacheDir::Scope::TEST};
     ScopedEnvironmentVariableSetter _forceBenchmarking{"HIPDNN_FORCE_BENCHMARKING", ""};
     ScopedEnvironmentVariableSetter _cacheEnabled{"HIPDNN_DISABLE_CACHE", ""};
-    ScopedEnvironmentVariableSetter _candidateLimit{
-        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME, ""};
+    ScopedEnvironmentVariableSetter _shortlistLimit{
+        hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME, ""};
     std::string _arch;
     void* _workspace = nullptr;
     size_t _workspaceSize = 0;
@@ -987,7 +987,7 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, UnbenchmarkedPlanServesFromTheWholeCata
     }
 }
 
-// Benchmarking under HIPDNN_INGESTOR_CANDIDATE_LIMIT measures only the best-ranked
+// Benchmarking under HIPDNN_INGESTOR_SHORTLIST_LIMIT measures only the best-ranked
 // candidates, and its record serves the next build of the graph.
 TEST_P(IntegrationGpuGfx950ConvDgradAot, CappedBenchmarkMatchesCpuReference)
 {
@@ -1002,7 +1002,7 @@ TEST_P(IntegrationGpuGfx950ConvDgradAot, CappedBenchmarkMatchesCpuReference)
     }
     auto reference = makeReference(variant, graphCase.problem, 71);
     const auto capped = std::min(BENCHMARK_LIMIT, total);
-    _candidateLimit.setValue(std::to_string(BENCHMARK_LIMIT));
+    _shortlistLimit.setValue(std::to_string(BENCHMARK_LIMIT));
 
     auto graph = buildDgradGraph(variant.dtype, graphCase.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(true)}));
