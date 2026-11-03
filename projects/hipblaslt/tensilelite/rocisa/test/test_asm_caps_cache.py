@@ -4,6 +4,7 @@
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -67,6 +68,9 @@ def _probe(assembler, cacheDir, isas=_ISAS, mode="many", disable=False):
     result = subprocess.run(
         [sys.executable, "-c", _PROBE, parentPath, json.dumps(isas), str(assembler), mode],
         env=env,
+        # Under nohup the runner ignores SIGHUP and its children inherit that, so
+        # restore it for the probe, whose assembler may have to die of it.
+        preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_DFL),
         capture_output=True,
         text=True,
     )
@@ -123,13 +127,47 @@ def test_truncated_entry_is_probed_again_and_rewritten(tmp_path, assembler):
     assert _runs(tmp_path) == runs
 
 
-def test_results_from_a_killed_assembler_are_not_cached(tmp_path):
-    # Killed runs read as rejected instructions, which is not what the assembler would say.
+def test_assembler_rejecting_even_the_empty_source_is_not_cached(tmp_path):
+    # Rejecting everything is also what a broken environment looks like, e.g. a
+    # missing library; once that is fixed, the same assembler must be probed again.
+    real = _realAssembler()
+    if not real:
+        pytest.skip("no amdclang++ under ROCM_PATH")
+    fixed = tmp_path / "fixed"
+    script = tmp_path / "bin" / "amdclang++"
+    script.parent.mkdir()
+    script.write_text(f'#!/bin/sh\n[ -e "{fixed}" ] || exit 1\nexec "{real}" "$@"\n')
+    script.chmod(0o755)
+    cache = tmp_path / "cache"
+
+    broken = _probe(script, cache, isas=_ISAS[:1])
+    assert all(c["SupportedISA"] == 0 for c in broken.values())
+    assert not list(cache.glob("*.txt"))
+
+    fixed.touch()
+    assert all(c["SupportedISA"] == 1 for c in _probe(script, cache, isas=_ISAS[:1]).values())
+    assert len(list(cache.glob("*.txt"))) == 1
+
+
+@pytest.mark.parametrize("signal", ["KILL", "HUP"])
+def test_probes_killed_by_a_signal_are_not_cached(tmp_path, signal):
+    # The assembler accepts the empty source, so the ISA counts as supported,
+    # but is killed on every instruction probe. Killed runs read as rejected
+    # instructions, which is not what the assembler would say. SIGHUP is 1,
+    # the same as a rejection, unless run() reports it as a signal.
+    real = _realAssembler()
+    if not real:
+        pytest.skip("no amdclang++ under ROCM_PATH")
     script = tmp_path / "amdclang++"
-    script.write_text("#!/bin/sh\nkill -9 $$\n")
+    script.write_text(
+        "#!/bin/sh\n"
+        'src=$(cat)\n'
+        f'[ -n "$src" ] || exec "{real}" "$@" < /dev/null\n'
+        f"kill -{signal} $$\n"
+    )
     script.chmod(0o755)
     cache = tmp_path / "cache"
 
     caps = _probe(script, cache, isas=_ISAS[:1])
-    assert all(c["SupportedISA"] == 0 for c in caps.values())
+    assert all(c["SupportedISA"] == 1 for c in caps.values())
     assert not list(cache.glob("*.txt"))

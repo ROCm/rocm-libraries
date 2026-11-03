@@ -193,9 +193,10 @@ namespace rocisa
                 for(const auto& [name, value] : asmCaps)
                     out << name << " " << value << "\n";
                 out << "end\n";
-                if(!out)
+                // close() flushes, so a write that fails at the end (disk full) shows here.
+                out.close();
+                if(out.fail())
                 {
-                    out.close();
                     fs::remove(tmp, ec);
                     return;
                 }

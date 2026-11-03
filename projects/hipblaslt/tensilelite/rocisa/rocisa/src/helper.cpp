@@ -299,12 +299,15 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
         close(p[1]);
         // The child's output is not captured (see above), so there is no result text.
         std::string result;
-        int         rcode;
-        waitpid(pid, &rcode, 0);
-        if(WIFEXITED(rcode))
-        {
-            rcode = WEXITSTATUS(rcode);
-        }
+        int         status = 0;
+        waitpid(pid, &status, 0);
+        // Like a shell, a child killed by a signal is 128 + the signal, so it can't
+        // read as an exit code (SIGHUP would otherwise look like a rejection, 1).
+        int rcode = status;
+        if(WIFEXITED(status))
+            rcode = WEXITSTATUS(status);
+        else if(WIFSIGNALED(status))
+            rcode = 128 + WTERMSIG(status);
         return {rcode, result};
     }
     // Should not go here.

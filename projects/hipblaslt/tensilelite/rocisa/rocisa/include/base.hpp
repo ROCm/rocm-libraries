@@ -141,7 +141,7 @@ namespace rocisa
                     isaVersions.push_back(isaVersion);
             }
             std::vector<std::map<std::string, int>> asmCaps(isaVersions.size());
-            std::vector<char> fromCache(isaVersions.size(), 0);
+            std::vector<char>                       fromCache(isaVersions.size(), 0);
             // char, not bool: each probe thread writes its own element.
             std::vector<char> cacheable(isaVersions.size(), 0);
             if(!debug)
@@ -318,13 +318,19 @@ namespace rocisa
         rocIsa() = default;
 
         // The capabilities can be cached only if every assembler run accepted or
-        // rejected its source normally.
+        // rejected its source normally, and the assembler accepted the empty
+        // source. Rejecting even that is also what an environment that breaks
+        // every run looks like (a missing library, say), and the zeros it leaves
+        // must not outlive it, so such an ISA is probed again on every run.
         static std::pair<std::map<std::string, int>, bool>
             probeAsmCaps(const IsaVersion& isaVersion, const std::string& assemblerPath, bool debug)
         {
             unusualAssemblerExit() = false;
             auto asmCaps           = initAsmCaps(isaVersion, assemblerPath, debug);
-            return {std::move(asmCaps), !unusualAssemblerExit()};
+            auto supported         = asmCaps.find("SupportedISA");
+            bool cacheable
+                = !unusualAssemblerExit() && supported != asmCaps.end() && supported->second != 0;
+            return {std::move(asmCaps), cacheable};
         }
 
         void addIsaInfo(const IsaVersion& isaVersion, std::map<std::string, int> asmCaps)
