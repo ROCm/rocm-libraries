@@ -219,6 +219,23 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
  * right under "same" padding PAD == (KH-1)/2 with an odd filter; any other
  * padding makes the kernel write wrong rows (including the next image's)
  * rather than fail, so it is refused before a binary is built. */
+/* channel_totals_reason(p): declared in rocke/instance_conv_direct_grouped.h. */
+bool rocke_direct_channel_totals_reason(const rocke_direct_conv_problem_t* p,
+                                        char* why,
+                                        size_t why_cap)
+{
+    const long long total_c = rocke_direct_conv_problem_total_c(p);
+    const long long total_k = rocke_direct_conv_problem_total_k(p);
+    if(total_c <= INT32_MAX && total_k <= INT32_MAX)
+        return false;
+    rocke_spec_set_reasonf(why,
+                           why_cap,
+                           "groups * cpg = %lld and groups * kpg = %lld must fit in i32",
+                           total_c,
+                           total_k);
+    return true;
+}
+
 /* dilation_reason(p): declared in rocke/instance_conv_direct_grouped.h. */
 bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap)
 {
@@ -329,6 +346,8 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
 
     /* try: target = ArchTarget.from_gfx(arch) except KeyError as e: return False, str(e) */
     target = rocke_archtarget_from_gfx(arch);
@@ -681,6 +700,8 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
 
     /* try: ArchTarget.from_gfx(arch) except KeyError as e: return False, str(e) */
     target = rocke_archtarget_from_gfx(arch);
@@ -959,6 +980,8 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
@@ -1187,6 +1210,8 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
@@ -1425,6 +1450,8 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     if(rocke_archtarget_from_gfx(arch) == NULL)
     {
         rocke_set_unknown_arch_reason(reason, reason_cap, arch);
@@ -1606,6 +1633,8 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     if(rocke_archtarget_from_gfx(arch) == NULL)
     {
         rocke_set_unknown_arch_reason(reason, reason_cap, arch);
@@ -2001,6 +2030,8 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
@@ -2349,6 +2380,8 @@ bool rocke_direct_conv_dgrad_is_valid_spec(const rocke_direct_conv_dgrad_spec_t*
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     if(rocke_archtarget_from_gfx(arch) == NULL)
     {
         rocke_set_unknown_arch_reason(reason, reason_cap, arch);
@@ -2793,6 +2826,8 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
     {
         arch = "gfx950";
     }
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
@@ -3755,6 +3790,8 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
         ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     if(arch == NULL)
         arch = "gfx950";
+    if(rocke_direct_channel_totals_reason(&spec->problem, reason, reason_cap))
+        return false;
     target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {

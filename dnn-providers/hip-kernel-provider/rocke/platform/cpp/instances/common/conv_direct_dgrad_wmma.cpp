@@ -553,8 +553,8 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
             = rocke_floor_div((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
                               p->stride)
               + 1;
-        long long total_k = (long long)p->groups * p->kpg;
-        long long total_c = (long long)p->groups * p->cpg;
+        long long total_k = rocke_direct_conv_problem_total_k(p);
+        long long total_c = rocke_direct_conv_problem_total_c(p);
         long long bytes[3] = {2 * p->N * Ho * Wo * total_k,
                               2 * total_k * p->KH * p->KW * p->cpg,
                               2 * p->N * (long long)p->H * p->W * total_c};

@@ -45,6 +45,7 @@ from rocke.core.codegen_policy import scheduler_strategy_reason
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    I32_MAX,
     DirectConvProblem,
     one_padding_reason,
     pad_w_reason,
@@ -71,7 +72,6 @@ WMMA_M = 16
 WMMA_N = 16
 WMMA_K = 32
 CH_PAD = 8  # channels of row skew past each LDS row of a staged tile (16 bytes)
-I32_MAX = (1 << 31) - 1  # the largest i32 byte offset / block id
 
 
 def wmma_ab_dtype(dtype: str) -> str:

@@ -717,8 +717,84 @@ static void test_wgrad_dilation_reason(void)
                          rocke_grouped_wgrad_mfma_is_valid_spec);
 }
 
+/* Every validator whose builder keeps a channel total in an int refuses
+ * groups * cpg or groups * kpg past INT32_MAX first, with Python's
+ * channel_totals_reason text (test_conv_direct_grouped_backend_parity.py pins
+ * the Python validators to the same literal). */
+template <typename Spec, typename Valid>
+static void check_channel_totals(const char* kernel, Spec spec, int groups, int ch, Valid is_valid)
+{
+    char reason[ERR_CAP];
+    spec.problem.N = 1;
+    spec.problem.H = 8;
+    spec.problem.W = 8;
+    spec.problem.groups = groups;
+    spec.problem.cpg = ch;
+    spec.problem.kpg = ch;
+    reason[0] = '\0';
+    CHECK(!is_valid(&spec, "gfx950", reason, sizeof(reason)), "%s accepted 2^31 channels", kernel);
+    CHECK(strcmp(reason, "groups * cpg = 2147483648 and groups * kpg = 2147483648 must fit in i32")
+              == 0,
+          "%s 2^31 channels reason: %s",
+          kernel,
+          reason);
+}
+
+static void test_channel_totals_refused(void)
+{
+    check_channel_totals("16c",
+                         rocke_direct_conv_16c_spec_default(),
+                         1 << 27,
+                         16,
+                         rocke_direct_conv_16c_is_valid_spec);
+    check_channel_totals(
+        "4c", rocke_direct_conv_4c_spec_default(), 1 << 29, 4, rocke_direct_conv_4c_is_valid_spec);
+    check_channel_totals(
+        "8c", rocke_direct_conv_8c_spec_default(), 1 << 28, 8, rocke_direct_conv_8c_is_valid_spec);
+    check_channel_totals("32c",
+                         rocke_direct_conv_32c_spec_default(),
+                         1 << 26,
+                         32,
+                         rocke_direct_conv_32c_is_valid_spec);
+    check_channel_totals(
+        "generic", rocke_direct_conv_spec_default(), 1 << 27, 16, rocke_direct_conv_is_valid_spec);
+    check_channel_totals("wgrad",
+                         rocke_direct_conv_wgrad_spec_default(),
+                         1 << 27,
+                         16,
+                         rocke_direct_conv_wgrad_is_valid_spec);
+    check_channel_totals("dgrad",
+                         rocke_direct_conv_dgrad_spec_default(),
+                         1 << 27,
+                         16,
+                         rocke_direct_conv_dgrad_is_valid_spec);
+    /* The guard runs first, so the depthwise validators see the totals
+     * before their cpg = kpg = 1 rule (a C int cannot hold 2^31 groups). */
+    check_channel_totals("depthwise",
+                         rocke_direct_depthwise_spec_default(),
+                         1 << 30,
+                         2,
+                         rocke_direct_depthwise_is_valid_spec);
+    check_channel_totals("depthwise_col",
+                         rocke_direct_depthwise_col_spec_default(),
+                         1 << 30,
+                         2,
+                         rocke_direct_depthwise_col_is_valid_spec);
+    check_channel_totals("depthwise_spatial",
+                         rocke_direct_depthwise_spatial_spec_default(),
+                         1 << 30,
+                         2,
+                         rocke_direct_depthwise_spatial_is_valid_spec);
+    check_channel_totals("grouped_wgrad_mfma",
+                         rocke_grouped_wgrad_mfma_spec_default(),
+                         1 << 28,
+                         8,
+                         rocke_grouped_wgrad_mfma_is_valid_spec);
+}
+
 int main(void)
 {
+    test_channel_totals_refused();
     test_wgrad_dilation_reason();
     test_total_channels_past_i32();
     test_ceil_floor_div();

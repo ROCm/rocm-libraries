@@ -388,8 +388,8 @@ bool rocke_dgrad_smallc_wmma_is_valid_spec(const rocke_dgrad_smallc_wmma_spec_t*
         return false;
     /* Global offsets are i32 bytes. */
     {
-        long long total_k = (long long)p->groups * p->kpg;
-        long long total_c = (long long)p->groups * p->cpg;
+        long long total_k = rocke_direct_conv_problem_total_k(p);
+        long long total_c = rocke_direct_conv_problem_total_c(p);
         long long bytes[3] = {2 * p->N * dsw_Ho(p) * dsw_Wo(p) * total_k,
                               2 * total_k * p->KH * p->KW * p->cpg,
                               2 * p->N * (long long)p->H * p->W * total_c};

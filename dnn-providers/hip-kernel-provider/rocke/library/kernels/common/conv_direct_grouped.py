@@ -465,6 +465,23 @@ class DirectConv16cSpec:
             )
 
 
+# The largest i32: byte offsets, block ids and the channel totals the kernels
+# (and their C++ builders) keep in 32 bits must not exceed it.
+I32_MAX = (1 << 31) - 1
+
+
+def channel_totals_reason(p: "DirectConvProblem") -> Optional[str]:
+    """Why ``p``'s channel totals (``groups * cpg``, ``groups * kpg``) do not
+    fit the i32 the direct-conv kernels keep them in. Every validator whose
+    C++ builder stores a total in an ``int`` checks this first."""
+    if p.total_c > I32_MAX or p.total_k > I32_MAX:
+        return (
+            f"groups * cpg = {p.total_c} and groups * kpg = {p.total_k} "
+            f"must fit in i32"
+        )
+    return None
+
+
 def dilation_reason(p: "DirectConvProblem") -> Optional[str]:
     """Why a direct-conv kernel without dilation support cannot compute ``p``."""
     if p.is_dilated:
@@ -539,6 +556,9 @@ def is_valid_spec_16c(
     The atom legality is sourced from
     :class:`rocke.core.arch.ArchTarget`.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -1343,6 +1363,9 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     because the catalog lists only the warp-tile (16x16 / 32x32) shapes,
     while comgr selects the 4x4x4 intrinsic directly on both targets.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -2065,6 +2088,9 @@ def is_valid_spec_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Tuple[bool
     ``mfma_f32_16x16x16_f16`` (or the bf16 counterpart), which is present on
     both gfx942 and gfx950.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -2547,6 +2573,9 @@ def is_valid_spec_32c(
     The 32c kernel uses ``mfma_f32_32x32x8_f16`` or ``mfma_f32_32x32x8_bf16``,
     which are present in the rocke MMA catalog for both gfx942 and gfx950.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -3350,6 +3379,9 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
     cpg_new = kpg_orig and kpg_new = cpg_orig, which differ for non-square
     channel counts).
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -5034,6 +5066,9 @@ def is_valid_wgrad_spec(
     spec: DirectConvWgradSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a wgrad spec on ``arch``."""
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -6500,6 +6535,9 @@ def is_valid_dgrad_spec(
     The dgrad kernel uses scalar FMA (no MFMA), so there are no MFMA-atom
     constraints on cpg or kpg alignment.  stride > 1 is supported.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -8970,6 +9008,9 @@ def is_valid_depthwise_spec(
     Geometry and register pressure only; no MFMA atom check is needed because
     the kernel uses only scalar ``fma`` operations.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -10403,6 +10444,9 @@ def is_valid_depthwise_col_spec(
     ``p.Ho`` / ``p.Wo``, since those divide by ``stride`` and would raise
     rather than return a reason.
     """
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:
@@ -10772,6 +10816,9 @@ def is_valid_depthwise_spatial_spec(
     spec: "DirectDepthwiseSpatialSpec", arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a :class:`DirectDepthwiseSpatialSpec`."""
+    why = channel_totals_reason(spec.problem)
+    if why is not None:
+        return False, why
     from rocke.core.arch import ArchTarget
 
     try:

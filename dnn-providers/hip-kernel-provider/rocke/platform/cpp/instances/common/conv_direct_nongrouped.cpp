@@ -251,7 +251,7 @@ long long
         return 0;
     }
     return 4LL * spec->split_c * p->N * nongrouped_ho(p) * nongrouped_wo(p)
-           * ((long long)p->groups * p->kpg);
+           * rocke_direct_conv_problem_total_k(p);
 }
 
 /* ===================================================================== *
@@ -503,8 +503,8 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
         /* Masked staging loads and epilogue stores go to OOB_BASE and rely on
          * it being past num_records; a larger tensor would hand the loads real
          * data and take the stores. */
-        long long total_c = (long long)p->groups * p->cpg;
-        long long total_k = (long long)p->groups * p->kpg;
+        long long total_c = rocke_direct_conv_problem_total_c(p);
+        long long total_k = rocke_direct_conv_problem_total_k(p);
         long long a_bytes = 2LL * p->N * p->H * p->W * total_c;
         long long b_bytes = 2LL * total_k * p->KH * p->KW * p->cpg;
         long long d_bytes = 2LL * p->N * nongrouped_ho(p) * nongrouped_wo(p) * total_k;
@@ -1885,7 +1885,7 @@ void rocke_direct_conv_split_reduce_grid(const rocke_direct_conv_split_reduce_sp
 {
     long long per_block = (long long)spec->threads * ROCKE_DCONV_SPLIT_REDUCE_VEC;
     long long total = (long long)problem->N * nongrouped_ho(problem) * nongrouped_wo(problem)
-                      * ((long long)problem->groups * problem->kpg);
+                      * rocke_direct_conv_problem_total_k(problem);
     grid[0] = (int)((total + per_block - 1) / per_block);
     grid[1] = 1;
     grid[2] = 1;

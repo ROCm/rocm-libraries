@@ -149,6 +149,12 @@ bool rocke_direct_conv_one_padding_reason(const rocke_direct_conv_problem_t* p,
  * any dilation other than 1, zero and negatives included, as in Python's
  * is_dilated. */
 bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap);
+/* channel_totals_reason(p): why p's channel totals (groups * cpg, groups *
+ * kpg) do not fit the i32 the direct-conv builders keep them in. Returns true
+ * (and writes the reason) when either exceeds INT32_MAX. */
+bool rocke_direct_channel_totals_reason(const rocke_direct_conv_problem_t* p,
+                                        char* why,
+                                        size_t why_cap);
 
 /* The problem's dtype, NULL read as "fp16" (see the dtype field). */
 const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p);
@@ -157,7 +163,11 @@ bool rocke_direct_conv_problem_is_bf16(const rocke_direct_conv_problem_t* p);
 
 /* @property total_c -> groups * cpg and @property total_k -> groups * kpg,
  * in 64 bits like Python's ints: the validators compare tensor sizes built
- * from them against the i32 limits, so the product must not wrap. */
+ * from them against the i32 limits, so the product must not wrap. The
+ * validators of every builder that keeps a total in an int (the grouped
+ * direct-conv families and the grouped wgrad MFMA) refuse totals past
+ * INT32_MAX first (rocke_direct_channel_totals_reason), so those builders'
+ * (int) casts are exact. */
 long long rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
 long long rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p);
 /* @property Ho -> (H + 2*PAD - (KH-1)*dil_h - 1) // stride + 1 and
