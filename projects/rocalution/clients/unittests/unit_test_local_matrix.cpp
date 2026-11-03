@@ -1513,12 +1513,13 @@ TEST_P(local_matrix_formats, incomplete_cholesky_solves_a_tridiagonal_system)
         {
             A->LLAnalyse();
         }
-        auto        x   = vector_of(std::vector<T>(ref.n, 0.0));
+        // The solves must not read the previous output
+        auto        x   = vector_of(std::vector<T>(ref.n, 7.0));
         std::string log = logged([&] { A->LLSolve(*vector_of(b), x.get()); });
         EXPECT_EQ(backend_of(*x), backend_name(backend()));
         expect_fallback_warning(log, "LLSolve", native("LLSolve"));
 
-        auto y = vector_of(std::vector<T>(ref.n, 0.0));
+        auto y = vector_of(std::vector<T>(ref.n, 7.0));
         A->LLSolve(*vector_of(b), *inv, y.get());
         EXPECT_EQ(backend_of(*y), backend_name(backend()));
         if(analysed)
@@ -1526,11 +1527,7 @@ TEST_P(local_matrix_formats, incomplete_cholesky_solves_a_tridiagonal_system)
             A->LLAnalyseClear();
         }
 
-        // The BCSR blocks store zeros above the diagonal
-        if(backend() == Backend::Host && is(BCSR))
-        {
-            KNOWN_BUG("host LLSolve takes the last entry of a row as its diagonal");
-        }
+        // With BCSR the factor stores zeros above the diagonal, which LLSolve skips
         expect_close(ref.apply(values_of(*x)), b, loose_tol<T>(1e-10));
         expect_close(ref.apply(values_of(*y)), b, loose_tol<T>(1e-10));
 
@@ -1547,7 +1544,7 @@ TEST_P(local_matrix_formats, incomplete_cholesky_solves_a_tridiagonal_system)
         EXPECT_EQ(d->GetSize(), ref.n);
         M->MoveToHost();
         d->MoveToHost();
-        auto z = make_local_vector(Backend::Host, std::vector<T>(ref.n, 0.0));
+        auto z = make_local_vector(Backend::Host, std::vector<T>(ref.n, 7.0));
         M->LLSolve(*make_local_vector(Backend::Host, b), *d, z.get());
         expect_close(ref.apply(values_of(*z)), b, loose_tol<T>(1e-10));
     });

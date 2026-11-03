@@ -42,6 +42,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed `LocalMatrix::SymbolicPower()` computing the pattern of A^(p+1) instead of A^p for p above 8. FSAI with a matrix power above 8 and ILU(p) without level control for p of 8 or more got larger patterns than requested, and multi-colored ILU was colored from the larger pattern for q above 8, which `MultiColoredILU::Set(p)` uses for p of 8 or more.
+* Fixed `LocalMatrix::LLSolve()` on the host taking the last entry of each row as the diagonal of factors that store zeros above the diagonal, such as IC with a BCSR operator on the host. Without the inverse diagonal this gave NaN. With it, which the IC preconditioner passes, the results depended on the previous contents of the output vector. Without the inverse diagonal, `LLSolve()` now ends the program for a row that does not store its diagonal.
 
 ## (Unreleased) rocALUTION 4.1.1
 

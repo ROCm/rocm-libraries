@@ -1262,6 +1262,19 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    PtrType HostMatrixCSR<ValueType>::LLDiagonal_(int ai) const
+    {
+        PtrType diag_idx = this->mat_.row_offset[ai];
+
+        while(diag_idx < this->mat_.row_offset[ai + 1] && this->mat_.col[diag_idx] < ai)
+        {
+            ++diag_idx;
+        }
+
+        return diag_idx;
+    }
+
+    template <typename ValueType>
     bool HostMatrixCSR<ValueType>::LLSolve(const BaseVector<ValueType>& in,
                                            BaseVector<ValueType>*       out) const
     {
@@ -1280,7 +1293,9 @@ namespace rocalution
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
+
+            assert(diag_idx < this->mat_.row_offset[ai + 1] && this->mat_.col[diag_idx] == ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1293,7 +1308,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
             ValueType value    = cast_out->vec_[ai] / this->mat_.val[diag_idx];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
@@ -1330,7 +1345,7 @@ namespace rocalution
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1343,7 +1358,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
             ValueType value    = cast_out->vec_[ai] * cast_diag->vec_[ai];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
