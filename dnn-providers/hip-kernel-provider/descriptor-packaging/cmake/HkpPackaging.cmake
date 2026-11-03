@@ -1456,45 +1456,12 @@ function(hkp_product_offers_engine out_var engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_root_ships_for_gfx950(<out> <root> <engine>)
-#   TRUE when this configuration actually ships <engine> for gfx950 from the pack target
-#   <root>: <root> is wired, gfx950 is among the architectures it was wired for, and what
-#   that pack ships for gfx950 includes <engine>. Same conjuncts, probe and fallback as
-#   hkp_gfx950_attention_dense_available() above, for any root.
-# ---------------------------------------------------------------------------
-function(_hkp_root_ships_for_gfx950 out_var root engine)
-    set(${out_var} FALSE PARENT_SCOPE)
-
-    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
-    if(NOT "${root}" IN_LIST _labels)
-        return()
-    endif()
-
-    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${root})
-    if(NOT "gfx950" IN_LIST _arches)
-        return()
-    endif()
-
-    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_${root})
-    if(NOT _probe_ok)
-        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
-        return()
-    endif()
-
-    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_${root})
-    _hkp_shipped_engines_for_arch(_engines "${_shipped}" gfx950)
-    if("${engine}" IN_LIST _engines)
-        set(${out_var} TRUE PARENT_SCOPE)
-    endif()
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_gfx950_conv_dgrad_aot_available(<out>)
 #   The same predicate for the shape-generic AOT-instance backward-data engine,
-#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle.
+#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle (the `product` root).
 # ---------------------------------------------------------------------------
 function(hkp_gfx950_conv_dgrad_aot_available out_var)
-    _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvDgradAot")
+    hkp_product_ships_engine_for_arch(_ships "hipkernel:Gfx950ConvDgradAot" gfx950)
     set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
