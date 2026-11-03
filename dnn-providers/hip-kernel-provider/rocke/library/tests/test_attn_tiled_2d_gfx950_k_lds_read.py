@@ -351,6 +351,7 @@ def test_cpp_engine_refuses_the_python_only_k_pad():
         **_BASE, **_QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, use_q_reread=True
     )
     with pytest.raises(
-        ValueError, match="use_kq_lds_pad=True is not implemented in the C\\+\\+ engine"
+        NotImplementedError,
+        match="use_kq_lds_pad=True is not implemented in the C\\+\\+ engine",
     ):
         engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), "gfx950")
