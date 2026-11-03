@@ -92,8 +92,8 @@ template <class Derived, class ForwardIterator, class T>
 void _CCCL_HOST_DEVICE
 fill(execution_policy<Derived>& policy, ForwardIterator first, ForwardIterator last, const T& value)
 {
-  cuda_cub::fill_n(policy, first, _THRUST_STD::distance(first, last), value);
+  cuda_cub::fill_n(policy, first, ::cuda::std::distance(first, last), value);
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

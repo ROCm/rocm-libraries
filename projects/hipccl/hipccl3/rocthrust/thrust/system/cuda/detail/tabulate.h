@@ -59,4 +59,4 @@ void _CCCL_HOST_DEVICE tabulate(execution_policy<Derived>& policy, Iterator firs
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()
