@@ -16,6 +16,34 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 namespace hipdnn_flatbuffers_sdk {
 namespace data_objects {
 
+struct Int8Array;
+struct Int8ArrayBuilder;
+struct Int8ArrayT;
+
+struct UInt8Array;
+struct UInt8ArrayBuilder;
+struct UInt8ArrayT;
+
+struct Int16Array;
+struct Int16ArrayBuilder;
+struct Int16ArrayT;
+
+struct UInt16Array;
+struct UInt16ArrayBuilder;
+struct UInt16ArrayT;
+
+struct Int32Array;
+struct Int32ArrayBuilder;
+struct Int32ArrayT;
+
+struct Float32Array;
+struct Float32ArrayBuilder;
+struct Float32ArrayT;
+
+struct Float64Array;
+struct Float64ArrayBuilder;
+struct Float64ArrayT;
+
 struct GbdtTree;
 struct GbdtTreeBuilder;
 struct GbdtTreeT;
@@ -28,12 +56,816 @@ struct GbdtModel;
 struct GbdtModelBuilder;
 struct GbdtModelT;
 
+bool operator==(const Int8ArrayT &lhs, const Int8ArrayT &rhs);
+bool operator!=(const Int8ArrayT &lhs, const Int8ArrayT &rhs);
+bool operator==(const UInt8ArrayT &lhs, const UInt8ArrayT &rhs);
+bool operator!=(const UInt8ArrayT &lhs, const UInt8ArrayT &rhs);
+bool operator==(const Int16ArrayT &lhs, const Int16ArrayT &rhs);
+bool operator!=(const Int16ArrayT &lhs, const Int16ArrayT &rhs);
+bool operator==(const UInt16ArrayT &lhs, const UInt16ArrayT &rhs);
+bool operator!=(const UInt16ArrayT &lhs, const UInt16ArrayT &rhs);
+bool operator==(const Int32ArrayT &lhs, const Int32ArrayT &rhs);
+bool operator!=(const Int32ArrayT &lhs, const Int32ArrayT &rhs);
+bool operator==(const Float32ArrayT &lhs, const Float32ArrayT &rhs);
+bool operator!=(const Float32ArrayT &lhs, const Float32ArrayT &rhs);
+bool operator==(const Float64ArrayT &lhs, const Float64ArrayT &rhs);
+bool operator!=(const Float64ArrayT &lhs, const Float64ArrayT &rhs);
 bool operator==(const GbdtTreeT &lhs, const GbdtTreeT &rhs);
 bool operator!=(const GbdtTreeT &lhs, const GbdtTreeT &rhs);
 bool operator==(const GbdtGroupT &lhs, const GbdtGroupT &rhs);
 bool operator!=(const GbdtGroupT &lhs, const GbdtGroupT &rhs);
 bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs);
 bool operator!=(const GbdtModelT &lhs, const GbdtModelT &rhs);
+
+enum class IntegerArray : uint8_t {
+  NONE = 0,
+  Int8Array = 1,
+  UInt8Array = 2,
+  Int16Array = 3,
+  UInt16Array = 4,
+  Int32Array = 5,
+  MIN = NONE,
+  MAX = Int32Array
+};
+
+inline const IntegerArray (&EnumValuesIntegerArray())[6] {
+  static const IntegerArray values[] = {
+    IntegerArray::NONE,
+    IntegerArray::Int8Array,
+    IntegerArray::UInt8Array,
+    IntegerArray::Int16Array,
+    IntegerArray::UInt16Array,
+    IntegerArray::Int32Array
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesIntegerArray() {
+  static const char * const names[7] = {
+    "NONE",
+    "Int8Array",
+    "UInt8Array",
+    "Int16Array",
+    "UInt16Array",
+    "Int32Array",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameIntegerArray(IntegerArray e) {
+  if (::flatbuffers::IsOutRange(e, IntegerArray::NONE, IntegerArray::Int32Array)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesIntegerArray()[index];
+}
+
+template<typename T> struct IntegerArrayTraits {
+  static const IntegerArray enum_value = IntegerArray::NONE;
+};
+
+template<> struct IntegerArrayTraits<hipdnn_flatbuffers_sdk::data_objects::Int8Array> {
+  static const IntegerArray enum_value = IntegerArray::Int8Array;
+};
+
+template<> struct IntegerArrayTraits<hipdnn_flatbuffers_sdk::data_objects::UInt8Array> {
+  static const IntegerArray enum_value = IntegerArray::UInt8Array;
+};
+
+template<> struct IntegerArrayTraits<hipdnn_flatbuffers_sdk::data_objects::Int16Array> {
+  static const IntegerArray enum_value = IntegerArray::Int16Array;
+};
+
+template<> struct IntegerArrayTraits<hipdnn_flatbuffers_sdk::data_objects::UInt16Array> {
+  static const IntegerArray enum_value = IntegerArray::UInt16Array;
+};
+
+template<> struct IntegerArrayTraits<hipdnn_flatbuffers_sdk::data_objects::Int32Array> {
+  static const IntegerArray enum_value = IntegerArray::Int32Array;
+};
+
+template<typename T> struct IntegerArrayUnionTraits {
+  static const IntegerArray enum_value = IntegerArray::NONE;
+};
+
+template<> struct IntegerArrayUnionTraits<hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT> {
+  static const IntegerArray enum_value = IntegerArray::Int8Array;
+};
+
+template<> struct IntegerArrayUnionTraits<hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT> {
+  static const IntegerArray enum_value = IntegerArray::UInt8Array;
+};
+
+template<> struct IntegerArrayUnionTraits<hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT> {
+  static const IntegerArray enum_value = IntegerArray::Int16Array;
+};
+
+template<> struct IntegerArrayUnionTraits<hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT> {
+  static const IntegerArray enum_value = IntegerArray::UInt16Array;
+};
+
+template<> struct IntegerArrayUnionTraits<hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT> {
+  static const IntegerArray enum_value = IntegerArray::Int32Array;
+};
+
+struct IntegerArrayUnion {
+  IntegerArray type;
+  void *value;
+
+  IntegerArrayUnion() : type(IntegerArray::NONE), value(nullptr) {}
+  IntegerArrayUnion(IntegerArrayUnion&& u) FLATBUFFERS_NOEXCEPT :
+    type(IntegerArray::NONE), value(nullptr)
+    { std::swap(type, u.type); std::swap(value, u.value); }
+  IntegerArrayUnion(const IntegerArrayUnion &);
+  IntegerArrayUnion &operator=(const IntegerArrayUnion &u)
+    { IntegerArrayUnion t(u); std::swap(type, t.type); std::swap(value, t.value); return *this; }
+  IntegerArrayUnion &operator=(IntegerArrayUnion &&u) FLATBUFFERS_NOEXCEPT
+    { std::swap(type, u.type); std::swap(value, u.value); return *this; }
+  ~IntegerArrayUnion() { Reset(); }
+
+  void Reset();
+
+  template <typename T>
+  void Set(T&& val) {
+    typedef typename std::remove_reference<T>::type RT;
+    Reset();
+    type = IntegerArrayUnionTraits<RT>::enum_value;
+    if (type != IntegerArray::NONE) {
+      value = new RT(std::forward<T>(val));
+    }
+  }
+
+  static void *UnPack(const void *obj, IntegerArray type, const ::flatbuffers::resolver_function_t *resolver);
+  ::flatbuffers::Offset<void> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr) const;
+
+  hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *AsInt8Array() {
+    return type == IntegerArray::Int8Array ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *AsInt8Array() const {
+    return type == IntegerArray::Int8Array ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *>(value) : nullptr;
+  }
+  hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *AsUInt8Array() {
+    return type == IntegerArray::UInt8Array ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *AsUInt8Array() const {
+    return type == IntegerArray::UInt8Array ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *>(value) : nullptr;
+  }
+  hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *AsInt16Array() {
+    return type == IntegerArray::Int16Array ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *AsInt16Array() const {
+    return type == IntegerArray::Int16Array ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *>(value) : nullptr;
+  }
+  hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *AsUInt16Array() {
+    return type == IntegerArray::UInt16Array ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *AsUInt16Array() const {
+    return type == IntegerArray::UInt16Array ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *>(value) : nullptr;
+  }
+  hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *AsInt32Array() {
+    return type == IntegerArray::Int32Array ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *AsInt32Array() const {
+    return type == IntegerArray::Int32Array ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *>(value) : nullptr;
+  }
+};
+
+
+inline bool operator==(const IntegerArrayUnion &lhs, const IntegerArrayUnion &rhs) {
+  if (lhs.type != rhs.type) return false;
+  switch (lhs.type) {
+    case IntegerArray::NONE: {
+      return true;
+    }
+    case IntegerArray::Int8Array: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *>(rhs.value));
+    }
+    case IntegerArray::UInt8Array: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *>(rhs.value));
+    }
+    case IntegerArray::Int16Array: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *>(rhs.value));
+    }
+    case IntegerArray::UInt16Array: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *>(rhs.value));
+    }
+    case IntegerArray::Int32Array: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *>(rhs.value));
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+inline bool operator!=(const IntegerArrayUnion &lhs, const IntegerArrayUnion &rhs) {
+    return !(lhs == rhs);
+}
+
+bool VerifyIntegerArray(::flatbuffers::Verifier &verifier, const void *obj, IntegerArray type);
+bool VerifyIntegerArrayVector(::flatbuffers::Verifier &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<IntegerArray> *types);
+
+enum class RealArray : uint8_t {
+  NONE = 0,
+  Float32Array = 1,
+  Float64Array = 2,
+  MIN = NONE,
+  MAX = Float64Array
+};
+
+inline const RealArray (&EnumValuesRealArray())[3] {
+  static const RealArray values[] = {
+    RealArray::NONE,
+    RealArray::Float32Array,
+    RealArray::Float64Array
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesRealArray() {
+  static const char * const names[4] = {
+    "NONE",
+    "Float32Array",
+    "Float64Array",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameRealArray(RealArray e) {
+  if (::flatbuffers::IsOutRange(e, RealArray::NONE, RealArray::Float64Array)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesRealArray()[index];
+}
+
+template<typename T> struct RealArrayTraits {
+  static const RealArray enum_value = RealArray::NONE;
+};
+
+template<> struct RealArrayTraits<hipdnn_flatbuffers_sdk::data_objects::Float32Array> {
+  static const RealArray enum_value = RealArray::Float32Array;
+};
+
+template<> struct RealArrayTraits<hipdnn_flatbuffers_sdk::data_objects::Float64Array> {
+  static const RealArray enum_value = RealArray::Float64Array;
+};
+
+template<typename T> struct RealArrayUnionTraits {
+  static const RealArray enum_value = RealArray::NONE;
+};
+
+template<> struct RealArrayUnionTraits<hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT> {
+  static const RealArray enum_value = RealArray::Float32Array;
+};
+
+template<> struct RealArrayUnionTraits<hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT> {
+  static const RealArray enum_value = RealArray::Float64Array;
+};
+
+struct RealArrayUnion {
+  RealArray type;
+  void *value;
+
+  RealArrayUnion() : type(RealArray::NONE), value(nullptr) {}
+  RealArrayUnion(RealArrayUnion&& u) FLATBUFFERS_NOEXCEPT :
+    type(RealArray::NONE), value(nullptr)
+    { std::swap(type, u.type); std::swap(value, u.value); }
+  RealArrayUnion(const RealArrayUnion &);
+  RealArrayUnion &operator=(const RealArrayUnion &u)
+    { RealArrayUnion t(u); std::swap(type, t.type); std::swap(value, t.value); return *this; }
+  RealArrayUnion &operator=(RealArrayUnion &&u) FLATBUFFERS_NOEXCEPT
+    { std::swap(type, u.type); std::swap(value, u.value); return *this; }
+  ~RealArrayUnion() { Reset(); }
+
+  void Reset();
+
+  template <typename T>
+  void Set(T&& val) {
+    typedef typename std::remove_reference<T>::type RT;
+    Reset();
+    type = RealArrayUnionTraits<RT>::enum_value;
+    if (type != RealArray::NONE) {
+      value = new RT(std::forward<T>(val));
+    }
+  }
+
+  static void *UnPack(const void *obj, RealArray type, const ::flatbuffers::resolver_function_t *resolver);
+  ::flatbuffers::Offset<void> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr) const;
+
+  hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *AsFloat32Array() {
+    return type == RealArray::Float32Array ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *AsFloat32Array() const {
+    return type == RealArray::Float32Array ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *>(value) : nullptr;
+  }
+  hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *AsFloat64Array() {
+    return type == RealArray::Float64Array ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *AsFloat64Array() const {
+    return type == RealArray::Float64Array ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *>(value) : nullptr;
+  }
+};
+
+
+inline bool operator==(const RealArrayUnion &lhs, const RealArrayUnion &rhs) {
+  if (lhs.type != rhs.type) return false;
+  switch (lhs.type) {
+    case RealArray::NONE: {
+      return true;
+    }
+    case RealArray::Float32Array: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *>(rhs.value));
+    }
+    case RealArray::Float64Array: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *>(rhs.value));
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+inline bool operator!=(const RealArrayUnion &lhs, const RealArrayUnion &rhs) {
+    return !(lhs == rhs);
+}
+
+bool VerifyRealArray(::flatbuffers::Verifier &verifier, const void *obj, RealArray type);
+bool VerifyRealArrayVector(::flatbuffers::Verifier &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<RealArray> *types);
+
+struct Int8ArrayT : public ::flatbuffers::NativeTable {
+  typedef Int8Array TableType;
+  std::vector<int8_t> values{};
+};
+
+struct Int8Array FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef Int8ArrayT NativeTableType;
+  typedef Int8ArrayBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUES = 4
+  };
+  const ::flatbuffers::Vector<int8_t> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<int8_t> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<int8_t> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<int8_t> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.EndTable();
+  }
+  Int8ArrayT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(Int8ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<Int8Array> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Int8ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct Int8ArrayBuilder {
+  typedef Int8Array Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<int8_t>> values) {
+    fbb_.AddOffset(Int8Array::VT_VALUES, values);
+  }
+  explicit Int8ArrayBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<Int8Array> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<Int8Array>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<Int8Array> CreateInt8Array(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int8_t>> values = 0) {
+  Int8ArrayBuilder builder_(_fbb);
+  builder_.add_values(values);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<Int8Array> CreateInt8ArrayDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<int8_t> *values = nullptr) {
+  auto values__ = values ? _fbb.CreateVector<int8_t>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateInt8Array(
+      _fbb,
+      values__);
+}
+
+::flatbuffers::Offset<Int8Array> CreateInt8Array(::flatbuffers::FlatBufferBuilder &_fbb, const Int8ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct UInt8ArrayT : public ::flatbuffers::NativeTable {
+  typedef UInt8Array TableType;
+  std::vector<uint8_t> values{};
+};
+
+struct UInt8Array FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef UInt8ArrayT NativeTableType;
+  typedef UInt8ArrayBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUES = 4
+  };
+  const ::flatbuffers::Vector<uint8_t> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<uint8_t> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.EndTable();
+  }
+  UInt8ArrayT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(UInt8ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<UInt8Array> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UInt8ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct UInt8ArrayBuilder {
+  typedef UInt8Array Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> values) {
+    fbb_.AddOffset(UInt8Array::VT_VALUES, values);
+  }
+  explicit UInt8ArrayBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<UInt8Array> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<UInt8Array>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<UInt8Array> CreateUInt8Array(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> values = 0) {
+  UInt8ArrayBuilder builder_(_fbb);
+  builder_.add_values(values);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<UInt8Array> CreateUInt8ArrayDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<uint8_t> *values = nullptr) {
+  auto values__ = values ? _fbb.CreateVector<uint8_t>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUInt8Array(
+      _fbb,
+      values__);
+}
+
+::flatbuffers::Offset<UInt8Array> CreateUInt8Array(::flatbuffers::FlatBufferBuilder &_fbb, const UInt8ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct Int16ArrayT : public ::flatbuffers::NativeTable {
+  typedef Int16Array TableType;
+  std::vector<int16_t> values{};
+};
+
+struct Int16Array FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef Int16ArrayT NativeTableType;
+  typedef Int16ArrayBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUES = 4
+  };
+  const ::flatbuffers::Vector<int16_t> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<int16_t> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<int16_t> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<int16_t> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.EndTable();
+  }
+  Int16ArrayT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(Int16ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<Int16Array> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Int16ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct Int16ArrayBuilder {
+  typedef Int16Array Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<int16_t>> values) {
+    fbb_.AddOffset(Int16Array::VT_VALUES, values);
+  }
+  explicit Int16ArrayBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<Int16Array> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<Int16Array>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<Int16Array> CreateInt16Array(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int16_t>> values = 0) {
+  Int16ArrayBuilder builder_(_fbb);
+  builder_.add_values(values);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<Int16Array> CreateInt16ArrayDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<int16_t> *values = nullptr) {
+  auto values__ = values ? _fbb.CreateVector<int16_t>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateInt16Array(
+      _fbb,
+      values__);
+}
+
+::flatbuffers::Offset<Int16Array> CreateInt16Array(::flatbuffers::FlatBufferBuilder &_fbb, const Int16ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct UInt16ArrayT : public ::flatbuffers::NativeTable {
+  typedef UInt16Array TableType;
+  std::vector<uint16_t> values{};
+};
+
+struct UInt16Array FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef UInt16ArrayT NativeTableType;
+  typedef UInt16ArrayBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUES = 4
+  };
+  const ::flatbuffers::Vector<uint16_t> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<uint16_t> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<uint16_t> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<uint16_t> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.EndTable();
+  }
+  UInt16ArrayT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(UInt16ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<UInt16Array> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UInt16ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct UInt16ArrayBuilder {
+  typedef UInt16Array Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<uint16_t>> values) {
+    fbb_.AddOffset(UInt16Array::VT_VALUES, values);
+  }
+  explicit UInt16ArrayBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<UInt16Array> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<UInt16Array>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<UInt16Array> CreateUInt16Array(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint16_t>> values = 0) {
+  UInt16ArrayBuilder builder_(_fbb);
+  builder_.add_values(values);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<UInt16Array> CreateUInt16ArrayDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<uint16_t> *values = nullptr) {
+  auto values__ = values ? _fbb.CreateVector<uint16_t>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUInt16Array(
+      _fbb,
+      values__);
+}
+
+::flatbuffers::Offset<UInt16Array> CreateUInt16Array(::flatbuffers::FlatBufferBuilder &_fbb, const UInt16ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct Int32ArrayT : public ::flatbuffers::NativeTable {
+  typedef Int32Array TableType;
+  std::vector<int32_t> values{};
+};
+
+struct Int32Array FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef Int32ArrayT NativeTableType;
+  typedef Int32ArrayBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUES = 4
+  };
+  const ::flatbuffers::Vector<int32_t> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<int32_t> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<int32_t> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<int32_t> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.EndTable();
+  }
+  Int32ArrayT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(Int32ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<Int32Array> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Int32ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct Int32ArrayBuilder {
+  typedef Int32Array Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> values) {
+    fbb_.AddOffset(Int32Array::VT_VALUES, values);
+  }
+  explicit Int32ArrayBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<Int32Array> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<Int32Array>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<Int32Array> CreateInt32Array(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> values = 0) {
+  Int32ArrayBuilder builder_(_fbb);
+  builder_.add_values(values);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<Int32Array> CreateInt32ArrayDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<int32_t> *values = nullptr) {
+  auto values__ = values ? _fbb.CreateVector<int32_t>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateInt32Array(
+      _fbb,
+      values__);
+}
+
+::flatbuffers::Offset<Int32Array> CreateInt32Array(::flatbuffers::FlatBufferBuilder &_fbb, const Int32ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct Float32ArrayT : public ::flatbuffers::NativeTable {
+  typedef Float32Array TableType;
+  std::vector<float> values{};
+};
+
+struct Float32Array FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef Float32ArrayT NativeTableType;
+  typedef Float32ArrayBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUES = 4
+  };
+  const ::flatbuffers::Vector<float> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<float> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<float> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<float> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.EndTable();
+  }
+  Float32ArrayT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(Float32ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<Float32Array> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Float32ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct Float32ArrayBuilder {
+  typedef Float32Array Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<float>> values) {
+    fbb_.AddOffset(Float32Array::VT_VALUES, values);
+  }
+  explicit Float32ArrayBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<Float32Array> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<Float32Array>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<Float32Array> CreateFloat32Array(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<float>> values = 0) {
+  Float32ArrayBuilder builder_(_fbb);
+  builder_.add_values(values);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<Float32Array> CreateFloat32ArrayDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<float> *values = nullptr) {
+  auto values__ = values ? _fbb.CreateVector<float>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateFloat32Array(
+      _fbb,
+      values__);
+}
+
+::flatbuffers::Offset<Float32Array> CreateFloat32Array(::flatbuffers::FlatBufferBuilder &_fbb, const Float32ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct Float64ArrayT : public ::flatbuffers::NativeTable {
+  typedef Float64Array TableType;
+  std::vector<double> values{};
+};
+
+struct Float64Array FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef Float64ArrayT NativeTableType;
+  typedef Float64ArrayBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUES = 4
+  };
+  const ::flatbuffers::Vector<double> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<double> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<double> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.EndTable();
+  }
+  Float64ArrayT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(Float64ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<Float64Array> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Float64ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct Float64ArrayBuilder {
+  typedef Float64Array Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<double>> values) {
+    fbb_.AddOffset(Float64Array::VT_VALUES, values);
+  }
+  explicit Float64ArrayBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<Float64Array> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<Float64Array>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<Float64Array> CreateFloat64Array(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<double>> values = 0) {
+  Float64ArrayBuilder builder_(_fbb);
+  builder_.add_values(values);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<Float64Array> CreateFloat64ArrayDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<double> *values = nullptr) {
+  auto values__ = values ? _fbb.CreateVector<double>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateFloat64Array(
+      _fbb,
+      values__);
+}
+
+::flatbuffers::Offset<Float64Array> CreateFloat64Array(::flatbuffers::FlatBufferBuilder &_fbb, const Float64ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 struct GbdtTreeT : public ::flatbuffers::NativeTable {
   typedef GbdtTree TableType;
@@ -44,17 +876,30 @@ struct GbdtTreeT : public ::flatbuffers::NativeTable {
   std::vector<double> leaf_values{};
   std::vector<bool> default_left{};
   std::vector<bool> decision_lte{};
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion split_features{};
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion split_thresholds{};
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion split_left{};
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion split_right{};
+  std::vector<bool> split_default_left{};
+  std::vector<bool> split_decision_lte{};
+  bool default_left_fill = false;
+  hipdnn_flatbuffers_sdk::data_objects::RealArrayUnion leaves{};
 };
 
-/// @brief A single decision tree in the GBDT ensemble.
+/// @brief A single decision tree in the GBDT ensemble, in one of two encodings.
 ///
-/// Trees are stored in a flat array format for cache-friendly traversal.
+/// Node arrays (the first seven fields): one entry per node, split or leaf.
 /// Node i is internal if left_children[i] >= 0; leaf if left_children[i] == -1.
-///
 /// Traversal: start at node 0, compare features[feature_indices[i]] against
 /// thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
 /// decision_lte at i is false) or if missing and default_left,
 /// else right (right_children[i]). At a leaf, return leaf_values[i].
+///
+/// Split/leaf arrays (the `split_*` fields and `leaves`): splits and leaves are stored
+/// apart, each array in the narrowest type it fits. A child >= 0 is a split index; a child
+/// c < 0 is leaf ~c (-1 is leaf 0). Traversal starts at split 0, or at leaf 0 when the
+/// tree has no splits. A split's threshold is GbdtModel.threshold_table[split_thresholds[i]].
+/// A tree uses exactly one encoding; `leaves` present selects this one.
 struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GbdtTreeT NativeTableType;
   typedef GbdtTreeBuilder Builder;
@@ -65,7 +910,20 @@ struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_RIGHT_CHILDREN = 10,
     VT_LEAF_VALUES = 12,
     VT_DEFAULT_LEFT = 14,
-    VT_DECISION_LTE = 16
+    VT_DECISION_LTE = 16,
+    VT_SPLIT_FEATURES_TYPE = 18,
+    VT_SPLIT_FEATURES = 20,
+    VT_SPLIT_THRESHOLDS_TYPE = 22,
+    VT_SPLIT_THRESHOLDS = 24,
+    VT_SPLIT_LEFT_TYPE = 26,
+    VT_SPLIT_LEFT = 28,
+    VT_SPLIT_RIGHT_TYPE = 30,
+    VT_SPLIT_RIGHT = 32,
+    VT_SPLIT_DEFAULT_LEFT = 34,
+    VT_SPLIT_DECISION_LTE = 36,
+    VT_DEFAULT_LEFT_FILL = 38,
+    VT_LEAVES_TYPE = 40,
+    VT_LEAVES = 42
   };
   /// Feature index to split on at each internal node.
   const ::flatbuffers::Vector<int32_t> *feature_indices() const {
@@ -117,6 +975,150 @@ struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::Vector<uint8_t> *mutable_decision_lte() {
     return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_DECISION_LTE);
   }
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_features_type() const {
+    return static_cast<hipdnn_flatbuffers_sdk::data_objects::IntegerArray>(GetField<uint8_t>(VT_SPLIT_FEATURES_TYPE, 0));
+  }
+  /// Split/leaf encoding: feature index per split.
+  const void *split_features() const {
+    return GetPointer<const void *>(VT_SPLIT_FEATURES);
+  }
+  template<typename T> const T *split_features_as() const;
+  const hipdnn_flatbuffers_sdk::data_objects::Int8Array *split_features_as_Int8Array() const {
+    return split_features_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8Array *>(split_features()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *split_features_as_UInt8Array() const {
+    return split_features_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *>(split_features()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int16Array *split_features_as_Int16Array() const {
+    return split_features_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16Array *>(split_features()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *split_features_as_UInt16Array() const {
+    return split_features_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *>(split_features()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int32Array *split_features_as_Int32Array() const {
+    return split_features_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int32Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32Array *>(split_features()) : nullptr;
+  }
+  void *mutable_split_features() {
+    return GetPointer<void *>(VT_SPLIT_FEATURES);
+  }
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_thresholds_type() const {
+    return static_cast<hipdnn_flatbuffers_sdk::data_objects::IntegerArray>(GetField<uint8_t>(VT_SPLIT_THRESHOLDS_TYPE, 0));
+  }
+  /// Split/leaf encoding: index into GbdtModel.threshold_table per split.
+  const void *split_thresholds() const {
+    return GetPointer<const void *>(VT_SPLIT_THRESHOLDS);
+  }
+  template<typename T> const T *split_thresholds_as() const;
+  const hipdnn_flatbuffers_sdk::data_objects::Int8Array *split_thresholds_as_Int8Array() const {
+    return split_thresholds_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8Array *>(split_thresholds()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *split_thresholds_as_UInt8Array() const {
+    return split_thresholds_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *>(split_thresholds()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int16Array *split_thresholds_as_Int16Array() const {
+    return split_thresholds_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16Array *>(split_thresholds()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *split_thresholds_as_UInt16Array() const {
+    return split_thresholds_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *>(split_thresholds()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int32Array *split_thresholds_as_Int32Array() const {
+    return split_thresholds_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int32Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32Array *>(split_thresholds()) : nullptr;
+  }
+  void *mutable_split_thresholds() {
+    return GetPointer<void *>(VT_SPLIT_THRESHOLDS);
+  }
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_left_type() const {
+    return static_cast<hipdnn_flatbuffers_sdk::data_objects::IntegerArray>(GetField<uint8_t>(VT_SPLIT_LEFT_TYPE, 0));
+  }
+  /// Split/leaf encoding: left child per split (>= 0 split, < 0 leaf ~c).
+  const void *split_left() const {
+    return GetPointer<const void *>(VT_SPLIT_LEFT);
+  }
+  template<typename T> const T *split_left_as() const;
+  const hipdnn_flatbuffers_sdk::data_objects::Int8Array *split_left_as_Int8Array() const {
+    return split_left_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8Array *>(split_left()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *split_left_as_UInt8Array() const {
+    return split_left_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *>(split_left()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int16Array *split_left_as_Int16Array() const {
+    return split_left_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16Array *>(split_left()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *split_left_as_UInt16Array() const {
+    return split_left_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *>(split_left()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int32Array *split_left_as_Int32Array() const {
+    return split_left_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int32Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32Array *>(split_left()) : nullptr;
+  }
+  void *mutable_split_left() {
+    return GetPointer<void *>(VT_SPLIT_LEFT);
+  }
+  hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_right_type() const {
+    return static_cast<hipdnn_flatbuffers_sdk::data_objects::IntegerArray>(GetField<uint8_t>(VT_SPLIT_RIGHT_TYPE, 0));
+  }
+  /// Split/leaf encoding: right child per split (>= 0 split, < 0 leaf ~c).
+  const void *split_right() const {
+    return GetPointer<const void *>(VT_SPLIT_RIGHT);
+  }
+  template<typename T> const T *split_right_as() const;
+  const hipdnn_flatbuffers_sdk::data_objects::Int8Array *split_right_as_Int8Array() const {
+    return split_right_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8Array *>(split_right()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *split_right_as_UInt8Array() const {
+    return split_right_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt8Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *>(split_right()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int16Array *split_right_as_Int16Array() const {
+    return split_right_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16Array *>(split_right()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *split_right_as_UInt16Array() const {
+    return split_right_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::UInt16Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *>(split_right()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Int32Array *split_right_as_Int32Array() const {
+    return split_right_type() == hipdnn_flatbuffers_sdk::data_objects::IntegerArray::Int32Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32Array *>(split_right()) : nullptr;
+  }
+  void *mutable_split_right() {
+    return GetPointer<void *>(VT_SPLIT_RIGHT);
+  }
+  /// Split/leaf encoding: missing-value direction per split. Absent means every split
+  /// goes `default_left_fill`.
+  const ::flatbuffers::Vector<uint8_t> *split_default_left() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_SPLIT_DEFAULT_LEFT);
+  }
+  ::flatbuffers::Vector<uint8_t> *mutable_split_default_left() {
+    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_SPLIT_DEFAULT_LEFT);
+  }
+  /// Split/leaf encoding: comparison per split, as decision_lte. Absent means `<=`.
+  const ::flatbuffers::Vector<uint8_t> *split_decision_lte() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_SPLIT_DECISION_LTE);
+  }
+  ::flatbuffers::Vector<uint8_t> *mutable_split_decision_lte() {
+    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_SPLIT_DECISION_LTE);
+  }
+  /// Split/leaf encoding: every split's missing-value direction when split_default_left
+  /// is absent.
+  bool default_left_fill() const {
+    return GetField<uint8_t>(VT_DEFAULT_LEFT_FILL, 0) != 0;
+  }
+  bool mutate_default_left_fill(bool _default_left_fill = 0) {
+    return SetField<uint8_t>(VT_DEFAULT_LEFT_FILL, static_cast<uint8_t>(_default_left_fill), 0);
+  }
+  hipdnn_flatbuffers_sdk::data_objects::RealArray leaves_type() const {
+    return static_cast<hipdnn_flatbuffers_sdk::data_objects::RealArray>(GetField<uint8_t>(VT_LEAVES_TYPE, 0));
+  }
+  /// Split/leaf encoding: prediction per leaf.
+  const void *leaves() const {
+    return GetPointer<const void *>(VT_LEAVES);
+  }
+  template<typename T> const T *leaves_as() const;
+  const hipdnn_flatbuffers_sdk::data_objects::Float32Array *leaves_as_Float32Array() const {
+    return leaves_type() == hipdnn_flatbuffers_sdk::data_objects::RealArray::Float32Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32Array *>(leaves()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Float64Array *leaves_as_Float64Array() const {
+    return leaves_type() == hipdnn_flatbuffers_sdk::data_objects::RealArray::Float64Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64Array *>(leaves()) : nullptr;
+  }
+  void *mutable_leaves() {
+    return GetPointer<void *>(VT_LEAVES);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_FEATURE_INDICES) &&
@@ -133,12 +1135,120 @@ struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVector(default_left()) &&
            VerifyOffset(verifier, VT_DECISION_LTE) &&
            verifier.VerifyVector(decision_lte()) &&
+           VerifyField<uint8_t>(verifier, VT_SPLIT_FEATURES_TYPE, 1) &&
+           VerifyOffset(verifier, VT_SPLIT_FEATURES) &&
+           VerifyIntegerArray(verifier, split_features(), split_features_type()) &&
+           VerifyField<uint8_t>(verifier, VT_SPLIT_THRESHOLDS_TYPE, 1) &&
+           VerifyOffset(verifier, VT_SPLIT_THRESHOLDS) &&
+           VerifyIntegerArray(verifier, split_thresholds(), split_thresholds_type()) &&
+           VerifyField<uint8_t>(verifier, VT_SPLIT_LEFT_TYPE, 1) &&
+           VerifyOffset(verifier, VT_SPLIT_LEFT) &&
+           VerifyIntegerArray(verifier, split_left(), split_left_type()) &&
+           VerifyField<uint8_t>(verifier, VT_SPLIT_RIGHT_TYPE, 1) &&
+           VerifyOffset(verifier, VT_SPLIT_RIGHT) &&
+           VerifyIntegerArray(verifier, split_right(), split_right_type()) &&
+           VerifyOffset(verifier, VT_SPLIT_DEFAULT_LEFT) &&
+           verifier.VerifyVector(split_default_left()) &&
+           VerifyOffset(verifier, VT_SPLIT_DECISION_LTE) &&
+           verifier.VerifyVector(split_decision_lte()) &&
+           VerifyField<uint8_t>(verifier, VT_DEFAULT_LEFT_FILL, 1) &&
+           VerifyField<uint8_t>(verifier, VT_LEAVES_TYPE, 1) &&
+           VerifyOffset(verifier, VT_LEAVES) &&
+           VerifyRealArray(verifier, leaves(), leaves_type()) &&
            verifier.EndTable();
   }
   GbdtTreeT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
   void UnPackTo(GbdtTreeT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
   static ::flatbuffers::Offset<GbdtTree> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtTreeT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int8Array *GbdtTree::split_features_as<hipdnn_flatbuffers_sdk::data_objects::Int8Array>() const {
+  return split_features_as_Int8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *GbdtTree::split_features_as<hipdnn_flatbuffers_sdk::data_objects::UInt8Array>() const {
+  return split_features_as_UInt8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int16Array *GbdtTree::split_features_as<hipdnn_flatbuffers_sdk::data_objects::Int16Array>() const {
+  return split_features_as_Int16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *GbdtTree::split_features_as<hipdnn_flatbuffers_sdk::data_objects::UInt16Array>() const {
+  return split_features_as_UInt16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int32Array *GbdtTree::split_features_as<hipdnn_flatbuffers_sdk::data_objects::Int32Array>() const {
+  return split_features_as_Int32Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int8Array *GbdtTree::split_thresholds_as<hipdnn_flatbuffers_sdk::data_objects::Int8Array>() const {
+  return split_thresholds_as_Int8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *GbdtTree::split_thresholds_as<hipdnn_flatbuffers_sdk::data_objects::UInt8Array>() const {
+  return split_thresholds_as_UInt8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int16Array *GbdtTree::split_thresholds_as<hipdnn_flatbuffers_sdk::data_objects::Int16Array>() const {
+  return split_thresholds_as_Int16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *GbdtTree::split_thresholds_as<hipdnn_flatbuffers_sdk::data_objects::UInt16Array>() const {
+  return split_thresholds_as_UInt16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int32Array *GbdtTree::split_thresholds_as<hipdnn_flatbuffers_sdk::data_objects::Int32Array>() const {
+  return split_thresholds_as_Int32Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int8Array *GbdtTree::split_left_as<hipdnn_flatbuffers_sdk::data_objects::Int8Array>() const {
+  return split_left_as_Int8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *GbdtTree::split_left_as<hipdnn_flatbuffers_sdk::data_objects::UInt8Array>() const {
+  return split_left_as_UInt8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int16Array *GbdtTree::split_left_as<hipdnn_flatbuffers_sdk::data_objects::Int16Array>() const {
+  return split_left_as_Int16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *GbdtTree::split_left_as<hipdnn_flatbuffers_sdk::data_objects::UInt16Array>() const {
+  return split_left_as_UInt16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int32Array *GbdtTree::split_left_as<hipdnn_flatbuffers_sdk::data_objects::Int32Array>() const {
+  return split_left_as_Int32Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int8Array *GbdtTree::split_right_as<hipdnn_flatbuffers_sdk::data_objects::Int8Array>() const {
+  return split_right_as_Int8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *GbdtTree::split_right_as<hipdnn_flatbuffers_sdk::data_objects::UInt8Array>() const {
+  return split_right_as_UInt8Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int16Array *GbdtTree::split_right_as<hipdnn_flatbuffers_sdk::data_objects::Int16Array>() const {
+  return split_right_as_Int16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *GbdtTree::split_right_as<hipdnn_flatbuffers_sdk::data_objects::UInt16Array>() const {
+  return split_right_as_UInt16Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Int32Array *GbdtTree::split_right_as<hipdnn_flatbuffers_sdk::data_objects::Int32Array>() const {
+  return split_right_as_Int32Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Float32Array *GbdtTree::leaves_as<hipdnn_flatbuffers_sdk::data_objects::Float32Array>() const {
+  return leaves_as_Float32Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Float64Array *GbdtTree::leaves_as<hipdnn_flatbuffers_sdk::data_objects::Float64Array>() const {
+  return leaves_as_Float64Array();
+}
 
 struct GbdtTreeBuilder {
   typedef GbdtTree Table;
@@ -165,6 +1275,45 @@ struct GbdtTreeBuilder {
   void add_decision_lte(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> decision_lte) {
     fbb_.AddOffset(GbdtTree::VT_DECISION_LTE, decision_lte);
   }
+  void add_split_features_type(hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_features_type) {
+    fbb_.AddElement<uint8_t>(GbdtTree::VT_SPLIT_FEATURES_TYPE, static_cast<uint8_t>(split_features_type), 0);
+  }
+  void add_split_features(::flatbuffers::Offset<void> split_features) {
+    fbb_.AddOffset(GbdtTree::VT_SPLIT_FEATURES, split_features);
+  }
+  void add_split_thresholds_type(hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_thresholds_type) {
+    fbb_.AddElement<uint8_t>(GbdtTree::VT_SPLIT_THRESHOLDS_TYPE, static_cast<uint8_t>(split_thresholds_type), 0);
+  }
+  void add_split_thresholds(::flatbuffers::Offset<void> split_thresholds) {
+    fbb_.AddOffset(GbdtTree::VT_SPLIT_THRESHOLDS, split_thresholds);
+  }
+  void add_split_left_type(hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_left_type) {
+    fbb_.AddElement<uint8_t>(GbdtTree::VT_SPLIT_LEFT_TYPE, static_cast<uint8_t>(split_left_type), 0);
+  }
+  void add_split_left(::flatbuffers::Offset<void> split_left) {
+    fbb_.AddOffset(GbdtTree::VT_SPLIT_LEFT, split_left);
+  }
+  void add_split_right_type(hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_right_type) {
+    fbb_.AddElement<uint8_t>(GbdtTree::VT_SPLIT_RIGHT_TYPE, static_cast<uint8_t>(split_right_type), 0);
+  }
+  void add_split_right(::flatbuffers::Offset<void> split_right) {
+    fbb_.AddOffset(GbdtTree::VT_SPLIT_RIGHT, split_right);
+  }
+  void add_split_default_left(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> split_default_left) {
+    fbb_.AddOffset(GbdtTree::VT_SPLIT_DEFAULT_LEFT, split_default_left);
+  }
+  void add_split_decision_lte(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> split_decision_lte) {
+    fbb_.AddOffset(GbdtTree::VT_SPLIT_DECISION_LTE, split_decision_lte);
+  }
+  void add_default_left_fill(bool default_left_fill) {
+    fbb_.AddElement<uint8_t>(GbdtTree::VT_DEFAULT_LEFT_FILL, static_cast<uint8_t>(default_left_fill), 0);
+  }
+  void add_leaves_type(hipdnn_flatbuffers_sdk::data_objects::RealArray leaves_type) {
+    fbb_.AddElement<uint8_t>(GbdtTree::VT_LEAVES_TYPE, static_cast<uint8_t>(leaves_type), 0);
+  }
+  void add_leaves(::flatbuffers::Offset<void> leaves) {
+    fbb_.AddOffset(GbdtTree::VT_LEAVES, leaves);
+  }
   explicit GbdtTreeBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -184,8 +1333,28 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(
     ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> right_children = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<double>> leaf_values = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> default_left = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> decision_lte = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> decision_lte = 0,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_features_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_features = 0,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_thresholds_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_thresholds = 0,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_left_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_left = 0,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_right_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_right = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> split_default_left = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> split_decision_lte = 0,
+    bool default_left_fill = false,
+    hipdnn_flatbuffers_sdk::data_objects::RealArray leaves_type = hipdnn_flatbuffers_sdk::data_objects::RealArray::NONE,
+    ::flatbuffers::Offset<void> leaves = 0) {
   GbdtTreeBuilder builder_(_fbb);
+  builder_.add_leaves(leaves);
+  builder_.add_split_decision_lte(split_decision_lte);
+  builder_.add_split_default_left(split_default_left);
+  builder_.add_split_right(split_right);
+  builder_.add_split_left(split_left);
+  builder_.add_split_thresholds(split_thresholds);
+  builder_.add_split_features(split_features);
   builder_.add_decision_lte(decision_lte);
   builder_.add_default_left(default_left);
   builder_.add_leaf_values(leaf_values);
@@ -193,6 +1362,12 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(
   builder_.add_left_children(left_children);
   builder_.add_thresholds(thresholds);
   builder_.add_feature_indices(feature_indices);
+  builder_.add_leaves_type(leaves_type);
+  builder_.add_default_left_fill(default_left_fill);
+  builder_.add_split_right_type(split_right_type);
+  builder_.add_split_left_type(split_left_type);
+  builder_.add_split_thresholds_type(split_thresholds_type);
+  builder_.add_split_features_type(split_features_type);
   return builder_.Finish();
 }
 
@@ -204,7 +1379,20 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTreeDirect(
     const std::vector<int32_t> *right_children = nullptr,
     const std::vector<double> *leaf_values = nullptr,
     const std::vector<uint8_t> *default_left = nullptr,
-    const std::vector<uint8_t> *decision_lte = nullptr) {
+    const std::vector<uint8_t> *decision_lte = nullptr,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_features_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_features = 0,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_thresholds_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_thresholds = 0,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_left_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_left = 0,
+    hipdnn_flatbuffers_sdk::data_objects::IntegerArray split_right_type = hipdnn_flatbuffers_sdk::data_objects::IntegerArray::NONE,
+    ::flatbuffers::Offset<void> split_right = 0,
+    const std::vector<uint8_t> *split_default_left = nullptr,
+    const std::vector<uint8_t> *split_decision_lte = nullptr,
+    bool default_left_fill = false,
+    hipdnn_flatbuffers_sdk::data_objects::RealArray leaves_type = hipdnn_flatbuffers_sdk::data_objects::RealArray::NONE,
+    ::flatbuffers::Offset<void> leaves = 0) {
   auto feature_indices__ = feature_indices ? _fbb.CreateVector<int32_t>(*feature_indices) : 0;
   auto thresholds__ = thresholds ? _fbb.CreateVector<double>(*thresholds) : 0;
   auto left_children__ = left_children ? _fbb.CreateVector<int32_t>(*left_children) : 0;
@@ -212,6 +1400,8 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTreeDirect(
   auto leaf_values__ = leaf_values ? _fbb.CreateVector<double>(*leaf_values) : 0;
   auto default_left__ = default_left ? _fbb.CreateVector<uint8_t>(*default_left) : 0;
   auto decision_lte__ = decision_lte ? _fbb.CreateVector<uint8_t>(*decision_lte) : 0;
+  auto split_default_left__ = split_default_left ? _fbb.CreateVector<uint8_t>(*split_default_left) : 0;
+  auto split_decision_lte__ = split_decision_lte ? _fbb.CreateVector<uint8_t>(*split_decision_lte) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtTree(
       _fbb,
       feature_indices__,
@@ -220,7 +1410,20 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTreeDirect(
       right_children__,
       leaf_values__,
       default_left__,
-      decision_lte__);
+      decision_lte__,
+      split_features_type,
+      split_features,
+      split_thresholds_type,
+      split_thresholds,
+      split_left_type,
+      split_left,
+      split_right_type,
+      split_right,
+      split_default_left__,
+      split_decision_lte__,
+      default_left_fill,
+      leaves_type,
+      leaves);
 }
 
 ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtTreeT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -334,6 +1537,7 @@ struct GbdtModelT : public ::flatbuffers::NativeTable {
   std::string model_version{};
   int32_t group_by_feature_index = -1;
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT>> groups{};
+  hipdnn_flatbuffers_sdk::data_objects::RealArrayUnion threshold_table{};
   GbdtModelT() = default;
   GbdtModelT(const GbdtModelT &o);
   GbdtModelT(GbdtModelT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -369,7 +1573,9 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_TRAINING_ARCHES = 22,
     VT_MODEL_VERSION = 24,
     VT_GROUP_BY_FEATURE_INDEX = 26,
-    VT_GROUPS = 28
+    VT_GROUPS = 28,
+    VT_THRESHOLD_TABLE_TYPE = 30,
+    VT_THRESHOLD_TABLE = 32
   };
   /// Array of decision trees in the ensemble.
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *trees() const {
@@ -466,6 +1672,24 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *mutable_groups() {
     return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *>(VT_GROUPS);
   }
+  hipdnn_flatbuffers_sdk::data_objects::RealArray threshold_table_type() const {
+    return static_cast<hipdnn_flatbuffers_sdk::data_objects::RealArray>(GetField<uint8_t>(VT_THRESHOLD_TABLE_TYPE, 0));
+  }
+  /// The distinct split thresholds that split/leaf-encoded trees index. Absent when no
+  /// tree uses that encoding.
+  const void *threshold_table() const {
+    return GetPointer<const void *>(VT_THRESHOLD_TABLE);
+  }
+  template<typename T> const T *threshold_table_as() const;
+  const hipdnn_flatbuffers_sdk::data_objects::Float32Array *threshold_table_as_Float32Array() const {
+    return threshold_table_type() == hipdnn_flatbuffers_sdk::data_objects::RealArray::Float32Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32Array *>(threshold_table()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::Float64Array *threshold_table_as_Float64Array() const {
+    return threshold_table_type() == hipdnn_flatbuffers_sdk::data_objects::RealArray::Float64Array ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64Array *>(threshold_table()) : nullptr;
+  }
+  void *mutable_threshold_table() {
+    return GetPointer<void *>(VT_THRESHOLD_TABLE);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TREES) &&
@@ -492,12 +1716,23 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyOffset(verifier, VT_GROUPS) &&
            verifier.VerifyVector(groups()) &&
            verifier.VerifyVectorOfTables(groups()) &&
+           VerifyField<uint8_t>(verifier, VT_THRESHOLD_TABLE_TYPE, 1) &&
+           VerifyOffset(verifier, VT_THRESHOLD_TABLE) &&
+           VerifyRealArray(verifier, threshold_table(), threshold_table_type()) &&
            verifier.EndTable();
   }
   GbdtModelT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
   void UnPackTo(GbdtModelT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
   static ::flatbuffers::Offset<GbdtModel> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Float32Array *GbdtModel::threshold_table_as<hipdnn_flatbuffers_sdk::data_objects::Float32Array>() const {
+  return threshold_table_as_Float32Array();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::Float64Array *GbdtModel::threshold_table_as<hipdnn_flatbuffers_sdk::data_objects::Float64Array>() const {
+  return threshold_table_as_Float64Array();
+}
 
 struct GbdtModelBuilder {
   typedef GbdtModel Table;
@@ -542,6 +1777,12 @@ struct GbdtModelBuilder {
   void add_groups(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>> groups) {
     fbb_.AddOffset(GbdtModel::VT_GROUPS, groups);
   }
+  void add_threshold_table_type(hipdnn_flatbuffers_sdk::data_objects::RealArray threshold_table_type) {
+    fbb_.AddElement<uint8_t>(GbdtModel::VT_THRESHOLD_TABLE_TYPE, static_cast<uint8_t>(threshold_table_type), 0);
+  }
+  void add_threshold_table(::flatbuffers::Offset<void> threshold_table) {
+    fbb_.AddOffset(GbdtModel::VT_THRESHOLD_TABLE, threshold_table);
+  }
   explicit GbdtModelBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -567,11 +1808,14 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> training_arches = 0,
     ::flatbuffers::Offset<::flatbuffers::String> model_version = 0,
     int32_t group_by_feature_index = -1,
-    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>> groups = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>> groups = 0,
+    hipdnn_flatbuffers_sdk::data_objects::RealArray threshold_table_type = hipdnn_flatbuffers_sdk::data_objects::RealArray::NONE,
+    ::flatbuffers::Offset<void> threshold_table = 0) {
   GbdtModelBuilder builder_(_fbb);
   builder_.add_num_training_samples(num_training_samples);
   builder_.add_learning_rate(learning_rate);
   builder_.add_base_score(base_score);
+  builder_.add_threshold_table(threshold_table);
   builder_.add_groups(groups);
   builder_.add_group_by_feature_index(group_by_feature_index);
   builder_.add_model_version(model_version);
@@ -582,6 +1826,7 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(
   builder_.add_features_hash(features_hash);
   builder_.add_num_features(num_features);
   builder_.add_trees(trees);
+  builder_.add_threshold_table_type(threshold_table_type);
   return builder_.Finish();
 }
 
@@ -599,7 +1844,9 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *training_arches = nullptr,
     const char *model_version = nullptr,
     int32_t group_by_feature_index = -1,
-    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *groups = nullptr) {
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *groups = nullptr,
+    hipdnn_flatbuffers_sdk::data_objects::RealArray threshold_table_type = hipdnn_flatbuffers_sdk::data_objects::RealArray::NONE,
+    ::flatbuffers::Offset<void> threshold_table = 0) {
   auto trees__ = trees ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>(*trees) : 0;
   auto features_hash__ = features_hash ? _fbb.CreateString(features_hash) : 0;
   auto framework__ = framework ? _fbb.CreateString(framework) : 0;
@@ -622,10 +1869,271 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
       training_arches__,
       model_version__,
       group_by_feature_index,
-      groups__);
+      groups__,
+      threshold_table_type,
+      threshold_table);
 }
 
 ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+
+inline bool operator==(const Int8ArrayT &lhs, const Int8ArrayT &rhs) {
+  return
+      (lhs.values == rhs.values);
+}
+
+inline bool operator!=(const Int8ArrayT &lhs, const Int8ArrayT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline Int8ArrayT *Int8Array::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<Int8ArrayT>(new Int8ArrayT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void Int8Array::UnPackTo(Int8ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->values.begin()); } }
+}
+
+inline ::flatbuffers::Offset<Int8Array> Int8Array::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Int8ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateInt8Array(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<Int8Array> CreateInt8Array(::flatbuffers::FlatBufferBuilder &_fbb, const Int8ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const Int8ArrayT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _values = _o->values.size() ? _fbb.CreateVector(_o->values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateInt8Array(
+      _fbb,
+      _values);
+}
+
+
+inline bool operator==(const UInt8ArrayT &lhs, const UInt8ArrayT &rhs) {
+  return
+      (lhs.values == rhs.values);
+}
+
+inline bool operator!=(const UInt8ArrayT &lhs, const UInt8ArrayT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline UInt8ArrayT *UInt8Array::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<UInt8ArrayT>(new UInt8ArrayT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void UInt8Array::UnPackTo(UInt8ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->values.begin()); } }
+}
+
+inline ::flatbuffers::Offset<UInt8Array> UInt8Array::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UInt8ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateUInt8Array(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<UInt8Array> CreateUInt8Array(::flatbuffers::FlatBufferBuilder &_fbb, const UInt8ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const UInt8ArrayT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _values = _o->values.size() ? _fbb.CreateVector(_o->values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUInt8Array(
+      _fbb,
+      _values);
+}
+
+
+inline bool operator==(const Int16ArrayT &lhs, const Int16ArrayT &rhs) {
+  return
+      (lhs.values == rhs.values);
+}
+
+inline bool operator!=(const Int16ArrayT &lhs, const Int16ArrayT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline Int16ArrayT *Int16Array::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<Int16ArrayT>(new Int16ArrayT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void Int16Array::UnPackTo(Int16ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->values[_i] = _e->Get(_i); } } else { _o->values.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<Int16Array> Int16Array::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Int16ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateInt16Array(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<Int16Array> CreateInt16Array(::flatbuffers::FlatBufferBuilder &_fbb, const Int16ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const Int16ArrayT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _values = _o->values.size() ? _fbb.CreateVector(_o->values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateInt16Array(
+      _fbb,
+      _values);
+}
+
+
+inline bool operator==(const UInt16ArrayT &lhs, const UInt16ArrayT &rhs) {
+  return
+      (lhs.values == rhs.values);
+}
+
+inline bool operator!=(const UInt16ArrayT &lhs, const UInt16ArrayT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline UInt16ArrayT *UInt16Array::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<UInt16ArrayT>(new UInt16ArrayT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void UInt16Array::UnPackTo(UInt16ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->values[_i] = _e->Get(_i); } } else { _o->values.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<UInt16Array> UInt16Array::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UInt16ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateUInt16Array(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<UInt16Array> CreateUInt16Array(::flatbuffers::FlatBufferBuilder &_fbb, const UInt16ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const UInt16ArrayT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _values = _o->values.size() ? _fbb.CreateVector(_o->values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUInt16Array(
+      _fbb,
+      _values);
+}
+
+
+inline bool operator==(const Int32ArrayT &lhs, const Int32ArrayT &rhs) {
+  return
+      (lhs.values == rhs.values);
+}
+
+inline bool operator!=(const Int32ArrayT &lhs, const Int32ArrayT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline Int32ArrayT *Int32Array::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<Int32ArrayT>(new Int32ArrayT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void Int32Array::UnPackTo(Int32ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->values[_i] = _e->Get(_i); } } else { _o->values.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<Int32Array> Int32Array::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Int32ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateInt32Array(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<Int32Array> CreateInt32Array(::flatbuffers::FlatBufferBuilder &_fbb, const Int32ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const Int32ArrayT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _values = _o->values.size() ? _fbb.CreateVector(_o->values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateInt32Array(
+      _fbb,
+      _values);
+}
+
+
+inline bool operator==(const Float32ArrayT &lhs, const Float32ArrayT &rhs) {
+  return
+      (lhs.values == rhs.values);
+}
+
+inline bool operator!=(const Float32ArrayT &lhs, const Float32ArrayT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline Float32ArrayT *Float32Array::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<Float32ArrayT>(new Float32ArrayT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void Float32Array::UnPackTo(Float32ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->values[_i] = _e->Get(_i); } } else { _o->values.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<Float32Array> Float32Array::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Float32ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateFloat32Array(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<Float32Array> CreateFloat32Array(::flatbuffers::FlatBufferBuilder &_fbb, const Float32ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const Float32ArrayT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _values = _o->values.size() ? _fbb.CreateVector(_o->values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateFloat32Array(
+      _fbb,
+      _values);
+}
+
+
+inline bool operator==(const Float64ArrayT &lhs, const Float64ArrayT &rhs) {
+  return
+      (lhs.values == rhs.values);
+}
+
+inline bool operator!=(const Float64ArrayT &lhs, const Float64ArrayT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline Float64ArrayT *Float64Array::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<Float64ArrayT>(new Float64ArrayT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void Float64Array::UnPackTo(Float64ArrayT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->values[_i] = _e->Get(_i); } } else { _o->values.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<Float64Array> Float64Array::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const Float64ArrayT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateFloat64Array(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<Float64Array> CreateFloat64Array(::flatbuffers::FlatBufferBuilder &_fbb, const Float64ArrayT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const Float64ArrayT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _values = _o->values.size() ? _fbb.CreateVector(_o->values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateFloat64Array(
+      _fbb,
+      _values);
+}
 
 
 inline bool operator==(const GbdtTreeT &lhs, const GbdtTreeT &rhs) {
@@ -636,7 +2144,15 @@ inline bool operator==(const GbdtTreeT &lhs, const GbdtTreeT &rhs) {
       (lhs.right_children == rhs.right_children) &&
       (lhs.leaf_values == rhs.leaf_values) &&
       (lhs.default_left == rhs.default_left) &&
-      (lhs.decision_lte == rhs.decision_lte);
+      (lhs.decision_lte == rhs.decision_lte) &&
+      (lhs.split_features == rhs.split_features) &&
+      (lhs.split_thresholds == rhs.split_thresholds) &&
+      (lhs.split_left == rhs.split_left) &&
+      (lhs.split_right == rhs.split_right) &&
+      (lhs.split_default_left == rhs.split_default_left) &&
+      (lhs.split_decision_lte == rhs.split_decision_lte) &&
+      (lhs.default_left_fill == rhs.default_left_fill) &&
+      (lhs.leaves == rhs.leaves);
 }
 
 inline bool operator!=(const GbdtTreeT &lhs, const GbdtTreeT &rhs) {
@@ -660,6 +2176,19 @@ inline void GbdtTree::UnPackTo(GbdtTreeT *_o, const ::flatbuffers::resolver_func
   { auto _e = leaf_values(); if (_e) { _o->leaf_values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->leaf_values[_i] = _e->Get(_i); } } else { _o->leaf_values.resize(0); } }
   { auto _e = default_left(); if (_e) { _o->default_left.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->default_left[_i] = _e->Get(_i) != 0; } } else { _o->default_left.resize(0); } }
   { auto _e = decision_lte(); if (_e) { _o->decision_lte.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->decision_lte[_i] = _e->Get(_i) != 0; } } else { _o->decision_lte.resize(0); } }
+  { auto _e = split_features_type(); _o->split_features.type = _e; }
+  { auto _e = split_features(); if (_e) _o->split_features.value = hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion::UnPack(_e, split_features_type(), _resolver); }
+  { auto _e = split_thresholds_type(); _o->split_thresholds.type = _e; }
+  { auto _e = split_thresholds(); if (_e) _o->split_thresholds.value = hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion::UnPack(_e, split_thresholds_type(), _resolver); }
+  { auto _e = split_left_type(); _o->split_left.type = _e; }
+  { auto _e = split_left(); if (_e) _o->split_left.value = hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion::UnPack(_e, split_left_type(), _resolver); }
+  { auto _e = split_right_type(); _o->split_right.type = _e; }
+  { auto _e = split_right(); if (_e) _o->split_right.value = hipdnn_flatbuffers_sdk::data_objects::IntegerArrayUnion::UnPack(_e, split_right_type(), _resolver); }
+  { auto _e = split_default_left(); if (_e) { _o->split_default_left.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->split_default_left[_i] = _e->Get(_i) != 0; } } else { _o->split_default_left.resize(0); } }
+  { auto _e = split_decision_lte(); if (_e) { _o->split_decision_lte.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->split_decision_lte[_i] = _e->Get(_i) != 0; } } else { _o->split_decision_lte.resize(0); } }
+  { auto _e = default_left_fill(); _o->default_left_fill = _e; }
+  { auto _e = leaves_type(); _o->leaves.type = _e; }
+  { auto _e = leaves(); if (_e) _o->leaves.value = hipdnn_flatbuffers_sdk::data_objects::RealArrayUnion::UnPack(_e, leaves_type(), _resolver); }
 }
 
 inline ::flatbuffers::Offset<GbdtTree> GbdtTree::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtTreeT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -677,6 +2206,19 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferB
   auto _leaf_values = _o->leaf_values.size() ? _fbb.CreateVector(_o->leaf_values) : 0;
   auto _default_left = _o->default_left.size() ? _fbb.CreateVector(_o->default_left) : 0;
   auto _decision_lte = _o->decision_lte.size() ? _fbb.CreateVector(_o->decision_lte) : 0;
+  auto _split_features_type = _o->split_features.type;
+  auto _split_features = _o->split_features.Pack(_fbb);
+  auto _split_thresholds_type = _o->split_thresholds.type;
+  auto _split_thresholds = _o->split_thresholds.Pack(_fbb);
+  auto _split_left_type = _o->split_left.type;
+  auto _split_left = _o->split_left.Pack(_fbb);
+  auto _split_right_type = _o->split_right.type;
+  auto _split_right = _o->split_right.Pack(_fbb);
+  auto _split_default_left = _o->split_default_left.size() ? _fbb.CreateVector(_o->split_default_left) : 0;
+  auto _split_decision_lte = _o->split_decision_lte.size() ? _fbb.CreateVector(_o->split_decision_lte) : 0;
+  auto _default_left_fill = _o->default_left_fill;
+  auto _leaves_type = _o->leaves.type;
+  auto _leaves = _o->leaves.Pack(_fbb);
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtTree(
       _fbb,
       _feature_indices,
@@ -685,7 +2227,20 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferB
       _right_children,
       _leaf_values,
       _default_left,
-      _decision_lte);
+      _decision_lte,
+      _split_features_type,
+      _split_features,
+      _split_thresholds_type,
+      _split_thresholds,
+      _split_left_type,
+      _split_left,
+      _split_right_type,
+      _split_right,
+      _split_default_left,
+      _split_decision_lte,
+      _default_left_fill,
+      _leaves_type,
+      _leaves);
 }
 
 
@@ -756,7 +2311,8 @@ inline bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs) {
       (lhs.training_arches == rhs.training_arches) &&
       (lhs.model_version == rhs.model_version) &&
       (lhs.group_by_feature_index == rhs.group_by_feature_index) &&
-      (lhs.groups.size() == rhs.groups.size() && std::equal(lhs.groups.cbegin(), lhs.groups.cend(), rhs.groups.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &b) { return (a == b) || (a && b && *a == *b); }));
+      (lhs.groups.size() == rhs.groups.size() && std::equal(lhs.groups.cbegin(), lhs.groups.cend(), rhs.groups.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
+      (lhs.threshold_table == rhs.threshold_table);
 }
 
 inline bool operator!=(const GbdtModelT &lhs, const GbdtModelT &rhs) {
@@ -775,7 +2331,8 @@ inline GbdtModelT::GbdtModelT(const GbdtModelT &o)
         training_objective(o.training_objective),
         training_arches(o.training_arches),
         model_version(o.model_version),
-        group_by_feature_index(o.group_by_feature_index) {
+        group_by_feature_index(o.group_by_feature_index),
+        threshold_table(o.threshold_table) {
   trees.reserve(o.trees.size());
   for (const auto &trees_ : o.trees) { trees.emplace_back((trees_) ? new hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT(*trees_) : nullptr); }
   groups.reserve(o.groups.size());
@@ -796,6 +2353,7 @@ inline GbdtModelT &GbdtModelT::operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT {
   std::swap(model_version, o.model_version);
   std::swap(group_by_feature_index, o.group_by_feature_index);
   std::swap(groups, o.groups);
+  std::swap(threshold_table, o.threshold_table);
   return *this;
 }
 
@@ -821,6 +2379,8 @@ inline void GbdtModel::UnPackTo(GbdtModelT *_o, const ::flatbuffers::resolver_fu
   { auto _e = model_version(); if (_e) _o->model_version = _e->str(); }
   { auto _e = group_by_feature_index(); _o->group_by_feature_index = _e; }
   { auto _e = groups(); if (_e) { _o->groups.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->groups[_i]) { _e->Get(_i)->UnPackTo(_o->groups[_i].get(), _resolver); } else { _o->groups[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->groups.resize(0); } }
+  { auto _e = threshold_table_type(); _o->threshold_table.type = _e; }
+  { auto _e = threshold_table(); if (_e) _o->threshold_table.value = hipdnn_flatbuffers_sdk::data_objects::RealArrayUnion::UnPack(_e, threshold_table_type(), _resolver); }
 }
 
 inline ::flatbuffers::Offset<GbdtModel> GbdtModel::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -844,6 +2404,8 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
   auto _model_version = _o->model_version.empty() ? 0 : _fbb.CreateString(_o->model_version);
   auto _group_by_feature_index = _o->group_by_feature_index;
   auto _groups = _o->groups.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> (_o->groups.size(), [](size_t i, _VectorArgs *__va) { return CreateGbdtGroup(*__va->__fbb, __va->__o->groups[i].get(), __va->__rehasher); }, &_va ) : 0;
+  auto _threshold_table_type = _o->threshold_table.type;
+  auto _threshold_table = _o->threshold_table.Pack(_fbb);
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtModel(
       _fbb,
       _trees,
@@ -858,7 +2420,256 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
       _training_arches,
       _model_version,
       _group_by_feature_index,
-      _groups);
+      _groups,
+      _threshold_table_type,
+      _threshold_table);
+}
+
+inline bool VerifyIntegerArray(::flatbuffers::Verifier &verifier, const void *obj, IntegerArray type) {
+  switch (type) {
+    case IntegerArray::NONE: {
+      return true;
+    }
+    case IntegerArray::Int8Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8Array *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case IntegerArray::UInt8Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case IntegerArray::Int16Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16Array *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case IntegerArray::UInt16Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case IntegerArray::Int32Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32Array *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    default: return true;
+  }
+}
+
+inline bool VerifyIntegerArrayVector(::flatbuffers::Verifier &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<IntegerArray> *types) {
+  if (!values || !types) return !values && !types;
+  if (values->size() != types->size()) return false;
+  for (::flatbuffers::uoffset_t i = 0; i < values->size(); ++i) {
+    if (!VerifyIntegerArray(
+        verifier,  values->Get(i), types->GetEnum<IntegerArray>(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline void *IntegerArrayUnion::UnPack(const void *obj, IntegerArray type, const ::flatbuffers::resolver_function_t *resolver) {
+  (void)resolver;
+  switch (type) {
+    case IntegerArray::Int8Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8Array *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case IntegerArray::UInt8Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8Array *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case IntegerArray::Int16Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16Array *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case IntegerArray::UInt16Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16Array *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case IntegerArray::Int32Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32Array *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    default: return nullptr;
+  }
+}
+
+inline ::flatbuffers::Offset<void> IntegerArrayUnion::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ::flatbuffers::rehasher_function_t *_rehasher) const {
+  (void)_rehasher;
+  switch (type) {
+    case IntegerArray::Int8Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *>(value);
+      return CreateInt8Array(_fbb, ptr, _rehasher).Union();
+    }
+    case IntegerArray::UInt8Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *>(value);
+      return CreateUInt8Array(_fbb, ptr, _rehasher).Union();
+    }
+    case IntegerArray::Int16Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *>(value);
+      return CreateInt16Array(_fbb, ptr, _rehasher).Union();
+    }
+    case IntegerArray::UInt16Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *>(value);
+      return CreateUInt16Array(_fbb, ptr, _rehasher).Union();
+    }
+    case IntegerArray::Int32Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *>(value);
+      return CreateInt32Array(_fbb, ptr, _rehasher).Union();
+    }
+    default: return 0;
+  }
+}
+
+inline IntegerArrayUnion::IntegerArrayUnion(const IntegerArrayUnion &u) : type(u.type), value(nullptr) {
+  switch (type) {
+    case IntegerArray::Int8Array: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *>(u.value));
+      break;
+    }
+    case IntegerArray::UInt8Array: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *>(u.value));
+      break;
+    }
+    case IntegerArray::Int16Array: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *>(u.value));
+      break;
+    }
+    case IntegerArray::UInt16Array: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *>(u.value));
+      break;
+    }
+    case IntegerArray::Int32Array: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *>(u.value));
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+inline void IntegerArrayUnion::Reset() {
+  switch (type) {
+    case IntegerArray::Int8Array: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int8ArrayT *>(value);
+      delete ptr;
+      break;
+    }
+    case IntegerArray::UInt8Array: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::UInt8ArrayT *>(value);
+      delete ptr;
+      break;
+    }
+    case IntegerArray::Int16Array: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int16ArrayT *>(value);
+      delete ptr;
+      break;
+    }
+    case IntegerArray::UInt16Array: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::UInt16ArrayT *>(value);
+      delete ptr;
+      break;
+    }
+    case IntegerArray::Int32Array: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Int32ArrayT *>(value);
+      delete ptr;
+      break;
+    }
+    default: break;
+  }
+  value = nullptr;
+  type = IntegerArray::NONE;
+}
+
+inline bool VerifyRealArray(::flatbuffers::Verifier &verifier, const void *obj, RealArray type) {
+  switch (type) {
+    case RealArray::NONE: {
+      return true;
+    }
+    case RealArray::Float32Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32Array *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case RealArray::Float64Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64Array *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    default: return true;
+  }
+}
+
+inline bool VerifyRealArrayVector(::flatbuffers::Verifier &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<RealArray> *types) {
+  if (!values || !types) return !values && !types;
+  if (values->size() != types->size()) return false;
+  for (::flatbuffers::uoffset_t i = 0; i < values->size(); ++i) {
+    if (!VerifyRealArray(
+        verifier,  values->Get(i), types->GetEnum<RealArray>(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline void *RealArrayUnion::UnPack(const void *obj, RealArray type, const ::flatbuffers::resolver_function_t *resolver) {
+  (void)resolver;
+  switch (type) {
+    case RealArray::Float32Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32Array *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case RealArray::Float64Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64Array *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    default: return nullptr;
+  }
+}
+
+inline ::flatbuffers::Offset<void> RealArrayUnion::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ::flatbuffers::rehasher_function_t *_rehasher) const {
+  (void)_rehasher;
+  switch (type) {
+    case RealArray::Float32Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *>(value);
+      return CreateFloat32Array(_fbb, ptr, _rehasher).Union();
+    }
+    case RealArray::Float64Array: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *>(value);
+      return CreateFloat64Array(_fbb, ptr, _rehasher).Union();
+    }
+    default: return 0;
+  }
+}
+
+inline RealArrayUnion::RealArrayUnion(const RealArrayUnion &u) : type(u.type), value(nullptr) {
+  switch (type) {
+    case RealArray::Float32Array: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *>(u.value));
+      break;
+    }
+    case RealArray::Float64Array: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *>(u.value));
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+inline void RealArrayUnion::Reset() {
+  switch (type) {
+    case RealArray::Float32Array: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Float32ArrayT *>(value);
+      delete ptr;
+      break;
+    }
+    case RealArray::Float64Array: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::Float64ArrayT *>(value);
+      delete ptr;
+      break;
+    }
+    default: break;
+  }
+  value = nullptr;
+  type = RealArray::NONE;
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::GbdtModel *GetGbdtModel(const void *buf) {

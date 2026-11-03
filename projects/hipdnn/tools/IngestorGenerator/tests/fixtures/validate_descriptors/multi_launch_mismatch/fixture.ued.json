@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "95d1c420-e26e-5bb6-ab92-16ce803a721c",
+  "name": "hipkernel:ValidateFixtureLaunchMismatch",
+  "graph_match": {
+    "native": "hipkernel.fixture_launch_mismatch.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "f93e4c8f-7879-5d4c-83a1-39ebd4463cf5"
+  },
+  "metadata": "9df0f835-c642-59be-9265-37d23e4addac",
+  "knobs": [
+    "block_size"
+  ]
+}

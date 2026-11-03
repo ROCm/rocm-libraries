@@ -178,11 +178,21 @@ function(create_device_library)
     if(NOT _cdl_TARGET)
         set(_cdl_TARGET "tensilelite-device-libraries")
     endif()
+    # TENSILELITE_GPU_TARGETS first, GPU_TARGETS after it. The two differ only by
+    # an xnack suffix that hip::device cannot take, and TensileLite wants the
+    # unstripped list -- but this module is installed for downstream projects,
+    # which set GPU_TARGETS and have never heard of the other name. Preferring the
+    # new variable without falling back would turn a call that worked into a
+    # configure error, for a variable the caller has no way to know about.
+    if(NOT _cdl_ARCHES)
+        set(_cdl_ARCHES ${TENSILELITE_GPU_TARGETS})
+    endif()
     if(NOT _cdl_ARCHES)
         set(_cdl_ARCHES ${GPU_TARGETS})
     endif()
     if(NOT _cdl_ARCHES)
-        message(FATAL_ERROR "create_device_library: no ARCHES given and GPU_TARGETS is empty")
+        message(FATAL_ERROR "create_device_library: no ARCHES given and neither "
+                            "TENSILELITE_GPU_TARGETS nor GPU_TARGETS is set")
     endif()
     if(NOT _cdl_CXX_COMPILER)
         set(_cdl_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
@@ -307,7 +317,16 @@ function(create_device_library)
     if(HIPBLASLT_BUILD_GFX1250V0)
         list(APPEND _opts_list "--gfx1250v0")
         # gfx1250v0 is built from gfx1250-strict's logic, so validate that too.
-        if("gfx1250" IN_LIST _cdl_ARCHES AND NOT "gfx1250-strict" IN_LIST _cdl_ARCHES)
+        # Matched on base names: an arch arrives qualified (gfx1250:xnack-) or
+        # predicated (gfx1250[cu=64]), and comparing whole strings would miss it
+        # and quietly leave gfx1250-strict's logic unchecked.
+        set(_arch_bases "")
+        foreach(_arch IN LISTS _cdl_ARCHES)
+            string(REGEX REPLACE ":.*$" "" _arch_base "${_arch}")
+            string(REGEX REPLACE "\\[.*$" "" _arch_base "${_arch_base}")
+            list(APPEND _arch_bases "${_arch_base}")
+        endforeach()
+        if("gfx1250" IN_LIST _arch_bases AND NOT "gfx1250-strict" IN_LIST _arch_bases)
             list(APPEND _logic_arches "gfx1250-strict")
         endif()
     endif()
