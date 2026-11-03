@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -935,7 +935,14 @@ void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
-    gp.set_stockham_grid(DivRoundingUp(length[2], bwd) * length[1] * batch, wgs, deviceProp);
+    SetStockhamGrid(gp);
+}
+
+std::pair<size_t, unsigned int> SBRCTransXY_ZNode::StockhamLaunchSize() const
+{
+    const auto kernel = GetKernel();
+    return {DivRoundingUp<size_t>(length[2], kernel.transforms_per_block) * length[1] * batch,
+            kernel.workgroup_size};
 }
 
 /*****************************************************
@@ -949,7 +956,14 @@ void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
-    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * length[2] * batch, wgs, deviceProp);
+    SetStockhamGrid(gp);
+}
+
+std::pair<size_t, unsigned int> SBRCTransZ_XYNode::StockhamLaunchSize() const
+{
+    const auto kernel = GetKernel();
+    return {DivRoundingUp<size_t>(length[1], kernel.transforms_per_block) * length[2] * batch,
+            kernel.workgroup_size};
 }
 
 /*****************************************************
@@ -965,7 +979,14 @@ void RealCmplxTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
     // this kernel always does real-complex processing and needs one
     // extra element per row
     lds = (length[0] + 1) * bwd;
-    gp.set_stockham_grid(DivRoundingUp(length[1], bwd) * length[2] * batch, wgs, deviceProp);
+    SetStockhamGrid(gp);
+}
+
+std::pair<size_t, unsigned int> RealCmplxTransZ_XYNode::StockhamLaunchSize() const
+{
+    const auto kernel = pool.get_kernel(GetKernelKey());
+    return {DivRoundingUp<size_t>(length[1], kernel.transforms_per_block) * length[2] * batch,
+            kernel.workgroup_size};
 }
 
 bool RealCmplxTransZ_XYNode::CreateDevKernelArgs()

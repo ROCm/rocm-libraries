@@ -89,6 +89,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->half_lds              = kernel->half_lds;
         specs->direct_to_from_reg    = kernel->direct_to_from_reg;
         specs->ebtype                = node.ebtype;
+        // same decision as the node's SetupGridParam, so grid and kernel agree
+        specs->grid_y = node.StockhamGridY() > 1;
 
         if(node.isPartialPassEnabled())
         {
