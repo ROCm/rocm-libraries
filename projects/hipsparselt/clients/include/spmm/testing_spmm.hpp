@@ -41,6 +41,7 @@
 #include <cstddef>
 #include <hipsparselt/hipsparselt.h>
 #include <omp.h>
+#include <utility>
 
 // Tiles smaller than this are processed serially. This is a floor rather than a
 // tuned crossover: the size at which distributing a tile starts to pay varies by
@@ -62,16 +63,33 @@ inline To saturate_cast(TAccum val)
         return static_cast<To>(val);
 }
 
-// The epilogue references below all walk an m x n tile with leading dimension ld.
-// They loop with the contiguous axis innermost (rows for COL, columns for ROW) and
-// open a single parallel region for the whole tile -- parallelising the strided
-// axis inside a serial loop costs one fork/join per line and makes neighbouring
-// threads write into the same cache line.
-template <typename T, typename Tb = T, typename To = T, hipsparseOrder_t order>
-void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
+// One element of the m x n D tile, handed to the callbacks below.
+//
+//   i, j  -- logical row and column, whatever the order
+//   o, k  -- strided and contiguous loop indices; pos(ld) turns them into an
+//            offset, which is o * ld + k for either order
+struct DElem
 {
-    using TAccum = float;
+    int64_t i, j, o, k;
 
+    int64_t pos(int64_t ld) const
+    {
+        return o * ld + k;
+    }
+};
+
+// The epilogue references below all walk an m x n tile with leading dimension ld,
+// and they all walk it the same way, so the walk lives here rather than in each of
+// them. Two things matter about it: one parallel region covers the whole tile
+// rather than one per line, and the contiguous axis is innermost (rows for COL,
+// columns for ROW) so that each thread walks a contiguous span of memory.
+//
+// Keeping the traversal in one place is also what keeps the orders consistent. A
+// caller cannot pass the extents the wrong way round for its layout, because it no
+// longer passes extents in layout order at all -- it passes `order`.
+template <hipsparseOrder_t order, typename F>
+inline void for_each_d_elem(int64_t m, int64_t n, F&& f)
+{
     constexpr bool col   = (order == HIPSPARSE_ORDER_COL);
     const int64_t  n_out = col ? n : m; // strided axis, stepped by ld
     const int64_t  n_in  = col ? m : n; // contiguous axis
@@ -79,53 +97,76 @@ void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
 #pragma omp parallel for collapse(2) schedule(static) if(m * n > epilogue_omp_threshold)
     for(int64_t o = 0; o < n_out; o++)
         for(int64_t k = 0; k < n_in; k++)
-        {
-            const int64_t pos   = o * ld + k; // j * ld + i for COL, i * ld + j for ROW
-            const Tb      _bias = *(bias + (col ? k : o));
-
-            *(dest + pos) = saturate_cast<To, TAccum>(static_cast<TAccum>(*(src + pos))
-                                                      + static_cast<TAccum>(_bias));
-        }
+            f(DElem{col ? k : o, col ? o : k, o, k});
 }
 
-// gate_residual: D[i,j] = gate[i,j] * spmm_result[i,j] + gate[i,j]
-template <typename T, typename Tgate, typename To = T, hipsparseOrder_t order>
-void gate_residual(int64_t m, int64_t n, int64_t ld, int64_t ld_gate, T* src, To* dest, Tgate* gate)
+// Runtime-order entry point. The branch is taken once per call, so the loop body
+// still sees `order` as a compile-time constant.
+template <typename F>
+inline void for_each_d_elem(hipsparseOrder_t order, int64_t m, int64_t n, F&& f)
+{
+    if(order == HIPSPARSE_ORDER_COL)
+        for_each_d_elem<HIPSPARSE_ORDER_COL>(m, n, std::forward<F>(f));
+    else
+        for_each_d_elem<HIPSPARSE_ORDER_ROW>(m, n, std::forward<F>(f));
+}
+
+template <typename T, typename Tb = T, typename To = T>
+void bias(hipsparseOrder_t order, int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
 {
     using TAccum = float;
 
-    constexpr bool col   = (order == HIPSPARSE_ORDER_COL);
-    const int64_t  n_out = col ? n : m;
-    const int64_t  n_in  = col ? m : n;
+    for_each_d_elem(order, m, n, [&](DElem e) {
+        const int64_t pos   = e.pos(ld);
+        const Tb      _bias = *(bias + e.i);
 
-#pragma omp parallel for collapse(2) schedule(static) if(m * n > epilogue_omp_threshold)
-    for(int64_t o = 0; o < n_out; o++)
-        for(int64_t k = 0; k < n_in; k++)
-        {
-            const int64_t pos      = o * ld + k;
-            const int64_t gate_pos = o * ld_gate + k;
-
-            TAccum g      = static_cast<TAccum>(*(gate + gate_pos));
-            TAccum spmm   = static_cast<TAccum>(*(src + pos));
-            *(dest + pos) = saturate_cast<To, TAccum>(g * spmm + g);
-        }
+        *(dest + pos) = saturate_cast<To, TAccum>(static_cast<TAccum>(*(src + pos))
+                                                  + static_cast<TAccum>(_bias));
+    });
 }
 
-// Unlike bias()/gate_residual() this takes no `order` parameter: the map is purely
-// elementwise, so the layout does not change the value written to any position. It
-// does still have to sweep the right positions, so callers pass (m, n) in *memory*
-// order -- (M, N) for a column-major D, (N, M) for a row-major one.
-template <typename Ti, typename To, typename Tact, typename F>
-void activation(int64_t m, int64_t n, int64_t ld, Ti* in, To* out, Tact arg1, Tact arg2, F& func)
+// gate_residual: D[i,j] = gate[i,j] * spmm_result[i,j] + gate[i,j]
+template <typename T, typename Tgate, typename To = T>
+void gate_residual(hipsparseOrder_t order,
+                   int64_t          m,
+                   int64_t          n,
+                   int64_t          ld,
+                   int64_t          ld_gate,
+                   T*               src,
+                   To*              dest,
+                   Tgate*           gate)
 {
-#pragma omp parallel for collapse(2) schedule(static) if(m * n > epilogue_omp_threshold)
-    for(int64_t j = 0; j < n; j++)
-        for(int64_t i = 0; i < m; i++)
-        {
-            const int64_t pos     = j * ld + i;
-            auto          in_Tact = static_cast<Tact>(*(in + pos));
-            *(out + pos)          = saturate_cast<To, Tact>(func(in_Tact, arg1, arg2));
-        }
+    using TAccum = float;
+
+    for_each_d_elem(order, m, n, [&](DElem e) {
+        const int64_t pos      = e.pos(ld);
+        const int64_t gate_pos = e.pos(ld_gate);
+
+        TAccum g      = static_cast<TAccum>(*(gate + gate_pos));
+        TAccum spmm   = static_cast<TAccum>(*(src + pos));
+        *(dest + pos) = saturate_cast<To, TAccum>(g * spmm + g);
+    });
+}
+
+// The activation map is purely elementwise -- the layout does not change the value
+// written to any position -- but the sweep still has to cover the positions D
+// actually occupies, so this takes `order` like the other two.
+template <typename Ti, typename To, typename Tact, typename F>
+void activation(hipsparseOrder_t order,
+                int64_t          m,
+                int64_t          n,
+                int64_t          ld,
+                Ti*              in,
+                To*              out,
+                Tact             arg1,
+                Tact             arg2,
+                F&               func)
+{
+    for_each_d_elem(order, m, n, [&](DElem e) {
+        const int64_t pos     = e.pos(ld);
+        auto          in_Tact = static_cast<Tact>(*(in + pos));
+        *(out + pos)          = saturate_cast<To, Tact>(func(in_Tact, arg1, arg2));
+    });
 }
 
 auto _relu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
@@ -936,22 +977,16 @@ void testing_spmm(const Arguments& arg)
                               : HIPSPARSE_OPERATION_NON_TRANSPOSE;
         }
 
-        // activation() is elementwise, so it does not need to know the order -- but it
-        // does need the tile extents in *memory* order, so that it sweeps exactly the
-        // positions D occupies. COL -> (M, N), ROW -> (N, M). Passing (M, N) for a
-        // row-major D with M != N both skips elements and writes past the tile.
-        const int64_t act_m = (orderD == HIPSPARSE_ORDER_COL) ? M : N;
-        const int64_t act_n = (orderD == HIPSPARSE_ORDER_COL) ? N : M;
-
-#define activation_act_param \
-    act_m, act_n, ldd, hD_gold_act + pos, hD_gold_act + pos, arg.activation_arg1, \
+#define activation_act_param                                                      \
+    orderD, M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, arg.activation_arg1, \
         arg.activation_arg2
 #define activation_param \
-    act_m, act_n, ldd, hD_gold_act + pos, hD_gold + pos, arg.activation_arg1, arg.activation_arg2
-#define bias_act_param M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
-#define bias_param M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i
+    orderD, M, N, ldd, hD_gold_act + pos, hD_gold + pos, arg.activation_arg1, arg.activation_arg2
+#define bias_act_param \
+    orderD, M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
+#define bias_param orderD, M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i
 #define gate_residual_param \
-    M, N, ldd, ldg, hD_gold_act + pos, hD_gold + pos, hGate.data() + stride_gate* i
+    orderD, M, N, ldd, ldg, hD_gold_act + pos, hD_gold + pos, hGate.data() + stride_gate* i
 
         for(int i = 0; i < num_batches; i++)
         {
@@ -983,19 +1018,9 @@ void testing_spmm(const Arguments& arg)
                 if(arg.bias_vector)
                 {
                     if(activation_on || arg.gate_residual)
-                    {
-                        if(orderD == HIPSPARSE_ORDER_COL)
-                            bias<Talpha, TBias, Talpha, HIPSPARSE_ORDER_COL>(bias_act_param);
-                        else
-                            bias<Talpha, TBias, Talpha, HIPSPARSE_ORDER_ROW>(bias_act_param);
-                    }
+                        bias<Talpha, TBias, Talpha>(bias_act_param);
                     else
-                    {
-                        if(orderD == HIPSPARSE_ORDER_COL)
-                            bias<Talpha, TBias, To, HIPSPARSE_ORDER_COL>(bias_param);
-                        else
-                            bias<Talpha, TBias, To, HIPSPARSE_ORDER_ROW>(bias_param);
-                    }
+                        bias<Talpha, TBias, To>(bias_param);
                 }
 
                 if(activation_on)
@@ -1061,12 +1086,7 @@ void testing_spmm(const Arguments& arg)
                 }
 
                 if(arg.gate_residual)
-                {
-                    if(orderD == HIPSPARSE_ORDER_COL)
-                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_COL>(gate_residual_param);
-                    else
-                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_ROW>(gate_residual_param);
-                }
+                    gate_residual<Talpha, TGate, To>(gate_residual_param);
             }
 
             else
@@ -1547,10 +1567,11 @@ void testing_aux_plan_assign(const Arguments& arg)
                       cpu_time_used = get_time_us_no_sync();
                   }
 
-                  // (M, N) is correct here: this test sizes D as ldd * N unconditionally,
+                  // COL is correct here: this test sizes D as ldd * N unconditionally,
                   // i.e. it only ever exercises a column-major D.
-#define activation_param \
-    M, N, ldd, hD_gold_act + pos, hD_gold + pos, activation_arg1, activation_arg2
+#define activation_param                                                               \
+    HIPSPARSE_ORDER_COL, M, N, ldd, hD_gold_act + pos, hD_gold + pos, activation_arg1, \
+        activation_arg2
                   for(int i = 0; i < num_batches; i++)
                   {
                       if(activation_on)
