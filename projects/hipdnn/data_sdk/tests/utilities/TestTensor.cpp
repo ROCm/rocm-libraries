@@ -790,12 +790,88 @@ TEST(TestTensor, ConstructorThrowsOnNegativeStride)
     EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
 }
 
-TEST(TestTensor, ConstructorThrowsOnZeroStride)
+TEST(TestTensor, ZeroStrideAxisReadsOneElement)
 {
     const std::vector<int64_t> dims = {2, 3, 4};
-    const std::vector<int64_t> strides = {12, 0, 1};
+    const std::vector<int64_t> strides = {4, 0, 1};
 
-    EXPECT_THROW(const Tensor<float> tensor(dims, strides), std::invalid_argument);
+    Tensor<float> tensor(dims, strides);
+
+    EXPECT_EQ(tensor.elementCount(), 24);
+    EXPECT_EQ(tensor.elementSpace(), 8);
+    EXPECT_FALSE(tensor.isPacked());
+    EXPECT_EQ(tensor.getIndex(1, 0, 3), 7);
+    EXPECT_EQ(tensor.getIndex(1, 2, 3), 7);
+
+    tensor.setHostValue(5.0F, 1, 0, 2);
+    for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+    {
+        EXPECT_EQ(tensor.getHostValue(1, i1, 2), 5.0F);
+    }
+}
+
+TEST(TestTensor, AllZeroStridesUseOneElement)
+{
+    Tensor<float> tensor({2, 3}, {0, 0});
+
+    EXPECT_EQ(tensor.elementCount(), 6);
+    EXPECT_EQ(tensor.elementSpace(), 1);
+    EXPECT_FALSE(tensor.isPacked());
+
+    tensor.fillWithValue(3.0F);
+    EXPECT_EQ(tensor.getHostValue(1, 2), 3.0F);
+}
+
+TEST(TestTensor, ZeroStrideIsNotPackedWhenElementSpaceEqualsItemCount)
+{
+    const Tensor<float> tensor({2, 2}, {3, 0});
+
+    ASSERT_EQ(tensor.elementCount(), tensor.elementSpace());
+    EXPECT_FALSE(tensor.isPacked());
+}
+
+TEST(TestTensor, ZeroStrideOnUnitExtentAxisStaysPacked)
+{
+    const Tensor<float> tensor({2, 1, 3}, {3, 0, 1});
+
+    EXPECT_TRUE(tensor.isPacked());
+}
+
+TEST(TestTensor, FillWithRandomValuesBroadcastsAlongZeroStrideAxis)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    const std::vector<int64_t> dims = {3, 4, 2};
+    Tensor<float> tensor(dims, {2, 0, 1});
+    ASSERT_EQ(tensor.elementSpace(), 6);
+
+    tensor.fillWithSentinelValue();
+    tensor.fillWithRandomValues(-1.0F, 1.0F, 1234);
+
+    const auto* hostData = static_cast<const float*>(tensor.rawHostData());
+    for(size_t offset = 0; offset < tensor.elementSpace(); ++offset)
+    {
+        EXPECT_FALSE(isnan(hostData[offset])) << "offset " << offset;
+        EXPECT_GE(hostData[offset], -1.0F);
+        EXPECT_LE(hostData[offset], 1.0F);
+    }
+}
+
+TEST(TestTensor, ZeroStrideTensorRoundTripsThroughDevice)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> tensor({2, 3}, {1, 0});
+    tensor.setHostValue(1.5F, 0, 0);
+    tensor.setHostValue(2.5F, 1, 0);
+
+    auto* device = tensor.rawDeviceData();
+    std::vector<float> fromDevice(tensor.elementSpace());
+    ASSERT_EQ(
+        hipMemcpy(
+            fromDevice.data(), device, fromDevice.size() * sizeof(float), hipMemcpyDeviceToHost),
+        hipSuccess);
+    EXPECT_EQ(fromDevice, (std::vector<float>{1.5F, 2.5F}));
 }
 
 TEST(TestTensor, ConstructorThrowsOnMultipleInvalidDimensions)
