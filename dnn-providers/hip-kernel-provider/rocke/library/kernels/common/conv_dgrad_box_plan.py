@@ -13,7 +13,7 @@ grows the boxes of many tiles to (nearly) the full filter.
 ``pp_boxes`` 8 (this module) plans the records by the makespan of the
 split-K launch instead. For a candidate slice length ``T`` (K tiles) every
 tap box ``B`` gets the split degree ``S_B = ceil(K tiles of B / T)``; a small
-MILP (scipy's HiGHS, no time limit: at most 5 classes per axis, so <= 125
+MILP (scipy's HiGHS, deterministic node / gap limits, no time limit: <= 125
 classes x 216 boxes) assigns the pixel classes to boxes that contain their
 offsets, minimising the MFMA K tiles with the launch's workgroups (tiles x N
 tiles x S_B) within the CU budget (``pp_box_cus``). Each candidate is scored
