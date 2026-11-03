@@ -1,14 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the occupancy primitive's pure logic (no GPU)."""
-import re
-import shutil
-import subprocess
 import unittest
 from types import SimpleNamespace
 
 from rocke.benchmark.perf import occupancy
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.llc import find_llvm_tool, llc_code_object, llc_occupancy
 
 _CDNA_ARCHS = ("gfx942", "gfx950")
 
@@ -214,72 +212,6 @@ class TestEstimateOccupancyDetail(unittest.TestCase):
                 self.assertEqual(occupancy.estimate_occupancy_detail(b"x", arch), {})
                 self._patch(vgpr=64)  # no lds_bytes
                 self.assertEqual(occupancy.estimate_occupancy_detail(b"x", arch), {})
-
-
-def find_llvm_tool(name):
-    """The ROCm LLVM tool ``name`` (llc, llvm-readelf), or None when absent."""
-    for candidate in (f"/opt/rocm/llvm/bin/{name}", name):
-        path = shutil.which(candidate)
-        if path:
-            return path
-    return None
-
-
-def _vgpr_kernel_ir(vgprs, wave_size=32, agprs=0):
-    """An AMDGPU kernel that uses exactly ``vgprs`` VGPRs and ``agprs`` AGPRs
-    (it clobbers the top register of each).
-
-    The workgroup is capped at 64 lanes so the workgroup size never limits the
-    occupancy the compiler reports; only the register count does. ``wave_size``
-    only matters on RDNA: CDNA processors always build wave64 code.
-    """
-    features = ' "target-features"="+wavefrontsize64"' if wave_size == 64 else ""
-    clobbers = f"~{{v{vgprs - 1}}}" + (f",~{{a{agprs - 1}}}" if agprs else "")
-    return (
-        "define amdgpu_kernel void @k() #0 {\n"
-        f'  call void asm sideeffect "", "{clobbers}"()\n'
-        "  ret void\n"
-        "}\n"
-        f'attributes #0 = {{ "amdgpu-flat-work-group-size"="1,64"{features} }}\n'
-    )
-
-
-def _run_llc(llc, processor, ir, *extra_args):
-    """Run llc on ``ir``; None when this llc does not know ``processor``."""
-    out = subprocess.run(
-        [llc, "-mtriple=amdgcn-amd-amdhsa", f"-mcpu={processor}", *extra_args],
-        input=ir.encode(),
-        capture_output=True,
-        timeout=120,
-        check=True,
-    )
-    if b"not a recognized processor" in out.stderr:
-        return None
-    return out.stdout
-
-
-def llc_occupancy(llc, processor, vgprs, agprs=0):
-    """The waves per SIMD llc reports for a kernel using ``vgprs`` VGPRs and
-    ``agprs`` AGPRs."""
-    asm = _run_llc(llc, processor, _vgpr_kernel_ir(vgprs, agprs=agprs), "-o", "-")
-    if asm is None:
-        return None
-    return int(re.search(rb"; Occupancy: (\d+)", asm).group(1))
-
-
-def llc_code_object(llc, processor, vgprs, wave_size=32, agprs=0):
-    """A real relocatable code object (ELF with AMDGPU notes) built by llc."""
-    obj = _run_llc(
-        llc,
-        processor,
-        _vgpr_kernel_ir(vgprs, wave_size, agprs),
-        "-filetype=obj",
-        "-o",
-        "-",
-    )
-    if obj is None:
-        raise unittest.SkipTest(f"this llc does not know {processor}")
-    return obj
 
 
 # VGPR counts at which the two register-file sizes give distinct wave counts.

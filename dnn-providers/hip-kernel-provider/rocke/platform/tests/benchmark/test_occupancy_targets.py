@@ -2,20 +2,15 @@
 # SPDX-License-Identifier: MIT
 """The occupancy model covers every target rocKE lowers for, gfx908 included.
 
-The gfx908 cases check the model against the compiler's own occupancy report;
-the llc helpers they build kernels with stay beside the rest of the occupancy
-tests in ``rocke.benchmark.perf.tests.test_occupancy``.
+The gfx908 cases check the model against the compiler's own occupancy report,
+read from kernels built with the ``rocke.tests.llc`` helpers.
 """
 
 import unittest
 
 from rocke.benchmark.perf import occupancy
-from rocke.benchmark.perf.tests.test_occupancy import (
-    find_llvm_tool,
-    llc_code_object,
-    llc_occupancy,
-)
 from rocke.core.arch import ArchTarget, known_arches
+from rocke.tests.llc import find_llvm_tool, llc_code_object, llc_occupancy
 
 # gfx908 register counts at the edges of every wave count, and the waves per SIMD
 # the compiler reports at each (separate 256-entry VGPR and AGPR files, steps of 4,
