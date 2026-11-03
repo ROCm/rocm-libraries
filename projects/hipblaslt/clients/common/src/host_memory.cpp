@@ -58,7 +58,9 @@ namespace
     }
 
     // Memory left under one cgroup's limit, or nothing when the directory sets no limit. Page
-    // cache the kernel can drop (inactive_file) does not count as used.
+    // cache the kernel can drop does not count as used: both file lists (active_file and
+    // inactive_file; tmpfs and shared memory are not on them), less pages still waiting to be
+    // written back. A pinned allocation reclaims active and inactive cache alike.
     std::optional<uint64_t> cgroup_headroom(const std::filesystem::path& dir, bool v2)
     {
         // v2 writes "max" for no limit, which is not a number. v1 writes a value near 2^63,
@@ -68,10 +70,15 @@ namespace
             return std::nullopt;
         uint64_t used
             = read_number(dir / (v2 ? "memory.current" : "memory.usage_in_bytes")).value_or(0);
-        uint64_t reclaimable
-            = read_field(dir / "memory.stat", v2 ? "inactive_file" : "total_inactive_file")
-                  .value_or(0);
-        used = used > reclaimable ? used - reclaimable : 0;
+        auto stat = [&](const char* v2_key, const char* v1_key) {
+            return read_field(dir / "memory.stat", v2 ? v2_key : v1_key).value_or(0);
+        };
+        uint64_t cache = stat("active_file", "total_active_file")
+                         + stat("inactive_file", "total_inactive_file");
+        uint64_t unwritten
+            = stat("file_dirty", "total_dirty") + stat("file_writeback", "total_writeback");
+        uint64_t reclaimable = cache > unwritten ? cache - unwritten : 0;
+        used                 = used > reclaimable ? used - reclaimable : 0;
         return *limit > used ? *limit - used : uint64_t(0);
     }
 
@@ -102,7 +109,13 @@ namespace
             std::filesystem::path root = s.cgroup_root;
             if(v1)
                 root /= "memory";
-            std::filesystem::path rel = std::filesystem::path(line.substr(b + 1)).relative_path();
+            // A cgroup that has been removed is listed with this suffix.
+            std::string       path    = line.substr(b + 1);
+            const std::string deleted = " (deleted)";
+            if(path.size() >= deleted.size()
+               && path.compare(path.size() - deleted.size(), deleted.size(), deleted) == 0)
+                path.erase(path.size() - deleted.size());
+            std::filesystem::path rel = std::filesystem::path(path).relative_path();
             while(true)
             {
                 if(auto h = cgroup_headroom(root / rel, v2))

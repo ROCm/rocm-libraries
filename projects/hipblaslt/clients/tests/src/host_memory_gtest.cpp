@@ -367,6 +367,36 @@ namespace
         EXPECT_LE(*available, available_host_memory_bytes(meminfo_only.sources).value_or(0) + kGiB);
     }
 
+    TEST(HostMemory_pre_checkin, query_counts_active_page_cache_as_reclaimable)
+    {
+        // A 2 GiB container that is full, mostly with page cache the kernel reclaims (active or
+        // inactive) before it kills anything. Pages still being written back are not counted.
+        FakeHost host;
+        host.mem_available(8 * kGiB);
+        host.write(host.sources.self_cgroup, "0::/job\n");
+        host.cgroup("job", std::to_string(2 * kGiB), 2 * kGiB);
+        host.write(std::filesystem::path(host.sources.cgroup_root) / "job/memory.stat",
+                   "anon 524288\nfile 1610612746\nactive_file " + std::to_string(3 * kGiB / 2)
+                       + "\ninactive_file 10\nfile_dirty 0\nfile_writeback 0\n");
+        EXPECT_EQ(available_host_memory_bytes(host.sources), 3 * kGiB / 2 + 10);
+
+        host.write(std::filesystem::path(host.sources.cgroup_root) / "job/memory.stat",
+                   "active_file " + std::to_string(3 * kGiB / 2) + "\ninactive_file 10\nfile_dirty "
+                       + std::to_string(kGiB / 4) + "\nfile_writeback " + std::to_string(kGiB / 4)
+                       + "\n");
+        EXPECT_EQ(available_host_memory_bytes(host.sources), kGiB + 10);
+    }
+
+    TEST(HostMemory_pre_checkin, query_follows_a_removed_cgroup)
+    {
+        // /proc/self/cgroup lists a cgroup that has been removed with a " (deleted)" suffix.
+        FakeHost host;
+        host.mem_available(8 * kGiB);
+        host.write(host.sources.self_cgroup, "0::/job (deleted)\n");
+        host.cgroup("job", std::to_string(2 * kGiB), kGiB);
+        EXPECT_EQ(available_host_memory_bytes(host.sources), kGiB);
+    }
+
     TEST(HostMemory_pre_checkin, limit_is_a_byte_count_with_an_optional_suffix)
     {
         EXPECT_EQ(parse_host_memory_size("1024"), size_t(1024));
