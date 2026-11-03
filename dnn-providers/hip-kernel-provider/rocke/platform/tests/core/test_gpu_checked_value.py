@@ -1169,7 +1169,7 @@ _CHILD_TIMEOUT_S = 45
 
 # The processors the GPU cases below have run on, on both routes. On any other
 # they are skipped until they have.
-_RUN_ON = ("gfx90a", "gfx1100", "gfx1201")
+_RUN_ON = ("gfx90a", "gfx942", "gfx1100", "gfx1201")
 
 
 def _run_child(route: str, case: str):
