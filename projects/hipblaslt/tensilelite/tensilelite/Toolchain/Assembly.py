@@ -143,7 +143,7 @@ def buildAssemblyCodeObjectFiles(
         aliases = getattr(entry, "aliases", (kernel,))
         for alias in aliases:
           if "codeObjectFile" not in alias:
-            destination = asmDir / ("TensileLibrary_" + compilerTargetOf(name) + extCoRaw)
+            destination = asmDir / ("TensileLibrary_" + compilerTargetOf(name, linker.path) + extCoRaw)
           else:
             coName = alias.get("codeObjectFile", None)
             destination = asmDir / (coName + extCoRaw) if coName else None
@@ -155,7 +155,7 @@ def buildAssemblyCodeObjectFiles(
         linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
-          bundler.compress(str(coFileRaw), str(coFile), compilerTargetOf(name))
+          bundler.compress(str(coFileRaw), str(coFile), compilerTargetOf(name, linker.path))
         else:
           shutil.move(coFileRaw, coFile)
         coFiles.append(coFile)

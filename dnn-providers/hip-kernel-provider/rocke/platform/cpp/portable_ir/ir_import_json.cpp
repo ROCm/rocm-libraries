@@ -1029,9 +1029,20 @@ static void import_scf_if_else(importer_t* im, const jval_t* op)
 {
     const jval_t* operands = jobj_get(op, "operands");
     const jval_t* regions = jobj_get(op, "regions");
+    const jval_t* results = jobj_get(op, "results");
     if(!operands || operands->kind != J_ARR || operands->arr_len < 1)
     {
         imp_fail(im, "scf.if_else needs a condition operand");
+        return;
+    }
+    /* Portable IR refuses an if/else that yields values in every reader, with
+     * the Python recorder's text (recording_builder.py
+     * IF_ELSE_RESULTS_UNSUPPORTED). */
+    if(results && results->kind == J_ARR && results->arr_len > 0)
+    {
+        imp_fail(im,
+                 "portable IR does not support an scf.if_else with results; lower the kernel "
+                 "directly");
         return;
     }
     rocke_value_t* cond = vmap_get(im, jstr(operands->arr[0]));

@@ -700,7 +700,7 @@ void checkBatchnormActivationModeSupported(
        == (isBwd ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD
                  : hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD))
     {
-        if(!activAttr.relu_lower_clip_slope())
+        if(!miopen_utils::hasLeakyReluSlope(activAttr))
         {
             return;
         }

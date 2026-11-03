@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "tests": [
+    {
+      "name": "no_openmp",
+      "source": "no_openmp",
+      "hip": true
+    },
+    {
+      "name": "openmp",
+      "source": "openmp",
+      "platforms": ["linux"]
+    }
+  ]
+}

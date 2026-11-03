@@ -375,8 +375,16 @@ std::pair<bool, double> compareEqual(DDataType const*             deviceD,
     bool   retval             = true;
     double max_relative_error = 0.0;
 
-    auto toDouble
-        = [](DDataType const& val) { return static_cast<double>(static_cast<float>(val)); };
+    auto toDouble = [](DDataType const& val) {
+        if constexpr(std::is_same_v<DDataType, double>)
+        {
+            return val;
+        }
+        else
+        {
+            return static_cast<double>(static_cast<float>(val));
+        }
+    };
 
     bool       isInf = false;
     bool       isNaN = false;

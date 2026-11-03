@@ -686,13 +686,23 @@ def test_request_fields_reach_the_launch(harness, gate, state_dtype, flags, head
     The request fields must reach the compiled kernel AND the launch: the
     result's signature packs the fused tensors (``mixed_qkv`` in place of
     q/k/v, ``conv_state`` / ``conv_weight``, ``out_gate`` / ``norm_weight``)
-    from the builder's inputs. Two batches, since KDA's unfused work table may
-    pick a different tile for each.
+    from the builder's inputs. ``auto`` runs the case's tile and knob stack.
     """
+    from dispatch.gdn import GdnDecodeRequest
+    from dispatch.gdn.gfx950 import auto_tile
+
     conv, norm = flags
+    case = GdnDecodeRequest(
+        batch=1,
+        arch=ARCH,
+        gate_kind=gate,
+        state_dtype=state_dtype,
+        fuse_conv=conv,
+        fuse_out_norm=norm,
+    )
     _check_dispatched_launch(
         harness,
-        expect_tile=(4, 16, 1) if conv or norm else None,
+        expect_tile=auto_tile(case),
         gate_kind=gate,
         num_k_heads=heads[0],
         num_v_heads=heads[1],
@@ -715,12 +725,24 @@ def test_kda_fused_request_reaches_kimi_head_shape(harness, state_dtype, flags):
     """KDA's real fused-conv deployment shape has Hk == Hv == 32, not 16.
 
     The generic dispatch matrix above proves the fused ABI at a smaller MHA
-    shape; this pins the request-routed KDA/Kimi head count that the docs name.
+    shape; this pins the request-routed KDA/Kimi head count that the docs
+    name, on the tile ``auto`` runs for the case.
     """
+    from dispatch.gdn import GdnDecodeRequest
+    from dispatch.gdn.gfx950 import auto_tile
+
     conv, norm = flags
+    case = GdnDecodeRequest(
+        batch=1,
+        arch=ARCH,
+        gate_kind="kda",
+        state_dtype=state_dtype,
+        fuse_conv=conv,
+        fuse_out_norm=norm,
+    )
     _check_dispatched_launch(
         harness,
-        expect_tile=(4, 16, 1),
+        expect_tile=auto_tile(case),
         gate_kind="kda",
         num_k_heads=32,
         num_v_heads=32,
@@ -734,15 +756,27 @@ def test_kda_fused_request_reaches_kimi_head_shape(harness, state_dtype, flags):
 @pytest.mark.parametrize("gate", ["gdn", "kda"])
 @pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
 def test_request_fields_reach_the_launch_without_qk_l2norm(harness, gate, state_dtype):
-    """A fused request with the q/k L2 norm off runs at the fused default.
+    """A fused request with the q/k L2 norm off runs at the fused case's
+    configuration.
 
     Raw (unnormalized) k lets one update grow the state to |S| ~ 18 at these
     inputs (about 2.5 with the norm on). There one correctly rounded bf16
     store alone moves a value by up to 0.0625, more than ``TOL``, so the state
     error is taken relative to ``max(1, |ref|)``, like ``out_error``'s."""
+    from dispatch.gdn import GdnDecodeRequest
+    from dispatch.gdn.gfx950 import auto_tile
+
+    case = GdnDecodeRequest(
+        batch=1,
+        arch=ARCH,
+        gate_kind=gate,
+        state_dtype=state_dtype,
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
     _check_dispatched_launch(
         harness,
-        expect_tile=(4, 16, 1),
+        expect_tile=auto_tile(case),
         relative_state=True,
         gate_kind=gate,
         num_k_heads=16,
@@ -759,8 +793,9 @@ def test_request_fields_reach_the_launch_without_qk_l2norm(harness, gate, state_
 def test_request_fields_reach_the_launch_at_the_fused_d64_fallback(
     harness, state_dtype
 ):
-    """GDN D64 cannot run the fused default (it needs head_k_dim % 128 == 0),
-    so dispatch falls back to (1, 1, 1); that tile must still be correct."""
+    """GDN D64 cannot run the fused case's tile (it needs head_k_dim % 128 ==
+    0), so dispatch falls back to (1, 1, 1) at its base configuration; that
+    tile must still be correct."""
     _check_dispatched_launch(
         harness,
         expect_tile=(1, 1, 1),
@@ -773,6 +808,47 @@ def test_request_fields_reach_the_launch_at_the_fused_d64_fallback(
         fuse_conv=True,
         fuse_out_norm=True,
     )
+
+
+@requires_gfx950
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["bf16", "f16", "f32"])
+@pytest.mark.parametrize("fused", [False, True], ids=["plain", "cv_rn"])
+def test_every_auto_configuration_matches_fp32_through_dispatch(
+    harness, gate, state_dtype, fused
+):
+    """Each case's ``auto`` configuration (the tile and knob stack the golden
+    ``auto_*`` cases pin; f16 runs the bf16 row) is dispatched from a plain
+    request, compiled and launched from the dispatch result alone, and checked
+    against the fp32 reference at batches 1, 5, 64 and 256: output, written
+    state and conv state, and every untouched page."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+    from dispatch.gdn.gfx950 import auto_default
+
+    launchers = {}
+    picks = set()
+    for batch in (1, 5, 64, 256):
+        req = GdnDecodeRequest(
+            batch=batch,
+            arch=ARCH,
+            gate_kind=gate,
+            num_k_heads=16,
+            num_v_heads=16,
+            state_dtype=state_dtype,
+            fuse_conv=fused,
+            fuse_out_norm=fused,
+        )
+        result = dispatch_gdn_decode(req)
+        default = auto_default(req)
+        kernel = result.spec.kernel_spec
+        assert (kernel.num_warps, kernel.warp_threads_k, kernel.blocks_per_v_dim) == (
+            default.tile
+        )
+        assert dict(result.spec.knobs) == dict(default.knobs)
+        assert kernel.state_dtype == state_dtype
+        picks.add(result.spec.tuning_id)
+        _launch_dispatched(harness, result, batch, launchers)
+    assert len(picks) == 1, picks
 
 
 @requires_gfx950
