@@ -40,6 +40,8 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common.attention_mask_type import band_mask_type
+from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
 
 from rocke.core.ir import (
     BF16,
@@ -326,20 +328,21 @@ class UnifiedAttention3DTiledSpec:
         return binary_search_seq_idx_iters(self.num_seqs)
 
     def mask_type(self) -> int:
-        """The band as one ``AttentionMaskType`` value, as
-        ``UnifiedAttention2DTiledSpec.mask_type`` reports it: 0 no mask, 1 top-left causal,
-        2 bottom-right causal, 3 any other band (a sliding window or a right bound above
-        zero).
+        """The band as one ``AttentionMaskType`` value, by the mapping
+        ``UnifiedAttention2DTiledSpec.mask_type`` also delegates to
+        (``kernels.common.attention_mask_type.band_mask_type``): 0 no mask, 1 top-left
+        causal, 2 bottom-right causal, 3 any other band (a sliding window or a right bound
+        above zero).
 
         A bound method so ``hkp_pack`` can observe it as an effective accessor. Note the
         dispatcher builds no 0 at ``seqlen_q == 1``: full attention with one query row is
         the bottom-right causal computation, and ``normalize_band`` folds it to that.
         """
-        if self.sliding_window > 0 or self.right_bound > 0:
-            return 3
-        if self.right_bound < 0:
-            return 0
-        return 1 if self.causal_top_left else 2
+        return band_mask_type(
+            sliding_window=self.sliding_window,
+            right_bound=self.right_bound,
+            causal_top_left=self.causal_top_left,
+        )
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -1767,23 +1770,18 @@ def supports_tiled_reduce_spec(
 
 
 def reduce_spec_for(
-    spec: UnifiedAttention3DTiledSpec,
+    spec: UnifiedAttention3DTiledSpec, *, emit_lse: bool = False
 ) -> UnifiedAttentionReduceTiledSpec:
     """The reduce kernel that pairs with segment kernel ``spec``.
 
-    Every reduce field but ``emit_lse`` is a segment field: the dispatcher builds the pair
-    from one problem and one config (``make_explicit_attention_3d_specs``), so deriving the
-    reduce from the segment spec reproduces what it launches. ``emit_lse`` comes from the
-    problem, not the segment spec, so LSE output is out of scope here: the derived reduce
-    keeps ``emit_lse=False`` and its module carries no ``lse_ptr``.
+    Every reduce field but ``emit_lse`` is a segment field, and the dispatcher builds its
+    pair (``make_explicit_attention_3d_specs``) through the same derivation,
+    ``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec``, so this is the
+    reduce it launches. ``emit_lse`` comes from the problem, not the segment spec: it
+    defaults off, so the module packs a reduce with ``emit_lse=False`` and no ``lse_ptr``.
     """
-    return UnifiedAttentionReduceTiledSpec(
-        head_size=spec.head_size,
-        num_query_heads=spec.num_query_heads,
-        num_kv_heads=spec.num_kv_heads,
-        dtype=spec.dtype,
-        num_segments=spec.num_segments,
-        waves_per_eu=spec.waves_per_eu,
+    return split_kv_reduce_spec(
+        UnifiedAttentionReduceTiledSpec, spec, emit_lse=emit_lse
     )
 
 

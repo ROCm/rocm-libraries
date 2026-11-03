@@ -5,8 +5,10 @@
 reduce kernel the dispatcher pairs it with, and its predicate gates both.
 
 hkp_pack compiles the module once and ships the reduce as the ``reduce`` launch beside the
-segment launch. The reduce spec is derived from the segment spec (``reduce_spec_for``), so
-a derivation that drifts from the dispatcher's own pairing ships a reduce that combines a
+segment launch. The reduce spec is derived from the segment spec (``reduce_spec_for``), and
+the dispatcher builds its pair through the same derivation
+(``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec``). The round trip below
+pins that the module packs the reduce the dispatcher launches: otherwise it would combine a
 different number of segments, heads or head dims than the segment kernel wrote.
 """
 
@@ -36,7 +38,9 @@ def _gfx950_3d_candidates():
     ]
 
 
-def _request(candidate, *, hq, hkv, d, dtype, mask, batch=2, seqlen_k=4096):
+def _request(
+    candidate, *, hq, hkv, d, dtype, mask, batch=2, seqlen_k=4096, emit_lse=False
+):
     return AttentionRequest(
         batch=batch,
         nhead_q=hq,
@@ -51,6 +55,7 @@ def _request(candidate, *, hq, hkv, d, dtype, mask, batch=2, seqlen_k=4096):
         kv_block_size=16,
         algorithm=candidate.algorithm,
         spec_id=candidate.spec_id,
+        emit_lse=emit_lse,
     )
 
 
@@ -60,30 +65,37 @@ def test_every_gfx950_3d_candidate_is_compared():
 
 
 @pytest.mark.parametrize(
-    "heads, d, dtype, mask",
+    "heads, d, dtype, mask, emit_lse",
     list(
         itertools.product(
             [(8, 1), (16, 2), (32, 8)],
             [64, 128],
             ["bf16", "fp16"],
             [AttentionMaskType.TOP_LEFT_CAUSAL, AttentionMaskType.BOTTOM_RIGHT_CAUSAL],
+            [False, True],
         )
     ),
     ids=lambda v: str(v),
 )
-def test_derived_reduce_is_the_one_the_dispatcher_pairs(heads, d, dtype, mask):
+def test_derived_reduce_is_the_one_the_dispatcher_pairs(
+    heads, d, dtype, mask, emit_lse
+):
     """For every gfx950 3D tuning candidate, ``reduce_spec_for`` of the segment spec the
-    dispatcher builds equals the reduce spec it builds beside it."""
+    dispatcher builds (with the request's ``emit_lse``, a problem field) equals the
+    reduce spec it builds beside it."""
     hq, hkv = heads
     compared = 0
     for candidate in _gfx950_3d_candidates():
-        request = _request(candidate, hq=hq, hkv=hkv, d=d, dtype=dtype, mask=mask)
+        request = _request(
+            candidate, hq=hq, hkv=hkv, d=d, dtype=dtype, mask=mask, emit_lse=emit_lse
+        )
         tuning = candidate.select_spec(request)
         if tuning is None:
             continue
         assert tuning.reduce_spec is not None, candidate.spec_id
+        assert tuning.reduce_spec.emit_lse is emit_lse, candidate.spec_id
         assert (
-            reduce_spec_for(tuning.kernel_spec) == tuning.reduce_spec
+            reduce_spec_for(tuning.kernel_spec, emit_lse=emit_lse) == tuning.reduce_spec
         ), candidate.spec_id
         compared += 1
     assert compared, "no gfx950 3D candidate admitted the request"
@@ -153,3 +165,11 @@ def test_reduce_spec_follows_every_segment_field_it_reads():
     ]:
         changed = reduce_spec_for(dataclasses.replace(spec, **{field: value}))
         assert getattr(changed, field) == value and changed != base, field
+
+
+def test_reduce_spec_takes_emit_lse_from_the_caller_not_the_segment():
+    """``emit_lse`` is a problem field: off unless asked for, and the only difference."""
+    spec = _segment(waves_per_eu=2)
+    assert reduce_spec_for(spec).emit_lse is False
+    with_lse = reduce_spec_for(spec, emit_lse=True)
+    assert with_lse == dataclasses.replace(reduce_spec_for(spec), emit_lse=True)

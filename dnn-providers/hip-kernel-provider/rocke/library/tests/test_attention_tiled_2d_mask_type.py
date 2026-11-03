@@ -1,11 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""``UnifiedAttention2DTiledSpec.mask_type()`` names the band the way the dispatcher's
-``AttentionMaskType`` does, and agrees with the spec the dispatcher builds for each mask.
+"""``UnifiedAttention2DTiledSpec.mask_type()`` names the band by the ``AttentionMaskType``
+ordinals, and the spec the dispatcher builds for each mask round-trips to that mask.
 
-The ingestor catalog carries this value as its ``mask_type`` metadata, observed from the
-compiled spec at pack time, so a mismatch ships a kernel under another mask's key.
+The ordinals and the band -> kind mapping live once, in
+``kernels.common.attention_mask_type`` (the dispatcher re-exports the enum; both tiled
+specs' ``mask_type()`` delegate to ``band_mask_type``). The table below pins the mapping
+through the 2D spec. The ingestor catalog carries this value as its ``mask_type``
+metadata, observed from the compiled spec at pack time, so a mismatch ships a kernel
+under another mask's key.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import pytest
 
 from dispatch.attention import attention_candidates
 from dispatch.attention.common import AttentionMaskType, AttentionRequest
+from kernels.common import attention_mask_type
 from kernels.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec
 
 _SPEC_ID = "gfx950_u2d_narrow_nw4_mw16_t4xb_llvm"
@@ -46,8 +51,22 @@ def _spec(**band) -> UnifiedAttention2DTiledSpec:
     ],
 )
 def test_mask_type_names_the_band(band, expected):
-    """Each band: not the neighbouring one, which is what a swapped alignment gives."""
-    assert _spec(**band).mask_type() == expected
+    """Each band: not the neighbouring one, which is what a swapped alignment gives. An
+    exact ``int``: hkp_pack accepts no other type (an ``IntEnum`` member included)."""
+    mask = _spec(**band).mask_type()
+    assert type(mask) is int and mask == expected
+
+
+def test_mask_ordinals_have_one_home():
+    """The dispatcher's mask kinds are the kernels' enum, re-exported rather than
+    redeclared, and keep the ``plan_utils::MaskType`` ordinals."""
+    assert AttentionMaskType is attention_mask_type.AttentionMaskType
+    assert [(m.name, int(m)) for m in AttentionMaskType] == [
+        ("NO_MASK", 0),
+        ("TOP_LEFT_CAUSAL", 1),
+        ("BOTTOM_RIGHT_CAUSAL", 2),
+        ("SLIDING_WINDOW", 3),
+    ]
 
 
 @pytest.mark.parametrize(

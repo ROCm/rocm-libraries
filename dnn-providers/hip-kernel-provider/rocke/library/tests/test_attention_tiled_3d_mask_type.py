@@ -1,10 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""``UnifiedAttention3DTiledSpec.mask_type()`` names the band the way the dispatcher's
-``AttentionMaskType`` does, and agrees with the spec the dispatcher builds for each mask.
+"""``UnifiedAttention3DTiledSpec.mask_type()`` names the band by the ``AttentionMaskType``
+ordinals, and the spec the dispatcher builds for each mask round-trips to that mask.
 
-The ingestor catalog carries this value as its ``mask_type`` metadata, observed from the
+Like the 2D spec it delegates to ``kernels.common.attention_mask_type.band_mask_type``;
+the table below pins the mapping through the 3D spec, including its default band. The
+ingestor catalog carries this value as its ``mask_type`` metadata, observed from the
 compiled spec at pack time, so a mismatch ships a kernel under another mask's key.
 """
 
@@ -48,8 +50,10 @@ def _spec(**band) -> UnifiedAttention3DTiledSpec:
 )
 def test_mask_type_names_the_band(band, expected):
     """Each band: not the neighbouring one, which is what a swapped alignment gives. The
-    spec's default band is bottom-right causal."""
-    assert _spec(**band).mask_type() == expected
+    spec's default band is bottom-right causal. An exact ``int``, as hkp_pack requires.
+    """
+    mask = _spec(**band).mask_type()
+    assert type(mask) is int and mask == expected
 
 
 def _request(mask, seqlen_q):
