@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "28b2f769-e3c4-57cd-91c8-3327594a0760",
   "name": "hipkernel:flydsl_sdpa_cdna_dualwave",
-  "sdk_version": "1.2.0",
+  "sdk_version": "1.4.0",
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_cdna_dualwave.graph_match"
   },

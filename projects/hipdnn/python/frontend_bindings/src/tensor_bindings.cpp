@@ -154,6 +154,34 @@ void tensorBindings(nb::module_& m)
         .def("set_is_pass_by_value",
              &TensorAttributes::set_is_pass_by_value,
              nb::rv_policy::reference_internal)
+        // Ragged (packed, THD) tensors (RFC 0014), as the C++ frontend spells them. A ragged
+        // primary holds its sequences back to back; its INT32 ragged-offset tensor
+        // [batch + 1, 1, 1, 1] (cu_seqlens) gives each sequence's start, counted in elements
+        // times the multiplier (element_offset = stored_offset * multiplier).
+        .def("get_ragged_offset", &TensorAttributes::get_ragged_offset)
+        .def("set_ragged_offset",
+             &TensorAttributes::set_ragged_offset,
+             nb::arg("ragged_offset").none(),
+             nb::rv_policy::reference_internal,
+             "Make this a ragged (packed) tensor addressed through `ragged_offset`, an INT32 "
+             "[batch + 1, 1, 1, 1] tensor of sequence starts (cu_seqlens); None clears it.")
+        .def("has_ragged_offset", &TensorAttributes::has_ragged_offset)
+        .def("get_ragged_offset_multiplier", &TensorAttributes::get_ragged_offset_multiplier)
+        .def("set_ragged_offset_multiplier",
+             &TensorAttributes::set_ragged_offset_multiplier,
+             nb::arg("multiplier"),
+             nb::rv_policy::reference_internal,
+             "Elements per stored offset unit (default 1): with cu_seqlens counted in tokens, "
+             "the tensor's token stride (e.g. H * D for a packed [T, H, D] Q). Must be >= 1 and "
+             "needs a ragged offset.")
+        .def("has_ragged_offset_multiplier", &TensorAttributes::has_ragged_offset_multiplier)
+        .def("get_alignment", &TensorAttributes::get_alignment)
+        .def("set_alignment",
+             &TensorAttributes::set_alignment,
+             nb::arg("alignment"),
+             nb::rv_policy::reference_internal,
+             "The byte alignment the tensor's buffer pointer is guaranteed to have (default "
+             "16); must be >= 1.")
         .def("get_volume", &TensorAttributes::get_volume)
         .def("has_uid", &TensorAttributes::has_uid)
         .def("clear_uid", &TensorAttributes::clear_uid, nb::rv_policy::reference_internal)

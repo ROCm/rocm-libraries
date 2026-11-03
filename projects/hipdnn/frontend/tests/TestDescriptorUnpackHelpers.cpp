@@ -7,6 +7,8 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
 #include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 
@@ -295,6 +297,19 @@ protected:
     {
         _mockBackend = std::make_shared<Mock_hipdnn_backend>();
         IHipdnnBackend::setInstance(_mockBackend);
+
+        // Every tensor unpack also reads the optional byte alignment, ragged-offset
+        // multiplier and ragged-offset aux. By default the mocked tensors have none
+        // (a count of 0, which keeps the TensorAttributes defaults); the tests of those
+        // fields set their own expectations, which gMock matches first.
+        for(const auto attr : {HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                               HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                               HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC})
+        {
+            EXPECT_CALL(*_mockBackend, backendGetAttribute(_, attr, _, 0, _, nullptr))
+                .Times(::testing::AnyNumber())
+                .WillRepeatedly(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
+        }
     }
 
     void TearDown() override
@@ -573,6 +588,66 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesSuccess)
     EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{K_STRIDES.begin(), K_STRIDES.end()}));
     EXPECT_FALSE(tensor->get_is_virtual());
     EXPECT_FALSE(tensor->get_is_pass_by_value());
+}
+
+// The byte alignment and ragged-offset multiplier the backend reports must reach the
+// lifted tensor: a graph re-lowered from it would otherwise claim the default 16-byte
+// alignment and element-counted offsets.
+TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresAlignmentAndRaggedMultiplier)
+{
+    static constexpr int64_t K_ALIGNMENT = 4;
+    static constexpr int64_t K_MULTIPLIER = 128;
+    expectFullTensorMocks();
+    for(const auto& [attr, attrValue] :
+        {std::pair{HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT, K_ALIGNMENT},
+         std::pair{HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER, K_MULTIPLIER}})
+    {
+        const int64_t value = attrValue;
+        EXPECT_CALL(*_mockBackend,
+                    backendGetAttribute(_fakeDesc, attr, HIPDNN_TYPE_INT64, 0, _, nullptr))
+            .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)));
+        EXPECT_CALL(*_mockBackend, backendGetAttribute(_fakeDesc, attr, HIPDNN_TYPE_INT64, 1, _, _))
+            .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                            Invoke([value](hipdnnBackendDescriptor_t,
+                                           hipdnnBackendAttributeName_t,
+                                           hipdnnBackendAttributeType_t,
+                                           int64_t,
+                                           int64_t*,
+                                           void* arrayOfElements) {
+                                std::memcpy(arrayOfElements, &value, sizeof(int64_t));
+                            }),
+                            Return(HIPDNN_STATUS_SUCCESS)));
+    }
+
+    std::shared_ptr<TensorAttributes> tensor;
+    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->get_alignment(), K_ALIGNMENT);
+    EXPECT_EQ(tensor->get_ragged_offset_multiplier(), K_MULTIPLIER);
+}
+
+// A backend older than the alignment and multiplier attributes reports NOT_SUPPORTED:
+// the tensor keeps the defaults rather than failing to unpack.
+TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesToleratesLegacyAlignmentAndMultiplier)
+{
+    expectFullTensorMocks();
+    for(const auto attr :
+        {HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT, HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER})
+    {
+        EXPECT_CALL(*_mockBackend,
+                    backendGetAttribute(_fakeDesc, attr, HIPDNN_TYPE_INT64, 0, _, nullptr))
+            .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
+    }
+
+    std::shared_ptr<TensorAttributes> tensor;
+    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->get_alignment(), TensorAttributes().get_alignment());
+    EXPECT_FALSE(tensor->has_ragged_offset_multiplier());
 }
 
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValue)
@@ -905,6 +980,61 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorNewTensor)
     EXPECT_EQ(outTensor->get_uid(), K_UID);
     EXPECT_EQ(tensorMap.size(), 1u);
     EXPECT_EQ(tensorMap[K_UID], outTensor);
+}
+
+// A ragged tensor lifts with its ragged-offset aux linked, the aux unpacked and
+// registered by UID so the other tensors that share it get the same TensorAttributes.
+// Without the link the lifted tensor is dense, and so is every graph re-lowered from it.
+TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorLinksRaggedOffset)
+{
+    static constexpr int64_t K_AUX_UID = 7;
+    int auxPlaceholder = 0;
+    auto auxDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(&auxPlaceholder);
+
+    expectDescriptorGet(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X);
+    expectFullTensorMocks();
+    expectFullTensorMocksForDesc(auxDesc, K_AUX_UID);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)));
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _,
+                                    _))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([auxDesc](hipdnnBackendDescriptor_t,
+                                         hipdnnBackendAttributeName_t,
+                                         hipdnnBackendAttributeType_t,
+                                         int64_t,
+                                         int64_t*,
+                                         void* arrayOfElements) {
+                            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = auxDesc;
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
+    std::shared_ptr<TensorAttributes> outTensor;
+    hipdnnBackendDescriptor_t opDesc = nullptr;
+
+    auto err = unpackAndRegisterTensor(
+        opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_NE(outTensor, nullptr);
+    ASSERT_TRUE(outTensor->has_ragged_offset());
+    EXPECT_EQ(outTensor->get_ragged_offset()->get_uid(), K_AUX_UID);
+    ASSERT_EQ(tensorMap.count(K_AUX_UID), 1u);
+    EXPECT_EQ(tensorMap[K_AUX_UID], outTensor->get_ragged_offset());
 }
 
 TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorExistingUid)

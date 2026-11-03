@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "1569ca05-8c34-5332-b914-9bf834c10bb3",
+  "name": "hipkernel:flydsl_sdpa_head_pad",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_head_pad.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "4a92101f-c468-5623-a112-54f1907ed9b9"
+  },
+  "metadata": "49cbfb66-b2f8-5b1b-b409-cee6c953ab00",
+  "knobs": [
+    "block_threads"
+  ]
+}

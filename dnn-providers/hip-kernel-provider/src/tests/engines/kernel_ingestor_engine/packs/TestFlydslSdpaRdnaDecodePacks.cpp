@@ -137,22 +137,34 @@ TEST(TestFlydslSdpaRdnaDecodePacks, ShipsEveryDecodeVariantOnce)
                 }
             }
         }
-        // Generic: head_dim read at runtime, no bias, up to 96 and up to 256.
+        // Generic: head_dim read at runtime, up to 96 and up to 256, with and without a bias.
         for(const int64_t headDimMax : {96, 256})
         {
             for(const int64_t causal : {0, 1})
             {
-                EXPECT_EQ(classes.count({dtype, 0, causal, 0, 0, headDimMax, 0}), 1U)
-                    << dtype << " generic up to " << headDimMax << " causal=" << causal;
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(classes.count({dtype, 0, causal, hasBias, biasQ, headDimMax, 0}), 1U)
+                        << dtype << " generic up to " << headDimMax << " causal=" << causal
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
+                }
             }
         }
-        // Attention sinks: gpt-oss's head dims, no bias.
+        // Attention sinks: gpt-oss's head dims, alone and with a bias in f32 or the query's
+        // dtype (N1).
         for(const int64_t headDim : {64, 128})
         {
             for(const int64_t causal : {0, 1})
             {
-                EXPECT_EQ(classes.count({dtype, headDim, causal, 0, 0, headDim, 1}), 1U)
-                    << dtype << " sink head_dim=" << headDim << " causal=" << causal;
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(classes.count({dtype, headDim, causal, hasBias, biasQ, headDim, 1}),
+                              1U)
+                        << dtype << " sink head_dim=" << headDim << " causal=" << causal
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
+                }
             }
         }
     }
@@ -169,7 +181,8 @@ TEST(TestFlydslSdpaRdnaDecodePacks, RanksTheNarrowestServingObjectFirst)
         int64_t headDimMax;
         int64_t priority;
     };
-    std::map<std::tuple<std::string, int64_t, bool>, std::vector<Ranked>> families;
+    std::map<std::tuple<std::string, int64_t, bool, int64_t, int64_t>, std::vector<Ranked>>
+        families;
     size_t checked = 0;
     for(const auto& pack : set.packs)
     {
@@ -183,10 +196,14 @@ TEST(TestFlydslSdpaRdnaDecodePacks, RanksTheNarrowestServingObjectFirst)
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_CAUSAL_FIELD);
             const auto* headDimMax = tryGetMetadataField<int64_t>(
                 kernel.metadata, FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD);
+            const auto* hasBias
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD);
+            const auto* biasQ
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_BIAS_Q_FIELD);
             ASSERT_TRUE(dtype != nullptr && headDim != nullptr && causal != nullptr
-                        && headDimMax != nullptr)
+                        && headDimMax != nullptr && hasBias != nullptr && biasQ != nullptr)
                 << kernel.name;
-            families[{*dtype, *causal, *headDim == 0}].push_back(
+            families[{*dtype, *causal, *headDim == 0, *hasBias, *biasQ}].push_back(
                 {*headDimMax, static_cast<int64_t>(kernel.priority)});
             ++checked;
         }
@@ -195,7 +212,7 @@ TEST(TestFlydslSdpaRdnaDecodePacks, RanksTheNarrowestServingObjectFirst)
 
     for(const auto& [key, ranked] : families)
     {
-        const auto& [dtype, causal, generic] = key;
+        const auto& [dtype, causal, generic, hasBias, biasQ] = key;
         if(!generic)
         {
             continue;
@@ -210,7 +227,7 @@ TEST(TestFlydslSdpaRdnaDecodePacks, RanksTheNarrowestServingObjectFirst)
                 << dtype << " causal=" << causal << ": the tier up to " << tiers[i - 1].headDimMax
                 << " must outrank the one up to " << tiers[i].headDimMax;
         }
-        const auto exact = families.find({dtype, causal, false});
+        const auto exact = families.find({dtype, causal, false, hasBias, biasQ});
         ASSERT_NE(exact, families.end());
         int64_t lowestExact = std::numeric_limits<int64_t>::max();
         for(const auto& r : exact->second)
@@ -223,17 +240,18 @@ TEST(TestFlydslSdpaRdnaDecodePacks, RanksTheNarrowestServingObjectFirst)
     }
 }
 
-TEST(TestFlydslSdpaRdnaDecodePacks, EveryKernelDeclaresTheFortySlotSignature)
+TEST(TestFlydslSdpaRdnaDecodePacks, EveryKernelDeclaresTheFortyFourSlotSignature)
 {
     const auto& set = loadedSet(FLYDSL_SDPA_RDNA_DECODE.engineName);
 
     // Q, K, V, O, LSE and the split workspace's O and LSE pointers; nine i32 (seq_len_q,
-    // seq_len_kv, num_heads, kv_group, right_bound, left_bound, align_bottom_right, lse_on,
+    // seq_len_kv, num_heads, kv_group, right_bound, left_bound, align_bottom_right, flags,
     // num_splits) and the f32 scale from offset 56; fifteen i64 strides from 96; the bias
     // pointer at 216 and its four i64 strides; the i32 head_dim at 256; the sink pointer at
-    // 264 and its i64 head stride at 272. The merge kernel
+    // 264 and its i64 head stride at 272; the per-batch length and packed-sequence offset
+    // pointers from 280 (kernel modification 26). The merge kernel
     // in the same object is launched by name and checked by the generator.
-    constexpr size_t SLOTS = 40;
+    constexpr size_t SLOTS = 44;
     size_t checked = 0;
     for(const auto& pack : set.packs)
     {
@@ -259,7 +277,7 @@ TEST(TestFlydslSdpaRdnaDecodePacks, EveryKernelDeclaresTheFortySlotSignature)
                 }
                 else
                 {
-                    kind = slot == 32 || slot == 38 ? "global_buffer" : "by_value";
+                    kind = slot == 32 || slot == 38 || slot >= 40 ? "global_buffer" : "by_value";
                     size = slot == 37 ? 4 : 8;
                     offset = static_cast<uint32_t>(96 + 8 * (slot - 17));
                 }

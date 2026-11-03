@@ -8,10 +8,12 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "ApplicabilityManager.hpp"
 #include "ApplicabilityPool.hpp"
+#include "GraphSchema.hpp"
 #include "Handle.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "device/IDevicePropertyProvider.hpp"
@@ -57,6 +59,10 @@ private:
         std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>>(
             const device::IDevicePropertyProvider&)>
             createEngine;
+        /// The newest graph schema the engine's applicability was reviewed against
+        /// (GraphSchema.hpp): the provider baseline unless the engine opts in. An
+        /// ingestor engine's is its UED's `sdk_version`.
+        hipdnn_data_sdk::utilities::Version maxGraphSchema = providerBaselineGraphSchema();
     };
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();

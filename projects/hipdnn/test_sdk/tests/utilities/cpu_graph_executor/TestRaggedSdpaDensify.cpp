@@ -11,19 +11,24 @@
 #include <numeric>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaDensifyTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedSdpaDensify.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_data_sdk::utilities::Tensor;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
 using hipdnn_test_sdk::utilities::CpuFpReferenceSdpa;
 using hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor;
 using hipdnn_test_sdk::utilities::SdpaBwdOptions;
@@ -93,20 +98,36 @@ TEST(TestRaggedSdpaDensify, PackAndUnpackRoundTrip)
     EXPECT_EQ(back, packed);
 }
 
-// An all-zero bias changes nothing numerically but the native ragged plan declines it, so the
-// same data runs once through the native ragged reference and once through the dense rewrite.
-TEST(TestRaggedSdpaDensify, ZeroBiasThroughTheRewriteEqualsTheNativeRaggedPlan)
+namespace
 {
-    auto q = packedValues(10, H * D, 11);
-    auto k = packedValues(13, H * D, 12);
-    auto v = packedValues(13, H * D, 13);
+
+// Runs the unbiased ragged forward graph and the same graph with an all-zero bias on the same
+// data. A zero bias changes nothing numerically, but every ragged plan declines a bias, so the
+// biased arm always runs through the dense rewrite. Returns the unbiased and biased (O, LSE).
+template <typename T>
+std::pair<std::pair<std::vector<T>, std::vector<float>>,
+          std::pair<std::vector<T>, std::vector<float>>>
+    runUnbiasedAndZeroBias(DataType dataType)
+{
+    const auto toT = [](const std::vector<float>& values) {
+        std::vector<T> out;
+        out.reserve(values.size());
+        for(const float x : values)
+        {
+            out.push_back(static_cast<T>(x));
+        }
+        return out;
+    };
+    auto q = toT(packedValues(10, H * D, 11));
+    auto k = toT(packedValues(13, H * D, 12));
+    auto v = toT(packedValues(13, H * D, 13));
     std::vector<float> zeroBias(static_cast<size_t>(SQ * SKV), 0.0F);
     auto qOffsets = Q_TOKENS;
     auto kvOffsets = KV_TOKENS;
 
     const auto run = [&](bool bias) {
-        const auto graph = raggedGraph(false, bias);
-        std::vector<float> o(10 * H * D, -7.0F);
+        const auto graph = raggedGraph(false, bias, /*ragged=*/true, dataType);
+        std::vector<T> o(10 * H * D, static_cast<T>(-7.0F));
         std::vector<float> lse(10 * H, -7.0F);
         std::unordered_map<int64_t, void*> pack = {{Q, q.data()},
                                                    {K, k.data()},
@@ -124,11 +145,20 @@ TEST(TestRaggedSdpaDensify, ZeroBiasThroughTheRewriteEqualsTheNativeRaggedPlan)
         executor.execute(const_cast<uint8_t*>(graph.data()), graph.size(), pack);
         return std::make_pair(o, lse);
     };
-    const auto native = run(false);
-    const auto rewritten = run(true);
+    return {run(false), run(true)};
+}
+
+// Compares the two arms of runUnbiasedAndZeroBias: O within oTolerance, LSE within 1e-5.
+template <typename T>
+void expectSameOutputs(const std::pair<std::vector<T>, std::vector<float>>& native,
+                       const std::pair<std::vector<T>, std::vector<float>>& rewritten,
+                       float oTolerance)
+{
     for(size_t i = 0; i < native.first.size(); ++i)
     {
-        EXPECT_NEAR(native.first[i], rewritten.first[i], 1e-6F) << "O element " << i;
+        EXPECT_NEAR(
+            static_cast<float>(native.first[i]), static_cast<float>(rewritten.first[i]), oTolerance)
+            << "O element " << i;
     }
     for(size_t i = 0; i < native.second.size(); ++i)
     {
@@ -143,6 +173,41 @@ TEST(TestRaggedSdpaDensify, ZeroBiasThroughTheRewriteEqualsTheNativeRaggedPlan)
             EXPECT_NEAR(native.second[i], rewritten.second[i], 1e-5F) << "LSE element " << i;
         }
     }
+}
+
+} // namespace
+
+// The native ragged registry holds all-BF16 and FP8 E4M3 -> BF16 only, so with BF16 data the
+// unbiased arm runs SdpaRaggedFwdPlan and the zero-bias arm runs the dense rewrite.
+TEST(TestRaggedSdpaDensify, ZeroBiasThroughTheRewriteEqualsTheNativeRaggedPlan)
+{
+    using hipdnn_data_sdk::types::bfloat16;
+
+    // The unbiased graph is the native plan's; the biased one is not (it takes the rewrite).
+    const auto builders = hipdnn_test_sdk::detail::SdpaRaggedFwdSignatureKey::getPlanBuilders();
+    const auto builderIt = builders.find(hipdnn_test_sdk::detail::SdpaRaggedFwdSignatureKey(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16));
+    ASSERT_NE(builderIt, builders.end());
+    for(const bool bias : {false, true})
+    {
+        const auto graph = raggedGraph(false, bias, /*ragged=*/true, DataType::BFLOAT16);
+        const GraphWrapper wrapper(graph.data(), graph.size());
+        EXPECT_EQ(builderIt->second->isApplicable(wrapper.getNode(0), wrapper.getTensorMap()),
+                  !bias)
+            << (bias ? "zero-bias graph" : "unbiased graph");
+    }
+
+    // Both arms compute in float and round O to bf16, so they may differ by one bf16 step.
+    const auto [native, rewritten] = runUnbiasedAndZeroBias<bfloat16>(DataType::BFLOAT16);
+    expectSameOutputs(native, rewritten, 0.0078125F);
+}
+
+// FLOAT has no native ragged plan: both arms run through the dense rewrite, with and without
+// the bias input.
+TEST(TestRaggedSdpaDensify, Fp32ZeroBiasThroughTheRewriteEqualsTheUnbiasedRewrite)
+{
+    const auto [unbiased, zeroBias] = runUnbiasedAndZeroBias<float>(DataType::FLOAT);
+    expectSameOutputs(unbiased, zeroBias, 1e-6F);
 }
 
 // A ragged backward graph (no native plan) through the executor equals the dense backward

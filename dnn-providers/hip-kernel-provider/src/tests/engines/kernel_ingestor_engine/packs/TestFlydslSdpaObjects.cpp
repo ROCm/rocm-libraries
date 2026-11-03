@@ -19,6 +19,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -206,7 +208,12 @@ struct ObjectTraits
     /// The bias in the query's dtype (RDNA `bias_q`; every CDNA bias) rather than f32.
     bool biasInQueryType = false;
     bool sink = false;
+    /// The object drops attention probabilities (aiw `has_dropout`).
+    bool dropout = false;
     bool qkMask = false;
+    /// V's width apart from Q/K's (a pair bucket or tier: CDNA modification 40, RDNA prefill
+    /// modification 32); it serves only graphs whose two head dims differ.
+    bool vMask = false;
     int64_t kvAlign = 0;
     bool anyDiagonal = true;
     int64_t hdPair = 0;
@@ -223,7 +230,9 @@ ObjectTraits traitsOf(ObjectKind kind, const KernelDefinition& kernel)
     traits.causal = intField(kernel, "causal") == 1;
     traits.bias = intField(kernel, "has_bias") == 1;
     traits.sink = intField(kernel, "has_sink") == 1;
+    traits.dropout = intField(kernel, "has_dropout") == 1;
     traits.qkMask = intField(kernel, "qk_mask") == 1;
+    traits.vMask = intField(kernel, "v_mask") == 1;
     traits.kvAlign = intField(kernel, "kv_align");
     traits.anyDiagonal = intField(kernel, "any_diagonal", 1) == 1;
     traits.hdPair = intField(kernel, "hd_pair");
@@ -234,7 +243,9 @@ ObjectTraits traitsOf(ObjectKind kind, const KernelDefinition& kernel)
     }
     else if(isCdna(kind))
     {
-        traits.biasInQueryType = true;
+        // The strided bias objects (vendored-kernel modification 31) are the CDNA ones that
+        // read an f32 bias; they run one, the others a bias in the query's dtype.
+        traits.biasInQueryType = intField(kernel, "bias_kstrided") == 0;
     }
     else
     {
@@ -252,8 +263,8 @@ bool isBucketed(ObjectKind kind, const ObjectTraits& traits)
 
 /// What changes the code an object runs beyond its head dim: one object of each is the
 /// pre-merge tier.
-using ObjectForm
-    = std::tuple<std::string, bool, bool, bool, bool, bool, bool, int64_t, bool, int64_t, int64_t>;
+using ObjectForm = std::
+    tuple<std::string, bool, bool, bool, bool, bool, bool, int64_t, bool, int64_t, int64_t, bool>;
 
 ObjectForm formOf(ObjectKind kind, const KernelDefinition& kernel)
 {
@@ -269,7 +280,8 @@ ObjectForm formOf(ObjectKind kind, const KernelDefinition& kernel)
             traits.kvAlign,
             traits.anyDiagonal,
             traits.hdPair,
-            traits.dvSplit};
+            traits.dvSplit,
+            traits.vMask};
 }
 
 /// A head dim inside a bucket of @p bound: about five eighths of it, on the multiple of 8
@@ -311,6 +323,12 @@ std::vector<ShapeAlternatives>
     {
         SdpaGraphSpec spec;
         spec.dataType = traits.dtype == "f16" ? DataType::HALF : DataType::BFLOAT16;
+        if(traits.dtype == "f32")
+        {
+            // Exact f32: the CDNA generic objects' (vendored-kernel modification 35) and
+            // the RDNA prefill objects' (prefill kernel modification 34).
+            spec.dataType = DataType::FLOAT;
+        }
         spec.headDim = width;
         spec.scale = static_cast<float>(1.0 / std::sqrt(static_cast<double>(width)));
         spec.stats = SdpaStats::LSE;
@@ -319,9 +337,19 @@ std::vector<ShapeAlternatives>
         {
             spec.valueHeadDim = traits.headDimV;
         }
+        if(traits.vMask)
+        {
+            // A pair object serves only head dims that differ: V half as wide as Q/K at the
+            // bound, and under EVERY, V at the bound over the narrower Q/K inside it.
+            spec.valueHeadDim = width == bound ? std::max<int64_t>(8, bound / 2 / 8 * 8) : bound;
+        }
 
         spec.withSink = traits.sink;
         spec.withBias = traits.bias;
+        if(traits.dropout)
+        {
+            setDropout(spec, 0.2F);
+        }
         if(traits.bias)
         {
             spec.biasDataType = traits.biasInQueryType ? spec.dataType : DataType::FLOAT;
@@ -454,7 +482,8 @@ std::string describe(const SdpaGraphSpec& spec)
            + " Hk=" + std::to_string(spec.kvHeads) + " Sq=" + std::to_string(spec.seqLenQ)
            + " Skv=" + std::to_string(spec.seqLenKv) + " D=" + std::to_string(spec.headDim)
            + " Dv=" + std::to_string(spec.valueHeadDim.value_or(spec.headDim)) + " mask=" + mask
-           + (spec.withBias ? " bias" : "") + (spec.withSink ? " sink" : "");
+           + (spec.withBias ? " bias" : "") + (spec.withSink ? " sink" : "")
+           + (spec.dropoutProbability.value_or(0.0F) > 0.0F ? " dropout" : "");
 }
 
 /// @p kernels in name order, or one per form when @p selection asks for that: the first of
@@ -527,6 +556,48 @@ void expectStagedObjectsMatch(ObjectKind kind, ObjectSelection selection)
               << " launches\n";
     ::testing::Test::RecordProperty("objects", static_cast<int>(kernels.size()));
     ::testing::Test::RecordProperty("staged", static_cast<int>(staged.size()));
+}
+
+// ---------------------------------------------------------------------------
+// host: the graph schema the engines claim
+// ---------------------------------------------------------------------------
+
+// Every FlyDSL SDPA engine's UED claims the graph schema its matchers were last reviewed
+// against: each field the schema added up to it is gated where it is read, or by
+// usesUnreadSchemaFields (FlydslSdpaShared.hpp; COVERAGE.md "Graph schema"). The claim is the
+// newest version this SDK defines, so a ragged graph reaches the matchers; an SDK that adds a
+// version fails the first check until its fields are reviewed and both values move together
+// (gen_descriptors.py SDPA_SDK_VERSION).
+TEST(TestFlydslSdpaGraphSchema, EveryEngineClaimsTheReviewedSchema)
+{
+    const hipdnn_data_sdk::utilities::Version reviewed{std::string("1.4.0")};
+    EXPECT_EQ(
+        hipdnn_data_sdk::utilities::Version{
+            std::string(hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION)}
+            .str(),
+        reviewed.str())
+        << "the SDK defines a graph schema the FlyDSL SDPA matchers were not reviewed against";
+    // A packed graph with every 1.x feature: overridable shapes aside, which the matchers
+    // decline themselves, it is within the claim.
+    const auto& packedFloor
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, true, true, true, true);
+    for(const auto op : {"sdpa_rdna",
+                         "sdpa_rdna_decode",
+                         "sdpa_aiw",
+                         "sdpa_cdna",
+                         "sdpa_cdna_dualwave",
+                         "sdpa_cdna_decode"})
+    {
+        const auto* staged = findLoadedSet(std::string("hipkernel:flydsl_") + op);
+        if(staged == nullptr)
+        {
+            EXPECT_FALSE(flydslShipsAnywhere(op))
+                << "this build ships " << op << " but loaded no objects for it";
+            continue;
+        }
+        EXPECT_EQ(staged->engine.sdkVersion.str(), reviewed.str()) << op;
+        EXPECT_FALSE(staged->engine.sdkVersion < packedFloor) << op;
+    }
 }
 
 // ---------------------------------------------------------------------------

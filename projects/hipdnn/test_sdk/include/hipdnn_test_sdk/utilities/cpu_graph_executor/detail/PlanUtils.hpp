@@ -449,9 +449,14 @@ bool isSupportedSdpaBlockMask(const hipdnn_flatbuffers_sdk::data_objects::SdpaAt
            && m->Get(2) == (q->Get(2) + TILE - 1) / TILE && m->Get(3) == (tilesKv + 7) / 8;
 }
 
+template <typename TensorMap>
+bool isSdpaZeroProbabilityDropout(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                                  const TensorMap& tensorMap);
+
 /// The cuDNN sdpa_fp8 softmax / output scaling the references implement (SEM-024): with fp8
 /// inputs, scale_s and descale_s together, scale_o, and the amax_s / amax_o outputs, each a
-/// one-element FLOAT tensor; none of them for other inputs. Dropout does not combine with them.
+/// one-element FLOAT tensor; none of them for other inputs. Dropout does not combine with them,
+/// except probability-0 dropout, which is no dropout (isSdpaZeroProbabilityDropout).
 template <typename TensorMap>
 bool isSupportedSdpaFp8Scaling(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
                                const TensorMap& tensorMap,
@@ -491,7 +496,8 @@ bool isSupportedSdpaFp8Scaling(const hipdnn_flatbuffers_sdk::data_objects::SdpaA
         return true;
     }
     const bool dropout
-        = attrs.dropout_mask_tensor_uid().has_value() || attrs.dropout_probability().has_value();
+        = (attrs.dropout_mask_tensor_uid().has_value() || attrs.dropout_probability().has_value())
+          && !isSdpaZeroProbabilityDropout(attrs, tensorMap);
     return fp8Input && !dropout
            && attrs.scale_s_tensor_uid().has_value() == attrs.descale_s_tensor_uid().has_value();
 }
@@ -551,6 +557,30 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
     const auto* k = kIt->second->dims();
     return d->size() == 4 && q->size() == 4 && k->size() == 4 && d->Get(0) == q->Get(0)
            && d->Get(1) == q->Get(1) && d->Get(2) == q->Get(2) && d->Get(3) == k->Get(2);
+}
+
+/// Whether an SDPA forward node's dropout is probability 0 with nothing to check or apply: no
+/// rng_dump, no explicit mask and no dropout_scale. Probability 0 drops no element, so the
+/// references compute the undropped result (a hipDNN reference choice). A seed or offset may be
+/// given or absent; it is not read, but a named one must be in the graph.
+template <typename TensorMap>
+bool isSdpaZeroProbabilityDropout(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                                  const TensorMap& tensorMap)
+{
+    if(!attrs.dropout_probability().has_value() || attrs.dropout_probability().value() != 0.0F
+       || attrs.rng_dump_tensor_uid().has_value() || attrs.dropout_mask_tensor_uid().has_value()
+       || attrs.dropout_scale_tensor_uid().has_value())
+    {
+        return false;
+    }
+    for(const auto uid : {attrs.seed_tensor_uid(), attrs.offset_tensor_uid()})
+    {
+        if(uid.has_value() && tensorMap.find(uid.value()) == tensorMap.end())
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
@@ -677,9 +707,10 @@ bool isSupportedSdpaFwdNode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttr
     }
 
     // Dropout: cuDNN's explicit-mask form, or Philox dropout checked through the engine's
-    // RNG_DUMP keep mask. Philox without RNG_DUMP has no exact oracle and is declined.
+    // RNG_DUMP keep mask. Philox without RNG_DUMP has no exact oracle and is declined, except at
+    // probability 0, which is no dropout (isSdpaZeroProbabilityDropout).
     const bool philoxWithDump = isSdpaPhiloxDropoutWithDump(attrs, tensorMap);
-    if(!philoxWithDump
+    if(!philoxWithDump && !isSdpaZeroProbabilityDropout(attrs, tensorMap)
        && (!isSupportedSdpaDropout(attrs, tensorMap) || attrs.rng_dump_tensor_uid().has_value()))
     {
         return false;

@@ -49,6 +49,9 @@ if(ENABLE_ASM_SDPA_ENGINE)
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
+            # Group mode against the CPU reference (compiles empty without the ingestor,
+            # whose frontend-built lane it uses).
+            asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
@@ -90,6 +93,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     elseif(_hkp_knobs_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
+        )
+    endif()
+    # The FlyDSL SDPA engines end to end through the frontend Graph API (Graph::sdpa needs
+    # HIPDNN_ENABLE_SDPA; the source compiles empty without it).
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPDNN_ENABLE_SDPA)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontend.cpp
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontendFeatures.cpp
         )
     endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE

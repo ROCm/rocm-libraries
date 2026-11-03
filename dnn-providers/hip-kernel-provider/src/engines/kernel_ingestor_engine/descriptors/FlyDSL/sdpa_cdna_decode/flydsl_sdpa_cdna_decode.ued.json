@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "63ffc720-10c9-55e1-9b3b-78da0f7c4aea",
   "name": "hipkernel:flydsl_sdpa_cdna_decode",
-  "sdk_version": "1.2.0",
+  "sdk_version": "1.4.0",
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_cdna_decode.graph_match"
   },

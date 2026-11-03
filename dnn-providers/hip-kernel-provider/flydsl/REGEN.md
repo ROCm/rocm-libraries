@@ -113,14 +113,14 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode` | 309 (90 + 63 + 84 + 72) |
-| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode` | 253 (90 + 63 + 56 + 20 + 24) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad` | 583 (90 + 63 + 312 + 116 + 1 + 1) |
+| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask sdpa_head_pad` | 719 (90 + 63 + 192 + 116 + 256 + 1 + 1) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 453 (90 + 63 + 248 + 26 + 24 + 1 + 1) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 457 (90 + 63 + 278 + 24 + 1 + 1) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 465 (90 + 63 + 286 + 24 + 1 + 1) |
 
 ```bash
-ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
@@ -197,6 +197,10 @@ for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
   # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
   [ $ARCH = gfx12-generic ] && $PY -m generators.gen_sdpa_aiw --arch $ARCH
+  # The RNG dump's keep-mask writer (COVERAGE.md §5.10), one object per target.
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
+  # The head-dim padding copy (COVERAGE.md §7.12), one object per target.
+  $PY -m generators.gen_sdpa_head_pad --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -216,6 +220,8 @@ for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_sdpa_cdna --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
+  $PY -m generators.gen_sdpa_head_pad --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
 done

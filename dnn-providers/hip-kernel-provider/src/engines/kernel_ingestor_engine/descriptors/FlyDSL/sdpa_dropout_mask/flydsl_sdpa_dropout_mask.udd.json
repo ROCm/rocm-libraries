@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "d166837a-770a-5f5f-8c42-2de3e77297ba",
+  "name": "flydsl sdpa_dropout_mask dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_dropout_mask.dispatch"
+}

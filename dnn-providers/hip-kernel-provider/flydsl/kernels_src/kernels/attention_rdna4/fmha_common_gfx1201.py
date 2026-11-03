@@ -476,16 +476,21 @@ class FastMath:
     ("state variable 'fastmath' is FastMath, not an MLIR Value").
     """
 
-    __slots__ = ("flags",)
+    __slots__ = ("flags", "uncontracted")
 
     def __init__(self, fp_mode: str):
         _F = arith.FastMathFlags
         if fp_mode == "fast":
             self.flags = _F.fast
+            self.uncontracted = (
+                _F.reassoc | _F.nnan | _F.ninf | _F.nsz | _F.arcp | _F.afn
+            )
         elif fp_mode == "noninf":
             self.flags = _F.reassoc | _F.nnan | _F.nsz | _F.arcp | _F.contract | _F.afn
+            self.uncontracted = _F.reassoc | _F.nnan | _F.nsz | _F.arcp | _F.afn
         elif fp_mode == "safe":  # as "noninf", also dropping nnan
             self.flags = _F.reassoc | _F.nsz | _F.arcp | _F.contract | _F.afn
+            self.uncontracted = _F.reassoc | _F.nsz | _F.arcp | _F.afn
         else:
             raise ValueError(f"unknown fp_mode {fp_mode!r}; expected fast/noninf/safe")
 
@@ -511,6 +516,14 @@ class FastMath:
     def sub(self, a, b):
         with arith.fastmath(self.flags):
             return a - b
+
+    def add_uncontracted(self, a, b):
+        """`add` that LLVM may not fuse with the multiply that made an operand (aiw
+        README modification 13): a score's exponent `s * c - m` must subtract the very
+        product the row max was taken over, or the max key's exponent is the rounding
+        error of that product rather than 0."""
+        with arith.fastmath(self.uncontracted):
+            return a + b
 
     def mul(self, a, b):
         with arith.fastmath(self.flags):
@@ -1391,10 +1404,17 @@ def decode_addressing(varlen_bits, bits_shift, max_seqlen, s0, s1, z):
     nxt = cond_load(cumulative, seqinfo_addr(s0, z + fx.Int32(1)), zero)
     pos = cond_load(array, seqinfo_addr(s1, z), zero)
 
+    # Modification 10 (hipDNN vendoring): an INDIVIDUAL length -- a padded
+    # sequence's -- clamped to [0, max_seqlen], as hipDNN's GPU reference clamps
+    # it; one past max_seqlen would read past the batch's rows.
+    cur_len = common_utils.ssel(cur < zero, zero, cur)
+    cur_len = common_utils.ssel(
+        cur_len > fx.Int32(max_seqlen), fx.Int32(max_seqlen), cur_len
+    )
     seqlen = common_utils.ssel(
         cumulative,
         nxt - cur,
-        common_utils.ssel(individual, cur, fx.Int32(max_seqlen)),
+        common_utils.ssel(individual, cur_len, fx.Int32(max_seqlen)),
     )
     row_off = common_utils.ssel(
         array,
