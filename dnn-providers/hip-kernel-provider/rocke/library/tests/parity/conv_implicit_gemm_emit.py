@@ -1019,6 +1019,7 @@ _GFX942_3D_OFFSET = 32
 #  120: 116 + xh_yring=2
 #  121-123: 55 + reg_prefetch=1 with rpf_lds_barrier / rpf_fetch_late / sched_strategy
 #  124-127: 56 / 55 + lds_ahead / defer_mfma / defer_mfma_per_write
+#  128-130: 55 + the plain uk_xhalo loop (defer_mfma, lds_ahead, chunk groups)
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1349,6 +1350,37 @@ def _gfx942_3d_spec(idx: int):
     )
     knobs[126] = (56, dict(pipeline="compv3", reg_prefetch=2, lds_ahead=True))
     knobs[127] = (55, dict(reg_prefetch=1, defer_mfma=1, rpf_setprio=2))
+    # 128-130: the plain (register-staged) uk_xhalo loop, with defer_mfma.
+    _xp = dict(
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        xcd_remap=6,
+        lds_xor=True,
+        uk_xhalo=8,
+        rpf_setprio=2,
+        lds_xor_rowkey=True,
+        xh_wait_smem=True,
+        epi_quad_xpose=4,
+        lds_kpack_read=True,
+    )
+    knobs[128] = (
+        55,
+        dict(_xp, defer_mfma=2, vmem_interleave=2, no_agpr=True, m_band=32),
+    )
+    knobs[129] = (
+        55,
+        dict(
+            _xp,
+            uk_xhalo=4,
+            rpf_setprio=0,
+            uk_tap_fast=True,
+            uk_chunk_group=2,
+            lds_ahead=True,
+            defer_mfma=2,
+            vmem_interleave=2,
+        ),
+    )
+    knobs[130] = (55, dict(_xp, epi_quad_xpose=0))
     _pp.update(
         {
             110: dict(_p84, xcd_remap=0, split_streamk=True),
