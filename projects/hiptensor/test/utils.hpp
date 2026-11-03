@@ -516,7 +516,7 @@ std::pair<bool, double> compareEqualLaunchKernel(DDataType*                   de
         gridDim       = dim3(ceilDiv(i, maxElements), 1, 1);
         auto elements = i > maxElements ? maxElements : i;
 
-        hipLaunchKernelGGL((maxReduceKernel),
+        hipLaunchKernelGGL((maxReduceKernel<double>),
                            gridDim,
                            blockDim,
                            0,
