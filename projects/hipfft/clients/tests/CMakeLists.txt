@@ -32,6 +32,14 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
+# This has to be initialized before the project() command appears
+# Set the default of CMAKE_BUILD_TYPE to be release, unless user
+# specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
+if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
+  set( CMAKE_BUILD_TYPE Release CACHE STRING
+    "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
+endif()
+
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   project( hipfft-clients-tests LANGUAGES CXX )
   find_package( hipfft REQUIRED CONFIG PATHS )
@@ -92,16 +100,6 @@ else()
 endif()
 
 set( TEST_TARGETS hipfft-test )
-
-
-# This has to be initialized before the project() command appears
-# Set the default of CMAKE_BUILD_TYPE to be release, unless user
-# specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
-if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
-  set( CMAKE_BUILD_TYPE Release CACHE STRING
-    "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
-endif()
-
 
 # searching FFTW with FindFFTW.cmake that is provided by project
 # because distro versions of FFTW does not include the cmake specific
