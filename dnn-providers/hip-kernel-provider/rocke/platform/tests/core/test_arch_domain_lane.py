@@ -179,6 +179,47 @@ def test_a_malformed_column_is_rejected_not_emptied() -> None:
             arch_domain.ArchDomain("llvm22", doc)
 
 
+def _column_with_processors(processors: object) -> dict:
+    return {"schema": arch_domain.SCHEMA, "keys": {}, "processors": processors}
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [{"accepted": "false"}, {"accepted": 0}, {"accepted": None}, {}, True],
+    ids=["string", "integer", "null", "no_answer", "not_an_object"],
+)
+def test_a_processor_answer_that_is_not_a_boolean_is_rejected(entry) -> None:
+    """``{"accepted": "false"}`` must not read as acceptance: the column is
+    refused when it is read, so no compile routing or generated C++ table can
+    act on it."""
+    with pytest.raises(ValueError) as error:
+        arch_domain.ArchDomain("llvm22", _column_with_processors({"gfx1154": entry}))
+    assert str(error.value) == (
+        f"arch-domain column for llvm22 records processor 'gfx1154' as {entry!r}; "
+        "expected an object whose `accepted` is true or false. Regenerate it with "
+        "tools/gen_arch_domain.py."
+    )
+
+
+def test_a_processors_field_that_is_not_an_object_is_rejected() -> None:
+    with pytest.raises(ValueError, match=r"has a `processors` list, not a JSON object"):
+        arch_domain.ArchDomain("llvm22", _column_with_processors(["gfx1154"]))
+
+
+def test_a_recorded_processor_answer_is_returned_as_recorded() -> None:
+    """A recorded answer is that boolean; a processor with no entry is None."""
+    table = arch_domain.ArchDomain(
+        "llvm22",
+        _column_with_processors(
+            {"gfx1154": {"accepted": False}, "gfx11-generic": {"accepted": True}}
+        ),
+    )
+    assert table.accepts_processor("gfx1154") is False
+    assert table.accepts_processor("gfx11-generic") is True
+    assert table.accepts_processor("gfx1100") is None
+    assert table.processors() == ("gfx1154", "gfx11-generic")
+
+
 def test_every_committed_column_declares_the_schema_it_is() -> None:
     """The check above is only worth having if the real columns pass it."""
     for flavor in _committed_flavors():

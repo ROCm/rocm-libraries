@@ -134,7 +134,9 @@ class ArchDomain:
         self.toolchain: dict[str, object] = doc.get("toolchain", {})
         self.canonical: dict[str, str] = doc.get("canonical", {})
         self._keys: dict[str, dict[str, dict]] = keys
-        self._processors: dict[str, dict] = doc.get("processors", {})
+        self._processors: dict[str, bool] = _processor_answers(
+            flavor, doc.get("processors", {})
+        )
 
     def lookup(self, key: str, arch: str) -> Cell | None:
         """The cell for ``(key, arch)``, or ``None`` when it was not measured.
@@ -177,9 +179,37 @@ class ArchDomain:
 
         ``None`` when the column has no answer for ``arch`` (a target the
         generator never probed, or a column written before it recorded this).
+        A recorded answer is the JSON boolean itself; the column was refused at
+        construction if any answer was not one.
         """
-        entry = self._processors.get(arch)
-        return None if entry is None else bool(entry["accepted"])
+        return self._processors.get(arch)
+
+
+def _processor_answers(flavor: str, processors: object) -> dict[str, bool]:
+    """``{processor: accepted}`` from a column's ``processors`` object.
+
+    Every entry must be an object whose ``accepted`` is a JSON boolean. Raises
+    ``ValueError`` otherwise: coercing ``"false"`` or a missing answer to a
+    boolean would route compiles through a processor the compiler rejects, and
+    the C++ generator would drop the rejection, with nothing reporting it.
+    """
+    if not isinstance(processors, dict):
+        raise ValueError(  # noqa: TRY004 -- the artifact is wrong, not the caller
+            f"arch-domain column for {flavor} has a `processors` "
+            f"{type(processors).__name__}, not a JSON object; regenerate it with "
+            "tools/gen_arch_domain.py."
+        )
+    answers: dict[str, bool] = {}
+    for processor, entry in processors.items():
+        accepted = entry.get("accepted") if isinstance(entry, dict) else None
+        if not isinstance(accepted, bool):
+            raise ValueError(  # noqa: TRY004 -- the artifact is wrong, not the caller
+                f"arch-domain column for {flavor} records processor {processor!r} "
+                f"as {entry!r}; expected an object whose `accepted` is true or "
+                "false. Regenerate it with tools/gen_arch_domain.py."
+            )
+        answers[processor] = accepted
+    return answers
 
 
 def is_negative(status: str) -> bool:

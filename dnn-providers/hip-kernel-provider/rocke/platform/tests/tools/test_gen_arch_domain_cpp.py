@@ -168,6 +168,26 @@ def test_only_a_recorded_rejection_is_emitted(gen) -> None:
     assert _parse_rejected(gen.render(fake)) == {("llvm99", "gfx_no")}
 
 
+def test_a_column_whose_answer_is_not_a_boolean_stops_generation(gen) -> None:
+    """``{"accepted": "false"}`` stops the build's generator instead of being
+    read as acceptance and dropped from the C++ table: the generator reads the
+    column through the Python reader, which refuses it."""
+    doc = {
+        "schema": arch_domain.SCHEMA,
+        "keys": {},
+        "processors": {"gfx1154": {"accepted": "false"}},
+    }
+    fake = SimpleNamespace(
+        committed_flavors=lambda: ("llvm99",),
+        load=lambda flavor: arch_domain.ArchDomain(flavor, doc),
+        is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
+    )
+    with pytest.raises(ValueError, match=r"records processor 'gfx1154' as"):
+        gen.render(fake)
+
+
 def test_generation_is_deterministic(gen) -> None:
     """CMake reruns the generator on every input change; output that varied run
     to run would rebuild the engine for nothing and defeat any later diff."""
