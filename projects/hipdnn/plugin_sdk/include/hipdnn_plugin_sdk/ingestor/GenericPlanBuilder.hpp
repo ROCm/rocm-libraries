@@ -795,22 +795,36 @@ public:
         auto catalog = _stateManager.measuredCatalog(context);
         auto filtered = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         // Mirrors buildPlan: under a limit, the configuration this answers must be one plan
-        // build would actually shortlist, not a candidate beyond it (RFC 0019 §11.4). This
-        // does not yet mirror buildPlan's ad-hoc per-graph winner-record lookup under a
-        // limit (serveRecordedOrder / orderIfFullyCovered): when no catalog-wide
-        // measuredRecord exists, a covering winner-cache record can still make buildPlan
-        // serve a configuration this prediction does not know about.
+        // build would actually shortlist, not a candidate beyond it (RFC 0019 §11.4).
         applyCandidateLimit(filtered, executionSettings.ingestorSettings.candidateLimit);
         std::string modelId;
+        // Mirrors buildPlan's serveRecordedOrder/orderIfFullyCovered: under a limit, a
+        // per-graph winner-cache record that covers only the shortlist (not the whole
+        // catalog, so catalog.measuredRecord stays null) still decides buildPlan's order.
+        std::optional<WinnerRecord> perGraphRecord;
+        if(catalog.measuredRecord == nullptr
+           && executionSettings.ingestorSettings.candidateLimit.has_value()
+           && _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            const WinnerKey winnerKey{
+                hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
+                DeviceKey{context.deviceProperties}};
+            perGraphRecord = _stateManager.winnerFor(winnerKey);
+        }
+        const WinnerRecord* effectiveRecord = catalog.measuredRecord.get();
+        if(effectiveRecord == nullptr && perGraphRecord.has_value()
+           && orderIfFullyCovered(*perGraphRecord, filtered).has_value())
+        {
+            effectiveRecord = &*perGraphRecord;
+        }
         // The full catalog decides the order source and ranking; `filtered` only limits what
         // the answer may name, so a pin changes neither (RFC 0019 §9.2, §5 steps 8-9).
-        const bool measured = catalog.measuredRecord != nullptr;
+        const bool measured = effectiveRecord != nullptr;
         std::vector<ScoredKernel> ranking;
         if(measured)
         {
             bool measuresMetric = false;
-            ranking = measuredRanking(
-                *catalog.measuredRecord, filtered, metric, context, measuresMetric);
+            ranking = measuredRanking(*effectiveRecord, filtered, metric, context, measuresMetric);
             if(!measuresMetric)
             {
                 // A metric the record does not measure is the model's to answer -- for the

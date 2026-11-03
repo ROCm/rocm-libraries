@@ -3160,5 +3160,72 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, ARecordTakenUnderTheLimitSe
         << "a shortlist record does not cover the full candidate set";
 }
 
+/// predictConfiguration must name the same kernel buildPlan actually serves under a
+/// limit: both apply applyCandidateLimit to the same filtered catalog before ranking, so
+/// a benchmark record taken under the limit (shortlisting kernel_64, kernel_128) cannot
+/// make the prediction fall back to the unlimited winner (kernel_256).
+TEST_F(TestIngestorGenericPlanBuilderCandidateLimit,
+       PredictConfigurationAgreesWithBuildPlanUnderTheLimit)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF4));
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    // The sampling build only writes the record; a second build reads the kernel buildPlan
+    // actually serves from it (as ARecordTakenUnderTheLimitServesTheSameLimit does).
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, served);
+    const auto servedWorkspace = served.plan().getWorkspaceSize(handle);
+    ASSERT_NE(servedWorkspace, 256U) << "the shortlist excludes kernel_256 under this limit";
+
+    // "time" matches what the timer measures: the default ranking metric would ask for
+    // "tflops", which this record does not measure and nothing here calibrates.
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT timeMetric;
+    timeMetric.ranking_metric = "time";
+    flatbuffers::FlatBufferBuilder predictFbb;
+    predictFbb.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(predictFbb, &timeMetric));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predictConfig(
+        predictFbb.GetBufferPointer(), predictFbb.GetSize());
+    EnginePredictionT prediction;
+    builder.predictConfiguration(handle, graph, predictConfig, prediction);
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    const auto blockSize
+        = std::find_if(prediction.engine_config->knobs.begin(),
+                       prediction.engine_config->knobs.end(),
+                       [](const auto& setting) { return setting->knob_id == BLOCK_SIZE; });
+    ASSERT_NE(blockSize, prediction.engine_config->knobs.end());
+    ASSERT_NE((*blockSize)->value.AsIntValue(), nullptr);
+    EXPECT_EQ((*blockSize)->value.AsIntValue()->value, static_cast<int64_t>(servedWorkspace))
+        << "predictConfiguration must name the same kernel buildPlan actually served "
+           "under the limit";
+}
+
 } // namespace
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
