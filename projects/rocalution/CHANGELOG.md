@@ -43,6 +43,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed the preconditioned BiCGStab solver returning a wrong solution after a breakdown in the second half of an iteration.
 * Fixed the QMRCGStab solver starting a second solve from the search direction of the previous solve, returning NaN when the first half step solves the system exactly, and reporting one iteration more than it performed.
+* Fixed the MixedPrecisionDC solver counting a residual check as an iteration, so that a maximum of one iteration made no correction, and `ReBuildNumeric()` keeping the values of the old matrix in its low precision copy.
 
 ## (Unreleased) rocALUTION 4.1.1
 

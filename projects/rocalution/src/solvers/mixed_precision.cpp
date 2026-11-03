@@ -263,6 +263,31 @@ namespace rocalution
 
             this->iter_ctrl_.Clear();
 
+            // Copy the new values into the low precision matrix
+            PtrType*    row_offset = NULL;
+            int*        col        = NULL;
+            ValueTypeH* val_h      = NULL;
+            ValueTypeL* val_l      = NULL;
+
+            allocate_host(this->op_h_->GetLocalM() + 1, &row_offset);
+            allocate_host(this->op_h_->GetLocalNnz(), &col);
+            allocate_host(this->op_h_->GetLocalNnz(), &val_l);
+            allocate_host(this->op_h_->GetLocalNnz(), &val_h);
+
+            this->op_h_->CopyToCSR(row_offset, col, val_h);
+
+            for(int64_t i = 0; i < this->op_h_->GetNnz(); ++i)
+            {
+                val_l[i] = static_cast<ValueTypeL>(val_h[i]);
+            }
+
+            this->op_l_->CopyFromCSR(row_offset, col, val_l);
+
+            free_host(&row_offset);
+            free_host(&col);
+            free_host(&val_l);
+            free_host(&val_h);
+
             if(this->Solver_L_ != NULL)
             {
                 this->Solver_L_->ReBuildNumeric();
@@ -392,7 +417,7 @@ namespace rocalution
             return;
         }
 
-        while(!this->iter_ctrl_.CheckResidual(res, this->index_))
+        do
         {
             // cast to lower precision
 
@@ -433,7 +458,7 @@ namespace rocalution
             this->op_h_->Apply(*this->x_h_, &this->r_h_);
             this->r_h_.ScaleAdd(static_cast<ValueTypeH>(-1), rhs);
             res = this->Norm_(this->r_h_);
-        }
+        } while(!this->iter_ctrl_.CheckResidual(res, this->index_));
 
         log_debug(this, "MixedPrecisionDC::SolveNonPrecond_()", " #*# end");
     }

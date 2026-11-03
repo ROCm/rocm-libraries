@@ -3394,8 +3394,6 @@ TEST(solvers_mixed_precision, rebuild_numeric_takes_new_matrix_values)
     A->ScaleDiagonal(2.0);
     quietly([&] { solver.ReBuildNumeric(); });
     const Outcome<double> out = quiet_solve(solver, *A, b, Vec<double>(16, 0.0));
-
-    KNOWN_BUG("MixedPrecisionDC::ReBuildNumeric keeps the float copy of the old matrix");
     EXPECT_EQ(out.status, 2);
     expect_near(out.x,
                 dense_solve(dense(transformed(
@@ -3427,8 +3425,6 @@ TEST(solvers_mixed_precision, one_iteration_is_one_defect_correction)
     EXPECT_NE(output.find("MixedPrecisionDC [64bit-32bit] solver starts"), std::string::npos);
     EXPECT_NE(output.find("LU solver"), std::string::npos);
     EXPECT_EQ(out.status, 4);
-
-    KNOWN_BUG("the residual check before the first correction is counted as an iteration");
     EXPECT_EQ(out.iterations, 1);
     expect_near(out.x, x, 1e-5);
 }
