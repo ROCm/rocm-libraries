@@ -1269,11 +1269,7 @@ inline bool
         const std::string message
             = "skip_launch_solution: " + solution_description(handle, algo, sol, count, true) + " "
               + error;
-#ifdef GOOGLE_TEST
-        ADD_FAILURE() << message;
-#else
-        hipblaslt_cerr << message << std::endl;
-#endif
+        HIPBLASLT_REPORT_FAILURE(message);
     }
     return skipped;
 }
@@ -1906,12 +1902,7 @@ void testing_matmul(const Arguments& arg)
         {
             std::string why = std::string("unknown integer_exact_pattern '")
                               + arg.integer_exact_pattern + "'; use ternary or sparse_k";
-#ifdef GOOGLE_TEST
-            FAIL() << why;
-#else
-            hipblaslt_cerr << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_FAIL(why);
         }
         // sparse_k keeps every result below 2 * 17 * 4 + 4 = 140 whatever K is, as long as alpha
         // and beta are at most 2 and nothing else scales the result.
@@ -2016,12 +2007,7 @@ void testing_matmul(const Arguments& arg)
             why = "requires K to be a multiple of 8 (one dword of int4 per global load)";
         if(why)
         {
-#ifdef GOOGLE_TEST
-            GTEST_SKIP() << "w4a16 " << why;
-#else
-            hipblaslt_cout << "Skipping w4a16: " << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_SKIP("Skipping w4a16: " << why);
         }
     }
 
@@ -2496,12 +2482,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         if(!why.empty())
         {
-#ifdef GOOGLE_TEST
-            FAIL() << why;
-#else
-            hipblaslt_cerr << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_FAIL(why);
         }
     }
 
@@ -2529,12 +2510,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             why = "placing scale_a or scale_b requires MX block scales";
         if(!why.empty())
         {
-#ifdef GOOGLE_TEST
-            FAIL() << why;
-#else
-            hipblaslt_cerr << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_FAIL(why);
         }
     }
 
@@ -2551,12 +2527,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             why = "fast_check_inject must name an iteration below fast_check_repeat";
         if(!why.empty())
         {
-#ifdef GOOGLE_TEST
-            FAIL() << why;
-#else
-            hipblaslt_cerr << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_FAIL(why);
         }
     }
 
@@ -2576,12 +2547,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             why = "skip_launch_solution supports only the C API with strided batches";
         if(!why.empty())
         {
-#ifdef GOOGLE_TEST
-            FAIL() << why;
-#else
-            hipblaslt_cerr << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_FAIL(why);
         }
     }
 
@@ -2597,12 +2563,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                   + "'; use ternary or sparse_k";
         if(!why.empty())
         {
-#ifdef GOOGLE_TEST
-            FAIL() << why;
-#else
-            hipblaslt_cerr << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_FAIL(why);
         }
     }
 
@@ -3357,24 +3318,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
-#ifdef GOOGLE_TEST
-                GTEST_SKIP() << "unsupported MX initialization: "
-                             << hipblaslt_initialization2string(arg.initialization);
-#else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
-                return;
-#endif
+                HIPBLASLT_SKIP(
+                    "Initialization of microscaling data only allows hpl, trig_float, "
+                    "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
+                    << hipblaslt_initialization2string(arg.initialization));
             }
             if(arg.algo_method == 1)
             {
-#ifdef GOOGLE_TEST
-                GTEST_SKIP() << "MX data types do not support algorithm \"all\"";
-#else
-                hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
-                return;
-#endif
+                HIPBLASLT_SKIP("MX data types do not support algorithm \"all\"");
             }
             MXScaleLayout const scaleLayoutA
                 = mxScaleLayoutForFormat(arg.scaleA, mxProp.gcnArchName);
@@ -3408,13 +3359,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
 #else
-#ifdef GOOGLE_TEST
-            GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time";
-#else
-            hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
-                           << std::endl;
-            return;
-#endif
+            HIPBLASLT_SKIP("MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at "
+                           "build time");
 #endif
         }
         else
@@ -3468,24 +3414,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
-#ifdef GOOGLE_TEST
-                GTEST_SKIP() << "unsupported MX initialization: "
-                             << hipblaslt_initialization2string(arg.initialization);
-#else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
-                return;
-#endif
+                HIPBLASLT_SKIP(
+                    "Initialization of microscaling data only allows hpl, trig_float, "
+                    "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
+                    << hipblaslt_initialization2string(arg.initialization));
             }
             if(arg.algo_method == 1)
             {
-#ifdef GOOGLE_TEST
-                GTEST_SKIP() << "MX data types do not support algorithm \"all\"";
-#else
-                hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
-                return;
-#endif
+                HIPBLASLT_SKIP("MX data types do not support algorithm \"all\"");
             }
             MXScaleLayout const scaleLayoutB
                 = mxScaleLayoutForFormat(arg.scaleB, mxProp.gcnArchName);
@@ -3521,13 +3457,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
 #else
-#ifdef GOOGLE_TEST
-            GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time";
-#else
-            hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
-                           << std::endl;
-            return;
-#endif
+            HIPBLASLT_SKIP("MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at "
+                           "build time");
 #endif
         }
         else
@@ -5495,12 +5426,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     // A size-threshold sweep may reach shapes the library declines; that is a correct answer.
     if(arg.allow_no_solution && returnedAlgoCount == 0)
     {
-#ifdef GOOGLE_TEST
-        GTEST_SKIP() << "the library offers no solution for this shape";
-#else
-        hipblaslt_cout << "the library offers no solution for this shape" << std::endl;
-        return;
-#endif
+        HIPBLASLT_SKIP("the library offers no solution for this shape");
     }
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
@@ -5516,12 +5442,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             const std::string why = "none of the " + std::to_string(heuristicResult.size())
                                     + " solutions for this case is a Stream-K kernel";
-#ifdef GOOGLE_TEST
-            GTEST_SKIP() << why;
-#else
-            hipblaslt_cout << why << std::endl;
-            return;
-#endif
+            HIPBLASLT_SKIP(why);
         }
     }
 
@@ -5531,12 +5452,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 + " needs at least " + std::to_string(arg.skip_launch_solution + 1)
                                 + " solutions, and this case has "
                                 + std::to_string(heuristicResult.size());
-#ifdef GOOGLE_TEST
-        GTEST_SKIP() << why;
-#else
-        hipblaslt_cout << why << std::endl;
-        return;
-#endif
+        HIPBLASLT_SKIP(why);
     }
 
     // A placed workspace replaces the normal one, which placement runs never use: placement
@@ -6158,12 +6074,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     : fcExpected[i].status;
                 if(!status.passed)
                 {
-#ifdef GOOGLE_TEST
-                    FAIL() << status.message;
-#else
-                    hipblaslt_cerr << status.message << std::endl;
-                    return;
-#endif
+                    HIPBLASLT_FAIL(status.message);
                 }
             }
         for(size_t run = 0; run < heuristicResult.size() * fcIterations; run++)
@@ -6434,11 +6345,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     iterReport += report;
                     if(fcInjecting)
                         return;
-#ifdef GOOGLE_TEST
-                    ADD_FAILURE() << report;
-#else
-                    hipblaslt_cerr << report << std::endl;
-#endif
+                    HIPBLASLT_REPORT_FAILURE(report);
                 };
 
                 for(int i = 0; i < gemm_count; i++)
@@ -6562,11 +6469,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         = std::string("fast_check placement: ") + arg.placement
                           + " was to cross a 4 GiB boundary but "
                           + (placed ? "this solution's range does not" : "no buffer was placed");
-#ifdef GOOGLE_TEST
-                    ADD_FAILURE() << report;
-#else
-                    hipblaslt_cerr << report << std::endl;
-#endif
+                    HIPBLASLT_REPORT_FAILURE(report);
                 }
                 if(placed)
                 {
@@ -6605,11 +6508,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         + " was not corrupted but failed:\n" + iterReport;
                     if(!selfTestError.empty())
                     {
-#ifdef GOOGLE_TEST
-                        ADD_FAILURE() << selfTestError;
-#else
-                        hipblaslt_cerr << selfTestError << std::endl;
-#endif
+                        HIPBLASLT_REPORT_FAILURE(selfTestError);
                     }
                 }
             }
@@ -6619,11 +6518,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         const std::string fcSummary = fcInjecting ? std::string() : fcLog.summary(fcIterations);
         if(!fcSummary.empty())
         {
-#ifdef GOOGLE_TEST
-            ADD_FAILURE() << fcSummary;
-#else
-            hipblaslt_cerr << fcSummary << std::endl;
-#endif
+            HIPBLASLT_REPORT_FAILURE(fcSummary);
         }
     }
     else
@@ -7483,11 +7378,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     {
         const std::string error = "skip_launch_solution: solution "
                                   + std::to_string(arg.skip_launch_solution) + " was never checked";
-#ifdef GOOGLE_TEST
-        ADD_FAILURE() << error;
-#else
-        hipblaslt_cerr << error << std::endl;
-#endif
+        HIPBLASLT_REPORT_FAILURE(error);
     }
 
     for(auto it : ptrs)
