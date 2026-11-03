@@ -37,41 +37,6 @@ void ie_fail(ie_state_t* st, const char* fmt, ...)
     va_end(ap);
 }
 
-/* The JSON DOM holds numbers as doubles, so a spelling beyond 2^53 may already
- * have been rounded; refuse it rather than trust it. Checked before the cast,
- * which is undefined for a non-finite or out-of-range double. */
-bool ie_number(double n, int64_t* out)
-{
-    if(!isfinite(n) || !(n >= -9007199254740991.0 && n <= 9007199254740991.0))
-        return false;
-    int64_t value = (int64_t)n;
-    if(n != (double)value)
-        return false;
-    *out = value;
-    return true;
-}
-
-/* Overflow is checked before each operation: signed overflow is undefined in
- * C++, and C++20 has no standard checked-arithmetic function. */
-bool ie_add_overflows(int64_t a, int64_t b)
-{
-    return (b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b);
-}
-
-bool ie_sub_overflows(int64_t a, int64_t b)
-{
-    return (b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b);
-}
-
-bool ie_mul_overflows(int64_t a, int64_t b)
-{
-    if(a == 0 || b == 0)
-        return false;
-    if(a > 0)
-        return b > 0 ? a > INT64_MAX / b : b < INT64_MIN / a;
-    return b > 0 ? a < INT64_MIN / b : b < INT64_MAX / a;
-}
-
 int64_t ie_eval(ie_state_t* st, const jd_val_t* e);
 
 int64_t ie_binary(ie_state_t* st, const char* op, int64_t a, int64_t b)
@@ -96,15 +61,16 @@ int64_t ie_binary(ie_state_t* st, const char* op, int64_t a, int64_t b)
     }
     if(strcmp(op, "add") == 0 || strcmp(op, "sub") == 0 || strcmp(op, "mul") == 0)
     {
-        const bool overflows = op[0] == 'a'   ? ie_add_overflows(a, b)
-                               : op[0] == 's' ? ie_sub_overflows(a, b)
-                                              : ie_mul_overflows(a, b);
-        if(overflows)
+        int64_t result = 0;
+        const bool fits = op[0] == 'a'   ? rocke_intexpr_checked_add(a, b, &result)
+                          : op[0] == 's' ? rocke_intexpr_checked_sub(a, b, &result)
+                                         : rocke_intexpr_checked_mul(a, b, &result);
+        if(!fits)
         {
             ie_fail(st, "intexpr %s overflows int64 (%lld, %lld)", op, la, lb);
             return 0;
         }
-        return op[0] == 'a' ? a + b : op[0] == 's' ? a - b : a * b;
+        return result;
     }
     if(strcmp(op, "eq") == 0)
         return a == b;
@@ -151,9 +117,9 @@ int64_t ie_eval(ie_state_t* st, const jd_val_t* e)
     if(rocke_jnum(e, &n))
     {
         int64_t value;
-        if(!ie_number(n, &value))
+        if(!rocke_intexpr_exact_int(n, &value))
         {
-            ie_fail(st, "intexpr number is not an integer");
+            ie_fail(st, ROCKE_INTEXPR_NOT_EXACT_INT);
             return 0;
         }
         return value;
@@ -224,6 +190,48 @@ int64_t ie_eval(ie_state_t* st, const jd_val_t* e)
 }
 
 } // namespace
+
+/* Overflow is checked before each operation, so no signed overflow happens. */
+extern "C" bool rocke_intexpr_checked_add(int64_t a, int64_t b, int64_t* out)
+{
+    if((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b))
+        return false;
+    *out = a + b;
+    return true;
+}
+
+extern "C" bool rocke_intexpr_checked_sub(int64_t a, int64_t b, int64_t* out)
+{
+    if((b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b))
+        return false;
+    *out = a - b;
+    return true;
+}
+
+extern "C" bool rocke_intexpr_checked_mul(int64_t a, int64_t b, int64_t* out)
+{
+    if(a != 0 && b != 0)
+    {
+        const bool overflows = a > 0 ? (b > 0 ? a > INT64_MAX / b : b < INT64_MIN / a)
+                                     : (b > 0 ? a < INT64_MIN / b : b < INT64_MAX / a);
+        if(overflows)
+            return false;
+    }
+    *out = a * b;
+    return true;
+}
+
+extern "C" bool rocke_intexpr_exact_int(double n, int64_t* out)
+{
+    const double most = (double)ROCKE_INTEXPR_EXACT_INT_MAX;
+    if(!isfinite(n) || !(n >= -most && n <= most))
+        return false;
+    const int64_t value = (int64_t)n;
+    if(n != (double)value)
+        return false;
+    *out = value;
+    return true;
+}
 
 extern "C" bool rocke_intexpr_eval(
     const jd_val_t* expr, const rocke_intexpr_env_t* env, int64_t* out, char* err, size_t err_cap)

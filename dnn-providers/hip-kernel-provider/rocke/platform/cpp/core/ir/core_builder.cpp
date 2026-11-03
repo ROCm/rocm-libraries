@@ -874,27 +874,21 @@ static void rocke_i_first_fact_error(void* ctx, const char* message)
 static bool
     rocke_i_param_set_facts(rocke_ir_builder_t* b, rocke_param_t* p, const rocke_int_facts_t* facts)
 {
-    const struct
+    for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
     {
-        const char* word;
-        const rocke_int_bound_t* bound;
-    } bounds[] = {{"ge", &facts->ge},
-                  {"gt", &facts->gt},
-                  {"le", &facts->le},
-                  {"lt", &facts->lt},
-                  {"eq", &facts->eq}};
-    for(const auto& entry : bounds)
-    {
-        if(entry.bound->value_bound != NULL)
+        const char* word = bound_word.word;
+        const rocke_int_bound_t* bound = &(facts->*bound_word.bound);
+        if(bound->value_bound != NULL)
         {
             /* Python IRBuilder._leaf_name: a Value bound is a parameter of this
              * kernel, stored as its relation; the host evaluates nothing else. */
-            const rocke_value_t* bound = entry.bound->value_bound;
-            const char* shown = bound->name[0] == '%' ? bound->name + 1 : bound->name;
+            const rocke_value_t* bound_value = bound->value_bound;
+            const char* shown
+                = bound_value->name[0] == '%' ? bound_value->name + 1 : bound_value->name;
             const char* leaf = NULL;
             for(int i = 0; i < b->num_param_lookup; i++)
             {
-                if(b->param_values[i] == bound)
+                if(b->param_values[i] == bound_value)
                 {
                     leaf = b->param_names[i];
                 }
@@ -905,10 +899,10 @@ static bool
                                 ROCKE_ERR_VALUE,
                                 "param %s: %s=%s uses %s, which %s",
                                 p->name,
-                                entry.word,
+                                word,
                                 shown,
                                 shown,
-                                bound->op == NULL
+                                bound_value->op == NULL
                                     ? "is a parameter of another kernel -- the host can only "
                                       "evaluate this kernel's parameters and ints"
                                     : "is computed in the kernel -- the host can only "
@@ -919,20 +913,19 @@ static bool
             json += leaf;
             json += "\"}";
             const char* canonical = rocke_relation_canonical(json.c_str(), &b->arena, NULL, NULL);
-            rocke_attr_set_str(b, &p->attrs, entry.word, canonical ? canonical : json.c_str());
+            rocke_attr_set_str(b, &p->attrs, word, canonical ? canonical : json.c_str());
         }
-        else if(entry.bound->relation != NULL)
+        else if(bound->relation != NULL)
         {
             /* Stored canonical, as the Python builder stores it; a string that
              * holds no relation is kept as given and refused below. */
             const char* canonical
-                = rocke_relation_canonical(entry.bound->relation, &b->arena, NULL, NULL);
-            rocke_attr_set_str(
-                b, &p->attrs, entry.word, canonical ? canonical : entry.bound->relation);
+                = rocke_relation_canonical(bound->relation, &b->arena, NULL, NULL);
+            rocke_attr_set_str(b, &p->attrs, word, canonical ? canonical : bound->relation);
         }
-        else if(entry.bound->set)
+        else if(bound->set)
         {
-            rocke_attr_set_int(b, &p->attrs, entry.word, entry.bound->value);
+            rocke_attr_set_int(b, &p->attrs, word, bound->value);
         }
     }
     if(facts->multiple_of_set)

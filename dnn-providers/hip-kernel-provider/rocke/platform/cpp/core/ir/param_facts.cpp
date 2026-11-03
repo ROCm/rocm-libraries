@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <limits.h>
 #include <map>
-#include <math.h>
 #include <optional>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,6 +28,7 @@
 #include "rocke/arena.h"
 #include "rocke/dtypes.h"
 #include "rocke/dtypes_internal.h"
+#include "rocke/intexpr.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 #include "rocke/json_dom.h"
@@ -37,18 +37,9 @@
 namespace
 {
 
+/* Python param_facts.FACT_WORDS: the bound words (ROCKE_INT_BOUND_WORDS), then
+ * multiple_of, which takes no bound. */
 const char* const kFactWords[] = {"ge", "gt", "le", "lt", "eq", "multiple_of"};
-/* The fact words that take a bound (Python param_facts._BOUND_WORDS), each with
- * the rocke_int_facts_t field it fills. */
-const struct
-{
-    const char* word;
-    rocke_int_bound_t rocke_int_facts_t::*bound;
-} kBoundWords[] = {{"ge", &rocke_int_facts_t::ge},
-                   {"gt", &rocke_int_facts_t::gt},
-                   {"le", &rocke_int_facts_t::le},
-                   {"lt", &rocke_int_facts_t::lt},
-                   {"eq", &rocke_int_facts_t::eq}};
 const char* const kPointerAttrs[] = {"noalias",
                                      "readonly",
                                      "writeonly",
@@ -57,7 +48,6 @@ const char* const kPointerAttrs[] = {"noalias",
                                      "align",
                                      "dereferenceable",
                                      "addr_space"};
-const int64_t kExactFactInt = 9007199254740991LL; /* 2^53 - 1 */
 
 bool is_int_type(const rocke_type_t* t)
 {
@@ -72,18 +62,6 @@ std::string type_name(const rocke_type_t* t)
 }
 
 /* ------------------------------------------------------------- relations */
-
-/* A JSON number that is an exact integer within +/-(2^53 - 1). */
-bool exact_int(double n, int64_t* out)
-{
-    if(!isfinite(n) || !(n >= -9007199254740991.0 && n <= 9007199254740991.0))
-        return false;
-    const int64_t value = (int64_t)n;
-    if(n != (double)value)
-        return false;
-    *out = value;
-    return true;
-}
 
 bool is_relation_op(const char* key)
 {
@@ -101,7 +79,7 @@ std::string relation_error(const jd_val_t* t)
     if(t->kind == JD_NUM)
     {
         int64_t unused;
-        return exact_int(t->num, &unused) ? "" : "intexpr number is not an integer";
+        return rocke_intexpr_exact_int(t->num, &unused) ? "" : ROCKE_INTEXPR_NOT_EXACT_INT;
     }
     if(t->kind == JD_OBJ && t->obj_len == 1)
     {
@@ -251,37 +229,28 @@ using interval_t = std::pair<end_t, end_t>;
 
 end_t checked_add(end_t a, end_t b)
 {
-    if(!a || !b)
+    int64_t sum = 0;
+    if(!a || !b || !rocke_intexpr_checked_add(*a, *b, &sum))
         return std::nullopt;
-    if((*b > 0 && *a > INT64_MAX - *b) || (*b < 0 && *a < INT64_MIN - *b))
-        return std::nullopt;
-    return *a + *b;
+    return sum;
 }
 
 end_t checked_sub(end_t a, end_t b)
 {
-    if(!a || !b)
+    int64_t difference = 0;
+    if(!a || !b || !rocke_intexpr_checked_sub(*a, *b, &difference))
         return std::nullopt;
-    if((*b < 0 && *a > INT64_MAX + *b) || (*b > 0 && *a < INT64_MIN + *b))
-        return std::nullopt;
-    return *a - *b;
+    return difference;
 }
 
 /* a * b, with the sign of an overflowing result in *overflow (0 when exact). */
 int64_t mul_or_overflow(int64_t a, int64_t b, int* overflow)
 {
+    int64_t product = 0;
     *overflow = 0;
-    if(a == 0 || b == 0)
-        return 0;
-    const bool negative = (a < 0) != (b < 0);
-    const bool fits = negative ? (a > 0 ? b >= INT64_MIN / a : a >= INT64_MIN / b)
-                               : (a > 0 ? b <= INT64_MAX / a : b >= INT64_MAX / a);
-    if(!fits)
-    {
-        *overflow = negative ? -1 : 1;
-        return 0;
-    }
-    return a * b;
+    if(!rocke_intexpr_checked_mul(a, b, &product))
+        *overflow = (a < 0) != (b < 0) ? -1 : 1;
+    return product;
 }
 
 /* Python param_facts.stated_param_interval's ends: unstated, or a resolved end. */
@@ -583,7 +552,7 @@ void checker_t::run()
                              + name + " is " + tname);
     if(!errors.empty())
         return;
-    for(const auto& bound_word : kBoundWords)
+    for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
     {
         const char* word = bound_word.word;
         const rocke_attr_value_t* v = rocke_attr_get(attrs, word);
@@ -634,13 +603,13 @@ void checker_t::run()
             if(v->u.i < tmin || v->u.i > tmax)
                 errors.push_back("param " + name + ": " + stated + " is outside the range of "
                                  + tname);
-            else if(v->u.i > kExactFactInt || v->u.i < -kExactFactInt)
+            else if(v->u.i > ROCKE_INTEXPR_EXACT_INT_MAX || v->u.i < -ROCKE_INTEXPR_EXACT_INT_MAX)
                 errors.push_back("param " + name + ": " + stated
                                  + " is outside +/-(2^53 - 1), which a stored fact cannot "
                                    "hold exactly");
         }
     resolver_t resolver{params, index, &arena, {}};
-    for(const auto& bound_word : kBoundWords)
+    for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
     {
         const char* word = bound_word.word;
         const rocke_attr_value_t* v = rocke_attr_get(attrs, word);
@@ -674,7 +643,7 @@ const struct
 /* A number that is an exact integer, or false. */
 bool attr_int(const rocke_param_attr_value_t* value, int64_t* out)
 {
-    return value->kind == ROCKE_PARAM_ATTR_NUMBER && exact_int(value->number, out);
+    return value->kind == ROCKE_PARAM_ATTR_NUMBER && rocke_intexpr_exact_int(value->number, out);
 }
 
 const char* refuse(char* buf, size_t cap, const std::string& message)
@@ -776,7 +745,7 @@ extern "C" const char* rocke_param_opts_set_attr(rocke_param_opts_t* opts,
         opts->*flag.set = true;
         return NULL;
     }
-    for(const auto& entry : kBoundWords)
+    for(const auto& entry : ROCKE_INT_BOUND_WORDS)
     {
         if(strcmp(key, entry.word) != 0)
             continue;

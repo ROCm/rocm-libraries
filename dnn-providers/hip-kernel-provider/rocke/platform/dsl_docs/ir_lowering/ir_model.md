@@ -377,9 +377,9 @@ A lane whose value breaks a fact stops at the check, before anything uses the va
 to the kernel's GPU-check word (`rocke_gpu_check_failed_<kernel>`, an i32 global in the code
 object, zero at load) and returns from the kernel. A wave all of whose lanes have returned has
 ended, and an ended wave does not hold the others at a workgroup barrier, so the launch completes
-with no trap for any OS to handle. (Run on Linux on gfx90a, gfx942, gfx1100 and gfx1201; the GPU tests
-are skipped on other GPUs until they have run there, and a workgroup returning before a gfx1250
-cluster barrier has not run on hardware yet.) `rocke.runtime` then fails the launch with
+with no trap for any OS to handle. (The GPU tests in `tests/core/test_gpu_checked_value.py` run
+on Linux on the processors its `_RUN_ON` lists and are skipped on other GPUs until they have
+run there; a workgroup returning before a gfx1250 cluster barrier has not run on hardware yet.) `rocke.runtime` then fails the launch with
 `GpuCheckFailed`, and the process keeps the GPU.
 
 **A false fact fails the launch, and every output of that launch is undefined**, not only what the

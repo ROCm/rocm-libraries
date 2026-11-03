@@ -20,7 +20,6 @@
 #include "rocke/ir_import.h"
 
 #include <limits.h>
-#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -29,6 +28,7 @@
 
 #include "rocke/arena.h"
 #include "rocke/error.hpp"
+#include "rocke/intexpr.h"
 #include "rocke/ir_internal.h"
 
 /* ====================================================================== */
@@ -789,18 +789,13 @@ static const rocke_type_t* import_type(importer_t* im, const jval_t* t)
 
 static bool import_int_value(importer_t* im, const char* context, const jval_t* v, int64_t* out)
 {
-    /* JSON numbers are doubles in this parser. Stay in the safe-integer range
-     * and validate before casting: larger adjacent integer spellings can round
-     * to the same double, while non-finite and out-of-range conversions are
-     * undefined behavior. */
-    if(!v || v->kind != J_NUM || !isfinite(v->num)
-       || !(v->num >= -9007199254740991.0 && v->num <= 9007199254740991.0)
-       || v->num != (double)(int64_t)v->num)
+    /* JSON numbers are doubles in this parser, so only an exact one is an
+     * integer (rocke_intexpr_exact_int). */
+    if(!v || v->kind != J_NUM || !rocke_intexpr_exact_int(v->num, out))
     {
         imp_fail(im, "%s is not an integer", context);
         return false;
     }
-    *out = (int64_t)v->num;
     return true;
 }
 

@@ -119,7 +119,8 @@ void case_leaves_and_refusals()
     expect_outcome("{\"mul\": [{\"mul\": [2147483648, 2147483648]}, 2]}",
                    "error intexpr mul overflows int64 (4611686018427387904, 2)",
                    __LINE__);
-    expect_outcome("2.5", "error intexpr number is not an integer", __LINE__);
+    expect_outcome(
+        "2.5", "error intexpr number is not an exact integer within +/-(2^53 - 1)", __LINE__);
 }
 
 void case_env_may_bind_nothing()

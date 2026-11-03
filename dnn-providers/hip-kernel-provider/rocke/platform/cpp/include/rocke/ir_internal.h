@@ -535,6 +535,22 @@ int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask);
 /* `t`'s name in upper case, as a declaration text writes a type (I32): the
  * Python texts' `t.name.upper()`. (cpp/core/ir/param_facts.cpp) */
 std::string rocke_i_upper_type_name(const rocke_type_t* t);
+
+/* A fact word that takes a bound, with the rocke_int_facts_t field it fills. */
+struct rocke_int_bound_word_t
+{
+    const char* word;
+    rocke_int_bound_t rocke_int_facts_t::*bound;
+};
+
+/* The fact words that take a bound, in Python param_facts._BOUND_WORDS order:
+ * the one table from a word to its field, which the param builder, the GPU-check
+ * builder and the param-attr reader all read. */
+inline constexpr rocke_int_bound_word_t ROCKE_INT_BOUND_WORDS[] = {{"ge", &rocke_int_facts_t::ge},
+                                                                   {"gt", &rocke_int_facts_t::gt},
+                                                                   {"le", &rocke_int_facts_t::le},
+                                                                   {"lt", &rocke_int_facts_t::lt},
+                                                                   {"eq", &rocke_int_facts_t::eq}};
 #endif
 
 #endif /* ROCKE_IR_INTERNAL_H */

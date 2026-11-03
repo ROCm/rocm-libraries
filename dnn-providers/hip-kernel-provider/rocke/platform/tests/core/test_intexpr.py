@@ -101,9 +101,9 @@ CASES = [
         "error intexpr mod needs non-negative operands, got (7, -2)",
     ),
     # number leaves the JSON tree cannot hold exactly
-    (2.5, "error intexpr number is not an integer"),
-    ((1 << 53), "error intexpr number is not an integer"),
-    (1e16, "error intexpr number is not an integer"),
+    (2.5, "error intexpr number is not an exact integer within +/-(2^53 - 1)"),
+    ((1 << 53), "error intexpr number is not an exact integer within +/-(2^53 - 1)"),
+    (1e16, "error intexpr number is not an exact integer within +/-(2^53 - 1)"),
     # malformed trees
     (True, "error bad intexpr"),
     ("D", "error bad intexpr"),

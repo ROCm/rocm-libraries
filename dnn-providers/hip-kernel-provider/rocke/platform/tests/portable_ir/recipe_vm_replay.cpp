@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "malformed_param_attrs.h"
+#include "rocke/intexpr.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/recipe_vm.h"
@@ -223,7 +224,7 @@ void check_invalid_integer_values()
         const std::string expr_label = std::string("integer expression ") + spelling;
         check(run_attr_recipe(recipe, &ll, &err) != ROCKE_OK,
               (expr_label + " is rejected").c_str());
-        check(err.find("not an integer") != std::string::npos,
+        check(err.find(ROCKE_INTEXPR_NOT_EXACT_INT) != std::string::npos,
               (expr_label + " has a diagnostic (got: " + err + ")").c_str());
     }
 }

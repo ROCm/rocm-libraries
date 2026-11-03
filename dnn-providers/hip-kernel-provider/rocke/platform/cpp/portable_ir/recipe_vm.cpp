@@ -47,7 +47,6 @@
 #include "rocke/recipe_vm.h"
 
 #include <limits.h>
-#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -315,32 +314,14 @@ static void rv_ivar_push(rvm_t* vm, const char* name, long value)
 
 /* ----------------------------------------------------------- intexpr eval */
 
+/* A recipe number as a long: an exact integer (rocke_intexpr_exact_int) that
+ * also fits a long, which is 32 bits on Windows. */
 static bool rv_number_to_long(double n, long* out)
 {
-    /* Check before casting: larger adjacent integer spellings can round to the
-     * same double, while non-finite and out-of-range conversions are undefined.
-     * The upper long bound is exclusive so the first out-of-range power of two
-     * is rejected even where LONG_MAX rounds to it. */
-    if(!isfinite(n) || n < -9007199254740991.0 || n > 9007199254740991.0 || n < (double)LONG_MIN
-       || n >= (double)LONG_MAX + 1.0)
+    int64_t value = 0;
+    if(!rocke_intexpr_exact_int(n, &value) || value < LONG_MIN || value > LONG_MAX)
         return false;
-    long value = (long)n;
-    if(n != (double)value)
-        return false;
-    *out = value;
-    return true;
-}
-
-static bool rv_number_to_int64(double n, int64_t* out)
-{
-    /* Recipe numbers use a double-backed DOM, so values outside the safe-integer
-     * range can silently change when adjacent spellings round to one double. */
-    if(!isfinite(n) || !(n >= -9007199254740991.0 && n <= 9007199254740991.0))
-        return false;
-    int64_t value = (int64_t)n;
-    if(n != (double)value)
-        return false;
-    *out = value;
+    *out = (long)value;
     return true;
 }
 
@@ -859,7 +840,7 @@ static void rv_kernel_int_list(rvm_t* vm, rocke_attr_map_t* m, const char* key, 
             rv_fail(vm, "kernel attr '%s': item %d is not a bare int", key, i);
             return;
         }
-        if(!rv_number_to_int64(d, &ints[i]))
+        if(!rocke_intexpr_exact_int(d, &ints[i]))
         {
             rv_fail(vm, "kernel attr '%s': item %d is not an integer", key, i);
             return;
@@ -1442,7 +1423,7 @@ static rocke_status_t rv_run_root(jd_val_t* root,
             else if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
             {
                 int64_t value;
-                if(!rv_number_to_int64(d, &value))
+                if(!rocke_intexpr_exact_int(d, &value))
                     rv_fail(&vm, "kernel attr '%s' value is not an integer", key);
                 else
                     rocke_attr_set_int(out_builder, &k->attrs, key, value);

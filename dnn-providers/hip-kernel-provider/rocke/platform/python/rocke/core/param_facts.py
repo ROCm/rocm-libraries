@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
 from .intexpr import (
+    EXACT_INT_MAX,
     INT64_MAX,
     INT64_MIN,
     relation_error,
@@ -84,9 +85,6 @@ POINTER_ATTRS = (
 # Every key a parameter may carry, as the portable-IR importers list it
 # (ROCKE_PARAM_ATTR_KEYS in rocke/ir.h).
 PARAM_ATTR_KEYS = POINTER_ATTRS + FACT_WORDS
-
-# The largest integer a stored fact holds exactly (portable IR is JSON).
-_EXACT_FACT_INT = (1 << 53) - 1
 
 # The integer types a fact may be stated on (the integer scalars a value can
 # have). ``rocke_int_type_limits`` in ``cpp/core/ir/param_facts.cpp`` lists
@@ -421,7 +419,7 @@ def declaration_errors(
                 errors.append(
                     f"param {name}: {word}={value} is outside the range of {type_name}"
                 )
-            elif abs(value) > _EXACT_FACT_INT:
+            elif abs(value) > EXACT_INT_MAX:
                 errors.append(
                     f"param {name}: {word}={value} is outside +/-(2^53 - 1), which a "
                     "stored fact cannot hold exactly"

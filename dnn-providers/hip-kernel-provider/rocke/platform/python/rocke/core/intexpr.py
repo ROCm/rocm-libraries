@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any
 
 __all__ = [
+    "EXACT_INT_MAX",
     "INT64_MAX",
     "INT64_MIN",
     "IntExpr",
@@ -63,9 +64,12 @@ __all__ = [
 
 INT64_MIN = -(1 << 63)
 INT64_MAX = (1 << 63) - 1
-# The largest integer a double holds exactly; both evaluators refuse a number
-# leaf beyond it rather than trust its spelling.
-_EXACT_DOUBLE_INT = (1 << 53) - 1
+# The largest magnitude a portable-IR number holds exactly, 2^53 - 1 (JSON
+# numbers are doubles). The evaluators and the parameter-fact rules refuse a
+# number beyond it rather than trust its spelling (C++: ROCKE_INTEXPR_EXACT_INT_MAX).
+EXACT_INT_MAX = (1 << 53) - 1
+# Why a number is refused (C++: ROCKE_INTEXPR_NOT_EXACT_INT).
+_NOT_EXACT_INT = "intexpr number is not an exact integer within +/-(2^53 - 1)"
 
 
 class IntExprError(ValueError):
@@ -146,11 +150,11 @@ def _apply_binary(op: str, a: int, b: int) -> int:
 
 def _number(node: float) -> int:
     if isinstance(node, float):
-        if not node.is_integer() or abs(node) > _EXACT_DOUBLE_INT:
-            raise IntExprError("intexpr number is not an integer")
+        if not node.is_integer() or abs(node) > EXACT_INT_MAX:
+            raise IntExprError(_NOT_EXACT_INT)
         return int(node)
-    if abs(node) > _EXACT_DOUBLE_INT:
-        raise IntExprError("intexpr number is not an integer")
+    if abs(node) > EXACT_INT_MAX:
+        raise IntExprError(_NOT_EXACT_INT)
     return node
 
 
@@ -280,7 +284,7 @@ def _term(function: str, term: Any) -> Any:
             f"{function}: a term is an int, a kernel parameter or a nested "
             f"sum_of / product_of / quotient_of / difference_of, got {term!r}"
         )
-    if isinstance(term, int) and abs(term) > _EXACT_DOUBLE_INT:
+    if isinstance(term, int) and abs(term) > EXACT_INT_MAX:
         raise ValueError(
             f"{function}: {term} is outside +/-(2^53 - 1), which the stored "
             "expression cannot hold exactly"
@@ -344,9 +348,9 @@ def relation_error(tree: Any) -> str | None:
         return "a relation is an int, a param leaf, or add / sub / mul / div of two relations"
     if isinstance(tree, (int, float)):
         if isinstance(tree, float) and not tree.is_integer():
-            return "intexpr number is not an integer"
-        if abs(tree) > _EXACT_DOUBLE_INT:
-            return "intexpr number is not an integer"
+            return _NOT_EXACT_INT
+        if abs(tree) > EXACT_INT_MAX:
+            return _NOT_EXACT_INT
         return None
     if isinstance(tree, dict) and len(tree) == 1:
         ((key, value),) = tree.items()

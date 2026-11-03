@@ -55,6 +55,30 @@ typedef struct
     void* ctx;
 } rocke_intexpr_env_t;
 
+/* The largest magnitude a portable-IR number holds exactly, 2^53 - 1: the JSON
+ * DOMs keep numbers as doubles. The evaluator, the param-fact rules, the recipe
+ * VM and the JSON importer refuse a number beyond it rather than trust its
+ * spelling (Python intexpr.EXACT_INT_MAX). */
+#define ROCKE_INTEXPR_EXACT_INT_MAX 9007199254740991LL
+
+/* Why a number beyond it, or one with a fraction, is refused (Python
+ * intexpr._NOT_EXACT_INT, same words). */
+#define ROCKE_INTEXPR_NOT_EXACT_INT "intexpr number is not an exact integer within +/-(2^53 - 1)"
+
+/* a + b, a - b and a * b in int64_t: write the result to *out and return
+ * true, or return false, leaving *out unchanged, when the exact result leaves
+ * int64. The C++ engine's one checked int64 arithmetic, used by the evaluator
+ * and the param-fact interval rules: signed overflow is undefined in C++, and
+ * C++20 has no standard checked-arithmetic function. */
+bool rocke_intexpr_checked_add(int64_t a, int64_t b, int64_t* out);
+bool rocke_intexpr_checked_sub(int64_t a, int64_t b, int64_t* out);
+bool rocke_intexpr_checked_mul(int64_t a, int64_t b, int64_t* out);
+
+/* Whether `n` is an integer within +/-ROCKE_INTEXPR_EXACT_INT_MAX; if so,
+ * writes it to *out. Checked before the cast, which is undefined for a
+ * non-finite or out-of-range double. */
+bool rocke_intexpr_exact_int(double n, int64_t* out);
+
 /* Evaluate `expr` into *out. Returns false and writes the reason into
  * err/err_cap when the tree is malformed, names an unbound leaf, or is refused
  * (see above); *out is then left unchanged. */

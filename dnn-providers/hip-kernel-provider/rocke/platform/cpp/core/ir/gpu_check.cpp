@@ -693,11 +693,10 @@ rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
                "on the GPU state ge and le");
     const kernel_view_t view{b};
     std::vector<word_t> words;
-    const word_t candidates[]
-        = {{"ge", &facts->ge}, {"gt", &facts->gt}, {"le", &facts->le}, {"lt", &facts->lt}};
-    for(const word_t& entry : candidates)
-        if(stated(*entry.bound))
-            words.push_back(entry);
+    /* eq was refused above, so every stated word here is a lower or upper end. */
+    for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
+        if(stated(facts->*bound_word.bound))
+            words.push_back(word_t{bound_word.word, &(facts->*bound_word.bound)});
     bool has_lower;
     bool has_upper;
     int64_t lower = 0;
