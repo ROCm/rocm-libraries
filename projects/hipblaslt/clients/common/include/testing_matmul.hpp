@@ -2639,8 +2639,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     // failing an allocation or getting the process killed when the host runs out. hipblaslt-test
     // checks every case; hipblaslt-bench checks fast_check cases. The estimate follows the
     // allocations below: the device buffers block_count times for the rotating buffers, a
-    // workspace of at most user_allocated_workspace, the host buffers, and the float or double
-    // copies the CPU reference makes of one batch of A and B, and of D when To is not Tc.
+    // workspace of at most user_allocated_workspace, the host buffers, and the larger of the
+    // swizzle's scratch arrays and the float or double copies the CPU reference makes.
 #ifdef GOOGLE_TEST
     const bool                         memory_preflight = true;
     std::optional<MemoryEstimateCheck> memoryEstimateCheck;
@@ -2657,7 +2657,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         // cblas_gemm computes in double for int32 and in at least float for every other type.
         const size_t sizeRef
             = Tc == HIP_R_32I ? sizeof(double) : std::max(sizeof(float), realDataTypeSize(Tc));
-        size_t hostBytes = 0, deviceBytes = 0, referenceBytes = 0;
+        size_t hostBytes = 0, deviceBytes = 0, transientBytes = 0;
         for(int i = 0; i < gemm_count; i++)
         {
             deviceBytes
@@ -2685,24 +2685,42 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hostBytes += (mxA ? size_A[i] : 0) * sizeof(float)
                              + (mxB ? size_B[i] : 0) * sizeof(float);
             }
-            // The host buffers: MX generation also retains its packed host operands,
-            // even in fast_check_only mode. The pool pins 20% extra for a buffer below
-            // kHostPoolRetainLimit, so that a slightly larger request can reuse it.
+            // W4A16 keeps a float copy of A, dequantized, for the CPU reference.
+            if(isW4A16Scaling(arg.scaleA))
+                hostBytes += size_t(lda[i]) * size_t(M[i]) * sizeof(float);
+            // The host buffers. The pool pins 20% extra for a buffer below kHostPoolRetainLimit,
+            // so that a slightly larger request can reuse it.
             size_t pinned = 0;
             auto   pin    = [&](size_t bytes, size_t count = 1) {
                 pinned += (bytes < kHostPoolRetainLimit ? bytes + bytes / 5 : bytes) * count;
             };
-            if(!fast_check_only || mxA)
+            if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
+            {
+                // MX generation also retains its packed host operands, even in fast_check_only
+                // mode.
+                if(!fast_check_only || mxA)
+                    pin(size_A[i] * realDataTypeSize(TiA));
+                if(!fast_check_only || mxB)
+                    pin(size_B[i] * realDataTypeSize(TiB));
+                if(!fast_check_only || arg.c_equal_d)
+                    pin(size_C[i] * sizeTo);
+                pin(size_D_copy[i] * sizeTo, 2);
+                pin(size_D_copy[i] * sizeAlpha, 3);
+                pin(size_bias[i] * realDataTypeSize(Tbias), 2);
+                pin(size_E[i] * realDataTypeSize(Taux), arg.use_e && !arg.gradient ? 2 : 1);
+                pin(size_scaleAlphaVec[i] * sizeAlpha);
+            }
+            else
+            {
+                // Each pointer-array batch has its own A, B, C, two copies of D and two of the
+                // bias; the scale vectors below are allocated once.
                 pin(size_A[i] * realDataTypeSize(TiA));
-            if(!fast_check_only || mxB)
                 pin(size_B[i] * realDataTypeSize(TiB));
-            if(!fast_check_only || arg.c_equal_d)
                 pin(size_C[i] * sizeTo);
-            pin(size_D_copy[i] * sizeTo, 2);
-            pin(size_D_copy[i] * sizeAlpha, 3);
-            pin(size_bias[i] * realDataTypeSize(Tbias), 2);
-            pin(size_E[i] * realDataTypeSize(Taux), arg.use_e && !arg.gradient ? 2 : 1);
-            pin(size_scaleAlphaVec[i] * sizeAlpha);
+                pin(size_D_copy[i] * sizeTo, 2);
+                pin(size_bias[i] * realDataTypeSize(Tbias), 2);
+                pinned *= copies;
+            }
             pin(size_scaleAVec[i] * num_batches[i] * sizeAlpha);
             pin(size_scaleBVec[i] * num_batches[i] * sizeAlpha);
             // The temporary host copies a swizzled A or B is built in before it is uploaded.
@@ -2710,13 +2728,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                 pin(size_dA[i] * realDataTypeSize(TiA));
             if(do_swizzle_b)
                 pin(size_dB[i] * realDataTypeSize(TiB));
-            hostBytes += pinned * copies;
+            hostBytes += pinned;
+            // Memory held only for a while, freed before the next use: the swizzle builds the
+            // layout in up to three arrays the size of the swizzled operand, and the CPU
+            // reference copies one batch of A and B, and of D when cblas_gemm computes in
+            // another type than the D it is given (To, or Tc with an epilogue).
+            if(do_swizzle_a)
+                transientBytes = std::max(transientBytes, 3 * size_dA[i] * realDataTypeSize(TiA));
+            if(do_swizzle_b)
+                transientBytes = std::max(transientBytes, 3 * size_dB[i] * realDataTypeSize(TiB));
+            const bool promoted = Tc == HIP_R_32I || Tc == HIP_R_16F;
             if(host_reference)
-                referenceBytes = std::max(referenceBytes,
-                                          (size_t(A_col[i]) * size_t(lda[i])
-                                           + size_t(B_col[i]) * size_t(ldb[i])
-                                           + (To != Tc ? size_t(N[i]) * size_t(ldd[i]) : 0))
-                                              * sizeRef);
+                transientBytes = std::max(
+                    transientBytes,
+                    (size_t(A_col[i]) * size_t(lda[i]) + size_t(B_col[i]) * size_t(ldb[i])
+                     + (To != Tc || promoted ? size_t(N[i]) * size_t(ldd[i]) : 0))
+                        * sizeRef);
         }
         // scaleC, scaleD and scaleE are one value each, and amaxD two on the host (result and
         // reference); the device count reuses the host's, which is at least as large.
@@ -2724,12 +2751,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             = size_t(arg.scaleC) + size_t(arg.scaleD) + size_t(arg.scaleE) + 2 * size_t(arg.amaxD);
         deviceBytes += size_t(arg.user_allocated_workspace) * size_t(block_count)
                        + size_t(gemm_count) * sideScalars * sizeAlpha;
-        hostBytes += size_t(gemm_count) * sideScalars * sizeAlpha + referenceBytes;
+        hostBytes += size_t(gemm_count) * sideScalars * sizeAlpha + transientBytes;
         std::string why = fast_check_memory_shortfall(deviceBytes, hostBytes);
         if(!why.empty())
             SKIP_FOR_MEMORY(why);
 #ifdef GOOGLE_TEST
-        memoryEstimateCheck.emplace(hostBytes);
+        if(arg.threads <= 1)
+            memoryEstimateCheck.emplace(hostBytes);
 #endif
     }
 

@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -35,6 +36,8 @@ inline MemoryEstimateMeasurement& last_memory_estimate_measurement()
 // memory, which counts pinned and pageable memory alike. The case fails when it used more than
 // its estimate plus a margin for memory the estimate leaves out, such as code objects loaded for
 // a new kernel. Linux only; elsewhere, or when the peak cannot be reset, nothing is checked.
+// Cases that run on several threads at once share the peak, so testing_matmul does not measure
+// them.
 class MemoryEstimateCheck
 {
 public:
@@ -50,9 +53,9 @@ public:
 #ifdef __linux__
         // The first matmul case in a process also loads the kernel library, which raised the
         // peak by about 0.6 GiB on gfx90a, so the check starts with the second case.
-        static bool first_case = true;
-        const bool  first      = std::exchange(first_case, false);
-        const char* on         = std::getenv("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE");
+        static std::atomic<bool> first_case{true};
+        const bool               first = first_case.exchange(false);
+        const char*              on    = std::getenv("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE");
         if(first || !on || !*on || !strcmp(on, "0") || estimate < kMinBytes)
             return;
         // Buffers an earlier test left in the pool would be reused without raising the peak.
