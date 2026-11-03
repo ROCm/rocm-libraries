@@ -255,7 +255,7 @@ THRUST_HOST_DEVICE contiguous_storage<T, Alloc>& contiguous_storage<T, Alloc>::o
   {
     deallocate();
   }
-  if constexpr (allocator_traits<Alloc>::propagate_on_container_move_assignment::value)
+  if constexpr (_THRUST_STD::allocator_traits<Alloc>::propagate_on_container_move_assignment::value)
   {
     m_allocator = _THRUST_STD::move(other.m_allocator);
   }

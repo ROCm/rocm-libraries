@@ -26,12 +26,13 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/allocator/allocator_traits.h>
+#include <thrust/detail/allocator/allocator_system.h>
 #include <thrust/detail/allocator/destroy_range.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/for_each.h>
 
 #include _THRUST_STD_INCLUDE(__host_stdlib/memory)
+#include _THRUST_STD_INCLUDE(__memory/allocator_traits.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -44,7 +45,7 @@ namespace detail
 //   3. if T has a trivial destructor, do a no-op
 
 template <typename Allocator, typename T>
-inline constexpr bool has_effectful_member_destroy = allocator_traits_detail::has_member_destroy<Allocator, T>::value;
+inline constexpr bool has_effectful_member_destroy = _THRUST_STD::__has_destroy<Allocator, T*>;
 
 // std::allocator::destroy's only effect is to invoke its argument's destructor
 template <typename U, typename T>
@@ -58,7 +59,7 @@ struct destroy_via_allocator
   template <typename T>
   THRUST_HOST_DEVICE void operator()(T& x) noexcept
   {
-    allocator_traits<Allocator>::destroy(a, &x);
+    _THRUST_STD::allocator_traits<Allocator>::destroy(a, &x);
   }
 };
 
