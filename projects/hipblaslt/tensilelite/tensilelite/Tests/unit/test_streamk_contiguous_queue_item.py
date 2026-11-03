@@ -1,8 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Codegen tests for the contiguous per-XCD work-item order of the StreamK
-Hybrid dynamic sub-mode (see StreamKHybrid._contiguousQueueItem): emitted
-instructions, runtime gate and registers, plus the formula on a reference.
+"""Codegen tests for the contiguous per-XCD work-item order of dynamic StreamK
+(see StreamK._contiguousQueueItem), for DynamicWorkQueue and the dynamic
+sub-mode of Hybrid: emitted instructions, runtime gate and registers, call
+sites, plus the formula on a reference.
 """
 
 import itertools
@@ -27,13 +28,19 @@ from rocisa.instruction import (
 )
 
 from tensilelite.Component import Component
-from tensilelite.Components.StreamK import StreamKHybrid
+from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid
 
 pytestmark = pytest.mark.unit
 
 _NUM_QUEUES = 8
 _ITEM = 40  # SGPR holding the popped work item
 _KERNEL = {"WorkGroupMappingXCC": -1, "WavefrontSize": 64}
+
+# Strategy -> (grid, split-tile count) SGPRs read by the gate.
+_STRATEGIES = {
+    StreamKDynamic: ("skGrid", "skTiles"),
+    StreamKHybrid: ("SKGrid", "SKTiles"),
+}
 
 
 class _Pool:
@@ -69,9 +76,14 @@ def _eight_queues(monkeypatch):
     _queues(monkeypatch, _NUM_QUEUES)
 
 
-def _emit(kernel=_KERNEL):
+@pytest.fixture(params=list(_STRATEGIES), ids=lambda c: c.__name__)
+def strategy(request):
+    return request.param
+
+
+def _emit(strategy, kernel=_KERNEL):
     w = _writer()
-    items = list(StreamKHybrid()._contiguousQueueItem(w, kernel, _ITEM).flatitems())
+    items = list(strategy()._contiguousQueueItem(w, kernel, _ITEM).flatitems())
     return w, items
 
 
@@ -89,11 +101,11 @@ def _imm_in(inst, value):
     return False
 
 
-def test_emitted_sequence():
-    _, items = _emit()
+def test_emitted_sequence(strategy):
+    _, items = _emit(strategy)
     assert [type(i) for i in items] == [
-        SCmpGtU32, SCBranchSCC1,             # TotalItems > SKGrid
-        SCmpEQU32, SCBranchSCC0,             # SKTiles == 0
+        SCmpGtU32, SCBranchSCC1,             # TotalItems > grid
+        SCmpEQU32, SCBranchSCC0,             # split tiles == 0
         SAndB32, SCmpEQU32, SCBranchSCC0,    # static uses the contiguous remap
         SAndB32, SLShiftRightB32,            # q, cnt
         SLShiftRightB32, SMulI32, SAddU32,   # + q * floor(T / numQueues)
@@ -102,20 +114,21 @@ def test_emitted_sequence():
     ]
 
 
-def test_gate_branches_to_the_end():
-    _, items = _emit()
+def test_gate_branches_to_the_end(strategy):
+    _, items = _emit(strategy)
     done = items[-1].getLabelName()
     branches = [i for i in items if isinstance(i, (SCBranchSCC0, SCBranchSCC1))]
     assert len(branches) == 3
     assert all(_params(b)[0] == done for b in branches)
 
 
-def test_gate_operands():
-    _, items = _emit()
+def test_gate_operands(strategy):
+    _, items = _emit(strategy)
     rounds, tiles, wgm, mode = items[0], items[2], items[4], items[5]
-    assert _params(rounds) == ["s[sgprTotalItems]", "s[sgprSKGrid]"]
+    grid, splitTiles = _STRATEGIES[strategy]
+    assert _params(rounds) == ["s[sgprTotalItems]", "s[sgpr%s]" % grid]
     assert isinstance(items[1], SCBranchSCC1), "more items than workgroups: skip"
-    assert _params(tiles)[0] == "s[sgprSKTiles]" and _imm_in(tiles, 0)
+    assert _params(tiles)[0] == "s[sgpr%s]" % splitTiles and _imm_in(tiles, 0)
     assert isinstance(items[3], SCBranchSCC0), "split tiles: skip"
     # WGM bits: WGMXCC [13:10], chunk [21:14] with bit 14 masked out.
     assert "s[sgprWGM]" in _params(wgm) and _imm_in(wgm, 0x3FBC00)
@@ -123,8 +136,8 @@ def test_gate_operands():
     assert isinstance(items[6], SCBranchSCC0), "other WGMXCC modes: skip"
 
 
-def test_queue_and_count_immediates():
-    _, items = _emit()
+def test_queue_and_count_immediates(strategy):
+    _, items = _emit(strategy)
     q, cnt, floorT, modT = items[7], items[8], items[9], items[12]
     assert _params(q)[1] == "s%d" % _ITEM and _imm_in(q, _NUM_QUEUES - 1)
     assert _params(cnt)[:2] == ["s%d" % _ITEM, "s%d" % _ITEM] and _imm_in(cnt, 3)
@@ -138,21 +151,21 @@ def test_queue_and_count_immediates():
     assert _params(items[14]) == [item, item, sTmp], "the renumbered item replaces the popped one"
 
 
-def test_temporaries_checked_back_in():
-    w, _ = _emit()
+def test_temporaries_checked_back_in(strategy):
+    w, _ = _emit(strategy)
     assert not w.sgprPool.out
 
 
-def test_one_queue_emits_nothing(monkeypatch):
+def test_one_queue_emits_nothing(monkeypatch, strategy):
     _queues(monkeypatch, 1)
-    w, items = _emit()
+    w, items = _emit(strategy)
     assert not items and not w.sgprPool.out
 
 
 @pytest.mark.parametrize("wgmxcc", [1, 8])
-def test_fixed_wgmxcc_emits_nothing(wgmxcc):
-    # Only auto-WGMXCC kernels use the runtime contiguous remap on the static sub-mode.
-    w, items = _emit({"WorkGroupMappingXCC": wgmxcc, "WavefrontSize": 64})
+def test_fixed_wgmxcc_emits_nothing(strategy, wgmxcc):
+    # Only auto-WGMXCC kernels use the runtime contiguous remap.
+    w, items = _emit(strategy, {"WorkGroupMappingXCC": wgmxcc, "WavefrontSize": 64})
     assert not items and not w.sgprPool.out
 
 
@@ -172,18 +185,41 @@ def test_reference_gives_each_queue_a_contiguous_range(total):
     assert sorted(seen) == list(range(total))
 
 
+def _marker(text):
+    m = Module(text)
+    m.add(TextBlock("// %s\n" % text))
+    return m
+
+
 def test_tile_identity_reads_the_renumbered_item(monkeypatch):
     # The renumbering runs first, on the popped item's SGPR, before the tile decode.
-    def marker(text):
-        m = Module(text)
-        m.add(TextBlock("// %s\n" % text))
-        return m
-
     monkeypatch.setattr(StreamKHybrid, "_contiguousQueueItem",
-                        lambda self, w, k, sidx: marker("renumber s%d" % sidx))
-    monkeypatch.setattr(StreamKHybrid, "computeTotalTiles", lambda self, w, k, dst: marker("total tiles"))
+                        lambda self, w, k, sidx: _marker("renumber s%d" % sidx))
+    monkeypatch.setattr(StreamKHybrid, "computeTotalTiles", lambda self, w, k, dst: _marker("total tiles"))
     w = _writer()
     w.vgprPool = _Pool()
     w.sgprPool.out.add(_ITEM)  # the caller's popped item, checked in by the helper
     text = str(StreamKHybrid()._computeNextTileIdentity(w, _KERNEL, _ITEM))
+    assert text.index("renumber s%d" % _ITEM) < text.index("total tiles")
+
+
+@pytest.mark.parametrize("site", ["activateWorkItem", "_computeNextTileIdentity"])
+def test_dynamic_decode_sites_read_the_renumbered_item(monkeypatch, site):
+    # DynamicWorkQueue: main path and PAP next tile both renumber before the decode.
+    monkeypatch.setattr(StreamKDynamic, "_contiguousQueueItem",
+                        lambda self, w, k, sidx: _marker("renumber s%d" % sidx))
+    monkeypatch.setattr(StreamKDynamic, "computeTotalTiles", lambda self, w, k, dst: _marker("total tiles"))
+    monkeypatch.setattr("tensilelite.Components.StreamK.BranchIfNotZero", lambda *a, **k: _marker("alpha"))
+    w = _writer()
+    w.vgprPool = _Pool()
+    w.longBranchScc0 = lambda label, posNeg=0: _marker("branch")
+    w.sgprPool.out.add(_ITEM)  # the caller's popped item
+    kernel = dict(_KERNEL, ProblemType={"ComputeDataType": SimpleNamespace(toEnum=lambda: 0)})
+    sk = StreamKDynamic()
+    if site == "activateWorkItem":
+        module = sk.activateWorkItem(w, kernel, None, None, _ITEM)
+    else:
+        module = sk._computeNextTileIdentity(w, kernel, _ITEM, None, None)
+    text = str(module)
+    assert text.count("renumber s%d" % _ITEM) == 1
     assert text.index("renumber s%d" % _ITEM) < text.index("total tiles")
