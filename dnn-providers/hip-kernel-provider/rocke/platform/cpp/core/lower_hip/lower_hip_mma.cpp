@@ -1381,7 +1381,7 @@ static const char* h_tr_vec_prefix(const char* elem)
  * only in the raw type / shim name / lane count / memcpy byte count.
  *   self._require_ds_read_tr(op_id)
  *   smem = op.operands[0]; indices = op.operands[1:]
- *   storage = smem.op.attrs.get("_storage")  -- RuntimeError on miss
+ *   storage = smem.op.attrs.get("_storage")  -- ValueError on miss
  *   idx_str = "][".join(_name(i) for i in indices)
  *   elem = op.attrs.get("elem_type", "f16")
  *   vec_prefix = {"f16":"f16x","bf16":"bf16x"}.get(elem, "f16x")
