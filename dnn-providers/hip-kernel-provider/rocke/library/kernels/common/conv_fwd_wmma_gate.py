@@ -25,7 +25,11 @@ What each family reads from here:
 - the WMMA atom (``WMMA_M`` / ``WMMA_N`` / ``WMMA_K``, :func:`wmma_ab_dtype`,
   :func:`wmma_fwd_op`): all of the above and ``conv_direct_dw_fwd_wmma``
   (depthwise), which uses neither the gate nor the validator tail: it checks
-  its arch and shapes itself.
+  its arch and shapes itself;
+- ``CH_PAD``, ``WMMA_K``, ``I32_MAX`` and :func:`wmma_fwd_op` also serve the
+  dgrad WMMA families that stage like the forward ones
+  (``conv_direct_dgrad_wmma``, ``conv_dgrad_patch_wmma`` and
+  ``conv_dgrad_smallc_wmma``).
 
 The other shape rules of each family stay in its own ``*_reason``.
 
@@ -48,6 +52,7 @@ from kernels.common.conv_direct_grouped import (
 
 __all__ = [
     "CH_PAD",
+    "I32_MAX",
     "WMMA_K",
     "WMMA_M",
     "WMMA_N",
@@ -66,7 +71,7 @@ WMMA_M = 16
 WMMA_N = 16
 WMMA_K = 32
 CH_PAD = 8  # channels of row skew past each LDS row of a staged tile (16 bytes)
-_I32_MAX = (1 << 31) - 1
+I32_MAX = (1 << 31) - 1  # the largest i32 byte offset / block id
 
 
 def wmma_ab_dtype(dtype: str) -> str:
@@ -135,7 +140,7 @@ def wmma_fwd_limits_reason(
     why = scheduler_strategy_reason(sched) or wmma_fwd_tensor_bytes_reason(p)
     if why is not None:
         return why
-    if n_blocks > _I32_MAX:
+    if n_blocks > I32_MAX:
         return f"{n_blocks} workgroups exceed the i32 block id"
     return None
 
@@ -147,7 +152,7 @@ def wmma_fwd_tensor_bytes_reason(p: DirectConvProblem) -> str | None:
         2 * p.total_k * p.KH * p.KW * p.cpg,
         2 * p.N * p.Ho * p.Wo * p.total_k,
     )
-    if max(tensor_bytes) > _I32_MAX:
+    if max(tensor_bytes) > I32_MAX:
         return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
     return None
 

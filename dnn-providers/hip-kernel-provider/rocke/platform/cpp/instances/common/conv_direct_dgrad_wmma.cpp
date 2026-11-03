@@ -27,21 +27,16 @@
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* ROCKE_FWD_WMMA_K / _CH_PAD, rocke_wmma_fwd_op_id */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
-/* conv_direct_dgrad_wmma.WMMA_K / CH_PAD / DGRAD_WMMA_VGPR_BUDGET. */
-#define DGW_WMMA_K 32
-#define DGW_CH_PAD 8
+/* conv_direct_dgrad_wmma.DGRAD_WMMA_VGPR_BUDGET (WMMA_K / CH_PAD are the
+ * forward gate's ROCKE_FWD_WMMA_K / ROCKE_FWD_WMMA_CH_PAD). */
 #define DGW_VGPR_BUDGET 448
 
 namespace
 {
-
-int dgw_ceil_div(int a, int b)
-{
-    return (a + b - 1) / b;
-}
 
 /* pack_groups serves cpg / kpg in (2, 4, 8, 16). */
 bool dgw_packable(int c)
@@ -65,13 +60,6 @@ const char* dgw_dtype(const rocke_direct_dgrad_wmma_spec_t* spec)
 bool dgw_is_bf16(const rocke_direct_dgrad_wmma_spec_t* spec)
 {
     return strcmp(dgw_dtype(spec), "bf16") == 0;
-}
-
-/* Python floor division / modulo (the C operators truncate toward zero). */
-long long dgw_floordiv(long long a, long long b)
-{
-    long long q = a / b;
-    return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
 }
 
 /* _axis_plan(K, PAD, dil, S): output row S * i + a (phase a) collects filter
@@ -99,7 +87,7 @@ dgw_plan dgw_axis_plan(int K, int PAD, int dil, int S)
             if(x % S == 0)
             {
                 pl.phase.push_back(a);
-                d.push_back(dgw_floordiv(x, S));
+                d.push_back(rocke_floor_div(x, S));
                 break;
             }
         }
@@ -157,11 +145,11 @@ int dgw_halo_w(const rocke_direct_dgrad_wmma_spec_t* s)
 }
 int dgw_x_pitch(const rocke_direct_dgrad_wmma_spec_t* s)
 {
-    return s->ck + DGW_CH_PAD;
+    return s->ck + ROCKE_FWD_WMMA_CH_PAD;
 }
 int dgw_w_pitch(const rocke_direct_dgrad_wmma_spec_t* s)
 {
-    return rocke_direct_dgrad_wmma_block_c(s) + DGW_CH_PAD;
+    return rocke_direct_dgrad_wmma_block_c(s) + ROCKE_FWD_WMMA_CH_PAD;
 }
 int dgw_image_elems(const rocke_direct_dgrad_wmma_spec_t* s)
 {
@@ -239,7 +227,7 @@ long rocke_direct_dgrad_wmma_lds_bytes(const rocke_direct_dgrad_wmma_spec_t* spe
     if(spec->wave_epilogue)
     {
         long n_waves = (long)spec->waves_c * spec->waves_p;
-        epi = n_waves * spec->tiles_p * 16 * (spec->tiles_c * 16 + DGW_CH_PAD);
+        epi = n_waves * spec->tiles_p * 16 * (spec->tiles_c * 16 + ROCKE_FWD_WMMA_CH_PAD);
     }
     return 2 * (ring > epi ? ring : epi);
 }
@@ -248,10 +236,11 @@ void rocke_direct_dgrad_wmma_grid(const rocke_direct_dgrad_wmma_spec_t* spec, in
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     int S = p->stride;
-    int n_ct = dgw_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
-    int n_ht = dgw_ceil_div(dgw_ceil_div(p->H, S), rocke_direct_dgrad_wmma_tile_h(spec));
-    int n_wt = dgw_ceil_div(dgw_ceil_div(p->W, S), spec->tile_w);
-    grid[0] = dgw_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec) * n_ht * n_wt * n_ct;
+    long long n_ct = rocke_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
+    long long n_ht = rocke_ceil_div(rocke_ceil_div(p->H, S), rocke_direct_dgrad_wmma_tile_h(spec));
+    long long n_wt = rocke_ceil_div(rocke_ceil_div(p->W, S), spec->tile_w);
+    /* The validator bounds the block count to i32. */
+    grid[0] = (int)(rocke_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec) * n_ht * n_wt * n_ct);
     grid[1] = 1;
     grid[2] = 1;
 }
@@ -369,7 +358,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         return false;
     }
     if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, DGW_WMMA_K))
+           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, ROCKE_FWD_WMMA_K))
     {
         snprintf(msg, sizeof msg, "missing wmma_f32_16x16x32_%s on %s", ab, arch);
         dgw_set_reason(reason, reason_cap, msg);
@@ -459,9 +448,10 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->ck % DGW_WMMA_K != 0 || spec->ck <= 0)
+    if(spec->ck % ROCKE_FWD_WMMA_K != 0 || spec->ck <= 0)
     {
-        snprintf(msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, DGW_WMMA_K);
+        snprintf(
+            msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
@@ -563,12 +553,12 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     {
         /* DirectConvProblem.Ho / .Wo: strided, dilated output extents. */
         long long Ho
-            = dgw_floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
-                           p->stride)
+            = rocke_floor_div((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
+                              p->stride)
               + 1;
         long long Wo
-            = dgw_floordiv((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
-                           p->stride)
+            = rocke_floor_div((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
+                              p->stride)
               + 1;
         long long total_k = (long long)p->groups * p->kpg;
         long long total_c = (long long)p->groups * p->cpg;
@@ -577,10 +567,11 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                               2 * p->N * (long long)p->H * p->W * total_c};
         long long mx = bytes[0];
         long long tiles
-            = (long long)dgw_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec)
-              * dgw_ceil_div(dgw_ceil_div(p->H, p->stride), rocke_direct_dgrad_wmma_tile_h(spec))
-              * dgw_ceil_div(dgw_ceil_div(p->W, p->stride), spec->tile_w)
-              * dgw_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
+            = rocke_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec)
+              * rocke_ceil_div(rocke_ceil_div(p->H, p->stride),
+                               rocke_direct_dgrad_wmma_tile_h(spec))
+              * rocke_ceil_div(rocke_ceil_div(p->W, p->stride), spec->tile_w)
+              * rocke_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
         if(bytes[1] > mx)
             mx = bytes[1];
         if(bytes[2] > mx)
@@ -862,7 +853,7 @@ struct dgw_step
 std::vector<dgw_step> make_steps(const dgw_ctx& c)
 {
     std::vector<dgw_step> steps;
-    for(int ks = 0; ks < c.CK / DGW_WMMA_K; ++ks)
+    for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
     {
         /* Python dict: shifts in first-seen order. */
         size_t first = steps.size();
@@ -897,7 +888,7 @@ void frags(dgw_ctx& c,
            std::vector<std::vector<rocke_value_t*>>& af,
            std::vector<rocke_value_t*>& bf)
 {
-    int tap_off = (st.dh * c.HALO_W + st.dw) * c.XP + st.ks * DGW_WMMA_K;
+    int tap_off = (st.dh * c.HALO_W + st.dw) * c.XP + st.ks * ROCKE_FWD_WMMA_K;
     bf.assign(c.TN, NULL);
     af.assign(st.taps.size(), std::vector<rocke_value_t*>());
     for(int tn = 0; tn < c.TN; ++tn)
@@ -906,7 +897,8 @@ void frags(dgw_ctx& c,
     {
         af[t].assign(c.TM, NULL);
         for(int m = 0; m < c.TM; ++m)
-            af[t][m] = read_a(c, wei_base, m, (st.taps[t] * c.CK + st.ks * DGW_WMMA_K) * c.WPITCH);
+            af[t][m]
+                = read_a(c, wei_base, m, (st.taps[t] * c.CK + st.ks * ROCKE_FWD_WMMA_K) * c.WPITCH);
     }
 }
 
@@ -1195,7 +1187,7 @@ void epilogue_wave(dgw_ctx& c, rocke_value_t* const* accs)
     if(!c.SB)
         rocke_b_sync_lds_only(b); /* every wave is done with the ring */
     const int WPX = c.TN * 16;
-    const int EP = c.TM * 16 + DGW_CH_PAD;
+    const int EP = c.TM * 16 + ROCKE_FWD_WMMA_CH_PAD;
     const int ROWS = WPX / c.TW;
     rocke_value_t* base;
     {
@@ -1434,18 +1426,9 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
     c.io_type = rocke_b_io_ir_type(b, dgw_dtype(spec));
     if(c.io_type == NULL)
         return NULL;
-    {
-        const char* ab = dgw_is_bf16(spec) ? "bf16" : "f16";
-        const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-        const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
-            target, "wmma", ab, ab, "fp32", 16, 16, DGW_WMMA_K, NULL);
-        if(op == NULL || op->op_id == NULL)
-        {
-            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_dgrad_wmma: no WMMA atom");
-            return NULL;
-        }
-        c.wmma_op_id = op->op_id;
-    }
+    c.wmma_op_id = rocke_wmma_fwd_op_id(b, dgw_dtype(spec), arch, "build_direct_dgrad_wmma");
+    if(c.wmma_op_id == NULL)
+        return NULL;
     c.WAVE = spec->wave_size;
     c.WC = spec->waves_c;
     c.WP = spec->waves_p;
@@ -1670,7 +1653,7 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
             rocke_value_t* zero_v = rocke_b_zero_vec(b, c.io_type, 8);
             rocke_value_t* c8z = ci(c, 8);
             rocke_value_t* z_vecs = rocke_b_div(b, c.z_elems, c8z);
-            for(int j = 0; j < dgw_ceil_div(max_z, 8); j += c.THREADS)
+            for(int j = 0; j < (int)rocke_ceil_div(max_z, 8); j += c.THREADS)
             {
                 rocke_value_t* cj = ci(c, j);
                 rocke_value_t* v = rocke_b_add(b, c.tid, cj);

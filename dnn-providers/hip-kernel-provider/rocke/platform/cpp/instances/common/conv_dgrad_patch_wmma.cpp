@@ -30,12 +30,8 @@
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
-using rocke_dgstem::ceil_div;
 using rocke_dgstem::ci;
-using rocke_dgstem::floordiv;
-using rocke_dgstem::kChPad;
 using rocke_dgstem::kVgprBudget;
-using rocke_dgstem::kWmmaK;
 using rocke_dgstem::set_reason;
 using rocke_dgstem::V;
 
@@ -63,11 +59,11 @@ int dpw_run(const rocke_dgrad_patch_wmma_spec_t* s)
 }
 int dpw_x_pitch(const rocke_dgrad_patch_wmma_spec_t* s)
 {
-    return s->ck + kChPad;
+    return s->ck + ROCKE_FWD_WMMA_CH_PAD;
 }
 int dpw_w_pitch(const rocke_dgrad_patch_wmma_spec_t* s)
 {
-    return rocke_dgrad_patch_wmma_block_c(s) + kChPad;
+    return rocke_dgrad_patch_wmma_block_c(s) + ROCKE_FWD_WMMA_CH_PAD;
 }
 int dpw_x_elems(const rocke_dgrad_patch_wmma_spec_t* s)
 {
@@ -81,12 +77,14 @@ int dpw_wei_elems(const rocke_dgrad_patch_wmma_spec_t* s)
 /* DirectConvProblem.Ho / Wo (strided, dilated). */
 long long dpw_Ho(const rocke_direct_conv_problem_t* p)
 {
-    return floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1, p->stride)
+    return rocke_floor_div((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
+                           p->stride)
            + 1;
 }
 long long dpw_Wo(const rocke_direct_conv_problem_t* p)
 {
-    return floordiv((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1, p->stride)
+    return rocke_floor_div((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
+                           p->stride)
            + 1;
 }
 
@@ -139,7 +137,9 @@ int rocke_dgrad_patch_wmma_block_cols(const rocke_dgrad_patch_wmma_spec_t* spec)
 
 int rocke_dgrad_patch_wmma_tile_h(const rocke_dgrad_patch_wmma_spec_t* spec)
 {
-    return spec->tile_w > 0 ? (int)floordiv(rocke_dgrad_patch_wmma_block_p(spec), spec->tile_w) : 0;
+    return spec->tile_w > 0
+               ? (int)rocke_floor_div(rocke_dgrad_patch_wmma_block_p(spec), spec->tile_w)
+               : 0;
 }
 
 int rocke_dgrad_patch_wmma_threads_per_block(const rocke_dgrad_patch_wmma_spec_t* spec)
@@ -159,8 +159,9 @@ void rocke_dgrad_patch_wmma_grid(const rocke_dgrad_patch_wmma_spec_t* spec, int 
     const rocke_direct_conv_problem_t* p = &spec->problem;
     long long Ho = dpw_Ho(p);
     long long Wo = dpw_Wo(p);
-    long long main_blocks = (long long)p->N * ceil_div(Ho, rocke_dgrad_patch_wmma_tile_h(spec))
-                            * ceil_div(Wo, spec->tile_w) * floordiv(dpw_P(spec), spec->r_blk);
+    long long main_blocks
+        = (long long)p->N * rocke_ceil_div(Ho, rocke_dgrad_patch_wmma_tile_h(spec))
+          * rocke_ceil_div(Wo, spec->tile_w) * rocke_floor_div(dpw_P(spec), spec->r_blk);
     bool border = Ho * dpw_P(spec) < p->H || Wo * dpw_P(spec) < p->W;
     grid[0] = (int)(main_blocks + (border ? p->N : 0));
     grid[1] = 1;
@@ -248,7 +249,7 @@ bool rocke_dgrad_patch_wmma_is_valid_spec(const rocke_dgrad_patch_wmma_spec_t* s
     }
     ab = dpw_is_bf16(spec) ? "bf16" : "f16";
     if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, kWmmaK))
+           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, ROCKE_FWD_WMMA_K))
     {
         snprintf(msg, sizeof msg, "missing wmma_f32_16x16x32_%s on %s", ab, arch);
         set_reason(reason, reason_cap, msg);
@@ -269,9 +270,10 @@ bool rocke_dgrad_patch_wmma_is_valid_spec(const rocke_dgrad_patch_wmma_spec_t* s
         set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(spec->ck % kWmmaK != 0 || spec->ck <= 0)
+    if(spec->ck % ROCKE_FWD_WMMA_K != 0 || spec->ck <= 0)
     {
-        snprintf(msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, kWmmaK);
+        snprintf(
+            msg, sizeof msg, "ck %d must be a positive multiple of %d", spec->ck, ROCKE_FWD_WMMA_K);
         set_reason(reason, reason_cap, msg);
         return false;
     }
@@ -813,18 +815,9 @@ rocke_kernel_def_t* rocke_build_dgrad_patch_wmma(rocke_ir_builder_t* b,
     c.io_type = rocke_b_io_ir_type(b, dpw_dtype(spec));
     if(c.io_type == NULL)
         return NULL;
-    {
-        const char* ab = dpw_is_bf16(spec) ? "bf16" : "f16";
-        const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-        const rocke_mmaop_t* op
-            = rocke_archtarget_op_for_shape(target, "wmma", ab, ab, "fp32", 16, 16, kWmmaK, NULL);
-        if(op == NULL || op->op_id == NULL)
-        {
-            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_dgrad_patch_wmma: no WMMA atom");
-            return NULL;
-        }
-        c.wmma_op_id = op->op_id;
-    }
+    c.wmma_op_id = rocke_wmma_fwd_op_id(b, dpw_dtype(spec), arch, "build_dgrad_patch_wmma");
+    if(c.wmma_op_id == NULL)
+        return NULL;
     c.WAVE = spec->wave_size;
     c.WC = spec->waves_c;
     c.THREADS = rocke_dgrad_patch_wmma_threads_per_block(spec);
