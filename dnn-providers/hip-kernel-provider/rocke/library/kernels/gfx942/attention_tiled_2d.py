@@ -38,6 +38,12 @@ from dataclasses import dataclass, field
 import os
 from typing import Optional, Tuple
 
+from kernels.common._attention_band import (
+    BandMask,
+    check_right_bound,
+    diagonal_offset,
+    tiled_band_name_parts,
+)
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
@@ -508,15 +514,11 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
-        if self.right_bound < -1:
-            raise ValueError(
-                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
-            )
-        if self.right_bound != 0 and (self.use_alibi or self.use_qq_bias):
-            raise ValueError(
-                "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
-                "(their offsets are defined on the causal diagonal)"
-            )
+        check_right_bound(
+            self.right_bound,
+            use_alibi=self.use_alibi,
+            use_qq_bias=self.use_qq_bias,
+        )
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -1027,12 +1029,7 @@ class UnifiedAttention2DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
-            "tl" if self.causal_top_left else "",
-            (
-                ("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
-                if self.right_bound != 0
-                else ""
-            ),
+            *tiled_band_name_parts(self.causal_top_left, self.right_bound),
             f"w{self.num_warps}" if self.num_warps != 1 else "",
             f"wpe{self.waves_per_eu}" if self.waves_per_eu is not None else "",
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
@@ -1656,29 +1653,13 @@ def build_unified_attention_2d_tiled(
     q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
     q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
-    if spec.causal_top_left:
-        context_len = b.const_i32(0)
-    else:
-        context_len = b.sub(seq_len, cur_batch_q_len)
+    context_len = diagonal_offset(b, spec.causal_top_left, seq_len, cur_batch_q_len)
 
-    # Right bound of the band (see the spec field). ``_upper_ok`` is the per-score
-    # compare ``col <= d + right_bound`` (``None`` when unbounded); every site that
-    # derived a causal limit from ``context_len`` adds ``RIGHT`` the same way. All
-    # of them are identical to the pre-existing causal IR when ``RIGHT == 0``.
+    # Right bound of the band (see the spec field). ``band_mask`` emits every compare
+    # derived from it (kernels.common._attention_band); all of them are the
+    # pre-existing causal IR when ``RIGHT == 0``.
     RIGHT = spec.right_bound
-
-    def _upper_lim(causal_lim):
-        return causal_lim if RIGHT <= 0 else b.add(causal_lim, b.const_i32(RIGHT))
-
-    def _upper_ok(col_abs, causal_lim):
-        if RIGHT < 0:
-            return None
-        return b.cmp_le(col_abs, _upper_lim(causal_lim))
-
-    def _band_row_mask(row_ok, upper_ok, in_prefix):
-        if upper_ok is None:
-            return b.land(row_ok, in_prefix)
-        return b.land(b.land(row_ok, upper_ok), in_prefix)
+    band_mask = BandMask(b, RIGHT)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
     with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
@@ -2296,13 +2277,9 @@ def build_unified_attention_2d_tiled(
 
     # ---------------- KV tile loop bounds ----------------
     bm1_div_nqk = (BLOCK_M - 1) // NQK
-    if RIGHT < 0:
-        max_seq_prefix_len = seq_len  # no upper bound: every key of the sequence
-    else:
-        msp_raw = b.add(
-            b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1 + RIGHT)
-        )
-        max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
+    max_seq_prefix_len = band_mask.max_prefix_len(
+        context_len, qb_start_pos, bm1_div_nqk, seq_len
+    )
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
     if SLIDING_WINDOW > 0:
@@ -2314,10 +2291,7 @@ def build_unified_attention_2d_tiled(
         first_allowed_key = b.add(
             b.sub(b.add(context_len, qb_start_pos), sw_const), b.const_i32(1)
         )
-        if RIGHT < 0:
-            last_allowed_key = b.sub(seq_len, b.const_i32(1))
-        else:
-            last_allowed_key = _upper_lim(b.add(context_len, qpos_hi))
+        last_allowed_key = band_mask.last_key(context_len, qpos_hi, seq_len)
         tile_start_raw = b.div(first_allowed_key, b.const_i32(T))
         tile_start = b.select(
             b.cmp_lt(tile_start_raw, b.const_i32(0)), b.const_i32(0), tile_start_raw
@@ -4436,13 +4410,7 @@ def build_unified_attention_2d_tiled(
                         else st_causal_lim_iter
                     )
                     prefix_tail = b.sub(max_seq_prefix_len, b.const_i32(1))
-                    if RIGHT < 0:
-                        valid_tail = prefix_tail
-                    else:
-                        upper_lim = _upper_lim(causal_lim)
-                        valid_tail = b.select(
-                            b.cmp_lt(upper_lim, prefix_tail), upper_lim, prefix_tail
-                        )
+                    valid_tail = band_mask.valid_tail(causal_lim, prefix_tail)
                     st_row_half_base = b.mul(lane_half32, b.const_i32(4))
                     # VALU reduction for the per-element mask (algebraically
                     # identical to ``land(row_ok, col_abs <= valid_tail)``):
@@ -4562,9 +4530,9 @@ def build_unified_attention_2d_tiled(
                                     TRANSPOSED_INVARIANT_HOIST or TRANSPOSED_MASK_ONCE
                                 ):
                                     causal_lim = b.add(context_len, qp_r)
-                                causal_ok = _upper_ok(col_abs, causal_lim)
+                                causal_ok = band_mask.upper_ok(col_abs, causal_lim)
                                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                                m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
+                                m_ok = band_mask.row_mask(row_ok, causal_ok, in_prefix)
                                 if SLIDING_WINDOW > 0:
                                     dist = b.sub(causal_lim, col_abs)
                                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -4780,9 +4748,9 @@ def build_unified_attention_2d_tiled(
                 causal_lim = hoist_causal_lim[reg]
                 for n in range(QK_N_TILES):
                     col_abs = b.add(tile_off, _mfma_32x32_c_col(b, lane, n))
-                    causal_ok = _upper_ok(col_abs, causal_lim)
+                    causal_ok = band_mask.upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                    m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
+                    m_ok = band_mask.row_mask(row_ok, causal_ok, in_prefix)
                     if SLIDING_WINDOW > 0:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -4857,9 +4825,9 @@ def build_unified_attention_2d_tiled(
                         b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))),
                         lane_col,
                     )
-                    causal_ok = _upper_ok(col_abs, causal_lim)
+                    causal_ok = band_mask.upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                    m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
+                    m_ok = band_mask.row_mask(row_ok, causal_ok, in_prefix)
                     if SLIDING_WINDOW > 0:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -5562,7 +5530,8 @@ def build_unified_attention_2d_tiled(
                 _split_raw = _full_by_prefix
             else:
                 _full_by_band = b.div(
-                    _upper_lim(b.add(context_len, qb_start_pos)), b.const_i32(T)
+                    band_mask.upper_lim(b.add(context_len, qb_start_pos)),
+                    b.const_i32(T),
                 )
                 _split_raw = b.select(
                     b.cmp_lt(_full_by_band, _full_by_prefix),
@@ -6114,9 +6083,8 @@ def _build_gfx942_4warp_gqa_lean(
     iters = [("m", ninf), ("l", zf)] + [
         (f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)
     ]
-    context_off = (  # prefix in KV cache (qlen!=klen: chunked/decode); 0 = top-left
-        b.const_i32(0) if spec.causal_top_left else b.sub(klen, qlen)
-    )
+    # prefix in KV cache (qlen!=klen: chunked/decode); 0 = top-left
+    context_off = diagonal_offset(b, spec.causal_top_left, klen, qlen)
     causal_t = b.div(
         b.add(b.add(context_off, qbase), b.const_i32(128 + BN - 1)), b.const_i32(BN)
     )
@@ -6472,9 +6440,8 @@ def build_gfx942_4warp_gqa(
     iters = [("m", ninf), ("l", zf)] + [
         (f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)
     ]
-    context_off = (  # prefix in KV cache (qlen!=klen: chunked/decode); 0 = top-left
-        b.const_i32(0) if spec.causal_top_left else b.sub(klen, qlen)
-    )
+    # prefix in KV cache (qlen!=klen: chunked/decode); 0 = top-left
+    context_off = diagonal_offset(b, spec.causal_top_left, klen, qlen)
     window = int(spec.sliding_window)  # 0 = causal; >0 = SWA (keep dist < window)
     causal_t = b.div(
         b.add(b.add(context_off, qbase), b.const_i32(TOKBLK + BN - 1)), b.const_i32(BN)

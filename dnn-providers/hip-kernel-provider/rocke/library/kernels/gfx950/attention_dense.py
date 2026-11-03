@@ -120,6 +120,11 @@ from kernels.common.attention_dense_kv_split import (
     launch_segment_combine,
     segment_tile_range,
 )
+from kernels.common._attention_band import (
+    check_dense_right_bound,
+    dense_band_name_parts,
+    upper_lim,
+)
 from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
@@ -220,7 +225,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         return True
 
     def _band_name_parts(self) -> tuple[str, ...]:
-        return (f"rb{self.right_bound}",) if self.right_bound > 0 else ()
+        return dense_band_name_parts(self.right_bound)
 
     @property
     def _aligned_causal(self) -> bool:
@@ -323,20 +328,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 f"elements (16 bytes), got {self.lds_v_row_pad}"
             )
         self._validate_codegen_knobs()
-        if self.right_bound < 0:
-            raise ValueError(
-                f"right_bound must be >= 0 (causal=False is the unbounded side), "
-                f"got {self.right_bound}"
-            )
-        if self.right_bound > 0:
-            if not self.causal:
-                raise ValueError("right_bound > 0 requires causal=True")
-            if self.causal_bottom_right:
-                raise ValueError(
-                    "right_bound > 0 is not supported with causal_bottom_right"
-                )
-            if self.paged or self.varlen:
-                raise ValueError("right_bound > 0 is not supported with paged / varlen")
+        check_dense_right_bound(self)
         if self.paged and not self.causal:
             raise ValueError("paged attention is causal-only")
         if self.causal_bottom_right:
@@ -1286,7 +1278,7 @@ def build_attention_dense(
         # lower bound key: q - W + 1  (keep iff ktok > q - W)
         win_lo = b.sub(query_tok, b.const_i32(W)) if lower else None
         # upper bound key: q + RIGHT (the window anchor above stays unshifted)
-        up_tok = b.add(query_tok, b.const_i32(RIGHT)) if RIGHT else query_tok
+        up_tok = upper_lim(b, query_tok, RIGHT)
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
             for i in range(16):
@@ -2421,7 +2413,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             tile_key0 = b.mul(tile_idx, b.const_i32(BN))
             query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
             win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
-            up_tok = b.add(query_tok, b.const_i32(RIGHT)) if RIGHT else query_tok
+            up_tok = upper_lim(b, query_tok, RIGHT)
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):

@@ -62,6 +62,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
+from ._attention_band import check_right_bound, diagonal_offset, right_bound_tag
 from ._lse_store import validate_unified_lse
 
 # Alias the promoted log2-domain softcap helper under the local name used by
@@ -159,10 +160,7 @@ class UnifiedAttentionProblem:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
-        if self.right_bound < -1:
-            raise ValueError(
-                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
-            )
+        check_right_bound(self.right_bound)
         # Changes the kernel ABI (4 appended params), so a truthy non-bool such as
         # "false" must not silently enable it.
         if type(self.use_additive_bias) is not bool:
@@ -6651,7 +6649,7 @@ def _right_bound_flag(p: UnifiedAttentionProblem) -> dict:
     """Kernel-name token for a non-causal right bound: ``rbu`` (unbounded) or ``rb<R>``."""
     if p.right_bound == 0:
         return {}
-    return {("rbu" if p.right_bound < 0 else f"rb{p.right_bound}"): True}
+    return {right_bound_tag(p.right_bound): True}
 
 
 def _scalar_context_len(b: IRBuilder, p: UnifiedAttentionProblem, kv_len, q_len):
@@ -6659,9 +6657,7 @@ def _scalar_context_len(b: IRBuilder, p: UnifiedAttentionProblem, kv_len, q_len)
 
     bottom-right: ``kv_len - q_len``; top-left: 0.
     """
-    if p.causal_top_left:
-        return b.const_i32(0)
-    return b.sub(kv_len, q_len)
+    return diagonal_offset(b, p.causal_top_left, kv_len, q_len)
 
 
 def _scalar_band_ok(
