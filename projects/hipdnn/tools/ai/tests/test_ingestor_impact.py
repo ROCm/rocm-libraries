@@ -7,8 +7,10 @@ test depends on this clone's history or on rocKE. Git runs for real with the use
 isolated.
 """
 
+import ast
 import importlib.util
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -180,6 +182,18 @@ def report(mod, capsys, repo, base, head, *extra, cmd="report") -> dict:
     return json.loads(out)
 
 
+def git_version() -> tuple:
+    out = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout
+    found = re.search(r"(\d+)\.(\d+)", out)
+    return tuple(map(int, found.groups())) if found else (0, 0)
+
+
+#: The merged view runs `git merge-tree --write-tree`, which git 2.38 added.
+needs_merge_tree = pytest.mark.skipif(
+    git_version() < (2, 38), reason="merge-tree --write-tree needs git 2.38"
+)
+
+
 def rows_of(data, kind=None, status=None):
     return [
         r
@@ -227,6 +241,7 @@ def test_comment_only_touch_of_pin_is_not_moved(mod, capsys, tmp_path):
     assert [r["path"] for r in rows_of(data, "kernargs", "mismatch")] == [BUILDER]
 
 
+@needs_merge_tree
 def test_pin_on_target_tip_only_is_mismatch_in_merged_view_only(mod, capsys, tmp_path):
     # catches: merged view not computed, or computed against the merge base
     repo, base = make_repo(tmp_path, {BUILDER: BUILD})
@@ -241,6 +256,7 @@ def test_pin_on_target_tip_only_is_mismatch_in_merged_view_only(mod, capsys, tmp
     assert data["rollup"] == "Runtime impact: BREAKS"
 
 
+@needs_merge_tree
 def test_merge_conflict_on_a_surface_file_marks_the_merged_view_changed(
     mod, capsys, tmp_path
 ):
@@ -267,6 +283,7 @@ def test_merge_conflict_on_a_surface_file_marks_the_merged_view_changed(
     ]
 
 
+@needs_merge_tree
 def test_conflict_elsewhere_still_finds_the_merged_view_race(mod, capsys, tmp_path):
     # catches: one conflicted file, even one no runtime reads, discarding the whole merged
     # view and with it a pin race on files that merged cleanly
@@ -1057,14 +1074,19 @@ def test_multi_launch_pack_compares_each_list_with_its_own_builder(
 @pytest.mark.parametrize(
     "added, status",
     [('    if spec.lse:\n        b.param("lse_ptr", PTR)\n', "changed"),
-     ('    b.param("lse_ptr", PTR)\n', "mismatch")],
-    ids=["conditional-param-added", "unconditional-param-added"],
+     ('    b.param("lse_ptr", PTR)\n', "mismatch"),
+     ('    with b.scope():\n        b.param("lse_ptr", PTR)\n', "mismatch"),
+     ('    try:\n        b.param("lse_ptr", PTR)\n    finally:\n        pass\n', "mismatch"),
+     ('    if True:\n        b.param("lse_ptr", PTR)\n', "mismatch")],
+    ids=["conditional-param-added", "unconditional-param-added", "under-with",
+         "under-try-body", "under-if-true"],
 )  # fmt: skip
 def test_copy_without_a_newly_added_conditional_param_is_not_a_mismatch(
     mod, capsys, tmp_path, added, status
 ):
     # catches: a copy of the list without an optional param, which variants that do not enable
-    # it still pass, read as a break; or a copy missing a required new param read as fine
+    # it still pass, read as a break; or a copy missing a required new param read as fine,
+    # including one under a `with`, a `try` body or `if True:`, which always run
     repo, base = abi_repo(tmp_path)
     head = commit(
         repo, {BUILDER: BUILD.replace("    return b", added + "    return b")}
@@ -1083,9 +1105,8 @@ def test_emit_fold_compares_each_companion_launch_with_its_static_list(
     mod, capsys, tmp_path, reduce_params, status
 ):
     # catches: only a KernelModule's primary launch compared with the pack, so a companion's
-    # changed kernargs read as consistent; or a pack found only by the arch-named fallback,
-    # not through the manifest's `source` builder that the family names
-    # no arch in the pack's name, so only the manifest's builder can pair it
+    # changed kernargs read as consistent; or a pack named for no arch, which only the
+    # manifest's `source` builder can pair, left unpaired
     pack = HKP + "src/engines/kernel_ingestor_engine/packs/AttnNative.cpp"
     lists = (
         PACK_STATIC
@@ -1162,6 +1183,7 @@ def test_method_removed_from_a_base_read_only_through_a_subclass_is_changed(
     }
 
 
+@needs_merge_tree
 def test_conflict_only_in_a_test_still_marks_the_merged_view_changed(
     mod, capsys, tmp_path
 ):
@@ -1185,6 +1207,7 @@ def test_conflict_only_in_a_test_still_marks_the_merged_view_changed(
     assert data["rollup"] == "Runtime impact: N/A (no surface file)"
 
 
+@needs_merge_tree
 def test_unrelated_target_history_skips_the_merged_view_as_changed(
     mod, capsys, tmp_path
 ):
@@ -1516,6 +1539,7 @@ def test_member_read_of_a_moved_class_is_not_a_removal_reader(mod, capsys, tmp_p
     assert "Space.outer_knob" in {r["name"] for r in rows}
 
 
+@needs_merge_tree
 def test_target_tip_keeps_the_emit_fold_for_modules_the_head_owns(
     mod, capsys, tmp_path
 ):
@@ -1585,3 +1609,147 @@ def test_static_list_cut_short_of_the_declared_builder_is_mismatch(
     head = commit(repo, {PACK: ptr_sig("attnSignature", ["q_ptr", "k_ptr"])})
     (row,) = rows_of(report(mod, capsys, repo, base, head), "kernargs", "mismatch")
     assert "builder build_attn" in row["reason"]
+
+
+@pytest.mark.parametrize(
+    "locator",
+    [
+        '"kernels/gfx950/attn.py: (the launch builder)"',
+        "kernels/gfx950/attn.py:launch_block",
+    ],
+    ids=["prose-locator", "named-function"],
+)
+def test_surface_module_that_stops_parsing_says_so(mod, capsys, tmp_path, locator):
+    # catches: an unparsable surface module reported as "a missing function None" (prose
+    # locator) or as a missing function that is still in the text
+    surface = manifest(("block", locator, GEOM))
+    files = {BUILDER: WITH_METHOD, GEOM: "int block();\n", MANIFEST: surface}
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {BUILDER: WITH_METHOD + "\ndef broken(b:\n"})
+    (row,) = rows_of(report(mod, capsys, repo, base, head), "surfaces")
+    assert row["status"] == "mismatch" and "does not parse" in row["reason"]
+    assert "missing" not in row["reason"]
+
+
+def test_comment_inside_a_kernel_argument_literal_is_not_an_argument(mod):
+    # catches: a literal's arguments split from the unmasked text, so a comment in the braces
+    # makes the list unnamed and it is never compared with its builder
+    text = """std::vector<KernelArgument> sig()
+{
+    return {KernelArgument{"global_buffer", PTR, 0,  // kind, size, offset
+                           "q_ptr"},
+            KernelArgument{"by_value", F32, 8, /* a, b */ "scale"}};
+}
+"""
+    (entry,) = mod.cpp_kernel_lists(text)
+    assert (entry["names"], entry["sizes"]) == (["q_ptr", "scale"], ["ptr", 4])
+
+
+def emit_doc() -> dict:
+    """A well-formed impact_emit document with one quiet family and no tables."""
+    return {"schema": 6, "tool": "impact_emit", "base_tree": "a" * 40, "head_tree": "b" * 40,
+            "families": [family()], "predicate_tables": [], "not_inspected": []}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "spoil",
+    [lambda d: d["families"][0].update(params={}),
+     lambda d: d["families"][0].update(companions={}),
+     lambda d: d.update(predicate_tables=[{k: v for k, v in table().items() if k != "truncated"}]),
+     lambda d: d.update(predicate_tables=[{k: v for k, v in table().items() if k != "at_base"}])],
+    ids=["params-without-sides", "companions-without-sides", "table-without-truncated",
+         "table-without-at-base"],
+)  # fmt: skip
+def test_emit_shape_guard_refuses_a_missing_side_or_table_flag(mod, spoil):
+    # catches: a family without base and head params or companions passing the guard, so the
+    # fold dies on a KeyError instead of the one-line refusal; or a table flag left unchecked
+    doc = emit_doc()
+    assert mod.emit_shape_problem(doc) is None
+    spoil(doc)
+    assert mod.emit_shape_problem(doc) is not None
+
+
+def test_emit_shape_guard_accepts_a_bool_valued_finding(mod):
+    # catches: finding values narrowed to int, so a real emit file whose probe varied a bool
+    # field is refused
+    doc = emit_doc()
+    doc["predicate_tables"] = [table([finding(values=[True, False])])]
+    assert mod.emit_shape_problem(doc) is None
+
+
+def test_predicate_tables_text_lists_skipped_tables_and_escapes_cells(mod):
+    # catches: the skipped-table lines dropped from the text report, or a `|` in a builder
+    # name or detail breaking the Markdown table
+    tables = [table([finding(detail="raises at a|b")], builder="build|x"),
+              table(skipped="no predicate takes its spec", builder="build_y"),
+              table(truncated=True)]  # fmt: skip
+    text = mod.render_tables(tables)
+    assert "1 skipped, 1 truncated" in text
+    assert "skipped (1): no predicate takes its spec: build_y" in text
+    row = next(line for line in text.splitlines() if "raises at" in line)
+    assert "build\\|x" in row and "a\\|b" in row
+
+
+PREDICATE = "def supports_attn(spec):\n    def ok(v):\n        return v > 0\n\n    return ok(spec.tile)\n"
+
+
+@pytest.mark.parametrize(
+    "edited",
+    [PREDICATE.replace("return ok(spec.tile)", "return ok(spec.tile) and True"),
+     PREDICATE.replace("v > 0", "v >= 0")],
+    ids=["predicate-body", "def-nested-in-the-predicate"],
+)  # fmt: skip
+def test_finding_on_a_predicate_the_change_edits_is_new(mod, capsys, tmp_path, edited):
+    # catches: only the builder's name checked against the edited functions, or a function
+    # nested in the predicate not counted as the predicate, so a finding the change writes
+    # reads as an older one shipping for the first time
+    repo, base = make_repo(
+        tmp_path, {BUILDER: BUILD + "\n\n" + PREDICATE, KDP: KDP_JSON}
+    )
+    head = commit(repo, {BUILDER: BUILD + "\n\n" + edited})
+    emit = write_emit(tmp_path / "t.json", repo, base, head,
+                      tables=[table([finding()], at_base=False)])  # fmt: skip
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    assert data["pack_time"] == "Pack-time: NEW 1"
+
+
+LAUNCH_SURFACE = (
+    Path(__file__).resolve().parent.parent.parent
+    / "IngestorGenerator"
+    / "tools"
+    / "launch_surface.py"
+)
+
+
+@pytest.fixture(scope="module")
+def launch_surface() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("launch_surface_rule", LAUNCH_SURFACE)
+    assert spec and spec.loader, f"could not load {LAUNCH_SURFACE}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    "locator",
+    ["kernels/a.py:build_attn", "kernels/a.py:Handler::prepare", "kernels/a.py:prepare -- note",
+     "kernels/a.py: prepare() trusts the KMD", "kernels/a.py", "kernels/a.py:"],
+)  # fmt: skip
+def test_locator_symbol_rule_is_launch_surface_checks(mod, launch_surface, locator):
+    # catches: impact.py's restatement of launch_surface.py's locator rule drifting from it,
+    # although reference.md says the two resolve a python_source alike
+    assert mod.leading_symbol(locator) == launch_surface._leading_symbol(locator)
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["def f():\n    pass\n", "class C:\n    def f(self):\n        pass\n",
+     "def g():\n    def f():\n        pass\n", "try:\n    def f():\n        pass\nexcept E:\n    pass\n",
+     "with x:\n    def f():\n        pass\n", "async def f():\n    pass\n", "f = 1\n# def f():\n"],
+    ids=["top-level", "method", "nested", "under-try", "under-with", "async", "absent"],
+)  # fmt: skip
+def test_python_symbol_lookup_is_launch_surface_checks(mod, launch_surface, source):
+    # catches: impact.py's restatement of launch_surface.py's symbol lookup drifting from it
+    # (an async def, a def under `with` or a nested def found by one and not the other)
+    found = bool(mod.defs_named(ast.parse(source), "f"))
+    assert found == launch_surface.python_symbol_exists(source, "f")

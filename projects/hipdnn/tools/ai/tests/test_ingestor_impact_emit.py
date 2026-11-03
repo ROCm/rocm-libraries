@@ -10,8 +10,10 @@ returns deterministic IR text, so no rocKE, comgr or GPU is involved.
 import importlib.util
 import json
 import os
+import sys
 import subprocess
 import textwrap
+import types
 import time
 from pathlib import Path
 
@@ -308,6 +310,18 @@ def scenarios():
     s["module_wide"] = module_files(reduce_params=[("lse", "ptr addrspace(1)")])
     s["module_body"] = module_files(reduce_body="r2")
     s["tables"] = table_files()
+    s["tables_hang"] = table_files()
+    s["tables_hang"][BUILDER] = (
+        s["tables_hang"][BUILDER]
+        .replace(
+            'assert spec.block % spec.tile == 0, "tile must divide block"',
+            "while spec.tile < 1:\n        pass",
+        )
+        .replace(
+            'return spec.n >= 1 and spec.block >= 1 and spec.tile >= 1, "ok"',
+            'return True, "ok"',
+        )
+    )
     s["tables_fixed"] = table_files(reduce_check="spec.n >= 1 and spec.n % 8 == 0")
     return s
 
@@ -513,6 +527,243 @@ def test_predicate_tables_say_why_they_did_not_run_and_stop_at_their_budget(
     monkeypatch.setenv("IMPACT_EMIT_TABLE_SECONDS", "0")
     _, doc = run(emit, repo, "tables", "tables", tmp_path)
     assert all(t["truncated"] and t["rows"] == 0 for t in doc["predicate_tables"])
+
+
+def test_a_builder_that_hangs_on_a_probed_spec_costs_only_the_tables(
+    emit, repo, tmp_path, monkeypatch
+):
+    # catches: the probe loop sharing the child's --timeout, so one builder that never
+    # returns on a spec its predicate accepts (tile=0) kills the child and the whole run
+    # exits 1 with no JSON although every variant built and compared
+    monkeypatch.setenv("IMPACT_EMIT_TABLE_SECONDS", "0.2")
+    t0 = time.time()
+    rc, doc = run(
+        emit, repo, "tables_hang", "tables_hang", tmp_path, "--timeout", "120"
+    )
+    assert time.time() - t0 < 100
+    assert rc == 0
+    f = only_family(doc)
+    assert f["variants"] == {"base": 2, "head": 2}
+    assert f["failures"] == {"base": {}, "head": {}}
+    assert {t["inner"] for t in doc["predicate_tables"]} == {"", "build_reduce"}
+    assert all(t["skipped"] == "probe timed out" for t in doc["predicate_tables"])
+
+
+def probe_src(fields, pred, body="", reduce_pred=None):
+    """A builder module for one predicate-table case. FIELDS are the Spec fields, PRED the
+    full `supports_fake` def ("" for none), BODY lines run first in `build_fake`. With
+    REDUCE_PRED, `build_fake` returns a KernelModule whose companion is built by the
+    inner `build_reduce` (spec `RSpec(n=spec.n)`), guarded by that predicate."""
+    fields = "\n".join(f"    {f}" for f in fields)
+    body = "\n".join(f"    {b}" for b in body)
+    inner = (
+        "\n@dataclasses.dataclass(frozen=True)\nclass RSpec:\n    n: int = 1\n\n"
+        f"def supports_reduce(spec, arch='x'):\n    return {reduce_pred}\n\n"
+        "def build_reduce(spec, arch):\n"
+        '    return {"params": [("o", "ptr addrspace(1)")], "body": "r"}\n'
+        if reduce_pred
+        else ""
+    )
+    tail = (
+        '    return KernelModule({"params": p, "body": "v"},'
+        ' {"r": build_reduce(RSpec(n=spec.n), arch=arch)})\n'
+        if reduce_pred
+        else '    return {"params": p, "body": "v"}\n'
+    )
+    return (
+        "import dataclasses\nfrom rocke.helpers import KernelModule\n\n"
+        f"@dataclasses.dataclass(frozen=True)\nclass Spec:\n{fields}\n\n{pred}\n{inner}\n"
+        f"def build_fake(spec, arch):\n{body}\n"
+        '    p = [("q", "ptr addrspace(1)")]\n'
+        f"{tail}"
+    )
+
+
+def probe_tables(emit, tmp_path, src, specs):
+    """The head tables the child writes for a tree whose builder is SRC and whose KDP ships
+    SPECS (one variant each)."""
+    variants = tuple({"name": f"v{i}", "spec": s} for i, s in enumerate(specs))
+    files = tree_files(variants=variants)
+    files[f"{PROVIDER}/rocke/platform/python/rocke/helpers/__init__.py"] = KERNEL_MODULE
+    files[f"{PROVIDER}/descriptor-packaging/python/hkp_pack/rocke_compile.py"] = (
+        HELPERS + RESOLVER
+    )
+    files[BUILDER] = src
+    root = tmp_path / "tree"
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text, encoding="utf-8")
+    out = tmp_path / "side.json"
+    r = emit.run_tree(
+        [sys.executable, str(SCRIPT), "child", "--root", str(root), "--out", str(out)],
+        120,
+        cwd=str(root),
+        env=emit.child_env(str(root), "llvm23"),
+    )
+    assert r.returncode == 0, r.stderr
+    return json.loads(out.read_text(encoding="utf-8"))["tables"]
+
+
+ACCEPT = "def supports_fake(spec, arch='x'):\n    return {}, 'ok'\n"
+RAISE_AT_3 = ["if spec.n == 3:", "    raise ValueError('three')"]
+
+
+@pytest.mark.parametrize(
+    "src, specs, skipped, found",
+    [
+        (  # a bare-bool predicate, not a (bool, reason) tuple
+            probe_src(
+                ["n: int = 1"],
+                "def supports_fake(spec, arch='x'):\n    return spec.n >= 1\n",
+                RAISE_AT_3,
+            ),
+            [{"n": 1}, {"n": 2}],
+            "",
+            {("", "builder", "n"): [3]},
+        ),
+        (  # a predicate that takes no arch
+            probe_src(
+                ["n: int = 1"],
+                "def supports_fake(spec):\n    return spec.n >= 1, 'ok'\n",
+                RAISE_AT_3,
+            ),
+            [{"n": 1}, {"n": 2}],
+            "",
+            {("", "builder", "n"): [3]},
+        ),
+        (  # a bool field shipped True: False is the value only the bool candidates reach
+            probe_src(
+                ["flag: bool = True"],
+                ACCEPT.format("True"),
+                ["if not spec.flag:", "    raise ValueError('off')"],
+            ),
+            [{"flag": True}],
+            "",
+            {("", "builder", "flag"): [False]},
+        ),
+        (  # more than six shipped values: only the first four and last two seed the
+            # derived values (15 from 10, never 75 from 50)
+            probe_src(
+                ["n: int = 1"],
+                ACCEPT.format("True"),
+                ["if spec.n in (15, 75):", "    raise ValueError('x')"],
+            ),
+            [{"n": 10 * i} for i in range(1, 9)],
+            "",
+            {("", "builder", "n"): [15]},
+        ),
+        (  # a finding only the second seed reaches (n=3 with m=2)
+            probe_src(
+                ["n: int = 1", "m: int = 1"],
+                ACCEPT.format("True"),
+                ["if spec.n == 3 and spec.m == 2:", "    raise ValueError('x')"],
+            ),
+            [{"n": 1, "m": 1}, {"n": 2, "m": 2}],
+            "",
+            {("", "builder", "n"): [3]},
+        ),
+        (  # a field shipping 0: only the negative values are outside its sign range
+            probe_src(["n: int = 1"], ACCEPT.format("True"), reduce_pred="spec.n >= 0"),
+            [{"n": 0}, {"n": 1}],
+            "",
+            {("", "sign", "n"): [-1]},
+        ),
+        (  # a field shipping a negative value has no sign range to leave
+            probe_src(["n: int = 1"], ACCEPT.format("True"), reduce_pred="spec.n >= 0"),
+            [{"n": -2}, {"n": 1}],
+            "",
+            {},
+        ),
+        (
+            probe_src(["n: int = 1"], "", RAISE_AT_3),
+            [{"n": 1}, {"n": 2}],
+            "no support predicate takes its spec",
+            {},
+        ),
+        (  # a spec class that is not a dataclass
+            probe_src(["n: int = 1"], ACCEPT.format("True")).replace(
+                "@dataclasses.dataclass(frozen=True)\nclass Spec:",
+                "class Spec:\n    def __init__(self, n=1):\n        self.n = n\n",
+            ),
+            [{"n": 1}],
+            "no shipped spec, or a spec that is not a dataclass instance",
+            {},
+        ),
+    ],
+    ids=[
+        "bare-bool-predicate",
+        "predicate-without-arch",
+        "bool-field",
+        "many-shipped-values",
+        "second-seed",
+        "ships-zero",
+        "ships-negative",
+        "no-predicate",
+        "non-dataclass-spec",
+    ],
+)
+def test_predicate_table_probes_each_kind_of_field_and_predicate(
+    emit, tmp_path, src, specs, skipped, found
+):
+    # catches: a bare-bool predicate read as res[0]; a predicate without `arch` called with
+    # one; a bool field probed with only True; the many-shipped-values cut dropped; one seed
+    # instead of several; the sign guard for a field that ships 0 or a negative value; a
+    # missing predicate or a non-dataclass spec reported as "no findings" with no reason
+    tables = probe_tables(emit, tmp_path, src, specs)
+    assert tables[0]["skipped"] == skipped
+    got = {
+        (t["inner"], f["check"], f["field"]): f["values"]
+        for t in tables
+        for f in t["findings"]
+    }
+    assert got == found
+
+
+def test_a_finding_is_at_base_only_for_the_same_check_on_the_same_field(emit):
+    # catches: a finding marked pre-existing because the base tabled the builder, or
+    # because it found another check on the field
+    def table(*findings):
+        return {
+            "arch": "gfx950",
+            "source": "s.py",
+            "builder": "build_x",
+            "inner": "",
+            "skipped": "",
+            "findings": [{"check": c, "field": f} for c, f in findings],
+        }
+
+    base = {"tables": [table(("sign", "n"), ("builder", "m"))]}
+    head = {"tables": [table(("builder", "n"), ("sign", "n"), ("builder", "m"))]}
+    (t,) = emit.compare_tables(base, head)
+    assert t["at_base"]
+    assert [(f["check"], f["field"], f["at_base"]) for f in t["findings"]] == [
+        ("builder", "n", False),
+        ("sign", "n", True),
+        ("builder", "m", True),
+    ]
+
+
+def test_the_emitted_document_is_accepted_by_impacts_loader(emit, tmp_path):
+    # catches: the emitter's schema literal and impact.py's EMIT_SCHEMA bumped one-sided,
+    # so every emit file is then rejected; or a document field the loader reads changing
+    spec = importlib.util.spec_from_file_location(
+        "hipdnn_ingestor_impact_for_emit", SCRIPT.with_name("impact.py")
+    )
+    impact = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(impact)
+    side = {"not_inspected": [{"kdp": "k.kdp.json", "reason": "r"}]}
+    sides = {"base": side, "head": side}
+    names = ["v"]
+    fam = family(names, {"v": [["q", "ptr"]]})
+    args = types.SimpleNamespace(base="b", head="h")
+    tree = "0" * 40
+    doc = emit.build_doc(
+        args, "llvm23", tree, tree, sides["base"], sides["head"],
+        emit.compare({"families": [fam]}, {"families": [fam]}), [], 1.0,
+    )  # fmt: skip
+    path = tmp_path / "emit.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert impact.load_emit(path)["schema"] == doc["schema"]
 
 
 def test_removed_variant_is_only_in_base_and_unchanged_one_is_not_flagged(

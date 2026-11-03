@@ -52,12 +52,13 @@ AREA_ROWS = [
 ]
 
 # Changes under these trigger the IMPACT lane (lanes/runtime-impact.md): the kernel ingestor's
-# producers, packer, native packs, SDK ingestor headers, generic-target table and header, and
+# producers, packer, native packs, plugin SDK headers (the loader's include closure is worked out
+# per tree, so every header triggers), the generic-target table and its CMake template, and
 # generator configs. Keep in step with SURFACE_TABLE in hipdnn-ingestor-impact's scripts/impact.py.
 IMPACT_PREFIXES = (
     "dnn-providers/hip-kernel-provider/",
-    "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/",
-    "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets",
+    "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/",
+    "projects/hipdnn/plugin_sdk/cmake/GpuGenericTargets",
     "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
     "projects/hipdnn/tools/IngestorGenerator/",
 )

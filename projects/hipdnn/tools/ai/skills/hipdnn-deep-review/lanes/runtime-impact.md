@@ -33,6 +33,7 @@ searched as copies and readers, so a stale pin or a stale import is yours.
 2. Run the emitter when the reference's *The emitter* says to:
 
    ```bash
+   . ./env.sh; IMPACT_SCRIPTS="$SKILL/../hipdnn-ingestor-impact/scripts"
    rm -f "$SCRATCH/IMPACT/emit.json"
    python3 "$IMPACT_SCRIPTS/impact_emit.py" run --repo "$CLONE" --base "$BASE" --head "$HEAD" --out "$SCRATCH/IMPACT/emit.json"
    python3 "$IMPACT_SCRIPTS/impact.py" report --repo "$CLONE" --base "$BASE" --head "$HEAD" --target-tip "$TARGET_TIP" --emit "$SCRATCH/IMPACT/emit.json" > lanes/IMPACT-evidence/report-emit.md
@@ -49,7 +50,7 @@ searched as copies and readers, so a stale pin or a stale import is yours.
 4. End **Checked, no finding** with the two lines the script printed last, each corrected by your
    judgment and saying why when it differs: the `Pack-time:` line (`NEW <n>`, `FIRST-SHIPPED <n>`,
    `CLEAN` or `NOT RUN`; see the reference's *Predicate tables*), then
-   `Runtime impact: BREAKS | NEEDS-DEVICE <arch: suite, ...> | NONE (<n> files inspected) | N/A (no surface file)`,
+   `Runtime impact: BREAKS | NEEDS-DEVICE <arch, ...> | NONE (<n> files inspected) | N/A (no surface file)`,
    keeping any `not judged here:` note the script added. Follow them with your own
    `C++ tables: <k> of <n> disagree (...) | <n> written, all agree | none written (<why>)` line, so a
    qualifying row with no table is visible.
@@ -60,7 +61,7 @@ searched as copies and readers, so a stale pin or a stale import is yours.
 |---|---|
 | A `mismatch` that holds | A `source-claim` at `BLOCKING` ([../policy.md](../policy.md): an ABI break without a migration path). **Where**: the producer line and every disagreeing copy. **Proof**: the command and both quoted lists. A `merged-only` mismatch: **Fix** is to rebase and update the named copy. The same mismatch at `$BASE` is pre-existing: `FUTURE WORK` at most |
 | A dispatch divergence | A `source-claim` at `BLOCKING`, quoting both sides |
-| A descriptor or generic-target value the loader rejects or ignores | A finding, citing the loader rule |
+| A descriptor or generic-target value the loader rejects or ignores | A `source-claim` at `BLOCKING`, citing the loader rule |
 | No break (`changed` but consistent), `inert`, `outside` | No finding. Count them under **Checked, no finding**; list each `inert` reason once |
 | A predicate-table finding in state `new` or `first shipped` that holds | A `defect` at `IMPORTANT`: the packer accepts a spec its builder rejects, or a value the kernel cannot use. For `first shipped`, say the predicate is older and ships for the first time. **Proof**: the table's row (predicate, field, values, seed, the builder's error). A finding `at base` predates the change: `FUTURE WORK` at most |
 | A C++ table disagreement that holds | A `source-claim`: `BLOCKING` when a valid row's values differ, or when no C++ refusal on the engine's call path refuses a row Python refuses. `IMPORTANT` when the engine path refuses it but the header's own function does not, and another caller reaches the function directly. **Proof**: the harness, the driver command and the disagreeing rows |

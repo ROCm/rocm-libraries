@@ -203,6 +203,7 @@ CONDITIONAL_NODES = (
     ast.AsyncWith,
     ast.Match,
 ) + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())
+TRY_NODES = (ast.Try,) + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())
 ZERO_SHA = "0" * 40
 GIT_CONFIG = (
     "-c", "core.quotepath=off",
@@ -1004,12 +1005,38 @@ class ParamList:
         return [n + "?" if c else n for n, c in zip(self.names, self.conditional)]
 
 
+def always_runs(node, field: str) -> bool:
+    """Whether the code under `field` of the compound `node` runs whenever `node` does: a
+    `with` body, a `try` body and `finally`, the head expression of a branch or loop, and the
+    body of an `if` whose test is a true constant."""
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return True
+    if isinstance(node, TRY_NODES):
+        return field in ("body", "finalbody")
+    if isinstance(node, ast.If) and field == "body":
+        return isinstance(node.test, ast.Constant) and bool(node.test.value)
+    return field in ("test", "iter", "subject")
+
+
+def branch_children(node, conditional: bool):
+    """(child, conditional) for each child node, a child marked when it may not run."""
+    if not isinstance(node, CONDITIONAL_NODES):
+        for child in ast.iter_child_nodes(node):
+            yield child, conditional
+        return
+    for field, value in ast.iter_fields(node):
+        branch = conditional or not always_runs(node, field)
+        for child in value if isinstance(value, list) else [value]:
+            if isinstance(child, ast.AST):
+                yield child, branch
+
+
 def param_lists(tree) -> dict:
     """Function qualname -> its `b.param` names in source order, conditional ones marked."""
     result, calls = {}, {}
 
     def visit(node, qual, function, conditional):
-        for child in ast.iter_child_nodes(node):
+        for child, branch in branch_children(node, conditional):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 name = f"{qual}.{child.name}" if qual else child.name
                 result.setdefault(name, ParamList(child.lineno))
@@ -1025,13 +1052,8 @@ def param_lists(tree) -> dict:
                     and isinstance(child.func, ast.Attribute)
                     and child.func.attr == "param"
                 ):
-                    calls.setdefault(function, []).append((child, conditional))
-                visit(
-                    child,
-                    qual,
-                    function,
-                    conditional or isinstance(child, CONDITIONAL_NODES),
-                )
+                    calls.setdefault(function, []).append((child, branch))
+                visit(child, qual, function, branch)
 
     visit(tree, "", None, False)
     for function, found in calls.items():
@@ -1249,6 +1271,9 @@ def cpp_kernel_lists(text: str) -> list:
     [{func, line, names, sizes, dynamic, unnamed}]; `names` is None unless every entry is a
     `KernelArgument{kind, size, offset, "name"}` literal with a non-empty name."""
     code = mask_cpp(text)
+    # Arguments are read with comments blanked and string literals kept, so a comment inside
+    # the braces is not taken for an argument.
+    plain = strip_c_comments(text)
     out = []
     for fn in _KA_FUNC.finditer(code):
         open_at = fn.end() - 1
@@ -1264,7 +1289,7 @@ def cpp_kernel_lists(text: str) -> list:
         for i in range(open_at, close):
             if i in literals:
                 end = match_brace(code, literals[i].end() - 1)
-                args = split_args(text[literals[i].end() : end])
+                args = split_args(plain[literals[i].end() : end])
                 groups.setdefault(stack[-1] if stack else open_at, []).append(
                     (args, text.count("\n", 0, i) + 1)
                 )
@@ -1932,7 +1957,6 @@ def rocke_status(ctx: Ctx, ch: Change):
         else "; runs after lowering, so an equal emitted IR does not cover it"
     )
     side = ctx.closure("before" if ch.head is None else "after")
-    before = after = side
     archs = set(side.shipped.get(path, ()))
     if path in side.shipped:
         arch = ALL_ARCHS if ALL_ARCHS in archs else ", ".join(sorted(archs))
@@ -1944,7 +1968,7 @@ def rocke_status(ctx: Ctx, ch: Change):
             arch,
             fold,
         )
-    why = after.consumed.get(path) or before.consumed.get(path)
+    why = side.consumed.get(path)
     if why:
         bt, at = ctx.ast(ch, "before"), ctx.ast(ch, "after")
         if bt is None or at is None:
@@ -3072,12 +3096,18 @@ def surfaces_rows(ctx: Ctx) -> list:
             )
             if path and ctx.after.read([path])[path] is None
         ]
-        if not broken and dump is None and (py_changed or manifest_changed):
-            broken = [f"function {surface.function}"]
+        problem = None
         if broken:
+            problem = f"points at a missing {', '.join(broken)} after the change"
+        elif dump is None and (py_changed or manifest_changed):
+            problem = (
+                f"points at python module {surface.module}, which does not parse after the change"
+                if ctx.after.ast(surface.module) is None
+                else f"points at a missing function {surface.function} after the change"
+            )
+        if problem:
             rows.append(make_row("surfaces", surface.manifest, 0, name, "mismatch",
-                f"declared launch_surface {surface.name} points at a missing {', '.join(broken)} after the change",
-                counter, arch=arch))  # fmt: skip
+                f"declared launch_surface {surface.name} {problem}", counter, arch=arch))  # fmt: skip
         elif py_changed or cpp_changed or manifest_changed:
             side = (
                 ("python side" if py_changed else "")
@@ -3369,19 +3399,22 @@ def emit_shape_problem(data: dict):
             return f"family {n}: `failures` lacks base and head objects"
         if not (
             isinstance(built, dict)
-            and all(params(built.get(s)) for s in ("base", "head"))
+            and all(s in built and params(built[s]) for s in ("base", "head"))
         ):
             return f"family {n}: `params` is not base and head [name, type] lists"
         companions = fam.get("companions")
         if not (
             isinstance(companions, dict)
             and all(
-                companions.get(s) is None
-                or (
-                    isinstance(companions[s], dict)
-                    and all(
-                        isinstance(r, str) and p is not None and params(p)
-                        for r, p in companions[s].items()
+                s in companions
+                and (
+                    companions[s] is None
+                    or (
+                        isinstance(companions[s], dict)
+                        and all(
+                            isinstance(r, str) and p is not None and params(p)
+                            for r, p in companions[s].items()
+                        )
                     )
                 )
                 for s in ("base", "head")
@@ -3596,10 +3629,12 @@ def anchor(row) -> str:
     return f"{row['path']}:{row['line']}" if row["line"] else row["path"]
 
 
-def render_rows(rows: list) -> str:
-    def esc(text):
-        return str(text).replace("|", "\\|").replace("\n", " ")
+def esc(text) -> str:
+    """`text` as one Markdown table cell: pipes escaped, newlines flattened."""
+    return str(text).replace("|", "\\|").replace("\n", " ")
 
+
+def render_rows(rows: list) -> str:
     lines = [
         "| Anchor | View | Status | Reason | Counterparts |",
         "|---|---|---|---|---|",
@@ -3673,9 +3708,6 @@ def render_tables(tables: list, edited=None) -> str:
     """The emit file's predicate tables: findings the change introduces, then older defects
     that ship for the first time, then pre-existing ones (`finding_state`), then the tables
     that could not run. Pack-time facts; no row or rollup reads them."""
-
-    def esc(text):
-        return str(text).replace("|", "\\|").replace("\n", " ")
 
     def state(t, f):
         return finding_state(t, f, edited)
@@ -3837,19 +3869,13 @@ def cmd(args) -> None:
     selected = (
         rows
         if args.cmd == "report"
-        else [
-            r
-            for r in rows
-            if r["kind"] in KINDS[args.cmd] or (args.cmd == "files" and False)
-        ]
+        else [r for r in rows if r["kind"] in KINDS[args.cmd]]
     )
     files = sorted(ctx.changes.values(), key=lambda c: c.path)
     worst = {}
     for r in rows:
         if SEVERITY[r["status"]] >= SEVERITY[worst.get(r["path"], "outside")]:
             worst[r["path"]] = r["status"]
-    if args.cmd == "files":
-        selected = [r for r in rows if r["kind"] == "file"]
     if args.json:
         payload = {"views": views, "rows": [public(r) for r in selected]}
         if args.cmd in ("files", "report"):

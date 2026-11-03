@@ -67,13 +67,18 @@ How the copies are paired:
 - `scripts/impact.py` reads git objects only (`cat-file`, `diff`, `ls-tree`, `grep`,
   `merge-tree`); it writes no ref, index or worktree. Its subcommands are `files`, `kernargs`,
   `symbols`, `surfaces`, `data` and `report`; `report` runs all of them and ends in the rollup line.
+  The merged view needs git 2.38 or later (`merge-tree --write-tree`); an older git skips it as
+  `changed`.
 - `scripts/impact_emit.py` imports and runs rocKE code from the two trees: a `git archive` extract
   per side, in a child process whose whole process tree is killed at its timeout, with an
   environment reduced to system, temp, locale and Python user-site variables, so credentials such
   as `GH_TOKEN` are not passed. That is the same code execution as building the head, and it is
   not a sandbox: the child keeps `HOME` (`USERPROFILE` on Windows) and network access, and only
   tokens held in environment variables are dropped. It builds every shipped variant at both sides
-  on the CPU (no GPU or comgr): a few minutes, with the two sides on two concurrent workers.
+  on the CPU (no GPU or comgr): a few minutes, with the two sides on two concurrent workers. Every
+  `IMPACT_EMIT_*` variable passes through to the child; it reads `IMPACT_EMIT_TABLE_SECONDS`
+  (see *Predicate tables*) and `IMPACT_EMIT_ENUM_TIMEOUT`, the seconds the registry enumerator
+  gets for a DVC-held catalog (default 600, inside the per-side `--timeout` of 900).
 
 Both exit 0 when the analysis ran, whatever it found, and 1 with one line (`impact: <reason>` or
 `impact_emit: <reason>`) on stderr when they could not run. An exit 1 is never a verdict.
@@ -131,8 +136,9 @@ builds. It works on the family's shipped builder, and on every other `build_*` f
 module that the builds called (a `KernelModule`'s kernel builders, such as a `reduce` companion's).
 It takes the shipped specs (an inner builder's are the specs the builds passed it) and varies one
 int or bool field at a time from up to four seeds. The values are the shipped ones, 0, -1, and the
-negation, double, half and 1.5 times of each shipped positive value. It asks the predicate the
-packer would resolve (`_resolve_support_predicate`).
+negation, double, half and 1.5 times of each shipped positive value. A field that ships more than
+six distinct ints is cut to its four smallest and two largest positive values, which stand in for
+the shipped ones too. It asks the predicate the packer would resolve (`_resolve_support_predicate`).
 
 | Check | Finding |
 |---|---|
@@ -172,7 +178,11 @@ did not run.
 
 A table that cannot run says why (`skipped`): the packer has no resolver at that revision, no
 predicate takes the spec, or the specs are not dataclasses. A family's tables stop after
-`IMPACT_EMIT_TABLE_SECONDS` (default 60) and say `truncated`.
+`IMPACT_EMIT_TABLE_SECONDS` (default 60) and say `truncated`. A builder call that never returns
+(a probed spec it loops on) is abandoned 5 s past that budget: that family's tables and those of
+the families after it read `skipped: probe timed out`, and the argument and IR comparison is
+still written. A builder stuck in native code that holds the interpreter lock still runs the side
+to its `--timeout`.
 
 Judge each finding whose state is `new` or `first shipped`. Read the predicate and the
 builder at `HEAD`.
@@ -242,7 +252,7 @@ Every judged finding in the report carries one:
 
 | Severity | Use for |
 |---|---|
-| `BLOCKING` | A break on the engine's path: a holding `mismatch` row, a dispatch divergence, values that differ on a valid row, a refusal no C++ check on the engine path restates |
+| `BLOCKING` | A break on the engine's path: a holding `mismatch` row, a dispatch divergence, values that differ on a valid row, a refusal no C++ check on the engine path restates, a descriptor or generic-target value the loader rejects or ignores |
 | `IMPORTANT` | Real risk off the engine's path or not yet reachable: a predicate-table finding that holds, a precondition the function does not enforce while another caller reaches it, the engine declining what rocKE serves |
 | `SUGGESTION` | Anything else worth fixing in code the change touches |
 

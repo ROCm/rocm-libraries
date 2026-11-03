@@ -42,7 +42,10 @@ resolves (`_resolve_support_predicate`). An accepted spec that the builder raise
 shipped value (<= 0 where all are >= 1, < 0 where all are >= 0) of a field they share that one
 predicate accepts and the other refuses is a `sign` finding on the one that accepts. A finding
 the base's table also has (same check, same field) is marked `at_base`. A family's tables stop
-after `IMPACT_EMIT_TABLE_SECONDS` (default 60) and say `truncated`.
+after `IMPACT_EMIT_TABLE_SECONDS` (default 60) and say `truncated`. The probes run in a worker
+thread: a builder that never returns on a spec the predicate accepts costs only its family
+(and the families after it) the tables, which read `skipped: "probe timed out"`, once the
+family is 5 s past its budget; the families and `not_inspected` are still written and compared.
 
 The flavor defaults to the newest flavor the head and the base both know (the top rung
 of `_LLVM_FLAVOR_LADDER` in `rocke/platform/python/rocke/core/lower_llvm.py`, else the last
@@ -69,6 +72,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -643,10 +647,14 @@ def _build_one(h, v, arch, capture=None):
 #: Seeds per table, and how many distinct shipped values of one int field seed its domain.
 _TABLE_SEEDS = 4
 _TABLE_BASE_INTS = 6
+#: Seconds a family's probes may run past their budget before the family is abandoned.
+_TABLE_GRACE = 5
 
 
 def _spec_key(spec):
-    return repr(dataclasses.asdict(spec))
+    if dataclasses.is_dataclass(spec) and not isinstance(spec, type):
+        return repr(dataclasses.asdict(spec))
+    return repr(id(spec))  # not a dataclass: the table says so, it needs no key
 
 
 def _domains(specs):
@@ -845,38 +853,71 @@ def _same_module_signs(tables, deadline):
                                f"{b.name} in the same module, refuses it; every shipped value is >= {low}")  # fmt: skip
 
 
+def _table_names(fam, got):
+    return [fam["builder"], *sorted({n for n, _ in got["inner"]})]
+
+
+def _table_record(fam, t):
+    return {
+        "arch": fam["arch"],
+        "source": fam["source"],
+        "builder": fam["builder"],
+        "inner": "" if t.name == fam["builder"] else t.name,
+        **t.finish(),
+    }
+
+
+def _family_tables(h, fam, got, seconds):
+    """The table records of one family: its shipped builder's and each inner builder's."""
+    module = got["module"]
+    inner = {}
+    for name, spec in got["inner"]:
+        inner.setdefault(name, []).append(spec)
+    deadline = time.time() + seconds
+    tables = [
+        _predicate_table(h, module, name, catalog, fam["arch"], deadline)
+        for name, catalog in [(fam["builder"], got["specs"]), *sorted(inner.items())]
+    ]
+    _same_module_signs(tables, deadline)
+    return [_table_record(fam, t) for t in tables]
+
+
 def _tables(h, fams, captures):
-    """One table per family's shipped builder and per inner builder its builds called."""
+    """(records, stuck): one table per family's shipped builder and per inner builder its
+    builds called. The probes run in a worker thread; a family whose probes run past its
+    IMPACT_EMIT_TABLE_SECONDS budget plus _TABLE_GRACE (a builder that never returns on a spec
+    the predicate accepts) is abandoned with every table not yet finished, and STUCK is True.
+    """
     seconds = float(os.environ.get("IMPACT_EMIT_TABLE_SECONDS", "60"))
-    out = []
-    for key, fam in fams.items():
-        got = captures.get(key)
-        if not got:
-            continue
-        module = got["module"]
-        inner = {}
-        for name, spec in got["inner"]:
-            inner.setdefault(name, []).append(spec)
-        deadline = time.time() + seconds
-        tables = [
-            _predicate_table(h, module, name, catalog, fam["arch"], deadline)
-            for name, catalog in [
-                (fam["builder"], got["specs"]),
-                *sorted(inner.items()),
-            ]
-        ]
-        _same_module_signs(tables, deadline)
-        for t in tables:
-            out.append(
-                {
-                    "arch": fam["arch"],
-                    "source": fam["source"],
-                    "builder": fam["builder"],
-                    "inner": "" if t.name == fam["builder"] else t.name,
-                    **t.finish(),
-                }
-            )
-    return out
+    plan = [(fam, captures[key]) for key, fam in fams.items() if captures.get(key)]
+    done, state = [], {"at": (0, time.time()), "error": None}
+
+    def work():
+        try:
+            for i, (fam, got) in enumerate(plan):
+                state["at"] = (i, time.time())
+                done.append(_family_tables(h, fam, got, seconds))
+        except BaseException as e:  # re-raised in the caller's thread
+            state["error"] = e
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(0.1)
+        if time.time() - state["at"][1] > seconds + _TABLE_GRACE:
+            break
+    stuck = worker.is_alive()
+    if state["error"] is not None:
+        raise state["error"]
+    finished = list(done)
+    out = [r for recs in finished for r in recs]
+    if stuck:
+        for fam, got in plan[len(finished) :]:
+            for name in _table_names(fam, got):
+                t = _Table(name)
+                t.record["skipped"] = "probe timed out"
+                out.append(_table_record(fam, t))
+    return out, stuck
 
 
 def child_main(root, out):
@@ -939,13 +980,16 @@ def child_main(root, out):
             )
             got["specs"].append(capture["spec"])
             got["inner"] += capture["inner"]
+    tables, stuck = _tables(h, fams, captures)
     doc = {
         "families": list(fams.values()),
-        "tables": _tables(h, fams, captures),
+        "tables": tables,
         "not_inspected": skipped,
         "seconds": round(time.time() - t0, 1),
     }
     Path(out).write_text(json.dumps(doc), encoding="utf-8", newline="\n")
+    if stuck:
+        os._exit(0)  # a probe thread still spins in a builder; the document is written
     return 0
 
 
@@ -1167,6 +1211,30 @@ def compare_tables(base_side, head_side):
     ]
 
 
+def build_doc(
+    a, flavor, base_tree, head_tree, base_side, head_side, families, tables, seconds
+):
+    """The emit document (schema 6) of one run, from the two sides' child documents and
+    their compared families and tables."""
+    return {
+        "schema": 6,
+        "tool": "impact_emit",
+        "flavor": flavor,
+        "base": a.base,
+        "head": a.head,
+        "base_tree": base_tree,
+        "head_tree": head_tree,
+        "families": families,
+        "predicate_tables": tables,
+        "not_inspected": [
+            {"kdp": n["kdp"], "side": side, "reason": n["reason"]}
+            for side, doc in (("base", base_side), ("head", head_side))
+            for n in doc["not_inspected"]
+        ],
+        "seconds": seconds,
+    }
+
+
 def cmd_run(a):
     repo = Path(a.repo)
     if not repo.is_dir():
@@ -1182,25 +1250,11 @@ def cmd_run(a):
         base_side, head_side = fb.result(), fh.result()
     families = compare(base_side, head_side)
     tables = compare_tables(base_side, head_side)
-    not_inspected = [
-        {"kdp": n["kdp"], "side": side, "reason": n["reason"]}
-        for side, doc in (("base", base_side), ("head", head_side))
-        for n in doc["not_inspected"]
-    ]
     seconds = round(time.time() - t0, 1)
-    doc = {
-        "schema": 6,
-        "tool": "impact_emit",
-        "flavor": flavor,
-        "base": a.base,
-        "head": a.head,
-        "base_tree": base_tree,
-        "head_tree": head_tree,
-        "families": families,
-        "predicate_tables": tables,
-        "not_inspected": not_inspected,
-        "seconds": seconds,
-    }
+    doc = build_doc(
+        a, flavor, base_tree, head_tree, base_side, head_side, families, tables, seconds
+    )
+    not_inspected = doc["not_inspected"]
     try:
         Path(a.out).write_text(
             json.dumps(doc, indent=1) + "\n", encoding="utf-8", newline="\n"
