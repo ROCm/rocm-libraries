@@ -22,13 +22,13 @@
 #
 # ########################################################################
 
-# NVIDIA HPC SDK toolchain (nvfortran).
+# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
 #
-# Usage, from projects/rocblas/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/nvhpc.cmake
+# Usage, from bindings/fortran/rocblas:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
 #
 # No format or line-length flag: the generated source fits within the 132
 # free-form columns, and the CMakeLists sets Fortran_FORMAT/Fortran_PREPROCESS.
 
-set(CMAKE_Fortran_COMPILER nvfortran CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       nvc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")

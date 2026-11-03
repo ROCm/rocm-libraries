@@ -51,6 +51,7 @@ end subroutine ROCBLAS_CHECK
 program example_fortran_gemv
     use iso_c_binding
     use rocblas
+    use rocblas_enums
 
     implicit none
 
@@ -153,8 +154,8 @@ program example_fortran_gemv
     integer(c_int) :: i, element
 
     ! Create rocBLAS handle
-    type(c_ptr) :: handle
-    call ROCBLAS_CHECK(rocblas_create_handle(handle))
+    type(c_ptr), target :: handle
+    call ROCBLAS_CHECK(rocblas_create_handle(c_loc(handle)))
 
     ! Allocate host-side memory
     allocate(hA(size_A))
@@ -191,7 +192,7 @@ program example_fortran_gemv
     call date_and_time(values = tbegin)
 
     ! Call rocblas_gemv
-    call ROCBLAS_CHECK(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host))
+    call ROCBLAS_CHECK(rocblas_set_pointer_mode(handle, 0))
     call ROCBLAS_CHECK(rocblas_dgemv(handle, transA, m, n, c_loc(alpha), dA,&
                                      lda, dx, 1, c_loc(beta), dy, 1))
     call HIP_CHECK(hipDeviceSynchronize())

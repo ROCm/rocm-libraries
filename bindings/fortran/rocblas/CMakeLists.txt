@@ -263,8 +263,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocblas-fortran-config.cmake"
 
 # Not rocblas_VERSION: standalone, that is the INSTALLED rocBLAS's version.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _rocblas_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocblas/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocblas/CMakeLists.txt" _rocblas_root)
   string(REGEX MATCH "set[ \t]*\\([ \t]*VERSION_STRING[ \t]+\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
          _m "${_rocblas_root}")
   if(CMAKE_MATCH_1)

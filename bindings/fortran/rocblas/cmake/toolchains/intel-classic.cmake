@@ -22,13 +22,13 @@
 #
 # ########################################################################
 
-# GNU toolchain (gfortran).
+# Classic Intel toolchain (ifort). Deprecated by Intel in favour of ifx; kept for sites still pinned to it.
 #
-# Usage, from projects/rocblas/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/gnu.cmake
+# Usage, from bindings/fortran/rocblas:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-classic.cmake
 #
 # No format or line-length flag: the generated source fits within the 132
 # free-form columns, and the CMakeLists sets Fortran_FORMAT/Fortran_PREPROCESS.
 
-set(CMAKE_Fortran_COMPILER gfortran CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       gcc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ifort CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")
