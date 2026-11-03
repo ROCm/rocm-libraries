@@ -3,181 +3,68 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
  * @file UnifiedAttentionGraphMatch.hpp
- * @brief The graph- and record-reading helpers the gfx950 unified-attention packs
+ * @brief The graph match and record-reading helpers the gfx950 unified-attention packs
  *        (hipkernel:Gfx950AttentionUnified2D and hipkernel:Gfx950AttentionUnified3D) share.
  *
  * Both packs serve a single dense BSHD SDPA-forward node through the same paged-KV kernel
- * family, so they read the graph, classify its mask and read a candidate's metadata the
- * same way. Those rules live here once, so a matcher fix is one edit; what differs per
- * engine (the decode rule, the geometry check, the launch) stays in each pack. Decline
- * lines name their engine through DeclinedBy.
+ * family, so their graph matches run the same steps around a few engine rules:
+ *
+ *   matchOperands()   node, operands, layout, dtype and shape consistency
+ *   (engine rules)    GQA group, head size, seqlen_q, and anything else the engine adds
+ *   matchAttributes() whole paged-KV blocks, 32-bit addressing, the mask, every optional
+ *                     attribute the kernels cannot honour, and the scale
+ *   bindGraph()       the bound tokens, with the engine's catalog mask key
+ *
+ * A matcher fix is one edit here; decline lines name their engine through DeclinedBy.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::unified_attention
 {
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 
-/// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout.
-inline constexpr uint32_t BATCH_AXIS = 0;
-inline constexpr uint32_t HEAD_AXIS = 1;
-inline constexpr uint32_t SEQ_AXIS = 2;
-inline constexpr uint32_t HEAD_SIZE_AXIS = 3;
-inline constexpr uint32_t SDPA_RANK = 4;
+using sdpa_graph::BATCH_AXIS;
+using sdpa_graph::DeclinedBy;
+using sdpa_graph::describeOperand;
+using sdpa_graph::findTensor;
+using sdpa_graph::hasBshdStrides;
+using sdpa_graph::hasSdpaForwardNode;
+using sdpa_graph::HEAD_AXIS;
+using sdpa_graph::HEAD_SIZE_AXIS;
+using sdpa_graph::isWellFormedOperand;
+using sdpa_graph::sdpaNode;
+using sdpa_graph::SEQ_AXIS;
 
-inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
-
-/// The node this engine's matchers read, or nullptr if the graph is not a single
-/// SDPA-forward node.
-inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
-{
-    if(context.graph.nodeCount() != 1)
-    {
-        return nullptr;
-    }
-
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::SdpaAttributes)
-    {
-        return nullptr;
-    }
-
-    return &node.attributesAs<data_objects::SdpaAttributes>();
-}
-
-/// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
-/// checked before anything indexes an axis.
-inline bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
-       || strides->size() != SDPA_RANK)
-    {
-        return false;
-    }
-
-    for(const auto dim : *dims)
-    {
-        if(dim <= 0)
-        {
-            return false;
-        }
-    }
-
-    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
-}
-
-/**
- * @brief Is this tensor's memory BSHD -- token-major, head varying fastest -- and gap-free?
- *
- * The kernel reads Q and writes O as `[total_q, Hq, D]` rows and reads K/V as a paged cache
- * `[blocks, block_size, Hkv, D]`; with the identity block table those are exactly the BSHD
- * layouts of a contiguous graph tensor. A differently-strided tensor is read as if it were
- * this one, so it must be declined.
- *
- * Unit-extent axes are exempt: a stride multiplies an index that is always 0 when the extent
- * is 1. An expected stride too large for int64_t is one no stride can equal, so that axis
- * fails unless it is unit-extent.
- */
-inline bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-
-    const int64_t heads = dims->Get(HEAD_AXIS);
-    const int64_t sequence = dims->Get(SEQ_AXIS);
-    const int64_t headSize = dims->Get(HEAD_SIZE_AXIS);
-
-    const auto axisOk = [&](uint32_t axis, std::optional<int64_t> expected) {
-        return dims->Get(axis) == 1 || (expected.has_value() && strides->Get(axis) == *expected);
-    };
-
-    return axisOk(BATCH_AXIS, pack_features::checkedProduct({sequence, heads, headSize}))
-           && axisOk(HEAD_AXIS, headSize)
-           && axisOk(SEQ_AXIS, pack_features::checkedProduct({heads, headSize}))
-           && axisOk(HEAD_SIZE_AXIS, 1);
-}
-
-// ---------------------------------------------------------------------------
-// Decline logging
-//
-// hipDNN reports a declined graph to its caller only as "No engine configurations available
-// for the graph", so each decline logs its cause at INFO. graph_match runs on every catalog
-// miss, so every piece of that work sits inside HIPDNN_PLUGIN_LOG_INFO's argument: the macro
-// tests the level first, and with INFO off nothing below is called.
-// ---------------------------------------------------------------------------
-
-/// The head of a decline line: "<engine> declined the graph [<cause>]: ". Each pack wraps
-/// this in its own `Declined{cause}` that fills in its engine name.
-struct DeclinedBy
-{
-    std::string_view engine;
-    std::string_view cause;
-};
-
-inline std::ostream& operator<<(std::ostream& out, const DeclinedBy& declined)
-{
-    return out << declined.engine << " declined the graph [" << declined.cause << "]: ";
-}
-
-/// Whether any node of the graph is an SDPA-forward node. Only such a graph hears why it
-/// was declined: graph_match sees every graph the catalog misses on.
-inline bool hasSdpaForwardNode(const MatchContext& context)
-{
-    for(const auto& node : context.graph.nodeWrappers())
-    {
-        if(node->attributesType() == data_objects::NodeAttributes::SdpaAttributes)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-/// "Q (uid 1): dims [..], strides [..]". Null dims or strides print as [].
-inline std::string describeOperand(std::string_view role,
-                                   const data_objects::TensorAttributes& tensor)
-{
-    using hipdnn_data_sdk::utilities::vecToString;
-    using hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector;
-    std::ostringstream out;
-    out << role << " (uid " << tensor.uid() << "): dims "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.dims())) << ", strides "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.strides()));
-    return out.str();
-}
-
-/// Why @p tensor is not one the kernel can address. Checks the rank itself rather than
-/// trusting that the caller validated it.
+/// Why @p tensor is not one the kernels can address: they read Q and write O as
+/// `[total_q, Hq, D]` rows and read K/V as a paged cache `[blocks, block_size, Hkv, D]`,
+/// which with the identity block table are exactly the BSHD layouts of a contiguous tensor.
 inline std::string notBshdReason(std::string_view role,
                                  const data_objects::TensorAttributes& tensor)
 {
@@ -297,6 +184,457 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
         return std::nullopt;
     }
     return *value;
+}
+
+// ---------------------------------------------------------------------------
+// The shared graph match
+// ---------------------------------------------------------------------------
+
+/// The graph facts the matchers and prepare() need, derived once from the tensors.
+struct UnifiedAttentionProblem
+{
+    int64_t batch = 0;
+    int64_t seqLenQ = 0;
+    int64_t seqLenKv = 0;
+    int64_t numQueryHeads = 0;
+    int64_t numKvHeads = 0;
+    int64_t headSize = 0;
+    data_objects::DataType dataType = data_objects::DataType::UNSET;
+};
+
+/// The graph's shape, read from Q and K. Callers must have validated both operands.
+inline UnifiedAttentionProblem problemFor(const data_objects::TensorAttributes& q,
+                                          const data_objects::TensorAttributes& k)
+{
+    UnifiedAttentionProblem problem;
+    problem.batch = q.dims()->Get(BATCH_AXIS);
+    problem.numQueryHeads = q.dims()->Get(HEAD_AXIS);
+    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
+    problem.headSize = q.dims()->Get(HEAD_SIZE_AXIS);
+    problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
+    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
+    problem.dataType = q.data_type();
+    return problem;
+}
+
+/// A graph's SDPA-forward node and its shape, once matchOperands() has accepted them.
+struct MatchedOperands
+{
+    const data_objects::SdpaAttributes* attributes = nullptr;
+    UnifiedAttentionProblem problem;
+};
+
+/**
+ * @brief The node, its four operands, their layout, and dtype and shape consistency.
+ *
+ * Each decline of a graph with an SDPA-forward node logs its cause at INFO under @p engine;
+ * any other graph declines silently. On success the engine applies its own shape rules, then
+ * matchAttributes().
+ */
+inline std::optional<MatchedOperands> matchOperands(const MatchContext& context,
+                                                    std::string_view engine)
+{
+    // --- 1. Node shape. One SDPA-forward node; these engines serve a whole graph.
+    const auto* attributes = sdpaNode(context);
+    if(attributes == nullptr)
+    {
+        if(HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED() && hasSdpaForwardNode(context))
+        {
+            HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "node"})
+                                   << "the graph is not a single SDPA-forward node ("
+                                   << context.graph.nodeCount() << " node(s))");
+        }
+        return std::nullopt;
+    }
+
+    // --- 2. Operands. Q/K/V/O are the four buffers the launch resolves.
+    const auto* q = findTensor(context, attributes->q_tensor_uid());
+    const auto* k = findTensor(context, attributes->k_tensor_uid());
+    const auto* v = findTensor(context, attributes->v_tensor_uid());
+    const auto* o = findTensor(context, attributes->o_tensor_uid());
+    if(q == nullptr || k == nullptr || v == nullptr || o == nullptr)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "operand"})
+                               << "the SDPA node names a Q, K, V or O uid the graph has no "
+                                  "tensor for");
+        return std::nullopt;
+    }
+
+    // --- 3. Total predicates, before anything indexes an axis.
+    for(const auto& [role, tensor] :
+        {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}, std::pair{"O", o}})
+    {
+        if(!isWellFormedOperand(*tensor))
+        {
+            HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "operand"})
+                                   << describeOperand(role, *tensor)
+                                   << " must be a rank-4 (B, H, S, D) tensor with positive "
+                                      "extents, not virtual and not pass-by-value");
+            return std::nullopt;
+        }
+        // A ragged (RFC-0014) operand packs its tokens behind an offsets tensor; reading it
+        // as a dense BSHD buffer would be silently wrong.
+        if(tensor->ragged_offset_tensor_uid().has_value())
+        {
+            HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "ragged"})
+                                   << describeOperand(role, *tensor)
+                                   << " is ragged (has a ragged_offset tensor); ragged operands "
+                                      "are not supported");
+            return std::nullopt;
+        }
+    }
+
+    // --- 4. Layout. The failure is wrong elements in bounds, no fault.
+    for(const auto& [role, tensor] : {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}})
+    {
+        if(!hasBshdStrides(*tensor))
+        {
+            HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "layout"}) << notBshdReason(role, *tensor));
+            return std::nullopt;
+        }
+    }
+
+    // --- 5. Cross-tensor consistency.
+    const auto problem = problemFor(*q, *k);
+
+    if(k->data_type() != problem.dataType || v->data_type() != problem.dataType
+       || o->data_type() != problem.dataType)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "data_type"})
+                               << "Q, K, V and O must share one data type, got " << problem.dataType
+                               << ", " << k->data_type() << ", " << v->data_type() << ", "
+                               << o->data_type());
+        return std::nullopt;
+    }
+    if(!supportedDataTypeName(problem.dataType).has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "data_type"})
+                               << "data type " << problem.dataType
+                               << " is not supported; the kernel is built for BFLOAT16 and HALF");
+        return std::nullopt;
+    }
+
+    // V shares K's cache layout, so it must share K's shape exactly.
+    if(v->dims()->Get(BATCH_AXIS) != problem.batch
+       || v->dims()->Get(HEAD_AXIS) != problem.numKvHeads
+       || v->dims()->Get(SEQ_AXIS) != problem.seqLenKv
+       || v->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "shape"})
+                               << describeOperand("V", *v)
+                               << " must have K's batch, heads and sequence and Q's head size; "
+                               << describeOperand("K", *k));
+        return std::nullopt;
+    }
+    if(k->dims()->Get(BATCH_AXIS) != problem.batch
+       || k->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "shape"})
+                               << describeOperand("K", *k) << " must have Q's batch and head size; "
+                               << describeOperand("Q", *q));
+        return std::nullopt;
+    }
+    // O is Q's shape: the epilogue writes the query rows back.
+    if(o->dims()->Get(BATCH_AXIS) != problem.batch
+       || o->dims()->Get(HEAD_AXIS) != problem.numQueryHeads
+       || o->dims()->Get(SEQ_AXIS) != problem.seqLenQ
+       || o->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "shape"})
+                               << describeOperand("O", *o) << " must have Q's dims; "
+                               << describeOperand("Q", *q));
+        return std::nullopt;
+    }
+    if(!hasBshdStrides(*o))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "layout"}) << notBshdReason("O", *o));
+        return std::nullopt;
+    }
+
+    return MatchedOperands{attributes, problem};
+}
+
+/// The smallest paged-KV block any candidate of either engine is built with: a Skv no block
+/// divides cannot be served by any candidate, so graph_match declines it instead of emptying
+/// nothing.
+inline constexpr int64_t SMALLEST_BLOCK_SIZE = GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL;
+
+/// What matchAttributes() derives from the node for the bind.
+struct MatchedAttributes
+{
+    MaskType mask = MaskType::NO_MASK;
+    float scale = 0.0F;
+};
+
+/**
+ * @brief Whole paged-KV blocks, 32-bit addressing, the mask, every optional attribute these
+ *        kernels cannot honour, and the scale. Logs each decline under @p engine.
+ */
+inline std::optional<MatchedAttributes>
+    matchAttributes(const data_objects::SdpaAttributes& attributes,
+                    const UnifiedAttentionProblem& problem,
+                    std::string_view engine)
+{
+    // The identity cache is cut into whole blocks, and the smallest block is 16: a Skv that
+    // 16 does not divide is not a whole number of blocks at any block size.
+    if(problem.seqLenKv % SMALLEST_BLOCK_SIZE != 0)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "seqlen_kv"})
+                               << "seqlen_kv " << problem.seqLenKv << " is not a multiple of "
+                               << SMALLEST_BLOCK_SIZE
+                               << ", so K/V cannot be addressed as whole paged-KV blocks");
+        return std::nullopt;
+    }
+
+    // --- 6. 32-bit addressing. The kernels are built with i32 K/V addressing, which bounds
+    // the cache in bytes; Q/O are held to the same bound.
+    constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and fp16 only
+    const auto kvBytes = pack_features::checkedProduct(
+        {problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headSize, BYTES_PER_ELEMENT});
+    if(!kvBytes.has_value() || *kvBytes > GFX950_UNIFIED_2D_KV_BUFFER_BYTES)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "size_limit"})
+                               << "K or V is larger than " << GFX950_UNIFIED_2D_KV_BUFFER_BYTES
+                               << " bytes; the kernel addresses K/V with 32-bit byte offsets");
+        return std::nullopt;
+    }
+    const auto qBytes = pack_features::checkedProduct({problem.batch,
+                                                       problem.seqLenQ,
+                                                       problem.numQueryHeads,
+                                                       problem.headSize,
+                                                       BYTES_PER_ELEMENT});
+    if(!qBytes.has_value() || *qBytes > GFX950_UNIFIED_2D_KV_BUFFER_BYTES)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "size_limit"})
+                               << "Q or O is larger than " << GFX950_UNIFIED_2D_KV_BUFFER_BYTES
+                               << " bytes; the kernel addresses them with 32-bit offsets");
+        return std::nullopt;
+    }
+
+    // --- 7. The mask. hipDNN has no `causal` boolean; see maskTypeFor, which logs its own
+    // declines. Which catalog kernel serves each kind is the engine's (bindGraph's maskKey).
+    const auto mask = maskTypeFor(attributes, engine);
+    if(!mask.has_value())
+    {
+        return std::nullopt;
+    }
+
+    // --- 8. Every optional attribute these kernels cannot honour, declined explicitly. (The
+    // kernels have softcap, ALiBi and qq-bias variants, none shipped; hipDNN's SDPA node has no
+    // softcap attribute to decline.)
+
+    // Additive attention bias.
+    if(attributes.attn_mask_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "attn_mask"})
+                               << "an additive attention mask (attn_mask tensor) is not "
+                                  "supported");
+        return std::nullopt;
+    }
+    // Device-resident scale: the ABI takes `scale` as an f32 kernarg.
+    if(attributes.scale_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "scale_tensor"})
+                               << "a scale tensor is not supported; the kernel takes the scale "
+                                  "as a host value (attn_scale_value)");
+        return std::nullopt;
+    }
+    // Ragged operands: the engine derives query_start_len and seq_lens itself, from uniform
+    // lengths.
+    if(attributes.seq_len_q_tensor_uid().has_value()
+       || attributes.seq_len_kv_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "varlen"})
+                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
+                                  "not supported");
+        return std::nullopt;
+    }
+    // Dropout.
+    if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
+       || attributes.dropout_mask_tensor_uid().has_value()
+       || attributes.dropout_scale_tensor_uid().has_value()
+       || attributes.dropout_probability().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "dropout"}) << "dropout is not supported");
+        return std::nullopt;
+    }
+    // Caller-paged KV: these engines page K/V themselves; a graph that already carries page
+    // tables names a cache layout they do not model.
+    if(attributes.page_table_k_tensor_uid().has_value()
+       || attributes.page_table_v_tensor_uid().has_value()
+       || attributes.max_seq_len_kv().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "paged_kv"})
+                               << "paged K/V (page tables or max_seq_len_kv) is not supported");
+        return std::nullopt;
+    }
+    // Block-sparse, and attention SINKS (the kernels have a sink path; no shipped variant
+    // enables it).
+    if(attributes.block_mask_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "block_mask"})
+                               << "a block mask is not supported");
+        return std::nullopt;
+    }
+    if(attributes.sink_token_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "sinks"})
+                               << "attention sinks (sink_token tensor) are not supported");
+        return std::nullopt;
+    }
+    // FP8 quantization.
+    if(attributes.descale_q_tensor_uid().has_value()
+       || attributes.descale_k_tensor_uid().has_value()
+       || attributes.descale_v_tensor_uid().has_value()
+       || attributes.descale_s_tensor_uid().has_value()
+       || attributes.scale_s_tensor_uid().has_value() || attributes.scale_o_tensor_uid().has_value()
+       || attributes.amax_s_tensor_uid().has_value() || attributes.amax_o_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "fp8"})
+                               << "FP8 scaling tensors (descale, scale or amax) are not "
+                                  "supported");
+        return std::nullopt;
+    }
+    // Auxiliary softmax outputs. generate_stats is optional<bool>; explicit false is fine.
+    if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
+       || attributes.sum_exp_tensor_uid().has_value()
+       || attributes.rng_dump_tensor_uid().has_value()
+       || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << "softmax statistics outputs (stats, max, sum_exp, rng_dump or "
+                                  "generate_stats) are not supported");
+        return std::nullopt;
+    }
+    // ALiBi slopes and padding masks.
+    if(attributes.alibi_mask())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "alibi_mask"}) << "alibi_mask is not supported");
+        return std::nullopt;
+    }
+    if(attributes.padding_mask())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "padding_mask"})
+                               << "padding_mask is not supported");
+        return std::nullopt;
+    }
+    // mma_core_mode is the MMA operand precision. These kernels' MFMA operands are the graph's
+    // own fp16/bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16 describe what
+    // they run. An allow-list, so an enum value added later declines until judged.
+    const auto mmaCoreMode = attributes.mma_core_mode();
+    if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
+       && mmaCoreMode != data_objects::DataType::BFLOAT16)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "mma_core_mode"})
+                               << "mma_core_mode " << mmaCoreMode
+                               << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
+        return std::nullopt;
+    }
+    // `implementation` is an execution-strategy hint. AUTO leaves the choice to the provider.
+    if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "implementation"})
+                               << "implementation hint " << attributes.implementation()
+                               << " is not supported; only AUTO is");
+        return std::nullopt;
+    }
+
+    // The softmax scale is an f32 launch argument. An absent attn_scale_value means 1.0,
+    // cuDNN's default. The kernel folds it into an exp2-domain multiplier, so any finite
+    // positive scale is well defined; NaN compares false with both tests and is caught by the
+    // first.
+    const float scale = attributes.attn_scale_value().value_or(1.0F);
+    if(!std::isfinite(scale) || !(scale > 0.0F))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "scale"})
+                               << "attn_scale " << scale << " is not a finite positive number");
+        return std::nullopt;
+    }
+
+    return MatchedAttributes{*mask, scale};
+}
+
+/// An engine's bound-token names: each engine prefixes its own, so two engines' bindings
+/// never alias. @p dispatchLabel heads the error a missing token raises.
+struct BoundTokenNames
+{
+    std::string_view q;
+    std::string_view k;
+    std::string_view v;
+    std::string_view o;
+    /// The catalog mask key (a MaskType value), so kernelMatches does not re-derive it.
+    std::string_view maskType;
+    /// The sliding window the candidate must have been built with. Always 0: maskTypeFor
+    /// declines every left bound, so no graph that reaches the bind asks for a window.
+    std::string_view slidingWindow;
+    /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
+    std::string_view scaleBits;
+    std::string_view dispatchLabel;
+};
+
+/// The bound tokens of a matched graph. @p maskKey is the catalog mask kind that serves the
+/// graph's mask, which the engine may map (Unified3D serves NO_MASK decode by its
+/// bottom-right causal kernel).
+inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
+                             MaskType maskKey,
+                             float scale,
+                             const BoundTokenNames& names)
+{
+    BoundTokens bound;
+    bound[std::string(names.q)] = attributes.q_tensor_uid();
+    bound[std::string(names.k)] = attributes.k_tensor_uid();
+    bound[std::string(names.v)] = attributes.v_tensor_uid();
+    bound[std::string(names.o)] = attributes.o_tensor_uid();
+    bound[std::string(names.maskType)] = static_cast<int64_t>(maskKey);
+    // Bound even though it is always zero: kernelMatches compares it against the candidate's
+    // sliding_window field, so a variant built with a window cannot be matched by a graph
+    // that does not ask for one.
+    bound[std::string(names.slidingWindow)] = int64_t{0};
+    int32_t scaleBits = 0;
+    static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
+    std::memcpy(&scaleBits, &scale, sizeof(scale));
+    bound[std::string(names.scaleBits)] = static_cast<int64_t>(scaleBits);
+    return bound;
+}
+
+/// The tensor uids and derived scalars a matched graph binds.
+struct UnifiedAttentionBinding
+{
+    int64_t q = 0;
+    int64_t k = 0;
+    int64_t v = 0;
+    int64_t o = 0;
+    int64_t maskType = 0;
+    int64_t slidingWindow = 0;
+    float scale = 0.0F;
+};
+
+/// Re-reads the bindings bindGraph() established. Throws if one is missing.
+inline UnifiedAttentionBinding readBinding(const BoundTokens& bound, const BoundTokenNames& names)
+{
+    const auto read = [&bound, &names](std::string_view token) {
+        const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
+        if(!value.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string(names.dispatchLabel) + " dispatch is missing bound token '"
+                    + std::string(token) + "', or it does not hold an integer");
+        }
+        return *value;
+    };
+
+    UnifiedAttentionBinding binding;
+    binding.q = read(names.q);
+    binding.k = read(names.k);
+    binding.v = read(names.v);
+    binding.o = read(names.o);
+    binding.maskType = read(names.maskType);
+    binding.slidingWindow = read(names.slidingWindow);
+
+    const auto scaleBits = static_cast<int32_t>(read(names.scaleBits));
+    std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));
+    return binding;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::unified_attention

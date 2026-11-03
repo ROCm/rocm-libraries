@@ -41,12 +41,32 @@ inline constexpr unsigned GFX950_UNIFIED_3D_CTA_THREADS
 /// (`supports_tiled_3d`).
 inline constexpr int64_t GFX950_UNIFIED_3D_BLOCK_M = 16;
 
-/// The reduce kernel's LDS per segment: one f32 factor (`reduce_lds_bytes`, held to the
-/// compiled code object's group_segment_fixed_size by test_attention_tiled_3d_reduce_lds).
+/**
+ * @brief Whether the segment kernel serves `numQueryHeads` query heads over `numKvHeads`
+ * key/value heads: a whole GQA group that divides GFX950_UNIFIED_3D_BLOCK_M.
+ *
+ * The one statement of Unified3D's GQA rule: its graph match, geometry and launch check it,
+ * and Unified2D hands a decode graph to Unified3D exactly when it holds. Total over every
+ * int64 input.
+ */
+inline bool gfx950Unified3DServesGqaGroup(int64_t numQueryHeads, int64_t numKvHeads)
+{
+    if(numQueryHeads <= 0 || numKvHeads <= 0 || numQueryHeads % numKvHeads != 0)
+    {
+        return false;
+    }
+    return GFX950_UNIFIED_3D_BLOCK_M % (numQueryHeads / numKvHeads) == 0;
+}
+
+/// The reduce kernel's LDS per segment: one f32 factor (`split_kv_reduce_lds_bytes`, held
+/// to the compiled code object's group_segment_fixed_size by
+/// test_attention_tiled_3d_reduce_lds).
 inline constexpr int64_t GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT = 4;
 
 /// The most segments whose factor cache fits gfx950's LDS (`reduce_max_segments`): the
-/// bound `supports_tiled_reduce_spec` gates with ArchTarget.fits_lds.
+/// bound `supports_tiled_reduce_spec` gates with ArchTarget.fits_lds. The Python size rounds
+/// the pool to 16 bytes, which does not change the bound while the capacity is a multiple
+/// of 16.
 inline constexpr int64_t GFX950_UNIFIED_3D_MAX_SEGMENTS
     = GFX950_LDS_CAPACITY_BYTES / GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT;
 
@@ -78,12 +98,7 @@ inline bool isSupportedGfx950Unified3DGeometry(int64_t headSize,
     {
         return false;
     }
-    if(numQueryHeads <= 0 || numKvHeads <= 0 || numQueryHeads % numKvHeads != 0)
-    {
-        return false;
-    }
-    const int64_t queriesPerKv = numQueryHeads / numKvHeads;
-    if(queriesPerKv > GFX950_UNIFIED_3D_BLOCK_M || GFX950_UNIFIED_3D_BLOCK_M % queriesPerKv != 0)
+    if(!gfx950Unified3DServesGqaGroup(numQueryHeads, numKvHeads))
     {
         return false;
     }
@@ -145,8 +160,7 @@ inline Gfx950Unified3DLaunchGeometry gfx950Unified3DLaunchGeometry(int64_t numQu
         refuse("declares num_segments " + std::to_string(numSegments)
                + ", which gfx950 does not build");
     }
-    if(numQueryHeads % numKvHeads != 0 || numQueryHeads / numKvHeads > GFX950_UNIFIED_3D_BLOCK_M
-       || GFX950_UNIFIED_3D_BLOCK_M % (numQueryHeads / numKvHeads) != 0)
+    if(!gfx950Unified3DServesGqaGroup(numQueryHeads, numKvHeads))
     {
         refuse("is asked to launch " + std::to_string(numQueryHeads) + " query heads over "
                + std::to_string(numKvHeads)

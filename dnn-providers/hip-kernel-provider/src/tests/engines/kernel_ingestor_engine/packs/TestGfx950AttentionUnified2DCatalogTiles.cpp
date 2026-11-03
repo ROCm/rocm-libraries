@@ -196,7 +196,7 @@ TEST(TestGfx950AttentionUnified2DDecodeHandoff, EveryDecodeCellHandedToUnified3D
             const auto& [headSize, numQueryHeads, numKvHeads, dtype] = *cell;
             ASSERT_GT(numKvHeads, 0) << "kernel '" << kernel.name << "'";
             // The same rule Unified2D's graph match applies before declining decode.
-            if(GFX950_UNIFIED_3D_BLOCK_M % (numQueryHeads / numKvHeads) != 0)
+            if(!gfx950Unified3DServesGqaGroup(numQueryHeads, numKvHeads))
             {
                 continue;
             }

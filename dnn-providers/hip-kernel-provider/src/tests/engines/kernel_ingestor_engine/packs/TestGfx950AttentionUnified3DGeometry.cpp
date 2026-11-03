@@ -74,6 +74,24 @@ TEST(TestGfx950AttentionUnified3DGeometry, RefusesWhatTheBuildersRefuse)
     EXPECT_TRUE(isSupportedGfx950Unified3DGeometry(128, 16, 8, 1, GFX950_UNIFIED_3D_MAX_SEGMENTS));
 }
 
+TEST(TestGfx950AttentionUnified3DGeometry, ServesGqaGroupsDividingBlockM)
+{
+    for(const int64_t group : {1, 2, 4, 8, 16})
+    {
+        EXPECT_TRUE(gfx950Unified3DServesGqaGroup(group * 2, 2)) << group;
+    }
+    // Groups that do not divide 16, exceed it, or are not whole.
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(6, 1));
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(12, 2));
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(32, 1));
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(9, 2));
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(1, 2));
+    // Non-positive head counts.
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(8, 0));
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(0, 1));
+    EXPECT_FALSE(gfx950Unified3DServesGqaGroup(-8, -1));
+}
+
 // =============================================================================
 // Launch geometry
 // =============================================================================
