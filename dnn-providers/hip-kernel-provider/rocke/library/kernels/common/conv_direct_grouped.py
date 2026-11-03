@@ -5152,21 +5152,36 @@ def _wgrad_image_reason(spec: "DirectConvWgradSpec") -> str:
     """Why the image-per-block / register-blocking knobs cannot be honoured."""
     p = spec.problem
     if spec.wave_tiles_k < 1 or spec.wave_tiles_c < 1:
-        return "wave_tiles_k and wave_tiles_c must be >= 1"
+        return (
+            f"wave_tiles_k and wave_tiles_c must be >= 1 "
+            f"(got {spec.wave_tiles_k}, {spec.wave_tiles_c})"
+        )
     if spec.sub_steps != 1 or spec.vec_x or spec.uniform_wave:
-        return "sub_steps / vec_x / uniform_wave need small_c=True"
+        return (
+            f"sub_steps / vec_x / uniform_wave need small_c=True "
+            f"(got sub_steps={spec.sub_steps}, vec_x={spec.vec_x}, "
+            f"uniform_wave={bool(spec.uniform_wave)})"
+        )
     blocked = spec.wave_tiles_k > 1 or spec.wave_tiles_c > 1
     if not spec.image_per_block:
         if blocked:
-            return "wave_tiles_k / wave_tiles_c > 1 need image_per_block=True"
+            return (
+                f"wave_tiles_k / wave_tiles_c > 1 need image_per_block=True "
+                f"(got {spec.wave_tiles_k}, {spec.wave_tiles_c})"
+            )
         if spec.rows_per_sync != 1:
-            return "rows_per_sync > 1 needs image_per_block=True"
+            return (
+                f"rows_per_sync > 1 needs image_per_block=True "
+                f"(got {spec.rows_per_sync})"
+            )
         if spec.row_blocks != 1:
-            return "row_blocks > 1 needs image_per_block=True"
+            return f"row_blocks > 1 needs image_per_block=True (got {spec.row_blocks})"
         if spec.tdm_stages:
-            return "tdm_stages needs image_per_block=True"
+            return f"tdm_stages needs image_per_block=True (got {spec.tdm_stages})"
         if spec.ws_replicas != 1:
-            return "ws_replicas > 1 needs image_per_block=True"
+            return (
+                f"ws_replicas > 1 needs image_per_block=True (got {spec.ws_replicas})"
+            )
         if spec.lds_epilogue:
             return "lds_epilogue needs image_per_block=True"
         return ""
@@ -5195,9 +5210,15 @@ def _wgrad_image_reason(spec: "DirectConvWgradSpec") -> str:
     if spec.rows_per_sync not in (1, p.KH):
         return f"rows_per_sync must be 1 or KH={p.KH} (got {spec.rows_per_sync})"
     if spec.wave_size != 32:
-        return "image_per_block is implemented for wave32 (gfx1250) only"
+        return (
+            f"image_per_block is implemented for wave32 (gfx1250) only "
+            f"(got wave_size={spec.wave_size})"
+        )
     if spec.waves_q != 1:
-        return "image_per_block walks every wo tile itself; waves_q must be 1"
+        return (
+            f"image_per_block walks every wo tile itself; waves_q must be 1 "
+            f"(got {spec.waves_q})"
+        )
     regs = 8 * (
         p.KH * p.KW * spec.wave_tiles_k * spec.wave_tiles_c
         + p.KH * spec.wave_tiles_k
@@ -5223,7 +5244,10 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
     if spec.image_per_block:
         return "small_c and image_per_block are separate variants"
     if spec.wave_size != 32:
-        return "small_c is implemented for wave32 (gfx1250) only"
+        return (
+            f"small_c is implemented for wave32 (gfx1250) only "
+            f"(got wave_size={spec.wave_size})"
+        )
     if spec.mfma_k != 32:
         return _WGRAD_WAVE32_MK_WHY.format(mfma_k=spec.mfma_k)
     if p.groups != 1:
@@ -5233,17 +5257,34 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
     if p.KH < 1 or p.KW < 1:
         return f"KH and KW must be >= 1 (got {p.KH}, {p.KW})"
     if spec.wave_tile_k != 16 or spec.wave_tile_c != 16:
-        return "wave_tile_k and wave_tile_c must be 16"
+        return (
+            f"wave_tile_k and wave_tile_c must be 16 "
+            f"(got {spec.wave_tile_k}, {spec.wave_tile_c})"
+        )
     if spec.waves_k < 1 or spec.waves_c < 1:
-        return "waves_k and waves_c must be >= 1"
+        return f"waves_k and waves_c must be >= 1 (got {spec.waves_k}, {spec.waves_c})"
     if spec.waves_k * spec.waves_c > 16:
-        return "waves_k * waves_c must be <= 16"
+        return (
+            f"waves_k * waves_c must be <= 16 (got {spec.waves_k} * "
+            f"{spec.waves_c} = {spec.waves_k * spec.waves_c})"
+        )
     if spec.waves_q != 1:
-        return "small_c walks its pixel range itself; waves_q must be 1"
+        return (
+            f"small_c walks its pixel range itself; waves_q must be 1 "
+            f"(got {spec.waves_q})"
+        )
     if spec.wave_tiles_k < 1 or spec.wave_tiles_c < 1:
-        return "wave_tiles_k and wave_tiles_c must be >= 1"
+        return (
+            f"wave_tiles_k and wave_tiles_c must be >= 1 "
+            f"(got {spec.wave_tiles_k}, {spec.wave_tiles_c})"
+        )
     if spec.rows_per_sync != 1 or spec.tdm_stages or spec.lds_epilogue:
-        return "rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs"
+        return (
+            f"rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs "
+            f"(got rows_per_sync={spec.rows_per_sync}, "
+            f"tdm_stages={spec.tdm_stages}, "
+            f"lds_epilogue={bool(spec.lds_epilogue)})"
+        )
     if spec.runtime_channels:
         return "small_c bakes its channel counts; runtime_channels is not supported"
     if spec.row_blocks < 1:
@@ -7533,7 +7574,10 @@ def _depthwise_wgrad_reason(spec: "DirectDepthwiseWgradSpec") -> str:
             f"{spec.chan_per_lane} (one vector load per lane)"
         )
     if spec.waves < 1 or spec.rows_per_wave < 1 or spec.wo_chunk < 1:
-        return "waves, rows_per_wave and wo_chunk must be >= 1"
+        return (
+            f"waves, rows_per_wave and wo_chunk must be >= 1 "
+            f"(got {spec.waves}, {spec.rows_per_wave}, {spec.wo_chunk})"
+        )
     if spec.r_split < 1 or spec.r_split > p.KH or spec.waves % spec.r_split:
         return (
             f"r_split must be in 1..KH={p.KH} and divide waves={spec.waves} "

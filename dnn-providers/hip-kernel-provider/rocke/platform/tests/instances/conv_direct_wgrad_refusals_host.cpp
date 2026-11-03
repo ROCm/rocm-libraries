@@ -109,37 +109,38 @@ static const wgrad_case_t k_wgrad_cases[] = {
      BASE_IMG,
      [](W* s) { s->wave_tiles_k = 0; },
      "gfx1250",
-     "wave_tiles_k and wave_tiles_c must be >= 1"},
+     "wave_tiles_k and wave_tiles_c must be >= 1 (got 0, 1)"},
     {"img_small_c_knob",
      BASE_W32,
      [](W* s) { s->sub_steps = 2; },
      "gfx1250",
-     "sub_steps / vec_x / uniform_wave need small_c=True"},
+     "sub_steps / vec_x / uniform_wave need small_c=True (got sub_steps=2, vec_x=0, "
+     "uniform_wave=False)"},
     {"img_tiles_need_img",
      BASE_W32,
      [](W* s) { s->wave_tiles_c = 2; },
      "gfx1250",
-     "wave_tiles_k / wave_tiles_c > 1 need image_per_block=True"},
+     "wave_tiles_k / wave_tiles_c > 1 need image_per_block=True (got 1, 2)"},
     {"img_rps_need_img",
      BASE_W32,
      [](W* s) { s->rows_per_sync = 3; },
      "gfx1250",
-     "rows_per_sync > 1 needs image_per_block=True"},
+     "rows_per_sync > 1 needs image_per_block=True (got 3)"},
     {"img_rb_need_img",
      BASE_W32,
      [](W* s) { s->row_blocks = 2; },
      "gfx1250",
-     "row_blocks > 1 needs image_per_block=True"},
+     "row_blocks > 1 needs image_per_block=True (got 2)"},
     {"img_tdm_need_img",
      BASE_W32,
      [](W* s) { s->tdm_stages = 2; },
      "gfx1250",
-     "tdm_stages needs image_per_block=True"},
+     "tdm_stages needs image_per_block=True (got 2)"},
     {"img_wsr_need_img",
      BASE_W32,
      [](W* s) { s->ws_replicas = 2; },
      "gfx1250",
-     "ws_replicas > 1 needs image_per_block=True"},
+     "ws_replicas > 1 needs image_per_block=True (got 2)"},
     {"img_ldsepi_need_img",
      BASE_W32,
      [](W* s) { s->lds_epilogue = 1; },
@@ -187,12 +188,12 @@ static const wgrad_case_t k_wgrad_cases[] = {
      BASE_IMG,
      [](W* s) { s->wave_size = 64; },
      "gfx950",
-     "image_per_block is implemented for wave32 (gfx1250) only"},
+     "image_per_block is implemented for wave32 (gfx1250) only (got wave_size=64)"},
     {"img_waves_q",
      BASE_IMG,
      [](W* s) { s->waves_q = 2; },
      "gfx1250",
-     "image_per_block walks every wo tile itself; waves_q must be 1"},
+     "image_per_block walks every wo tile itself; waves_q must be 1 (got 2)"},
     {"img_vgpr_budget",
      BASE_IMG,
      [](W* s) {
@@ -217,7 +218,7 @@ static const wgrad_case_t k_wgrad_cases[] = {
      BASE_SC,
      [](W* s) { s->wave_size = 64; },
      "gfx950",
-     "small_c is implemented for wave32 (gfx1250) only"},
+     "small_c is implemented for wave32 (gfx1250) only (got wave_size=64)"},
     {"sc_mfma_k",
      BASE_SC,
      [](W* s) { s->mfma_k = 16; },
@@ -242,12 +243,12 @@ static const wgrad_case_t k_wgrad_cases[] = {
      BASE_SC,
      [](W* s) { s->wave_tile_c = 32; },
      "gfx1250",
-     "wave_tile_k and wave_tile_c must be 16"},
+     "wave_tile_k and wave_tile_c must be 16 (got 16, 32)"},
     {"sc_waves_lt1",
      BASE_SC,
      [](W* s) { s->waves_c = 0; },
      "gfx1250",
-     "waves_k and waves_c must be >= 1"},
+     "waves_k and waves_c must be >= 1 (got 1, 0)"},
     {"sc_waves_gt16",
      BASE_SC,
      [](W* s) {
@@ -255,22 +256,23 @@ static const wgrad_case_t k_wgrad_cases[] = {
          s->waves_c = 4;
      },
      "gfx1250",
-     "waves_k * waves_c must be <= 16"},
+     "waves_k * waves_c must be <= 16 (got 8 * 4 = 32)"},
     {"sc_waves_q",
      BASE_SC,
      [](W* s) { s->waves_q = 2; },
      "gfx1250",
-     "small_c walks its pixel range itself; waves_q must be 1"},
+     "small_c walks its pixel range itself; waves_q must be 1 (got 2)"},
     {"sc_wave_tiles_lt1",
      BASE_SC,
      [](W* s) { s->wave_tiles_k = 0; },
      "gfx1250",
-     "wave_tiles_k and wave_tiles_c must be >= 1"},
+     "wave_tiles_k and wave_tiles_c must be >= 1 (got 0, 1)"},
     {"sc_image_knob",
      BASE_SC,
      [](W* s) { s->tdm_stages = 2; },
      "gfx1250",
-     "rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs"},
+     "rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs (got rows_per_sync=1, "
+     "tdm_stages=2, lds_epilogue=False)"},
     {"sc_runtime_channels",
      BASE_SC,
      [](W* s) { s->runtime_channels = 1; },
@@ -340,7 +342,7 @@ static const dw_case_t k_dw_cases[] = {
     {"dw_waves_lt1",
      [](D* s) { s->wo_chunk = 0; },
      "gfx1250",
-     "waves, rows_per_wave and wo_chunk must be >= 1"},
+     "waves, rows_per_wave and wo_chunk must be >= 1 (got 4, 2, 0)"},
     {"dw_r_split",
      [](D* s) { s->r_split = 3; },
      "gfx1250",
@@ -389,6 +391,24 @@ static void expect_refused(const char* id, bool ok, const char* why, const char*
     }
 }
 
+/* The refusals of a boolean flag: the message itself names the value. Every
+ * other refusal says what it got (test_wgrad_refusal_names_the_offending_value). */
+static const char* const k_flag_cases[]
+    = {"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels"};
+
+static void expect_names_value(const char* id, const char* why)
+{
+    size_t i;
+    for(i = 0; i < sizeof k_flag_cases / sizeof k_flag_cases[0]; ++i)
+        if(strcmp(id, k_flag_cases[i]) == 0)
+            return;
+    if(strpbrk(why, "0123456789") == NULL)
+    {
+        fprintf(stderr, "FAIL %s: reason \"%s\" has no value\n", id, why);
+        ++g_failures;
+    }
+}
+
 int main(void)
 {
     char why[REASON_CAP];
@@ -426,6 +446,7 @@ int main(void)
                        rocke_direct_conv_wgrad_is_valid_spec(&s, c->arch, why, sizeof why),
                        why,
                        c->reason);
+        expect_names_value(c->id, why);
     }
     for(i = 0; i < sizeof k_dw_cases / sizeof k_dw_cases[0]; ++i)
     {
@@ -437,6 +458,7 @@ int main(void)
                        rocke_direct_depthwise_wgrad_is_valid_spec(&s, c->arch, why, sizeof why),
                        why,
                        c->reason);
+        expect_names_value(c->id, why);
     }
 
     if(g_failures != 0)

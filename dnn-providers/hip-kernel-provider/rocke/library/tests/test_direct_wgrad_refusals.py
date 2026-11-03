@@ -61,19 +61,20 @@ _BASES = {
 _CASES = [
     # ---- _wgrad_image_reason
     ("img_wave_tiles_lt1", "img", {"wave_tiles_k": 0}, {}, "gfx1250",
-     r"wave_tiles_k and wave_tiles_c must be >= 1"),
+     r"wave_tiles_k and wave_tiles_c must be >= 1 \(got 0, 1\)"),
     ("img_small_c_knob", "w32", {"sub_steps": 2}, {}, "gfx1250",
-     r"sub_steps / vec_x / uniform_wave need small_c=True"),
+     r"sub_steps / vec_x / uniform_wave need small_c=True "
+     r"\(got sub_steps=2, vec_x=0, uniform_wave=False\)"),
     ("img_tiles_need_img", "w32", {"wave_tiles_c": 2}, {}, "gfx1250",
-     r"wave_tiles_k / wave_tiles_c > 1 need image_per_block=True"),
+     r"wave_tiles_k / wave_tiles_c > 1 need image_per_block=True \(got 1, 2\)"),
     ("img_rps_need_img", "w32", {"rows_per_sync": 3}, {}, "gfx1250",
-     r"rows_per_sync > 1 needs image_per_block=True"),
+     r"rows_per_sync > 1 needs image_per_block=True \(got 3\)"),
     ("img_rb_need_img", "w32", {"row_blocks": 2}, {}, "gfx1250",
-     r"row_blocks > 1 needs image_per_block=True"),
+     r"row_blocks > 1 needs image_per_block=True \(got 2\)"),
     ("img_tdm_need_img", "w32", {"tdm_stages": 2}, {}, "gfx1250",
-     r"tdm_stages needs image_per_block=True"),
+     r"tdm_stages needs image_per_block=True \(got 2\)"),
     ("img_wsr_need_img", "w32", {"ws_replicas": 2}, {}, "gfx1250",
-     r"ws_replicas > 1 needs image_per_block=True"),
+     r"ws_replicas > 1 needs image_per_block=True \(got 2\)"),
     ("img_ldsepi_need_img", "w32", {"lds_epilogue": True}, {}, "gfx1250",
      r"lds_epilogue needs image_per_block=True"),
     ("img_wsr_lt1", "img", {"ws_replicas": 0}, {}, "gfx1250",
@@ -89,9 +90,9 @@ _CASES = [
     ("img_rps_value", "img", {"rows_per_sync": 2}, {}, "gfx1250",
      r"rows_per_sync must be 1 or KH=3 \(got 2\)"),
     ("img_wave64", "img", {"wave_size": 64}, {}, "gfx950",
-     r"image_per_block is implemented for wave32 \(gfx1250\) only"),
+     r"image_per_block is implemented for wave32 \(gfx1250\) only \(got wave_size=64\)"),
     ("img_waves_q", "img", {"waves_q": 2}, {}, "gfx1250",
-     r"image_per_block walks every wo tile itself; waves_q must be 1"),
+     r"image_per_block walks every wo tile itself; waves_q must be 1 \(got 2\)"),
     ("img_vgpr_budget", "img", {"wave_tiles_k": 4, "wave_tiles_c": 4}, {}, "gfx1250",
      r"image_per_block body needs ~1344 VGPRs for accumulators and fragments \(> 224\)"),
     # ---- is_valid_wgrad_spec: the wave32 arch gate
@@ -101,7 +102,7 @@ _CASES = [
     ("sc_and_img", "sc", {"image_per_block": True}, {}, "gfx1250",
      r"small_c and image_per_block are separate variants"),
     ("sc_wave64", "sc", {"wave_size": 64}, {}, "gfx950",
-     r"small_c is implemented for wave32 \(gfx1250\) only"),
+     r"small_c is implemented for wave32 \(gfx1250\) only \(got wave_size=64\)"),
     ("sc_mfma_k", "sc", {"mfma_k": 16}, {}, "gfx1250",
      r"direct wgrad on wave32 needs mfma_k=32 \(WMMA 16x16x32\); got mfma_k=16"),
     ("sc_groups", "sc", {}, {"groups": 2}, "gfx1250",
@@ -111,17 +112,18 @@ _CASES = [
     ("sc_filter", "sc", {}, {"KW": 0}, "gfx1250",
      r"KH and KW must be >= 1 \(got 3, 0\)"),
     ("sc_wave_tile", "sc", {"wave_tile_c": 32}, {}, "gfx1250",
-     r"wave_tile_k and wave_tile_c must be 16"),
+     r"wave_tile_k and wave_tile_c must be 16 \(got 16, 32\)"),
     ("sc_waves_lt1", "sc", {"waves_c": 0}, {}, "gfx1250",
-     r"waves_k and waves_c must be >= 1"),
+     r"waves_k and waves_c must be >= 1 \(got 1, 0\)"),
     ("sc_waves_gt16", "sc", {"waves_k": 8, "waves_c": 4}, {}, "gfx1250",
-     r"waves_k \* waves_c must be <= 16"),
+     r"waves_k \* waves_c must be <= 16 \(got 8 \* 4 = 32\)"),
     ("sc_waves_q", "sc", {"waves_q": 2}, {}, "gfx1250",
-     r"small_c walks its pixel range itself; waves_q must be 1"),
+     r"small_c walks its pixel range itself; waves_q must be 1 \(got 2\)"),
     ("sc_wave_tiles_lt1", "sc", {"wave_tiles_k": 0}, {}, "gfx1250",
-     r"wave_tiles_k and wave_tiles_c must be >= 1"),
+     r"wave_tiles_k and wave_tiles_c must be >= 1 \(got 0, 1\)"),
     ("sc_image_knob", "sc", {"tdm_stages": 2}, {}, "gfx1250",
-     r"rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs"),
+     r"rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs "
+     r"\(got rows_per_sync=1, tdm_stages=2, lds_epilogue=False\)"),
     ("sc_runtime_channels", "sc", {"runtime_channels": True}, {}, "gfx1250",
      r"small_c bakes its channel counts; runtime_channels is not supported"),
     ("sc_rb_lt1", "sc", {"row_blocks": 0}, {}, "gfx1250",
@@ -151,7 +153,7 @@ _CASES = [
     ("dw_channels", "dw", {"chan_per_lane": 4}, {"groups": 66}, "gfx1250",
      r"channels 66 must be a multiple of chan_per_lane 4 \(one vector load per lane\)"),
     ("dw_waves_lt1", "dw", {"wo_chunk": 0}, {}, "gfx1250",
-     r"waves, rows_per_wave and wo_chunk must be >= 1"),
+     r"waves, rows_per_wave and wo_chunk must be >= 1 \(got 4, 2, 0\)"),
     ("dw_r_split", "dw", {"r_split": 3}, {}, "gfx1250",
      r"r_split must be in 1\.\.KH=3 and divide waves=4 \(got 3\)"),
     ("dw_wsr_lt1", "dw", {"ws_replicas": 0}, {}, "gfx1250",
@@ -194,6 +196,22 @@ def test_wgrad_refusal_bases_are_valid(base):
     """Each case changes one knob of a base spec, so the bases must pass."""
     ok, why = _check(_BASES[base], "gfx1250")
     assert ok, why
+
+
+# The refusals of a boolean flag: the message itself names the value.
+_FLAG_CASES = frozenset({"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels"})
+
+
+@pytest.mark.parametrize(
+    "case_id, base, spec_kw, prob_kw, arch",
+    [c[:5] for c in _CASES if c[0] not in _FLAG_CASES],
+    ids=[c[0] for c in _CASES if c[0] not in _FLAG_CASES],
+)
+def test_wgrad_refusal_names_the_offending_value(case_id, base, spec_kw, prob_kw, arch):
+    """Every refusal of a numeric knob or the arch says what it got."""
+    ok, why = _check(_spec(base, spec_kw, prob_kw), arch)
+    assert not ok
+    assert re.search(r"\d", why), f"{case_id}: {why!r} has no value"
 
 
 def test_wgrad_refusal_case_ids_are_unique():

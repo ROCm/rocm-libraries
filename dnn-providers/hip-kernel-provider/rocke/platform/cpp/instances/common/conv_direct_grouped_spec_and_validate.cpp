@@ -2615,34 +2615,46 @@ static bool rocke_wgrad_image_reason(const rocke_direct_conv_wgrad_spec_t* spec,
 
     if(spec->wave_tiles_k < 1 || spec->wave_tiles_c < 1)
     {
-        ROCKE_WGRAD_IMG_WHY("wave_tiles_k and wave_tiles_c must be >= 1");
+        ROCKE_WGRAD_IMG_WHY("wave_tiles_k and wave_tiles_c must be >= 1 (got %d, %d)",
+                            spec->wave_tiles_k,
+                            spec->wave_tiles_c);
     }
     if(spec->sub_steps != 1 || spec->vec_x || spec->uniform_wave)
     {
-        ROCKE_WGRAD_IMG_WHY("sub_steps / vec_x / uniform_wave need small_c=True");
+        ROCKE_WGRAD_IMG_WHY("sub_steps / vec_x / uniform_wave need small_c=True (got sub_steps=%d, "
+                            "vec_x=%d, uniform_wave=%s)",
+                            spec->sub_steps,
+                            spec->vec_x,
+                            spec->uniform_wave ? "True" : "False");
     }
     blocked = spec->wave_tiles_k > 1 || spec->wave_tiles_c > 1;
     if(!spec->image_per_block)
     {
         if(blocked)
         {
-            ROCKE_WGRAD_IMG_WHY("wave_tiles_k / wave_tiles_c > 1 need image_per_block=True");
+            ROCKE_WGRAD_IMG_WHY(
+                "wave_tiles_k / wave_tiles_c > 1 need image_per_block=True (got %d, %d)",
+                spec->wave_tiles_k,
+                spec->wave_tiles_c);
         }
         if(spec->rows_per_sync != 1)
         {
-            ROCKE_WGRAD_IMG_WHY("rows_per_sync > 1 needs image_per_block=True");
+            ROCKE_WGRAD_IMG_WHY("rows_per_sync > 1 needs image_per_block=True (got %d)",
+                                spec->rows_per_sync);
         }
         if(spec->row_blocks != 1)
         {
-            ROCKE_WGRAD_IMG_WHY("row_blocks > 1 needs image_per_block=True");
+            ROCKE_WGRAD_IMG_WHY("row_blocks > 1 needs image_per_block=True (got %d)",
+                                spec->row_blocks);
         }
         if(spec->tdm_stages)
         {
-            ROCKE_WGRAD_IMG_WHY("tdm_stages needs image_per_block=True");
+            ROCKE_WGRAD_IMG_WHY("tdm_stages needs image_per_block=True (got %d)", spec->tdm_stages);
         }
         if(spec->ws_replicas != 1)
         {
-            ROCKE_WGRAD_IMG_WHY("ws_replicas > 1 needs image_per_block=True");
+            ROCKE_WGRAD_IMG_WHY("ws_replicas > 1 needs image_per_block=True (got %d)",
+                                spec->ws_replicas);
         }
         if(spec->lds_epilogue)
         {
@@ -2690,11 +2702,15 @@ static bool rocke_wgrad_image_reason(const rocke_direct_conv_wgrad_spec_t* spec,
     }
     if(spec->wave_size != 32)
     {
-        ROCKE_WGRAD_IMG_WHY("image_per_block is implemented for wave32 (gfx1250) only");
+        ROCKE_WGRAD_IMG_WHY(
+            "image_per_block is implemented for wave32 (gfx1250) only (got wave_size=%d)",
+            spec->wave_size);
     }
     if(spec->waves_q != 1)
     {
-        ROCKE_WGRAD_IMG_WHY("image_per_block walks every wo tile itself; waves_q must be 1");
+        ROCKE_WGRAD_IMG_WHY(
+            "image_per_block walks every wo tile itself; waves_q must be 1 (got %d)",
+            spec->waves_q);
     }
     regs = 8L
            * ((long)p->KH * p->KW * spec->wave_tiles_k * spec->wave_tiles_c
@@ -2743,7 +2759,8 @@ static bool rocke_wgrad_small_c_reason(const rocke_direct_conv_wgrad_spec_t* spe
     }
     if(spec->wave_size != 32)
     {
-        ROCKE_WGRAD_SC_WHY("small_c is implemented for wave32 (gfx1250) only");
+        ROCKE_WGRAD_SC_WHY("small_c is implemented for wave32 (gfx1250) only (got wave_size=%d)",
+                           spec->wave_size);
     }
     if(spec->mfma_k != 32)
     {
@@ -2764,27 +2781,40 @@ static bool rocke_wgrad_small_c_reason(const rocke_direct_conv_wgrad_spec_t* spe
     }
     if(spec->wave_tile_k != 16 || spec->wave_tile_c != 16)
     {
-        ROCKE_WGRAD_SC_WHY("wave_tile_k and wave_tile_c must be 16");
+        ROCKE_WGRAD_SC_WHY("wave_tile_k and wave_tile_c must be 16 (got %d, %d)",
+                           spec->wave_tile_k,
+                           spec->wave_tile_c);
     }
     if(spec->waves_k < 1 || spec->waves_c < 1)
     {
-        ROCKE_WGRAD_SC_WHY("waves_k and waves_c must be >= 1");
+        ROCKE_WGRAD_SC_WHY(
+            "waves_k and waves_c must be >= 1 (got %d, %d)", spec->waves_k, spec->waves_c);
     }
     if(spec->waves_k * spec->waves_c > 16)
     {
-        ROCKE_WGRAD_SC_WHY("waves_k * waves_c must be <= 16");
+        ROCKE_WGRAD_SC_WHY("waves_k * waves_c must be <= 16 (got %d * %d = %d)",
+                           spec->waves_k,
+                           spec->waves_c,
+                           spec->waves_k * spec->waves_c);
     }
     if(spec->waves_q != 1)
     {
-        ROCKE_WGRAD_SC_WHY("small_c walks its pixel range itself; waves_q must be 1");
+        ROCKE_WGRAD_SC_WHY("small_c walks its pixel range itself; waves_q must be 1 (got %d)",
+                           spec->waves_q);
     }
     if(spec->wave_tiles_k < 1 || spec->wave_tiles_c < 1)
     {
-        ROCKE_WGRAD_SC_WHY("wave_tiles_k and wave_tiles_c must be >= 1");
+        ROCKE_WGRAD_SC_WHY("wave_tiles_k and wave_tiles_c must be >= 1 (got %d, %d)",
+                           spec->wave_tiles_k,
+                           spec->wave_tiles_c);
     }
     if(spec->rows_per_sync != 1 || spec->tdm_stages || spec->lds_epilogue)
     {
-        ROCKE_WGRAD_SC_WHY("rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs");
+        ROCKE_WGRAD_SC_WHY("rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs "
+                           "(got rows_per_sync=%d, tdm_stages=%d, lds_epilogue=%s)",
+                           spec->rows_per_sync,
+                           spec->tdm_stages,
+                           spec->lds_epilogue ? "True" : "False");
     }
     if(spec->runtime_channels)
     {
@@ -4431,7 +4461,10 @@ static bool rocke_depthwise_wgrad_reason(const rocke_direct_depthwise_wgrad_spec
     }
     if(spec->waves < 1 || spec->rows_per_wave < 1 || spec->wo_chunk < 1)
     {
-        ROCKE_DW_WGRAD_WHY("waves, rows_per_wave and wo_chunk must be >= 1");
+        ROCKE_DW_WGRAD_WHY("waves, rows_per_wave and wo_chunk must be >= 1 (got %d, %d, %d)",
+                           spec->waves,
+                           spec->rows_per_wave,
+                           spec->wo_chunk);
     }
     if(spec->r_split < 1 || spec->r_split > p->KH || spec->waves % spec->r_split)
     {
