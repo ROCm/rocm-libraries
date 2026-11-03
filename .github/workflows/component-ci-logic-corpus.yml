@@ -17,7 +17,8 @@ name: "Component CI: hipBLASLt Logic Corpus"
 #   be strict without failing local builds over someone else's stale entry.
 #   Here it covers the architectures whose logic the change touched, or the
 #   whole corpus when a validator or the known-bugs list changed, or on a
-#   manual run. The whole corpus takes about half an hour on this runner.
+#   manual run. The whole corpus takes about 35 minutes on this runner, and
+#   the job about 45 with setup.
 # - The few TensileLite unit tests that still read the corpus, selected by
 #   their @needs_logic_corpus marker, with the corpus required so a skip
 #   cannot pass for green. SolutionUID uniqueness is one of them.
@@ -34,7 +35,8 @@ jobs:
   linux:
     name: Linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # Leaves room over a whole-corpus run for runner variance and corpus growth.
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
