@@ -121,7 +121,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const auto oStrides = bshdStrides(spec.numQueryHeads, spec.seqLenQ, spec.headSize);
     const auto kvStrides = bshdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
 
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+    const std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
         data_objects::CreateTensorAttributesDirect(
             builder, Q_UID, nullptr, spec.dataType, &qStrides, &qDims, false),
         data_objects::CreateTensorAttributesDirect(
@@ -174,7 +174,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
     const auto attributes = attributesBuilder.Finish();
 
-    std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
+    const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
         data_objects::CreateNodeDirect(builder,
                                        "sdpa",
                                        data_objects::DataType::FLOAT,

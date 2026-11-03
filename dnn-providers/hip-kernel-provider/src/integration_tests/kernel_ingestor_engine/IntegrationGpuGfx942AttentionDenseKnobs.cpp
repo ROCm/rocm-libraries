@@ -4,6 +4,7 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENABLE_SDPA)
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -217,7 +218,7 @@ std::vector<KnobCase> knobCases()
     constexpr bool COLD = false;
 
     // MHA, GQA and MQA head configurations, rotated across the class rows.
-    const std::pair<int64_t, int64_t> heads[] = {{8, 8}, {16, 2}, {8, 1}, {4, 4}};
+    const std::array<std::pair<int64_t, int64_t>, 4> heads{{{8, 8}, {16, 2}, {8, 1}, {4, 4}}};
 
     std::vector<KnobCase> cases;
     std::size_t row = 0;
@@ -559,8 +560,8 @@ std::optional<std::string>
 class SelectedKernelReport
 {
 public:
-    SelectedKernelReport(const std::string& caseName, const ScopedPluginLogCapture& capture)
-        : _caseName(caseName)
+    SelectedKernelReport(std::string caseName, const ScopedPluginLogCapture& capture)
+        : _caseName(std::move(caseName))
         , _capture(capture)
     {
     }

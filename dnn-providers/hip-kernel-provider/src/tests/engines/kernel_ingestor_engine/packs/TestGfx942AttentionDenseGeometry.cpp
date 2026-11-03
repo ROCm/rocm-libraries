@@ -7,6 +7,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -240,7 +241,7 @@ TEST(TestGfx942AttentionDenseWindow, MatchesThePythonVerdictAtEachWitness)
         int64_t blockM, blockN, seqLenQ, seqLenKv, window;
         bool accepted;
     };
-    const Witness witnesses[] = {
+    const std::vector<Witness> witnesses{
         {256, 64, 512, 512, 128, true},
         {256, 64, 2048, 2048, 128, true},
         {256, 64, 768, 256, 512, true},
