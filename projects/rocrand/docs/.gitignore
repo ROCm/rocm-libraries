@@ -4,3 +4,4 @@
 /doxygen/xml/
 /doxygen/*.tag
 /sphinx/_toc.yml
+fortran-api-reference.md
