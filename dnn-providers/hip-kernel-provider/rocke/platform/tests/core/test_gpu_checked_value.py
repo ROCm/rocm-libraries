@@ -32,13 +32,15 @@ What is pinned here:
   lowers every accepted case to the same LLVM IR and HIP source and refuses a
   failure path that is not bare with the same text;
 - when a GPU that they have run on is present (``_RUN_ON``), on the LLVM and
-  the hipcc route, each in a child process: a launch whose loaded value meets the facts runs to its store; one
-  whose value breaks them raises ``GpuCheckFailed`` with the store not done,
-  and the same process then launches again and stores; and with two waves of
-  which one breaks the facts (a wave-uniform value), that wave stops while the
-  other passes a barrier and stores, and the launch still ends with
-  ``GpuCheckFailed``; and with a per-lane value, the lanes that break the
-  facts stop while the rest of their wave passes the barrier and stores;
+  the hipcc route, each in a child process that loads a code object compiled
+  once in the test process: a launch whose loaded value meets the facts runs
+  to its store; one whose value breaks them raises ``GpuCheckFailed`` with
+  the store not done, and the same process then launches again and stores;
+  and with two waves of which one breaks the facts (a wave-uniform value),
+  that wave stops while the other passes a barrier and stores, and the launch
+  still ends with ``GpuCheckFailed``; and with a per-lane value, the lanes
+  that break the facts stop while the rest of their wave passes the barrier
+  and stores;
 - how the runtime reads the word, on the GPU: two streams with unread
   launches of one kernel both see a failure; a word set by a launch the
   runtime never saw is not blamed on the next; ``check_gpu_checks`` and
@@ -57,11 +59,13 @@ import os
 import shutil
 import subprocess
 import textwrap
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
 
+from rocke.core.arch import ArchTarget
 from rocke.core.facts import StatedFacts, stated_facts_of
 from rocke.core.intexpr import product_of
 from rocke.core.ir import (
@@ -69,6 +73,7 @@ from rocke.core.ir import (
     I32,
     I64,
     IRBuilder,
+    KernelDef,
     PtrType,
     Value,
     one_unsigned_compare_checks,
@@ -80,6 +85,7 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import optimize_kernel
 from rocke.core.value_sources import MEMORY_READ_OPS
 from rocke.core.verify import verify
+from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 INT64_MAX = (1 << 63) - 1
@@ -974,54 +980,75 @@ def _cluster_kernel(name: str):
     return b.kernel
 
 
-# Runs in the child: compiles a kernel on ``route``, launches it with T = 10 and
-# the ``cu`` values of ``case``, and prints how each launch ended and what it
-# stored (-1 where nothing was stored). A child, so that a failure path that
-# ever stops ending the launch fails this test at the time bound below instead
-# of hanging the run.
+def _plain_kernel(name: str) -> KernelDef:
+    """A kernel with no check: it only returns."""
+    b = IRBuilder(name)
+    b.ret()
+    return b.kernel
+
+
+def _kernel_for(case: str, route: str, wave: int) -> KernelDef:
+    """The kernel the child launches for ``case`` on ``route``: the two-wave,
+    cluster or unchecked kernel for those cases, and the checked-store kernel
+    for every other case (a list of ``cu`` values). Its name carries the
+    route, as the failure texts the tests read back name the kernel."""
+    if case in ("two_waves", "per_lane"):
+        return _two_wave_kernel(
+            f"gpu_checked_{case}_{route}", wave, per_lane=case == "per_lane"
+        )
+    if case == "cluster":
+        return _cluster_kernel(f"gpu_checked_cluster_{route}")
+    if case == "unchecked":
+        return _plain_kernel(f"plain_{route}")
+    return _checked_store_kernel(f"gpu_checked_{route}")
+
+
+# How each route compiles a kernel: rocKE's LLVM lowering and COMGR, or its
+# HIP lowering and hipcc.
+_COMPILE_ON_ROUTE = {"llvm": compile_kernel, "hipcc": compile_kernel_via_hipcc}
+
+
+def _code_object(kernel: KernelDef, route: str, arch: str) -> bytes:
+    """``kernel`` compiled for ``arch`` on ``route``."""
+    return _COMPILE_ON_ROUTE[route](kernel, arch=arch).hsaco
+
+
+# Runs in the child: loads the code object the test compiled, launches its
+# kernel with T = 10 and the ``cu`` values of ``case``, and prints how each
+# launch ended and what it stored (-1 where nothing was stored). A child, so
+# that a failure path that ever stops ending the launch fails this test at the
+# time bound below instead of hanging the run, and one child per case, so that
+# no case starts from HIP or runtime state another case left behind. The child
+# compiles nothing and imports neither numpy nor this file: it imports the
+# rocke package for its runtime, loads the code object, and runs the launches
+# and reads under test.
 _CHILD = textwrap.dedent(
     """
     import ctypes, struct, sys
-    import numpy as np
-    from rocke.core.arch import ArchTarget
-    from rocke.core.ir import IRBuilder
     from rocke.runtime import hip_module
     from rocke.runtime.hip_module import GpuCheckCaptureRefused, GpuCheckFailed, Runtime
-    sys.path.insert(0, sys.argv[4])
-    from test_gpu_checked_value import (
-        _checked_store_kernel,
-        _cluster_kernel,
-        _two_wave_kernel,
-    )
 
-    route, arch, case = sys.argv[1], sys.argv[2], sys.argv[3]
+    case, code_object, kernel_name = sys.argv[1:4]
+    wave = int(sys.argv[4])
     runtime = Runtime()
-
-
-    def load(kernel):
-        if route == "llvm":
-            from rocke.helpers.compile import compile_kernel
-            blob = compile_kernel(kernel, arch=arch).hsaco
-        else:
-            from rocke.helpers.compile import compile_kernel_via_hipcc
-            blob = compile_kernel_via_hipcc(kernel, arch=arch).hsaco
-        module = runtime.load_module(blob)
-        return module, module.get_function(kernel.name)
+    with open(code_object, "rb") as code:
+        module = runtime.load_module(code.read())
+    function = module.get_function(kernel_name)
 
 
     def buffers(lanes, loaded):
         y_dev = runtime.alloc(4 * lanes)
         runtime.memset(y_dev, 0xFF, 4 * lanes)
-        cu = np.array(loaded, dtype=np.int32)
-        cu_dev = runtime.alloc(cu.nbytes)
-        runtime.memcpy_h2d(cu_dev, (ctypes.c_ubyte * cu.nbytes).from_buffer(cu), cu.nbytes)
+        cu = (ctypes.c_int32 * len(loaded))(*loaded)
+        cu_dev = runtime.alloc(ctypes.sizeof(cu))
+        runtime.memcpy_h2d(cu_dev, cu, ctypes.sizeof(cu))
         return y_dev, cu_dev
 
 
     def stored(y_dev, lanes):
-        y = np.full(lanes, -1, dtype=np.int32)
-        runtime.memcpy_d2h((ctypes.c_ubyte * y.nbytes).from_buffer(y), y_dev, y.nbytes)
-        return y
+        y = (ctypes.c_int32 * lanes)()
+        runtime.memcpy_d2h(y, y_dev, ctypes.sizeof(y))
+        return list(y)
 
 
     def waited(what, wait):
@@ -1032,7 +1059,7 @@ _CHILD = textwrap.dedent(
             print(f"{what}: {type(error).__name__}: {error}", flush=True)
 
 
-    def launch(function, lanes, loaded, grid=(1, 1, 1), cluster=None):
+    def launch(lanes, loaded, grid=(1, 1, 1), cluster=None):
         y_dev, cu_dev = buffers(lanes, loaded)
         args = struct.pack("QQi", y_dev, cu_dev, 10)
         waited(
@@ -1044,7 +1071,7 @@ _CHILD = textwrap.dedent(
         return stored(y_dev, lanes * grid[0])
 
 
-    def foreign_launch(function, loaded):
+    def foreign_launch(loaded):
         # A launch the runtime never sees, as a graph replay or another
         # library's launch would be, and a wait outside the runtime.
         y_dev, cu_dev = buffers(1, [loaded])
@@ -1060,20 +1087,16 @@ _CHILD = textwrap.dedent(
 
 
     if case in ("two_waves", "per_lane"):
-        wave = ArchTarget.from_gfx(arch).wave_size
-        per_lane = case == "per_lane"
-        kernel = _two_wave_kernel(f"gpu_checked_{case}_{route}", wave, per_lane=per_lane)
-        y = launch(load(kernel)[1], 2 * wave, [11, 7])
-        if per_lane:
-            print(f"even lanes stored: {sorted(set(y[0::2].tolist()))}", flush=True)
-            print(f"odd lanes stored: {sorted(set(y[1::2].tolist()))}", flush=True)
+        y = launch(2 * wave, [11, 7])
+        if case == "per_lane":
+            print(f"even lanes stored: {sorted(set(y[0::2]))}", flush=True)
+            print(f"odd lanes stored: {sorted(set(y[1::2]))}", flush=True)
         else:
-            print(f"first wave stored: {sorted(set(y[:wave].tolist()))}", flush=True)
-            print(f"second wave stored: {sorted(set(y[wave:].tolist()))}", flush=True)
+            print(f"first wave stored: {sorted(set(y[:wave]))}", flush=True)
+            print(f"second wave stored: {sorted(set(y[wave:]))}", flush=True)
     elif case == "cluster":
-        kernel = _cluster_kernel(f"gpu_checked_cluster_{route}")
-        y = launch(load(kernel)[1], 1, [11, 7], grid=(2, 1, 1), cluster=(2, 1, 1))
-        print(f"workgroups stored: {y.tolist()}", flush=True)
+        y = launch(1, [11, 7], grid=(2, 1, 1), cluster=(2, 1, 1))
+        print(f"workgroups stored: {y}", flush=True)
     elif case == "two_streams":
         # One failing launch on stream a, one passing launch on stream b, both
         # queued before either wait: the shared word cannot say which failed,
@@ -1083,7 +1106,6 @@ _CHILD = textwrap.dedent(
         for stream in streams:
             assert create(ctypes.byref(stream)) == 0
         a, b = (int(stream.value) for stream in streams)
-        function = load(_checked_store_kernel(f"gpu_checked_{route}"))[1]
         for stream, loaded in ((a, 11), (b, 7)):
             y_dev, cu_dev = buffers(1, [loaded])
             runtime.launch(function, (1, 1, 1), (1, 1, 1),
@@ -1097,13 +1119,11 @@ _CHILD = textwrap.dedent(
     elif case == "stale":
         # A launch the runtime never saw sets the word; the next runtime
         # launch, whose value meets the facts, must not be blamed for it.
-        function = load(_checked_store_kernel(f"gpu_checked_{route}"))[1]
-        foreign_launch(function, 11)
-        print(f"stored: {int(launch(function, 1, [7])[0])}", flush=True)
+        foreign_launch(11)
+        print(f"stored: {launch(1, [7])[0]}", flush=True)
     elif case == "explicit":
         # Waits outside the runtime read nothing: check_gpu_checks after a
         # device synchronize, and release_pending_for_stream, do.
-        function = load(_checked_store_kernel(f"gpu_checked_{route}"))[1]
         for name, read in (
             ("check_gpu_checks", lambda: runtime.check_gpu_checks()),
             ("release_pending_for_stream", lambda: runtime.release_pending_for_stream(0)),
@@ -1115,7 +1135,6 @@ _CHILD = textwrap.dedent(
     elif case == "unload":
         # Unloading the code object drops its unread words: the next wait
         # reads nothing of the freed memory.
-        module, function = load(_checked_store_kernel(f"gpu_checked_{route}"))
         y_dev, cu_dev = buffers(1, [11])
         runtime.launch(function, (1, 1, 1), (1, 1, 1), struct.pack("QQi", y_dev, cu_dev, 10))
         assert hip_module._hipDeviceSynchronize() == 0
@@ -1124,10 +1143,7 @@ _CHILD = textwrap.dedent(
     elif case == "unchecked":
         # A kernel without a check has no word, and looking for it leaves no
         # error behind for hipGetLastError.
-        b = IRBuilder(f"plain_{route}")
-        b.ret()
-        module = load(b.kernel)[0]
-        print(f"gpu_check_word: {module.gpu_check_word(b.kernel.name)}", flush=True)
+        print(f"gpu_check_word: {module.gpu_check_word(kernel_name)}", flush=True)
         print(f"hipGetLastError: {hip_module._hipGetLastError()}", flush=True)
     elif case == "capture":
         # A checked kernel launched on a stream that is being captured is
@@ -1140,7 +1156,6 @@ _CHILD = textwrap.dedent(
         destroy = hip_module._b("hipGraphDestroy", ctypes.c_void_p)
         stream = ctypes.c_void_p(0)
         assert create(ctypes.byref(stream)) == 0
-        function = load(_checked_store_kernel(f"gpu_checked_{route}"))[1]
         y_dev, cu_dev = buffers(1, [7])
         relaxed = 2  # hipStreamCaptureModeRelaxed
         assert begin(stream, relaxed) == 0
@@ -1155,9 +1170,8 @@ _CHILD = textwrap.dedent(
         if graph.value:
             assert destroy(graph) == 0
     else:
-        function = load(_checked_store_kernel(f"gpu_checked_{route}"))[1]
         for loaded in [int(v) for v in case.split(",")]:
-            print(f"stored: {int(launch(function, 1, [loaded])[0])}", flush=True)
+            print(f"stored: {launch(1, [loaded])[0]}", flush=True)
     """
 )
 
@@ -1172,76 +1186,101 @@ _CHILD_TIMEOUT_S = 45
 _RUN_ON = ("gfx90a", "gfx942", "gfx1100", "gfx1201")
 
 
-def _run_child(route: str, case: str):
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
-    from rocke.runtime.hip_module import get_device_target_id
+@pytest.fixture(scope="module")
+def run_gpu_case(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Callable[[str, str], list[str]]:
+    """Run one GPU case, ``run_gpu_case(route, case)``, in a child process and
+    return the lines it printed.
 
-    processor = (get_device_target_id() or arch).split(":")[0]
-    if processor not in _RUN_ON:
-        pytest.skip(f"has not run on {processor} hardware yet; enable once it has")
-    if route == "hipcc" and shutil.which("hipcc") is None:
-        pytest.skip("hipcc not found")
-    child = subprocess.run(
-        rocke_python_command(
-            "-c", _CHILD, route, arch, case, str(Path(__file__).parent)
-        ),
-        check=False,  # the child's output is the result, read below
-        capture_output=True,
-        text=True,
-        timeout=_CHILD_TIMEOUT_S,
-        env=rocke_subprocess_env(),
-    )
-    assert child.returncode == 0, child.stdout + child.stderr
-    return child.stdout.splitlines()
+    Each kernel is compiled here, in the test process, the first time a case
+    on its route needs it, and every later case reuses that code object: the
+    child only loads it, so the child's time bound no longer covers a
+    compile."""
+    code_object_dir = tmp_path_factory.mktemp("gpu_checked_code_objects")
+    compiled: dict[tuple[str, str], Path] = {}
+
+    def run(route: str, case: str) -> list[str]:
+        arch = _gpu_arch()
+        if not arch:
+            pytest.skip("no GPU")
+        from rocke.runtime.hip_module import get_device_target_id
+
+        processor = (get_device_target_id() or arch).split(":")[0]
+        if processor not in _RUN_ON:
+            pytest.skip(f"has not run on {processor} hardware yet; enable once it has")
+        if route == "hipcc" and shutil.which("hipcc") is None:
+            pytest.skip("hipcc not found")
+        wave = ArchTarget.from_gfx(arch).wave_size
+        kernel = _kernel_for(case, route, wave)
+        key = (route, kernel.name)
+        if key not in compiled:
+            path = code_object_dir / f"{route}_{kernel.name}.hsaco"
+            path.write_bytes(_code_object(kernel, route, arch))
+            compiled[key] = path
+        child = subprocess.run(
+            rocke_python_command(
+                "-c", _CHILD, case, compiled[key], kernel.name, str(wave)
+            ),
+            check=False,  # the child's output is the result, read below
+            capture_output=True,
+            text=True,
+            timeout=_CHILD_TIMEOUT_S,
+            env=rocke_subprocess_env(),
+        )
+        assert child.returncode == 0, child.stdout + child.stderr
+        return child.stdout.splitlines()
+
+    return run
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_a_value_meeting_its_facts_runs_to_the_store(route):
-    lines = _run_child(route, "7")
+def test_gpu_a_value_meeting_its_facts_runs_to_the_store(run_gpu_case, route):
+    lines = run_gpu_case(route, "7")
     assert lines == ["launch: completed", "stored: 7"]
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_a_value_breaking_its_facts_fails_the_launch(route):
+def test_gpu_a_value_breaking_its_facts_fails_the_launch(run_gpu_case, route):
     """cu[0] = 11 > T = 10: the lane stops at the check, so the store never
     happens, and the launch ends with GpuCheckFailed. The same process then
     launches the kernel with cu[0] = 7, which stores: the GPU is still usable
     and the word was cleared."""
-    lines = _run_child(route, "11,7")
+    lines = run_gpu_case(route, "11,7")
     failed = f"launch: GpuCheckFailed: gpu_checked_{route}: a gpu_checked_value fact"
     assert len(lines) == 4 and lines[0].startswith(failed), lines
     assert lines[1:] == ["stored: -1", "launch: completed", "stored: 7"]
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_one_wave_breaking_its_facts_does_not_hold_the_other(route):
+def test_gpu_one_wave_breaking_its_facts_does_not_hold_the_other(run_gpu_case, route):
     """cu = [11, 7]: the first wave stops at its check; the second passes the
     barrier after it and stores 7 in every lane; the launch ends with
     GpuCheckFailed."""
-    lines = _run_child(route, "two_waves")
+    lines = run_gpu_case(route, "two_waves")
     assert len(lines) == 3 and lines[0].startswith("launch: GpuCheckFailed: "), lines
     assert lines[1:] == ["first wave stored: [-1]", "second wave stored: [7]"]
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_lanes_breaking_their_facts_stop_and_the_rest_of_the_wave_goes_on(route):
+def test_gpu_lanes_breaking_their_facts_stop_and_the_rest_of_the_wave_goes_on(
+    run_gpu_case, route
+):
     """Lane i checks cu[i % 2], cu = [11, 7]: the even lanes return at their
     check, the odd lanes of the same waves pass the barrier and store 7, and
     the launch ends with GpuCheckFailed."""
-    lines = _run_child(route, "per_lane")
+    lines = run_gpu_case(route, "per_lane")
     assert len(lines) == 3 and lines[0].startswith("launch: GpuCheckFailed: "), lines
     assert lines[1:] == ["even lanes stored: [-1]", "odd lanes stored: [7]"]
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_two_streams_with_unread_launches_both_see_the_failure(route):
+def test_gpu_two_streams_with_unread_launches_both_see_the_failure(run_gpu_case, route):
     """A failing launch on stream a and a passing one on stream b, both queued
     before either wait: the kernel's one word cannot say which failed, so
     both waits raise and say so. Once both are read, the next launch on a
     clears the word first and is checked on its own."""
-    lines = _run_child(route, "two_streams")
+    lines = run_gpu_case(route, "two_streams")
     shared = (
         f"GpuCheckFailed: gpu_checked_{route}: a gpu_checked_value fact was false "
         f"in a launch of gpu_checked_{route} on this stream or on another stream"
@@ -1254,42 +1293,46 @@ def test_gpu_two_streams_with_unread_launches_both_see_the_failure(route):
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_a_word_set_by_a_launch_the_runtime_never_saw_is_not_blamed_on_the_next(
-    route,
+    run_gpu_case, route
 ):
     """A launch outside the runtime (as a graph replay would be) breaks the
     facts and sets the word; the next runtime launch, whose value meets them,
     completes and stores."""
-    lines = _run_child(route, "stale")
+    lines = run_gpu_case(route, "stale")
     assert lines == ["launch: completed", "stored: 7"]
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_after_a_wait_outside_the_runtime_the_explicit_reads_raise(route):
+def test_gpu_after_a_wait_outside_the_runtime_the_explicit_reads_raise(
+    run_gpu_case, route
+):
     """After a device synchronize outside the runtime, check_gpu_checks and
     release_pending_for_stream each read the word of the failing launch."""
-    lines = _run_child(route, "explicit")
+    lines = run_gpu_case(route, "explicit")
     assert len(lines) == 2, lines
     assert lines[0].startswith("check_gpu_checks: GpuCheckFailed: "), lines
     assert lines[1].startswith("release_pending_for_stream: GpuCheckFailed: "), lines
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_unloading_a_module_drops_its_unread_words(route):
-    lines = _run_child(route, "unload")
+def test_gpu_unloading_a_module_drops_its_unread_words(run_gpu_case, route):
+    lines = run_gpu_case(route, "unload")
     assert lines == ["sync after unload: completed"]
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_a_kernel_without_a_check_has_no_word_and_leaves_no_error(route):
-    lines = _run_child(route, "unchecked")
+def test_gpu_a_kernel_without_a_check_has_no_word_and_leaves_no_error(
+    run_gpu_case, route
+):
+    lines = run_gpu_case(route, "unchecked")
     assert lines == ["gpu_check_word: None", "hipGetLastError: 0"]
 
 
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_a_checked_launch_during_stream_capture_is_refused(route):
+def test_gpu_a_checked_launch_during_stream_capture_is_refused(run_gpu_case, route):
     """Nothing reads the word after a graph replay, so the runtime refuses to
     queue a checked kernel on a stream being captured, and queues nothing."""
-    lines = _run_child(route, "capture")
+    lines = run_gpu_case(route, "capture")
     refused = (
         f"launch during capture: GpuCheckCaptureRefused: gpu_checked_{route}: this "
         "kernel checks gpu_checked_value facts, and its stream is being captured "
@@ -1334,12 +1377,14 @@ def test_a_check_comes_before_a_cluster_barrier():
 
 @pytest.mark.skip(reason="has not run on gfx1250 hardware yet; enable once it has")
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
-def test_gpu_one_workgroup_breaking_its_facts_does_not_hold_its_cluster(route):
+def test_gpu_one_workgroup_breaking_its_facts_does_not_hold_its_cluster(
+    run_gpu_case, route
+):
     """gfx1250, cu = [11, 7] in a cluster of two workgroups: the first returns
     at its check, the second passes the cluster barrier and stores 7, and the
     launch ends with GpuCheckFailed."""
     if not (_gpu_arch() or "").startswith("gfx1250"):
         pytest.skip("needs a gfx1250 GPU (workgroup clusters)")
-    lines = _run_child(route, "cluster")
+    lines = run_gpu_case(route, "cluster")
     assert len(lines) == 2 and lines[0].startswith("launch: GpuCheckFailed: "), lines
     assert lines[1] == "workgroups stored: [-1, 7]"
