@@ -80,7 +80,6 @@ module rocfft
 
   interface rocfft_setup
     function rocfft_setup_() bind(c, name="rocfft_setup")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_setup_
@@ -89,7 +88,6 @@ module rocfft
 
   interface rocfft_cleanup
     function rocfft_cleanup_() bind(c, name="rocfft_cleanup")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_cleanup_
@@ -100,7 +98,6 @@ module rocfft
     function rocfft_plan_create_(plan,placement,transform_type,myPrecision,dimensions,lengths, &
         number_of_transforms,description) &
         bind(c, name="rocfft_plan_create")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_create_
@@ -127,7 +124,6 @@ module rocfft
 
   interface rocfft_execute
     function rocfft_execute_(plan,in_buffer,out_buffer,myInfo) bind(c, name="rocfft_execute")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execute_
@@ -140,7 +136,6 @@ module rocfft
 
   interface rocfft_plan_destroy
     function rocfft_plan_destroy_(plan) bind(c, name="rocfft_plan_destroy")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_destroy_
@@ -151,7 +146,6 @@ module rocfft
   interface rocfft_plan_description_set_scale_factor
     function rocfft_plan_description_set_scale_factor_(description,scale_factor) &
         bind(c, name="rocfft_plan_description_set_scale_factor")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_set_scale_factor_
@@ -165,7 +159,6 @@ module rocfft
         in_offsets,out_offsets,in_strides_size,in_strides,in_distance,out_strides_size, &
         out_strides,out_distance) &
         bind(c, name="rocfft_plan_description_set_data_layout")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_set_data_layout_
@@ -195,7 +188,6 @@ module rocfft
 
   interface rocfft_field_create
     function rocfft_field_create_(field) bind(c, name="rocfft_field_create")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_field_create_
@@ -205,7 +197,6 @@ module rocfft
 
   interface rocfft_field_destroy
     function rocfft_field_destroy_(field) bind(c, name="rocfft_field_destroy")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_field_destroy_
@@ -215,7 +206,6 @@ module rocfft
 
   interface rocfft_get_version_string
     function rocfft_get_version_string_(buf,len) bind(c, name="rocfft_get_version_string")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_get_version_string_
@@ -227,7 +217,6 @@ module rocfft
   interface rocfft_plan_description_set_comm
     function rocfft_plan_description_set_comm_(description,comm_type,comm_handle) &
         bind(c, name="rocfft_plan_description_set_comm")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_set_comm_
@@ -241,7 +230,6 @@ module rocfft
     function rocfft_plan_description_set_load_callback_(description,symbol_name,bitcode_data, &
         bitcode_len_bytes,shared_mem_bytes) &
         bind(c, name="rocfft_plan_description_set_load_callback")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_set_load_callback_
@@ -257,7 +245,6 @@ module rocfft
     function rocfft_plan_description_set_store_callback_(description,symbol_name,bitcode_data, &
         bitcode_len_bytes,shared_mem_bytes) &
         bind(c, name="rocfft_plan_description_set_store_callback")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_set_store_callback_
@@ -273,7 +260,6 @@ module rocfft
     function rocfft_brick_create_(brick,field_lower,field_upper,brick_stride,dim_with_batch, &
         deviceID) &
         bind(c, name="rocfft_brick_create")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_brick_create_
@@ -284,11 +270,20 @@ module rocfft
       integer(c_size_t),value :: dim_with_batch
       integer(c_int),value :: deviceID
     end function
+
+#ifdef USE_ASSUMED_RANK
+    module procedure rocfft_brick_create_assumed_rank
+#else
+#ifdef USE_ASSUMED_SHAPE
+    module procedure &
+      rocfft_brick_create_rank_0,&
+      rocfft_brick_create_rank_1
+#endif
+#endif
   end interface
 
   interface rocfft_brick_destroy
     function rocfft_brick_destroy_(brick) bind(c, name="rocfft_brick_destroy")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_brick_destroy_
@@ -298,7 +293,6 @@ module rocfft
 
   interface rocfft_field_add_brick
     function rocfft_field_add_brick_(field,brick) bind(c, name="rocfft_field_add_brick")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_field_add_brick_
@@ -310,7 +304,6 @@ module rocfft
   interface rocfft_plan_description_add_infield
     function rocfft_plan_description_add_infield_(description,field) &
         bind(c, name="rocfft_plan_description_add_infield")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_add_infield_
@@ -322,7 +315,6 @@ module rocfft
   interface rocfft_plan_description_add_outfield
     function rocfft_plan_description_add_outfield_(description,field) &
         bind(c, name="rocfft_plan_description_add_outfield")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_add_outfield_
@@ -334,7 +326,6 @@ module rocfft
   interface rocfft_plan_get_work_buffer_size
     function rocfft_plan_get_work_buffer_size_(plan,size_in_bytes) &
         bind(c, name="rocfft_plan_get_work_buffer_size")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_get_work_buffer_size_
@@ -347,7 +338,6 @@ module rocfft
 
   interface rocfft_plan_get_print
     function rocfft_plan_get_print_(plan) bind(c, name="rocfft_plan_get_print")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_get_print_
@@ -358,7 +348,6 @@ module rocfft
   interface rocfft_plan_description_create
     function rocfft_plan_description_create_(description) &
         bind(c, name="rocfft_plan_description_create")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_create_
@@ -369,7 +358,6 @@ module rocfft
   interface rocfft_plan_description_destroy
     function rocfft_plan_description_destroy_(description) &
         bind(c, name="rocfft_plan_description_destroy")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_plan_description_destroy_
@@ -379,7 +367,6 @@ module rocfft
 
   interface rocfft_execution_info_create
     function rocfft_execution_info_create_(myInfo) bind(c, name="rocfft_execution_info_create")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_create_
@@ -389,7 +376,6 @@ module rocfft
 
   interface rocfft_execution_info_destroy
     function rocfft_execution_info_destroy_(myInfo) bind(c, name="rocfft_execution_info_destroy")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_destroy_
@@ -400,7 +386,6 @@ module rocfft
   interface rocfft_execution_info_set_work_buffer
     function rocfft_execution_info_set_work_buffer_(myInfo,work_buffer,size_in_bytes) &
         bind(c, name="rocfft_execution_info_set_work_buffer")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_set_work_buffer_
@@ -413,7 +398,6 @@ module rocfft
   interface rocfft_execution_info_set_stream
     function rocfft_execution_info_set_stream_(myInfo,stream) &
         bind(c, name="rocfft_execution_info_set_stream")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_set_stream_
@@ -426,7 +410,6 @@ module rocfft
     function rocfft_execution_info_set_load_callback_(myInfo,cb_functions,cb_data, &
         shared_mem_bytes) &
         bind(c, name="rocfft_execution_info_set_load_callback")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_set_load_callback_
@@ -440,7 +423,6 @@ module rocfft
   interface rocfft_execution_info_set_load_callback_data
     function rocfft_execution_info_set_load_callback_data_(myInfo,cb_data,count) &
         bind(c, name="rocfft_execution_info_set_load_callback_data")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_set_load_callback_data_
@@ -454,7 +436,6 @@ module rocfft
     function rocfft_execution_info_set_store_callback_(myInfo,cb_functions,cb_data, &
         shared_mem_bytes) &
         bind(c, name="rocfft_execution_info_set_store_callback")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_set_store_callback_
@@ -468,7 +449,6 @@ module rocfft
   interface rocfft_execution_info_set_store_callback_data
     function rocfft_execution_info_set_store_callback_data_(myInfo,cb_data,count) &
         bind(c, name="rocfft_execution_info_set_store_callback_data")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_execution_info_set_store_callback_data_
@@ -480,7 +460,6 @@ module rocfft
 
   interface rocfft_cache_serialize
     function rocfft_cache_serialize_(buffer,buffer_len_bytes) bind(c, name="rocfft_cache_serialize")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_cache_serialize_
@@ -493,7 +472,6 @@ module rocfft
 
   interface rocfft_cache_buffer_free
     function rocfft_cache_buffer_free_(buffer) bind(c, name="rocfft_cache_buffer_free")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_cache_buffer_free_
@@ -504,7 +482,6 @@ module rocfft
   interface rocfft_cache_deserialize
     function rocfft_cache_deserialize_(buffer,buffer_len_bytes) &
         bind(c, name="rocfft_cache_deserialize")
-      use iso_c_binding
       import
       implicit none
       integer(c_int) :: rocfft_cache_deserialize_
@@ -519,8 +496,9 @@ module rocfft
     subroutine rocfftCheck(status)
       implicit none
       integer(kind(rocfft_status_success)) :: status
-      character(len=:), allocatable :: name
+      character(len=33) :: name
       if (status /= rocfft_status_success) then
+        name = "unknown status"
         select case (status)
         case (rocfft_status_failure)
           name = "rocfft_status_failure"
@@ -538,15 +516,12 @@ module rocfft
           name = "rocfft_status_invalid_offset"
         case (rocfft_status_invalid_work_buffer)
           name = "rocfft_status_invalid_work_buffer"
-        case default
-          name = "unknown status"
         end select
-        write (*, "(a,i0,a)") "ROCFFT ERROR: " // name // " (code ", status, ")"
+        write (*, "(a,i0,a)") "ROCFFT ERROR: " // trim(name) // " (code ", status, ")"
         stop 1
       end if
     end subroutine rocfftCheck
     function rocfft_plan_get_work_buffer_size_typed(plan,size_in_bytes)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_plan_get_work_buffer_size_typed
       type(c_ptr), value :: plan
@@ -557,7 +532,6 @@ module rocfft
     end function
 
     function rocfft_cache_serialize_typed(buffer,buffer_len_bytes)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_cache_serialize_typed
       type(c_ptr) :: buffer
@@ -572,7 +546,6 @@ module rocfft
 #ifdef USE_ASSUMED_RANK
     function rocfft_plan_create_assumed_rank(plan,placement,transform_type,myPrecision,dimensions, &
         lengths,number_of_transforms,description)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_plan_create_assumed_rank
       type(c_ptr) :: plan
@@ -591,7 +564,6 @@ module rocfft
 #else
     function rocfft_plan_create_rank_0(plan,placement,transform_type,myPrecision,dimensions, &
         lengths,number_of_transforms,description)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_plan_create_rank_0
       type(c_ptr) :: plan
@@ -609,7 +581,6 @@ module rocfft
 
     function rocfft_plan_create_rank_1(plan,placement,transform_type,myPrecision,dimensions, &
         lengths,number_of_transforms,description)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_plan_create_rank_1
       type(c_ptr) :: plan
@@ -630,7 +601,6 @@ module rocfft
     function rocfft_plan_description_set_data_layout_assumed_rank(description,in_array_type, &
         out_array_type,in_offsets,out_offsets,in_strides_size,in_strides,in_distance, &
         out_strides_size,out_strides,out_distance)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_plan_description_set_data_layout_assumed_rank
       type(c_ptr), value :: description
@@ -655,7 +625,6 @@ module rocfft
     function rocfft_plan_description_set_data_layout_rank_0(description,in_array_type, &
         out_array_type,in_offsets,out_offsets,in_strides_size,in_strides,in_distance, &
         out_strides_size,out_strides,out_distance)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_plan_description_set_data_layout_rank_0
       type(c_ptr), value :: description
@@ -679,7 +648,6 @@ module rocfft
     function rocfft_plan_description_set_data_layout_rank_1(description,in_array_type, &
         out_array_type,in_offsets,out_offsets,in_strides_size,in_strides,in_distance, &
         out_strides_size,out_strides,out_distance)
-      use iso_c_binding
       implicit none
       integer(kind(rocfft_status_success)) :: rocfft_plan_description_set_data_layout_rank_1
       type(c_ptr), value :: description
@@ -698,6 +666,54 @@ module rocfft
         description,in_array_type,out_array_type,c_loc(in_offsets),c_loc(out_offsets), &
         in_strides_size,c_loc(in_strides),in_distance,out_strides_size,c_loc(out_strides), &
         out_distance)
+    end function
+
+#endif
+#ifdef USE_ASSUMED_RANK
+    function rocfft_brick_create_assumed_rank(brick,field_lower,field_upper,brick_stride, &
+        dim_with_batch,deviceID)
+      implicit none
+      integer(kind(rocfft_status_success)) :: rocfft_brick_create_assumed_rank
+      type(c_ptr) :: brick
+      integer(c_size_t),target,dimension(..) :: field_lower
+      integer(c_size_t),target,dimension(..) :: field_upper
+      integer(c_size_t),target,dimension(..) :: brick_stride
+      integer(c_size_t) :: dim_with_batch
+      integer(c_int) :: deviceID
+      !
+      rocfft_brick_create_assumed_rank = rocfft_brick_create_(brick,c_loc(field_lower), &
+        c_loc(field_upper),c_loc(brick_stride),dim_with_batch,deviceID)
+    end function
+
+#else
+    function rocfft_brick_create_rank_0(brick,field_lower,field_upper,brick_stride,dim_with_batch, &
+        deviceID)
+      implicit none
+      integer(kind(rocfft_status_success)) :: rocfft_brick_create_rank_0
+      type(c_ptr) :: brick
+      integer(c_size_t),target :: field_lower
+      integer(c_size_t),target :: field_upper
+      integer(c_size_t),target :: brick_stride
+      integer(c_size_t) :: dim_with_batch
+      integer(c_int) :: deviceID
+      !
+      rocfft_brick_create_rank_0 = rocfft_brick_create_(brick,c_loc(field_lower), &
+        c_loc(field_upper),c_loc(brick_stride),dim_with_batch,deviceID)
+    end function
+
+    function rocfft_brick_create_rank_1(brick,field_lower,field_upper,brick_stride,dim_with_batch, &
+        deviceID)
+      implicit none
+      integer(kind(rocfft_status_success)) :: rocfft_brick_create_rank_1
+      type(c_ptr) :: brick
+      integer(c_size_t),target,dimension(:) :: field_lower
+      integer(c_size_t),target,dimension(:) :: field_upper
+      integer(c_size_t),target,dimension(:) :: brick_stride
+      integer(c_size_t) :: dim_with_batch
+      integer(c_int) :: deviceID
+      !
+      rocfft_brick_create_rank_1 = rocfft_brick_create_(brick,c_loc(field_lower), &
+        c_loc(field_upper),c_loc(brick_stride),dim_with_batch,deviceID)
     end function
 
 #endif
