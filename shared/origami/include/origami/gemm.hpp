@@ -521,6 +521,40 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
                                           const context_t& context);
 
 /**
+ * @brief Context-free rejection rules applied by compute_total_latency.
+ *
+ * Returns true exactly when compute_total_latency() rejects @p config (returns the maximum
+ * latency) without building a context or running a latency model: invalid configs,
+ * heuristic rejections, the ANALYTICAL_GEMM_PICK filter and, for the estimation model,
+ * its short-circuit rules.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @return true if the config is rejected.
+ */
+ORIGAMI_EXPORT bool fast_reject(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config);
+
+/**
+ * @brief Compute the estimation-model total latency from a prebuilt context.
+ *
+ * This is the part of compute_total_latency() that runs after the context is built. It does
+ * not apply fast_reject(); callers are expected to filter first.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context built from @p problem, @p hardware and @p config.
+ * @return double Latency in cycles.
+ */
+ORIGAMI_EXPORT double estimation_latency_from_context(const problem_t& problem,
+                                                      const hardware_t& hardware,
+                                                      const config_t& config,
+                                                      const context_t& context);
+
+/**
  * @brief Compute the total latency of a gemm based on the latency of one timestep multiplied by the
  * number of timesteps. (@see compute_timestep_latency)
  *

@@ -24,9 +24,11 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <limits>
 #include "common.hpp"
 
 using Catch::Approx;
@@ -224,6 +226,93 @@ TEST_CASE("GEMM: compute_total_latency", "[gemm]") {
 
       REQUIRE(latency_small < latency_large);
     }
+  }
+}
+
+TEST_CASE("GEMM: fast_reject matches compute_total_latency rejections", "[gemm][fast_reject]") {
+  constexpr double kRejected                     = std::numeric_limits<double>::max();
+  const std::vector<origami::problem_t> problems = {
+      // Small batched problem: one-tile short-circuit.
+      make_problem(128, 128, 512, origami::transpose_t::T, origami::transpose_t::N, 4),
+      // Wide N with M covered by the tile: non-temporal B rule.
+      make_problem(64, 8192, 4096, origami::transpose_t::N, origami::transpose_t::N),
+      // Wide M with N covered by the tile: non-temporal A rule.
+      make_problem(8192, 64, 4096, origami::transpose_t::T, origami::transpose_t::T),
+      // M < 3: Dot2 rule.
+      make_problem(2, 4096, 4096),
+      // K not a multiple of the cache line.
+      make_problem(4096, 4096, 4100),
+      make_problem(4096, 4096, 4096),
+  };
+
+  // MT x MI x non-temporal hint variants. Non-temporal availability is memoized per
+  // macro tile, the same way callers prepare a config list.
+  std::vector<origami::config_t> configs;
+  for (size_t mt_m : {16, 64, 128, 256})
+    for (size_t mt_n : {16, 64, 128, 256})
+      for (size_t mt_k : {64, 128})
+        for (int nt_a : {0, 4})
+          for (int nt_b : {0, 4}) {
+            configs.push_back(make_config(mt_m, mt_n, mt_k, 16, 16, 16, false, 1, 1, nt_a, nt_b));
+            configs.push_back(make_config(mt_m, mt_n, mt_k, 1, 1, 64, false, 1, 1, nt_a, nt_b));
+          }
+  // Only some tiles have a non-temporal variant, so both availability paths are covered.
+  configs.erase(std::remove_if(configs.begin(),
+                               configs.end(),
+                               [](const origami::config_t& c) {
+                                 return c.mt.m == 128 &&
+                                        (c.cache_hints_a == 4 || c.cache_hints_b == 4);
+                               }),
+                configs.end());
+  origami::memoize_non_temporal_availability(configs);
+
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware   = make_hardware(gpu_arch);
+      size_t rejected = 0;
+      size_t accepted = 0;
+      for (const auto& problem : problems) {
+        for (const auto& config : configs) {
+          const bool fast      = origami::gemm::fast_reject(problem, hardware, config);
+          const double latency = origami::gemm::compute_total_latency(problem, hardware, config);
+          REQUIRE(fast == (latency == kRejected));
+          if (fast) {
+            ++rejected;
+            continue;
+          }
+          ++accepted;
+          origami::gemm::context_t context(problem, hardware, config);
+          REQUIRE(origami::gemm::estimation_latency_from_context(
+                      problem, hardware, config, context) == latency);
+        }
+      }
+      REQUIRE(rejected > 0);
+      REQUIRE(accepted > 0);
+    }
+  }
+
+  SECTION("invalid config is rejected") {
+    auto hardware = make_hardware(950);
+    auto problem  = make_problem(4096, 4096, 4096);
+    auto config   = make_config(128, 128, 64);
+    config.mt.m   = 0;
+    REQUIRE(origami::gemm::fast_reject(problem, hardware, config));
+    REQUIRE(origami::gemm::compute_total_latency(problem, hardware, config) == kRejected);
+  }
+
+  SECTION("ANALYTICAL_GEMM_PICK filter is a fast rejection") {
+    auto hardware = make_hardware(950);
+    auto problem  = make_problem(4096, 4096, 4096);
+    portable_setenv("ANALYTICAL_GEMM_PICK", "256x256x64", 1);
+    origami::runtime_options::get().update_from_env();
+    const bool picked_rejected =
+        origami::gemm::fast_reject(problem, hardware, make_config(256, 256, 64));
+    const bool other_rejected =
+        origami::gemm::fast_reject(problem, hardware, make_config(128, 128, 64));
+    portable_unsetenv("ANALYTICAL_GEMM_PICK");
+    origami::runtime_options::get().update_from_env();
+    REQUIRE_FALSE(picked_rejected);
+    REQUIRE(other_rejected);
   }
 }
 

@@ -2347,32 +2347,32 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   return L_total;
 }
 
-double compute_total_latency(const problem_t& problem,
-                             const hardware_t& hardware,
-                             const config_t& config) {
-  if (!config.is_valid()) return std::numeric_limits<double>::max();
+namespace {
+
+// Rejections that apply regardless of the prediction mode.
+bool reject_before_prediction(const problem_t& problem,
+                              const hardware_t& hardware,
+                              const config_t& config) {
+  if (!config.is_valid()) return true;
 
   // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
   // When a matching heuristic marks the config as rejected, report the maximum
   // latency so rank_configs() drops the kernel from selection entirely.
-  if (get_heuristic_params(problem, hardware, config).reject) {
-    return std::numeric_limits<double>::max();
-  }
+  if (get_heuristic_params(problem, hardware, config).reject) { return true; }
 
   // ANALYTICAL_GEMM_PICK: force a specific MT size for solution selection.
   {
     const auto& pick = runtime_options::get().gemm_pick;
     if (pick.m > 0 && (config.mt.m != pick.m || config.mt.n != pick.n || config.mt.k != pick.k)) {
-      return std::numeric_limits<double>::max();
+      return true;
     }
   }
 
+  return false;
+}
 
-  // Use Formocast simulation model if prediction_mode is set to simulation
-  if (config.prediction_mode == prediction_modes_t::simulation) {
-    return compute_formocast_latency(problem, hardware, config);
-  }
-
+// Short-circuit rules of the analytical estimation model.
+bool reject_short_circuit(const problem_t& problem, const config_t& config) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -2400,11 +2400,10 @@ double compute_total_latency(const problem_t& problem,
     // so. This short circuit condition also decreases selection latency when problems are very
     // small :)
     // TODO 256 and 256 here should be largest M and N tile dimensions in library
-    if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
-      return std::numeric_limits<double>::max();
+    if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N)) return true;
 
     // Use Dot2 only for M < 3
-    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
+    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return true;
 
     constexpr size_t cache_line_bits = heuristic_defaults_t::CACHE_LINE_BYTES * 8;  // 128 B in bits
     size_t K_mod_128bytes    = K * a_bits % cache_line_bits;
@@ -2413,28 +2412,34 @@ double compute_total_latency(const problem_t& problem,
       // avoid division by 0 if K == 0
       if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
         // Use nontemporal B, if the library has one to use
-        if (config.non_temporal_b_available && !(config.cache_hints_b == 4)) {
-          return std::numeric_limits<double>::max();
-        }
+        if (config.non_temporal_b_available && !(config.cache_hints_b == 4)) { return true; }
       } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
         // Use Non Temporal A, if the library has one to use
-        if (config.non_temporal_a_available && !(config.cache_hints_a == 4)) {
-          return std::numeric_limits<double>::max();
-        }
+        if (config.non_temporal_a_available && !(config.cache_hints_a == 4)) { return true; }
       } else {
         // Never use Non Temporal
-        if (config.cache_hints_a || config.cache_hints_b) {
-          return std::numeric_limits<double>::max();
-        }
+        if (config.cache_hints_a || config.cache_hints_b) { return true; }
       }
     } else if (config.cache_hints_a || config.cache_hints_b) {
-      return std::numeric_limits<double>::max();
+      return true;
     }
   }
 
-  // 1) Setup context (computes grid dims, launch params, WGM, etc.)
-  context_t context(problem, hardware, config);
+  return false;
+}
 
+}  // namespace
+
+bool fast_reject(const problem_t& problem, const hardware_t& hardware, const config_t& config) {
+  if (reject_before_prediction(problem, hardware, config)) return true;
+  if (config.prediction_mode == prediction_modes_t::simulation) return false;
+  return reject_short_circuit(problem, config);
+}
+
+double estimation_latency_from_context(const problem_t& problem,
+                                       const hardware_t& hardware,
+                                       const config_t& config,
+                                       const context_t& context) {
   // 2) Compute latency of a timestep
   double L_timestep = compute_timestep_latency(problem, hardware, config, context);
 
@@ -2457,6 +2462,26 @@ double compute_total_latency(const problem_t& problem,
   }
 
   return total_latency;
+}
+
+double compute_total_latency(const problem_t& problem,
+                             const hardware_t& hardware,
+                             const config_t& config) {
+  if (reject_before_prediction(problem, hardware, config)) {
+    return std::numeric_limits<double>::max();
+  }
+
+  // Use Formocast simulation model if prediction_mode is set to simulation
+  if (config.prediction_mode == prediction_modes_t::simulation) {
+    return compute_formocast_latency(problem, hardware, config);
+  }
+
+  if (reject_short_circuit(problem, config)) return std::numeric_limits<double>::max();
+
+  // 1) Setup context (computes grid dims, launch params, WGM, etc.)
+  context_t context(problem, hardware, config);
+
+  return estimation_latency_from_context(problem, hardware, config, context);
 }
 
 static double compute_formocast_latency(const problem_t& problem,
