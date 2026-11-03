@@ -351,8 +351,8 @@ void testing_sddmm_batched_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -487,7 +487,6 @@ void testing_sddmm_batched_csr(Arguments argus)
     }
 
     // free.
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
