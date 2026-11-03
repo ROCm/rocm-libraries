@@ -49,7 +49,8 @@ Spec (the gtest golden, utilities/test/src/reference/bayer_to_rgb_ref.hpp, is th
   - Read the source at the ROI offset (x0, y0); write the destination from its origin.
   - I8: a mean of stored values is shift-invariant, so no +128 is needed.
   - Store: U8/I8 round to nearest then clamp; F16/F32 clamp to [0,1].
-  - layoutParams describes the DESTINATION (3-channel NCHW or NHWC); the source is always PLN1.
+  - The destination (3-channel NCHW or NHWC) is addressed through dstDescPtr's strides; the
+    source is always PLN1.
 
   Test: rpp_tests --gtest_filter='Image_DataExchange/BayerToRgb*HOST_*'
 */
@@ -113,7 +114,7 @@ template <typename T>
 RppStatus bayer_to_rgb_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                    RpptDescPtr dstDescPtr, RpptBayerPattern bayerPattern,
                                    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
-                                   RppLayoutParams layoutParams, rpp::Handle& handle) {
+                                   rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     Rpp32s redRowParity, redColParity;
     demosaic_red_parity(bayerPattern, redRowParity, redColParity);
@@ -188,13 +189,13 @@ RppStatus bayer_to_rgb_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
 template RppStatus bayer_to_rgb_host_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,
                                                    RpptBayerPattern, RpptROIPtr, RpptRoiType,
-                                                   RppLayoutParams, rpp::Handle&);
+                                                   rpp::Handle&);
 template RppStatus bayer_to_rgb_host_tensor<Rpp32f>(Rpp32f*, RpptDescPtr, Rpp32f*, RpptDescPtr,
                                                     RpptBayerPattern, RpptROIPtr, RpptRoiType,
-                                                    RppLayoutParams, rpp::Handle&);
+                                                    rpp::Handle&);
 template RppStatus bayer_to_rgb_host_tensor<Rpp16f>(Rpp16f*, RpptDescPtr, Rpp16f*, RpptDescPtr,
                                                     RpptBayerPattern, RpptROIPtr, RpptRoiType,
-                                                    RppLayoutParams, rpp::Handle&);
+                                                    rpp::Handle&);
 template RppStatus bayer_to_rgb_host_tensor<Rpp8s>(Rpp8s*, RpptDescPtr, Rpp8s*, RpptDescPtr,
                                                    RpptBayerPattern, RpptROIPtr, RpptRoiType,
-                                                   RppLayoutParams, rpp::Handle&);
+                                                   rpp::Handle&);

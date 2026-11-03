@@ -388,35 +388,41 @@ RppStatus rppt_bayer_to_rgb(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t ds
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
-        // The source is always single-channel NCHW, so the layout that varies is the destination's.
-        RppLayoutParams layoutParams = get_layout_params(dstDescPtr->layout, dstDescPtr->c);
+        RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+        for (Rpp32u i = 0; i < srcDescPtr->n; i++) {
+            RpptROI roi = roiDefault;
+            if (roiTensorPtrSrc != nullptr)
+                compute_roi_validation_host(&roiTensorPtrSrc[i], &roi, &roiDefault, roiType);
+            if ((roi.xywhROI.roiWidth < 2) || (roi.xywhROI.roiHeight < 2))
+                return RPP_ERROR_INVALID_ARGUMENTS;
+        }
 
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
             return bayer_to_rgb_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, bayerPattern,
-                roiTensorPtrSrc, roiType, layoutParams, handle);
+                roiTensorPtrSrc, roiType, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
             return bayer_to_rgb_host_tensor(
                 reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
-                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, layoutParams, handle);
+                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
             return bayer_to_rgb_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
-                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, layoutParams, handle);
+                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
             return bayer_to_rgb_host_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, bayerPattern,
-                roiTensorPtrSrc, roiType, layoutParams, handle);
+                roiTensorPtrSrc, roiType, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
     }

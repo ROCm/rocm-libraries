@@ -660,7 +660,7 @@ template <typename T>
 RppStatus bayer_to_rgb_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                    RpptDescPtr dstDescPtr, RpptBayerPattern bayerPattern,
                                    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
-                                   RppLayoutParams layoutParams, rpp::Handle& handle);
+                                   rpp::Handle& handle);
 
 // -------------------- color_to_greyscale --------------------
 

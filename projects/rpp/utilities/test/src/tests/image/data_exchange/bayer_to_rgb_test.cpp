@@ -51,11 +51,14 @@ const std::vector<RpptBayerPattern> kPatterns{RpptBayerPattern_RGGB, RpptBayerPa
 
 // phaseX/phaseY are the parity of the partial ROI's x/y offset, which decides the colour of every
 // pixel since the pattern is anchored at the ROI origin. Full ROIs always have phase 0.
+// minLtrb replaces the ROI with the smallest legal one, 2x2 at the origin, given as LTRB.
 struct BayerToRgbParams {
     RpptBayerPattern pattern;
     int phaseX, phaseY;
+    bool minLtrb = false;
     std::string name() const {
-        return pattern_name(pattern) + "_ph" + std::to_string(phaseX) + std::to_string(phaseY);
+        return pattern_name(pattern) + "_ph" + std::to_string(phaseX) + std::to_string(phaseY) +
+               (minLtrb ? "_ltrb2x2" : "");
     }
 };
 
@@ -83,7 +86,19 @@ void run_bayer_to_rgb(const TestConfig& cfg, const BayerToRgbParams& op) {
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
 
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = bayer_roi(srcDesc, cfg.roi, op.phaseX, op.phaseY);
+    std::vector<RpptROI> roiVec = bayer_roi(srcDesc, cfg.roi, op.phaseX, op.phaseY);
+    RpptRoiType roiType = XYWH;
+    if (op.minLtrb) {
+        // rb.x and rb.y alias the XYWH roiWidth and roiHeight fields as 1, so a size check that
+        // reads those fields instead of the converted ROI would wrongly reject this call.
+        roiType = LTRB;
+        for (RpptROI& r : roiVec) {
+            r.ltrbROI.lt.x = 0;
+            r.ltrbROI.lt.y = 0;
+            r.ltrbROI.rb.x = 1;
+            r.ltrbROI.rb.y = 1;
+        }
+    }
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // dst and golden share a seed distinct from the input so a no-op kernel would be caught.
@@ -92,7 +107,7 @@ void run_bayer_to_rgb(const TestConfig& cfg, const BayerToRgbParams& op) {
     fill_input<T>(dstInit.data(), dstCount, cfg.dtype, /*salt=*/1);
     golden = dstInit;
     bayer_to_rgb_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
-                              roiVec.data(), XYWH, op.pattern);
+                              roiVec.data(), roiType, op.pattern);
 
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
@@ -100,14 +115,14 @@ void run_bayer_to_rgb(const TestConfig& cfg, const BayerToRgbParams& op) {
 
     RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_bayer_to_rgb(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.pattern,
-                                RpptImageBorderType::REFLECT_NO_EDGE, roi.data(), XYWH,
+                                RpptImageBorderType::REFLECT_NO_EDGE, roi.data(), roiType,
                                 handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), dstBytes);
 
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), roiType,
                                kBayerToRgbTolerance(cfg.dtype)));
 }
 
@@ -119,6 +134,7 @@ std::vector<WithParams<BayerToRgbParams>> bayer_to_rgb_cases() {
     std::vector<BayerToRgbParams> full, partial;
     for (RpptBayerPattern p : kPatterns) {
         full.push_back({p, 0, 0});
+        full.push_back({p, 0, 0, /*minLtrb=*/true});
         for (int py = 0; py < 2; ++py)
             for (int px = 0; px < 2; ++px) partial.push_back({p, px, py});
     }
@@ -131,7 +147,21 @@ std::vector<WithParams<BayerToRgbParams>> bayer_to_rgb_cases() {
 }
 
 // One illegal argument per case; only the status is asserted.
-enum class BayerFault { Pattern, Border, SrcChannels, DstChannels };
+// The ROI faults each leave an ROI under the documented 2x2 minimum once it is converted to XYWH
+// and clipped to the image, which is the ROI the kernel uses:
+//   RoiWidth / RoiHeight - an XYWH ROI 1 pixel wide / high.
+//   LtrbWidth - a 1-column LTRB ROI away from x = 0, so its rb.x, read as roiWidth, is >= 2.
+//   ClippedWidth - an XYWH ROI starting at the last column, so clipping leaves 1 column.
+enum class BayerFault {
+    Pattern,
+    Border,
+    SrcChannels,
+    DstChannels,
+    RoiWidth,
+    RoiHeight,
+    LtrbWidth,
+    ClippedWidth
+};
 
 struct BayerToRgbNegativeParams {
     BayerFault fault;
@@ -145,10 +175,43 @@ struct BayerToRgbNegativeParams {
                 return "src3ch";
             case BayerFault::DstChannels:
                 return "dst1ch";
+            case BayerFault::RoiWidth:
+                return "roiw1";
+            case BayerFault::RoiHeight:
+                return "roih1";
+            case BayerFault::LtrbWidth:
+                return "ltrbw1";
+            case BayerFault::ClippedWidth:
+                return "clippedw1";
         }
         return "unknown";
     }
 };
+
+// Applies an ROI fault to one image's full-frame XYWH ROI; returns the ROI type to pass.
+RpptRoiType apply_roi_fault(RpptROI& r, const RpptDesc& d, BayerFault fault) {
+    const int w = static_cast<int>(d.w), h = static_cast<int>(d.h);
+    switch (fault) {
+        case BayerFault::RoiWidth:
+            r.xywhROI.roiWidth = 1;
+            break;
+        case BayerFault::RoiHeight:
+            r.xywhROI.roiHeight = 1;
+            break;
+        case BayerFault::LtrbWidth:
+            r.ltrbROI.lt.x = w / 2;
+            r.ltrbROI.lt.y = 0;
+            r.ltrbROI.rb.x = w / 2;
+            r.ltrbROI.rb.y = h - 1;
+            return LTRB;
+        case BayerFault::ClippedWidth:
+            r.xywhROI.xy.x = w - 1;
+            break;
+        default:
+            break;
+    }
+    return XYWH;
+}
 
 void run_bayer_to_rgb_negative(const TestConfig& cfg, const BayerToRgbNegativeParams& op) {
     TestConfig srcCfg = cfg, dstCfg = cfg;
@@ -164,7 +227,11 @@ void run_bayer_to_rgb_negative(const TestConfig& cfg, const BayerToRgbNegativePa
 
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, Roi::Full);
-    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
+    RpptRoiType roiType = XYWH;
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
+        roi[i] = roiVec[i];
+        roiType = apply_roi_fault(roi[i], srcDesc, op.fault);
+    }
 
     std::vector<Rpp8u> input(element_count(srcDesc));
     fill_input<Rpp8u>(input.data(), input.size(), cfg.dtype);
@@ -173,8 +240,9 @@ void run_bayer_to_rgb_negative(const TestConfig& cfg, const BayerToRgbNegativePa
     src.write(input.data(), byte_size(srcDesc, cfg.dtype));
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    const RppStatus status = rppt_bayer_to_rgb(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, pattern,
-                                               border, roi.data(), XYWH, handle.get(), cfg.backend);
+    const RppStatus status =
+        rppt_bayer_to_rgb(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, pattern, border, roi.data(),
+                          roiType, handle.get(), cfg.backend);
     handle.sync();
     EXPECT_NE(status, RPP_SUCCESS)
         << "bayer_to_rgb accepted an illegal argument (" << op.name() << ")";
@@ -213,5 +281,9 @@ INSTANTIATE_TEST_SUITE_P(Image_DataExchange, BayerToRgbNegativeTest,
                              {BayerToRgbNegativeParams{BayerFault::Pattern},
                               BayerToRgbNegativeParams{BayerFault::Border},
                               BayerToRgbNegativeParams{BayerFault::SrcChannels},
-                              BayerToRgbNegativeParams{BayerFault::DstChannels}})),
+                              BayerToRgbNegativeParams{BayerFault::DstChannels},
+                              BayerToRgbNegativeParams{BayerFault::RoiWidth},
+                              BayerToRgbNegativeParams{BayerFault::RoiHeight},
+                              BayerToRgbNegativeParams{BayerFault::LtrbWidth},
+                              BayerToRgbNegativeParams{BayerFault::ClippedWidth}})),
                          op_config_name<BayerToRgbNegativeParams>);
