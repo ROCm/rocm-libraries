@@ -439,10 +439,13 @@ rocm_install(
   COMPONENT clients-common
 )
 
-# this readme also serves to prevent an empty package rocblas-clients which dpkg may auto-remove entire rocblas-clients and non empty children
+# Client documentation is architecture-independent data, so it installs under the
+# data directory. It also serves to prevent an empty package rocblas-clients, which
+# dpkg may auto-remove along with its non-empty children; it stays in the clients
+# component for that reason.
 rocm_install(
   FILES ${ROCBLAS_CLIENTS_README}
-  DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/rocblas"
   COMPONENT clients
 )
 
