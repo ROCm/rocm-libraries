@@ -473,8 +473,26 @@ TEST(TestGfx950ConvDgradGeometry, TheMfmaPipelinesTransformTheWeightsFirst)
     EXPECT_EQ(plan->workspaces[0].bytes, 4 * 9 * 320 * 2);
     EXPECT_EQ(plan->workspaces[1].offset, 23040);
     EXPECT_EQ(plan->workspaces[1].bytes, 9 * 10 * 1 * 64 * 8 * 2);
-    // Coalesced weights serve groups == 1 only (the reorganize helper's group offset).
-    EXPECT_FALSE(dgrad::directPlan({1, 8, 640, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 2}, mfma));
+    // Coalesced weights also serve groups > 1: the reorganize helper's group-offset bug
+    // (rocKE build_direct_reorganize_weights) was fixed upstream of this PR's base
+    // (commit aa9ff78, #13075); confirmed on real gfx950 hardware at groups=2 and
+    // groups=4 against the CPU reference (benchmark_grouped_conv.py --direction dgrad
+    // --algorithm direct_dgrad_mfma_rtc,direct_grouped_dgrad_mfma --verify): every
+    // instance passed.
+    const auto grouped = dgrad::directPlan({1, 8, 640, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 2}, mfma);
+    ASSERT_TRUE(grouped);
+    ASSERT_EQ(grouped->steps.size(), 3U);
+    EXPECT_EQ(grouped->steps[0].kernel, dgrad::PlanKernel::TRANSPOSE);
+    EXPECT_EQ(grouped->steps[0].grid, (std::array<int64_t, 3>{18, 5, 4}));
+    EXPECT_EQ(grouped->steps[1].kernel, dgrad::PlanKernel::REORGANIZE);
+    EXPECT_EQ(grouped->steps[1].grid, (std::array<int64_t, 3>{180, 1, 1}));
+    EXPECT_EQ(grouped->steps[2].kernel, dgrad::PlanKernel::SELF);
+    EXPECT_EQ(grouped->steps[2].buffers[1], dgrad::Buffer::WS_COA);
+    EXPECT_EQ(grouped->steps[2].grid, (std::array<int64_t, 3>{4, 2, 4}));
+    ASSERT_EQ(grouped->workspaces.size(), 2U);
+    EXPECT_EQ(grouped->workspaces[0].bytes, 46080);
+    EXPECT_EQ(grouped->workspaces[1].offset, 46080);
+    EXPECT_EQ(grouped->workspaces[1].bytes, 184320);
 
     // The runtime-channel pipeline takes cpg and kpg from the problem, within its tiles.
     auto rtc = mfma;

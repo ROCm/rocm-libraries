@@ -979,30 +979,6 @@ def _mfma_knobs_reason(spec: Gfx950ConvDgradAotSpec, kpg: int) -> str:
     return ""
 
 
-#: The refusal :func:`_coalesced_groups_reason` gives.
-COALESCED_GROUPS_REASON = (
-    "the reorganize helper mis-addresses groups > 1 "
-    "(rocKE build_direct_reorganize_weights), so an MFMA instance with "
-    "waves_k > 1 or runtime_k_loop serves groups == 1 only"
-)
-
-
-def _coalesced_groups_reason(
-    spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
-) -> str:
-    """Why an MFMA instance whose compute reads the reorganized (coalesced) weights
-    cannot serve ``problem``, or ``""``.
-
-    rocKE's ``build_direct_reorganize_weights`` adds the group offset to the
-    per-group K axis of the transposed weights a second time, so the coalesced
-    weights are wrong for every group but the first. rocKE's own offer admits these
-    problems; this adapter refuses them until the helper is fixed.
-    """
-    if _uses_coalesced_weights(spec) and problem.groups != 1:
-        return COALESCED_GROUPS_REASON
-    return ""
-
-
 def _persistent_cells_reason(rocke_spec) -> str:
     """Why a persistent-grid compute pass cannot cover ``rocke_spec.problem``, or
     ``""``. Its blocks walk at most ``persistent_rounds`` cells each, a bound baked
@@ -1543,7 +1519,7 @@ def _direct_plan(
     """``direct_kernel_sweep.plan_for`` for a dgrad direct instance: rocKE's offer
     (``identity_supports_problem``, then ``direct_spec_for_problem``'s per-shape
     re-validation), its steps and scratch, plus the launch bounds rocKE does not
-    check and :func:`_coalesced_groups_reason`."""
+    check."""
     from kernels.conv.direct_variants import (
         DIRECT_DGRAD_FPROP_SINGLE,
         direct_dgrad_weight_transforms,
@@ -1569,9 +1545,7 @@ def _direct_plan(
     if rocke_spec is None:
         return None, why
     if spec.is_mfma:
-        why = _coalesced_groups_reason(spec, problem) or _persistent_cells_reason(
-            rocke_spec
-        )
+        why = _persistent_cells_reason(rocke_spec)
         if why:
             return None, why
     tensors = problem.tensor_bytes()
@@ -1672,7 +1646,7 @@ def gfx950_conv_dgrad_aot_plan(
     :func:`gfx950_conv_dgrad_aot_launch_problem`), which holds the dY-halo, tap-outer
     K loop and patch kernels to the problems they compute; the direct pipelines
     through ``identity_supports_problem`` and ``direct_spec_for_problem``. On top come
-    the launch bounds of the 32-bit dispatch and :func:`_coalesced_groups_reason`.
+    the launch bounds of the 32-bit dispatch.
     The plan is what the native pack runs; it ports this function.
     """
     error = _problem_error(problem)

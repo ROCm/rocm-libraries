@@ -46,7 +46,6 @@ from builders.common.convolution_backward_data import (
     BUFFER_DY,
     BUFFER_SUB_GEMM,
     BUFFER_W,
-    COALESCED_GROUPS_REASON,
     KERNEL_FAMILY_DGRAD_HELPER,
     KERNEL_SELF,
     PACKAGED_LLVM_FLAVOR,
@@ -375,10 +374,6 @@ def _rocke_offer(identity: KernelIdentity, problem: Gfx950ConvDgradProblem) -> b
     return plan is not None
 
 
-def _uses_reorganize(spec: Gfx950ConvDgradAotSpec) -> bool:
-    return spec.is_mfma and (spec.waves_k > 1 or bool(spec.runtime_k_loop))
-
-
 class _HelperCache:
     """The cache calls ``plan_for`` makes for the MFMA helpers."""
 
@@ -393,11 +388,16 @@ class _HelperCache:
 
 
 def test_the_plan_serves_rockes_offer(catalog):
-    """rocKE's offer, except the grouped problems of the MFMA instances that use the
-    reorganize helper (rocKE ``build_direct_reorganize_weights`` mis-addresses
-    groups > 1), which the adapter refuses; a helper serves nothing."""
+    """rocKE's offer: a helper serves nothing, every other instance matches it exactly.
+
+    The coalesced-weights MFMA instances (waves_k > 1 or runtime_k_loop) used to be
+    refused on every grouped problem, for a build_direct_reorganize_weights bug fixed
+    upstream of this PR's base (commit aa9ff78, #13075) -- confirmed fixed by running
+    the grouped_cpg4_kpg320 shape at groups=2 and groups=4 against the CPU reference on
+    gfx950 (benchmark_grouped_conv.py --direction dgrad --algorithm
+    direct_dgrad_mfma_rtc,direct_grouped_dgrad_mfma --verify): every instance passed.
+    """
     served = {}
-    refused_grouped_reorganize = 0
     for ident, spec in catalog:
         for problem in _PROBLEMS:
             plan, why = gfx950_conv_dgrad_aot_plan(spec, problem)
@@ -405,13 +405,6 @@ def test_the_plan_serves_rockes_offer(catalog):
                 assert plan is None
                 continue
             expected = _rocke_offer(ident, problem)
-            if expected and _uses_reorganize(spec) and problem.groups != 1:
-                assert plan is None and why == COALESCED_GROUPS_REASON, (
-                    ident.label(),
-                    problem,
-                )
-                refused_grouped_reorganize += 1
-                continue
             assert (plan is not None) == expected, (ident.label(), problem, why)
             if plan is not None:
                 served[spec.direct_variant] = served.get(spec.direct_variant, 0) + 1
@@ -420,7 +413,6 @@ def test_the_plan_serves_rockes_offer(catalog):
         for family, variant in AOT_DGRAD_DIRECT_ALGORITHMS.values()
         if family != KERNEL_FAMILY_DGRAD_HELPER
     }, served
-    assert refused_grouped_reorganize > 0
 
 
 # ---------------------------------------------------------------------------

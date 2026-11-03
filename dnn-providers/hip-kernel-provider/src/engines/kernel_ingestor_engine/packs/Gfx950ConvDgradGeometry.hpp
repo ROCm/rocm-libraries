@@ -1987,7 +1987,7 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
         const auto t = transposedProblem(problem, g);
         const auto compute = t ? directConvSpecLaunch(*t, instance) : std::nullopt;
         const bool coalesced = usesCoalescedWeights(knobs);
-        if(!compute || (coalesced && problem.groups != 1))
+        if(!compute)
         {
             return std::nullopt;
         }
