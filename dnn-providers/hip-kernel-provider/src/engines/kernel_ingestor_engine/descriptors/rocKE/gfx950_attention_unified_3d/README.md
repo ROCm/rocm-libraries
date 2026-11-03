@@ -48,6 +48,9 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
 - The native symbols (`hipkernel.gfx950_attention_unified_3d.*`) are registered in
   `packs/Gfx950AttentionUnified3DNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
-- Generated from `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_attention_unified_3d.yaml`;
-  after the first generation, splice additions rather than copying a regenerated directory over
-  this one (every run mints fresh UUIDs).
+- Generated from `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_attention_unified_3d.yaml`.
+  A regeneration keeps descriptor ids stable: `generate.py` reuses the ids of this installed
+  bundle by default (generator README, "Descriptor ids"). Separately, generate into scratch
+  space and splice additions with `tools/splice_additions.py` rather than copying a regenerated
+  directory over this one, because the C++ files are regenerated from scratch and the KDP is
+  DVC-backed.
