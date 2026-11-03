@@ -39,6 +39,11 @@ if(DEFINED ROCBLAS_BUILD_FORTRAN_BINDINGS)
   set(BUILD_FORTRAN_BINDINGS ${ROCBLAS_BUILD_FORTRAN_BINDINGS})
 endif()
 
+option(BUILD_FORTRAN_CLIENTS "Build the rocBLAS Fortran binding tests" ON)
+if(DEFINED ROCBLAS_BUILD_FORTRAN_CLIENTS)
+  set(BUILD_FORTRAN_CLIENTS ${ROCBLAS_BUILD_FORTRAN_CLIENTS})
+endif()
+
 set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
     "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
@@ -213,6 +218,18 @@ endif()
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(ROCBLAS_HAVE_FORTRAN_BINDINGS TRUE PARENT_SCOPE)
   set(ROCBLAS_FORTRAN_COMPILER_ID "${CMAKE_Fortran_COMPILER_ID}" PARENT_SCOPE)
+endif()
+
+# The uninstrumented Fortran executables cannot link an ASan librocblas.
+if(BUILD_FORTRAN_CLIENTS AND BUILD_ADDRESS_SANITIZER)
+  message(STATUS
+    "rocBLAS: address sanitizer is enabled, skipping the Fortran binding tests.")
+  set(BUILD_FORTRAN_CLIENTS OFF)
+endif()
+
+if(BUILD_FORTRAN_CLIENTS)
+  enable_testing()
+  add_subdirectory(test)
 endif()
 
 include(CMakePackageConfigHelpers)
