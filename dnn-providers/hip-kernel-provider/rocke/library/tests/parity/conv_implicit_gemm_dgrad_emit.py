@@ -1763,6 +1763,8 @@ _XH_PLAIN = dict(tapk_ilv=0, tapk_lds_ahead=0, xh_defer=0, xh_stride_m=False)
 _GFX942_3D_XH[110] = dict(_GFX942_3D_XH[77], tapk_setprio=2, **_XH_PLAIN)
 # 111: the y-ring (82) through the per-tap MFMA phase (no lds_ahead / defer).
 _GFX942_3D_XH[111] = dict(_GFX942_3D_XH[82], **_XH_PLAIN)
+# 112: 77 with the B tiles swizzled under lds_xor instead of padded (xh_b_kpad 0).
+_GFX942_3D_XH[112] = dict(_GFX942_3D_XH[77], xh_b_kpad=0)
 
 
 def _gfx942_3d_xh_spec(idx: int):
@@ -1794,7 +1796,7 @@ def _gfx942_3d_xh_spec(idx: int):
         )
     data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
     return (
-        DgradConvSpec(problem=p, data=data, **_XH_COMMON, **_GFX942_3D_XH[idx]),
+        DgradConvSpec(problem=p, data=data, **{**_XH_COMMON, **_GFX942_3D_XH[idx]}),
         "gfx942",
     )
 

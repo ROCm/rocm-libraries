@@ -4154,6 +4154,8 @@ static rocke_kernel_def_t*
     /* LDS element type follows STORAGE: a TF32 kernel holds fp32 tiles and
      * reinterprets each fragment after the read (_to_mma_operand). */
     const rocke_type_t* smem_dtype = rocke_conv_smem_dtype_for(spec->dtype_a);
+    /* The LDS read element type under the name the x-halo / ping-pong twins use. */
+    const rocke_type_t* dg_smem_dtype = smem_dtype;
     const bool is_tf32 = rocke_conv_data_is_tf32(spec->mma_dtype);
     int c_per_lane = op->dst.frag_len;
     /* Scheduling-hint group sizes. Only TF32 departs from one ds_read and one
@@ -6240,6 +6242,18 @@ static rocke_kernel_def_t*
                 fa_recording = false;
                 fa_armed = true;
             }
+            /* xh_swz_b: the lds_xor column swizzle of the B tiles (none when
+             * they are padded, xh_b_kpad) */
+            const int xor_sh = block_k == 16 ? 3 : block_k == 32 ? 2 : block_k == 64 ? 1 : 0;
+            const bool b_swz = spec->lds_xor && !spec->xh_b_kpad;
+            auto xh_swz_b = [&](rocke_value_t* row, rocke_value_t* col) -> rocke_value_t* {
+                if(!b_swz)
+                    return col;
+                rocke_value_t* r
+                    = xor_sh ? rocke_b_lshr(b, row, rocke_b_const_i32(b, xor_sh)) : row;
+                rocke_value_t* key = rocke_b_land(b, r, rocke_b_const_i32(b, block_k / 8 - 1));
+                return rocke_b_xor(b, col, rocke_b_shl(b, key, rocke_b_const_i32(b, 3)));
+            };
             /* _ak4_row (xh_stride_m) */
             auto ak4_row = [&](rocke_value_t* row) -> rocke_value_t* {
                 if(!xsm)
@@ -6248,13 +6262,12 @@ static rocke_kernel_def_t*
                 rocke_value_t* m = rocke_b_land(b, s4, rocke_b_const_i32(b, mfmas_m - 1));
                 return rocke_b_xor(b, row, m);
             };
-            if(!xh_ak4 || !spec->xh_b_wide || !spec->xh_b_kpad || spec->tapk_prefetch == 2
-               || !spec->tapk_prefetch)
+            if(!xh_ak4 || !spec->xh_b_wide || spec->tapk_prefetch == 2 || !spec->tapk_prefetch)
             {
                 rocke_i_set_err(b,
                                 ROCKE_ERR_VALUE,
                                 "this tapk_xhalo layout is Python-only (needs xh_a_k4, xh_b_wide, "
-                                "xh_b_kpad, tapk_prefetch 1/3)");
+                                "tapk_prefetch 1/3)");
                 return NULL;
             }
             /* zero row: one 4-element zero piece per k-group slab */
@@ -6523,7 +6536,27 @@ static rocke_kernel_def_t*
                         rocke_b_smem_store_vN(b, A_smem, idx, 2, piece, 4);
                     }
                 }
-                rocke_coalesced_tile_loader_store_lds(b, &bw_store, B_smem, w_st);
+                if(!b_swz)
+                {
+                    rocke_coalesced_tile_loader_store_lds(b, &bw_store, B_smem, w_st);
+                    return;
+                }
+                /* lds_xor without xh_b_kpad: each k-packed row write swizzled */
+                for(int g = 0; g < w_st->count; g += bw_kp)
+                {
+                    rocke_value_t* row = w_st->vecs[g].row;
+                    rocke_value_t* col = w_st->vecs[g].col;
+                    for(int i = 0; i < bw_lv; ++i)
+                    {
+                        rocke_value_t* r = i ? rocke_b_add(b, row, rocke_b_const_i32(b, i)) : row;
+                        rocke_value_t* parts[16];
+                        for(int q = 0; q < bw_kp; ++q)
+                            parts[q] = rocke_b_vec_extract(b, w_st->vecs[g + q].v, i);
+                        rocke_value_t* packed = rocke_b_vec_pack(b, parts, bw_kp, dg_smem_dtype);
+                        rocke_value_t* idx[2] = {r, xh_swz_b(r, col)};
+                        rocke_b_smem_store_vN(b, B_smem, idx, 2, packed, bw_kp);
+                    }
+                }
             };
             /* row_map(x) of the exact halo */
             struct xh_rmap
@@ -6617,8 +6650,12 @@ static rocke_kernel_def_t*
                                     = rocke_b_const_i32(b, ni * spec->warp_tile_n + xh_b_off[x]);
                                 rocke_value_t* t = rocke_b_add(b, c_, dec.n_in_atom);
                                 rocke_value_t* b_row = rocke_b_add(b, wno, t);
-                                bc[ni] = rocke_conv_emit_smem_load(
-                                    b, B_smem_x[x], b_row, col_base, b_per_lane, smem_dtype);
+                                bc[ni] = rocke_conv_emit_smem_load_dt(b,
+                                                                      B_smem_x[x],
+                                                                      b_row,
+                                                                      xh_swz_b(b_row, col_base),
+                                                                      b_per_lane,
+                                                                      dg_smem_dtype);
                             }
                             int flat = 0;
                             for(int mi = 0; mi < mfmas_m; ++mi)
@@ -6690,8 +6727,12 @@ static rocke_kernel_def_t*
                             = rocke_b_const_i32(b, ni * spec->warp_tile_n + xh_b_off[xi]);
                         rocke_value_t* t = rocke_b_add(b, c_, dec.n_in_atom);
                         rocke_value_t* b_row = rocke_b_add(b, wno, t);
-                        f->bc[ni] = rocke_conv_emit_smem_load(
-                            b, B_smem_x[xi], b_row, col_base, b_per_lane, smem_dtype);
+                        f->bc[ni] = rocke_conv_emit_smem_load_dt(b,
+                                                                 B_smem_x[xi],
+                                                                 b_row,
+                                                                 xh_swz_b(b_row, col_base),
+                                                                 b_per_lane,
+                                                                 dg_smem_dtype);
                     }
                 };
                 for(int i = 0; i < num_accs; ++i)

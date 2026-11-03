@@ -508,6 +508,13 @@ static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** 
         spec->xh_tap_rsrc = false;
         return r;
     }
+    if(idx == 112)
+    {
+        /* 77 with the B tiles swizzled under lds_xor (xh_b_kpad 0) */
+        const int r = make_cfg_3d_xh(77, spec, arch);
+        spec->xh_b_kpad = 0;
+        return r;
+    }
     if(idx == 110 || idx == 111)
     {
         /* 110: tapk_setprio 2 on 77's loop; 111: the y-ring (82) through the
