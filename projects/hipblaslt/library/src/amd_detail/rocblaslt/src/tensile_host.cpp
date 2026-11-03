@@ -7759,7 +7759,8 @@ namespace
 // Choose among the accepting kernels in RocRollerFallbackRank order, with M and
 // K whole multiples of the tile as the ranked lookup requires, except that the
 // first of them whose last wave fills rocRollerFallbackMinFill of the CUs goes
-// first. cap < 0 returns every candidate.
+// first, or, when none does, the one with the fullest last wave. cap < 0
+// returns every candidate.
 template <typename Accepts, typename FitsWorkspace>
 static std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     selectRocRollerFallback(const RocblasltContractionProblem&           prob,
@@ -7793,7 +7794,7 @@ static std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     for(const auto& candidate : candidates)
         fills.push_back(
             rocRollerLastWaveFill(candidate.second->traits, prob.m, prob.n, prob.batch_count, cus));
-    const size_t first = rocRollerFirstFilling(fills, fills.size(), rocRollerFallbackMinFill);
+    const size_t first = rocRollerFallbackPick(fills, rocRollerFallbackMinFill);
     if(first != 0)
         std::rotate(candidates.begin(), candidates.begin() + first, candidates.begin() + first + 1);
 
