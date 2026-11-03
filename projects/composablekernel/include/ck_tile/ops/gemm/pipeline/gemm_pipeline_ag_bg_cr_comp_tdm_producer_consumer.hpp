@@ -116,6 +116,10 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
     static constexpr index_t NumWaveGroups    = Problem::NumWaveGroups;
     static constexpr index_t Preshuffle       = Problem::Preshuffle;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
+    // Read by the kernels that host the TDM pipelines. The NumSlots ring always multi-buffers
+    // LDS (Problem::DoubleSmemBuffer is not consulted), and cluster launch is rejected below.
+    static constexpr bool DoubleSmemBuffer = true;
+    static constexpr bool UseClusterLaunch = false;
 
     // TDM vectorises internally and handles ragged extents, so launch checks do not apply.
     static constexpr bool skipCheckValidLaunchParams = true;
