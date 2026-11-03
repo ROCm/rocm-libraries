@@ -237,7 +237,7 @@ def test_split_k_starts_the_scale_pointer_at_its_k_range(toolchain, gsu, algorit
     _, src = _emit_solution(toolchain, sol)
     assert "block scale: contiguous split-K" in src
     entry = src.index("block scale: contiguous split-K")
-    offset = src.index("scaleA: groups before this split")
+    offset = src.index("scaleA: groups before this range")
     assert entry < offset < src.index("openLoopL")
     assert "scaleA: skip groups before the split (lower)" in src
     assert ("scaleA: position of the first iteration in its group" in src) == (depthU < blockSize)
@@ -257,6 +257,61 @@ def test_split_k_reduction_takes_no_scale_pointers(toolchain, zeroPoint):
     for k in kernels:
         args = k.functionArgument()
         assert "ScaleA;" not in args and "ScaleB;" not in args, k.getKernelName()
+
+
+def _sgpr_writes(src, regs):
+    """Instructions (other than kernel-argument loads) whose destination covers
+    one of the SGPR numbers in regs."""
+    names = dict(re.findall(r"^\.set (sgpr\w+), (\w+)$", src, re.M))
+
+    def num(t):
+        """SGPR number of 'N', 'sgprX' or 'sgprX+k'; None if not a fixed number."""
+        base, _, off = t.strip().partition("+")
+        for _ in range(8):
+            if base.isdigit():
+                return int(base) + (int(off) if off.isdigit() else 0)
+            if base not in names:
+                return None
+            base = names[base]
+        return None
+
+    hits = []
+    for line in src.splitlines():
+        code = line.split("//")[0].strip()
+        m = re.match(r"(s_\w+)\s+(s\[[^\]]+\]|s\d+)", code)
+        if not m or m.group(1).startswith(("s_load", "s_cmp", "s_bitcmp")):
+            continue
+        dst = m.group(2)
+        parts = dst[2:-1].split(":") if dst.startswith("s[") else [dst[1:]]
+        lo, hi = num(parts[0]), num(parts[-1])
+        if lo is None or hi is None:
+            continue
+        if any(lo <= r <= hi for r in regs):
+            hits.append(code)
+    return {n: num(n) for n in names}, hits
+
+
+@pytest.mark.parametrize("zeroPoint", [False, True])
+def test_stream_k_keeps_scale_state_across_tiles(toolchain, zeroPoint):
+    """A Stream-K work item starts at StreamKLocalStart of its tile: the scale
+    (and zero-point) pointers skip the same K range as A. A persistent kernel
+    reads the scale pointers and the group-size argument again for each tile,
+    so nothing may write those SGPRs after the kernel arguments are loaded --
+    neither the runtime-group setup (G-1 in place) nor the store code reusing
+    them as temporaries."""
+    sol = _solution(toolchain, zeroPoint=zeroPoint, StreamK=3, GlobalSplitU=0,
+                    problemType={"ScaleBlockSizesA": [32, 64, 128]})
+    assert sol.get("Valid") is True
+    _, src = _emit_solution(toolchain, sol)
+    assert "scaleA: groups before this range" in src
+    keep = ["sgprAddressScaleA", "sgprScaleAGMinus1"] + (["sgprAddressScaleZeroA"] if zeroPoint else [])
+    names, _ = _sgpr_writes(src, [])
+    regs = []
+    for n in keep:
+        base = names[n]
+        regs += [base, base + 1] if "Address" in n else [base]
+    _, hits = _sgpr_writes(src, regs)
+    assert not hits, f"{keep} overwritten: {hits[:4]}"
 
 
 @pytest.mark.parametrize("kw", [{"PrefetchGlobalRead": 2}, {"ScheduleIterAlg": 1}])
@@ -921,7 +976,8 @@ def test_runtime_group_scale_addressing(toolchain, zero_point):
     assert "s[sgprScaleAKMask]" in loop
     assert "s[sgprScaleAInc]" in loop
     if zero_point:
-        assert "s[sgprScaleZeroAInc]" in loop
+        # The zero-point step is the scale step times 4/bpe (4 bytes a group).
+        assert re.search(r"s_lshl_b32 s\d+, s\d+, 1\s+// scaleZeroA: advance only on a wrap", loop)
         assert "scaleZeroA limit -= inc" in loop
 
 
