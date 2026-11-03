@@ -38,11 +38,11 @@
       },
       "expected_failures": {
         "mla_prefill_gfx942/fwd_h128_agpr": {
-          "message": "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not keep the backend out of the AGPR file), got llvm20",
+          "message": "agpr_acc needs a flavor that honors agpr_alloc (llvm20 does not keep the backend out of the AGPR file), got llvm20",
           "type": "NotImplementedError"
         },
         "mla_prefill_gfx942/fwd_h128_agpr_aq": {
-          "message": "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not keep the backend out of the AGPR file), got llvm20",
+          "message": "agpr_acc needs a flavor that honors agpr_alloc (llvm20 does not keep the backend out of the AGPR file), got llvm20",
           "type": "NotImplementedError"
         }
       }

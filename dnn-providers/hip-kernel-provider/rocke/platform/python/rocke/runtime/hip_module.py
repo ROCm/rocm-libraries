@@ -344,7 +344,7 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
 _HIP_ATTR_MAX_GRID_DIMS = (29, 30, 31)
 
 # Per-device grid limits; a device's limits do not change during the process,
-# and dispatch asks on every request.
+# and a launcher asks on every launch.
 _max_grid_size: Dict[int, Optional[Tuple[int, int, int]]] = {}
 
 
@@ -352,9 +352,11 @@ def get_device_max_grid_size(device: int = 0) -> tuple[int, int, int] | None:
     """Per-axis grid limit ``(x, y, z)`` in workgroups, or ``None`` if unknown.
 
     Same query as :func:`get_device_num_cus` (``hipDeviceGetAttribute``, one
-    ``int`` per axis), so a dispatcher can size a grid axis against the device
-    it will launch on rather than a constant. ``None`` when HIP cannot be
-    queried or reports a non-positive limit. The answer is cached per device.
+    ``int`` per axis), so a launcher can check a grid against the device it
+    launches on. Dispatch does not call it: selection is host-independent and
+    sizes grid axes against :data:`rocke.helpers.spec.MAX_GRID_DIM`. ``None``
+    when HIP cannot be queried or reports a non-positive limit. The answer is
+    cached per device.
     """
     device = int(device)
     if device not in _max_grid_size:

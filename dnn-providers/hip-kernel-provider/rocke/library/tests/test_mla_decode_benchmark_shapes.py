@@ -34,7 +34,7 @@ def _llvm22(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_device(monkeypatch):
     """CPU only, whatever GPU the runner has: with no device arch the CU count
-    and the grid limits take their fallbacks, as on a GPU-less CI box."""
+    takes its fallback, as on a GPU-less CI box."""
     from rocke.runtime import hip_module
 
     monkeypatch.setattr(hip_module, "get_device_arch", lambda device=0: None)

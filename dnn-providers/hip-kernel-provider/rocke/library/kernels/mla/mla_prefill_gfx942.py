@@ -102,6 +102,7 @@ from kernels.mla._mla_body import (
     WT_PAD,
     KernelArg,
     acc_iter_args,
+    flavor_honors_agpr_alloc,
     kernel_signature,
     key_mask,
     lane_ids,
@@ -343,8 +344,8 @@ class MlaPrefillSpec:
     num_xcds: int = 0
     # Latent accumulator in AGPRs (one-wave-per-head layout). It lets a wave
     # own 32 query rows -- two M tiles, a 256-register accumulator -- at one
-    # workgroup per CU; see ``_mla_prefill_gfx942_body.AgprAcc``. Needs the
-    # llvm22 or llvm23 flavor.
+    # workgroup per CU; see ``_mla_prefill_gfx942_body.AgprAcc``. Needs a
+    # flavor that honors ``agpr_alloc``.
     agpr_acc: bool = False
     # Unfused head projections. False (the default) is the fused kernel: it
     # takes the projected query and ``W_UK`` and applies both head projections
@@ -741,13 +742,13 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, st
             f"block_q={spec.block_q}"
         )
     if spec.agpr_acc:
-        from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
+        from rocke.core.lower_llvm import _resolve_llvm_flavor
 
         flavor = _resolve_llvm_flavor()
-        if not _is_modern_flavor(flavor):
+        if not flavor_honors_agpr_alloc(flavor):
             return False, (
-                "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not "
-                f"keep the backend out of the AGPR file), got {flavor}"
+                "agpr_acc needs a flavor that honors agpr_alloc (llvm20 does "
+                f"not keep the backend out of the AGPR file), got {flavor}"
             )
         # The key-tile DMA moves 256 B per wave instruction: a latent row must
         # be a whole number of them, and a RoPE row exactly half of one (two

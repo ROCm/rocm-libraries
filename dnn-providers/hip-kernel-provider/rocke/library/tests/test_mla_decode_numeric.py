@@ -38,10 +38,10 @@ ARCH = _device_arch()
 
 
 def _decode_flavor_ok() -> bool:
-    from dispatch.mla.decode import DECODE_LLVM_FLAVORS
+    from kernels.mla._mla_body import flavor_honors_agpr_alloc
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
-    return _resolve_llvm_flavor() in DECODE_LLVM_FLAVORS
+    return flavor_honors_agpr_alloc(_resolve_llvm_flavor())
 
 
 pytestmark = [

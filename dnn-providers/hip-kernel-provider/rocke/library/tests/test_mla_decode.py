@@ -20,10 +20,12 @@ import os
 import re
 import subprocess
 import sys
+import unittest
 
 import pytest
 
-from dispatch.mla.decode import DECODE_LLVM_FLAVORS, choose_num_seg
+from _mla_resource_gate import REQUIRE_ENV, require_tools_or_skip
+from dispatch.mla.decode import choose_num_seg
 from kernels.mla.mla_decode import (
     MlaDecodeSpec,
     build_mla_decode,
@@ -470,14 +472,14 @@ except ImportError as exc:
     print(f"comgr / resource tools unavailable: {exc}")
     sys.exit(78)
 from rocke.core.lower_llvm import _resolve_llvm_flavor
-from dispatch.mla.decode import DECODE_LLVM_FLAVORS
+from kernels.mla._mla_body import flavor_honors_agpr_alloc
 try:
     flavor = _resolve_llvm_flavor()
 except RuntimeError as exc:
     print(f"LLVM flavor undeterminable: {exc}")
     sys.exit(78)
-if flavor not in DECODE_LLVM_FLAVORS:
-    print(f"decode is served at {DECODE_LLVM_FLAVORS} only; host lowers {flavor}")
+if not flavor_honors_agpr_alloc(flavor):
+    print(f"decode needs a flavor that honors agpr_alloc; host lowers {flavor}")
     sys.exit(77)
 from kernels.mla.mla_decode import MlaDecodeSpec, build_mla_decode
 from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec
@@ -508,30 +510,33 @@ print(json.dumps({"scratch": res.scratch_bytes, "vgpr": res.vgpr_count,
 """
 
 
-#: Set by the CTest entries that put ROCm's compiler tools on PATH: there, a
-#: gate whose tools are missing is a broken gate, not a skip. The same variable
-#: and rule as the prefill resource guards in test_mla_prefill_gfx942.py.
-_REQUIRE_ENV = "ROCKE_REQUIRE_COMPILER_TOOLS"
 #: The probe's exit codes (see the comment above ``_RESOURCE_PROBE``).
 _EXIT_HOST_MISMATCH = 77
 _EXIT_TOOLS_MISSING = 78
+#: What the probe prints for a host whose flavor decode refuses.
+_HOST_MISMATCH_REASON = (
+    "decode needs a flavor that honors agpr_alloc; host lowers llvm20"
+)
 
 
 def _probe_could_not_run(
-    returncode: int, stdout: str, stderr: str, *, require_tools: bool
+    returncode: int, stdout: str, stderr: str
 ) -> tuple[str, str] | None:
-    """``("skip" | "fail", reason)`` when the probe could not run the gate, else None.
+    """``("tools" | "skip", reason)`` when the probe could not run the gate, else None.
 
-    A missing tool fails where the run requires the tools and skips elsewhere. A
-    host whose LLVM version or IR flavor decode does not take always skips: no
-    tool is missing there, so the gate has nothing to check.
+    ``"tools"``: a tool the gate needs is missing; whether that fails or skips is
+    the rule shared with the prefill resource guards
+    (:func:`_mla_resource_gate.require_tools_or_skip`). ``"skip"``: no tool is
+    missing, but the host takes a different LLVM version or IR flavor than decode
+    serves (or its comgr rejects a compile option), so the gate has nothing to
+    check.
     """
     output = (stdout + stderr).strip()
     # The probe prints its reason on stdout; stderr may end in an unrelated
     # warning.
     reason = (stdout.strip().splitlines() or [output])[-1]
     if returncode == _EXIT_TOOLS_MISSING:
-        return ("fail" if require_tools else "skip"), reason
+        return "tools", reason
     if returncode == _EXIT_HOST_MISMATCH:
         return "skip", reason
     if (
@@ -544,6 +549,18 @@ def _probe_could_not_run(
     ):
         return "skip", f"the loaded comgr rejects a compile option: {output[-300:]}"
     return None
+
+
+def _skip_if_probe_declined(returncode: int, stdout: str, stderr: str) -> None:
+    """Skip, or fail where the run requires the compiler tools and one is missing,
+    when the probe could not run the gate; return when it did."""
+    verdict = _probe_could_not_run(returncode, stdout, stderr)
+    if verdict is None:
+        return
+    kind, reason = verdict
+    if kind == "tools":
+        require_tools_or_skip(f"the resource gate cannot run: {reason}")
+    pytest.skip(reason)
 
 
 class TestResources:
@@ -576,19 +593,7 @@ class TestResources:
                 f"resource probe timed out after 90 s: {(exc.stderr or '')[-1000:]}"
             )
         output = (proc.stdout + proc.stderr).strip()
-        verdict = _probe_could_not_run(
-            proc.returncode,
-            proc.stdout,
-            proc.stderr,
-            require_tools=os.environ.get(_REQUIRE_ENV) == "1",
-        )
-        if verdict is not None:
-            kind, reason = verdict
-            if kind == "fail":
-                pytest.fail(
-                    f"{_REQUIRE_ENV}=1, but the resource gate cannot run: {reason}"
-                )
-            pytest.skip(reason)
+        _skip_if_probe_declined(proc.returncode, proc.stdout, proc.stderr)
         assert proc.returncode == 0, output[-2000:]
         res = json.loads(proc.stdout.strip().splitlines()[-1])
         assert res["scratch"] == 0
@@ -597,54 +602,129 @@ class TestResources:
 
 
 class TestResourceGateVerdict:
-    """What the resource gate does when its probe could not run.
+    """How the resource gate classifies a probe that could not run it.
 
-    The rule shared with the prefill resource guards: a missing tool fails where
-    the run requires the tools (``ROCKE_REQUIRE_COMPILER_TOOLS=1``) and skips
-    elsewhere; a host that takes a different LLVM version or IR flavor skips
-    either way, because no tool is missing there.
+    A missing tool is handed to the rule shared with the prefill resource guards
+    (:func:`_mla_resource_gate.require_tools_or_skip`); a host that takes a
+    different LLVM version or IR flavor skips either way, because no tool is
+    missing there.
     """
 
     _OPTION_ERROR = "error: Unknown command line argument '-amdgpu-foo'"
 
-    @pytest.mark.parametrize("require_tools", [False, True])
-    def test_host_mismatch_always_skips(self, require_tools):
+    def test_host_mismatch_is_a_skip(self):
         verdict = _probe_could_not_run(
             _EXIT_HOST_MISMATCH,
-            f"decode is served at {DECODE_LLVM_FLAVORS} only; host lowers llvm20\n",
+            _HOST_MISMATCH_REASON + "\n",
             "",
-            require_tools=require_tools,
         )
-        assert verdict == (
-            "skip",
-            f"decode is served at {DECODE_LLVM_FLAVORS} only; host lowers llvm20",
-        )
+        assert verdict == ("skip", _HOST_MISMATCH_REASON)
 
-    @pytest.mark.parametrize(
-        ("require_tools", "kind"), [(False, "skip"), (True, "fail")]
-    )
-    def test_missing_tool_fails_only_where_required(self, require_tools, kind):
+    def test_a_missing_tool_is_the_tools_verdict(self):
         verdict = _probe_could_not_run(
             _EXIT_TOOLS_MISSING,
             "HSACO introspection unavailable: llvm-objdump failed\n",
             "a trailing warning\n",
-            require_tools=require_tools,
         )
-        assert verdict == (kind, "HSACO introspection unavailable: llvm-objdump failed")
+        assert verdict == (
+            "tools",
+            "HSACO introspection unavailable: llvm-objdump failed",
+        )
 
-    @pytest.mark.parametrize("require_tools", [False, True])
-    def test_comgr_rejecting_a_compile_option_always_skips(self, require_tools):
-        verdict = _probe_could_not_run(
-            1, "", self._OPTION_ERROR, require_tools=require_tools
-        )
+    def test_comgr_rejecting_a_compile_option_is_a_skip(self):
+        verdict = _probe_could_not_run(1, "", self._OPTION_ERROR)
         assert verdict is not None and verdict[0] == "skip"
         assert self._OPTION_ERROR in verdict[1]
 
-    @pytest.mark.parametrize("require_tools", [False, True])
-    def test_a_traceback_is_a_real_failure(self, require_tools):
+    def test_a_traceback_is_a_real_failure(self):
         stderr = f"Traceback (most recent call last):\n  ...\n{self._OPTION_ERROR}\n"
-        assert _probe_could_not_run(1, "", stderr, require_tools=require_tools) is None
+        assert _probe_could_not_run(1, "", stderr) is None
 
     @pytest.mark.parametrize("returncode", [0, 2, 134])
     def test_other_exits_are_not_the_gate_declining(self, returncode):
-        assert _probe_could_not_run(returncode, "", "", require_tools=True) is None
+        assert _probe_could_not_run(returncode, "", "") is None
+
+
+class TestRequireToolsOrSkip:
+    """The rule the two resource gates share: fail where the run requires the
+    compiler tools, skip elsewhere."""
+
+    def test_fails_where_the_run_requires_the_tools(self, monkeypatch):
+        monkeypatch.setenv(REQUIRE_ENV, "1")
+        with pytest.raises(
+            AssertionError, match=f"^{REQUIRE_ENV}=1 but llvm-objdump failed$"
+        ):
+            require_tools_or_skip("llvm-objdump failed")
+
+    @pytest.mark.parametrize("value", [None, "", "0", "true"])
+    def test_skips_elsewhere(self, monkeypatch, value):
+        if value is None:
+            monkeypatch.delenv(REQUIRE_ENV, raising=False)
+        else:
+            monkeypatch.setenv(REQUIRE_ENV, value)
+        with pytest.raises(unittest.SkipTest, match="^llvm-objdump failed$"):
+            require_tools_or_skip("llvm-objdump failed")
+
+
+class TestSkipIfProbeDeclined:
+    """What the gate does for each probe outcome, with the compiler tools
+    optional and required: where the verdict and the shared rule meet."""
+
+    TOOLS_MISSING = (
+        _EXIT_TOOLS_MISSING,
+        "HSACO introspection unavailable: llvm-objdump failed\n",
+        "a trailing warning\n",
+    )
+    HOST_MISMATCH = (
+        _EXIT_HOST_MISMATCH,
+        _HOST_MISMATCH_REASON + "\n",
+        "",
+    )
+    OPTION_ERROR = (1, "", TestResourceGateVerdict._OPTION_ERROR)
+    RAN = (0, '{"scratch": 0, "vgpr": 1, "lds": 2}\n', "")
+    FAILS = (
+        f"fails: {REQUIRE_ENV}=1 but the resource gate cannot run: "
+        "HSACO introspection unavailable: llvm-objdump failed"
+    )
+
+    @staticmethod
+    def _outcome(probe) -> str:
+        """How the call ends, as a value: a gate that wrongly skips then reads as
+        a red assertion, not as one more skipped test."""
+        try:
+            _skip_if_probe_declined(*probe)
+        except (unittest.SkipTest, pytest.skip.Exception):
+            return "skips"
+        except AssertionError as exc:
+            return f"fails: {exc}"
+        return "returns"
+
+    @pytest.mark.parametrize(
+        ("probe", "required", "outcome"),
+        [
+            (TOOLS_MISSING, False, "skips"),
+            (TOOLS_MISSING, True, FAILS),
+            (HOST_MISMATCH, False, "skips"),
+            (HOST_MISMATCH, True, "skips"),
+            (OPTION_ERROR, False, "skips"),
+            (OPTION_ERROR, True, "skips"),
+            (RAN, False, "returns"),
+            (RAN, True, "returns"),
+        ],
+        ids=[
+            "tools-missing-optional",
+            "tools-missing-required",
+            "host-mismatch-optional",
+            "host-mismatch-required",
+            "comgr-option-optional",
+            "comgr-option-required",
+            "ran-optional",
+            "ran-required",
+        ],
+    )
+    def test_each_probe_outcome(self, monkeypatch, probe, required, outcome):
+        if required:
+            monkeypatch.setenv(REQUIRE_ENV, "1")
+        else:
+            monkeypatch.delenv(REQUIRE_ENV, raising=False)
+        assert self._outcome(probe) == outcome

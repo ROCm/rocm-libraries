@@ -18,8 +18,11 @@ and the LLVM flavor, which decode admission reads (llvm20 is refused).
 
 from __future__ import annotations
 
+import types
+
 import pytest
 
+from builders.mla.mla_decode_runner import MlaDecodeRunner
 from dispatch.mla import (
     MLA_OP,
     MLA_REGISTRY,
@@ -29,7 +32,9 @@ from dispatch.mla import (
     mla_decode_launch,
     registered_mla_combos,
 )
+from dispatch.mla.common import resolve_num_cus
 from dispatch.mla.decode import DECODE_MIN_TILES_PER_SEG
+from kernels.mla._mla_body import flavor_honors_agpr_alloc
 from kernels.mla.mla_decode import MlaDecodeSpec, mla_decode_signature
 from kernels.mla.mla_decode_combine import MlaDecodeCombineSpec
 from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec
@@ -38,11 +43,8 @@ from rocke.core.lower_llvm import LLVM_FLAVORS
 PREFILL = "mla_prefill_fwd_gfx942"
 DECODE = {"gfx942": "mla_decode_gfx942", "gfx950": "mla_decode_gfx950"}
 SPEC_CLS = {"gfx942": MlaDecodeSpec, "gfx950": MlaDecodeGfx950Spec}
-# The lanes decode serves: every one the platform qualifies except llvm20
-# (``test_llvm20_is_refused``). Read from the platform, not from
-# ``DECODE_LLVM_FLAVORS``, so a lane the platform adds is exercised here until
-# someone refuses it on purpose.
-SERVED_LANES = tuple(f for f in LLVM_FLAVORS if f != "llvm20")
+# The flavors decode serves: those the MLA family's one rule admits.
+SERVED_LANES = tuple(f for f in LLVM_FLAVORS if flavor_honors_agpr_alloc(f))
 
 
 @pytest.fixture(autouse=True)
@@ -324,78 +326,231 @@ class TestLaunch:
             mla_decode_launch(dispatch_mla(_decode(total_q=8, max_seqlen_q=2)))
 
 
+class TestFlavorRule:
+    """The one rule for the LLVM flavors MLA kernels serve: decode's admission,
+    prefill's ``agpr_acc`` gate and the tests all ask
+    ``flavor_honors_agpr_alloc``."""
+
+    def test_llvm20_is_refused_and_the_oldest_modern_flavor_is_served(self):
+        assert not flavor_honors_agpr_alloc("llvm20")
+        assert flavor_honors_agpr_alloc("llvm22")
+
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+    def test_decode_admits_exactly_the_flavors_the_rule_serves(
+        self, monkeypatch, arch, flavor
+    ):
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+        ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(_decode(arch=arch))
+        assert ok == flavor_honors_agpr_alloc(flavor), why
+
+
 class TestGridLimits:
-    """Every launch fits the device's per-axis grid limit: sequences on y,
+    """Every launch fits the platform's per-axis grid limit: sequences on y,
     split-KV segments on z (the combine's y, tokens, is no wider than the
-    latent's)."""
+    latent's). Selection is a pure function of the request, so the live
+    device's own limit is the runner's to check at launch."""
+
+    #: A split launch (long keys, one sequence): the one whose z axis is narrowed.
+    SPLIT = {"total_q": 1, "num_seqs": 1, "max_seqlen_k": 32768}
+
+    @classmethod
+    def _narrowest_split_limit(cls):
+        """The narrowest scalar limit a split launch of ``SPLIT`` still meets: the
+        widest axis of its own combine grid, ``(heads // num_warps, tokens, 1)``.
+        Clamping to it narrows the segment (z) axis alone."""
+        launch = mla_decode_launch(dispatch_mla(_decode(**cls.SPLIT)))
+        return max(launch.combine_grid())
 
     @staticmethod
-    def _limits(monkeypatch, dims):
-        monkeypatch.setattr(
-            "dispatch.mla.decode.resolve_max_grid_dims", lambda req: dims
-        )
+    def _limit(monkeypatch, limit):
+        monkeypatch.setattr("dispatch.mla.decode.MAX_GRID_DIM", limit)
 
     def test_sequences_past_the_y_limit_are_refused(self, monkeypatch):
-        self._limits(monkeypatch, (65535, 100, 65535))
+        self._limit(monkeypatch, 100)
         assert dispatch_mla(_decode(total_q=100, num_seqs=100)).grid[1] == 100
         # Sequences with no query still occupy a grid row.
         req = _decode(total_q=4, num_seqs=101)
         ok, why = MLA_REGISTRY.get(DECODE["gfx942"]).admits(req)
-        assert not ok and "y extent 101 exceeds the device's 100" in why
+        assert not ok and "y extent 101 exceeds the grid limit 100" in why
 
     def test_split_count_is_clamped_to_the_z_limit(self, monkeypatch):
-        req = _decode(total_q=1, num_seqs=1, max_seqlen_k=32768)
-        self._limits(monkeypatch, (65535,) * 3)
-        assert dispatch_mla(req).spec.num_seg > 3  # unclamped, it would split further
-        self._limits(monkeypatch, (65535, 65535, 3))
+        req = _decode(**self.SPLIT)
+        narrow = self._narrowest_split_limit()
+        # Unclamped, it would split further.
+        assert dispatch_mla(req).spec.num_seg > narrow
+        self._limit(monkeypatch, narrow)
         result = dispatch_mla(req)
-        assert result.spec.num_seg == 3 and result.grid[2] == 3
+        assert result.spec.num_seg == narrow and result.grid[2] == narrow
 
     def test_a_forced_split_count_meets_the_same_limit(self, monkeypatch):
-        self._limits(monkeypatch, (65535, 65535, 3))
-        launch = mla_decode_launch(
-            dispatch_mla(_decode(total_q=1, num_seqs=1, max_seqlen_k=32768))
-        )
-        assert launch.with_num_seg(3).spec.num_seg == 3  # at the limit: admitted
-        with pytest.raises(ValueError, match="z extent 4 exceeds the device's 3"):
-            launch.with_num_seg(4)
+        launch = mla_decode_launch(dispatch_mla(_decode(**self.SPLIT)))
+        narrow = max(launch.combine_grid())
+        self._limit(monkeypatch, narrow)
+        # At the limit: admitted.
+        assert launch.with_num_seg(narrow).spec.num_seg == narrow
+        match = f"z extent {narrow + 1} exceeds the grid limit {narrow}"
+        with pytest.raises(ValueError, match=match):
+            launch.with_num_seg(narrow + 1)
 
-    def test_limits_come_from_the_device_of_the_requested_arch(self, monkeypatch):
-        from dispatch.mla.common import resolve_max_grid_dims
-        from rocke.helpers.spec import MAX_GRID_DIM
+    def test_selection_does_not_read_the_device(self, monkeypatch):
+        """Dispatch ARCHITECTURE.md, section 6.2, rule 3: with ``num_cus`` given,
+        selection asks the device for nothing (arch, CU count, grid limit), so a
+        request selects the same kernel on any host."""
         from rocke.runtime import hip_module
 
-        monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
-        monkeypatch.setattr(
-            hip_module, "get_device_max_grid_size", lambda: (2**31 - 1, 7, 9)
+        req = _decode(total_q=1, num_seqs=1, max_seqlen_k=32768)
+        want = dispatch_mla(req)
+        asked = []
+
+        def spy(name, answer):
+            def probe(*args, **kwargs):
+                asked.append(name)
+                return answer
+
+            return probe
+
+        # A host whose device is the requested arch. Every probe answers benignly
+        # and is recorded: a regression fails on ``asked``, not somewhere inside
+        # selection, and not inside a handler that swallows an exception.
+        probes = {
+            "get_device_arch": "gfx942",
+            "get_device_num_cus": 1,
+            "get_device_max_grid_size": None,
+        }
+        for name, answer in probes.items():
+            monkeypatch.setattr(hip_module, name, spy(name, answer))
+        got = dispatch_mla(req)
+        assert asked == []
+        assert (got.spec, got.grid) == (want.spec, want.grid)
+
+
+class TestGridsFitDevice:
+    """The device's own grid limit is checked where the launch happens
+    (``MlaDecodeRunner._check_grids_fit_device``); selection never asks.
+
+    Torch-free on purpose: ``test_mla_decode_runner.py`` skips wholesale without
+    torch, and the CI lane that runs this file has none. The call site, which
+    needs tensors, is ``TestLaunchChecksTheDevice`` there.
+    """
+
+    CPU = types.SimpleNamespace(index=None)  # what ``torch.device("cpu").index`` is
+
+    @staticmethod
+    def _device(monkeypatch, limits, asked=None):
+        from rocke.runtime import hip_module
+
+        def limits_of(device=0):
+            if asked is not None:
+                asked.append(device)
+            return limits
+
+        monkeypatch.setattr(hip_module, "get_device_max_grid_size", limits_of)
+
+    @staticmethod
+    def _runner(**request):
+        """A runner holding ``request``'s selection, without compiling a kernel."""
+        result = dispatch_mla(_decode(**request))
+        runner = object.__new__(MlaDecodeRunner)
+        runner.launch = mla_decode_launch(result)
+        runner.grid = tuple(result.grid)
+        return runner
+
+    @pytest.mark.parametrize(
+        ("max_seqlen_k", "split"),
+        [(511, False), (32768, True)],
+        ids=["single-pass", "split"],
+    )
+    def test_a_grid_exactly_at_the_device_limit_passes(
+        self, monkeypatch, max_seqlen_k, split
+    ):
+        runner = self._runner(max_seqlen_k=max_seqlen_k)
+        assert (runner.launch.combine_spec is not None) == split
+        grids = [runner.grid]
+        if split:
+            grids.append(runner.launch.combine_grid())
+        # The widest of the launches on each axis.
+        self._device(monkeypatch, tuple(max(extents) for extents in zip(*grids)))
+        runner._check_grids_fit_device(self.CPU)
+
+    @pytest.mark.parametrize("axis", [0, 1, 2], ids=["x", "y", "z"])
+    def test_a_latent_grid_wider_than_the_device_is_refused(self, monkeypatch, axis):
+        runner = self._runner(max_seqlen_k=32768)
+        limits = [65535] * 3
+        limits[axis] = runner.grid[axis] - 1
+        self._device(monkeypatch, tuple(limits))
+        match = (
+            f"latent grid's {'xyz'[axis]} extent {runner.grid[axis]} "
+            f"exceeds the device's grid limit {limits[axis]}$"
         )
-        assert resolve_max_grid_dims(_decode()) == (2**31 - 1, 7, 9)
-        # Another arch on the build box, or no answer: the platform constant.
-        assert resolve_max_grid_dims(_decode(arch="gfx950")) == (MAX_GRID_DIM,) * 3
-        monkeypatch.setattr(hip_module, "get_device_max_grid_size", lambda: None)
-        assert resolve_max_grid_dims(_decode()) == (MAX_GRID_DIM,) * 3
+        with pytest.raises(ValueError, match=match):
+            runner._check_grids_fit_device(self.CPU)
+
+    def test_the_combine_grid_of_a_split_launch_is_checked(self, monkeypatch):
+        runner = self._runner(max_seqlen_k=32768)
+        wide = runner.launch.combine_grid()[0]
+        # Only the combine is this wide on x, so only its check can refuse it.
+        assert wide > runner.grid[0]
+        self._device(monkeypatch, (wide - 1, 65535, 65535))
+        match = (
+            f"split-KV combine grid's x extent {wide} "
+            f"exceeds the device's grid limit {wide - 1}$"
+        )
+        with pytest.raises(ValueError, match=match):
+            runner._check_grids_fit_device(self.CPU)
+
+    def test_an_unknown_device_limit_is_left_to_the_launch(self, monkeypatch):
+        self._device(monkeypatch, None)
+        self._runner(max_seqlen_k=32768)._check_grids_fit_device(self.CPU)
+
+    def test_the_limit_is_asked_of_the_device_the_launch_runs_on(self, monkeypatch):
+        asked = []
+        self._device(monkeypatch, None, asked)
+        runner = self._runner(max_seqlen_k=511)
+        runner._check_grids_fit_device(types.SimpleNamespace(index=3))
+        runner._check_grids_fit_device(self.CPU)  # no index: the default device
+        assert asked == [3, 0]
+
+
+class TestNumCusResolution:
+    """The one device read dispatch keeps (ARCHITECTURE.md, section 6.2, rule 3):
+    the CU count behind an unset ``num_cus``, and only on a host whose device is
+    the requested arch."""
+
+    @staticmethod
+    def _host(monkeypatch, arch, num_cus=77):
+        """A host whose device is ``arch`` (or whose arch query raises, if ``arch``
+        is an exception type) and has ``num_cus`` CUs."""
+        from rocke.runtime import hip_module
+
+        def get_device_arch():
+            if isinstance(arch, type) and issubclass(arch, Exception):
+                raise arch("no device")
+            return arch
+
+        monkeypatch.setattr(hip_module, "get_device_arch", get_device_arch)
+        monkeypatch.setattr(hip_module, "get_device_num_cus", lambda *a, **k: num_cus)
+
+    def test_a_given_count_is_used_and_no_device_is_asked(self, monkeypatch):
+        self._host(monkeypatch, OSError)  # any query would fail
+        assert resolve_num_cus(_decode(num_cus=304)) == 304
+
+    def test_an_unset_count_comes_from_the_requested_archs_device(self, monkeypatch):
+        self._host(monkeypatch, "gfx942")
+        assert resolve_num_cus(_decode(num_cus=0)) == 77
+
+    def test_target_id_features_are_ignored(self, monkeypatch):
+        self._host(monkeypatch, "gfx942:sramecc+:xnack-")
+        assert resolve_num_cus(_decode(num_cus=0)) == 77
+
+    def test_another_arch_on_the_build_box_supplies_nothing(self, monkeypatch):
+        self._host(monkeypatch, "gfx950")
+        assert resolve_num_cus(_decode(num_cus=0)) == 0
 
     @pytest.mark.parametrize("exc", [OSError, RuntimeError])
-    def test_limits_fall_back_when_the_device_query_fails(self, monkeypatch, exc):
-        from dispatch.mla.common import resolve_max_grid_dims
-        from rocke.helpers.spec import MAX_GRID_DIM
-        from rocke.runtime import hip_module
-
-        def no_device(*a, **k):
-            raise exc("no device")
-
-        monkeypatch.setattr(hip_module, "get_device_arch", no_device)
-        assert resolve_max_grid_dims(_decode()) == (MAX_GRID_DIM,) * 3
-
-    def test_limits_match_the_base_arch_of_a_target_id(self, monkeypatch):
-        from dispatch.mla.common import resolve_max_grid_dims
-        from rocke.runtime import hip_module
-
-        monkeypatch.setattr(
-            hip_module, "get_device_arch", lambda: "gfx942:sramecc+:xnack-"
-        )
-        monkeypatch.setattr(hip_module, "get_device_max_grid_size", lambda: (5, 6, 7))
-        assert resolve_max_grid_dims(_decode(arch="gfx942")) == (5, 6, 7)
+    def test_a_failing_device_query_supplies_nothing(self, monkeypatch, exc):
+        self._host(monkeypatch, exc)
+        assert resolve_num_cus(_decode(num_cus=0)) == 0
 
 
 class TestSupportImpliesBuildable:

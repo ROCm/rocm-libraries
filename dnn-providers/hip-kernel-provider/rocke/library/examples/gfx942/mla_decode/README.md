@@ -147,9 +147,9 @@ from `mla_decode_launch(dispatch_mla(req))`.
 ## Reproducing
 
 From `rocke/library`, on a gfx942 node, with ROCm 7.2 or later torch: decode
-needs the llvm22, llvm23 or llvm24 IR flavor (llvm20 is refused), and torch's
-bundled comgr must match the flavor -- a ROCm 7.1 torch loads an llvm20 comgr
-and the compile fails with a flavor mismatch.
+needs an IR flavor from llvm22 on (llvm20 is refused), and torch's bundled
+comgr must match the flavor -- a ROCm 7.1 torch loads an llvm20 comgr and the
+compile fails with a flavor mismatch.
 
 ```bash
 export ROCKE_LLVM_FLAVOR=llvm22
@@ -291,5 +291,5 @@ Compiled through comgr from the llvm24 IR, with the LLVM 24 compiler the CI test
     name with different arguments: `ref_mla_decode_absorb(q_nope, q_rope, c_kv,
     k_rope, w_uk, block_table, cu_seqlens_q, cu_seqlens_k, scale)`, over the
     projected query and the fused per-head `W_UK`.
-- The llvm22, llvm23 or llvm24 IR flavor: llvm20 ignores the kernel's
-  `agpr_alloc`, the kernel then spills, and dispatch refuses it.
+- An IR flavor from llvm22 on: llvm20 ignores the kernel's `agpr_alloc`, the
+  kernel then spills, and dispatch refuses it.

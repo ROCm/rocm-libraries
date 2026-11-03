@@ -29,6 +29,7 @@ import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from kernels.mla._mla_body import flavor_honors_agpr_alloc
 from kernels.mla.mla_decode import (
     MlaDecodeSpec,
     check_mla_decode_extents,
@@ -56,6 +57,7 @@ from rocke.dispatch.core import (
     OperatorRequest,
     ShapeRange,
 )
+from rocke.helpers.spec import MAX_GRID_DIM
 
 from .common import (
     FAMILY,
@@ -65,7 +67,6 @@ from .common import (
     _request_errors,
     _selector_matches,
     mla_kernel_id,
-    resolve_max_grid_dims,
     resolve_num_cus,
 )
 
@@ -84,16 +85,6 @@ DECODE_NUM_WARPS = 4
 # TODO: validate 192, 256, ... on gfx942 and gfx950 (numeric lane + goldens)
 # before admitting them.
 DECODE_NUM_HEADS = (64, 128)
-
-#: LLVM flavors whose backend keeps the decode kernel out of the AGPR file.
-#: llvm20 ignores ``agpr_alloc``: the same IR then spills and runs one
-#: workgroup per CU instead of the two the split-KV count is sized for.
-#: llvm24 lowers decode to the same IR as llvm23: the two lanes differ only in
-#: how named barriers are declared and called, and decode uses none. Equal IR
-#: says nothing about the backend; the resource gate in
-#: ``tests/test_mla_decode.py`` checks that with the host's own compiler. The
-#: golden keeps a separate llvm24 column, so a later divergence is caught.
-DECODE_LLVM_FLAVORS = ("llvm22", "llvm23", "llvm24")
 
 #: Floor on key tiles per split-KV segment: untuned, but bounded by traffic.
 #: A 16-key tile is 16 x 576 bf16 = 18 KiB shared by 64 heads, about 288 B
@@ -144,7 +135,8 @@ def decode_spec_for(
 
     The bring-up geometry, and the segment count :func:`choose_num_seg` picks
     for this batch, clamped so the split workspace stays i32-addressable and
-    the grid's z axis (one workgroup per segment) stays within the device's.
+    the grid's z axis (one workgroup per segment) stays within the platform's
+    grid limit (:data:`MAX_GRID_DIM`); the device's own is checked at launch.
     ``fallback_num_cus`` stands in when neither the request nor the live
     device gives a CU count; too high a value only splits further than needed.
     """
@@ -168,16 +160,19 @@ def decode_spec_for(
     num_seg = min(
         num_seg,
         mla_decode_max_num_seg(spec, total_q=req.total_q),
-        resolve_max_grid_dims(req)[2],
+        MAX_GRID_DIM,
     )
     return dataclasses.replace(spec, num_seg=max(1, num_seg))
 
 
 def _check_grids(spec: MlaDecodeSpec, req: MLARequest) -> tuple[bool, str]:
-    """Whether every launch of ``spec`` fits the device's per-axis grid limit:
-    the latent kernel's ``(head groups, sequences, segments)`` and, split, the
-    combine's ``(head groups, tokens, 1)``."""
-    limits = resolve_max_grid_dims(req)
+    """Whether every launch of ``spec`` fits the platform's per-axis grid limit
+    (:data:`MAX_GRID_DIM`): the latent kernel's ``(head groups, sequences,
+    segments)`` and, split, the combine's ``(head groups, tokens, 1)``.
+
+    A pure function of the request (dispatch ARCHITECTURE.md, section 6.2,
+    rule 3): the live device's own limit is checked where the launch happens,
+    in ``MlaDecodeRunner``."""
     grids = [("latent", mla_decode_grid(spec, num_seqs=req.num_seqs))]
     if spec.split_kv:
         grids.append(
@@ -189,11 +184,11 @@ def _check_grids(spec: MlaDecodeSpec, req: MLARequest) -> tuple[bool, str]:
             )
         )
     for kernel, grid in grids:
-        for axis, extent, limit in zip("xyz", grid, limits, strict=True):
-            if extent > limit:
+        for axis, extent in zip("xyz", grid, strict=True):
+            if extent > MAX_GRID_DIM:
                 return False, (
                     f"the {kernel} grid's {axis} extent {extent} exceeds the "
-                    f"device's {limit}"
+                    f"grid limit {MAX_GRID_DIM}"
                 )
     return True, ""
 
@@ -264,13 +259,13 @@ def make_mla_decode_candidate(
             flavor = _resolve_llvm_flavor()
         except ComgrError as exc:
             return False, (
-                f"MLA decode needs one of {DECODE_LLVM_FLAVORS}; set "
+                "MLA decode needs an LLVM flavor that honors agpr_alloc; set "
                 f"ROCKE_LLVM_FLAVOR to choose one offline ({exc})"
             )
-        if flavor not in DECODE_LLVM_FLAVORS:
+        if not flavor_honors_agpr_alloc(flavor):
             return False, (
-                f"MLA decode needs one of {DECODE_LLVM_FLAVORS} (llvm20 ignores "
-                f"agpr_alloc, and the kernel spills), got {flavor}"
+                "MLA decode needs an LLVM flavor that honors agpr_alloc (llvm20 "
+                f"ignores it, and the kernel spills), got {flavor}"
             )
         try:
             spec = spec_for(req)
@@ -430,7 +425,6 @@ def mla_decode_launch(result: DispatchResult) -> MlaDecodeLaunch:
 
 
 __all__ = [
-    "DECODE_LLVM_FLAVORS",
     "DECODE_MIN_TILES_PER_SEG",
     "DECODE_NUM_HEADS",
     "DECODE_NUM_WARPS",

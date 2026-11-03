@@ -359,24 +359,6 @@ def resolve_num_cus(req: MLARequest) -> int:
     return 0
 
 
-def resolve_max_grid_dims(req: MLARequest) -> tuple[int, int, int]:
-    """Per-axis grid limit, in workgroups, for a launch of ``req``.
-
-    The live device's when it is the requested arch (:func:`_live_device_is`);
-    otherwise :data:`rocke.helpers.spec.MAX_GRID_DIM` on every axis, which
-    only refuses grids a larger device would have taken.
-    """
-    from rocke.helpers.spec import MAX_GRID_DIM
-
-    if _live_device_is(req.arch):
-        from rocke.runtime.hip_module import get_device_max_grid_size
-
-        dims = get_device_max_grid_size()
-        if dims is not None:
-            return dims
-    return (MAX_GRID_DIM,) * 3
-
-
 __all__ = [
     "FAMILY",
     "MLA_ABI_VERSION",
@@ -388,6 +370,5 @@ __all__ = [
     "_selector_matches",
     "mla_kernel_id",
     "num_q_blocks_for",
-    "resolve_max_grid_dims",
     "resolve_num_cus",
 ]

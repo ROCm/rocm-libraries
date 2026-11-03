@@ -302,6 +302,31 @@ class MlaDecodeRunner:
                         f"block_table row {s} names a page outside [0, {num_pages})"
                     )
 
+    def _check_grids_fit_device(self, device: torch.device) -> None:
+        """Refuse a launch whose grid is wider than ``device`` allows.
+
+        Dispatch selects against the platform's grid limit, so selection does
+        not depend on the device's own limit; a request it accepted can still be
+        too wide for a device that reports a narrower one. The device is asked
+        here, where the launch happens. A limit HIP cannot report is left to
+        the launch itself.
+        """
+        from rocke.runtime.hip_module import get_device_max_grid_size
+
+        limits = get_device_max_grid_size(device.index or 0)
+        if limits is None:
+            return
+        grids = [("latent", self.grid)]
+        if self.launch.combine_spec is not None:
+            grids.append(("split-KV combine", self.launch.combine_grid()))
+        for kernel, grid in grids:
+            for axis, extent, limit in zip("xyz", grid, limits, strict=True):
+                if extent > limit:
+                    raise ValueError(
+                        f"the {kernel} grid's {axis} extent {extent} exceeds the "
+                        f"device's grid limit {limit}"
+                    )
+
     def _launches(
         self,
         *,
@@ -327,6 +352,7 @@ class MlaDecodeRunner:
         self._check_inputs(
             qa, c_kv, k_rope, cu_seqlens_q, cu_seqlens_k, block_table, out, lse
         )
+        self._check_grids_fit_device(qa.device)
         if check_contents:
             self.check_contents(
                 cu_seqlens_q, cu_seqlens_k, block_table, num_pages=int(c_kv.shape[0])

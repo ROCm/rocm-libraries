@@ -34,6 +34,16 @@ def _llvm22(monkeypatch):
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm22")
 
 
+@pytest.fixture(autouse=True)
+def _no_device_grid_query(monkeypatch):
+    """The runner asks HIP for the launch device's grid limit, CPU tensors
+    included; answer "unknown" so these tests do not depend on the GPU the host
+    has. The tests of the check patch their own answers over this one."""
+    from rocke.runtime import hip_module
+
+    monkeypatch.setattr(hip_module, "get_device_max_grid_size", lambda device=0: None)
+
+
 def _result(**overrides):
     req = dict(
         num_heads=H,
@@ -296,6 +306,26 @@ class TestNumSegOverride:
                 512,
             )
             assert names[-1] == "num_seg"
+
+
+class TestLaunchChecksTheDevice:
+    """Dispatch selects against the platform's grid limit; the launch asks the
+    device. The check itself is tested torch-free in
+    dispatch/mla/test_mla_decode_wiring.py (``TestGridsFitDevice``); this is its
+    call site, which needs tensors."""
+
+    def test_the_launch_checks_the_device_after_the_inputs(self, monkeypatch):
+        def reached(self, device):
+            raise RuntimeError("device grid check reached")
+
+        monkeypatch.setattr(MlaDecodeRunner, "_check_grids_fit_device", reached)
+        runner = _uncompiled_runner(_result())
+        with pytest.raises(RuntimeError, match="device grid check reached"):
+            runner._launches(**_inputs(), scale=1.0, stream=0, check_contents=False)
+        # An input the request does not match is refused first.
+        bad = _inputs(qa=torch.zeros(T + 1, H, 576, dtype=torch.bfloat16))
+        with pytest.raises(ValueError, match="qa has shape"):
+            runner._launches(**bad, scale=1.0, stream=0, check_contents=False)
 
 
 class TestTorchStages:

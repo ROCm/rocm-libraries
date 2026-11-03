@@ -55,6 +55,7 @@ __all__ = [  # noqa: RUF022 -- grouped by section, as in the module
     "WT_PAD",
     "V8_PAD",
     "C_STAGE_W",
+    "flavor_honors_agpr_alloc",
     "mfma_16x16x16",
     "shift",
     "query_reduce",
@@ -144,6 +145,28 @@ NEG_INF = -1e30
 _C16_DIST = make_static_tile_distribution(
     make_c_warp_dstr_encoding(MfmaAtom.bf16_16x16x16())
 )
+
+# ---------------------------------------------------------------------------
+# Compiler flavor
+# ---------------------------------------------------------------------------
+
+
+def flavor_honors_agpr_alloc(flavor: str) -> bool:
+    """Whether ``flavor``'s backend honors a kernel's ``agpr_alloc`` hint, which
+    keeps a kernel budgeted for 256 VGPRs out of the AGPR file: the modern
+    (LLVM 21+) flavors. llvm20 ignores it, so the same IR spills and runs fewer
+    workgroups per CU than the split counts and register budgets assume.
+
+    The one definition of that rule for the MLA family: decode's admission, the
+    prefill ``agpr_acc`` layout's gate and their tests all ask it. A flavor it
+    serves is not thereby verified: the resource gates check the compiled
+    kernels with the host's own compiler, and the IR goldens keep one column per
+    flavor.
+    """
+    from rocke.core.lower_llvm import _is_modern_flavor
+
+    return _is_modern_flavor(flavor)
+
 
 # ---------------------------------------------------------------------------
 # Lane math

@@ -212,7 +212,7 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 42 | Query tiles per head (`q_tiles_per_wg`), shipped as two heads x two tiles | **Kept** | each head's W_UK / W_UV fetch and epilogue staging serve two waves; half the epilogue rounds; registers and LDS unchanged; L2 misses fell sharply; large gain on short full-prompt shapes, neutral to small on chunked |
 | 43 | XCD-aware workgroup order (`num_xcds`, from the device CU count) | **Kept** | each XCD walks short runs of a head-major order, so its L2 holds a few heads' weights; gain on short shapes |
 | 44 | One head x four query tiles per workgroup | Not selected | lowest weight traffic, but a large regression on some chunked shapes that is not explained |
-| 45 | `agpr_acc`: 32 rows per wave, accumulator in AGPRs, one workgroup per CU | **Kept, by rule** | in-place asm MFMAs into fixed AGPRs; llvm22 / llvm23 only; three dwords spill outside the loop; gain at many query rows per sequence |
+| 45 | `agpr_acc`: 32 rows per wave, accumulator in AGPRs, one workgroup per CU | **Kept, by rule** | in-place asm MFMAs into fixed AGPRs; llvm22 and later only; three dwords spill outside the loop; gain at many query rows per sequence |
 | 46 | Double-buffered key tile with the loop unrolled by two (agpr_acc) | **Kept** | one barrier per tile; static slot offsets |
 | 47 | Direct-to-LDS key tiles (`buffer_load ... lds`), DMA spread over the score fences | **Kept** | needs lever 48; without it the backend waits on each DMA before the next LDS read and the spread is much slower than one burst |
 | 48 | `lds_alias_scopes` (platform, both engines) | **Kept** | per-allocation LDS alias scopes; a read waits only for DMA into its own allocation |
@@ -939,9 +939,10 @@ becomes rare. It also helps the 16-row layout.
 
 ### When dispatch picks it
 
-Only when (a) the flavor is llvm22 or llvm23, (b) the batch averages at least
-320 query rows per sequence (`total_q / num_seqs`), and (c) the agpr_acc
-workgroups that carry rows -- at least `max(ceil(total_q / 64), num_seqs)` per
+Only when (a) the flavor honors `agpr_alloc` (llvm22 and later), (b) the batch
+averages at least 320 query rows per sequence (`total_q / num_seqs`), and (c)
+the agpr_acc workgroups that carry rows -- at least
+`max(ceil(total_q / 64), num_seqs)` per
 head pair, not counting the per-sequence padding workgroups -- number at least
 half the CUs. That is the
 [`_use_agpr_layout`](../../../dispatch/mla/gfx942.py) rule. The key length does
