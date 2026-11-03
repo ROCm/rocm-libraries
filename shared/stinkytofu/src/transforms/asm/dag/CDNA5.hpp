@@ -3719,7 +3719,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                             const int w = cutWindow(m);
                             if (w >= 0) {
                                 if (!forward) {
-                                    start = std::max(start, w);
+                                    start = std::max({start, w, earliestAt[m]});
                                 } else if (w < end) {
                                     end = w;
                                     drain = barrierDrain(*deps.dag.nodes[m].inst);
