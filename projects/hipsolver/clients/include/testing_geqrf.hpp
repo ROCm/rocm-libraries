@@ -350,6 +350,11 @@ void geqrf_getError(const hipsolverHandle_t   handle,
     if(!BATCHED)
         CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
+    // Check info. Expect success; all failures here are bugs or system failures
+    // (out of memory, no kernel, etc.).
+    // Pointer batched has single info, not array.
+    EXPECT_EQ(hInfoRes[0][0], 0);
+
     *max_err = 0;
     for(int b = 0; b < bc; ++b)
     {
@@ -389,19 +394,6 @@ void geqrf_getError(const hipsolverHandle_t   handle,
         if(A_norm != 0)
             err /= A_norm;
         max_err[0] = hipsolver_max_nan(err, max_err[0]);
-    }
-
-    // check info
-    if(!BATCHED)
-    {
-        double err = 0;
-        for(int b = 0; b < bc; ++b)
-        {
-            EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
-            if(hInfo[b][0] != hInfoRes[b][0])
-                err++;
-        }
-        *max_err += err;
     }
 }
 
