@@ -29,8 +29,8 @@ struct Outcome
 // The only place the compatibility layer catches core exceptions. Builders and getters report the outcome through
 // set_error_and_throw_exception, so callers see cudnnException (or the object status under
 // NV_CUDNN_DISABLE_EXCEPTION) and never another exception type; filters answer false. Setters run
-// outside it and reject bad counts the same way; only their copies of caller arrays can still throw
-// (std::bad_alloc).
+// outside it: as upstream, a negative count throws std::length_error, and their copies of caller
+// arrays can throw std::bad_alloc.
 template <typename Fn>
 Outcome guarded(Fn&& fn) noexcept
 {

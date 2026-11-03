@@ -142,7 +142,8 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, DescriptorBuildersReportCoreErr
                       .setDim(4, dims.data())
                       .setStride(4, strides.data())
                       .setId(1)
-                      .setAlignment(0)
+                      .setAlignment(16)
+                      .setConstValue(1.0)
                       .build();
               }),
               CUDNN_STATUS_BAD_PARAM);

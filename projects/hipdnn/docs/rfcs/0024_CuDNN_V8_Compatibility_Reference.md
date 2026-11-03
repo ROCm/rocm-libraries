@@ -1,7 +1,7 @@
-# RFC 0022 — Supporting Reference: Verified cuDNN FE v0.x and backend C API surface
+# RFC 0024 — Supporting Reference: Verified cuDNN FE v0.x and backend C API surface
 
 This document is the long-form companion to
-[RFC 0022: cuDNN v8 compatibility layer for hipDNN](./0022_CuDNN_V8_Compatibility.md). It collects the verified tables the
+[RFC 0024: cuDNN v8 compatibility layer for hipDNN](./0024_CuDNN_V8_Compatibility.md). It collects the verified tables the
 main RFC summarises: the cuDNN backend C API identifiers upstream's v0.x frontend uses, what hipDNN
 offers for each and what the compatibility layer does with them, the C surface the compatibility layer declares, the v0.x class
 inventory with the members the compatibility layer rewrites, per-operation setters, the consumer surfaces, NVIDIA's legacy
@@ -46,7 +46,7 @@ Legend for the "hipDNN" columns:
 | NS | hipDNN identifier exists, but its setter or getter returns `HIPDNN_STATUS_NOT_SUPPORTED` |
 | T! | hipDNN identifier exists but expects a different attribute type |
 
-The "Compatibility layer" column states what RFC 0022 does with the row; section references are to the main RFC.
+The "Compatibility layer" column states what RFC 0024 does with the row; section references are to the main RFC.
 
 ### 1.1 C entry points
 
@@ -137,7 +137,7 @@ operations or tensors.
 | cuDNN identifier | hipDNN | Compatibility layer |
 |---|---|---|
 | `CUDNN_ATTR_TENSOR_DATA_TYPE` :372 | `=` | translated by name; unmappable types (`INT8x4`, `UINT8x4`, `INT8x32`, `FAST_FLOAT_FOR_FP8`, `COMPLEX_*`) fail closed |
-| `CUDNN_ATTR_TENSOR_DIMENSIONS` :382, `STRIDES` :392, `UNIQUE_ID` :402, `IS_VIRTUAL` :422 | `=` | forwarded; one hipDNN tensor per UID, conflicting definitions → `BAD_PARAM`; a virtual tensor that is by-value or holds a constant builds, and graph build rejects it with `BAD_PARAM` (hipDNN's tensor rule) |
+| `CUDNN_ATTR_TENSOR_DIMENSIONS` :382, `STRIDES` :392, `UNIQUE_ID` :402, `IS_VIRTUAL` :422 | `=` | forwarded; one hipDNN tensor per UID, conflicting definitions → `BAD_PARAM`; a virtual tensor that is by-value or holds a constant builds, and graph build rejects it with `BAD_PARAM` (hipDNN's tensor rule; `NOT_SUPPORTED` first for a constant of a type hipDNN cannot carry) |
 | `CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT` :409 | `=` | ≥ 16 not set; < 16 forwarded (the graph then needs plugin API ≥ 1.3.0, which no current provider reports — divergence); never forwards > 16 |
 | `CUDNN_ATTR_TENSOR_IS_BY_VALUE` :436 (set) | NS on set (read-only) | `≈` `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT`; variant-pack entries are host pointers |
 | `CUDNN_ATTR_TENSOR_CONSTANT_VALUE` :527-557 | `≈` `HIPDNN_ATTR_TENSOR_VALUE_EXT` | forwarded; bytes copied at `TensorBuilder::build()` (upstream passes a pointer into builder-owned storage); takes precedence over `IS_BY_VALUE`. A constant whose size differs from the data type's element size → `BAD_PARAM`, except a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` (0 or 1) tensor, which is stored as one element (the value cuDNN reads); a constant on a type other than FLOAT, DOUBLE, HALF, BFLOAT16, UINT8, INT32, INT64 or BOOLEAN → `NOT_SUPPORTED` at graph build |
@@ -367,7 +367,7 @@ in its own `tests/cudnn_samples/legacy/overlay/cudnn.h`, which is never installe
 
 ### 2.1 Header inventory
 
-Line counts are `wc -l`. Caption directory: `upstream:include/`. "Compatibility layer" is the RFC 0022 disposition
+Line counts are `wc -l`. Caption directory: `upstream:include/`. "Compatibility layer" is the RFC 0024 disposition
 (RFC §3.1).
 
 | Header | Lines | Main public contents | Compatibility layer |
@@ -400,8 +400,8 @@ Line counts are `wc -l`. Caption directory: `upstream:include/`. "Compatibility 
 | `cudnn_frontend_get_plan.h` | 62 | `EngineConfigGenerator::cudnnGetPlan` definitions | port |
 | `cudnn_frontend_find_plan.h` | 163 | `time_sorted_plan<>`, `cudnnFindPlan<>`, `cudnnFindPlanAndCache<>` | port (hipDNN profiling-control descriptor for timing; includes `get_plan.h`, since its `cudnnFindPlan*` call `cudnnGetPlan`) |
 
-Totals: v0.x-only headers excluding the umbrella, `utils` and `compatibility layer`: **9,593 lines**; including
-`utils` and `compatibility layer`: **12,931 lines**. `Operation.h` alone is about 32% of the v0.x-only code.
+Totals: v0.x-only headers excluding the umbrella, `utils` and `shim`: **9,593 lines**; including
+`utils` and `shim`: **12,931 lines**. `Operation.h` alone is about 32% of the v0.x-only code.
 
 The umbrella includes the v0.x headers at :106-127 but **not** `EngineConfigGenerator.h`,
 `get_plan.h` or `find_plan.h`; samples include those explicitly. `cudnn_frontend_Rng.h` and
@@ -518,7 +518,7 @@ keeping upstream's check order and statuses, or replace upstream logic as the ro
 | `cudnn_frontend_Tensor.h` | `TensorBuilder_v8::build` (prechecks before the record, in upstream order; private `failPrecheck`; then the shared `detail::v8::buildDescriptor`, which also resets status and error on success); `setConstValue` and `setRaggedOffset` store into the builder, which `build()` copies from, so a fixed builder can build again | the `CUDNN_VERSION >= 8900` / `92200` gates; `Tensor_v8::hasConstValue` and `constValueBytes` (the builder holds the constant) | the rest of `Tensor_v8`, the other setters, `cloneFrom`, special members, aliases |
 | `cudnn_frontend_ConvDesc.h`, `_PointWiseDesc.h`, `_MatMulDesc.h`, `_ReductionDesc.h`, `_Resample.h`, `_Rng.h` | `<X>Builder_v8::build` through the shared `detail::v8::buildDescriptor` (also resets status and error on success); `RngDesc_v8::getUniformDistMin` (returns the uniform minimum; upstream returns the normal standard deviation) | version gates around plumbing only (`MatMulDesc` ≥ 8900, `ReductionDesc` ≥ 91100 branch, `Rng` ≥ 8700) | the rest of the `<X>_v8` class, every setter, special members, aliases |
 | `cudnn_frontend_Operation.h` | `build()` dispatch; `build_conv_forward`, `build_conv_backward_data`, `build_conv_backward_filter`, `build_pointwise_op`, `build_matmul_op`, `build_reduction_op`, `build_resample_fwd_operation`, `build_resample_bwd_operation`, `build_norm_forward`, `build_norm_backward`; `build_genstats_op`, `build_bn_finalize_op`, `build_bn_bwd_weight_op`, `build_rng_operation`, `build_reshape_operation`, `build_paged_cache_load_op` (slot checks, then `NOT_SUPPORTED`). New private helpers: `slot_record`, `tensor_record`, `required_record`, `peer_stats_present`, `scale_value`, `commit_record`, `reject_unsupported`, `convolution_labels`, `commit_convolution`. `Operation_v8::alphabetaType` retyped to `cudnnDataType_t`; `norm_fwd_phase`, `norm_mode` initialized to `NOT_SET` | every `detail::set_attribute` / `finalize` call; `NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR` and `CUDNN_VERSION` gates that wrapped only plumbing; `validate_norm_op`'s cuDNN 8.5.0 X-dimension check (`get_backend_version() == 8500`, false at 92200) | `Operation_v8` (`describe`, `getOutputTensor`, `getTag`, `getFeatureVector`), every setter including `setpwDesc`'s mode classification, `extract_feature_vector`, `copy_dims_and_strides`, every `validate_*` (`validate_norm_op` keeps its X check), constructors, aliases |
-| `cudnn_frontend_OperationGraph.h` | `OperationGraph_v8::getEngineCount`, `OperationGraphBuilder_v8::build`; — | — | `OperationGraph_v8` (`describe`, `getOpCount`, `getTag`, feature vectors, `getOps`), the other setters, special members, aliases |
+| `cudnn_frontend_OperationGraph.h` | `OperationGraph_v8::getEngineCount`, `OperationGraphBuilder_v8::build` | — | `OperationGraph_v8` (`describe`, `getOpCount`, `getTag`, feature vectors, `getOps`), the other setters, special members, aliases |
 | `cudnn_frontend_Heuristics.h` | `EngineHeuristicsBuilder_v8::build`, `EngineHeuristics_v8::getEngineConfig`, `getEngineConfigCount`; `get_heuristics_list(std::vector<HeurMode_t>, ...)` (`OPENSOURCE` runs fallback selection where upstream's `.at()` throws `std::out_of_range`; a value outside `HeurMode_t` throws `std::out_of_range`, as upstream) | `get_heur_b_mutex` | the other `get_heuristics_list` overloads, `get_heuristics_list_impl`, the `NV_CUDNN_FE_TRY` / `NV_CUDNN_FE_CATCH` macros, builder setters, aliases |
 | `cudnn_frontend_Engine.h` | `EngineBuilder_v8::build`; `Engine_v8::Knob::getMaxValue` (returns the maximum; upstream returns `minValue`) | `Engine_v8::bKnobs`, `Engine_v8::buildKnobs` | the rest of `Engine_v8::Knob`, `describe`, `getTag`, `getSupportedKnobs`, `getFinalizedKnobs`, `knobs_set`, builder setters |
 | `cudnn_frontend_EngineConfig.h` | `EngineConfigBuilder_v8::setEngine` (keeps knob choices as values), `EngineConfigBuilder_v8::build` (builds the knob `ENGINECFG`) | the `EngineConfig_v8()` constructor that created `KNOB_CHOICE` descriptors, `bChoices` | `describe`, `getTag`, `EngineConfigList` |
@@ -624,7 +624,7 @@ Sources, each pinned to one commit (line numbers below refer to these exact file
 | Quantized ops | `quantized/cudnn/{Conv,Linear,BinaryOps}.cpp` and `utils.h` use v0.x builders; `Pooling.cpp` is legacy v7 API only | §4.3 |
 
 Under ROCm, PyTorch's own build uses MIOpen sources, so the compatibility layer targets hipified builds of these CUDA
-files (RFC 0022 Phase 10).
+files (RFC 0024 Phase 10).
 
 ### 4.2 `Conv_v8.cpp` surface
 
@@ -719,7 +719,7 @@ changes to the set of enumerated engines (provider added, removed or upgraded, d
 
 CUDA-only dependencies (all under `upstream:samples/legacy_samples/`):
 
-| Dependency | Where | Harness treatment (RFC 0022 Phase 9) |
+| Dependency | Where | Harness treatment (RFC 0024 Phase 9) |
 |---|---|---|
 | `cuda_runtime.h` | `conv_sample.h:30`, `fusion_sample.h:30`, `fp8_sample.h:30`, `utils/helpers.h:29` | existing overlay |
 | `driver_types.h`, `cuda_fp16.h`, `cuda_runtime_api.h` | `utils/fp16_emu.h:26-30` | shared overlay; adds `driver_types.h` |
@@ -736,7 +736,7 @@ CUDA-only dependencies (all under `upstream:samples/legacy_samples/`):
 Caption: `upstream:samples/legacy_samples/test_list.cpp`. Driver functions are in `conv_sample.cpp`
 (C), `fusion_sample.cpp` (F), `fp8_sample.cpp` (P) or `norm_samples.cpp` (N).
 
-Tiers (RFC 0022 Phase 9): each case runs in its own process and is judged against its manifest
+Tiers (RFC 0024 Phase 9): each case runs in its own process and is judged against its manifest
 entry. **RUN_CLEAN** must end `ran-clean`; **VACUOUS** must not crash or fail to run, and is reported
 Skipped because it never reaches the compatibility layer; **XFAIL_RUN** must end with a
 listed outcome and print that outcome's anchor. Outcomes below are for a gfx1151 Windows host with

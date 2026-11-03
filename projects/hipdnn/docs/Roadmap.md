@@ -170,7 +170,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### cuDNN compatibility
 - Continued cuDNN v9 frontend compatibility, including a user guide and samples ⏳
-- cuDNN v8 frontend compatibility ⏳ ([RFC 0022](./rfcs/0022_CuDNN_V8_Compatibility.md))
+- cuDNN v8 frontend compatibility ⏳ ([RFC 0024](./rfcs/0024_CuDNN_V8_Compatibility.md))
   - Compatibility layer (POC) behind `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` ✅
   - The cuDNN frontend v0.x builders (cuDNN v8 API), ported from cudnn-frontend v1.24.0, build hipDNN graphs, plans and variant packs directly; `cudnnBackendExecute` passes straight through to hipDNN. Graphs a hipDNN engine supports execute; anything else either fails to build with `CUDNN_STATUS_NOT_SUPPORTED` or `CUDNN_STATUS_BAD_PARAM`, or builds and finds no engine (an empty heuristics list). The raw cuDNN backend descriptor C API (`cudnnBackendCreateDescriptor`, `…SetAttribute`, `…GetAttribute`, `…Finalize`, `…DestroyDescriptor`) is not provided, so code that calls it directly, such as XLA's autotune persistence, does not compile. Covered by mock-backend unit tests, integration tests against test plugins, GPU samples (convolution forward, backward data and backward filter, fused convolution, matmul, pointwise, batch norm, layer norm, reduction and resample), and a compile-and-run harness over NVIDIA's legacy v8 samples. Building PyTorch's v8 consumers against the compatibility layer is left to TheRock's PyTorch CI. Behavior differences are listed in [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md#cudnn-v8-api).
   - Remaining gaps:

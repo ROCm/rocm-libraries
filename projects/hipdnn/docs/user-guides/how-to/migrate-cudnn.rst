@@ -70,7 +70,7 @@ This table provides a high-level overview of the differences between cuDNN and h
 See the :ref:`dimension-layouts` section of the Operation Support doccument for operation-specifc hipDNN tensor layout details.
 
 Compile cuDNN frontend source with the compatibility layer
-=========================================================
+==========================================================
 
 Instead of porting to the ``hipdnn_frontend`` API, you can compile existing cuDNN frontend source
 against hipDNN's header-only cuDNN compatibility layer. Its cuDNN-spelled headers live under

@@ -46,7 +46,8 @@ TEST_F(TestCudnnCompatibilityV8NoexceptBoundary, BuildersReturnCoreStatus)
                                   .setDim(4, dims.data())
                                   .setStride(4, strides.data())
                                   .setId(1)
-                                  .setAlignment(0)
+                                  .setAlignment(16)
+                                  .setConstValue(1.0)
                                   .build();
     EXPECT_EQ(tensor.get_status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(tensor.get_raw_desc(), nullptr);

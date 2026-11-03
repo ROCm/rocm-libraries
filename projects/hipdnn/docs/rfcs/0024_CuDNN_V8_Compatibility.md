@@ -1,18 +1,18 @@
-# RFC 0022: cuDNN v8 compatibility layer for hipDNN
+# RFC 0024: cuDNN v8 compatibility layer for hipDNN
 
 - **Authors**: Mitch Ousdahl
 - **Status**: In progress
 - **Status notes**: The v0.x builders, their `detail/v8` core and the C types, `cudnnBackendExecute`
   and `cudnnGetLastErrorString` ship in `frontend/include/hipdnn_compatibility/cudnn/` behind
   `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (default `OFF`, #13970), with v8 GPU samples and the
-  legacy-sample corpus. The backend descriptor C API is not provided. Building PyTorch against the compatibility layer
-  is left to TheRock's PyTorch CI, and CI does not yet run the matmul, layer-norm and resample samples
+  legacy-sample corpus. The backend descriptor C API is not provided. No CI builds PyTorch against the compatibility layer
+  yet (planned for TheRock's PyTorch CI), and CI does not yet run the matmul, layer-norm and resample samples
   numerically (see the Roadmap).
 - **Last verified**: 2026-10-30 against `develop` (d730d16216b)
-- **Follows**: [RFC 0012: cuDNN compatibility layer for hipDNN](./0012_CuDNN_Shim.md) §9
+- **Follows**: [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md) §9
 - **Amends**: RFC 0012 §1 ("Not"), §4.2 (v9-only translation units), §4.3 (aliasing of
   `DescriptorType_t`, `NormMode_t`, `RngDistribution_t`), §4.7 (v9-only umbrella)
-- **Supporting reference**: [RFC 0022 Supporting Reference](./0022_CuDNN_V8_Compatibility_Reference.md) —
+- **Supporting reference**: [RFC 0024 Supporting Reference](./0024_CuDNN_V8_Compatibility_Reference.md) —
   identifier mapping, class inventory, per-op rules, consumer surfaces, legacy samples, version gates
 
 ## Table of Contents
@@ -41,7 +41,7 @@ frontend **v0.x builder API** (`TensorBuilder`, `OperationBuilder`, `ExecutionPl
 - PaddlePaddle's convolution path is v0.x.
 
 None of these compile against the v9 compatibility layer. See
-[Reference §4](./0022_CuDNN_V8_Compatibility_Reference.md#4-consumer-surfaces).
+[Reference §4](./0024_CuDNN_V8_Compatibility_Reference.md#4-consumer-surfaces).
 
 ### What
 
@@ -83,7 +83,7 @@ heuristics list).
   `get_heuristics_list` with a value outside `HeurMode_t`, and `std::length_error` from a negative
   count given to `VariantPackBuilder::setDataPointers`, `setUids` or
   `OperationGraphBuilder::setOperationGraph`. Nothing is silently dropped except
-  the store-and-ignore items listed in §3.4.
+  the store-and-ignore items and the unlowered epsilons listed in §3.4.
 - Per-call overhead over the hipDNN equivalent on the same plan, measured by
   `samples/cudnn_shim/ConvFpropV8.cpp --overhead`: `cudnnBackendExecute` < 1 µs;
   `VariantPackBuilder::build()` + `cudnnBackendExecute` < 5 µs. The latter measures p50 0.76–0.97 µs
@@ -115,7 +115,7 @@ cudnn_frontend_<X>.h          new (port): Tensor, ConvDesc, PointWiseDesc, MatMu
                               ExecutionPlan, Errata, ExecutionPlanCache, Reorder_Tensor,
                               EngineConfigGenerator, find_plan, get_plan
 cudnn_frontend.h              extended: v0.x headers and the _v8 aliases
-detail/c_types.h              new: C types and enums (generated, §3.7)
+detail/c_types.h              new: C types and enums (maintained by hand, §3.7)
 detail/frontend_types.h       new: FE enums, knob types and helpers, re-exported by
                               cudnn_frontend_utils.h
 detail/type_mapping.h         new: cuDNN <-> hipDNN enum translation, by name
@@ -158,7 +158,7 @@ descriptor types are aliased, so plans and variant packs pass to hipDNN unchange
 Each builder's `build()` hands its values to the core, which applies the checks upstream's backend
 would apply at finalize, then lowers to hipDNN. Builders keep upstream's public API and every member
 that did not talk to the backend; the members that did are rewritten
-([Reference §2.6](./0022_CuDNN_V8_Compatibility_Reference.md#26-ported-headers-rewritten-and-verbatim-members)).
+([Reference §2.6](./0024_CuDNN_V8_Compatibility_Reference.md#26-ported-headers-rewritten-and-verbatim-members)).
 
 ### 3.3 Objects and ownership
 
@@ -173,7 +173,7 @@ that did not talk to the backend; the members that did are rewritten
   for any object whose `build()` failed. A graph shows its finalized hipDNN `OPERATIONGRAPH`, an
   engine and a knob-free config the graph's default `ENGINE` and `ENGINECFG`, a config with knob
   choices its own `ENGINECFG`, a plan its `EXECUTION_PLAN`, a variant pack its `VARIANT_PACK`
-  ([Reference §2.5](./0022_CuDNN_V8_Compatibility_Reference.md#25-class--record--raw-descriptor)).
+  ([Reference §2.5](./0024_CuDNN_V8_Compatibility_Reference.md#25-class--record--raw-descriptor)).
 - Records are shared through `shared_ptr`, and hipDNN's own reference counts (plan → config → engine →
   graph) keep a plan valid after its graph, heuristics and config are destroyed. Copies of an
   `ExecutionPlan` share one record.
@@ -205,8 +205,8 @@ runs no heuristics and needs no GPU.
 |---|---|
 | alignment ≥ 16 | not set (16 is hipDNN's default; cuDNN's value is a lower bound) |
 | alignment < 16 | forwarded; needs plugin API ≥ 1.3.0, which no provider reports yet |
-| by-value | runtime pass-by-value tensor ([RFC 0016](./0016_RuntimePassByValueTensors.md)); on a virtual tensor, `BAD_PARAM` at graph build |
-| constant value | `HIPDNN_ATTR_TENSOR_VALUE_EXT`; bytes copied at `TensorBuilder::build()`. The value's size must equal the data type's element size, except that a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` tensor is stored as one element; `BAD_PARAM` otherwise, and at graph build on a virtual tensor |
+| by-value | runtime pass-by-value tensor ([RFC 0016](./0016_RuntimePassByValueTensors.md)); on a virtual tensor, `BAD_PARAM` at graph build (`NOT_SUPPORTED` first for a constant of a type hipDNN cannot carry) |
+| constant value | `HIPDNN_ATTR_TENSOR_VALUE_EXT`; bytes copied at `TensorBuilder::build()`. The value's size must equal the data type's element size, except that a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` tensor is stored as one element; `BAD_PARAM` otherwise, and at graph build on a virtual tensor (`NOT_SUPPORTED` first when hipDNN cannot carry the constant's type) |
 | ragged offset | forwarded; needs plugin API ≥ 1.3.0 |
 | vector count > 1, reordering | `NOT_SUPPORTED` (a count ≤ 1 is not sent, as upstream) |
 
@@ -235,9 +235,9 @@ runs no heuristics and needs no GPU.
   and on activation-backward modes; cuDNN ignores it on one-input forward modes.
 - **Store and ignore:** NaN propagation (hipDNN has no equivalent).
 - **Epsilon.** Required on every norm forward operation, as cuDNN requires it. Batch-norm inference
-  takes the inverse variance, and the backward operations take saved statistics, so their epsilon
-  is not lowered; cuDNN uses a backward epsilon only without saved statistics, which the
-  compatibility layer requires.
+  takes the inverse variance, and batch-norm and RMS-norm backward require saved statistics, so their
+  epsilon is not lowered (cuDNN uses a backward epsilon only without saved statistics). Layer-norm
+  backward accepts saved statistics or none and lowers its epsilon.
 - **`NOT_SUPPORTED` when set:** dynamic shapes, override shapes.
 
 ### 3.5 Engine selection
@@ -259,9 +259,9 @@ runs no heuristics and needs no GPU.
   changes.
 - **Notes.** Behavior notes map by name. `NONDETERMINISTIC` is reported for every engine not known to be
   deterministic, so deterministic filtering works; hipDNN's numerical-note attribute is never queried.
-  No other numerical notes are reported. The allowlist is the v9 compatibility layer's (`isDeterminismClaimed`), so both
-  compatibility layers keep the same engines. v0.x filtering runs in the caller, so an empty result reaches it as an
-  empty list where the v9 compatibility layer returns `GRAPH_NOT_SUPPORTED`.
+  No other numerical notes are reported. The allowlist is the v9 API's (`isDeterminismClaimed`), so both
+  APIs keep the same engines. v0.x filtering runs in the caller, so an empty result reaches it as an
+  empty list where the v9 API returns `GRAPH_NOT_SUPPORTED`.
 - **Knobs.** hipDNN knobs that map onto a cuDNN knob type are shown; others are hidden, and choosing a
   hidden knob is `NOT_SUPPORTED`. A choice of `-1` is upstream's "unset" and is ignored unless the knob
   is shown and accepts `-1`. `EngineConfigBuilder::build()` checks the choices and builds the config's
@@ -323,7 +323,7 @@ runs no heuristics and needs no GPU.
   `ManagedOpaqueDescriptor` and a compatibility layer slot enum instead of a raw descriptor and an attribute name
   (`check_rule` and `check_errata` match upstream). Members
   that set or got backend attributes call the core instead, with upstream's check order and statuses;
-  [Reference §2.6](./0022_CuDNN_V8_Compatibility_Reference.md#26-ported-headers-rewritten-and-verbatim-members)
+  [Reference §2.6](./0024_CuDNN_V8_Compatibility_Reference.md#26-ported-headers-rewritten-and-verbatim-members)
   lists them per header for upstream re-diffs. Other edits:
   - namespace and include paths;
   - upstream's global `json` alias is declared in the compatibility layer namespace as `cudnn_frontend::json`, so it
@@ -416,7 +416,7 @@ runs no heuristics and needs no GPU.
 | Upstream drift | Pin `static_assert`; re-diff in RFC 0012 §6.1's quarterly upstream review, guided by the Reference §2.6 member list |
 | `hipdnn_frontend` internals change | Same tree and version; GPU-free lowering tests catch breakage |
 | Maintenance of ~7.7k ported lines and ~7k of core and type mapping | Same owner as the RFC 0012 compatibility layer |
-| PyTorch's v0.x consumers stop compiling against the compatibility layer | TheRock's PyTorch CI builds PyTorch against the compatibility layer; this repository pins the PyTorch-facing surface with compile-only unit tests (`TestCudnnCompatibilityV8Tu`, also as C++20 in `hipdnn_frontend_cudnn_v8_tu_cpp20`) |
+| PyTorch's v0.x consumers stop compiling against the compatibility layer | Not covered by CI yet: building PyTorch against the compatibility layer is planned for TheRock's PyTorch CI. This repository pins the PyTorch-facing surface with compile-only unit tests (`TestCudnnCompatibilityV8Tu`, also as C++20 in `hipdnn_frontend_cudnn_v8_tu_cpp20`) |
 | Corpus failures surface only in TheRock CI | TheRock builds hipDNN with the compatibility layer on and runs the v9 and legacy corpus on its test families; the superbuild CI does not run the corpus |
 
 ## 6. Execution Plan
@@ -435,7 +435,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | 7 | Builders: heuristics, plans, filters, errata, cache, find / get plan |
 | 8 | GPU samples and overhead measurement |
 | 9 | Legacy-samples corpus harness |
-| 10 | PyTorch compile check (later removed: TheRock's PyTorch CI covers it) |
+| 10 | PyTorch compile check (later removed; a PyTorch build against the compatibility layer is planned for TheRock's PyTorch CI) |
 | 11 | Docs and final validation |
 | 12 | Core extracted from the emulated C API into `detail/v8`, no behavior change |
 | 13 | Builder-level tests for every rule, passing on the emulated C API |
@@ -456,8 +456,8 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | Integration, test plugins, GPU | Engine enumeration, plans, execute (including on another handle), knobs, multiple engines, plan search |
 | GPU samples (`samples/cudnn_shim/*V8.cpp`; MIOpen, hipBLASLt, hip-kernel) | Numerical results against a CPU reference for conv fprop / dgrad / wgrad, conv + bias + ReLU, pointwise ReLU, matmul + bias + activation, batch norm forward training and backward, layer norm forward and backward, and resample forward and backward. Each test fails when fewer variants run than its `--require-ran` floor or when a variant named by `--require-variant` (the fp32 NCHW variants of every sample with a non-zero floor) does not run. Variants with no engine are skipped: matmul (hipBLASLt only; none on gfx115x under Windows), layer norm and resample (hip-kernel-provider only), `CUDNN_CONVOLUTION` mode and asymmetric padding (MIOpen rejects them). The reduction sample is built but no provider runs reduction, so it always reports Skipped. TheRock's hipdnn-samples job loads only the MIOpen provider, so CI skips matmul, layer norm and resample (their floors are 0) until a TheRock change that loads the hipBLASLt and hip-kernel providers reaches this repository's pin; until then manual gfx942 runs cover them. Overhead (§2) is reported under ctest label `perf`. The v8 samples reject `--engine-id` and `--engine-name` |
 | v9 sample corpus | Existing v9 behavior unchanged |
-| NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0022_CuDNN_V8_Compatibility_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit: configure fails with E22 when a git checkout is at any other commit; a supplied corpus that is not a readable git checkout only warns, and the E20 version check still applies |
-| PyTorch | Not tested here: TheRock's PyTorch CI builds PyTorch against the compatibility layer. The PyTorch-facing surface is pinned by the compile-only `TestCudnnCompatibilityV8Tu` |
+| NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0024_CuDNN_V8_Compatibility_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit: configure fails with E22 when a git checkout is at any other commit; a supplied corpus that is not a readable git checkout only warns, and the E20 version check still applies |
+| PyTorch | Not tested in CI: a PyTorch build against the compatibility layer is planned for TheRock's PyTorch CI. The PyTorch-facing surface is pinned by the compile-only `TestCudnnCompatibilityV8Tu` |
 
 ## 8. Future Considerations
 
@@ -472,7 +472,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 
 | # | Decision |
 |---|---|
-| R1 | No backend descriptor C API except `cudnnBackendExecute`: the builders reach hipDNN through the core. The only raw C caller found is XLA's autotune persistence, which reads plans and engine configs through `cudnnBackendCreateDescriptor` / `GetAttribute` / `DestroyDescriptor` (`cuda_dnn.cc` L5081-5199 at the [Reference §4](./0022_CuDNN_V8_Compatibility_Reference.md#4-consumer-surfaces) commit); it does not compile. PyTorch's, Paddle's and XLA's builder code is source compatible |
+| R1 | No backend descriptor C API except `cudnnBackendExecute`: the builders reach hipDNN through the core. The only raw C caller found is XLA's autotune persistence, which reads plans and engine configs through `cudnnBackendCreateDescriptor` / `GetAttribute` / `DestroyDescriptor` (`cuda_dnn.cc` L5081-5199 at the [Reference §4](./0024_CuDNN_V8_Compatibility_Reference.md#4-consumer-surfaces) commit); it does not compile. PyTorch's, Paddle's and XLA's builder code is source compatible |
 | R2 | `cudnnBackendExecute` is a passthrough: hipDNN runs a plan on whichever handle it is given, including one other than its graph's, provided the handle is on the plan's device. Pinned by unit and integration tests |
 | R3 | NVIDIA's legacy "Tensor creation comparison" calls the raw API. A harness-only `tests/cudnn_samples/legacy/overlay/cudnn.h` declares the calls it makes as `NOT_SUPPORTED` stubs, plus the five tensor attribute names and two attribute types it passes; the case is an expected failure. The stub is never installed under `include/` |
 | R4 | Identifiers are left out relative to the sources in §3.7. An excluded function or enum is left out whole: among them the five descriptor functions, `cudnnBackendAttributeName_t`, `cudnnBackendAttributeType_t`, and `cudnnMoeGroupedMatmulMode_t` (named only by upstream's enum converters, which the compatibility layer omits for it). An enumerator none of the sources names, such as `CUDNN_NOT_PROPAGATE_NAN`, is not declared. None of them was declared on `develop`, so relative to `develop` the change only adds API, as RFC 0012 §4.8 requires; `hipdnn_frontend` takes a minor version bump to 0.5.0 |

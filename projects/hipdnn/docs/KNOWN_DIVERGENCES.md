@@ -145,7 +145,7 @@ NVIDIA's legacy samples and PyTorch's v0.x consumers name are declared, less tha
 any other cuDNN C identifier does not compile. The legacy v7-style C API (`cudnnConvolutionForward`,
 `cudnnSetTensorNdDescriptor`, …) is not provided. PyTorch's `ATen/cudnn/Descriptors.h` wraps that API,
 and PyTorch's `Conv_v8.cpp` and quantized convolution include it, so they do not compile unmodified.
-Building PyTorch against the compatibility layer is tested in TheRock's PyTorch CI, not in this repository.
+No CI builds PyTorch against the compatibility layer yet; that is planned for TheRock's PyTorch CI.
 
 ### Backend descriptor C API
 
@@ -207,7 +207,7 @@ operation graph is built. These differ from cuDNN:
 | Vectorized tensors: a vector count above 1 (`setVectorCountAndDimension`); the data types `INT8x4`, `INT8x32` and `UINT8x4`; a reorder type other than `NONE` | `NOT_SUPPORTED` at `build()` |
 | Data types `FAST_FLOAT_FOR_FP8`, `COMPLEX_FP32` and `COMPLEX_FP64`, on a tensor or as the compute type of a parameter descriptor (which rejects the vectorized types too) | `NOT_SUPPORTED` at `build()`; hipDNN has no such types |
 | A constant (`setConstValue`) whose size is not the element size of the tensor's data type (one byte for `BOOLEAN`) | `BAD_PARAM` at `build()`; upstream passes the stored bytes, and cuDNN reads one element from their start. One case is accepted: a wider integer (for example an `int` literal, or `std::int64_t`) on an `INT8`, `UINT8`, `INT32` or `BOOLEAN` tensor whose value fits that type (`BOOLEAN`: 0 or 1) is stored as one element, the value cuDNN reads. Every other size mismatch stays `BAD_PARAM`: a floating-point one (a `double` on `FLOAT`, a `float` on `HALF`), a narrower constant, an integer of another size on a floating-point tensor and a wider integer that does not fit. Only the size is checked: a constant of the element size is passed as raw bytes, as upstream does, whatever its type, so `setConstValue(1)` on a `FLOAT` tensor builds and reads as the float whose bit pattern is 1 |
-| A virtual tensor (`setVirtual`) that is passed by value (`setByValue`) or holds a constant (`setConstValue`) | `TensorBuilder::build()` succeeds, as upstream; `OperationGraphBuilder::build()` fails with `BAD_PARAM` from hipDNN's tensor rule. Upstream sends both attributes to cuDNN, which does not document the combination |
+| A virtual tensor (`setVirtual`) that is passed by value (`setByValue`) or holds a constant (`setConstValue`) | `TensorBuilder::build()` succeeds, as upstream; `OperationGraphBuilder::build()` fails with `BAD_PARAM` from hipDNN's tensor rule, or first with `NOT_SUPPORTED` for a constant whose type hipDNN cannot carry (see [Operation graphs](#operation-graphs)). Upstream sends both attributes to cuDNN, which does not document the combination |
 
 ### Operations
 
@@ -264,7 +264,7 @@ These differ from cuDNN:
 | `ExecutionPlan::getWorkspaceSize()` | can differ between builds of the same engine configuration: with the MIOpen provider it follows MIOpen's user find-db, which executions fill. Allocate each plan's workspace from that plan's `getWorkspaceSize()`, not from a size cached by plan tag or engine configuration |
 | `cudnnBackendExecute` handle | not checked by the compatibility layer: hipDNN runs the plan on the handle it is given, with that handle's stream, including a handle other than the one the plan's graph was built on or, for a loaded plan, the one it was loaded with. A handle on another device than the one the plan was built or loaded on is rejected by hipDNN's `hipdnnBackendExecute` with `BAD_PARAM` before any provider call. `ExecutionPlanBuilder::setHandle` is ignored by `build()`, as upstream never sends it, and required by `loadFromJson` |
 | Variant packs (`VariantPackBuilder::build()`) | the hipDNN variant pack is built here; missing or empty data pointers or UIDs, or the two with different element counts, are `BAD_PARAM` |
-| Per-call overhead | `cudnnBackendExecute` is one hipDNN call. `VariantPackBuilder::build()` also builds the hipDNN variant pack on every call. Both stay within the budgets of RFC 0022 §2 over calling hipDNN directly on the same plan, as measured by `samples/cudnn_shim/ConvFpropV8.cpp --overhead` |
+| Per-call overhead | `cudnnBackendExecute` is one hipDNN call. `VariantPackBuilder::build()` also builds the hipDNN variant pack on every call. Both stay within the budgets of RFC 0024 §2 over calling hipDNN directly on the same plan, as measured by `samples/cudnn_shim/ConvFpropV8.cpp --overhead` |
 
 ### Builders
 
