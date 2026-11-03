@@ -126,6 +126,13 @@ def test_require_rankable_refuses_a_deterministic_catalog_and_names_the_other_ro
     assert "hipkernel:Gfx950AttentionDense" in message
 
 
+def test_a_deterministic_slot_catalog_is_named_by_its_slot():
+    """A slot ranker trains on one slot's reference rows, so the refusal is that slot's."""
+    with pytest.raises(DeterministicCatalogError) as caught:
+        require_rankable(_corpus(1), engine="hipkernel:SdpaBwd", slot="dq")
+    assert "slot 'dq' of engine 'hipkernel:SdpaBwd'" in str(caught.value)
+
+
 def test_the_refusal_is_a_value_error_so_existing_handlers_still_catch_it():
     # `generate.py` keeps the collected stage on ValueError; L1 still needs that sweep.
     assert issubclass(DeterministicCatalogError, ValueError)
@@ -236,6 +243,7 @@ def test_knob_analysis_reports_the_finding_instead_of_a_page_of_pinnable_fields(
         objective="min",
         device_column=None,
         manifest=None,
+        slot=None,
     )
     assert run_knobs(args) == 0
     out = capsys.readouterr().out
