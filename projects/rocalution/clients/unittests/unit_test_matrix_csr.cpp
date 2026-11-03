@@ -1297,8 +1297,6 @@ TYPED_TEST(matrix_csr, create_from_map)
     EXPECT_EQ(created.m, n);
     EXPECT_EQ(created.row_offset, restriction.row_offset);
 
-    KNOWN_BUG("with unassigned nodes the fill loop stops at nnz and indexes by node");
-
     expect_same(created, restriction);
     expect_created(map);
 }

@@ -2239,8 +2239,6 @@ TYPED_TEST(local_matrix, create_from_map_gives_the_restriction)
     R->CreateFromMap(*make_local_vector(this->backend(), map), n, m);
     expect_matrix(*R, restriction, csr_format, this->backend());
 
-    KNOWN_BUG("CreateFromMap(map, n, m) leaves a matrix without entries empty");
-
     auto E = empty_local_matrix<T>(this->backend());
     E->CreateFromMap(*make_local_vector(this->backend(), map), n, m);
     expect_matrix(*E, restriction, csr_format, this->backend());

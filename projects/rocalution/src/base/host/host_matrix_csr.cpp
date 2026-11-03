@@ -4216,16 +4216,16 @@ namespace rocalution
             row_buffer[i + 1]            = this->mat_.row_offset[i + 1];
         }
 
-        for(int i = 0; i < nnz; ++i)
+        for(int i = 0; i < n; ++i)
         {
             if(cast_map->vec_[i] < 0)
             {
                 continue;
             }
 
-            this->mat_.col[row_buffer[cast_map->vec_[i]]] = i;
-            this->mat_.val[i]                             = static_cast<ValueType>(1);
-            row_buffer[cast_map->vec_[i]]++;
+            PtrType pos         = row_buffer[cast_map->vec_[i]]++;
+            this->mat_.col[pos] = i;
+            this->mat_.val[pos] = static_cast<ValueType>(1);
         }
 
         assert(this->mat_.row_offset[m] == nnz);

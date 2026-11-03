@@ -8251,61 +8251,58 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        bool err
+            = this->matrix_->CreateFromMap(*map.vector_, static_cast<int>(n), static_cast<int>(m));
+
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
         {
-            bool err = this->matrix_->CreateFromMap(
-                *map.vector_, static_cast<int>(n), static_cast<int>(m));
+            LOG_INFO("Computation of LocalMatrix::CreateFromMap() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
-            // LCOV_EXCL_START
+        if(err == false)
+        {
+            LocalVector<int> map_host;
+            map_host.CopyFrom(map);
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+            // Move to host
+            this->MoveToHost();
+
+            // Convert to CSR
+            unsigned int format   = this->GetFormat();
+            int          blockdim = this->GetBlockDimension();
+            this->ConvertToCSR();
+
+            if(this->matrix_->CreateFromMap(
+                   *map_host.vector_, static_cast<int>(n), static_cast<int>(m))
+               == false)
             {
                 LOG_INFO("Computation of LocalMatrix::CreateFromMap() failed");
                 this->Info();
                 FATAL_ERROR(__FILE__, __LINE__);
             }
 
-            if(err == false)
+            if(format != CSR)
             {
-                LocalVector<int> map_host;
-                map_host.CopyFrom(map);
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::CreateFromMap() is performed in CSR format");
 
-                // Move to host
-                this->MoveToHost();
-
-                // Convert to CSR
-                unsigned int format   = this->GetFormat();
-                int          blockdim = this->GetBlockDimension();
-                this->ConvertToCSR();
-
-                if(this->matrix_->CreateFromMap(
-                       *map_host.vector_, static_cast<int>(n), static_cast<int>(m))
-                   == false)
-                {
-                    LOG_INFO("Computation of LocalMatrix::CreateFromMap() failed");
-                    this->Info();
-                    FATAL_ERROR(__FILE__, __LINE__);
-                }
-
-                if(format != CSR)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::CreateFromMap() is performed in CSR format");
-
-                    this->ConvertTo(format, blockdim);
-                }
-
-                if(map.is_accel_() == true)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::CreateFromMap() is performed on the host");
-
-                    this->MoveToAccelerator();
-                }
+                this->ConvertTo(format, blockdim);
             }
 
-            // LCOV_EXCL_STOP
+            if(map.is_accel_() == true)
+            {
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::CreateFromMap() is performed on the host");
+
+                this->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
 
 #ifdef DEBUG_MODE
         this->Check();
