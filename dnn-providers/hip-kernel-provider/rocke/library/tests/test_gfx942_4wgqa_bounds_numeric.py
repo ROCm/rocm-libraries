@@ -129,9 +129,9 @@ def _run(seqs, hq, hkv, d, bs, dt="bf16", window=0, pinned=False, seed=0):
             num_cus=torch.cuda.get_device_properties(0).multi_processor_count,
             num_kv_blocks=nblocks,
         )
-        assert au._gfx942_4warp_route(problem, "gfx942") is not None, (
-            "case must exercise a 4-warp body"
-        )
+        assert (
+            au._gfx942_4warp_route(problem, "gfx942") is not None
+        ), "case must exercise a 4-warp body"
         spec = au._tiled_spec_from_problem(problem, "gfx942")
         name = build_gfx942_4warp_gqa(spec, arch="gfx942").name
         au.run_unified_attention_torch(
