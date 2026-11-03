@@ -21,7 +21,6 @@
 
 using namespace miopen_plugin;
 
-using hipdnn_flatbuffers_sdk::data_objects::ResampleMode;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
 using hipdnn_test_sdk::utilities::createResampleFwdGraph;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
