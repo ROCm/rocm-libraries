@@ -1518,10 +1518,11 @@ when it does not load, so configure asserts that the library which loaded is \
 the one named here.")
 
     set(HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR "" CACHE STRING
-        "LLVM IR flavor the rocKE producer lowers to (llvm20, llvm22, llvm23), forwarded \
-into ROCKE_LLVM_FLAVOR for the pack step. Leave it empty to let rocke derive it from \
-the LLVM of the COMGR it loads. Set it to lower exactly as a catalog was swept: the \
-gfx950 conv AOT catalogs were measured as llvm22 on a COMGR of LLVM 22 or newer.")
+        "LLVM IR flavor the rocKE producer lowers to (llvm20, llvm22, llvm23, llvm24), \
+forwarded into ROCKE_LLVM_FLAVOR for the pack step. Leave it empty to let rocke derive \
+it from the LLVM of the COMGR it loads. Set it to lower exactly as a catalog was swept: \
+the gfx950 conv AOT catalogs were measured as llvm22 on a COMGR of LLVM 22 or newer. An \
+unrecognized value is only rejected when the pack step actually runs, not at configure.")
 
     # Runs before the copy below and before the probe, so the derived value is
     # what both of them see. An explicitly-set value is left alone.
