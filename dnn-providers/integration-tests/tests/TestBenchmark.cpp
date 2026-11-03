@@ -15,6 +15,8 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -94,6 +96,20 @@ TEST(TestReferenceBenchmark, RejectsModesThatDoNotExecute)
     }
 }
 
+// Only bundle tests are measured, so with bundles off the flag would measure nothing
+// and still exit 0.
+TEST(TestReferenceBenchmark, RefusesARunWithoutBundles)
+{
+    ReferenceBenchmarkRequest request;
+    request.bundlesDisabled = true;
+    EXPECT_FALSE(validateReferenceBenchmark(request).has_value());
+    request.enabled = true;
+    ASSERT_TRUE(validateReferenceBenchmark(request).has_value());
+    EXPECT_NE(validateReferenceBenchmark(request)->find("bundle tests are off"), std::string::npos);
+    request.bundlesDisabled = false;
+    EXPECT_FALSE(validateReferenceBenchmark(request).has_value());
+}
+
 TEST(TestReferenceBenchmark, StatusNamesAreThePublishedVocabulary)
 {
     EXPECT_STREQ(toString(ReferenceBenchmarkStatus::PENDING), "pending");
@@ -120,7 +136,8 @@ TEST(TestReferenceBenchmark, FailedSynchronizeIsAReferenceBenchmarkError)
 // The production timer must synchronize the device, or a GPU reference's timing
 // covers only its kernel launches. Queue enough asynchronous work that it is still
 // running when the work callable returns: the stream is idle afterwards only if the
-// timer waited for it.
+// timer waited for it. HarnessDependencies must default to it, as the production
+// harness takes the default.
 TEST(TestReferenceBenchmark, ProductionTimerWaitsForQueuedDeviceWork)
 {
     SKIP_IF_NO_DEVICES();
@@ -128,16 +145,24 @@ TEST(TestReferenceBenchmark, ProductionTimerWaitsForQueuedDeviceWork)
     constexpr int FILLS = 16;
     void* buffer = nullptr;
     ASSERT_EQ(hipMalloc(&buffer, BYTES), hipSuccess);
-    const auto timer = productionReferenceTimer();
-    double elapsedMs = 0.0;
-    EXPECT_NO_THROW(timer.measure(elapsedMs, [&] {
-        for(int fill = 0; fill < FILLS; ++fill)
-        {
-            static_cast<void>(hipMemsetAsync(buffer, fill, BYTES, nullptr));
-        }
-    }));
-    EXPECT_EQ(hipStreamQuery(nullptr), hipSuccess);
-    EXPECT_GT(elapsedMs, 0.0);
+    const std::array<std::pair<const char*, ReferenceBenchmarkTimer>, 2> timers{{
+        {"productionReferenceTimer()", productionReferenceTimer()},
+        {"HarnessDependencies default", HarnessDependencies{}.referenceTimer},
+    }};
+    for(const auto& [name, timer] : timers)
+    {
+        SCOPED_TRACE(name);
+        double elapsedMs = 0.0;
+        EXPECT_NO_THROW(timer.measure(elapsedMs, [&] {
+            for(int fill = 0; fill < FILLS; ++fill)
+            {
+                static_cast<void>(hipMemsetAsync(buffer, fill, BYTES, nullptr));
+            }
+        }));
+        EXPECT_EQ(hipStreamQuery(nullptr), hipSuccess);
+        EXPECT_GT(elapsedMs, 0.0);
+        static_cast<void>(hipDeviceSynchronize());
+    }
     EXPECT_EQ(hipFree(buffer), hipSuccess);
 }
 
@@ -504,6 +529,44 @@ TEST(TestReferenceBenchmark, PropertiesCarryEveryPhaseOfEachSampleAndTotalsOnlyV
     summary.OnTestIterationEnd(*unitTest, 1);
     EXPECT_EQ(::testing::internal::GetCapturedStdout(),
               "[ REFERENCE BENCHMARK SUMMARY ] measured=0\n");
+}
+
+// Each reference's total counts and sums every verified sample of the run, not only
+// the latest one.
+TEST(TestReferenceBenchmark, VerifiedTotalsSumEverySampleOfAReference)
+{
+    auto* unitTest = ::testing::UnitTest::GetInstance();
+    ReferenceBenchmarkSummary summary;
+    summary.OnTestIterationStart(*unitTest, 0);
+
+    const auto verified = [](const char* reference, double prepare, double execute) {
+        ReferenceBenchmarkResult result;
+        result.reference = reference;
+        result.validator = "cpu";
+        result.status = ReferenceBenchmarkStatus::VERIFIED;
+        result.prepareMs = prepare;
+        result.executeMs = execute;
+        return result;
+    };
+
+    ::testing::internal::CaptureStdout();
+    reportReferenceBenchmark(verified("cpu", 1.0, 2.0));
+    reportReferenceBenchmark(verified("gpu", 4.0, 8.0));
+    reportReferenceBenchmark(verified("cpu", 16.0, 32.0));
+    static_cast<void>(::testing::internal::GetCapturedStdout());
+
+    ASSERT_EQ(ReferenceBenchmarkSummary::totals().size(), 2u);
+    EXPECT_EQ(ReferenceBenchmarkSummary::totals().at("cpu").count, 2u);
+    EXPECT_DOUBLE_EQ(ReferenceBenchmarkSummary::totals().at("cpu").milliseconds, 51.0);
+    EXPECT_EQ(ReferenceBenchmarkSummary::totals().at("gpu").count, 1u);
+    EXPECT_DOUBLE_EQ(ReferenceBenchmarkSummary::totals().at("gpu").milliseconds, 12.0);
+
+    ::testing::internal::CaptureStdout();
+    summary.OnTestIterationEnd(*unitTest, 0);
+    EXPECT_EQ(::testing::internal::GetCapturedStdout(),
+              "[ REFERENCE BENCHMARK SUMMARY ] reference=cpu measured=2 total_ms=51\n"
+              "[ REFERENCE BENCHMARK SUMMARY ] reference=gpu measured=1 total_ms=12\n");
+    summary.OnTestIterationStart(*unitTest, 1);
 }
 
 // ---- resolveBenchmark -----------------------------------------------------
@@ -908,6 +971,27 @@ TEST_P(TestBundleHarnessBenchmark, ReferenceTimingExcludesEngineAndAccountsForEv
     EXPECT_TRUE(_benchmarkCalls.empty());
 }
 
+// Checking that a reference applies is part of preparing it, so its cost lands in
+// prepare_ms. Golden outputs have no such check.
+TEST_P(TestBundleHarnessBenchmark, ApplicabilityCheckIsTimedInPrepare)
+{
+    using ::testing::_;
+    for(auto* reference : {&_mocks.cpuReference, &_mocks.gpuReference})
+    {
+        ON_CALL(*reference, isApplicable(_, _)).WillByDefault([this](void*, size_t) {
+            _now += std::chrono::milliseconds(5);
+            return true;
+        });
+    }
+    ::testing::TestPartResultArray results;
+    run(fixtures::K_OUTPUT_VALUE, std::nullopt, &results, true);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    ASSERT_EQ(_referenceResults.size(), 1u);
+    // ReferenceTimingExcludesEngineAndAccountsForEveryPhase's 4.0, plus the check.
+    EXPECT_DOUBLE_EQ(_referenceResults.front().prepareMs, GetParam().hasGoldenOutput ? 0.0 : 9.0);
+}
+
 // The golden reference's execute phase is reading the golden outputs, so they must
 // not already be loaded with the inputs when it starts.
 TEST_P(TestBundleHarnessBenchmark, GoldenOutputsAreReadInsideTheExecutePhase)
@@ -1109,6 +1193,7 @@ TEST_P(TestReferenceBenchmarkDeviceSite, ExpectedOutputsReachTheValidatorInsideM
     constexpr size_t BYTES = fixtures::K_OUTPUT_ELEMS * sizeof(float);
     const std::vector<float> expected(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
     const std::vector<float> overwrite(fixtures::K_OUTPUT_ELEMS, -1.0f);
+    constexpr auto PLACEMENT_CHECK = std::chrono::milliseconds(20);
 
     const hipdnn_test_sdk::utilities::ScopedDirectory directory(
         hipdnn_test_sdk::utilities::claimScratchDirectory("reference_benchmark_device_site"));
@@ -1127,7 +1212,12 @@ TEST_P(TestReferenceBenchmarkDeviceSite, ExpectedOutputsReachTheValidatorInsideM
     void* referenceOutput = nullptr;
     for(auto* reference : {&mocks.cpuReference, &mocks.gpuReference})
     {
-        ON_CALL(*reference, requiresDeviceMemory()).WillByDefault(Return(param.referenceOnDevice));
+        // Choosing where the reference writes is part of preparing it. The clock here
+        // is real, so a sleep puts a floor under prepare_ms.
+        ON_CALL(*reference, requiresDeviceMemory()).WillByDefault([&] {
+            std::this_thread::sleep_for(PLACEMENT_CHECK);
+            return param.referenceOnDevice;
+        });
         ON_CALL(*reference, execute(_, _, _))
             .WillByDefault([&](void*, size_t, const VariantPack& variantPack) {
                 referenceOutput = variantPack.at(fixtures::K_OUTPUT_UID);
@@ -1187,6 +1277,12 @@ TEST_P(TestReferenceBenchmarkDeviceSite, ExpectedOutputsReachTheValidatorInsideM
     const auto& timing = driven.referenceBenchmarks().front();
     EXPECT_EQ(timing.status, ReferenceBenchmarkStatus::VERIFIED);
     EXPECT_EQ(timing.validator, param.validator == ValidatorDevice::GPU ? "gpu" : "cpu");
+    if(!param.golden)
+    {
+        const double placementCheckMs
+            = std::chrono::duration<double, std::milli>(PLACEMENT_CHECK).count();
+        EXPECT_GE(timing.prepareMs, placementCheckMs);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Sites,

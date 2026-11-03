@@ -458,15 +458,6 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        const bool benchmarkReference = parser.get<bool>("--benchmark-reference");
-        const auto referenceError = hipdnn_integration_tests::validateReferenceBenchmark(
-            {benchmarkReference, skipGraphValidation, captureDir.has_value(), writeSupportClaims});
-        if(referenceError.has_value())
-        {
-            std::cerr << "Error: " << *referenceError << '\n';
-            return 1;
-        }
-
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.articlePath = std::move(articlePath);
         opts.engineName = std::move(engineName);
@@ -482,11 +473,28 @@ int main(int argc, char** argv) noexcept
         opts.writeSupportClaims = writeSupportClaims;
         opts.benchmark = benchmark.settings;
         opts.graphCapture = graphCapture.settings;
-        opts.benchmarkReference = benchmarkReference;
+        opts.benchmarkReference = parser.get<bool>("--benchmark-reference");
         opts.enforceSupportClaims
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
+
+        // Checked against the initialized config: HIPDNN_TEST_ALLOW_BUNDLES can override
+        // --no-bundles either way, and only initialize() settles which one wins.
+        const auto& initializedConfig = hipdnn_integration_tests::TestConfig::get();
+        hipdnn_integration_tests::ReferenceBenchmarkRequest referenceRequest;
+        referenceRequest.enabled = initializedConfig.benchmarkReference();
+        referenceRequest.skipGraphValidation = initializedConfig.skipGraphValidation();
+        referenceRequest.captureBundles = initializedConfig.hasCaptureDir();
+        referenceRequest.writeSupportClaims = initializedConfig.writeSupportClaims();
+        referenceRequest.bundlesDisabled = !initializedConfig.allowBundles();
+        const auto referenceError
+            = hipdnn_integration_tests::validateReferenceBenchmark(referenceRequest);
+        if(referenceError.has_value())
+        {
+            std::cerr << "Error: " << *referenceError << '\n';
+            return 1;
+        }
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -518,7 +526,7 @@ int main(int argc, char** argv) noexcept
         // iteration too.
         listeners.Append(new hipdnn_integration_tests::bundle::VerifierTallyIterationReset);
         listeners.Append(new hipdnn_integration_tests::CaptureTallyIterationReset);
-        if(benchmarkReference)
+        if(initializedConfig.benchmarkReference())
         {
             listeners.Append(new hipdnn_integration_tests::ReferenceBenchmarkSummary);
         }

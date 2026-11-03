@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "harness/IReferenceExecutors.hpp"
+#include "harness/ReferenceBenchmarkSync.hpp"
 #include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/IGraphEngineRunner.hpp"
 #include "harness/bundle/ISupportClaimObserver.hpp"
@@ -35,9 +36,10 @@ struct HarnessDependencies
     /// every input is filled on the host.
     std::shared_ptr<DeviceInputFiller> deviceFiller;
     HarnessPolicy policy;
-    /// Times each reference phase under --benchmark-reference. The default never
-    /// synchronizes; productionDependencies() installs a real device synchronize.
-    ReferenceBenchmarkTimer referenceTimer;
+    /// Times each reference phase under --benchmark-reference. Defaults to the real
+    /// device synchronize, so no caller can time a GPU reference without it; deviceless
+    /// tests install a timer that never synchronizes.
+    ReferenceBenchmarkTimer referenceTimer = productionReferenceTimer();
 };
 
 /// The real collaborators, with the process-wide reference-executor pool.
