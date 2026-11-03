@@ -36,12 +36,12 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(__type_traits/decay.h)
 #include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
 #include _THRUST_STD_INCLUDE(__utility/declval.h)
 #include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail::functional
@@ -83,9 +83,9 @@ struct argument
 {
   template <typename... Ts>
   THRUST_HOST_DEVICE auto eval(Ts&&... args) const
-    -> decltype(thrust::get<Pos>(thrust::tuple<Ts&&...>{THRUST_FWD(args)...}))
+    -> decltype(_THRUST_STD::get<Pos>(_THRUST_STD::tuple<Ts&&...>{THRUST_FWD(args)...}))
   {
-    return thrust::get<Pos>(thrust::tuple<Ts&&...>{THRUST_FWD(args)...});
+    return _THRUST_STD::get<Pos>(_THRUST_STD::tuple<Ts&&...>{THRUST_FWD(args)...});
   }
 };
 

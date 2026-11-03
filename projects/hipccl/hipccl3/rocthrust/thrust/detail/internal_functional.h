@@ -36,7 +36,6 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
@@ -52,6 +51,7 @@
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_reference.h)
 #include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
+#include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 

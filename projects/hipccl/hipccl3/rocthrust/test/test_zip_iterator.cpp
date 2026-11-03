@@ -16,7 +16,6 @@
  */
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/sequence.h>
@@ -28,10 +27,6 @@
 #include "test_utils.hpp"
 
 #include _THRUST_STD_INCLUDE(type_traits)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
 
 using ZipIteratorTests32BitParams = ::testing::Types<Params<int>, Params<unsigned int>, Params<float>>;
 
@@ -69,12 +64,12 @@ TEST(ZipIterator32BitTests, TestZipIteratorTraits)
 
   using base_it = thrust::host_vector<int>::iterator;
 
-  using it        = thrust::zip_iterator<thrust::tuple<base_it, base_it>>;
+  using it        = thrust::zip_iterator<_THRUST_STD::tuple<base_it, base_it>>;
   using traits    = _THRUST_STD::iterator_traits<it>;
   using reference = thrust::detail::tuple_of_iterator_references<int&, int&>;
 
   static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
-  static_assert(_THRUST_STD::is_same_v<traits::value_type, thrust::tuple<int, int>>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, _THRUST_STD::tuple<int, int>>);
   static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
 
   static_assert(_THRUST_STD::is_same_v<traits::reference, reference>);
@@ -84,18 +79,12 @@ TEST(ZipIterator32BitTests, TestZipIteratorTraits)
 
   static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::output_iterator<it, int>);
-#endif
-#if _THRUST_HAS_DEVICE_SYSTEM_STD // The fallback version of zip_iterator lacks these iterator concepts.
   static_assert(_THRUST_STD::input_iterator<it>);
   static_assert(_THRUST_STD::forward_iterator<it>);
   static_assert(_THRUST_STD::bidirectional_iterator<it>);
   static_assert(_THRUST_STD::random_access_iterator<it>);
-#endif
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::contiguous_iterator<it>);
-#endif
 }
 
 template <typename Vector>
@@ -112,27 +101,27 @@ void TestZipIteratorConstructionFromIterators_test()
   sequence(v1.begin(), v1.end());
   sequence(v2.begin(), v2.end());
 
-  using IteratorTuple = tuple<typename Vector::iterator, typename Vector::iterator>;
-  IteratorTuple t     = make_tuple(v0.begin(), v1.begin());
+  using IteratorTuple = _THRUST_STD::tuple<typename Vector::iterator, typename Vector::iterator>;
+  IteratorTuple t     = _THRUST_STD::make_tuple(v0.begin(), v1.begin());
   using ZipIterator   = zip_iterator<IteratorTuple>;
 
   // test construction from tuple
   ZipIterator iter0 = make_zip_iterator(t);
   ASSERT_TRUE(iter0 == ZipIterator{t});
 
-  ASSERT_TRUE(v0.begin() == get<0>(iter0.get_iterator_tuple()));
-  ASSERT_TRUE(v1.begin() == get<1>(iter0.get_iterator_tuple()));
+  ASSERT_TRUE(v0.begin() == _THRUST_STD::get<0>(iter0.get_iterator_tuple()));
+  ASSERT_TRUE(v1.begin() == _THRUST_STD::get<1>(iter0.get_iterator_tuple()));
   static_assert(_THRUST_STD::is_same_v<decltype(zip_iterator{t}), ZipIterator>); // CTAD
 
   // test construction from pack
   ZipIterator iter0_pack = make_zip_iterator(v0.begin(), v1.begin());
   ASSERT_TRUE(iter0_pack == (ZipIterator{v0.begin(), v1.begin()}));
-  ASSERT_TRUE(v0.begin() == get<0>(iter0_pack.get_iterator_tuple()));
-  ASSERT_TRUE(v1.begin() == get<1>(iter0_pack.get_iterator_tuple()));
+  ASSERT_TRUE(v0.begin() == _THRUST_STD::get<0>(iter0_pack.get_iterator_tuple()));
+  ASSERT_TRUE(v1.begin() == _THRUST_STD::get<1>(iter0_pack.get_iterator_tuple()));
   static_assert(_THRUST_STD::is_same_v<decltype(zip_iterator{v0.begin(), v1.begin()}), ZipIterator>); // CTAD
 
   // test dereference
-  ASSERT_EQ(*v0.begin(), get<0>(*iter0));
+  ASSERT_EQ(*v0.begin(), _THRUST_STD::get<0>(*iter0));
 }
 
 TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorConstructionFromIterators)
@@ -159,9 +148,9 @@ void TestZipIteratorManipulation_test()
   sequence(v1.begin(), v1.end());
   sequence(v2.begin(), v2.end());
 
-  using IteratorTuple = tuple<typename Vector::iterator, typename Vector::iterator>;
+  using IteratorTuple = _THRUST_STD::tuple<typename Vector::iterator, typename Vector::iterator>;
 
-  IteratorTuple t = make_tuple(v0.begin(), v1.begin());
+  IteratorTuple t = _THRUST_STD::make_tuple(v0.begin(), v1.begin());
 
   using ZipIterator = zip_iterator<IteratorTuple>;
 
@@ -169,12 +158,12 @@ void TestZipIteratorManipulation_test()
   ZipIterator iter0 = make_zip_iterator(t);
   ASSERT_EQ(true, iter0 == ZipIterator{t});
 
-  ASSERT_EQ_QUIET(v0.begin(), get<0>(iter0.get_iterator_tuple()));
-  ASSERT_EQ_QUIET(v1.begin(), get<1>(iter0.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v0.begin(), _THRUST_STD::get<0>(iter0.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v1.begin(), _THRUST_STD::get<1>(iter0.get_iterator_tuple()));
 
   // test dereference
-  ASSERT_EQ(*v0.begin(), get<0>(*iter0));
-  ASSERT_EQ(*v1.begin(), get<1>(*iter0));
+  ASSERT_EQ(*v0.begin(), _THRUST_STD::get<0>(*iter0));
+  ASSERT_EQ(*v1.begin(), _THRUST_STD::get<1>(*iter0));
 
   // test equality
   ZipIterator iter1 = iter0;
@@ -191,28 +180,28 @@ void TestZipIteratorManipulation_test()
 
   // test advance
   ZipIterator iter4 = iter0 + 1;
-  ASSERT_EQ_QUIET(v0.begin() + 1, get<0>(iter4.get_iterator_tuple()));
-  ASSERT_EQ_QUIET(v1.begin() + 1, get<1>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v0.begin() + 1, _THRUST_STD::get<0>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v1.begin() + 1, _THRUST_STD::get<1>(iter4.get_iterator_tuple()));
 
   // test pre-increment
   ++iter4;
-  ASSERT_EQ_QUIET(v0.begin() + 2, get<0>(iter4.get_iterator_tuple()));
-  ASSERT_EQ_QUIET(v1.begin() + 2, get<1>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v0.begin() + 2, _THRUST_STD::get<0>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v1.begin() + 2, _THRUST_STD::get<1>(iter4.get_iterator_tuple()));
 
   // test post-increment
   iter4++;
-  ASSERT_EQ_QUIET(v0.begin() + 3, get<0>(iter4.get_iterator_tuple()));
-  ASSERT_EQ_QUIET(v1.begin() + 3, get<1>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v0.begin() + 3, _THRUST_STD::get<0>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v1.begin() + 3, _THRUST_STD::get<1>(iter4.get_iterator_tuple()));
 
   // test pre-decrement
   --iter4;
-  ASSERT_EQ_QUIET(v0.begin() + 2, get<0>(iter4.get_iterator_tuple()));
-  ASSERT_EQ_QUIET(v1.begin() + 2, get<1>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v0.begin() + 2, _THRUST_STD::get<0>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v1.begin() + 2, _THRUST_STD::get<1>(iter4.get_iterator_tuple()));
 
   // test post-decrement
   iter4--;
-  ASSERT_EQ_QUIET(v0.begin() + 1, get<0>(iter4.get_iterator_tuple()));
-  ASSERT_EQ_QUIET(v1.begin() + 1, get<1>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v0.begin() + 1, _THRUST_STD::get<0>(iter4.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(v1.begin() + 1, _THRUST_STD::get<1>(iter4.get_iterator_tuple()));
 
   // test difference
   ASSERT_EQ(1, iter4 - iter0);
@@ -228,7 +217,8 @@ TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorManipulation)
   TestZipIteratorManipulation_test<thrust::host_vector<T>>();
   TestZipIteratorManipulation_test<thrust::device_vector<T>>();
 }
-static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::zip_iterator<thrust::tuple<int*, int*>>>::value, "");
+static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::zip_iterator<_THRUST_STD::tuple<int*, int*>>>::value,
+              "");
 
 TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorReference)
 {
@@ -240,40 +230,40 @@ TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorReference)
   // test host types
   using Iterator1      = typename host_vector<T>::iterator;
   using Iterator2      = typename host_vector<T>::const_iterator;
-  using IteratorTuple1 = tuple<Iterator1, Iterator2>;
+  using IteratorTuple1 = _THRUST_STD::tuple<Iterator1, Iterator2>;
   using ZipIterator1   = zip_iterator<IteratorTuple1>;
 
   using zip_iterator_reference_type1 = thrust::detail::it_reference_t<ZipIterator1>;
 
   host_vector<T> h_variable(1);
 
-  using reference_type1 = tuple<T&, const T&>;
+  using reference_type1 = _THRUST_STD::tuple<T&, const T&>;
 
   reference_type1 ref1(*h_variable.begin(), *h_variable.cbegin());
   zip_iterator_reference_type1 test1(*h_variable.begin(), *h_variable.cbegin());
 
   ASSERT_EQ_QUIET(ref1, test1);
-  ASSERT_EQ(get<0>(ref1), get<0>(test1));
-  ASSERT_EQ(get<1>(ref1), get<1>(test1));
+  ASSERT_EQ(_THRUST_STD::get<0>(ref1), _THRUST_STD::get<0>(test1));
+  ASSERT_EQ(_THRUST_STD::get<1>(ref1), _THRUST_STD::get<1>(test1));
 
   // test device types
   using Iterator3      = typename device_vector<T>::iterator;
   using Iterator4      = typename device_vector<T>::const_iterator;
-  using IteratorTuple2 = tuple<Iterator3, Iterator4>;
+  using IteratorTuple2 = _THRUST_STD::tuple<Iterator3, Iterator4>;
   using ZipIterator2   = zip_iterator<IteratorTuple2>;
 
   using zip_iterator_reference_type2 = thrust::detail::it_reference_t<ZipIterator2>;
 
   device_vector<T> d_variable(1);
 
-  using reference_type2 = tuple<device_reference<T>, device_reference<const T>>;
+  using reference_type2 = _THRUST_STD::tuple<device_reference<T>, device_reference<const T>>;
 
   reference_type2 ref2(*d_variable.begin(), *d_variable.cbegin());
   zip_iterator_reference_type2 test2(*d_variable.begin(), *d_variable.cbegin());
 
   ASSERT_EQ_QUIET(ref2, test2);
-  ASSERT_EQ(get<0>(ref2), get<0>(test2));
-  ASSERT_EQ(get<1>(ref2), get<1>(test2));
+  ASSERT_EQ(_THRUST_STD::get<0>(ref2), _THRUST_STD::get<0>(test2));
+  ASSERT_EQ(_THRUST_STD::get<1>(ref2), _THRUST_STD::get<1>(test2));
 }
 
 TYPED_TEST(ZipIteratorVectorTests, TestZipIteratorCopy)
@@ -302,20 +292,20 @@ TYPED_TEST(ZipIteratorVectorTests, TestZipIteratorCopy)
 struct SumTwoTuple
 {
   template <typename Tuple>
-  THRUST_HOST_DEVICE typename _THRUST_STD::remove_reference<typename thrust::tuple_element<0, Tuple>::type>::type
+  THRUST_HOST_DEVICE typename _THRUST_STD::remove_reference<typename _THRUST_STD::tuple_element<0, Tuple>::type>::type
   operator()(Tuple x) const
   {
-    return thrust::get<0>(x) + thrust::get<1>(x);
+    return _THRUST_STD::get<0>(x) + _THRUST_STD::get<1>(x);
   }
 }; // end SumTwoTuple
 
 struct SumThreeTuple
 {
   template <typename Tuple>
-  THRUST_HOST_DEVICE typename _THRUST_STD::remove_reference<typename thrust::tuple_element<0, Tuple>::type>::type
+  THRUST_HOST_DEVICE typename _THRUST_STD::remove_reference<typename _THRUST_STD::tuple_element<0, Tuple>::type>::type
   operator()(Tuple x) const
   {
-    return thrust::get<0>(x) + thrust::get<1>(x) + thrust::get<2>(x);
+    return _THRUST_STD::get<0>(x) + _THRUST_STD::get<1>(x) + _THRUST_STD::get<2>(x);
   }
 }; // end SumThreeTuple
 
@@ -373,44 +363,46 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopyAoSToSoA)
 
   const size_t n = 1;
 
-  using structure                  = tuple<int, int>;
+  using structure                  = _THRUST_STD::tuple<int, int>;
   using host_array_of_structures   = host_vector<structure>;
   using device_array_of_structures = device_vector<structure>;
 
-  using host_structure_of_arrays = zip_iterator<tuple<host_vector<int>::iterator, host_vector<int>::iterator>>;
+  using host_structure_of_arrays =
+    zip_iterator<_THRUST_STD::tuple<host_vector<int>::iterator, host_vector<int>::iterator>>;
 
-  using device_structure_of_arrays = zip_iterator<tuple<device_vector<int>::iterator, device_vector<int>::iterator>>;
+  using device_structure_of_arrays =
+    zip_iterator<_THRUST_STD::tuple<device_vector<int>::iterator, device_vector<int>::iterator>>;
 
-  host_array_of_structures h_aos(n, make_tuple(7, 13));
-  device_array_of_structures d_aos(n, make_tuple(7, 13));
+  host_array_of_structures h_aos(n, _THRUST_STD::make_tuple(7, 13));
+  device_array_of_structures d_aos(n, _THRUST_STD::make_tuple(7, 13));
 
   // host to host
   host_vector<int> h_field0(n), h_field1(n);
   host_structure_of_arrays h_soa = make_zip_iterator(h_field0.begin(), h_field1.begin());
 
   thrust::copy(h_aos.begin(), h_aos.end(), h_soa);
-  ASSERT_EQ_QUIET(make_tuple(7, 13), h_soa[0]);
+  ASSERT_EQ_QUIET(_THRUST_STD::make_tuple(7, 13), h_soa[0]);
 
   // host to device
   device_vector<int> d_field0(n), d_field1(n);
   device_structure_of_arrays d_soa = make_zip_iterator(d_field0.begin(), d_field1.begin());
 
   thrust::copy(h_aos.begin(), h_aos.end(), d_soa);
-  ASSERT_EQ_QUIET(make_tuple(7, 13), d_soa[0]);
+  ASSERT_EQ_QUIET(_THRUST_STD::make_tuple(7, 13), d_soa[0]);
 
   // device to device
   thrust::fill(d_field0.begin(), d_field0.end(), 0);
   thrust::fill(d_field1.begin(), d_field1.end(), 0);
 
   thrust::copy(d_aos.begin(), d_aos.end(), d_soa);
-  ASSERT_EQ_QUIET(make_tuple(7, 13), d_soa[0]);
+  ASSERT_EQ_QUIET(_THRUST_STD::make_tuple(7, 13), d_soa[0]);
 
   // device to host
   thrust::fill(h_field0.begin(), h_field0.end(), 0);
   thrust::fill(h_field1.begin(), h_field1.end(), 0);
 
   thrust::copy(d_aos.begin(), d_aos.end(), h_soa);
-  ASSERT_EQ_QUIET(make_tuple(7, 13), h_soa[0]);
+  ASSERT_EQ_QUIET(_THRUST_STD::make_tuple(7, 13), h_soa[0]);
 }
 
 TEST(ZipIterator32BitTests, TestZipIteratorCopySoAToAoS)
@@ -421,13 +413,15 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopySoAToAoS)
 
   const size_t n = 1;
 
-  using structure                  = tuple<int, int>;
+  using structure                  = _THRUST_STD::tuple<int, int>;
   using host_array_of_structures   = host_vector<structure>;
   using device_array_of_structures = device_vector<structure>;
 
-  using host_structure_of_arrays = zip_iterator<tuple<host_vector<int>::iterator, host_vector<int>::iterator>>;
+  using host_structure_of_arrays =
+    zip_iterator<_THRUST_STD::tuple<host_vector<int>::iterator, host_vector<int>::iterator>>;
 
-  using device_structure_of_arrays = zip_iterator<tuple<device_vector<int>::iterator, device_vector<int>::iterator>>;
+  using device_structure_of_arrays =
+    zip_iterator<_THRUST_STD::tuple<device_vector<int>::iterator, device_vector<int>::iterator>>;
 
   host_vector<int> h_field0(n, 7), h_field1(n, 13);
   device_vector<int> d_field0(n, 7), d_field1(n, 13);
@@ -439,30 +433,30 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopySoAToAoS)
   device_array_of_structures d_aos(n);
 
   // host to host
-  thrust::fill(h_aos.begin(), h_aos.end(), make_tuple(0, 0));
+  thrust::fill(h_aos.begin(), h_aos.end(), _THRUST_STD::make_tuple(0, 0));
 
   thrust::copy(h_soa, h_soa + n, h_aos.begin());
-  ASSERT_EQ_QUIET(7, get<0>(h_soa[0]));
-  ASSERT_EQ_QUIET(13, get<1>(h_soa[0]));
+  ASSERT_EQ_QUIET(7, _THRUST_STD::get<0>(h_soa[0]));
+  ASSERT_EQ_QUIET(13, _THRUST_STD::get<1>(h_soa[0]));
 
   // host to device
-  thrust::fill(d_aos.begin(), d_aos.end(), make_tuple(0, 0));
+  thrust::fill(d_aos.begin(), d_aos.end(), _THRUST_STD::make_tuple(0, 0));
 
   thrust::copy(h_soa, h_soa + n, d_aos.begin());
-  ASSERT_EQ_QUIET(7, static_cast<int>(get<0>(d_soa[0]))); // needs casting due to GoogleTest limitation
-  ASSERT_EQ_QUIET(13, static_cast<int>(get<1>(d_soa[0]))); // needs casting due to GoogleTest limitation
+  ASSERT_EQ_QUIET(7, static_cast<int>(_THRUST_STD::get<0>(d_soa[0]))); // needs casting due to GoogleTest limitation
+  ASSERT_EQ_QUIET(13, static_cast<int>(_THRUST_STD::get<1>(d_soa[0]))); // needs casting due to GoogleTest limitation
 
   // device to device
-  thrust::fill(d_aos.begin(), d_aos.end(), make_tuple(0, 0));
+  thrust::fill(d_aos.begin(), d_aos.end(), _THRUST_STD::make_tuple(0, 0));
 
   thrust::copy(d_soa, d_soa + n, d_aos.begin());
-  ASSERT_EQ_QUIET(7, static_cast<int>(get<0>(d_soa[0]))); // needs casting due to GoogleTest limitation
-  ASSERT_EQ_QUIET(13, static_cast<int>(get<1>(d_soa[0]))); // needs casting due to GoogleTest limitation
+  ASSERT_EQ_QUIET(7, static_cast<int>(_THRUST_STD::get<0>(d_soa[0]))); // needs casting due to GoogleTest limitation
+  ASSERT_EQ_QUIET(13, static_cast<int>(_THRUST_STD::get<1>(d_soa[0]))); // needs casting due to GoogleTest limitation
 
   // device to host
-  thrust::fill(h_aos.begin(), h_aos.end(), make_tuple(0, 0));
+  thrust::fill(h_aos.begin(), h_aos.end(), _THRUST_STD::make_tuple(0, 0));
 
   thrust::copy(d_soa, d_soa + n, h_aos.begin());
-  ASSERT_EQ_QUIET(7, get<0>(h_soa[0]));
-  ASSERT_EQ_QUIET(13, get<1>(h_soa[0]));
+  ASSERT_EQ_QUIET(7, _THRUST_STD::get<0>(h_soa[0]));
+  ASSERT_EQ_QUIET(13, _THRUST_STD::get<1>(h_soa[0]));
 }

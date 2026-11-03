@@ -57,20 +57,20 @@ struct min_element_reduction
       : comp(comp)
   {}
 
-  THRUST_HOST_DEVICE thrust::tuple<InputType, IndexType>
-  operator()(const thrust::tuple<InputType, IndexType>& lhs, const thrust::tuple<InputType, IndexType>& rhs)
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<InputType, IndexType>
+  operator()(const _THRUST_STD::tuple<InputType, IndexType>& lhs, const _THRUST_STD::tuple<InputType, IndexType>& rhs)
   {
-    if (comp(thrust::get<0>(lhs), thrust::get<0>(rhs)))
+    if (comp(_THRUST_STD::get<0>(lhs), _THRUST_STD::get<0>(rhs)))
     {
       return lhs;
     }
-    if (comp(thrust::get<0>(rhs), thrust::get<0>(lhs)))
+    if (comp(_THRUST_STD::get<0>(rhs), _THRUST_STD::get<0>(lhs)))
     {
       return rhs;
     }
 
     // values are equivalent, prefer value with smaller index
-    if (thrust::get<1>(lhs) < thrust::get<1>(rhs))
+    if (_THRUST_STD::get<1>(lhs) < _THRUST_STD::get<1>(rhs))
     {
       return lhs;
     }
@@ -90,20 +90,20 @@ struct max_element_reduction
       : comp(comp)
   {}
 
-  THRUST_HOST_DEVICE thrust::tuple<InputType, IndexType>
-  operator()(const thrust::tuple<InputType, IndexType>& lhs, const thrust::tuple<InputType, IndexType>& rhs)
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<InputType, IndexType>
+  operator()(const _THRUST_STD::tuple<InputType, IndexType>& lhs, const _THRUST_STD::tuple<InputType, IndexType>& rhs)
   {
-    if (comp(thrust::get<0>(lhs), thrust::get<0>(rhs)))
+    if (comp(_THRUST_STD::get<0>(lhs), _THRUST_STD::get<0>(rhs)))
     {
       return rhs;
     }
-    if (comp(thrust::get<0>(rhs), thrust::get<0>(lhs)))
+    if (comp(_THRUST_STD::get<0>(rhs), _THRUST_STD::get<0>(lhs)))
     {
       return lhs;
     }
 
     // values are equivalent, prefer value with smaller index
-    if (thrust::get<1>(lhs) < thrust::get<1>(rhs))
+    if (_THRUST_STD::get<1>(lhs) < _THRUST_STD::get<1>(rhs))
     {
       return lhs;
     }
@@ -125,23 +125,26 @@ struct minmax_element_reduction
       : comp(comp)
   {}
 
-  THRUST_HOST_DEVICE thrust::tuple<thrust::tuple<InputType, IndexType>, thrust::tuple<InputType, IndexType>>
-  operator()(const thrust::tuple<thrust::tuple<InputType, IndexType>, thrust::tuple<InputType, IndexType>>& lhs,
-             const thrust::tuple<thrust::tuple<InputType, IndexType>, thrust::tuple<InputType, IndexType>>& rhs)
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<_THRUST_STD::tuple<InputType, IndexType>, _THRUST_STD::tuple<InputType, IndexType>>
+  operator()(
+    const _THRUST_STD::tuple<_THRUST_STD::tuple<InputType, IndexType>, _THRUST_STD::tuple<InputType, IndexType>>& lhs,
+    const _THRUST_STD::tuple<_THRUST_STD::tuple<InputType, IndexType>, _THRUST_STD::tuple<InputType, IndexType>>& rhs)
   {
-    return thrust::make_tuple(
-      min_element_reduction<InputType, IndexType, BinaryPredicate>(comp)(thrust::get<0>(lhs), thrust::get<0>(rhs)),
-      max_element_reduction<InputType, IndexType, BinaryPredicate>(comp)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
+    return _THRUST_STD::make_tuple(
+      min_element_reduction<InputType, IndexType, BinaryPredicate>(
+        comp)(_THRUST_STD::get<0>(lhs), _THRUST_STD::get<0>(rhs)),
+      max_element_reduction<InputType, IndexType, BinaryPredicate>(
+        comp)(_THRUST_STD::get<1>(lhs), _THRUST_STD::get<1>(rhs)));
   } // end operator()()
 }; // end minmax_element_reduction
 
 template <typename InputType, typename IndexType>
 struct duplicate_tuple
 {
-  THRUST_HOST_DEVICE thrust::tuple<thrust::tuple<InputType, IndexType>, thrust::tuple<InputType, IndexType>>
-  operator()(const thrust::tuple<InputType, IndexType>& t)
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<_THRUST_STD::tuple<InputType, IndexType>, _THRUST_STD::tuple<InputType, IndexType>>
+  operator()(const _THRUST_STD::tuple<InputType, IndexType>& t)
   {
-    return thrust::make_tuple(t, t);
+    return _THRUST_STD::make_tuple(t, t);
   }
 }; // end duplicate_tuple
 } // end namespace detail
@@ -167,14 +170,14 @@ THRUST_HOST_DEVICE ForwardIterator min_element(
   using InputType = thrust::detail::it_value_t<ForwardIterator>;
   using IndexType = thrust::detail::it_difference_t<ForwardIterator>;
 
-  thrust::tuple<InputType, IndexType> result = thrust::reduce(
+  _THRUST_STD::tuple<InputType, IndexType> result = thrust::reduce(
     exec,
     thrust::make_zip_iterator(first, thrust::counting_iterator<IndexType>(0)),
     thrust::make_zip_iterator(first, thrust::counting_iterator<IndexType>(0)) + (last - first),
-    thrust::tuple<InputType, IndexType>(thrust::detail::get_iterator_value(derived_cast(exec), first), 0),
+    _THRUST_STD::tuple<InputType, IndexType>(thrust::detail::get_iterator_value(derived_cast(exec), first), 0),
     detail::min_element_reduction<InputType, IndexType, BinaryPredicate>(comp));
 
-  return first + thrust::get<1>(result);
+  return first + _THRUST_STD::get<1>(result);
 } // end min_element()
 
 template <typename DerivedPolicy, typename ForwardIterator>
@@ -198,14 +201,14 @@ THRUST_HOST_DEVICE ForwardIterator max_element(
   using InputType = thrust::detail::it_value_t<ForwardIterator>;
   using IndexType = thrust::detail::it_difference_t<ForwardIterator>;
 
-  thrust::tuple<InputType, IndexType> result = thrust::reduce(
+  _THRUST_STD::tuple<InputType, IndexType> result = thrust::reduce(
     exec,
     thrust::make_zip_iterator(first, thrust::counting_iterator<IndexType>(0)),
     thrust::make_zip_iterator(first, thrust::counting_iterator<IndexType>(0)) + (last - first),
-    thrust::tuple<InputType, IndexType>(thrust::detail::get_iterator_value(derived_cast(exec), first), 0),
+    _THRUST_STD::tuple<InputType, IndexType>(thrust::detail::get_iterator_value(derived_cast(exec), first), 0),
     detail::max_element_reduction<InputType, IndexType, BinaryPredicate>(comp));
 
-  return first + thrust::get<1>(result);
+  return first + _THRUST_STD::get<1>(result);
 } // end max_element()
 
 template <typename DerivedPolicy, typename ForwardIterator>
@@ -229,18 +232,18 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator, ForwardIterator> minmax_el
   using InputType = thrust::detail::it_value_t<ForwardIterator>;
   using IndexType = thrust::detail::it_difference_t<ForwardIterator>;
 
-  thrust::tuple<thrust::tuple<InputType, IndexType>, thrust::tuple<InputType, IndexType>> result =
+  _THRUST_STD::tuple<_THRUST_STD::tuple<InputType, IndexType>, _THRUST_STD::tuple<InputType, IndexType>> result =
     thrust::transform_reduce(
       exec,
       thrust::make_zip_iterator(first, thrust::counting_iterator<IndexType>(0)),
       thrust::make_zip_iterator(first, thrust::counting_iterator<IndexType>(0)) + (last - first),
       detail::duplicate_tuple<InputType, IndexType>(),
       detail::duplicate_tuple<InputType, IndexType>()(
-        thrust::tuple<InputType, IndexType>(thrust::detail::get_iterator_value(derived_cast(exec), first), 0)),
+        _THRUST_STD::tuple<InputType, IndexType>(thrust::detail::get_iterator_value(derived_cast(exec), first), 0)),
       detail::minmax_element_reduction<InputType, IndexType, BinaryPredicate>(comp));
 
-  return _THRUST_STD::make_pair(first + thrust::get<1>(thrust::get<0>(result)),
-                           first + thrust::get<1>(thrust::get<1>(result)));
+  return _THRUST_STD::make_pair(
+    first + _THRUST_STD::get<1>(_THRUST_STD::get<0>(result)), first + _THRUST_STD::get<1>(_THRUST_STD::get<1>(result)));
 } // end minmax_element()
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END
