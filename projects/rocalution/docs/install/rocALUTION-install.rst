@@ -11,8 +11,8 @@ Install rocALUTION
 You can install rocALUTION on Linux from prebuilt packages either as part of
 the ROCm HPC SDK, as standalone packages, or from a ROCm Core SDK tarball
 release. Before you begin, verify that your operating system and environment
-are supported using the installation selector on :doc:`Install ROCm HPC SDK
-<rocm:components/hpc-sdk/install>`.
+are supported using the installation selector on `Install ROCm HPC SDK
+<https://rocm-stg.amd.com/en/docs-10.2.0/components/hpc-sdk/install.html>`__.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`Build rocALUTION from source <./rocALUTION-build-from-source>`.
@@ -27,10 +27,11 @@ ROCm Core SDK through the standard ``amdrocm`` metapackage; it is installed
 through the opt-in ``amdrocm-hpc-sdk`` metapackage. This is the recommended
 installation method for the most complete installation.
 
-For instructions, see :doc:`Install ROCm HPC SDK
-<rocm:components/hpc-sdk/install>` and use the selector panel to view
+For instructions, see `Install ROCm HPC SDK
+<https://rocm-stg.amd.com/en/docs-10.2.0/components/hpc-sdk/install.html>`__
+and use the selector panel to view
 instructions for your system environment. For ROCm core installation, see
-:doc:`Install AMD ROCm <rocm:install/rocm>`.
+`Install AMD ROCm <https://rocm-stg.amd.com/en/docs-10.2.0/install/rocm.html>`__.
 
 .. _install-rocalution-linux:
 
@@ -40,8 +41,9 @@ Install rocALUTION standalone on Linux
 Alternatively, you can use the ``amdrocm-rocalution`` packages to install
 rocALUTION without the full ROCm HPC SDK.
 
-1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
-   install dependencies and configure GPU access permissions.
+1. Complete the `ROCm installation prerequisites
+   <https://rocm-stg.amd.com/en/docs-10.2.0/install/rocm.html>`__ to install
+   dependencies and configure GPU access permissions.
 
 2. Install the rocALUTION packages that match your desired ROCm version,
    development package needs, and AMD GPU architecture. Package names use the
@@ -139,7 +141,7 @@ Install from a tarball
 ======================
 
 The standard ROCm Core SDK tarball installation includes rocALUTION. No additional steps
-are required. For details, see :doc:`Install AMD ROCm <rocm:install/rocm>` and
+are required. For details, see `Install AMD ROCm <https://rocm-stg.amd.com/en/docs-10.2.0/install/rocm.html>`__ and
 select the tarball installation method.
 
 The standard ROCm uninstallation process removes rocALUTION. No additional
