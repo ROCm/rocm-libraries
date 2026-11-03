@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Cold inventory of actual COMGR symbol providers, not guessed filenames.
+"""Cold inventory of actual compiler/runtime API providers, not guessed filenames.
 
 References returned to the owner pin already-loaded modules. No probe opens an
 unmapped compiler, and dependent/proxy modules are attributed to symbol owners.
@@ -17,13 +17,15 @@ from ._compiler_query import ComgrError, file_signature
 
 
 @dataclass(frozen=True)
-class LoadedCompiler:
+class LoadedLibrary:
     library: object
     path: str
     signature: tuple[int, int, int, int]
 
 
-def _windows() -> list[LoadedCompiler]:
+def _windows(
+    symbols=(b"amd_comgr_get_version", b"amd_comgr_do_action")
+) -> list[LoadedLibrary]:
     from ctypes import wintypes
 
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -65,8 +67,8 @@ def _windows() -> list[LoadedCompiler]:
     result, retained = [], set()
     try:
         for module in modules[: needed.value // ctypes.sizeof(wintypes.HMODULE)]:
-            version = kernel.GetProcAddress(module, b"amd_comgr_get_version")
-            action = kernel.GetProcAddress(module, b"amd_comgr_do_action")
+            version = kernel.GetProcAddress(module, symbols[0])
+            action = kernel.GetProcAddress(module, symbols[1])
             if not version or not action:
                 continue
             owner, action_owner = wintypes.HMODULE(), wintypes.HMODULE()
@@ -88,7 +90,7 @@ def _windows() -> list[LoadedCompiler]:
                 raise ComgrError("cannot identify loaded COMGR file")
             path = buf.value
             library = ctypes.CDLL(path, handle=pinned.value)
-            result.append(LoadedCompiler(library, path, file_signature(path)))
+            result.append(LoadedLibrary(library, path, file_signature(path)))
         return result
     except BaseException:
         for handle in retained:
@@ -96,7 +98,9 @@ def _windows() -> list[LoadedCompiler]:
         raise
 
 
-def _linux() -> list[LoadedCompiler]:
+def _linux(
+    symbols=(b"amd_comgr_get_version", b"amd_comgr_do_action")
+) -> list[LoadedLibrary]:
     import _ctypes
 
     class Info(ctypes.Structure):
@@ -169,8 +173,8 @@ def _linux() -> list[LoadedCompiler]:
         for library in attached.values():
             try:
                 version, action = (
-                    library.amd_comgr_get_version,
-                    library.amd_comgr_do_action,
+                    getattr(library, symbols[0].decode()),
+                    getattr(library, symbols[1].decode()),
                 )
             except AttributeError:
                 continue
@@ -204,7 +208,7 @@ def _linux() -> list[LoadedCompiler]:
                     f"mapped COMGR {path!r} no longer names its loaded file"
                 )
             keep.add(base)
-            result.append(LoadedCompiler(owner, path, signature))
+            result.append(LoadedLibrary(owner, path, signature))
         return result
     except BaseException:
         keep.clear()
@@ -215,7 +219,7 @@ def _linux() -> list[LoadedCompiler]:
                 _ctypes.dlclose(library._handle)
 
 
-def loaded_compilers() -> list[LoadedCompiler]:
+def loaded_compilers() -> list[LoadedLibrary]:
     if sys.platform == "win32":
         return _windows()
     if sys.platform == "linux":
@@ -223,7 +227,16 @@ def loaded_compilers() -> list[LoadedCompiler]:
     raise ComgrError("safe compiler admission supports Linux and Windows")
 
 
-def release(compiler: LoadedCompiler) -> None:
+def loaded_runtimes() -> list[LoadedLibrary]:
+    symbols = (b"hipGetDeviceCount", b"hipInit")
+    if sys.platform == "win32":
+        return _windows(symbols)
+    if sys.platform == "linux":
+        return _linux(symbols)
+    raise ComgrError("safe runtime admission supports Linux and Windows")
+
+
+def release(compiler: LoadedLibrary) -> None:
     if sys.platform == "win32":
         kernel = ctypes.WinDLL("kernel32")
         kernel.FreeLibrary.argtypes = [ctypes.c_void_p]

@@ -91,42 +91,79 @@ class _HipLaunchConfig(ctypes.Structure):
 
 def _load_lib() -> ctypes.CDLL:
     from pathlib import Path
-    from ._compiler_query import ComgrError
+    from . import _loaded_libraries
+    from ._compiler_query import ComgrError, file_signature
 
-    values = _session.session.environment
+    owner = _session.session
+    values = owner.environment
     paths = _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"], values)
     explicit = (values if values is not None else os.environ).get("ROCKE_HIP_LIB")
     selected = explicit or next(
         (p for p in paths if os.path.isfile(p)), paths[-1] if paths else None
     )
     if not selected:
-        raise HipError(
-            "no HIP runtime candidate; provision the SDK runtime or ROCKE_HIP_LIB"
-        )
-    if os.path.dirname(selected):
-        selected = str(Path(selected).absolute())
-    owner = _session.session
-    compiler = owner.compiler
-    requested = (
-        getattr(compiler, "_rocke_actual_path", getattr(compiler, "_name", None))
-        if compiler is not None
-        else (values if values is not None else os.environ).get("ROCKE_COMGR_LIB")
-    )
-    if requested:
-        try:
-            _session.check_pair(selected, requested)
-        except ComgrError as error:
-            raise HipError(str(error)) from error
-    directory = _add_dll_dir(selected)
+        raise HipError("no HIP runtime candidate; provision SDK HIP or ROCKE_HIP_LIB")
+    if os.path.isfile(selected):
+        selected = str(Path(selected).resolve())
+    mapped = _loaded_libraries.loaded_runtimes()
+    retained = None
+    accepted = False
     try:
-        library = ctypes.CDLL(selected)
-        if directory is not None:
-            owner.dll_directories.append(directory)
-        return library
-    except OSError as error:
-        if directory is not None:
-            directory.close()
-        raise HipError(f"cannot load HIP {selected!r}: {error}") from error
+        matches = []
+        for item in mapped:
+            try:
+                if os.path.samefile(selected, item.path):
+                    matches.append(item)
+            except OSError:
+                pass
+        if matches:
+            retained = matches[0]
+        elif mapped:
+            if explicit or len(mapped) != 1:
+                raise HipError(
+                    f"HIP already mapped at {[item.path for item in mapped]!r}; cannot introduce {selected!r}"
+                )
+            retained = mapped[
+                0
+            ]  # Existing runtime ownership wins over an automatic candidate.
+        if retained is not None:
+            selected = retained.path
+        compiler = owner.compiler
+        requested = (
+            getattr(compiler, "_rocke_actual_path", getattr(compiler, "_name", None))
+            if compiler is not None
+            else (values if values is not None else os.environ).get("ROCKE_COMGR_LIB")
+        )
+        if requested:
+            signature = (
+                getattr(compiler, "_rocke_signature", None)
+                if compiler is not None
+                else None
+            )
+            if isinstance(signature, tuple) and file_signature(requested) != signature:
+                raise HipError(
+                    "admitted compiler identity changed before HIP acquisition"
+                )
+            _session.check_pair(selected, requested)
+        if retained is not None:
+            accepted = True
+            return retained.library
+        directory = _add_dll_dir(selected)
+        try:
+            library = ctypes.CDLL(selected)
+            if directory is not None:
+                owner.dll_directories.append(directory)
+            return library
+        except OSError as error:
+            if directory is not None:
+                directory.close()
+            raise HipError(f"cannot load HIP {selected!r}: {error}") from error
+    except ComgrError as error:
+        raise HipError(str(error)) from error
+    finally:
+        for item in mapped:
+            if not accepted or item is not retained:
+                _loaded_libraries.release(item)
 
 
 def _resolve_hip() -> ctypes.CDLL:

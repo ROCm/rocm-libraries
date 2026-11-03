@@ -139,6 +139,12 @@ def _load_lib(explicit_path: str | None = None) -> ctypes.CDLL:
         hip = _session.session.hip
         if hip is not None:
             _session.check_pair(getattr(hip, "_name", None), selected)
+        from ._compiler_query import file_signature
+
+        try:
+            signature = file_signature(selected)
+        except OSError:
+            signature = None  # The loader retains the original missing-file diagnostic.
         directory = _add_dll_dir(selected)
         try:
             library = ctypes.CDLL(selected)
@@ -154,6 +160,16 @@ def _load_lib(explicit_path: str | None = None) -> ctypes.CDLL:
             _session.session.dll_directories.append(directory)
         library._rocke_admission = (selected, None)
         library._rocke_actual_path = str(Path(selected).absolute())
+        library._rocke_signature = signature
+        if signature is not None:
+            try:
+                unchanged = file_signature(selected) == signature
+            except OSError:
+                unchanged = False
+            if not unchanged:
+                library._rocke_failure = (
+                    "compiler file identity changed during acquisition"
+                )
         return library
     finally:
         for item in mapped:
@@ -163,16 +179,20 @@ def _load_lib(explicit_path: str | None = None) -> ctypes.CDLL:
 
 def _resolve_lib() -> ctypes.CDLL:
     """The warm path returns the process owner's retained compiler immediately."""
-    return _session.session.resolve("compiler", _load_lib)
+    library = _session.session.resolve("compiler", _load_lib)
+    failure = getattr(library, "_rocke_failure", None)
+    if isinstance(failure, str) and failure:
+        raise ComgrError(failure)
+    return library
 
 
 def initialize_compiler(path: str) -> ctypes.CDLL:
     """Explicit initialization/reinitialization must honor the exact physical file."""
     owner = _session.session
     owner.check_compiler_request(path)
-    library = owner.resolve("compiler", lambda: _load_lib(path))
+    owner.resolve("compiler", lambda: _load_lib(path))
     owner.check_compiler_request(path)
-    return library
+    return _resolve_lib()
 
 
 def resolved_lib_path() -> Optional[str]:
@@ -374,6 +394,11 @@ def _loaded_compiler_info(*, required: bool) -> CompilerInfo | None:
         return None
     owner = _session.session
     with owner.lock:
+        failure = getattr(lib, "_rocke_failure", None)
+        if isinstance(failure, str) and failure:
+            if required:
+                raise _compiler_info_error(failure)
+            return None
         if owner.queried_compiler is lib:
             return owner.compiler_info
         info = query_info(

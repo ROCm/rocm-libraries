@@ -50,6 +50,28 @@ def test_single_flight_and_warm_handle(owner):
         assert owner.resolve("compiler", lambda: pytest.fail("warm reload")) is handle
 
 
+def test_changed_file_after_load_is_retained_but_not_admitted(owner, monkeypatch):
+    from rocke.runtime import _compiler_query
+
+    handle = SimpleNamespace(_name="selected")
+    monkeypatch.setattr(comgr, "_candidate_lib_paths", lambda *args: ["selected"])
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_compilers", lambda: [])
+    monkeypatch.setattr(comgr, "_add_dll_dir", lambda path: None)
+    monkeypatch.setattr(comgr.ctypes, "CDLL", Mock(return_value=handle))
+    monkeypatch.setattr(
+        _compiler_query,
+        "file_signature",
+        Mock(side_effect=[(1, 2, 3, 4), (1, 9, 3, 4)]),
+    )
+    with pytest.raises(comgr.ComgrError, match="identity changed"):
+        comgr._resolve_lib()
+    for _ in range(2):
+        with pytest.raises(comgr.ComgrError, match="identity changed"):
+            comgr._require_compiler_info()
+    assert owner.compiler is handle  # Retain the unusable image; never retry a load.
+    comgr.ctypes.CDLL.assert_called_once()
+
+
 def test_failed_acquisition_is_retryable(owner):
     load = Mock(
         side_effect=[comgr.ComgrError("load failed"), SimpleNamespace(_name="selected")]
@@ -113,11 +135,33 @@ def test_incompatible_new_hip_pair_is_refused_before_load(owner, tmp_path, monke
     hip.touch()
     owner.compiler = SimpleNamespace(_name=str(selected))
     monkeypatch.setenv("ROCKE_HIP_LIB", str(hip))
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", lambda: [])
     monkeypatch.setattr(
         hip_module.ctypes, "CDLL", Mock(side_effect=AssertionError("unsafe HIP load"))
     )
     with pytest.raises(hip_module.HipError, match="coherent exact-file pair"):
         hip_module._resolve_hip()
+    hip_module.ctypes.CDLL.assert_not_called()
+
+
+def test_preloaded_hip_alias_uses_existing_handle(owner, tmp_path, monkeypatch):
+    from rocke.runtime import hip_module
+    from rocke.runtime._loaded_libraries import LoadedLibrary
+    from rocke.runtime._compiler_query import file_signature
+
+    path = tmp_path / "runtime.so"
+    path.touch()
+    alias = tmp_path / "alias.so"
+    os.link(path, alias)
+    handle = SimpleNamespace(_name=str(path))
+    mapped = LoadedLibrary(handle, str(path), file_signature(path))
+    monkeypatch.setenv("ROCKE_HIP_LIB", str(alias))
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_runtimes", lambda: [mapped])
+    monkeypatch.setattr(
+        hip_module.ctypes, "CDLL", Mock(side_effect=AssertionError("second HIP"))
+    )
+    assert hip_module._resolve_hip() is handle
+    assert hip_module._resolve_hip() is handle
     hip_module.ctypes.CDLL.assert_not_called()
 
 

@@ -8130,7 +8130,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         from unittest import mock
         from types import SimpleNamespace
         from rocke.runtime import comgr as comgr_mod
-        from rocke.runtime._loaded_libraries import LoadedCompiler
+        from rocke.runtime._loaded_libraries import LoadedLibrary
         from rocke.runtime._compiler_query import file_signature
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -8140,7 +8140,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             for path in (selected, foreign):
                 open(path, "wb").close()
             handle = SimpleNamespace(_name=foreign)
-            mapped = LoadedCompiler(handle, foreign, file_signature(foreign))
+            mapped = LoadedLibrary(handle, foreign, file_signature(foreign))
             with (
                 mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": selected}),
                 mock.patch.object(
