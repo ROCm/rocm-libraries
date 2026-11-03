@@ -800,11 +800,14 @@ struct UniversalGemmKernel
 
         if constexpr(has_skip_check_valid_launch_params::value)
         {
-            // A TDM pipeline paired with a split-K-capable epilogue (comp_tdm_v3 with CShuffle)
-            // passes the EpilogueSupportsSplitK guard above, but no TDM pipeline is tested with
-            // k_batch != 1, so apply the same TDM checks as the kernels that host one.
+            // Apply the same TDM checks as the kernels that host a TDM pipeline. Their split-K
+            // rejection is about the TDM epilogue, which overwrites C; a split-K-capable epilogue
+            // (CShuffle, with comp_tdm_v3) adds each split into C atomically, and the TDM loads of
+            // a split are clipped to its own K range, so k_batch > 1 is checked only with a TDM
+            // epilogue.
+            const index_t tdm_k_batch = is_tdm_epilogue_v<EpiloguePipeline> ? kargs.k_batch : 1;
             if(!IsTdmArgumentSupported(
-                   "GEMM", kargs.k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr))
+                   "GEMM", tdm_k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr))
             {
                 return false;
             }

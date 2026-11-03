@@ -13,6 +13,9 @@
 //   -vector_c auto | 8 | 2 | 1          CShuffle only; auto picks the widest of 8, 2 and 1 that
 //                                       divides N, so CShuffle also serves every shape.
 //   -tile     256x256x64 | 128x128x64   16 waves (warps 4x4x1) or 4 waves (warps 2x2x1)
+//   -k_batch  N                         split K into N ranges, one workgroup layer each, added
+//                                       into C atomically (CShuffle only; C is zeroed before
+//                                       every launch, inside the timed loop).
 // All use the warp tile 16x16x32, a double LDS buffer and the default policy. TDM clips every A/B
 // box to the real extent, so the kernels are unpadded in K and serve any M, N and K.
 //
@@ -20,15 +23,21 @@
 //   verify-int   integers in [-5, 5] (exact in bf16). Every partial sum is an integer below 2^24
 //                for K <= 671088, so fp32 accumulation is exact in any order; C must equal the
 //                exact sum rounded once to bf16 (round to nearest even), bit for bit.
+//   verify-sparse  about sqrt(64 / K) of the elements nonzero, each -2, -1, 1 or 2: sum|a*b| stays
+//                below 256 at almost every output, so every partial and running sum is exact in
+//                bf16 and those outputs must be exact at any -k_batch (the rest use the bound).
 //   verify-rand  normal(0, sigma) rounded to bf16. Checked against a double reference with the
 //                tolerance |got - ref| <= |ref| * 2^-7 + sum|a*b| * 2^-16.
 //   peak         -rounds samples; before each, -gap_ms of idle, -warmup untimed launches, then
 //                -repeat launches between two hipEvents. A sample is the mean time per launch.
 //   sustained    the same loop with 50 warmup, 100 repeat, no idle gap and one round.
+// With -k_batch > 1 every split rounds its partial sum to bf16 and adds it into C atomically, in
+// no fixed order, so both modes use |got - ref| <= |ref| * 2^-7 + k_batch * sum|a*b| * 2^-7 and
+// the outputs of the launches need not be identical.
 // The verify modes launch the kernel -verify_launches times and require every output to be
-// byte-identical to the first. The reference covers every output (-check=full) or a sample of
-// -check_per_tile points in every 256x256 output tile plus its four corners (-check=sample).
-// -check=auto picks full when M*N*K <= 2^33.
+// byte-identical to the first (k_batch 1). The reference covers every output (-check=full) or a
+// sample of -check_per_tile points in every 256x256 output tile plus its four corners
+// (-check=sample). -check=auto picks full when M*N*K <= 2^33.
 //
 // Output: one JSON line per timed sample ("type":"sample") and one summary line
 // ("type":"summary"); verify modes print one "type":"verify" line. Exit code: 0 pass, 1 wrong
@@ -180,12 +189,19 @@ void parallel_for(size_t n, F&& f)
 enum class Data
 {
     Int,
-    Rand
+    Rand,
+    Sparse
 };
 
 // Deterministic for a given seed whatever the thread count: 1 Mi-element chunks, each with its
 // own generator seeded from (seed, tensor id, chunk index). Fills the packed storage directly.
-void fill(std::vector<uint16_t>& v, Data data, uint64_t seed, uint64_t tensor_id, float sigma)
+// Sparse: each element is nonzero with probability `density`, then one of -2, -1, 1, 2.
+void fill(std::vector<uint16_t>& v,
+          Data data,
+          uint64_t seed,
+          uint64_t tensor_id,
+          float sigma,
+          double density = 1.0)
 {
     constexpr size_t kChunk = size_t{1} << 20;
     const size_t chunks     = (v.size() + kChunk - 1) / kChunk;
@@ -193,9 +209,19 @@ void fill(std::vector<uint16_t>& v, Data data, uint64_t seed, uint64_t tensor_id
         std::mt19937_64 g(splitmix64(seed ^ splitmix64(tensor_id * 0x100000000ull + c)));
         std::uniform_int_distribution<int> di(-5, 5);
         std::normal_distribution<float> dn(0.f, sigma);
+        std::uniform_real_distribution<double> du(0.0, 1.0);
+        std::uniform_int_distribution<int> ds(0, 3);
         const size_t end = std::min(v.size(), (c + 1) * kChunk);
         for(size_t i = c * kChunk; i < end; ++i)
-            v[i] = bf16_rne(data == Data::Int ? static_cast<float>(di(g)) : dn(g));
+        {
+            if(data == Data::Sparse)
+            {
+                static constexpr float kSparse[4] = {-2.f, -1.f, 1.f, 2.f};
+                v[i] = bf16_rne(du(g) < density ? kSparse[ds(g)] : 0.f);
+            }
+            else
+                v[i] = bf16_rne(data == Data::Int ? static_cast<float>(di(g)) : dn(g));
+        }
     });
 }
 
@@ -267,11 +293,18 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     const std::string mode = arg.get_str("mode");
     const uint64_t seed    = arg.get_uint64("seed");
     const float sigma      = arg.get_float("sigma");
-    const bool is_verify   = mode == "verify-int" || mode == "verify-rand";
-    const bool is_peak     = mode == "peak";
+    const bool is_verify = mode == "verify-int" || mode == "verify-rand" || mode == "verify-sparse";
+    const bool is_peak   = mode == "peak";
+    const int k_batch    = arg.get_int("k_batch");
+    if(k_batch < 1)
+    {
+        std::printf("-k_batch must be at least 1; got %d\n", k_batch);
+        return 2;
+    }
     if(!is_verify && !is_peak && mode != "sustained")
     {
-        std::printf("unknown -mode=%s (verify-int, verify-rand, peak, sustained)\n", mode.c_str());
+        std::printf("unknown -mode=%s (verify-int, verify-rand, verify-sparse, peak, sustained)\n",
+                    mode.c_str());
         return 2;
     }
     if(p.M <= 0 || p.N <= 0 || p.K <= 0)
@@ -282,7 +315,12 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     Data data = Data::Rand;
     if(mode == "verify-int" || (!is_verify && arg.get_str("data") == "int"))
         data = Data::Int;
-    const char* data_name = data == Data::Int ? "int" : "rand";
+    if(mode == "verify-sparse")
+        data = Data::Sparse;
+    const char* data_name = data == Data::Int ? "int" : data == Data::Sparse ? "sparse" : "rand";
+    // Sparse density: about 64 nonzero products per output, so sum|a*b| stays below 256 at almost
+    // every output and every partial and running sum is an integer that bf16 holds exactly.
+    const double density = std::min(1.0, std::sqrt(64.0 / static_cast<double>(p.K)));
 
     int warmup = arg.get_int("warmup"), repeat = arg.get_int("repeat");
     int rounds = arg.get_int("rounds");
@@ -319,8 +357,8 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     const size_t stride_b = static_cast<size_t>(b_col ? p.K : p.N);
     std::vector<uint16_t> a(a_elems), b(b_elems);
     const auto t_fill = std::chrono::steady_clock::now();
-    fill(a, data, seed, 0, sigma);
-    fill(b, data, seed, 1, sigma);
+    fill(a, data, seed, 0, sigma, density);
+    fill(b, data, seed, 1, sigma, density);
     std::printf("host fill (%s, seed %llu, sigma %g): %.1f s\n",
                 data_name,
                 static_cast<unsigned long long>(seed),
@@ -338,7 +376,7 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
     const ck_tile::GemmHostArgs args(d.a,
                                      d.b,
                                      d.c,
-                                     1,
+                                     k_batch,
                                      p.M,
                                      p.N,
                                      p.K,
@@ -358,9 +396,12 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
         return 2;
     }
     hipStream_t stream = nullptr;
-    const dim3 grids   = Kernel::GridSize(p.M, p.N, 1);
+    const dim3 grids   = Kernel::GridSize(p.M, p.N, k_batch);
     const dim3 blocks  = Kernel::BlockSize();
     auto launch        = [&] {
+        // The splits add into C, so it starts from zero every launch.
+        if(k_batch > 1)
+            BENCH_HIP_CHECK(hipMemsetAsync(d.c, 0, c_elems * sizeof(CDataType), stream));
         ck_tile::launch_kernel(ck_tile::stream_config{stream, false},
                                ck_tile::make_kernel<1>(Kernel{}, grids, blocks, 0, kargs));
     };
@@ -410,35 +451,45 @@ int run(const ck_tile::ArgParser& arg, const std::string& bench_name)
         const double ref_s =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - t_ref).count();
 
-        size_t bad     = 0;
-        double max_abs = 0;
+        size_t bad          = 0;
+        size_t exact_points = 0;
+        double max_abs      = 0;
         for(size_t i = 0; i < pts.size(); ++i)
         {
             const uint16_t got = first[static_cast<size_t>(pts[i].m) * p.N + pts[i].n];
             const double gotf  = bf16_to_float(got);
             const double err   = std::fabs(gotf - refs[i]);
-            const bool ok      = data == Data::Int
-                                     ? got == bf16_rne(static_cast<float>(refs[i]))
-                                     : err <= std::fabs(refs[i]) * 0x1p-7 + sabs[i] * 0x1p-16;
-            max_abs            = std::max(max_abs, err);
+            // Sparse: an output with sum|a*b| <= 256 has every partial and running sum exact in
+            // bf16, so it must be exact whatever the split count and order.
+            const bool exact_sparse = data == Data::Sparse && sabs[i] <= 256.0;
+            exact_points += exact_sparse;
+            const bool ok =
+                exact_sparse  ? got == bf16_rne(static_cast<float>(refs[i]))
+                : k_batch > 1 ? err <= std::fabs(refs[i]) * 0x1p-7 + k_batch * sabs[i] * 0x1p-7
+                : data == Data::Int ? got == bf16_rne(static_cast<float>(refs[i]))
+                                    : err <= std::fabs(refs[i]) * 0x1p-7 + sabs[i] * 0x1p-16;
+            max_abs = std::max(max_abs, err);
             if(!ok && bad++ < 5)
                 std::printf(
                     "mismatch m=%d n=%d ref=%.9g got=%.9g\n", pts[i].m, pts[i].n, refs[i], gotf);
         }
-        const bool pass = bad == 0 && nondeterministic == 0;
+        const bool pass = bad == 0 && (nondeterministic == 0 || k_batch > 1);
         std::printf("{\"type\":\"verify\",\"bench\":\"%s\",\"mode\":\"%s\",\"M\":%d,\"N\":%d,"
-                    "\"K\":%d,\"data\":\"%s\",\"seed\":%llu,\"check\":\"%s\",\"checked\":%zu,"
-                    "\"bad\":%zu,\"launches\":%d,\"nondeterministic_launches\":%zu,"
+                    "\"K\":%d,\"k_batch\":%d,\"data\":\"%s\",\"seed\":%llu,\"check\":\"%s\","
+                    "\"checked\":%zu,\"exact_checked\":%zu,\"bad\":%zu,\"launches\":%d,"
+                    "\"nondeterministic_launches\":%zu,"
                     "\"max_abs_err\":%.6g,\"ref_seconds\":%.1f,\"result\":\"%s\"}\n",
                     bench_name.c_str(),
                     mode.c_str(),
                     p.M,
                     p.N,
                     p.K,
+                    k_batch,
                     data_name,
                     static_cast<unsigned long long>(seed),
                     full ? "full" : "sample",
                     pts.size(),
+                    exact_points,
                     bad,
                     launches,
                     nondeterministic,
@@ -560,7 +611,8 @@ int dispatch(const ck_tile::ArgParser& arg)
 {
     const std::string layout = arg.get_str("layout");
     const std::string name   = "ck_comp_tdm_v3_bf16_bf16_" + layout + "_" + arg.get_str("tile") +
-                             "_wt16x16x32_" + arg.get_str("epilogue");
+                             "_wt16x16x32_" + arg.get_str("epilogue") +
+                             (arg.get_int("k_batch") > 1 ? "_kb" + arg.get_str("k_batch") : "");
     if(layout == "rcr")
         return dispatch_epilogue<RowMajor, ColumnMajor>(arg, name);
     if(layout == "rrr")
@@ -587,6 +639,7 @@ int main(int argc, char* argv[])
                 "auto",
                 "cshuffle C vector: auto (8, 2 or 1, widest dividing N) | 8 | 2 | 1")
         .insert("tile", "256x256x64", "256x256x64 (16 waves) | 128x128x64 (4 waves)")
+        .insert("k_batch", "1", "split K into this many atomically added ranges (CShuffle only)")
         .insert("mode", "verify-int", "verify-int | verify-rand | peak | sustained")
         .insert("data", "rand", "input data for peak/sustained: rand | int")
         .insert("seed", "12345", "RNG seed for the inputs")

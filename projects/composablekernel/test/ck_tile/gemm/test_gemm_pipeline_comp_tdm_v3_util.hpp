@@ -19,7 +19,9 @@
 // three K tiles and 512x512x1024 in test_gemm_pipeline_comp_tdm_v3_bf16_wmma.cpp (SMOKE_TEST) and
 // 4096x4096x4096 in test_gemm_pipeline_comp_tdm_v3_bf16_large_wmma.cpp (REGRESSION_TEST).
 //
-// Split-K (k_batch != 1) must be rejected by IsSupportedArgument.
+// Split-K (k_batch != 1): the CShuffle epilogue adds each K split into C atomically, so it is
+// accepted when the epilogue has a split-K store path (a C vector size of at least 2 for bf16) and
+// k_batch does not exceed the warp-tile K steps; the TdmEpilogue overwrites C and is rejected.
 //
 // Shapes: K = 256, 512 and 768 (one, two and three K tiles: both tail paths, with and without the
 // hot loop) and 512x512x1024 in test_gemm_pipeline_comp_tdm_v3_wmma.cpp (SMOKE_TEST); K = 65536 (a
@@ -35,6 +37,13 @@
 // - Random: uniform reals in [-2, 2] rounded to the operand's type. Checked against a double
 // reference with a
 //   tolerance for bf16 rounding and fp32 accumulation.
+// - Sparse: each element nonzero with probability sqrt(64 / K), then one of -2, -1, 1 and 2, so
+//   sum|a*b| stays below 256 at almost every output. There every partial and running sum is an
+//   integer that bf16 holds exactly, so the split-K result (each split's bf16 partial added into C
+//   atomically, in any order) must still be exact; the rare output above 256 uses the split-K
+//   tolerance.
+// With k_batch > 1, Int and Random use |got - ref| <= |ref| * 2^-7 + k_batch * sum|a*b| * 2^-7:
+// every split rounds its partial sum to bf16 and every atomic add rounds the running sum.
 
 #include <algorithm>
 #include <cmath>
@@ -244,14 +253,19 @@ uint16_t bf16_rne(float f)
 enum class Init
 {
     Int,
-    Random
+    Random,
+    Sparse
 };
 
 template <typename Config>
 class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
 {
     protected:
-    void Run(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K, Init init)
+    void Run(ck_tile::index_t M,
+             ck_tile::index_t N,
+             ck_tile::index_t K,
+             Init init,
+             ck_tile::index_t k_batch = 1)
     {
         using ADataType            = typename Config::ADataType;
         using BDataType            = typename Config::BDataType;
@@ -259,17 +273,24 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
         constexpr bool b_col_major = std::is_same_v<typename Config::BLayout, ColumnMajor>;
         // af is A as M x K and bf is B as N x K, both row-major, whatever the device layouts: the
         // values are drawn in that order, then packed into a and b in A's and B's layouts.
-        std::mt19937 gen(0xC0FFEE + M + N + K + static_cast<int>(init));
+        std::mt19937 gen(0xC0FFEE + M + N + K + static_cast<int>(init) + 7 * k_batch);
+        const double density = std::min(1.0, std::sqrt(64.0 / static_cast<double>(K)));
         std::vector<ADataType> a(static_cast<size_t>(M) * K);
         std::vector<BDataType> b(static_cast<size_t>(N) * K);
         std::vector<float> af(a.size()), bf(b.size()); // the A/B values, decoded
         auto fill = [&](auto& v, std::vector<float>& vf, ck_tile::index_t rows, bool packed_rows) {
             std::uniform_int_distribution<int> di(-5, 5);
             std::uniform_real_distribution<float> dr(-2.f, 2.f);
-            using T = typename std::decay_t<decltype(v)>::value_type;
+            std::uniform_real_distribution<double> du(0.0, 1.0);
+            std::uniform_int_distribution<int> ds(0, 3);
+            static constexpr float kSparse[4] = {-2.f, -1.f, 1.f, 2.f};
+            using T                           = typename std::decay_t<decltype(v)>::value_type;
             for(size_t i = 0; i < v.size(); ++i)
             {
-                const float x = init == Init::Int ? static_cast<float>(di(gen)) : dr(gen);
+                const float x = init == Init::Int ? static_cast<float>(di(gen))
+                                : init == Init::Sparse
+                                    ? (du(gen) < density ? kSparse[ds(gen)] : 0.f)
+                                    : dr(gen);
                 const T e     = ck_tile::type_convert<T>(x);
                 vf[i]         = ck_tile::type_convert<float>(e);
                 // row r = i / K, k = i % K; the transposed layout stores it at k * rows + r
@@ -290,7 +311,7 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
         ck_tile::GemmHostArgs args(a_dev.GetDeviceBuffer(),
                                    b_dev.GetDeviceBuffer(),
                                    c_dev.GetDeviceBuffer(),
-                                   1, // k_batch
+                                   k_batch,
                                    M,
                                    N,
                                    K,
@@ -321,7 +342,17 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
                     }
                     const CDataType got = c[static_cast<size_t>(m) * N + n];
                     bool ok;
-                    if(init == Init::Int)
+                    if(init == Init::Sparse && sum_abs <= 256.0)
+                    {
+                        // every partial and running sum is an integer exact in bf16
+                        ok = ck_tile::bit_cast<uint16_t>(got) == bf16_rne(static_cast<float>(sum));
+                    }
+                    else if(k_batch > 1 || init == Init::Sparse)
+                    {
+                        const double tol = std::abs(sum) * 0x1p-7 + k_batch * sum_abs * 0x1p-7;
+                        ok               = std::abs(ck_tile::type_convert<float>(got) - sum) <= tol;
+                    }
+                    else if(init == Init::Int)
                     {
                         // exact integer sum, rounded once to bf16 (round to nearest even)
                         ok = ck_tile::bit_cast<uint16_t>(got) == bf16_rne(static_cast<float>(sum));
@@ -361,37 +392,67 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
                               << first_bad[static_cast<size_t>(m)];
             }
         }
-        EXPECT_EQ(bad, 0u) << "mismatches at M=" << M << " N=" << N << " K=" << K;
+        EXPECT_EQ(bad, 0u) << "mismatches at M=" << M << " N=" << N << " K=" << K
+                           << " k_batch=" << k_batch;
     }
 
     // Host check only, no launch: whether the kernel accepts M x N x K, which must match the C
     // store rule (C row-major): an unaligned N needs kPadN, and N must be a multiple of the C
     // vector size. A/B never limit the shape: TDM clips them in hardware.
-    bool ExpectSupported(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
+    // With k_batch > 1 it must also match the split-K rule (SplitKSupported).
+    bool ExpectSupported(ck_tile::index_t M,
+                         ck_tile::index_t N,
+                         ck_tile::index_t K,
+                         ck_tile::index_t k_batch = 1)
     {
         using Kernel         = V3Kernel<Config>;
         const bool tile_ok   = N % Config::TileN == 0 || Config::PadMN;
         const bool vector_ok = N % Kernel::EpiloguePipeline::GetVectorSizeC() == 0;
         // A TDM epilogue clips C in hardware, so it accepts every shape.
-        const bool expected = Config::TdmEpilogue || (tile_ok && vector_ok);
-        const ck_tile::GemmHostArgs args(nullptr, nullptr, nullptr, 1, M, N, K, K, K, N);
+        const bool expected = (Config::TdmEpilogue || (tile_ok && vector_ok)) &&
+                              (k_batch == 1 || SplitKSupported(K, k_batch));
+        const ck_tile::GemmHostArgs args(nullptr, nullptr, nullptr, k_batch, M, N, K, K, K, N);
         const bool supported = Kernel::IsSupportedArgument(Kernel::MakeKernelArgs(args));
-        EXPECT_EQ(supported, expected) << "M=" << M << " N=" << N << " K=" << K;
+        EXPECT_EQ(supported, expected)
+            << "M=" << M << " N=" << N << " K=" << K << " k_batch=" << k_batch;
         return supported;
     }
 
-    // Host check only, no launch: k_batch = 1 is accepted and split-K is rejected. The CShuffle
-    // epilogue has a split-K store path, so this rejection is the TDM check, not the epilogue's.
-    void CheckSplitKRejected()
+    // Split-K needs an epilogue with a split-K store path -- not the TdmEpilogue, which overwrites
+    // C, and for bf16 C a vector size of at least 2 -- and no more splits than warp-tile K steps.
+    static bool SplitKSupported(ck_tile::index_t K, ck_tile::index_t k_batch)
     {
         using Kernel = V3Kernel<Config>;
-        for(ck_tile::index_t k_batch : {1, 2, 4})
+        constexpr ck_tile::index_t WarpK =
+            Kernel::GemmPipeline::BlockGemmShape::WarpTile::at(ck_tile::number<2>{});
+        return !Config::TdmEpilogue && Kernel::UniversalGemmKernel::EpilogueSupportsSplitK &&
+               ck_tile::integer_divide_ceil(K, WarpK) >= k_batch;
+    }
+
+    // Host check only, no launch: k_batch = 1 is accepted, and split-K is accepted exactly when
+    // SplitKSupported says so, including a k_batch beyond the K steps, which must be rejected.
+    void CheckSplitKSupport()
+    {
+        for(ck_tile::index_t k_batch : {1, 2, 4, 64})
+            ExpectSupported(512, 512, 1024, k_batch);
+    }
+
+    // Split-K runs: K of five K tiles plus a partial one, so the splits end inside K tiles and
+    // the last split is shorter; k_batch 2, 3 and 4, on sparse (exact) and random inputs.
+    void RunSplitK()
+    {
+        const ck_tile::index_t K = 5 * Config::TileK + 32;
+        int ran                  = 0;
+        for(ck_tile::index_t k_batch : {2, 3, 4})
         {
-            const ck_tile::GemmHostArgs args(
-                nullptr, nullptr, nullptr, k_batch, 512, 512, 1024, 1024, 1024, 512);
-            EXPECT_EQ(Kernel::IsSupportedArgument(Kernel::MakeKernelArgs(args)), k_batch == 1)
-                << "k_batch=" << k_batch;
+            if(!ExpectSupported(256, 256, K, k_batch))
+                continue;
+            Run(256, 256, K, Init::Sparse, k_batch);
+            Run(256, 256, K, Init::Random, k_batch);
+            ++ran;
         }
+        // The configurations under test all have a split-K store path.
+        EXPECT_EQ(ran > 0, SplitKSupported(K, 2));
     }
 };
 

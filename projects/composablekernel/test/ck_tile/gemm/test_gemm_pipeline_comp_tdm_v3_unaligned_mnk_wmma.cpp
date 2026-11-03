@@ -19,6 +19,10 @@
 //   TdmEpilogue (V3Bf16AfterArriveConfigs) on every shape, and fp8 (V3Fp8UnalignedConfigs) with
 //   the default policy and early refill, unpadded CShuffle as fp8 ships (an unaligned N rejected)
 //   and early refill with TdmEpilogue.
+// - split-K (k_batch 3) over the same shapes: the padded CShuffle instances with a split-K store
+//   path (a C vector of at least 2) accept every shape their C store does whose K has at least 3
+//   warp-tile K steps, and must be correct there; the C-vector-1 and TdmEpilogue instances reject
+//   every k_batch > 1.
 // Inputs and checks: test_gemm_pipeline_comp_tdm_v3_util.hpp.
 
 #include "test_gemm_pipeline_comp_tdm_v3_util.hpp"
@@ -52,18 +56,20 @@ template <typename Config>
 class TestCompTDMV3Bf16UnalignedMnk : public TestCkTileGemmPipelineCompTDMV3<Config>
 {
     protected:
-    void RunUnaligned(Init init)
+    void RunUnaligned(Init init, ck_tile::index_t k_batch = 1)
     {
         int ran = 0;
         for(const Shape& s : unaligned_shapes<Config>())
         {
-            if(this->ExpectSupported(s.M, s.N, s.K))
+            if(this->ExpectSupported(s.M, s.N, s.K, k_batch))
             {
-                this->Run(s.M, s.N, s.K, init);
+                this->Run(s.M, s.N, s.K, init, k_batch);
                 ++ran;
             }
         }
-        EXPECT_GT(ran, 0);
+        // An instance without a split-K store path (TdmEpilogue, or a C vector of 1) accepts no
+        // k_batch > 1; the others accept some of these shapes.
+        EXPECT_EQ(ran > 0, k_batch == 1 || this->SplitKSupported(1 << 20, k_batch));
     }
 };
 template <typename Config>
@@ -93,6 +99,14 @@ TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkPadded, RandomUnaligned)
 {
     this->RunUnaligned(Init::Random);
 }
+TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkPadded, SparseUnalignedSplitK)
+{
+    this->RunUnaligned(Init::Sparse, 3);
+}
+TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkPadded, RandomUnalignedSplitK)
+{
+    this->RunUnaligned(Init::Random, 3);
+}
 
 TYPED_TEST_SUITE(TestCompTDMV3Bf16UnalignedMnkTdmEpilogue, V3Bf16TdmEpilogueConfigs);
 TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkTdmEpilogue, IntUnaligned)
@@ -102,6 +116,10 @@ TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkTdmEpilogue, IntUnaligned)
 TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkTdmEpilogue, RandomUnaligned)
 {
     this->RunUnaligned(Init::Random);
+}
+TYPED_TEST(TestCompTDMV3Bf16UnalignedMnkTdmEpilogue, SplitKRejected)
+{
+    this->RunUnaligned(Init::Sparse, 3);
 }
 
 TYPED_TEST_SUITE(TestCompTDMV3Bf16UnalignedMnkAfterArrive, V3Bf16AfterArriveConfigs);
