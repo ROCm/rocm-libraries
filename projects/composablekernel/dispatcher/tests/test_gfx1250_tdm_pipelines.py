@@ -36,7 +36,6 @@ from arch_filter import (  # noqa: E402
 )
 from arch_specs_generated import get_lds_limit  # noqa: E402
 from codegen_common import (  # noqa: E402
-    COMP_TDM_PC_BATCHED_REJECT_REASON,
     COMP_TDM_PC_WARP_K_REJECT_REASON,
     CommonTypeMappings,
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
@@ -785,8 +784,8 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         _, names = self._gen("gfx1250", "batched")
         self.assertTrue(any("_comp_tdm_tdm_" in n for n in names))
         self.assertTrue(any("_comp_tdm_v2_tdm_" in n for n in names))
-        # BatchedGemmKernel does not arm the producer/consumer barriers.
-        self.assertFalse(any("_comp_tdm_pc_" in n for n in names))
+        # BatchedGemmKernel arms the producer/consumer barriers.
+        self.assertTrue(any("_comp_tdm_pc_tdm_" in n for n in names))
 
     def test_gfx1250_batched_comp_async_epilogue_double_smem(self):
         out, names = self._gen("gfx1250", "batched")
@@ -1112,7 +1111,8 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
     def test_tdm_pc_rules(self):
         self.assertTrue(self._ok("comp_tdm_pc", "tdm"))
         self.assertTrue(self._ok("comp_tdm_pc", "tdm", waves=(4, 2, 1)))
-        self.assertFalse(self._ok("comp_tdm_pc", "tdm", variant="batched"))
+        # BatchedGemmKernel arms the producer/consumer named barriers.
+        self.assertTrue(self._ok("comp_tdm_pc", "tdm", variant="batched"))
         # Plain GEMM also takes cshuffle (split-K), still not batched or persistent.
         self.assertTrue(self._ok("comp_tdm_pc", "cshuffle"))
         self.assertFalse(self._ok("comp_tdm_pc", "cshuffle", variant="batched"))
@@ -1128,21 +1128,6 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
             self._ok("comp_tdm_pc", "tdm", waves=(4, 2, 1), tile_mn=(256, 256))
         )
         self.assertTrue(self._ok("comp_tdm", "tdm", tile_mn=(256, 256)))
-        self.assertEqual(
-            gfx1250_pipeline_reject_reason(
-                "gfx1250",
-                "comp_tdm_pc",
-                "tdm",
-                "intrawave",
-                4,
-                32,
-                "fp16",
-                "fp16",
-                "rcr",
-                batched=True,
-            ),
-            COMP_TDM_PC_BATCHED_REJECT_REASON,
-        )
 
     def _async(self, *args, **kw):
         return self._ok("comp_async", *args, pad_m=True, pad_n=True, pad_k=True, **kw)

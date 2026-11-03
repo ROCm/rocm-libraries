@@ -1448,13 +1448,8 @@ GFX1250_FP32_ACC_REJECT_REASON = (
 # comp_tdm_pc (producer/consumer TDM): the C tile lives on the consumer waves
 # only (the two producer waves hold no accumulator), one fp32 VGPR per element.
 # Past 256 accumulators per lane occupancy collapses; same cap as the Tile
-# Engine MAX_ACC_VGPRS_PER_LANE. BatchedGemmKernel does not arm the pipeline's
-# named barriers, so the pipeline is plain-GEMM only.
+# Engine MAX_ACC_VGPRS_PER_LANE.
 COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE = 256
-COMP_TDM_PC_BATCHED_REJECT_REASON = (
-    "comp_tdm_pc is not supported for batched GEMM: BatchedGemmKernel does not "
-    "arm the producer/consumer named barriers"
-)
 # BlockGemm and the epilogue spread the C tile over warp_m x warp_n waves only,
 # with no K-wave reduction, so a K wave would be a consumer whose work is lost.
 # Mirrors the static_assert in GemmPipelineAgBgCrCompTDMProducerConsumer.
@@ -1652,9 +1647,9 @@ def gfx1250_pipeline_reject_reason(
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
     support (only plain, batched and preshuffle GEMM are, and Stream-K GEMM for
-    STREAMK_GFX1250_PIPELINES; comp_tdm_pc is plain and Stream-K only). ``pads`` is
-    (pad_m, pad_n, pad_k); None means unknown and skips the
-    pad rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
+    STREAMK_GFX1250_PIPELINES). ``pads`` is (pad_m, pad_n, pad_k); None means
+    unknown and skips the pad rules. ``batched`` marks the batched GEMM variant,
+    which does not take the cshuffle pairing below, and ``tile_mn``
     (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
     ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it).
     A TDM pipeline needs the tdm epilogue, except that plain GEMM may pair
@@ -1685,8 +1680,9 @@ def gfx1250_pipeline_reject_reason(
     if is_tdm:
         # StreamKKernel takes a TDM pipeline with either epilogue and persistent or not;
         # streamk_trait_reject_reason decides the epilogue per reduction strategy. Plain
-        # GEMM also takes cshuffle for GEMM_TDM_CSHUFFLE_PIPELINES (batched GEMM and
-        # preshuffle have no comp_tdm_pc kernel at all).
+        # GEMM also takes cshuffle for GEMM_TDM_CSHUFFLE_PIPELINES; batched GEMM does not
+        # (GEMM_TDM_CSHUFFLE_OPS in the Tile Engine), and preshuffle has no comp_tdm_pc
+        # kernel at all.
         cshuffle_ok = (
             epilogue == "cshuffle"
             and pipeline in GEMM_TDM_CSHUFFLE_PIPELINES
@@ -1705,8 +1701,6 @@ def gfx1250_pipeline_reject_reason(
         if pipeline == "comp_tdm_v2" and num_waves != 4:
             return "comp_tdm_v2 requires exactly 4 waves"
         if pipeline == "comp_tdm_pc":
-            if batched:
-                return COMP_TDM_PC_BATCHED_REJECT_REASON
             if warp_k is not None and warp_k != 1:
                 return COMP_TDM_PC_WARP_K_REJECT_REASON
             if tile_mn is not None:
