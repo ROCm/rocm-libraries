@@ -82,9 +82,67 @@ namespace
         return *limit > used ? *limit - used : uint64_t(0);
     }
 
-    // The smallest headroom from the process's cgroup up to the hierarchy root. A container may
-    // list "/" or the host's path for its cgroup; either way its own limit is at the root it
-    // sees, so the walk always ends there.
+    // Where a cgroup hierarchy is mounted (point), and which of its cgroups is at that point
+    // (root). Outside a cgroup namespace a container sees the host's paths, and its mount may
+    // start below the host's root.
+    struct CgroupMount
+    {
+        std::filesystem::path root;
+        std::filesystem::path point;
+    };
+
+    // mountinfo writes a space, tab, newline or backslash in a path as \ and three octal digits.
+    std::string unescape_mount_path(const std::string& text)
+    {
+        std::string out;
+        for(size_t i = 0; i < text.size(); i++)
+        {
+            if(text[i] == '\\' && i + 3 < text.size()
+               && std::isdigit(static_cast<unsigned char>(text[i + 1]))
+               && std::isdigit(static_cast<unsigned char>(text[i + 2]))
+               && std::isdigit(static_cast<unsigned char>(text[i + 3])))
+            {
+                out += char((text[i + 1] - '0') * 64 + (text[i + 2] - '0') * 8
+                            + (text[i + 3] - '0'));
+                i += 3;
+            }
+            else
+                out += text[i];
+        }
+        return out;
+    }
+
+    // The cgroup v2 mount, or the v1 mount that carries the memory controller, from
+    // /proc/self/mountinfo. Each line is "id parent dev root point options ... - type source
+    // super-options".
+    std::optional<CgroupMount> find_cgroup_mount(const std::string& mountinfo, bool v2)
+    {
+        std::ifstream in(mountinfo);
+        for(std::string line; std::getline(in, line);)
+        {
+            size_t dash = line.find(" - ");
+            if(dash == std::string::npos)
+                continue;
+            std::istringstream before(line.substr(0, dash)), after(line.substr(dash + 3));
+            std::string        id, parent, dev, root, point, type, source, options;
+            if(!(before >> id >> parent >> dev >> root >> point) || !(after >> type >> source))
+                continue;
+            after >> options;
+            bool              memory = false;
+            std::stringstream list(options);
+            for(std::string o; std::getline(list, o, ',');)
+                memory = memory || o == "memory";
+            if(v2 ? type == "cgroup2" : type == "cgroup" && memory)
+                return CgroupMount{unescape_mount_path(root), unescape_mount_path(point)};
+        }
+        return std::nullopt;
+    }
+
+    // The smallest headroom from the process's cgroup up to the top of the hierarchy this
+    // process can see. The cgroup's path is translated through its mount when mountinfo lists
+    // one; otherwise the hierarchy is assumed at cgroup_root (v1: cgroup_root/memory). A
+    // container may list "/" or the host's path for its cgroup; either way its own limit is at
+    // the top it sees, so the walk always ends there.
     std::optional<uint64_t> smallest_cgroup_headroom(const HostMemorySources& s)
     {
         std::ifstream           in(s.self_cgroup);
@@ -106,19 +164,33 @@ namespace
             if(!v2 && !v1)
                 continue;
 
-            std::filesystem::path root = s.cgroup_root;
-            if(v1)
-                root /= "memory";
             // A cgroup that has been removed is listed with this suffix.
             std::string       path    = line.substr(b + 1);
             const std::string deleted = " (deleted)";
             if(path.size() >= deleted.size()
                && path.compare(path.size() - deleted.size(), deleted.size(), deleted) == 0)
                 path.erase(path.size() - deleted.size());
-            std::filesystem::path rel = std::filesystem::path(path).relative_path();
+
+            std::filesystem::path top, rel;
+            if(auto mount = find_cgroup_mount(s.mountinfo, v2))
+            {
+                // The part of the cgroup's path below the mount's root. A cgroup outside that
+                // root (a container listing the host's path) leaves only the top visible.
+                top      = mount->point;
+                auto sub = std::filesystem::path(path).lexically_relative(mount->root);
+                if(!sub.empty() && *sub.begin() != ".." && sub != ".")
+                    rel = sub;
+            }
+            else
+            {
+                top = s.cgroup_root;
+                if(v1)
+                    top /= "memory";
+                rel = std::filesystem::path(path).relative_path();
+            }
             while(true)
             {
-                if(auto h = cgroup_headroom(root / rel, v2))
+                if(auto h = cgroup_headroom(top / rel, v2))
                     smallest = std::min(smallest.value_or(*h), *h);
                 if(rel.empty())
                     break;
@@ -188,13 +260,11 @@ std::optional<size_t> available_host_memory_bytes(const HostMemorySources& sourc
     if(GlobalMemoryStatusEx(&status))
         available = size_t(status.ullAvailPhys);
 #else
+    // Each source that can be read caps the budget on its own.
     if(auto kib = read_field(sources.meminfo, "MemAvailable:"))
-    {
-        uint64_t bytes = *kib * 1024;
-        if(auto headroom = smallest_cgroup_headroom(sources))
-            bytes = std::min(bytes, *headroom);
-        available = size_t(bytes);
-    }
+        available = size_t(*kib * 1024);
+    if(auto headroom = smallest_cgroup_headroom(sources))
+        available = std::min(available.value_or(size_t(*headroom)), size_t(*headroom));
 #endif
     // When the system cannot be read, the limit is the only budget there is.
     if(auto limit = host_memory_limit_override())

@@ -232,6 +232,7 @@ namespace
             std::filesystem::create_directories(dir / "cgroup");
             sources.meminfo     = (dir / "meminfo").string();
             sources.self_cgroup = (dir / "self_cgroup").string();
+            sources.mountinfo   = (dir / "mountinfo").string();
             sources.cgroup_root = (dir / "cgroup").string();
         }
         ~FakeHost()
@@ -324,6 +325,16 @@ namespace
         host.write(host.sources.self_cgroup, "0::/kubepods/pod1/ctr\n");
         host.cgroup("", std::to_string(3 * kGiB), kGiB);
         EXPECT_EQ(available_host_memory_bytes(host.sources), 2 * kGiB);
+
+        // mountinfo names another cgroup at the mount, so the listed path is not below it. The
+        // walk stays inside the mount: a full limit beside it is not read.
+        const auto beside = std::filesystem::path(host.sources.cgroup_root).parent_path();
+        host.write(beside / "memory.max", std::to_string(kGiB) + "\n");
+        host.write(beside / "memory.current", std::to_string(kGiB) + "\n");
+        host.write(host.sources.mountinfo,
+                   "30 24 0:26 /kubepods/pod2 " + host.sources.cgroup_root
+                       + " rw - cgroup2 cgroup2 rw\n");
+        EXPECT_EQ(available_host_memory_bytes(host.sources), 2 * kGiB);
     }
 
     TEST(HostMemory_pre_checkin, query_reads_cgroup_v1)
@@ -389,6 +400,46 @@ namespace
         EXPECT_EQ(available_host_memory_bytes(host.sources), kGiB + 10);
     }
 
+    TEST(HostMemory_pre_checkin, query_maps_the_cgroup_path_through_its_mount)
+    {
+        // The hierarchy is mounted from /runner, so /proc/self/cgroup's /runner/job is the
+        // mount's job directory. Its 2 GiB limit, not the mount top's 6 GiB, applies.
+        FakeHost host;
+        host.mem_available(8 * kGiB);
+        host.write(host.sources.self_cgroup, "0::/runner/job\n");
+        host.write(host.sources.mountinfo,
+                   "24 1 0:22 / / rw - ext4 /dev/root rw\n30 24 0:26 /runner "
+                       + host.sources.cgroup_root + " rw,nosuid - cgroup2 cgroup2 rw\n");
+        host.cgroup("", std::to_string(6 * kGiB), kGiB);
+        host.cgroup("job", std::to_string(2 * kGiB), kGiB);
+        EXPECT_EQ(available_host_memory_bytes(host.sources), kGiB);
+    }
+
+    TEST(HostMemory_pre_checkin, query_finds_the_v1_memory_controller_where_it_is_mounted)
+    {
+        // The v1 memory controller shares a mount with cpu, at "cpu,memory", not "memory".
+        FakeHost host;
+        host.mem_available(8 * kGiB);
+        host.write(host.sources.self_cgroup, "4:cpu,memory:/job\n");
+        const std::string point = host.sources.cgroup_root + "/cpu,memory";
+        host.write(host.sources.mountinfo,
+                   "31 24 0:27 / " + point + " rw - cgroup cgroup rw,cpu,memory\n");
+        host.write(point + "/job/memory.limit_in_bytes", std::to_string(3 * kGiB) + "\n");
+        host.write(point + "/job/memory.usage_in_bytes", std::to_string(kGiB) + "\n");
+        EXPECT_EQ(available_host_memory_bytes(host.sources), 2 * kGiB);
+    }
+
+    TEST(HostMemory_pre_checkin, query_applies_the_cgroup_limit_without_meminfo)
+    {
+        // With /proc/meminfo unreadable, a full container is still full, with or without a limit.
+        FakeHost host;
+        host.write(host.sources.self_cgroup, "0::/job\n");
+        host.cgroup("job", std::to_string(kGiB), kGiB);
+        EXPECT_EQ(available_host_memory_bytes(host.sources), size_t(0));
+        ScopedLimit limit("2G");
+        EXPECT_EQ(available_host_memory_bytes(host.sources), size_t(0));
+    }
+
     TEST(HostMemory_pre_checkin, query_follows_a_removed_cgroup)
     {
         // /proc/self/cgroup lists a cgroup that has been removed with a " (deleted)" suffix.
@@ -450,6 +501,12 @@ namespace
 
     TEST(HostMemory_pre_checkin, limit_makes_the_preflight_skip)
     {
+        // Only a runner with 2 GiB free shows that the limit, not the runner, made it skip.
+        {
+            ScopedLimit no_limit(nullptr);
+            if(available_host_memory_bytes().value_or(0) < 2 * kGiB)
+                GTEST_SKIP() << "this runner has less than 2 GiB of host memory free";
+        }
         ScopedLimit limit("1G");
         std::string why = fast_check_memory_shortfall(0, 2 * kGiB);
         EXPECT_NE(why.find("needs 2 GiB of host memory and 1 GiB is available"), std::string::npos)

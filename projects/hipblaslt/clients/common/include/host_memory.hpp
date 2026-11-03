@@ -12,6 +12,8 @@ struct HostMemorySources
 {
     std::string meminfo     = "/proc/meminfo";
     std::string self_cgroup = "/proc/self/cgroup";
+    std::string mountinfo   = "/proc/self/mountinfo";
+    // Where the cgroup hierarchy is assumed to be when mountinfo does not say.
     std::string cgroup_root = "/sys/fs/cgroup";
 };
 
