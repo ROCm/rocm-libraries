@@ -72,12 +72,12 @@ void _CCCL_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first,
   using difference_type = thrust::detail::it_difference_t<ItemsIt>;
 
   // find the midpoint of [first,last)
-  difference_type N = _THRUST_STD::distance(first, last);
+  difference_type N = ::cuda::std::distance(first, last);
   ItemsIt mid(first);
-  _THRUST_STD::advance(mid, N / 2);
+  ::cuda::std::advance(mid, N / 2);
 
   cuda_cub::swap_ranges(policy, first, mid, ::cuda::std::make_reverse_iterator(last));
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

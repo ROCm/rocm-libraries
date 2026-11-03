@@ -285,4 +285,4 @@ THRUST_NAMESPACE_END
 //
 #  include <thrust/memory.h>
 #  include <thrust/unique.h>
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

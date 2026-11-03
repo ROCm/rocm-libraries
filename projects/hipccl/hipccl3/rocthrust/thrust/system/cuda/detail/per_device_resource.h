@@ -67,4 +67,4 @@ _CCCL_HOST MR* get_per_device_resource(execution_policy<DerivedPolicy>&)
 
 THRUST_NAMESPACE_END
 
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

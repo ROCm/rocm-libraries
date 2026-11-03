@@ -277,4 +277,4 @@ struct AgentLauncher : Agent
 
 THRUST_NAMESPACE_END
 
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

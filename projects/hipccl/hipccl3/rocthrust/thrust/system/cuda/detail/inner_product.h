@@ -59,7 +59,7 @@ T _CCCL_HOST_DEVICE inner_product(
   ReduceOp reduce_op,
   ProductOp product_op)
 {
-  const auto n     = _THRUST_STD::distance(first1, last1);
+  const auto n     = ::cuda::std::distance(first1, last1);
   const auto first = make_transform_iterator(make_zip_iterator(first1, first2), make_zip_function(product_op));
   return cuda_cub::reduce_n(policy, first, n, init, reduce_op);
 }
@@ -73,4 +73,4 @@ inner_product(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()
