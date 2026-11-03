@@ -75,7 +75,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   H == 1, strided, dilated and grouped) for RDNA (`gfx101X`, `gfx103X`, `gfx110X`, `gfx115X`,
   `gfx117X`, `gfx120X`). On these targets the CK grouped kernels do not take fp32 inputs, so
   dilated fp32 1D convolutions previously ran on `ConvDirectNaiveConvFwd`; on gfx1151 the new
-  solver is 29x to 54x faster on those shapes and is selected through Find mode.
+  solver is 14x to 29x faster on those shapes and is selected through Find mode.
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
