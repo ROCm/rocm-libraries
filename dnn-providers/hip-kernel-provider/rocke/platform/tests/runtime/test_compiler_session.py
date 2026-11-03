@@ -499,7 +499,9 @@ def test_coherent_sdk_pair_both_orders(tmp_path, order):
             "-x",
             "none",
             str(compiler),
-            "-Wl,-rpath,$ORIGIN",
+            # Match owned SDK payloads: bind this fixture's companion before
+            # the ambient loader paths needed by the Python interpreter.
+            "-Wl,--disable-new-dtags,-rpath,$ORIGIN",
             "-o",
             str(hip),
         ],

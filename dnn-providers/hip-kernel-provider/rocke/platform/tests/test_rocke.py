@@ -2047,8 +2047,11 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         """An unloadable selected compiler reports its path and loader error."""
         from rocke.runtime import comgr as comgr_mod
 
+        from rocke.runtime import _session
+
         candidate = "/selected/libamd_comgr.so"
         with (
+            patch.object(_session, "session", _session.RuntimeSession()),
             patch.object(comgr_mod, "_candidate_lib_paths", return_value=[candidate]),
             patch.object(
                 comgr_mod._loaded_libraries, "loaded_compilers", return_value=[]
@@ -8132,6 +8135,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         from rocke.runtime import comgr as comgr_mod
         from rocke.runtime._loaded_libraries import LoadedLibrary
         from rocke.runtime._compiler_query import file_signature
+        from rocke.runtime import _session
 
         with tempfile.TemporaryDirectory() as tmp:
             selected, foreign = os.path.join(tmp, "selected.so"), os.path.join(
@@ -8142,6 +8146,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             handle = SimpleNamespace(_name=foreign)
             mapped = LoadedLibrary(handle, foreign, file_signature(foreign))
             with (
+                mock.patch.object(_session, "session", _session.RuntimeSession()),
                 mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": selected}),
                 mock.patch.object(
                     comgr_mod._loaded_libraries,
@@ -8155,6 +8160,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                     comgr_mod._load_lib()
                 load.assert_not_called()
             with (
+                mock.patch.object(_session, "session", _session.RuntimeSession()),
                 mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": foreign}),
                 mock.patch.object(
                     comgr_mod._loaded_libraries,
