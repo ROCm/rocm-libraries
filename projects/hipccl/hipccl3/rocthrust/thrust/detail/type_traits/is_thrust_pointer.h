@@ -19,11 +19,7 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/type_traits/is_metafunction_defined.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -51,10 +47,15 @@ template <typename T>
 struct pointer_raw_pointer : pointer_traits_detail::pointer_raw_pointer_impl<T>
 {};
 
-// this could be a lot better, but for our purposes, it's probably
-// sufficient just to check if pointer_raw_pointer<T> has meaning
+// Check whether we are dealing with either a raw pointer or a thrust smart pointer
+template <typename T, typename = void>
+inline constexpr bool is_thrust_pointer_v = false;
+
 template <typename T>
-inline constexpr bool is_thrust_pointer_v = is_metafunction_defined<pointer_raw_pointer<T>>::value;
+inline constexpr bool is_thrust_pointer_v<T*> = true;
+
+template <typename T>
+inline constexpr bool is_thrust_pointer_v<T, _THRUST_STD::void_t<typename T::raw_pointer>> = true;
 } // namespace detail
 
 THRUST_NAMESPACE_END
