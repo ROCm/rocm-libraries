@@ -81,10 +81,11 @@ namespace TensileLite
                     else
                         lib.libraryDirectory = '.';
 
-                    // Extract the file extension. An in-memory library has no
-                    // filename, and rfind then returns npos.
-                    size_t periodPos = ctx->filename.rfind('.');
-                    if(periodPos != std::string::npos)
+                    // Extract the extension from the basename only. Dots in
+                    // parent directories are not extensions.
+                    const size_t filePos = directoryPos == std::string::npos ? 0 : directoryPos + 1;
+                    size_t       periodPos = ctx->filename.rfind('.');
+                    if(periodPos != std::string::npos && periodPos >= filePos)
                         lib.suffix = ctx->filename.substr(periodPos);
 
                     for(auto condition : ctx->preloaded)
@@ -108,4 +109,3 @@ namespace TensileLite
 
     } // namespace Serialization
 } // namespace TensileLite
-
