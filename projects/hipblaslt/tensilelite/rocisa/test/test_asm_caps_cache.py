@@ -23,17 +23,18 @@ import json, signal, sys
 sys.path[:] = json.loads(sys.argv[1])
 import rocisa
 isas = [tuple(isa) for isa in json.loads(sys.argv[2])]
-interval = float(sys.argv[5])
+debug = sys.argv[5] == "1"
+interval = float(sys.argv[6])
 ti = rocisa.rocIsa.getInstance()
 if interval:
     # Interrupts the system calls probing waits in, as a SIGALRM-based timeout would.
     signal.signal(signal.SIGALRM, lambda *_: None)
     signal.setitimer(signal.ITIMER_REAL, interval, interval)
 if sys.argv[4] == "many":
-    ti.initMany(isas, sys.argv[3], False)
+    ti.initMany(isas, sys.argv[3], debug)
 else:
     for isa in isas:
-        ti.init(isa, sys.argv[3], False)
+        ti.init(isa, sys.argv[3], debug)
 signal.setitimer(signal.ITIMER_REAL, 0)
 print(json.dumps({str(isa): dict(ti.getIsaInfo(isa).asmCaps) for isa in isas}, sort_keys=True))
 """
@@ -65,7 +66,7 @@ def _runs(tmp_path):
     return len(log.read_text().splitlines()) if log.exists() else 0
 
 
-def _probe(assembler, cacheDir, isas=_ISAS, mode="many", disable=False, interval=0):
+def _probe(assembler, cacheDir, isas=_ISAS, mode="many", disable=False, debug=False, interval=0):
     env = {k: v for k, v in os.environ.items() if k != "TENSILE_DISABLE_ASM_CAPS_CACHE"}
     env["TENSILE_ASM_CAPS_CACHE_DIR"] = str(cacheDir)
     if disable:
@@ -80,6 +81,7 @@ def _probe(assembler, cacheDir, isas=_ISAS, mode="many", disable=False, interval
             json.dumps(isas),
             str(assembler),
             mode,
+            "1" if debug else "0",
             str(interval),
         ],
         env=env,
@@ -90,7 +92,8 @@ def _probe(assembler, cacheDir, isas=_ISAS, mode="many", disable=False, interval
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    # debug prints each assembler run first.
+    return json.loads(result.stdout.splitlines()[-1])
 
 
 @pytest.mark.parametrize("mode", ["many", "init"])
@@ -202,3 +205,26 @@ def test_probes_interrupted_by_a_signal_still_get_the_answer(tmp_path):
     assert _probe(script, cache, isas=_ISAS[:1], mode="init", interval=0.001) == uninterrupted
     assert len(list(cache.glob("*.txt"))) == 1
     assert _probe(script, cache, isas=_ISAS[:1], mode="init") == uninterrupted
+
+
+@pytest.mark.parametrize("isa", [(9, 4, 2), (11, 0, 0)], ids=["gfx942", "gfx1100"])
+def test_rejected_isa_stops_probing_after_the_empty_source(tmp_path, isa):
+    # Rejecting every source is what an assembler that doesn't know the ISA does.
+    # The empty source's command line rejects them all, so only probes with
+    # other options still run: gfx10+ wave32 probes, which leave out
+    # -mwavefrontsize64. debug runs every probe, for comparison.
+    script = tmp_path / "bin" / "amdclang++"
+    script.parent.mkdir()
+    script.write_text(f'#!/bin/sh\necho run >> "{tmp_path / "runs.log"}"\nexit 1\n')
+    script.chmod(0o755)
+    cache = tmp_path / "cache"
+
+    everyProbe = _probe(script, cache, isas=[isa], mode="init", debug=True)
+    allRuns = _runs(tmp_path)
+    assert _probe(script, cache, isas=[isa], mode="init") == everyProbe
+    runs = _runs(tmp_path) - allRuns
+    if isa[0] < 10:
+        assert runs == 1
+    else:
+        assert 1 < runs < 10 < allRuns
+    assert not cache.exists() or not list(cache.glob("*.txt"))
