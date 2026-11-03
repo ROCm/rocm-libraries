@@ -9,10 +9,11 @@
  * there, the 16-element zero vector made as value 5 (hint "cz16") and the
  * 1-element zero vector made as value 65 (hint "cz1") were both "%cz165". A
  * name the author picks (kernel parameter, loop induction variable,
- * loop-carried value) is refused when it ends in '_' and digits or is not an
- * identifier; a hint that is empty or starts with a digit is refused too. The
- * messages are the Python engine's; tests/core/test_value_names.py covers the
- * Python builder and checks both engines lower the kernel identically.
+ * loop-carried value) is refused when it ends in '_' and digits, is not an
+ * identifier or is a C++ keyword; a hint that is empty or starts with a digit
+ * is refused too. The messages are the Python engine's;
+ * tests/core/test_value_names.py covers the Python builder and checks both
+ * engines lower the kernel identically.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -49,6 +50,13 @@ std::string reserved(const std::string& what, const std::string& name)
     return what + " name '" + name
            + "' ends in '_' and digits, the form the builder gives the values it names; choose "
              "a name that does not end in '_<digits>'";
+}
+
+std::string keyword(const std::string& what, const std::string& name)
+{
+    return what + " name '" + name
+           + "' is a C++ keyword, and the HIP lowering prints value names as C++ identifiers; "
+             "choose another name";
 }
 
 std::string bad_hint(const std::string& hint)
@@ -137,7 +145,18 @@ void parameter_names()
         check(error == not_identifier("kernel parameter", name),
               "param '" + std::string(name) + "': '" + error + "'");
     }
-    const char* accepted[] = {"stride0", "x_y", "_", "acc_m0_n1"};
+    // One keyword of each kind: a statement, a type, an alternative operator
+    // token, and the C++11 and C++20 additions.
+    const char* refused_keyword[] = {"for", "int", "and", "nullptr", "co_await", "char8_t"};
+    for(const char* name : refused_keyword)
+    {
+        Builder k("param_name");
+        const std::string error
+            = refusal(&k.b, [&] { rocke_b_param(&k.b, name, rocke_i32(), NULL); });
+        check(error == keyword("kernel parameter", name),
+              "param '" + std::string(name) + "': '" + error + "'");
+    }
+    const char* accepted[] = {"stride0", "x_y", "_", "acc_m0_n1", "for_each"};
     for(const char* name : accepted)
     {
         Builder k("param_name");
@@ -178,6 +197,36 @@ void loop_names()
         const std::string error = refusal(
             &k.b, [&] { rocke_b_scf_for_iter(&k.b, lo, hi, step, args, 2, "k0", false, true); });
         check(error == reserved("loop-carried value", "acc_1"), "iter arg: '" + error + "'");
+    }
+    {
+        Builder k("iv_name");
+        rocke_value_t* lo = rocke_b_const_i32(&k.b, 0);
+        rocke_value_t* hi = rocke_b_const_i32(&k.b, 2);
+        rocke_value_t* step = rocke_b_const_i32(&k.b, 1);
+        const std::string error
+            = refusal(&k.b, [&] { rocke_b_scf_for(&k.b, lo, hi, step, "for"); });
+        check(error == keyword("loop induction variable", "for"), "scf_for iv: '" + error + "'");
+    }
+    {
+        Builder k("iv_name");
+        rocke_value_t* lo = rocke_b_const_i32(&k.b, 0);
+        rocke_value_t* hi = rocke_b_const_i32(&k.b, 2);
+        rocke_value_t* step = rocke_b_const_i32(&k.b, 1);
+        rocke_iter_arg_t acc = {"acc", lo};
+        const std::string error = refusal(
+            &k.b, [&] { rocke_b_scf_for_iter(&k.b, lo, hi, step, &acc, 1, "do", false, true); });
+        check(error == keyword("loop induction variable", "do"),
+              "scf_for_iter iv: '" + error + "'");
+    }
+    {
+        Builder k("iter_arg_name");
+        rocke_value_t* lo = rocke_b_const_i32(&k.b, 0);
+        rocke_value_t* hi = rocke_b_const_i32(&k.b, 2);
+        rocke_value_t* step = rocke_b_const_i32(&k.b, 1);
+        rocke_iter_arg_t args[2] = {{"acc", lo}, {"float", lo}};
+        const std::string error = refusal(
+            &k.b, [&] { rocke_b_scf_for_iter(&k.b, lo, hi, step, args, 2, "k0", false, true); });
+        check(error == keyword("loop-carried value", "float"), "iter arg: '" + error + "'");
     }
     {
         Builder k("iter_arg_name");

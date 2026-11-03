@@ -214,8 +214,11 @@ rocke_region_t* rocke_b_current_region(rocke_ir_builder_t* b)
  * names every value it makes "%<hint>_<n>", so the counter is always the digits
  * after the last '_' and two builder names are equal only when their hints and
  * counters are both equal. Author-chosen names (kernel parameters, loop
- * induction variables, loop-carried values) must be identifiers and must not
- * end in '_' and digits, or one could spell a builder name. */
+ * induction variables, loop-carried values) must not end in '_' and digits, or
+ * one could spell a builder name. The HIP lowering prints value names
+ * unchanged, as C++ identifiers, so they must also be identifiers and must not
+ * be C++ keywords. Other names the HIP output already uses (its type names,
+ * builtins, names C++ reserves) are not refused here. */
 
 static bool is_ascii_digit(char c)
 {
@@ -239,6 +242,54 @@ static bool is_identifier(const char* name)
     return true;
 }
 
+/* The C++20 keywords and alternative operator tokens (the standard's [lex.key]
+ * and [lex.digraph] tables): the twin of _CXX_KEYWORDS in core/ir.py. */
+static const char* const kCxxKeywords[] = {
+    "alignas",       "alignof",     "and",
+    "and_eq",        "asm",         "auto",
+    "bitand",        "bitor",       "bool",
+    "break",         "case",        "catch",
+    "char",          "char16_t",    "char32_t",
+    "char8_t",       "class",       "co_await",
+    "co_return",     "co_yield",    "compl",
+    "concept",       "const",       "const_cast",
+    "consteval",     "constexpr",   "constinit",
+    "continue",      "decltype",    "default",
+    "delete",        "do",          "double",
+    "dynamic_cast",  "else",        "enum",
+    "explicit",      "export",      "extern",
+    "false",         "float",       "for",
+    "friend",        "goto",        "if",
+    "inline",        "int",         "long",
+    "mutable",       "namespace",   "new",
+    "noexcept",      "not",         "not_eq",
+    "nullptr",       "operator",    "or",
+    "or_eq",         "private",     "protected",
+    "public",        "register",    "reinterpret_cast",
+    "requires",      "return",      "short",
+    "signed",        "sizeof",      "static",
+    "static_assert", "static_cast", "struct",
+    "switch",        "template",    "this",
+    "thread_local",  "throw",       "true",
+    "try",           "typedef",     "typeid",
+    "typename",      "union",       "unsigned",
+    "using",         "virtual",     "void",
+    "volatile",      "wchar_t",     "while",
+    "xor",           "xor_eq",
+};
+
+static bool is_cxx_keyword(const char* name)
+{
+    for(const char* keyword : kCxxKeywords)
+    {
+        if(strcmp(name, keyword) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool ends_in_counter(const char* name)
 {
     size_t end = strlen(name);
@@ -258,6 +309,15 @@ void rocke_i_refuse_declared_name(rocke_ir_builder_t* b, const char* what, const
                         ROCKE_ERR_VALUE,
                         "%s name '%s' is not an identifier: use letters, digits and '_', not "
                         "starting with a digit",
+                        what,
+                        name);
+    }
+    if(is_cxx_keyword(name))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s name '%s' is a C++ keyword, and the HIP lowering prints value names "
+                        "as C++ identifiers; choose another name",
                         what,
                         name);
     }
