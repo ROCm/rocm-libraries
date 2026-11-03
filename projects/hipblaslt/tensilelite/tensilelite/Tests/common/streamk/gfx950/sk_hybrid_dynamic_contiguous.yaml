@@ -1,17 +1,19 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# StreamK, WorkAssignment Hybrid, dynamic sub-mode: the contiguous per-queue
-# item order (formula and gate: StreamKHybrid._contiguousQueueItem).
+# StreamK dynamic work queues, WorkAssignment DynamicWorkQueue and the
+# dynamic sub-mode of Hybrid: the contiguous per-queue item order (formula and
+# gate: StreamK._contiguousQueueItem).
 # WorkGroupMapping 1 skips origami, so the runtime WGMXCC is the XCD count and
 # chunk is 0. The dynamic grid is at most 3 workgroups per CU: 768 on gfx950.
+# Every kernel below is built for both work assignments.
 #
 # - 768 whole tiles on the 768 grid, batch 1 and 2: renumbered;
 # - 1024 whole tiles on 768 workgroups: interleaved;
 # - fixed WorkGroupMappingXCC 8 with PersistentXCCMapping 8: interleaved;
 # - WorkQueueStealing: the renumbering follows the item's queue, not the
 #   popping workgroup's;
-# - PAP (whole tiles only), the OptNLL call site: one round (64 and 120
+# - PAP (whole tiles only), the next-tile call site: one round (64 and 120
 #   tiles) renumbered, several rounds (1024 tiles) interleaved.
 #
 # Validation after repeated launches: see sk_hybrid.yaml; the Synchronizer
@@ -45,7 +47,7 @@ GlobalParameters:
 .SkDynamicContiguousCommon: &sk_dynamic_contiguous_common
   - KernelLanguage: [Assembly]
   - TileProcessingStrategy: [StreamK]
-  - WorkAssignment: [Hybrid]
+  - WorkAssignment: [Hybrid, DynamicWorkQueue]
   - GlobalSplitU: [0]
   - DepthU: [16]
   # MT 64x64.
@@ -108,7 +110,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - TileProcessingStrategy: [StreamK]
-        - WorkAssignment: [Hybrid]
+        - WorkAssignment: [Hybrid, DynamicWorkQueue]
         - GlobalSplitU: [0]
         - WavefrontSize: [64]
         - DepthU: [16]
