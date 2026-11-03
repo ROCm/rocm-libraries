@@ -590,25 +590,26 @@ def problem_type_vcc(vcc):
     return vcc
 
 
-def _write_logic_yaml(path, *, problemType, libraryType, cuCount=256, devices=("Device 75a0",)):
+def _write_logic_yaml(
+    path, *, problemType, libraryType, cuCount=256, devices=("Device 75a0",), perfMetric=None
+):
     import yaml
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "MinimumRequiredVersion": "5.0.0",
-                "ScheduleName": "gfx950",
-                "ArchitectureName": "gfx950",
-                "CUCount": cuCount,
-                "DeviceNames": list(devices),
-                "ProblemType": problemType,
-                "Solutions": [],
-                "LibraryType": libraryType,
-            },
-            sort_keys=False,
-        )
-    )
+    doc = {
+        "MinimumRequiredVersion": "5.0.0",
+        "ScheduleName": "gfx950",
+        "ArchitectureName": "gfx950",
+        "CUCount": cuCount,
+        "DeviceNames": list(devices),
+        "ProblemType": problemType,
+        "Solutions": [],
+    }
+    # Shipped mapping-form files write PerfMetric after Solutions.
+    if perfMetric is not None:
+        doc["PerfMetric"] = perfMetric
+    doc["LibraryType"] = libraryType
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
     return path
 
 
@@ -632,6 +633,11 @@ def test_range_sibling_with_matching_placeholder_is_clean(tmp_path, problem_type
     assert problem_type_vcc.find_range_sibling_violations(files, tmp_path) == []
 
 
+def test_range_sibling_ignores_a_default_perf_metric_written_out(tmp_path, problem_type_vcc):
+    files = list(_range_pair(tmp_path, perfMetric="DeviceEfficiency"))
+    assert problem_type_vcc.find_range_sibling_violations(files, tmp_path) == []
+
+
 def test_range_sibling_ignores_defaults_written_out_explicitly(tmp_path, problem_type_vcc):
     # The Equality file spells out defaults the Range file leaves implicit;
     # nothing either file means is different.
@@ -652,6 +658,8 @@ def test_range_sibling_flags_a_different_problem_type(tmp_path, problem_type_vcc
     [
         ({"cuCount": None}, "CUCount"),
         ({"devices": ("Device 75a0", "Device 75a3")}, "DeviceNames"),
+        # A PerfMetric other than DeviceEfficiency is part of the placeholder name.
+        ({"perfMetric": "CUEfficiency"}, "PerfMetric"),
     ],
 )
 def test_range_sibling_flags_a_different_header(tmp_path, problem_type_vcc, header, field):

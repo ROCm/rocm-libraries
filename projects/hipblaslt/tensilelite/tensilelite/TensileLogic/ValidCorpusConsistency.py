@@ -39,6 +39,7 @@ from ..CustomYamlLoader import (
     load_logic_cu_count,
     load_logic_device_names,
     load_logic_gfx_arch,
+    load_logic_perf_metric,
     load_logic_problem_type,
     load_logic_schedule_name,
 )
@@ -218,12 +219,14 @@ _EQUALITY_DIRNAME = "Equality"
 
 
 def _placeholder_identity(yaml_path: Path) -> Dict[str, object]:
-    """The header fields and effective ``ProblemType`` that name a logic file's
-    placeholder library. ``ProblemType`` is compared after TensileLite fills in
-    its defaults, so a file that writes a default out explicitly and one that
-    omits it compare equal. ``DeviceNames`` keeps the file's order, unlike
-    ``read_device_names``: ``MasterSolutionLibrary.hardware`` joins them in
-    that order into the ``_ID`` placeholder suffix."""
+    """The header fields, effective ``PerfMetric`` and effective
+    ``ProblemType`` that name a logic file's placeholder library.
+    ``ProblemType`` is compared after TensileLite fills in its defaults, so a
+    file that writes a default out explicitly and one that omits it compare
+    equal; ``PerfMetric`` likewise defaults to ``DeviceEfficiency``, the one
+    value that adds nothing to the name. ``DeviceNames`` keeps the file's
+    order, unlike ``read_device_names``: ``MasterSolutionLibrary.hardware``
+    joins them in that order into the ``_ID`` placeholder suffix."""
     from ..SolutionStructs.Problem import ProblemType
 
     identity: Dict[str, object] = {
@@ -231,6 +234,7 @@ def _placeholder_identity(yaml_path: Path) -> Dict[str, object]:
         "ArchitectureName": load_logic_gfx_arch(yaml_path),
         "CUCount": load_logic_cu_count(yaml_path),
         "DeviceNames": [str(name) for name in load_logic_device_names(yaml_path) or []],
+        "PerfMetric": load_logic_perf_metric(yaml_path) or "DeviceEfficiency",
     }
     raw = load_logic_problem_type(yaml_path) or {}
     for key, value in ProblemType(copy.deepcopy(raw), False).state.items():
@@ -243,7 +247,8 @@ def find_range_sibling_violations(
 ) -> List[str]:
     """A ``Range`` logic file with a same-basename ``Equality`` sibling in its
     logic tree must declare the same ``ScheduleName``, ``ArchitectureName``,
-    ``CUCount``, ``DeviceNames`` and effective ``ProblemType``. Those decide the
+    ``CUCount``, ``DeviceNames``, effective ``PerfMetric`` and effective
+    ``ProblemType``. Those decide the
     placeholder library a file loads into, and the Range rows are meant to sit
     in the Equality file's placeholder beside its rows (the gfx950 skinny TN
     custom kernels rely on this). A Range file that drifts from its sibling
