@@ -549,17 +549,44 @@ def _reject_mask_semantics(
     return None
 
 
+# Arches whose unified tiled kernels implement the whole attention band (top-left
+# and a right bound). The one list: dispatch reads it too (``_has_no_mask_kernel``).
+_BAND_KERNEL_ARCHES = ("gfx950", "gfx942")
+
+
 def _reject_mask_on_arch(
     problem: UnifiedAttentionProblem, arch: str
 ) -> Optional[Tuple[bool, str]]:
     """Only gfx950's and gfx942's tiled kernels implement non-default masks (see the
     fields). On gfx942 the 4-warp GQA cohorts decline ``right_bound != 0`` in
     ``_gfx942_4warp_eligible``, so such a problem builds the generic tiled 2D spec."""
-    if not problem.default_mask and arch not in ("gfx950", "gfx942"):
+    if not problem.default_mask and arch not in _BAND_KERNEL_ARCHES:
         return False, (
             f"{arch} tiled attention does not implement {_mask_label(problem)} masks"
         )
     return None
+
+
+def band_spec_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
+    """Band fields (``causal_top_left`` / ``right_bound``) for a tiled spec.
+
+    Set only off the default mask, so the default bottom-right causal mask builds
+    exactly the spec (and IR) it always did. A non-default mask on an arch without
+    band kernels raises (the tiled gates reject it first, see
+    ``_reject_mask_on_arch``).
+    """
+    if problem.default_mask:
+        return {}
+    if arch not in _BAND_KERNEL_ARCHES:
+        raise ValueError(
+            f"non-default attention mask is gfx950/gfx942-only, got {arch}"
+        )
+    fields: dict = {}
+    if problem.causal_top_left:
+        fields["causal_top_left"] = True
+    if problem.right_bound != 0:
+        fields["right_bound"] = problem.right_bound
+    return fields
 
 
 _LSE_ARCHES = ("gfx942", "gfx950")

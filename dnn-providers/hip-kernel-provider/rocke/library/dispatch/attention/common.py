@@ -55,6 +55,7 @@ from operator import index
 from typing import Any, Tuple
 
 from kernels.common.attention_unified import (
+    _BAND_KERNEL_ARCHES,
     UnifiedAttentionProblem,
     gfx942_3d_kv_needs_i64_addr,
     kv_addr_width_for_builder,
@@ -611,10 +612,11 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
 
 
 def _has_no_mask_kernel(arch: str) -> bool:
-    """Arches whose unified kernels have a top-left body. Elsewhere the tiled kernels
-    are bottom-right causal only, so an equal-length top-left request is served by the
-    bottom-right body (see ``normalize_band``)."""
-    return arch.strip().lower() in ("gfx950", "gfx942")
+    """Arches whose unified kernels have a top-left body (the kernels' own
+    ``_BAND_KERNEL_ARCHES``). Elsewhere the tiled kernels are bottom-right causal
+    only, so an equal-length top-left request is served by the bottom-right body
+    (see ``normalize_band``)."""
+    return arch.strip().lower() in _BAND_KERNEL_ARCHES
 
 
 # Arches served by the unified / dense candidates, i.e. the ones ``normalize_band``

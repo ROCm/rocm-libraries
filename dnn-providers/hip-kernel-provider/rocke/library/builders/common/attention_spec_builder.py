@@ -18,6 +18,7 @@ from dataclasses import replace
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    band_spec_fields,
     _has_score_bias,
     _enable_combo_2d,
     _enable_early_v_schedule,
@@ -74,22 +75,6 @@ from kernels.common.attention_unified import (
 from kernels.common import attention_unified as _kau
 
 
-def _mask_spec_fields(problem: UnifiedAttentionProblem) -> dict:
-    """Band fields (``causal_top_left`` / ``right_bound``) for a non-gfx950 tiled spec.
-
-    Splatted only when set, so the default bottom-right causal mask builds exactly
-    the spec (and IR) it always did. gfx942's 2D/3D tiled specs declare both; every
-    other non-gfx950 arch's tiled gate (``_reject_mask_on_arch``) rejects a
-    non-default mask before a spec is built, so their classes never see them.
-    """
-    fields: dict = {}
-    if problem.causal_top_left:
-        fields["causal_top_left"] = True
-    if problem.right_bound != 0:
-        fields["right_bound"] = problem.right_bound
-    return fields
-
-
 def _spec_gfx942_fp16_flash(problem: UnifiedAttentionProblem, arch: str):
     """gfx942 fp16 transposed-x8 flash geometry (the ``gfx942_dense_pipe`` engine).
 
@@ -137,7 +122,7 @@ def _spec_gfx942_fp16_flash(problem: UnifiedAttentionProblem, arch: str):
         use_q_direct_global=_enable_gfx942_flash_q_direct(problem, arch),
         kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
-        **_mask_spec_fields(problem),
+        **band_spec_fields(problem, arch),
     )
 
 
@@ -203,7 +188,7 @@ def _spec_gfx942_bf16_flash(problem: UnifiedAttentionProblem, arch: str):
         use_q_direct_global=_enable_gfx942_flash_q_direct(problem, arch),
         kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
-        **_mask_spec_fields(problem),
+        **band_spec_fields(problem, arch),
     )
 
 
@@ -291,7 +276,7 @@ def _spec_generic_2d_non_gfx950(problem: UnifiedAttentionProblem, arch: str):
     """
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
     return UnifiedAttention2DTiledSpec(
-        **_base_2d_generic_fields(problem, arch), **_mask_spec_fields(problem)
+        **_base_2d_generic_fields(problem, arch), **band_spec_fields(problem, arch)
     )
 
 
@@ -438,7 +423,7 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
             if arch in ("gfx942", "gfx950")
             else {}
         ),
-        **_mask_spec_fields(problem),
+        **band_spec_fields(problem, arch),
     )
 
 

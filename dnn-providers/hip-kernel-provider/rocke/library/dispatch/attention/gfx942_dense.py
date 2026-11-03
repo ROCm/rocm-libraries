@@ -23,7 +23,7 @@ from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
 from .common import AttentionRequest
-from .gfx950_dense import _dense_band, _is_ragged
+from .dense_rules import dense_band, is_ragged
 
 CANDIDATE_NAME = "attention_gfx942_dense"
 SPEC_ID = "gfx942_dense"
@@ -59,7 +59,7 @@ def _default_block_m(req: AttentionRequest) -> int:
     if int(req.sliding_window) or "causal_bottom_right" in req.features():
         return bm
     try:
-        causal = _dense_band(req)[0]
+        causal = dense_band(req)[0]
     except ValueError:
         return bm  # a band dense cannot serve: _make_spec raises the reason
     if bool(req.use_sinks) and not causal and int(req.hdim_q) == 128:
@@ -99,8 +99,8 @@ def _base_spec(req: AttentionRequest):
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
     at D128, and non-tile-multiple lengths (cross-attention included) take the
-    on-chip ragged path. The mask is the gfx950 dense band reading
-    (``_dense_band``).
+    on-chip ragged path. The mask is the dense band reading shared with gfx950
+    (``dense_rules.dense_band``).
     ``waves_per_eu`` comes from the kernel's own per-config policy
     (``_tuned_waves_per_eu``): any value the kernel bakes into its
     ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
@@ -149,15 +149,15 @@ def _make_spec(
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
-    # The gfx950 dense band reading: full attention, left-only / two-sided windows
-    # and lookahead on the top-left diagonal; at bottom-right alignment with
-    # seqlen_q != seqlen_k only the plain causal mask (``bottom_right``, the
-    # shifted diagonal); a window or lookahead there raises, so ``admits`` rejects
-    # it with the reason instead of running it top-left.
-    causal, right_bound, bottom_right = _dense_band(req)
+    # The dense band reading shared with gfx950: full attention, left-only /
+    # two-sided windows and lookahead on the top-left diagonal; at bottom-right
+    # alignment with seqlen_q != seqlen_k only the plain causal mask
+    # (``bottom_right``, the shifted diagonal); a window or lookahead there raises,
+    # so ``admits`` rejects it with the reason instead of running it top-left.
+    causal, right_bound, bottom_right = dense_band(req)
     # on-chip ragged padding for lengths that are not tile multiples (any mask,
     # including cross-attention seqlen_q != seqlen_kv), as on gfx950.
-    ragged = _is_ragged(sq, sk, bm, bn)
+    ragged = is_ragged(sq, sk, bm, bn)
     diag_split = False
     kv_segments = 1
     if bottom_right and not ragged:
@@ -212,8 +212,7 @@ def _make_spec(
         causal_diag_split=diag_split,
         kv_segments=kv_segments,
         window_wave_skip=window_wave_skip,
-        # Set only for a lookahead, so every pre-existing spec is unchanged.
-        **({"right_bound": right_bound} if right_bound else {}),
+        right_bound=right_bound,
     )
 
 

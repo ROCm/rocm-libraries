@@ -28,7 +28,7 @@ from .axes import (
     axis_knob_names,
     tuning_axes,
 )
-from .common import AttentionTuningSpec
+from .common import AttentionRequest, AttentionTuningSpec, normalize_band
 from .waves import waves_per_eu_sweep_values
 
 DenseSupports = Callable[..., Tuple[bool, str]]
@@ -162,6 +162,49 @@ def _kv_segments_in_scope(spec) -> bool:
         or spec.varlen
         or spec.paged
     )
+
+
+# ---------------------------------------------------------------------------
+# The dense band reading, shared by the gfx942 and gfx950 dense candidates.
+# ---------------------------------------------------------------------------
+_DENSE_BR_BAND_ERROR = (
+    "dense: a window or lookahead with bottom-right alignment and "
+    "seqlen_q != seqlen_k is not implemented"
+)
+
+
+def is_ragged(sq: int, sk: int, block_m: int, block_n: int) -> bool:
+    """Lengths that are not tile multiples run the on-chip-padded ragged body (any
+    mask: the padded keys / query rows are handled by the key-pad mask and the
+    guarded store, not by the diagonal)."""
+    return sq % block_m != 0 or sk % block_n != 0
+
+
+def dense_band(req: AttentionRequest) -> Tuple[bool, int, bool]:
+    """``(causal, right_bound, moving_bottom_right)`` the dense body computes for
+    ``req``. Raises ``ValueError`` for a band dense cannot serve.
+
+    ``causal`` False is the unbounded right side; ``right_bound`` is the lookahead
+    (0 = plain causal). The dense body anchors its window / lookahead on the
+    top-left diagonal; only the plain causal mask has a compile-time shifted
+    (bottom-right) variant, so a window or lookahead at bottom-right alignment with
+    ``seqlen_q != seqlen_k`` is rejected here instead of being computed top-left.
+    """
+    band = normalize_band(req, uniform_lengths=True)
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    window = int(req.sliding_window)
+    causal = band.right_bound is not None
+    right_bound = band.right_bound or 0
+    if band.top_left or sq == sk:
+        return causal, right_bound, False  # the diagonals coincide, or top-left
+    # Bottom-right alignment with seqlen_q != seqlen_k.
+    if not causal:
+        if window > 0:
+            raise ValueError(_DENSE_BR_BAND_ERROR)
+        return False, 0, False  # full attention: alignment is moot
+    if window > 0 or right_bound > 0:
+        raise ValueError(_DENSE_BR_BAND_ERROR)
+    return True, 0, True  # plain causal, compile-time shifted diagonal
 
 
 def dense_kv_segments(work_items: int, num_cus: int, max_segments: int = 8) -> int:
