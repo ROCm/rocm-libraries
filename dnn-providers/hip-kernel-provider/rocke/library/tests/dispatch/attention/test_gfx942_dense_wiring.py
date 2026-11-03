@@ -229,6 +229,38 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
                 self.assertTrue(spec.causal)
                 self.assertTrue(spec.causal_bottom_right)
 
+    def test_ragged_bottom_right_is_the_default_dense_route(self):
+        """Chunked prefill at lengths that are not tile multiples: an unpinned
+        contiguous-layout request is auto-pinned to gfx942 dense, whose default
+        spec is the ragged bottom-right body (numerics: the ragged rows of
+        ``_BOTTOM_RIGHT_COHORT`` in test_attention_dense_gfx942_numeric.py)."""
+        with _Gfx942Arch():
+            for sq, sk in ((200, 1000), (197, 400)):
+                with self.subTest(seqlen_q=sq, seqlen_k=sk):
+                    req = _req(
+                        batch=2,
+                        nhead_q=16,
+                        nhead_k=4,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                        algorithm="auto",
+                        spec_id="auto",
+                        layout="dense",
+                        num_cus=304,
+                    )
+                    routed = dispatch_attention(req)
+                    self.assertEqual(routed.candidate.name, _NAME)
+                    spec = routed.spec.kernel_spec
+                    self.assertTrue(spec.causal)
+                    self.assertTrue(spec.ragged and spec.causal_bottom_right)
+                    pinned = dataclasses.replace(
+                        req, algorithm="attention_dense", spec_id=_SPEC_ID
+                    )
+                    ok, why = _candidate().admits(pinned)
+                    self.assertTrue(ok, why)
+                    self.assertEqual(spec, _spec(pinned))
+
     def test_cross_length_no_mask_is_full_attention(self):
         """gfx942 has a no-mask body, so a cross-length NO_MASK request is full
         attention (as on gfx950), never the bottom-right causal band."""

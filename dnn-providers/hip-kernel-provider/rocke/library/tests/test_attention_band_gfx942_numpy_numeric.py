@@ -305,30 +305,39 @@ def test_d128_swa_4warp_top_left_reads_only_its_blocks(rt):
 
 
 # ---------------------------------------------------------------------------
-# Dense attention (top-left band; gfx942 dense has no bottom-right body)
+# Dense attention: the top-left band, and the plain bottom-right causal mask
 # ---------------------------------------------------------------------------
 
 _DENSE_HQ, _DENSE_HKV, _DENSE_BATCH = 4, 1, 2
 
-# (id, sq, skv, window, right, persistent, ragged)
+# (id, sq, skv, window, right, top_left, persistent, ragged)
 _DENSE_CASES = [
-    ("tl_causal_256x512", 256, 512, 0, 0, False, False),
-    ("tl_causal_512x256", 512, 256, 0, 0, False, False),
-    ("full_512x1024", 512, 1024, 0, -1, False, False),
+    ("tl_causal_256x512", 256, 512, 0, 0, True, False, False),
+    ("tl_causal_512x256", 512, 256, 0, 0, True, False, False),
+    ("full_512x1024", 512, 1024, 0, -1, True, False, False),
     # Sq != Sk and neither a tile multiple: the ragged q- and k-tile tails.
-    ("full_ragged_197x400", 197, 400, 0, -1, False, True),
+    ("full_ragged_197x400", 197, 400, 0, -1, True, False, True),
     # q > skv + window: the last rows see no key, in both batches.
-    ("left_only_w128_1024x512_empty", 1024, 512, 128, -1, False, False),
-    ("persist_left_only_w128_1024x512_empty", 1024, 512, 128, -1, True, False),
-    ("lookahead_r7_512x1024", 512, 1024, 0, 7, False, False),
+    ("left_only_w128_1024x512_empty", 1024, 512, 128, -1, True, False, False),
+    ("persist_left_only_w128_1024x512_empty", 1024, 512, 128, -1, True, True, False),
+    ("lookahead_r7_512x1024", 512, 1024, 0, 7, True, False, False),
+    # Ragged bottom-right causal (chunked prefill), the route unpinned dense
+    # dispatch takes by default, on both grids. Batch 0's padded key tail reads
+    # batch 1's K/V unless the kernel masks it.
+    ("br_ragged_200x1000", 200, 1000, 0, 0, False, False, True),
+    ("persist_br_ragged_200x1000", 200, 1000, 0, 0, False, True, True),
+    ("br_ragged_197x400", 197, 400, 0, 0, False, False, True),
+    ("persist_br_ragged_197x400", 197, 400, 0, 0, False, True, True),
 ]
 
 
 @pytest.mark.parametrize(
-    "sq,skv,window,right,persistent,ragged",
+    "sq,skv,window,right,top_left,persistent,ragged",
     [pytest.param(*c[1:], id=c[0]) for c in _DENSE_CASES],
 )
-def test_dense_band_matches_numpy(rt, sq, skv, window, right, persistent, ragged):
+def test_dense_band_matches_numpy(
+    rt, sq, skv, window, right, top_left, persistent, ragged
+):
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         run_attention_dense_torch,
@@ -344,6 +353,7 @@ def test_dense_band_matches_numpy(rt, sq, skv, window, right, persistent, ragged
         head_size=_D,
         causal=right >= 0,
         right_bound=max(right, 0),
+        causal_bottom_right=not top_left,
         dtype=dtype,
         sliding_window=window,
         persistent=persistent,
@@ -366,7 +376,7 @@ def test_dense_band_matches_numpy(rt, sq, skv, window, right, persistent, ragged
         scale=scale,
     )
     got = _from_device_dtype(out.read(), dtype)
-    vis = _visible(sq, skv, top_left=True, window=window, right=right)
+    vis = _visible(sq, skv, top_left=top_left, window=window, right=right)
     empty = ~vis.any(axis=1)
     if window and sq > skv + window:
         assert empty.any(), "case meant to have empty rows has none"

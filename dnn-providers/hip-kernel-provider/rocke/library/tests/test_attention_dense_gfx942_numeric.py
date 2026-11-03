@@ -378,18 +378,30 @@ def test_dense_fp16_d128_large_equal_scores(persistent):
 
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal_diag_split,
-# seqlen_q, seqlen_kv): bottom-right causal, seqlen_q < seqlen_kv (chunked prefill).
-# The diagonal offset seqlen_kv - seqlen_q is a runtime value: block-aligned (512,
-# 3584) and not (64, 576), both grids, with and without the unmasked-body split.
+# seqlen_q, seqlen_kv, batch): bottom-right causal, seqlen_q < seqlen_kv (chunked
+# prefill). The diagonal offset seqlen_kv - seqlen_q is a runtime value:
+# block-aligned (512, 3584) and not (64, 576), both grids, with and without the
+# unmasked-body split.
+#
+# The last six rows are ragged (seqlen_q % block_m and seqlen_kv % block_n both
+# non-zero), the shape class unpinned dense dispatch routes here by default. Batch 2,
+# so batch 0's padded key tail reads batch 1's K/V unless the kernel masks it.
+# causal_diag_split is False there, as dispatch leaves it for ragged requests.
 _BOTTOM_RIGHT_COHORT = [
-    ("bf16", 128, 16, 4, False, False, 512, 1024),
-    ("bf16", 128, 16, 4, False, True, 512, 1088),
-    ("bf16", 128, 16, 4, True, False, 512, 576),
-    ("bf16", 128, 16, 4, True, True, 256, 3840),
-    ("fp16", 128, 16, 4, False, True, 512, 1024),
-    ("fp16", 128, 16, 4, True, True, 512, 1088),
-    ("bf16", 64, 16, 4, False, True, 512, 576),
-    ("bf16", 64, 16, 4, True, False, 256, 1024),
+    ("bf16", 128, 16, 4, False, False, 512, 1024, 1),
+    ("bf16", 128, 16, 4, False, True, 512, 1088, 1),
+    ("bf16", 128, 16, 4, True, False, 512, 576, 1),
+    ("bf16", 128, 16, 4, True, True, 256, 3840, 1),
+    ("fp16", 128, 16, 4, False, True, 512, 1024, 1),
+    ("fp16", 128, 16, 4, True, True, 512, 1088, 1),
+    ("bf16", 64, 16, 4, False, True, 512, 576, 1),
+    ("bf16", 64, 16, 4, True, False, 256, 1024, 1),
+    ("bf16", 128, 16, 4, False, False, 200, 1000, 2),
+    ("bf16", 128, 16, 4, True, False, 200, 1000, 2),
+    ("fp16", 128, 16, 4, False, False, 197, 400, 2),
+    ("fp16", 128, 16, 4, True, False, 197, 400, 2),
+    ("bf16", 64, 16, 4, False, False, 197, 400, 2),
+    ("bf16", 64, 16, 4, True, False, 197, 400, 2),
 ]
 
 
@@ -405,16 +417,16 @@ def _bottom_right_keep(sq, sk, device):
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    "dtype,d,hq,hkv,persistent,diag_split,sq,sk", _BOTTOM_RIGHT_COHORT
+    "dtype,d,hq,hkv,persistent,diag_split,sq,sk,batch", _BOTTOM_RIGHT_COHORT
 )
 def test_dense_bottom_right_numeric_vs_fp32_sdpa(
-    dtype, d, hq, hkv, persistent, diag_split, sq, sk
+    dtype, d, hq, hkv, persistent, diag_split, sq, sk, batch
 ):
     import torch
 
     tol = 2e-2 if dtype == "fp16" else 4e-2
     tdt = getattr(torch, _TORCH_DT[dtype])
-    B = 1
+    B = batch
     scale = 1.0 / math.sqrt(d)
     torch.manual_seed(0)
     q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
@@ -422,8 +434,12 @@ def test_dense_bottom_right_numeric_vs_fp32_sdpa(
     v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
     out = torch.empty(B, sq, hq, d, device="cuda", dtype=tdt)
 
-    spec = _spec(dtype, d, hq, hkv, persistent, sq=sq, sk=sk, bottom_right=True)
+    spec = _spec(
+        dtype, d, hq, hkv, persistent, batch=B, sq=sq, sk=sk, bottom_right=True
+    )
     assert spec.causal_bottom_right
+    ragged = sq % spec.block_m != 0 or sk % spec.block_n != 0
+    assert spec.ragged == ragged
     spec = dataclasses.replace(spec, causal_diag_split=diag_split)
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
@@ -432,7 +448,7 @@ def test_dense_bottom_right_numeric_vs_fp32_sdpa(
     ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
     max_abs = (ref - out.float()).abs().max().item()
     assert max_abs < tol, (
-        f"{dtype} D{d} GQA{hq}/{hkv} bottom-right sq={sq} sk={sk} "
+        f"{dtype} D{d} GQA{hq}/{hkv} bottom-right B={B} sq={sq} sk={sk} "
         f"{'persist' if persistent else 'default'} split={diag_split}: "
         f"max_abs={max_abs:.3e} >= {tol}"
     )
