@@ -997,6 +997,16 @@ _GFX942_3D_OFFSET = 32
 #  105: 83 + split_det=3, cshuffle_m_chunks=2
 #  106: 84 without xcd_remap + split_xcd_remap=6
 #  107: 83 + split_det=3, split_tail: rejected by both engines
+#  108: t256x256x32 w4x2, split_k=2, uniform_k_decode, reg_prefetch=1, lds_xor,
+#       uk_tap_fast, cshuffle_m_chunks=4, uk_nopad, vmem_interleave=5,
+#       lds_kpack_read, uk_chunk_group=2, rpf_pingpong=5, lds_xor_rowkey,
+#       split_atomic_pairs, pp_split_fetch=10, fb_skip_empty, split_hybrid=16,
+#       split_det=3
+#  109: 108 with split_hybrid=8, split_det=2
+#  110: 84 without xcd_remap + split_streamk (one segment per tile touched)
+#  111: 83 without xcd_remap + split_hybrid=4, split_det=1
+#  112: 110 + split_det=2: rejected by both engines
+#  113: 108 with split_streamk in place of split_hybrid: rejected by both engines
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1113,6 +1123,19 @@ def _gfx942_3d_spec(idx: int):
         107: dict(split_det=3, split_tail=True),
     })
     knobs[103] = (54, dict(cshuffle_m_chunks=2))
+    _s8 = dict(tile_n=256, tile_k=32, warp_n=2, split_k=2, uniform_k_decode=True,
+               reg_prefetch=1, lds_xor=True, uk_tap_fast=True, cshuffle_m_chunks=4,
+               uk_nopad=True, vmem_interleave=5, lds_kpack_read=True, uk_chunk_group=2,
+               rpf_pingpong=5, lds_xor_rowkey=True, split_atomic_pairs=True,
+               pp_split_fetch=10, fb_skip_empty=True, split_hybrid=16, split_det=3)
+    knobs[108] = (55, _s8)
+    knobs[109] = (55, dict(_s8, split_hybrid=8, split_det=2))
+    knobs[113] = (55, dict(_s8, split_hybrid=0, split_streamk=True, split_det=0))
+    _pp.update({
+        110: dict(_p84, xcd_remap=0, split_streamk=True),
+        111: dict(xcd_remap=0, split_hybrid=4, split_det=1),
+        112: dict(_p84, xcd_remap=0, split_streamk=True, split_det=2),
+    })
     if idx in _pp:
         knobs[idx] = (55, dict(_s3, **_pp[idx]))
     extra = {}

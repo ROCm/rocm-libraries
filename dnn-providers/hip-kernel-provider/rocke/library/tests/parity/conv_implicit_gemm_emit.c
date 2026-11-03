@@ -1020,6 +1020,43 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->cshuffle_m_chunks = idx == 105 ? 2 : 1;
         spec->split_tail = idx == 107;
         return 0;
+    case 108:
+    case 109:
+    case 113:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_n = 2;
+        spec->split_k = 2;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->lds_xor = true;
+        spec->uk_tap_fast = true;
+        spec->cshuffle_m_chunks = 4;
+        spec->uk_nopad = true;
+        spec->vmem_interleave = 5;
+        spec->lds_kpack_read = true;
+        spec->uk_chunk_group = 2;
+        spec->rpf_pingpong = 5;
+        spec->lds_xor_rowkey = true;
+        spec->split_atomic_pairs = true;
+        spec->pp_split_fetch = 10;
+        spec->fb_skip_empty = true;
+        spec->split_hybrid = idx == 108 ? 16 : idx == 109 ? 8 : 0;
+        spec->split_det = idx == 108 ? 3 : idx == 109 ? 2 : 0;
+        spec->split_streamk = idx == 113;
+        return 0;
+    case 110:
+    case 111:
+    case 112:
+        if(make_cfg_3d(idx == 111 ? 83 : 84, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = 0;
+        spec->split_streamk = idx != 111;
+        spec->split_hybrid = idx == 111 ? 4 : 0;
+        spec->split_det = idx == 111 ? 1 : idx == 112 ? 2 : 0;
+        return 0;
     case 102:
         if(make_cfg_3d_base(55, spec, arch) != 0)
             return -1;

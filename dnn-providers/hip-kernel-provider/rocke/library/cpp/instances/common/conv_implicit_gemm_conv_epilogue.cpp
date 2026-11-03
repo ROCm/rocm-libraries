@@ -487,8 +487,11 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
          * row-major through the cshuffle LDS staging, into its own [M, K]
          * slab of sk_partials (slot = slice); a separate fold kernel sums the
          * slabs in slot order into D. */
+        rocke_value_t* slot = ctx->fwd_slice_id;
+        if(spec->split_hybrid)
+            slot = rocke_b_select(b, ctx->shy_prim, ctx->shy_s, ctx->shy_S);
         rocke_value_t* mk = rocke_b_mul(b, ctx->p_M, ctx->p_K);
-        rocke_value_t* slab = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ctx->fwd_slice_id, mk));
+        rocke_value_t* slab = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, slot, mk));
         rocke_value_t* ws_rsrc
             = rocke_b_buffer_rsrc(b, ctx->fwd_p_sk_partials, rocke_b_const_i32(b, 0x7FFFFFF0));
         /* Row slabs of <= 32 KB of f32 where the warp's M atoms allow. */
@@ -523,29 +526,47 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
         ws_rsrc = rocke_b_buffer_rsrc(b, ctx->fwd_p_sk_partials, rocke_b_const_i32(b, 0x7FFFFFF0));
     rocke_value_t* c_1 = rocke_b_const_i32(b, 1);
     rocke_value_t* c_tile = rocke_b_const_i32(b, ctx->block_m * ctx->block_n);
-    rocke_value_t* mt = rocke_b_div(b, ctx->block_m_off_v, rocke_b_const_i32(b, ctx->block_m));
-    rocke_value_t* mtn = rocke_b_mul(b, mt, ctx->p_num_pid_n);
-    rocke_value_t* nt = rocke_b_div(b, ctx->block_n_off_v, rocke_b_const_i32(b, ctx->block_n));
-    rocke_value_t* t_lin = rocke_b_add(b, mtn, nt);
-    rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
-    rocke_value_t* f_idx = t_lin;
-    rocke_value_t* t_slot = t_lin;
-    rocke_value_t* per_group = tiles;
-    if(spec->split_tail)
+    rocke_value_t *f_idx, *t_slot, *n_wait, *is_owner, *n_slots, *slot;
+    if(spec->split_hybrid)
     {
-        /* Slots for the tail tiles only (launch order). */
-        t_slot = rocke_b_sub(b, t_lin, ctx->fwd_p_full_tiles);
-        per_group = rocke_b_sub(b, tiles, ctx->fwd_p_full_tiles);
+        rocke_value_t* has_rem = rocke_b_cmp_lt(b, c0, ctx->shy_H);
+        rocke_value_t* np_ = rocke_b_lnot(b, ctx->shy_prim);
+        rocke_value_t* sm1 = rocke_b_sub(b, ctx->shy_S, c_1);
+        rocke_value_t* last = rocke_b_land(b, ctx->shy_prim, rocke_b_cmp_eq(b, ctx->shy_s, sm1));
+        is_owner = rocke_b_select(b, has_rem, np_, last);
+        rocke_value_t* sm1b = rocke_b_sub(b, ctx->shy_S, c_1);
+        n_wait = rocke_b_to_sgpr_u32(b, rocke_b_select(b, has_rem, ctx->shy_S, sm1b));
+        n_slots = ctx->shy_S;
+        slot = ctx->shy_s;
+        f_idx = ctx->fsk_tile;
+        t_slot = ctx->fsk_tile;
     }
-    if(ctx->group_idx != NULL)
+    else
     {
-        f_idx = rocke_b_add(b, f_idx, rocke_b_mul(b, ctx->group_idx, tiles));
-        t_slot = rocke_b_add(b, t_slot, rocke_b_mul(b, ctx->group_idx, per_group));
+        rocke_value_t* mt = rocke_b_div(b, ctx->block_m_off_v, rocke_b_const_i32(b, ctx->block_m));
+        rocke_value_t* mtn = rocke_b_mul(b, mt, ctx->p_num_pid_n);
+        rocke_value_t* nt = rocke_b_div(b, ctx->block_n_off_v, rocke_b_const_i32(b, ctx->block_n));
+        rocke_value_t* t_lin = rocke_b_add(b, mtn, nt);
+        rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+        f_idx = t_lin;
+        t_slot = t_lin;
+        rocke_value_t* per_group = tiles;
+        if(spec->split_tail)
+        {
+            /* Slots for the tail tiles only (launch order). */
+            t_slot = rocke_b_sub(b, t_lin, ctx->fwd_p_full_tiles);
+            per_group = rocke_b_sub(b, tiles, ctx->fwd_p_full_tiles);
+        }
+        if(ctx->group_idx != NULL)
+        {
+            f_idx = rocke_b_add(b, f_idx, rocke_b_mul(b, ctx->group_idx, tiles));
+            t_slot = rocke_b_add(b, t_slot, rocke_b_mul(b, ctx->group_idx, per_group));
+        }
+        n_wait = rocke_b_to_sgpr_u32(b, rocke_b_sub(b, ctx->fwd_p_ks_count, c_1));
+        is_owner = rocke_b_cmp_eq(b, ctx->fwd_slice_id, n_wait);
+        n_slots = n_wait;
+        slot = ctx->fwd_slice_id;
     }
-    rocke_value_t* n_wait = rocke_b_to_sgpr_u32(b, rocke_b_sub(b, ctx->fwd_p_ks_count, c_1));
-    rocke_value_t* is_owner = rocke_b_cmp_eq(b, ctx->fwd_slice_id, n_wait);
-    rocke_value_t* n_slots = n_wait;
-    rocke_value_t* slot = ctx->fwd_slice_id;
     f_idx = rocke_b_to_sgpr_u32(b, f_idx);
     rocke_value_t* t_base
         = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_mul(b, t_slot, n_slots), c_tile));

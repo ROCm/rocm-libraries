@@ -482,11 +482,13 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->split_atomic_pairs, "sapl");
     /* (sapf, esf: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_xcd_remap > 0, "skx%d", s->split_xcd_remap);
-    /* (fsk, sfs, szf, xsub, ppfd: Python-only knobs, off.) */
+    ROCKE_FLAG(s->split_streamk, "fsk");
+    /* (sfs, szf, xsub, ppfd: Python-only knobs, off.) */
     ROCKE_FLAG(s->fb_skip_empty, "fbse");
     /* (ppeg: Python-only, off.) */
     ROCKE_FLAG(s->epi_lds_barriers, "elb");
-    /* (shy, mss, stc: Python-only knobs, off.) */
+    ROCKE_FLAG(s->split_hybrid > 0, "shy%d", s->split_hybrid);
+    /* (mss, stc: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_det > 0, "sdet%d", s->split_det);
     ROCKE_FLAG(s->pp_split_fetch > 0, "psf%d", s->pp_split_fetch);
     /* (nag: Python-only, off.) */
@@ -1101,10 +1103,11 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                         "split_atomic selects the wave64 MFMA atomic split-K for a 2-D "
                         "problem: it needs split_k > 1, wave_size 64 and no split_k_cluster "
                         "(a 3-D split is always atomic)");
-    const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_det || s->split_xcd_remap;
+    const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_det || s->split_xcd_remap
+                       || s->split_streamk || s->split_hybrid;
     if(s->split_k == 1)
     {
-        if(s->split_det || s->split_xcd_remap)
+        if(s->split_det || s->split_xcd_remap || s->split_streamk || s->split_hybrid)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "split_xcd_remap / split_streamk / split_flag_store need the split-K "
@@ -1128,7 +1131,8 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     }
     {
         const char* d = s->dtype_d ? s->dtype_d : "fp16";
-        if(s->split_det && (strcmp(d, "bf16") != 0 || s->split_det < 1 || s->split_det > 3))
+        if(s->split_det
+           && (s->split_streamk || strcmp(d, "bf16") != 0 || s->split_det < 1 || s->split_det > 3))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
@@ -1138,6 +1142,14 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
                             "split store");
+        if(s->split_hybrid && (s->split_streamk || s->split_hybrid < 0))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_hybrid: one segment scheme (not with split_streamk), E >= 0");
+        if((s->split_streamk || s->split_hybrid)
+           && (s->split_tail || s->xcd_remap || s->chiplet_swizzle
+               || (s->split_xcd_remap && !s->split_hybrid)))
+            ROCKE_SPEC_FAIL(reason, reason_cap, "split_streamk: no split tail, no tile remap");
         if(s->split_xcd_remap && (s->split_tail || s->xcd_remap || s->chiplet_swizzle))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
@@ -1245,6 +1257,9 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "uk_chunk_group with split_k: the uk_nopad rpf_pingpong loops only");
+        if(s->split_k > 1 && s->split_streamk)
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "uk_chunk_group with split_k: not with stream-K / x-halo");
     }
     if(s->rpf_setprio && (!(s->reg_prefetch == 1 || s->reg_prefetch == 2) || s->rpf_setprio > 3))
         ROCKE_SPEC_FAIL(reason,

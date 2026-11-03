@@ -304,6 +304,13 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* split_xcd_remap: the whole split launch of one group, slice-major,
      * remapped XCD-contiguously (replaces xcd_remap / chiplet_swizzle). */
     int split_xcd_remap; /* default 0 */
+    /* split_streamk: workgroup w of the flat grid of ks_count runs the global
+     * K iterations [w*T/G, (w+1)*T/G) of the tile-major T, one segment per
+     * tile it touches (the kernel body runs in a segment loop). */
+    bool split_streamk; /* default false */
+    /* split_hybrid (E >= 0): S aligned slices per tile plus whole-tile
+     * remainder workgroups (E: the remainder's extra K tiles of balance). */
+    int split_hybrid; /* default 0 */
 
     /* cshuffle_m_chunks: stage the cshuffle C tile in that many row slabs
      * (bf16 wave64 MFMA cshuffle). Default 1 (0 reads as 1). */
