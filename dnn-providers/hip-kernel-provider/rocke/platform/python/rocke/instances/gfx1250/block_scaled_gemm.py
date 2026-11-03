@@ -548,9 +548,8 @@ def build_block_scaled_gemm(
             value = ir.vec_extract(acc, i)
             if spec.tensor_scale:
                 value = ir.fmul(value, tensor_scale)
-                if c_ty == F16:
-                    # Preserve FP32 rounding before the final FP16 conversion.
-                    value = ir.optimization_barrier(value)
+                # Preserve FP32 rounding before the BF16/FP16 conversion.
+                value = ir.optimization_barrier(value)
             ir.global_store(C, idx, ir.cast_f32_to(value, c_ty), align=2)
         return ir.kernel
 

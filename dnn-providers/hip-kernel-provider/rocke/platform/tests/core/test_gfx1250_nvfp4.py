@@ -119,11 +119,10 @@ def test_nvfp4_kernel_contract(dtype, k, flavor):
         if "fmul float" in l and "tensor_scale" not in l
     }
     assert len(scaled_results) == 8
-    if dtype == "fp16":
-        barriers = [l for l in llvm.splitlines() if 'asm "", "=v,0"' in l]
-        assert len(barriers) == 8
-        assert all(any(v + ")" in l for l in barriers) for v in scaled_results)
-        scaled_results = {l.strip().split(" = ")[0] for l in barriers}
+    barriers = [l for l in llvm.splitlines() if 'asm "", "=v,0"' in l]
+    assert len(barriers) == 8
+    assert all(any(v + ")" in l for l in barriers) for v in scaled_results)
+    scaled_results = {l.strip().split(" = ")[0] for l in barriers}
     assert all(
         any(
             v + " " in l or v + "," in l or v + ")" in l
@@ -332,6 +331,28 @@ def test_tensor_rounding_fixture_requires_fp32_intermediate():
     assert result[0, 13] == -375.5
     factor = np.float32(factors[0]) * np.float32(factors[1])
     assert np.float16(np.float64(-412.5) * np.float64(factor)) == -375.25
+
+
+@pytest.mark.parametrize("m,n,k", [(16, 16, 128), (32, 48, 256)])
+@pytest.mark.usefixtures("ml_reference_types")
+def test_bf16_tensor_rounding_fixture_requires_fp32_intermediate(m, n, k):
+    spec = NvFp4GemmSpec("rounding", m, n, k, "bf16")
+    inputs, factors = make_case_inputs(spec, "tensor-rounding")
+    a, b, sa, sb = inputs
+    assert np.all(a[:, 0] == 2) and not np.any(a[:, 1:])
+    assert np.all(b[:, 0] == 2) and not np.any(b[:, 1:])
+    assert np.all(sa == 58) and np.all(sb == 62)
+    accumulator = np.float32(1.25 * 1.75)
+    factor = np.float32(factors[0]) * np.float32(factors[1])
+    lower, upper = 1.109375, 1.1171875  # Adjacent BF16 values; lower has even LSB.
+    midpoint = (lower + upper) / 2
+    assert np.float32(accumulator * factor) == midpoint
+    # Binary64 represents the exact product of these two FP32 operands.
+    exact_product = np.float64(accumulator) * np.float64(factor)
+    assert midpoint < exact_product < upper
+    # A fused multiply/conversion rounds upward, unlike FP32 then BF16 RNE.
+    result = reference_result(*inputs, factors, dtype_c="bf16")
+    np.testing.assert_array_equal(result, np.full((m, n), lower))
 
 
 @pytest.mark.parametrize(

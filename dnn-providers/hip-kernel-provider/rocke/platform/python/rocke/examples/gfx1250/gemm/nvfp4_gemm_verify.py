@@ -90,6 +90,17 @@ def make_case_inputs(spec: NvFp4GemmSpec, case: str):
         factors = (0.5, 1.5)
     elif case == "tensor-rounding":
         factors = (1.3, 0.7)
+        if spec.dtype_c == "bf16":
+            # One exact 1*1 term with scales 1.25*1.75 gives 2.1875.
+            # FP32(57/112) puts its rounded product on a BF16 midpoint;
+            # direct BF16 rounding of the exact product chooses the other side.
+            a.fill(0)
+            b.fill(0)
+            a[:, 0] = 2
+            b[:, 0] = 2
+            sa.fill(58)
+            sb.fill(62)
+            factors = (float(np.float32(57 / 112)), 1.0)
     elif case == "zero-tensor":
         factors = (0.0, 1.5)
     elif case == "zero-block":

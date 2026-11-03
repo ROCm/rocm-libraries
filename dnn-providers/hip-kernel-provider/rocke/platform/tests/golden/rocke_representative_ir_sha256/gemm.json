@@ -385,18 +385,18 @@
         },
         "gemm/gfx1250/nvfp4/bf16/k128": {
           "arch": "gfx1250",
-          "bytes": 20210,
+          "bytes": 20634,
           "family": "gemm",
           "kernel_name": "irhash_nvfp4_bf16_nvfp4_bf16_block_scaled_fp4_fp4_out_bf16_bk16_t16x16x128_wmma_scale16_tensor_scale_sa_e4m3_sb_e4m3_e8865ee420",
-          "sha256": "60e24b05cbd4803be94744ab741d94d1dcd3809fbff6c85c294f917b3ab831ab",
+          "sha256": "f3344e0fbf68c0b7389d8714d054d7aa9e5a5766973c752f3d2219bb55c08f49",
           "status": "ok"
         },
         "gemm/gfx1250/nvfp4/bf16/k256": {
           "arch": "gfx1250",
-          "bytes": 35596,
+          "bytes": 36020,
           "family": "gemm",
           "kernel_name": "irhash_nvfp4_bf16_nvfp4_bf16_block_scaled_fp4_fp4_out_bf16_bk16_t16x16x128_wmma_scale16_tensor_scale_sa_e4m3_sb_e4m3_04f0214aed",
-          "sha256": "c51eedd43575bb5c1d47044c3ff114cf0a54f4c7f1aad400886ca08e4ee94033",
+          "sha256": "ef81aa38d63f78a07e46e5bb3b20fda9e6c05f54a2e9ec8c6b445abec2ff8fcd",
           "status": "ok"
         },
         "gemm/gfx1250/nvfp4/fp16/k128": {
@@ -574,18 +574,18 @@
         },
         "gemm/gfx1250/nvfp4/bf16/k128": {
           "arch": "gfx1250",
-          "bytes": 20210,
+          "bytes": 20634,
           "family": "gemm",
           "kernel_name": "irhash_nvfp4_bf16_nvfp4_bf16_block_scaled_fp4_fp4_out_bf16_bk16_t16x16x128_wmma_scale16_tensor_scale_sa_e4m3_sb_e4m3_e8865ee420",
-          "sha256": "60e24b05cbd4803be94744ab741d94d1dcd3809fbff6c85c294f917b3ab831ab",
+          "sha256": "f3344e0fbf68c0b7389d8714d054d7aa9e5a5766973c752f3d2219bb55c08f49",
           "status": "ok"
         },
         "gemm/gfx1250/nvfp4/bf16/k256": {
           "arch": "gfx1250",
-          "bytes": 35596,
+          "bytes": 36020,
           "family": "gemm",
           "kernel_name": "irhash_nvfp4_bf16_nvfp4_bf16_block_scaled_fp4_fp4_out_bf16_bk16_t16x16x128_wmma_scale16_tensor_scale_sa_e4m3_sb_e4m3_04f0214aed",
-          "sha256": "c51eedd43575bb5c1d47044c3ff114cf0a54f4c7f1aad400886ca08e4ee94033",
+          "sha256": "ef81aa38d63f78a07e46e5bb3b20fda9e6c05f54a2e9ec8c6b445abec2ff8fcd",
           "status": "ok"
         },
         "gemm/gfx1250/nvfp4/fp16/k128": {

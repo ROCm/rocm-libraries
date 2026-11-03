@@ -374,7 +374,7 @@ pieces the v2 body composes.
 provides a packed-input, RCR GEMM builder. A and B contain low-nibble-first
 E2M1 FP4; each group of 16 values along K has an encoded E4M3 block scale.
 Two runtime FP32 tensor dequantization factors scale the FP32 accumulator
-before BF16 or FP16 output conversion. The FP16 epilogue preserves the FP32
+before BF16 or FP16 output conversion. Both epilogues preserve the FP32
 multiplication boundary with an optimization barrier.
 
 Import the public API from `rocke.instances.gfx1250`:
