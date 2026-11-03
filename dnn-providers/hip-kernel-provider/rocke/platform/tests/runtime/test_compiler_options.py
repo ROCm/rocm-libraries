@@ -20,6 +20,7 @@ Whether the committed answers match the loaded compiler is the CTest gate
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 import textwrap
 from collections.abc import Callable, Iterator
@@ -129,16 +130,67 @@ def _committed_with(old: str, new: str) -> str:
             '"verified_on": 20',
             r"on LLVM 20 evidence=.* and verified_on=20, expected strings",
         ),
-        ('"evidence": ', '"reason": ', r"exactly the keys accepted, evidence"),
-        ('"20": {', '"llvm20": {', r"expected an object keyed by LLVM major"),
+        (
+            '"evidence": ',
+            '"reason": ',
+            (
+                r"on LLVM 20 has missing keys \['evidence'\] and unexpected keys "
+                r"\['reason'\]"
+            ),
+        ),
+        ('"20": {', '"llvm20": {', r"has the keys \['llvm20'\], expected LLVM major"),
     ],
     ids=["schema", "accepted_not_bool", "verified_on_not_str", "key", "major"],
 )
 def test_parse_table_refuses_a_malformed_table(
     old: str, new: str, message: str
 ) -> None:
-    with pytest.raises(ValueError, match=message):
-        table.parse_table(_committed_with(old, new))
+    """Each refusal names the file and the entry that is wrong."""
+    with pytest.raises(ValueError, match=message) as err:
+        table.parse_table(_committed_with(old, new), source="edited.json")
+    assert str(err.value).startswith("edited.json: ")
+
+
+def test_parse_table_names_the_committed_file_by_default() -> None:
+    with pytest.raises(ValueError) as err:
+        table.parse_table(_committed_with(table.SCHEMA, "rocke.compiler_options/v0"))
+    assert str(err.value).startswith(f"{table.TABLE_PATH}: ")
+
+
+# --- the drift the reproducibility gate reports -----------------------------------
+
+
+def test_column_drift_is_empty_when_the_column_reproduces() -> None:
+    committed = table.measured_answers()
+    for major in committed[OPTION]:
+        measured = {
+            option: column[major].accepted
+            for option, column in committed.items()
+            if major in column
+        }
+        assert table.column_drift(committed, measured, llvm_major=major) == []
+
+
+def test_column_drift_reports_a_changed_answer() -> None:
+    major = _measured_major(accepted=False)
+    drift = table.column_drift(
+        table.measured_answers(), {OPTION: True}, llvm_major=major
+    )
+    assert drift == [
+        f"{OPTION} on LLVM {major}: committed accepted=False, measured accepted=True"
+    ]
+
+
+def test_column_drift_reports_a_missing_answer() -> None:
+    drift = table.column_drift(
+        table.measured_answers(),
+        {OPTION: True, "-amdgpu-no-such-option": False},
+        llvm_major=999,
+    )
+    assert drift == [
+        f"{OPTION} on LLVM 999: no committed answer",
+        "-amdgpu-no-such-option on LLVM 999: no committed answer",
+    ]
 
 
 def test_backend_options_reads_only_mllvm_values() -> None:
@@ -310,12 +362,24 @@ def _loaded_compiler() -> CompilerInfo:
     return info
 
 
-def test_comgr_child_env_names_the_loaded_library() -> None:
-    info = _loaded_compiler()
-    env = comgr.comgr_child_env({"KEPT": "1", "AMD_COMGR_CACHE": "1"})
+@pytest.mark.parametrize(
+    ("comgr_path", "expected_lib"),
+    [
+        ("/opt/rocm/lib/libamd_comgr.so", "/opt/rocm/lib/libamd_comgr.so"),
+        # The loader could not say which file it mapped: the name it was asked for.
+        (None, "libamd_comgr.so"),
+    ],
+    ids=["mapped_path", "requested_name"],
+)
+def test_comgr_child_env_names_the_loaded_library(
+    comgr_path: str | None, expected_lib: str
+) -> None:
+    loaded = dataclasses.replace(_compiler(20, 0, 0), comgr_path=comgr_path)
+    with mock.patch.object(comgr, "loaded_compiler_info", return_value=loaded):
+        env = comgr.comgr_child_env({"KEPT": "1", "AMD_COMGR_CACHE": "1"})
     assert env == {
         "KEPT": "1",
-        "ROCKE_COMGR_LIB": info.comgr_path or info.requested_comgr,
+        "ROCKE_COMGR_LIB": expected_lib,
         "AMD_COMGR_CACHE": "0",
     }
 
