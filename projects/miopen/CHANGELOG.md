@@ -30,6 +30,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [Conv] Fixed HIP graph captures of convolutions failing with `hipErrorStreamCaptureInvalidated`
+  after a find had skipped a naive solver for exceeding `MIOPEN_NAIVE_TIMEOUT` (#12121). Scratch
+  held by a skipped evaluation is now released by a background thread as soon as its kernel
+  finishes, rather than from a later kernel launch, so it is also released in workloads that only
+  replay a captured graph.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -52,6 +57,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
 * Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
+
+### Optimized
+* [Conv] Restored gfx1200 backward-weights performance that #13697 gave up when it removed the
+  Composable Kernel entries invalidated by #13373 from 838 find-db keys. 835 of those problems were
+  re-tuned on gfx1200, and the 475 whose config verifies on a fresh-process replay and beats the
+  post-#13697 pick by at least 5 percent are back in the system database, for a geomean 2.64x and
+  up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
+  split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
+  between builds.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

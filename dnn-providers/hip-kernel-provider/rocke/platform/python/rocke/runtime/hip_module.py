@@ -164,6 +164,27 @@ _hipMemcpy = _b(
     "hipMemcpy", ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int
 )
 _hipMemset = _b("hipMemset", ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t)
+_hipMemsetAsync = _b(
+    "hipMemsetAsync",
+    ctypes.c_void_p,
+    ctypes.c_int,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+)
+_hipExtMallocWithFlags = _b(
+    "hipExtMallocWithFlags",
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.c_size_t,
+    ctypes.c_uint,
+)
+_hipStreamWaitValue32 = _b(
+    "hipStreamWaitValue32",
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_uint32,
+    ctypes.c_uint,
+    ctypes.c_uint32,
+)
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipEventCreate = _b("hipEventCreate", ctypes.POINTER(_HipEventHandle))
@@ -520,6 +541,28 @@ class Runtime:
 
     def memset(self, ptr: int, value: int, nbytes: int) -> None:
         _check(_hipMemset(ctypes.c_void_p(ptr), value, nbytes), "hipMemset")
+
+    def memset_async(self, ptr: int, value: int, nbytes: int, stream: int = 0) -> None:
+        """Queue a fill on ``stream`` instead of draining the device for it.
+
+        :meth:`memset` is ``hipMemset``, which is synchronous with respect to
+        the host and the device: it waits for everything already queued. That
+        is the right primitive for setting a buffer up between measurements,
+        and the wrong one *inside* one -- a kernel whose contract is "zero
+        this, then launch" (a split-K epilogue accumulating into its output,
+        a stream-K flag table) would drain the device once per launch, which
+        serialises a batch that was queued precisely so it would not.
+
+        Queued on one stream, the fill is ordered against that stream's
+        launches by FIFO alone, so it is also what makes a batch of such
+        kernels safe to queue back to back on shared buffers.
+        """
+        _check(
+            _hipMemsetAsync(
+                ctypes.c_void_p(ptr), value, nbytes, ctypes.c_void_p(stream)
+            ),
+            "hipMemsetAsync",
+        )
 
     def _reap_completed(self, stream: int) -> None:
         """Drop bucket entries whose completion events have fired.
