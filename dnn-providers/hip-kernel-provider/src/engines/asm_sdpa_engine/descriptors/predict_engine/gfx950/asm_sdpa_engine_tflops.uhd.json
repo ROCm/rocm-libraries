@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "id": "8b61d0c9-24af-4d17-9e52-3a7c06b8f145",
-  "name": "ASM_SDPA_ENGINE (gfx950, 250 contribution(s))",
+  "name": "ASM_SDPA_ENGINE (gfx950, 158 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
     "$device.memory_clock_rate",
@@ -61,7 +61,7 @@
   ],
   "features_hash": "sha256:d2b2ae535075697d",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/beb342731173d8c8",
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/7e4d15199ca13f30",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -72,6 +72,6 @@
   },
   "tree_data": {
     "artifact": "asm_sdpa_engine_tflops.bin",
-    "hash": "03a1c32a29b17a6e0d32ad775da4e25120174c8a31e8b281624de9cd23b141f7"
+    "hash": "c956ae30de379fd76726d129fec8c5236e9878ed7a71814d3b211fdaca68e23f"
   }
 }
