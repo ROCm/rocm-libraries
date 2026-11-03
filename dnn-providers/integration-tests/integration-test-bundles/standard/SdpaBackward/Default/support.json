@@ -1,0 +1,36 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "1_1_256_128_bfp16_nchw_diagonal_alignmentbottom_right_noleft_bound_right_bound0",
+          "1_1_512_128_bfp16_nchw_diagonal_alignmenttop_left_noleft_bound_right_bound0",
+          "1_1_512_128_fp16_nchw_diagonal_alignmenttop_left_noleft_bound_noright_bound"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "1_1_256_128_bfp16_nchw_diagonal_alignmentbottom_right_noleft_bound_right_bound0",
+          "1_1_512_128_bfp16_nchw_diagonal_alignmenttop_left_noleft_bound_right_bound0",
+          "1_1_512_128_fp16_nchw_diagonal_alignmenttop_left_noleft_bound_noright_bound"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
