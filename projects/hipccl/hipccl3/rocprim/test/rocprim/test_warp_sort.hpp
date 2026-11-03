@@ -49,7 +49,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
+    // logical warp size for warp primitive, execution warp size is always rocprim::warp_size()
     using T              = typename TestFixture::params::type;
     using binary_op_type = rocprim::less<T>;
 
@@ -131,7 +131,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
+    // logical warp size for warp primitive, execution warp size is always rocprim::warp_size()
     using T    = typename TestFixture::params::type;
     using pair = common::custom_type<T, T, true>;
 

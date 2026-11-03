@@ -113,7 +113,7 @@ void inclusive_scan_test()
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
 
-    // logical warp side for warp primitive, execution warp size
+    // logical warp size for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -294,7 +294,7 @@ void inclusive_scan_init_test()
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
 
-    // logical warp side for warp primitive, execution warp size
+    // logical warp size for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -496,7 +496,7 @@ void inclusive_scan_reduce_test()
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
 
-    // logical warp side for warp primitive
+    // logical warp size for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -706,7 +706,7 @@ void inclusive_scan_reduce_init_test()
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
 
-    // logical warp side for warp primitive
+    // logical warp size for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -912,7 +912,7 @@ void exclusive_scan_test()
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
 
-    // logical warp side for warp primitive
+    // logical warp size for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -1104,7 +1104,7 @@ void exclusive_scan_reduce_test()
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
 
-    // logical warp side for warp primitive
+    // logical warp size for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
