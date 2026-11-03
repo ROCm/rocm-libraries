@@ -180,3 +180,14 @@ ctest --test-dir build --output-on-failure --no-tests=error -L forwarding_parity
 Preserve the public SONAME/C symbol contract; wrappers must not export `_impl` names or hard-link the hipDNN backend. Source/ELF gates do not prove numerical behavior or complete ABI layout compatibility. Forwarding parity uses public APIs, `HipdnnShim` naming, and meaningful `parity_*` properties; reuse its harness without duplicate registrations or silently expanded divergence allowances. Parameterized shim tests still need an allowed tier prefix (e.g. `Smoke`); put `HipdnnShim` in the suite name.
 
 CI spans Jenkins and GitHub workflows (see Important Files); local green tests do not replace hardware/datatype coverage. `codecov.yml` sets exclusions, not a fixed local coverage threshold. Update relevant docs/release notes for user-visible changes. Narrative docs use reStructuredText; Sphinx invokes Doxygen. Follow the documentation build workflow in `README.md`.
+
+## Maintaining This File
+
+`CLAUDE.md` is a symlink to this file; edit `AGENTS.md` only.
+
+- Update this file in the same PR when you change something it documents (a CMake option or default, target, test label or tier, solver integration step, ABI artifact, or CI workflow).
+- Verify before writing: read the source of truth or run the command in `rocm/miopen-dev` on a matching GPU. State conditions (combined vs discrete mode, wrapper ON, GPU required).
+- Point to the source of truth instead of copying values that change (defaults, lists, versions). Do not restate the super-repo `AGENTS.md`, `CONTRIBUTING.md`, or PR-bot rules; link them.
+- Record repository facts, not local-machine workarounds. Keep entries short; move detail to `README.md`, `test/gtest/README.md`, or `docs/`.
+- If you find this file wrong while doing other work, tell the user and propose the fix; edit it only when asked or when your change already alters the documented behavior.
+- Changes are reviewed by `@ROCm/miopen-reviewers` (`CODEOWNERS`); run pre-commit on the file.
