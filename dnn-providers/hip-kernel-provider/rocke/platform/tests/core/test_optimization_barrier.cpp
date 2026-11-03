@@ -320,6 +320,155 @@ static int test_hip_asm_string_roundtrip()
     return 0;
 }
 
+static int test_hip_constraint_rejection()
+{
+    struct rejection_t
+    {
+        const char* constraints;
+        int outputs;
+        int inputs;
+        const char* diagnostic;
+    };
+    const rejection_t cases[] = {
+        {"=v", 1, 1, "HIP inline asm inputs failed - constraints=0, expected operands=1"},
+        {"=v,0,v", 1, 1, "HIP inline asm inputs failed - constraints=2, expected operands=1"},
+        {"", 0, 1, "HIP inline asm inputs failed - constraints=0, expected operands=1"},
+        {"v", 0, 0, "HIP inline asm inputs failed - constraints=1, expected operands=0"},
+        {"=v", 0, 0, "HIP inline asm outputs failed - constraints=1, expected results=0"},
+        {"=v,=s", 1, 0, "HIP inline asm outputs failed - constraints=2, expected results=1"},
+        {"v", 1, 1, "HIP inline asm requires an output constraint"},
+        {"", 1, 0, "HIP inline asm requires an output constraint"},
+        {"=v,,0", 1, 1, nullptr},
+        {"=v,0,", 1, 1, nullptr},
+        {", ", 0, 0, nullptr},
+        {"=v,~m0", 1, 0, "~m0"},
+        {"~{m0", 0, 0, "~{m0"},
+        {"~{}", 0, 0, "~{}"},
+        {"~{s0}", 0, 0, "~{s0}"},
+        {"~{memory},v", 0, 1, "v"},
+        {"v,=v", 1, 1, "=v"},
+        {"0", 0, 1, "0"},
+        {"=v,1", 1, 1, "1"},
+        {"+v", 1, 0, "+v"},
+        {"=r", 1, 0, "=r"},
+        {"=v,0,0", 1, 2, "0"},
+    };
+    for(size_t index = 0; index < sizeof(cases) / sizeof(cases[0]) + 4; ++index)
+    {
+        const bool typed = index >= sizeof(cases) / sizeof(cases[0]);
+        const auto* item = typed ? nullptr : &cases[index];
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "asm_constraints") == ROCKE_OK);
+        rocke_value_t* operands[2] = {};
+        int inputs = typed ? 0 : item->inputs;
+        for(int i = 0; i < inputs; ++i)
+        {
+            char name[32];
+            snprintf(name, sizeof name, "value_%d", i);
+            operands[i] = rocke_b_param(&b, name, rocke_f32(), nullptr);
+        }
+        const rocke_type_t* types[] = {rocke_f32()};
+        auto* op = rocke_b_inline_asm(&b,
+                                      "s_nop 0",
+                                      typed ? "" : item->constraints,
+                                      operands,
+                                      inputs,
+                                      types,
+                                      typed ? 0 : item->outputs,
+                                      nullptr);
+        CHECK(op);
+        if(typed)
+        {
+            size_t kind = index - sizeof(cases) / sizeof(cases[0]);
+            if(kind < 2)
+                rocke_attr_set_bool(&b, &op->attrs, "constraints", kind != 0);
+            else if(kind == 2)
+                rocke_attr_set_int(&b, &op->attrs, "constraints", 0);
+            else
+                rocke_attr_set_float(&b, &op->attrs, "constraints", 1.0);
+        }
+        rocke_b_ret(&b);
+        char message[256];
+        const char* diagnostic
+            = typed ? "HIP inline asm constraints must be a string" : item->diagnostic;
+        if(!typed && index >= 8)
+        {
+            snprintf(message,
+                     sizeof message,
+                     "HIP inline asm constraint failed - constraint=\"%s\", "
+                     "expected a supported output, input, tie, or clobber",
+                     diagnostic ? diagnostic : "");
+            diagnostic = message;
+        }
+        char* serialized = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+        rocke_ir_builder_t copy;
+        CHECK(rocke_ir_builder_init(&copy, "imported_constraints") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+        free(serialized);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx950";
+        rocke_strbuf_t original = {}, imported = {};
+        auto status = typed ? ROCKE_ERR_TYPE : ROCKE_ERR_VALUE;
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == status);
+        CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == status);
+        CHECK(strcmp(rocke_ir_builder_error(&b), diagnostic) == 0);
+        CHECK(strcmp(rocke_ir_builder_error(&copy), diagnostic) == 0);
+        CHECK(!strstr(original.cstr(), "asm volatile"));
+        CHECK(!strstr(imported.cstr(), "asm volatile"));
+        original.free_buffer();
+        imported.free_buffer();
+        rocke_ir_builder_free(&copy);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
+static int test_hip_clobber_roundtrip()
+{
+    for(bool output : {false, true})
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "asm_clobbers") == ROCKE_OK);
+        auto* value = rocke_b_param(&b, "value", rocke_f32(), nullptr);
+        rocke_value_t* operands[] = {value};
+        const rocke_type_t* types[] = {rocke_f32()};
+        CHECK(rocke_b_inline_asm(&b,
+                                 output ? "v_mov_b32 $0, $1" : "s_nop 0",
+                                 output ? "=v,0,~{m0},~{memory}" : "v,~{m0},~{memory}",
+                                 operands,
+                                 1,
+                                 types,
+                                 output ? 1 : 0,
+                                 nullptr));
+        rocke_b_ret(&b);
+        char* serialized = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+        rocke_ir_builder_t copy;
+        CHECK(rocke_ir_builder_init(&copy, "imported_clobbers") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+        free(serialized);
+        for(const char* arch : {"gfx950", "gfx1250"})
+        {
+            rocke_lower_hip_opts_t opts = {};
+            opts.arch = arch;
+            rocke_strbuf_t original = {}, imported = {};
+            CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == ROCKE_OK);
+            CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == ROCKE_OK);
+            CHECK(strcmp(original.cstr(), imported.cstr()) == 0);
+            CHECK(strstr(original.cstr(), " : \"m0\", \"memory\");"));
+            CHECK(strstr(original.cstr(), "(value)"));
+            original.free_buffer();
+            imported.free_buffer();
+        }
+        rocke_ir_builder_free(&copy);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main()
 {
     int admission = test_admission();
@@ -328,5 +477,8 @@ int main()
     int hip = test_tensor_epilogue_hip();
     int attributes = test_hip_rejects_malformed_attributes();
     int strings = test_hip_asm_string_roundtrip();
-    return admission || scalars || predicate || hip || attributes || strings;
+    int constraints = test_hip_constraint_rejection();
+    int clobbers = test_hip_clobber_roundtrip();
+    return admission || scalars || predicate || hip || attributes || strings || constraints
+           || clobbers;
 }

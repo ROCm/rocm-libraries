@@ -343,18 +343,35 @@ compilation is not claimed. Both HIP handlers lower single-output inline assembl
 BF16/FP16 tensor epilogue, directly and after serialization, on gfx950/gfx1250
 with absent/empty clobbers, plus malformed-attribute rejection. The existing
 `rocke_optimization_barrier` CTest runs those checks in build and installed trees.
-`optimization_barrier_emit.{py,c}` provides twelve `hip` configurations: eight
-for this epilogue matrix and four for multiline void/single-output assembly on
-gfx950/gfx1250, including quotes and backslashes in the template. Its LLVM/IR
-modes are unchanged. The `rocke_optimization_barrier_hip_pair` CTest executes the
-prebuilt C emitter's `hip` mode and the selected Python emitter for all twelve
-configurations plus the range boundary, in build-tree and installed layouts.
+`optimization_barrier_emit.{py,c}` provides seventeen `hip` configurations:
+eight for this epilogue matrix, four for multiline void/single-output assembly
+on gfx950/gfx1250 (including quotes and backslashes), four for `m0`/`memory`
+clobbers on those targets, and the three-input gfx950 LDS-DMA assembly form.
+Its LLVM/IR modes are unchanged. The `rocke_optimization_barrier_hip_pair` CTest
+executes the prebuilt C emitter's `hip` mode and the selected Python emitter for
+all seventeen configurations plus the range boundary, in build-tree and
+installed layouts. Installed native paths include the CMake executable suffix;
+configuration tests compare them with the actual target filename under both
+host-default and explicitly nonempty suffixes, without substituting the host OS.
 It checks C-builder evaluation order, unlike binding tests that consume
 Python-serialized IR. The focused Python tests use `rocke.tests.engines` for exact
 HIP text and rejection-message parity; the `ROCKE_BACKEND=both` LLVM gate alone
 does not perform that HIP comparison. Both LLVM handlers reject non-boolean
 `sideeffect` attributes for void, single-output, and multi-output assembly at every
 supported flavor; absent, false, and true attributes retain their existing output.
+
+Both HIP handlers validate constraint counts before emitting assembly. The
+supported subset is ordered outputs (`=v`, `=s`, `=a`, including early-clobber
+`=&` forms), inputs (`v`, `s`, `a`, `i`, `n`, or the sole output tie `0`), then
+LLVM clobbers (`~{memory}`, `~{m0}`, `~{scc}`, `~{vcc}`, `~{exec}`). Constraint
+suitability for operand types and the selected ISA still belongs to the compiler.
+Clobbers are retained in GCC's clobber list and merged with the explicit/default
+clobber without duplicates. Missing/extra operands or outputs, empty entries,
+repeated/missing ties, read/write outputs, alternatives, unsupported numbered
+registers, and malformed clobbers are refused rather than silently discarded.
+Python-only admission tests and independent C-builder tests cover direct and
+serialized IR; exact engine-parity tests check both source and rejection text.
+Valid pure barriers and existing LLVM goldens are unchanged.
 
 ## Installed pinned-reference suites
 

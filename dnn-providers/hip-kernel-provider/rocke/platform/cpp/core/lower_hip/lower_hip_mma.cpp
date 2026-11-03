@@ -400,14 +400,144 @@ static const char* h_escape_asm_string(rocke_h_lowerer_t* lw, const char* text)
     return escaped;
 }
 
-/* Python's constraint/operand zip, stopping at the shorter list. */
+static bool h_asm_contains(const char* const* entries, size_t count, const char* entry)
+{
+    for(size_t i = 0; i < count; ++i)
+        if(strcmp(entries[i], entry) == 0)
+            return true;
+    return false;
+}
+
+static bool h_asm_clobber_supported(const char* name)
+{
+    /* Python: _HIP_ASM_CLOBBERS. Numbered registers and aliases need a separate lowering. */
+    static const char* names[] = {"memory", "m0", "scc", "vcc", "exec"};
+    return h_asm_contains(names, sizeof(names) / sizeof(names[0]), name);
+}
+
+static rocke_status_t h_asm_constraint_error(rocke_h_lowerer_t* lw, const char* entry)
+{
+    const char* escaped = h_escape_asm_string(lw, entry);
+    if(!rocke_h_live(lw))
+        return lw->status;
+    return rocke_h_fail(lw,
+                        ROCKE_ERR_VALUE,
+                        "HIP inline asm constraint failed - constraint=\"%s\", "
+                        "expected a supported output, input, tie, or clobber",
+                        escaped);
+}
+
+/* Arena-owned constraint partitions; clobbers reserve one slot for the default/explicit attr. */
+struct h_asm_constraints_t
+{
+    const char** outputs;
+    const char** inputs;
+    const char** clobbers;
+    size_t num_outputs;
+    size_t num_inputs;
+    size_t num_clobbers;
+};
+
+/* Python: _parse_hip_asm_constraints. Validate before constructing any asm statement. */
+static rocke_status_t h_parse_asm_constraints(rocke_h_lowerer_t* lw,
+                                              const rocke_op_t* op,
+                                              const char* raw,
+                                              h_asm_constraints_t* parsed)
+{
+    size_t capacity = 2;
+    bool any = false;
+    for(const char* c = raw; *c; ++c)
+    {
+        capacity += *c == ',';
+        any |= *c != ',' && !isspace((unsigned char)*c);
+    }
+    if(op->num_results && !any)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "HIP inline asm requires an output constraint");
+    auto* storage
+        = (const char**)rocke_arena_alloc(&lw->b->arena, 3 * capacity * sizeof(const char*));
+    if(!storage)
+        return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+    parsed->outputs = storage;
+    parsed->inputs = storage + capacity;
+    parsed->clobbers = storage + 2 * capacity;
+    if(any || strchr(raw, ','))
+        for(const char* c = raw;;)
+        {
+            const char* end = strchr(c, ',');
+            const char* first = c;
+            const char* last = end ? end : c + strlen(c);
+            while(first < last && isspace((unsigned char)*first))
+                ++first;
+            while(last > first && isspace((unsigned char)last[-1]))
+                --last;
+            const char* entry
+                = rocke_arena_printf(&lw->b->arena, "%.*s", (int)(last - first), first);
+            if(!entry)
+                return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+            if(!entry[0])
+                return h_asm_constraint_error(lw, entry);
+            if(entry[0] == '=')
+            {
+                static const char* outputs[] = {"=v", "=s", "=a", "=&v", "=&s", "=&a"};
+                if(parsed->num_inputs || parsed->num_clobbers
+                   || !h_asm_contains(outputs, sizeof(outputs) / sizeof(outputs[0]), entry))
+                    return h_asm_constraint_error(lw, entry);
+                parsed->outputs[parsed->num_outputs++] = entry;
+            }
+            else if(entry[0] == '~')
+            {
+                size_t len = strlen(entry);
+                if(len < 4 || entry[1] != '{' || entry[len - 1] != '}')
+                    return h_asm_constraint_error(lw, entry);
+                const char* name
+                    = rocke_arena_printf(&lw->b->arena, "%.*s", (int)len - 3, entry + 2);
+                if(!name)
+                    return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+                if(!h_asm_clobber_supported(name))
+                    return h_asm_constraint_error(lw, entry);
+                if(!h_asm_contains(parsed->clobbers, parsed->num_clobbers, name))
+                    parsed->clobbers[parsed->num_clobbers++] = name;
+            }
+            else
+            {
+                static const char* inputs[] = {"v", "s", "a", "i", "n", "0"};
+                if(parsed->num_clobbers
+                   || !h_asm_contains(inputs, sizeof(inputs) / sizeof(inputs[0]), entry)
+                   || (strcmp(entry, "0") == 0
+                       && (parsed->num_outputs != 1
+                           || h_asm_contains(parsed->inputs, parsed->num_inputs, entry))))
+                    return h_asm_constraint_error(lw, entry);
+                parsed->inputs[parsed->num_inputs++] = entry;
+            }
+            if(!end)
+                break;
+            c = end + 1;
+        }
+    if(op->num_results && !parsed->num_outputs)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "HIP inline asm requires an output constraint");
+    if(parsed->num_outputs != (size_t)op->num_results)
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_VALUE,
+                            "HIP inline asm outputs failed - constraints=%zu, expected results=%d",
+                            parsed->num_outputs,
+                            op->num_results);
+    if(parsed->num_inputs != (size_t)op->num_operands)
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_VALUE,
+                            "HIP inline asm inputs failed - constraints=%zu, expected operands=%d",
+                            parsed->num_inputs,
+                            op->num_operands);
+    return ROCKE_OK;
+}
+
+/* Count equality is established by h_parse_asm_constraints, never by truncation. */
 static const char* h_asm_operands(rocke_h_lowerer_t* lw,
                                   const char* const* constraints,
                                   size_t num_constraints,
                                   const rocke_op_t* op)
 {
     const char* text = "";
-    for(size_t i = 0; i < num_constraints && i < (size_t)op->num_operands; ++i)
+    for(size_t i = 0; i < num_constraints; ++i)
     {
         text = rocke_arena_printf(&lw->b->arena,
                                   "%s%s\"%s\"(%s)",
@@ -441,6 +571,9 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
     if(side_attr && side_attr->kind != ROCKE_ATTR_BOOL)
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "HIP inline asm sideeffect must be a boolean");
     const bool sideeffect = side_attr ? side_attr->u.b : true;
+    const auto* constraints_attr = rocke_attr_get(&op->attrs, "constraints");
+    if(constraints_attr && constraints_attr->kind != ROCKE_ATTR_STR)
+        return rocke_h_fail(lw, ROCKE_ERR_TYPE, "HIP inline asm constraints must be a string");
     const char* raw_template = rocke_attr_get_str(&op->attrs, "template");
     const char* raw_constraints = rocke_attr_get_str(&op->attrs, "constraints");
     if(!raw_template || !raw_constraints)
@@ -461,83 +594,57 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "HIP inline asm clobber must be a string");
     const char* clobber = clob_attr ? clob_attr->u.s : (sideeffect ? "memory" : "");
 
+    h_asm_constraints_t parsed = {};
+    if(h_parse_asm_constraints(lw, op, raw_constraints, &parsed) != ROCKE_OK)
+        return lw->status;
+    if(clobber[0])
+    {
+        if(!h_asm_clobber_supported(clobber))
+            return h_asm_constraint_error(lw, clobber);
+        if(!h_asm_contains(parsed.clobbers, parsed.num_clobbers, clobber))
+            parsed.clobbers[parsed.num_clobbers++] = clobber;
+    }
+    const char* clobbers = "";
+    for(size_t i = 0; i < parsed.num_clobbers; ++i)
+    {
+        clobbers = rocke_arena_printf(
+            &lw->b->arena, "%s%s\"%s\"", clobbers, i ? ", " : " : ", parsed.clobbers[i]);
+        if(!clobbers)
+            return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+    }
     char* tmpl = rocke_arena_strdup(&lw->b->arena, raw_template);
-    size_t max_entries = 1;
-    for(const char* c = raw_constraints; *c; ++c)
-        max_entries += *c == ',';
-    const char** entries
-        = (const char**)rocke_arena_alloc(&lw->b->arena, max_entries * sizeof(const char*));
-    if(!tmpl || !entries)
+    if(!tmpl)
         return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
     for(char* t = tmpl; *t; ++t)
         if(t[0] == '$' && isdigit((unsigned char)t[1]))
             t[0] = '%';
-
-    size_t num_entries = 0;
-    for(const char* c = raw_constraints;;)
-    {
-        const char* end = strchr(c, ',');
-        const char* first = c;
-        const char* last = end ? end : c + strlen(c);
-        while(first < last && isspace((unsigned char)*first))
-            ++first;
-        while(last > first && isspace((unsigned char)last[-1]))
-            --last;
-        if(last > first)
-        {
-            entries[num_entries]
-                = rocke_arena_printf(&lw->b->arena, "%.*s", (int)(last - first), first);
-            if(!entries[num_entries++])
-                return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
-        }
-        if(!end)
-            break;
-        c = end + 1;
-    }
-
     const char* escaped_template = h_escape_asm_string(lw, tmpl);
+    const char* ins = h_asm_operands(lw, parsed.inputs, parsed.num_inputs, op);
     if(!rocke_h_live(lw))
         return lw->status;
     const char* side = sideeffect ? "volatile " : "";
-    const char* clobber_open = clobber[0] ? " : \"" : "";
-    const char* clobber_close = clobber[0] ? "\"" : "";
     if(op->num_results == 1)
     {
-        if(num_entries == 0)
-            return rocke_h_fail(
-                lw, ROCKE_ERR_VALUE, "HIP inline asm requires an output constraint");
         const auto* res = op->results[0];
         const char* name = rocke_h_name(lw, res);
-        const char* ins = h_asm_operands(lw, entries + 1, num_entries - 1, op);
-        if(!rocke_h_live(lw))
-            return lw->status;
         rocke_h_emitf(lw, "%s %s;", rocke_h_type_to_hip(lw, res->type), name);
         rocke_h_emitf(lw,
-                      "asm %s(\"%s\" : \"%s\"(%s) : %s%s%s%s);",
+                      "asm %s(\"%s\" : \"%s\"(%s) : %s%s);",
                       side,
                       escaped_template,
-                      entries[0],
+                      parsed.outputs[0],
                       name,
                       ins,
-                      clobber_open,
-                      clobber,
-                      clobber_close);
+                      clobbers);
     }
     else
-    {
-        const char* ins = h_asm_operands(lw, entries, num_entries, op);
-        if(!rocke_h_live(lw))
-            return lw->status;
         rocke_h_emitf(lw,
-                      "asm %s(\"%s\" : :%s%s%s%s%s);",
+                      "asm %s(\"%s\" : :%s%s%s);",
                       side,
                       escaped_template,
                       ins[0] ? " " : "",
                       ins,
-                      clobber_open,
-                      clobber,
-                      clobber_close);
-    }
+                      clobbers);
     return lw->status;
 }
 

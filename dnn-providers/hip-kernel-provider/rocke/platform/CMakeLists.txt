@@ -589,11 +589,12 @@ if(ROCKE_INSTALL_TESTS)
         "add_test(rocke_optimization_barrier_hip_pair python "
         "\"${ROCKE_TEST_CTEST_REL}tests/core/"
         "test_optimization_barrier_cli.py\" --native "
-        "\"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}\" "
+        "\"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}"
+        "${CMAKE_EXECUTABLE_SUFFIX}\" "
         "--launcher \"${_rocke_installed_pythonpath}/rocke/tests/"
         "subprocess_launcher.py\" --emitter "
         "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
-        "optimization_barrier_emit.py\" --count 12)\n"
+        "optimization_barrier_emit.py\" --count 17)\n"
         "set_tests_properties(rocke_optimization_barrier_hip_pair "
         "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT 120)\n")
     endif()

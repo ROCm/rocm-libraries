@@ -245,6 +245,174 @@ def test_hip_assembly_paired_emitters(index, barrier_emitter):
     assert r"\n\ts_nop 0 ; \"quoted\" \\path" in source
 
 
+def _constraint_diagnostic(entry):
+    return (
+        f'HIP inline asm constraint failed - constraint="{entry}", '
+        "expected a supported output, input, tie, or clobber"
+    )
+
+
+_HIP_ASM_INVALID_CONSTRAINTS = [
+    ("=v", 1, 1, "HIP inline asm inputs failed - constraints=0, expected operands=1"),
+    (
+        "=v,0,v",
+        1,
+        1,
+        "HIP inline asm inputs failed - constraints=2, expected operands=1",
+    ),
+    ("", 0, 1, "HIP inline asm inputs failed - constraints=0, expected operands=1"),
+    ("v", 0, 0, "HIP inline asm inputs failed - constraints=1, expected operands=0"),
+    ("=v", 0, 0, "HIP inline asm outputs failed - constraints=1, expected results=0"),
+    (
+        "=v,=s",
+        1,
+        0,
+        "HIP inline asm outputs failed - constraints=2, expected results=1",
+    ),
+    ("v", 1, 1, "HIP inline asm requires an output constraint"),
+    ("", 1, 0, "HIP inline asm requires an output constraint"),
+    ("=v,,0", 1, 1, _constraint_diagnostic("")),
+    ("=v,0,", 1, 1, _constraint_diagnostic("")),
+    (", ", 0, 0, _constraint_diagnostic("")),
+    ("=v,~m0", 1, 0, _constraint_diagnostic("~m0")),
+    ("~{m0", 0, 0, _constraint_diagnostic("~{m0")),
+    ("~{}", 0, 0, _constraint_diagnostic("~{}")),
+    ("~{s0}", 0, 0, _constraint_diagnostic("~{s0}")),
+    ("~{memory},v", 0, 1, _constraint_diagnostic("v")),
+    ("v,=v", 1, 1, _constraint_diagnostic("=v")),
+    ("0", 0, 1, _constraint_diagnostic("0")),
+    ("=v,1", 1, 1, _constraint_diagnostic("1")),
+    ("+v", 1, 0, _constraint_diagnostic("+v")),
+    ("=r", 1, 0, _constraint_diagnostic("=r")),
+    ("=v,0,0", 1, 2, _constraint_diagnostic("0")),
+]
+
+
+def _asm_constraint_kernel(constraints, outputs, operands):
+    b = IRBuilder("asm_constraints")
+    values = [b.param(f"value_{index}", F32) for index in range(operands)]
+    b.inline_asm("s_nop 0", "=v" if outputs else "", values, F32 if outputs else None)
+    b.kernel.body.ops[-1].attrs["constraints"] = constraints
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize(
+    "constraints,outputs,operands,diagnostic", _HIP_ASM_INVALID_CONSTRAINTS
+)
+@pytest.mark.parametrize("roundtrip", [False, True])
+def test_hip_inline_asm_constraint_admission(
+    constraints, outputs, operands, diagnostic, roundtrip
+):
+    kernel = _asm_constraint_kernel(constraints, outputs, operands)
+    if roundtrip:
+        kernel = parse(serialize(kernel))
+    with pytest.raises(ValueError) as error:
+        lower_kernel_to_hip(kernel, arch="gfx950")
+    assert str(error.value) == diagnostic
+
+
+@pytest.mark.parametrize(
+    "constraints,outputs,operands,diagnostic", _HIP_ASM_INVALID_CONSTRAINTS
+)
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+@pytest.mark.parametrize("roundtrip", [False, True])
+def test_hip_inline_asm_native_constraint_rejection(
+    constraints, outputs, operands, diagnostic, arch, roundtrip
+):
+    kernel = _asm_constraint_kernel(constraints, outputs, operands)
+    if roundtrip:
+        kernel = parse(serialize(kernel))
+    assert_both_engines_reject_hip(kernel, arch, ValueError, diagnostic)
+
+
+@pytest.mark.parametrize("constraints", [False, True, 0, 1.0])
+@pytest.mark.parametrize("roundtrip", [False, True])
+def test_hip_inline_asm_constraint_type(constraints, roundtrip):
+    kernel = _asm_constraint_kernel(constraints, 0, 0)
+    if roundtrip:
+        kernel = parse(serialize(kernel))
+    diagnostic = "HIP inline asm constraints must be a string"
+    with pytest.raises(TypeError, match=diagnostic):
+        lower_kernel_to_hip(kernel, arch="gfx950")
+
+
+@pytest.mark.parametrize("constraints", [False, True, 0, 1.0])
+@pytest.mark.parametrize("clobber", [None, False])
+def test_hip_inline_asm_native_constraint_type(constraints, clobber):
+    kernel = _asm_constraint_kernel(constraints, 0, 0)
+    if clobber is not None:
+        kernel.body.ops[0].attrs["clobber"] = clobber
+    assert_both_engines_reject_hip(
+        kernel,
+        "gfx950",
+        TypeError,
+        "HIP inline asm constraints must be a string",
+    )
+
+
+@pytest.mark.parametrize("kind", ["void", "output", "ring"])
+@pytest.mark.parametrize("sideeffect", [False, True])
+@pytest.mark.parametrize("explicit", [None, "", "memory", "m0"])
+@pytest.mark.parametrize("roundtrip", [False, True])
+def test_hip_inline_asm_clobbers_preserved(
+    kind, sideeffect, explicit, roundtrip, barrier_emitter
+):
+    kernel = barrier_emitter["build_hip_clobbers"](kind)
+    op = next(op for op in kernel.body.ops if op.name == "tile.inline_asm")
+    op.attrs["sideeffect"] = sideeffect
+    if explicit is not None:
+        op.attrs["clobber"] = explicit
+    if roundtrip:
+        kernel = parse(serialize(kernel))
+    source = lower_kernel_to_hip(kernel, arch="gfx950")
+    clause = next(
+        line for line in source.splitlines() if line.strip().startswith("asm ")
+    )
+    assert clause.endswith(' : "m0", "memory");')
+    assert ("asm volatile" in clause) == sideeffect
+    for operand in op.operands:
+        assert f"({operand.name.lstrip('%')})" in clause
+
+
+@pytest.mark.parametrize("index", range(5))
+@pytest.mark.parametrize("roundtrip", [False, True])
+def test_hip_clobber_paired_emitters(index, roundtrip, barrier_emitter):
+    arch, kind = barrier_emitter["HIP_CLOBBER_CONFIGS"][index]
+    kernel = barrier_emitter["build_hip_clobbers"](kind)
+    if roundtrip:
+        kernel = parse(serialize(kernel))
+    source = lower_hip_with_both_engines(kernel, arch)
+    assert ' : "m0", "memory");' in source
+
+
+@pytest.mark.parametrize("clobber", ["memory", "m0", "scc", "vcc", "exec"])
+@pytest.mark.parametrize("output", [False, True])
+def test_hip_inline_asm_clobber_deduplication(clobber, output):
+    prefix = "=v,0," if output else ""
+    kernel = _asm_constraint_kernel(
+        prefix + f"~{{{clobber}}},~{{{clobber}}}", int(output), int(output)
+    )
+    op = kernel.body.ops[0]
+    op.attrs["sideeffect"] = False
+    op.attrs["clobber"] = clobber
+    source = lower_hip_with_both_engines(kernel, "gfx950")
+    clause = next(
+        line for line in source.splitlines() if line.strip().startswith("asm ")
+    )
+    assert clause.count(f'"{clobber}"') == 1
+
+
+@pytest.mark.parametrize("clobber", ["s0", "m0,memory", 'm0"', "~{m0}"])
+def test_hip_inline_asm_rejects_unsupported_explicit_clobber(clobber):
+    kernel = _asm_constraint_kernel("", 0, 0)
+    kernel.body.ops[0].attrs["clobber"] = clobber
+    escaped = clobber.replace('"', '\\"')
+    assert_both_engines_reject_hip(
+        kernel, "gfx950", ValueError, _constraint_diagnostic(escaped)
+    )
+
+
 _HIP_ASM_STRING_CASES = [
     ("\n\ts_nop 0", r"\n\ts_nop 0"),
     (' ; "quoted" \\path', r" ; \"quoted\" \\path"),

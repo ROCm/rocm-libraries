@@ -74,7 +74,7 @@ if(BUILD_TESTING)
         "${_rocke_core_tests}/test_optimization_barrier_cli.py" --native
         "$<TARGET_FILE:rocke_optimization_barrier_emit>" --launcher
         "${_rocke_python_root}/rocke/tests/subprocess_launcher.py" --emitter
-        "${_rocke_parity_dir}/optimization_barrier_emit.py" --count 12)
+        "${_rocke_parity_dir}/optimization_barrier_emit.py" --count 17)
     set_tests_properties(rocke_optimization_barrier_hip_pair
                          PROPERTIES LABELS "ckc;python;host;quick" TIMEOUT 120)
   endif()

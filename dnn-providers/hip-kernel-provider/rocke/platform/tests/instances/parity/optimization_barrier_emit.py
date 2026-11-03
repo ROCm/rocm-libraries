@@ -102,17 +102,64 @@ def build_hip_assembly(output):
     return b.kernel
 
 
+HIP_CLOBBER_CONFIGS = (
+    ("gfx950", "void"),
+    ("gfx950", "output"),
+    ("gfx1250", "void"),
+    ("gfx1250", "output"),
+    ("gfx950", "ring"),
+)
+
+
+def build_hip_clobbers(kind):
+    b = IRBuilder("asm_clobbers")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    if kind == "ring":
+        voff = b.param("voff", I32)
+        lds = b.param("lds", I32)
+        base = b.param("base", I64)
+        b.inline_asm(
+            "s_mov_b32 m0, $1\n\ts_nop 0\n\tglobal_load_lds_dword $0, $2",
+            "v,s,s,~{m0},~{memory}",
+            [voff, lds, base],
+        )
+    else:
+        output = kind == "output"
+        pointer = b.param("output", PtrType(F32, "global")) if output else None
+        value = b.param("value", F32 if output else I32)
+        lds = b.param("lds", I32) if output else None
+        result = b.inline_asm(
+            "s_mov_b32 m0, $2\n\tv_mov_b32 $0, $1" if output else "s_mov_b32 m0, $0",
+            "=v,0,s,~{m0},~{memory}" if output else "s,~{m0},~{memory}",
+            [value, lds] if output else [value],
+            F32 if output else None,
+        )
+        if output:
+            b.global_store(pointer, b.thread_id_x(), result, align=4)
+    b.ret()
+    return b.kernel
+
+
 def main() -> int:
     if len(sys.argv) > 2 and sys.argv[2] == "hip":
         idx = int(sys.argv[1])
-        if not 0 <= idx < len(HIP_CONFIGS) + len(HIP_STRING_CONFIGS):
+        if (
+            not 0
+            <= idx
+            < len(HIP_CONFIGS) + len(HIP_STRING_CONFIGS) + len(HIP_CLOBBER_CONFIGS)
+        ):
             raise SystemExit(f"unknown config index {idx}")
         if idx < len(HIP_CONFIGS):
             arch, dtype, clobber = HIP_CONFIGS[idx]
             kernel = build_hip_epilogue(dtype, clobber)
-        else:
+        elif idx < len(HIP_CONFIGS) + len(HIP_STRING_CONFIGS):
             arch, output = HIP_STRING_CONFIGS[idx - len(HIP_CONFIGS)]
             kernel = build_hip_assembly(output)
+        else:
+            arch, kind = HIP_CLOBBER_CONFIGS[
+                idx - len(HIP_CONFIGS) - len(HIP_STRING_CONFIGS)
+            ]
+            kernel = build_hip_clobbers(kind)
         print(lower_kernel_to_hip(kernel, arch=arch), end="")
         return 0
     from _emit_common import run_emit
