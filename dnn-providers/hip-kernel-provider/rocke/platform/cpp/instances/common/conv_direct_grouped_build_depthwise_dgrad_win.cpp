@@ -267,6 +267,9 @@ static bool
     {
         if(spec->dot2 || cpl != 1)
             DW_WIN_FAIL("mfma excludes dot2 and ch_per_lane > 1");
+        /* The wave32 WMMA builder emits only the dgrad pass. */
+        if(spec->fwd && spec->wave_size == 32)
+            DW_WIN_FAIL("fwd needs the wave64 MFMA form (got wave_size=32)");
         if(spec->w_fold != 1 && spec->w_fold != 2 && spec->w_fold != 4)
             DW_WIN_FAIL("w_fold must be 1, 2 or 4 (got %d)", spec->w_fold);
         if(spec->prefetch_rows > ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS)

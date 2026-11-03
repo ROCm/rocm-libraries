@@ -7977,6 +7977,9 @@ def _depthwise_dgrad_win_mfma_check(
     p = spec.problem
     if spec.dot2 or spec.ch_per_lane != 1:
         return False, "mfma excludes dot2 and ch_per_lane > 1"
+    if spec.fwd and spec.wave_size == 32:
+        # The wave32 WMMA builder emits only the dgrad pass.
+        return False, "fwd needs the wave64 MFMA form (got wave_size=32)"
     if spec.w_fold not in DW_DGRAD_MFMA_W_FOLDS:
         return False, f"w_fold must be 1, 2 or 4 (got {spec.w_fold})"
     if spec.prefetch_rows > DW_DGRAD_MFMA_MAX_PREFETCH_ROWS:

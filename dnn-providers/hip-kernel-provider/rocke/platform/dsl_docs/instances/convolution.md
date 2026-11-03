@@ -1034,6 +1034,8 @@ take twice the wave64 VGPRs (`mfma_frag_vgprs()`), so 9x9 and larger filters
 exceed `DW_DGRAD_MFMA_MAX_FRAG_VGPRS` at wave32. The AOT build gives this form
 the target's wave size (`direct_variants.make_direct_spec`); the VALU form
 keeps its logical wave64. The non-finite semantics are those of the MFMA form.
+The WMMA form has no forward pass: both engines reject `fwd` (and so
+`out_stride=2` and the grouped form) at `wave_size=32`.
 
 AOT cache image (`library/kernels/conv/direct_aot_jobs.py`): the square
 filters `_DEPTHWISE_FILTERS` with every padding; for the VALU form the `(block_w, block_h)` tiles of
@@ -1053,9 +1055,9 @@ point. Stride 2 runs the row-streaming kernel (`direct_depthwise_dgrad`).
 Parity gate: configs 0-19 of
 `library/tests/parity/conv_direct_dgrad_ext_emit.{c,py}` (0-10 the VALU and
 `dot2` forms, 11-19 the MFMA form, including the gfx942, `groups % 8 != 0` and
-`block_h = 0` configs both engines reject) and 45-53 (the wave32 WMMA form;
-51-53 -- 9x9 past the fragment budget, wave32 on gfx950, wave64 on gfx1250 --
-both reject). Case study:
+`block_h = 0` configs both engines reject) and 62-72 (the wave32 WMMA form;
+68-72 -- 9x9 past the fragment budget, wave32 on gfx950, wave64 on gfx1250,
+`fwd` at stride 1 and 2 -- both reject). Case study:
 [`depthwise_windowed_dgrad_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/depthwise_windowed_dgrad_case_study.md).
 
 ### Row-Streaming Depthwise Dgrad Kernel (`DirectDepthwiseDgradStreamSpec`)

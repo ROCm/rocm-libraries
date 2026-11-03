@@ -380,6 +380,36 @@ class TestWmmaSpec(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("mfma needs one of ('gfx950',)", why)
 
+    def test_wave32_form_has_no_forward_pass(self):
+        """``fwd`` (the rotated-filter forward pass, any ``out_stride`` or
+        group size) is a wave64 MFMA mode: the wave32 builder emits only the
+        dgrad pass, so the spec is rejected instead of building a dgrad
+        kernel. The C++ mirror rejects the same specs (parity configs 71, 72
+        of conv_direct_dgrad_ext_emit)."""
+        cases = (
+            (_problem(2, 14, 14, 64, 3, 3, 1, "fp16"), {}),
+            (_problem(2, 14, 14, 64, 3, 3, 1, "bf16"), {"out_stride": 2}),
+            (
+                DirectConvProblem(
+                    N=2, H=13, W=21, groups=10, cpg=8, kpg=8, KH=3, KW=3, PAD=1
+                ),
+                {},
+            ),
+        )
+        for problem, extra in cases:
+            knobs = dict(block_h=14 if problem.cpg == 1 else 8, fwd=True, **extra)
+            with self.subTest(cpg=problem.cpg, **extra):
+                ok, why = is_valid_depthwise_dgrad_win_spec(
+                    self._wmma(problem, **knobs), arch="gfx1250"
+                )
+                self.assertFalse(ok)
+                self.assertIn("fwd needs the wave64 MFMA form", why)
+                # The same knobs at wave64 are the valid gfx950 forward form.
+                ok, why = is_valid_depthwise_dgrad_win_spec(
+                    self._wmma(problem, wave_size=64, **knobs), arch="gfx950"
+                )
+                self.assertTrue(ok, why)
+
     def test_make_direct_spec_takes_the_target_wave_size(self):
         """The AOT spec factory gives the matrix form the target's wave size
         and rejects an explicit wave_size knob that conflicts with it."""
