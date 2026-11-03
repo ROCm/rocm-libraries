@@ -1085,6 +1085,28 @@ _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 
+# fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+# non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+# k_scale before the bf16 MFMA, as on the transposed path.
+_CONFIGS[68] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype="fp8e4m3",
+    use_fp8_mfma_qk=True,
+    use_mfma_32x32=True,
+    block_m_per_warp=32,
+    tile_size=64,
+)
+# The same fp8 K in LDS on the transposed 32x32 QK path, which reads K through
+# the same shared reader.
+_CONFIGS[69] = {**_CONFIGS[68], "use_transposed_qk_32x32": True}
+
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:

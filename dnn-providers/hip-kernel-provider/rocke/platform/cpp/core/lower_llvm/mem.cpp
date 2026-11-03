@@ -31,7 +31,8 @@ static const char* ll_res(const rocke_op_t* op)
 }
 
 /* Element byte size for an smem/store/load alignment, keyed by the scalar
- * type's canonical name. Mirrors the per-handler {..}.get(name, 2) dicts. */
+ * type's canonical name; 2 for a name with no entry. Twin of the Python
+ * _scalar_bytes (python/rocke/core/lower_llvm.py). */
 static int ll_elem_bytes(const char* name)
 {
     if(!name)
@@ -695,33 +696,8 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    /* Python _op_tile_smem_load_vN uses a LOCAL dict that, unlike the other
-     * handlers, does NOT list fp8e4m3 / bf8e5m2 -- so they fall to the default
-     * 2 (not 1). Replicate that exact dict here rather than the shared
-     * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
-     * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
-    const char* en = op->results[0]->type->elem->name;
-    int elem_bytes = 2;
-    if(en)
-    {
-        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
-        {
-            elem_bytes = 1;
-        }
-        else if(strcmp(en, "f16") == 0 || strcmp(en, "bf16") == 0)
-        {
-            elem_bytes = 2;
-        }
-        else if(strcmp(en, "i32") == 0 || strcmp(en, "tf32") == 0 || strcmp(en, "f32") == 0)
-        {
-            elem_bytes = 4;
-        }
-        else if(strcmp(en, "i64") == 0 || strcmp(en, "f64") == 0)
-        {
-            elem_bytes = 8;
-        }
-    }
+    /* The element byte size drives the vector alignment. */
+    int elem_bytes = ll_elem_bytes(op->results[0]->type->elem->name);
     /* New 96-bit widths guarantee only element alignment, including FP8. */
     int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend

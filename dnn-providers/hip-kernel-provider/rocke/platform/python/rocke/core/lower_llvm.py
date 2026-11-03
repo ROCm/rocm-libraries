@@ -1314,6 +1314,33 @@ def _smem_storage_type(t: SmemType) -> str:
     return out
 
 
+# Bytes per element of a scalar type that LDS holds or a typed load / store
+# moves; the access alignments and the LDS pool layout derive from it. No
+# packed-only type has an entry: core/ir.py _refuse_packed_only_value refuses
+# its LDS tiles. The C++ engine's twin is ll_elem_bytes
+# (cpp/core/lower_llvm/mem.cpp).
+_SCALAR_BYTES = {
+    "i8": 1,
+    "u8": 1,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "i16": 2,
+    "f16": 2,
+    "bf16": 2,
+    "i32": 4,
+    "tf32": 4,
+    "f32": 4,
+    "i64": 8,
+    "f64": 8,
+}
+
+
+def _scalar_bytes(type_name: str) -> int:
+    """Bytes per element of the scalar type named ``type_name``; 2 for a name
+    with no entry, as every access lowering has always assumed."""
+    return _SCALAR_BYTES.get(type_name, 2)
+
+
 # ----------------------------- block model -------------------------------
 
 
@@ -2149,22 +2176,6 @@ class _Lowerer:
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
         """
-        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
-        # refuses its LDS tiles.
-        _elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }
-
         pool_name = f"@smem_pool.{self.kernel.name}"
         self._smem_pool_name = pool_name
 
@@ -2174,7 +2185,7 @@ class _Lowerer:
 
         # ---- compute per-allocation sizes and alignments ----
         def _seg_size(stype: "SmemType") -> int:
-            eb = _elem_bytes.get(stype.elem.name, 2)
+            eb = _scalar_bytes(stype.elem.name)
             seg = eb
             for d in stype.shape:
                 seg *= d
@@ -3646,19 +3657,7 @@ class _Lowerer:
         # Alignment is the element byte size: 1 for i8/u8, 2 for f16/bf16,
         # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
-        align = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(value.type.name, 2)
+        align = _scalar_bytes(value.type.name)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
         )
@@ -3713,21 +3712,7 @@ class _Lowerer:
             f"{', '.join(gidx)}"
         )
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
-            value.type.elem.name, 2
-        )  # type: ignore[attr-defined]
+        elem_bytes = _scalar_bytes(value.type.elem.name)  # type: ignore[attr-defined]
         align = int(op.attrs.get("align", vec * elem_bytes))
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
@@ -3798,23 +3783,8 @@ class _Lowerer:
             f"{', '.join(idx_strs)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        # Element byte size drives the vector alignment. 16-bit
-        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
-        # (i64 / f64): 8 bytes.
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
-            op.result.type.elem.name,
-            2,  # type: ignore[attr-defined]
-        )
+        # The element byte size drives the vector alignment.
+        elem_bytes = _scalar_bytes(op.result.type.elem.name)  # type: ignore[attr-defined]
         # New 96-bit widths guarantee only element alignment, including FP8.
         align = 12 // vec if vec in (3, 6, 12) else vec * elem_bytes
         # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
@@ -6515,20 +6485,7 @@ class _Lowerer:
         elem_name = (
             val.type.elem.name if isinstance(val.type, VectorType) else val.type.name
         )
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "i16": 2,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(elem_name, 2)
+        elem_bytes = _scalar_bytes(elem_name)
         align = int(op.attrs.get("align", vec * elem_bytes))
         if align <= 0 or align & (align - 1):
             raise ValueError(
