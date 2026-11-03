@@ -209,6 +209,9 @@ class TestFp8AtomIsCheckedAgainstTheCatalog(unittest.TestCase):
     """The fp8 candidate checks the atom of the spec it would return, the K=128
     hero atom included, against the target's MMA catalog."""
 
+    @arch_specific(
+        ("gfx950",), reason="the K=128 fp8 hero atom exists in the gfx950 catalog only"
+    )
     def test_the_gfx950_default_spec_passes_the_catalog_check(self):
         (candidate,) = [c for c in moe_candidates() if c.spec_id == "mega_fp8"]
         self.assertEqual(
