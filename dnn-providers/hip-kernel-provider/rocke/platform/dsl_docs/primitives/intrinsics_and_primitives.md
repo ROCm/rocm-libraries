@@ -181,6 +181,8 @@ buffer_load_f16(rsrc, voffset, soffset)
 buffer_load_vN_f16(rsrc, voffset, soffset, dwords) # vN in halves; dwords = N/2
 buffer_store_f16(rsrc, voffset, soffset, value)
 buffer_store_vN_f16(rsrc, voffset, soffset, value, dwords)
+buffer_load_vN(rsrc, voffset, soffset, dtype, n)   # any whole-byte dtype; n * size in {1,2,4,8,16} bytes
+buffer_store_vN(rsrc, voffset, soffset, value)     # value: a vector, same widths
 ```
 
 Canonical masked-access pattern:

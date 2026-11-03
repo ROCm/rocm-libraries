@@ -238,9 +238,9 @@ pass the buffer as `tensors["lse"]`; `dispatch_attention(req).bind_torch(tensors
 then launches the LSE kernel. A candidate whose kernel cannot write LSE does not
 declare the `lse` feature, so an LSE request is refused rather than routed to a
 kernel without the output. The prefill CLI, hipDNN, and the standalone split-KV
-decode kernels do not write LSE; unified attention writes it on its split-KV path
-only (see `dispatch/attention/README.md`). The gfx942 dense kernel has the same
-opt-in.
+decode kernels do not write LSE; unified attention writes it on its split-KV and
+tiled 2D paths on gfx942/gfx950 (see `dispatch/attention/README.md`). The gfx942
+dense kernel has the same opt-in.
 
 Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
 and optionally a swept point by `tuning_id`):
@@ -339,7 +339,7 @@ Known gap: the C++ engine (`platform/cpp/instances/`, the tiled 2D / 3D and unif
 bodies, with the `library/tests/parity/*_emit` pairs) does not yet mirror the
 `causal_top_left` / `right_bound` bodies. The default mask is unchanged, so the
 Python/C++ byte-identity gate still holds, and the new variants' lowered IR is pinned
-by representative cases in `platform/tests/golden/rocke_representative_ir_sha256.json`
+by representative cases in `platform/tests/golden/rocke_representative_ir_sha256/`
 (Python only). Mirroring them in C++ and adding emit pairs is tracked as a follow-up.
 
 Every alias above (causal kinds fix the right bound at 0, full attention ignores the

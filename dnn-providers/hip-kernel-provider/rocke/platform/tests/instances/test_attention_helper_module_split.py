@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import subprocess
-import sys
 
-import rocke
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 
 def test_old_import_paths_resolve_to_new_homes():
@@ -49,13 +49,11 @@ def test_public_names_unchanged():
 
 
 def _fresh_interpreter(code: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    package_root = str(Path(rocke.__file__).resolve().parent.parent)
-    env["PYTHONPATH"] = package_root + (
-        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
-    )
     return subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, env=env
+        rocke_python_command("-c", code),
+        capture_output=True,
+        text=True,
+        env=rocke_subprocess_env(),
     )
 
 

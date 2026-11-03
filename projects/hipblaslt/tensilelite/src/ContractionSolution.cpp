@@ -71,13 +71,6 @@ namespace TensileLite
 {
     namespace
     {
-        size_t checkedAdd(size_t a, size_t b)
-        {
-            if(b > std::numeric_limits<size_t>::max() - a)
-                throw std::overflow_error("Spatial cluster workspace exceeds size_t");
-            return a + b;
-        }
-
         size_t checkedMultiply(size_t a, size_t b)
         {
             if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
@@ -6498,17 +6491,6 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
-    double ContractionSolution::streamKClusterUtilization(Problem const& problem) const
-    {
-        if(!usesStreamKSpatialCluster())
-            return 1.0;
-        const auto geometry = spatialClusterGeometry(*this, problem);
-        if(geometry.totalBlocks == 0)
-            return 1.0;
-        return static_cast<double>(geometry.totalTiles)
-               / (static_cast<double>(geometry.totalBlocks) * geometry.clusterSize);
-    }
-
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
         Problem const& problem, Hardware const& hardware) const
     {
@@ -6610,51 +6592,6 @@ namespace TensileLite
             launch.grid = std::min(launch.grid, cluster.blocks);
             cluster.split = {};
         };
-        // The tile predictor does not price spatial block padding or clustered
-        // tree fixup. Compare its resolved physical grid with a whole-block
-        // candidate, in units of DepthU iterations on the busiest CU. Count
-        // physical waves (including padded peers), not just logical workers.
-        // The fixup allowance is calibrated for gfx1250 dense clustered tree
-        // kernels at a full physical wave, scaled by the block footprint so
-        // underfilled waves still favor K parallelism. Keep small grids (<1/4
-        // CU coverage), other
-        // architectures and parallel reduction on their existing policies.
-        if(!cluster.fixedGridUsed && !wholeTileGrid && cluster.blocks % launch.grid != 0
-           && gpu->processor == AMDGPU::Processor::gfx1250
-           && gpu->persistentDynamicGrid == static_cast<int>(origami::grid_selection_t::k_split_aware)
-           && launch.reduction == origami::reduction_t::tree
-           && !handwrittenCustomKernel() && !sizeMapping.useSubtileImpl
-           && !problemType.useGradient && !problemType.sparse && k != 0)
-        {
-            size_t cuBudget = gpu->computeUnitCount;
-            if(gpu->persistentMaxCUs > 0)
-                cuBudget = std::min(cuBudget, static_cast<size_t>(gpu->persistentMaxCUs));
-            if(launch.smCountTarget > 0)
-                cuBudget = std::min(cuBudget, static_cast<size_t>(launch.smCountTarget));
-            const size_t clustersPerWave = std::max(size_t{1}, cuBudget / cluster.clusterSize);
-            const size_t wholeWaves = divideUp(cluster.blocks, clustersPerWave);
-            const size_t splitWaves = divideUp(launch.grid, clustersPerWave);
-            const size_t wholeWork = checkedMultiply(wholeWaves, iters);
-            const size_t splitWork = checkedMultiply(splitWaves, divideUp(totalIters, launch.grid));
-            constexpr size_t TreeFixupItersPerWave = 48;
-            const size_t fixupWork = checkedMultiply(
-                checkedMultiply(splitWaves, TreeFixupItersPerWave),
-                std::min(cluster.blocks, clustersPerWave)) / clustersPerWave;
-            const size_t splitCost = checkedAdd(splitWork, fixupWork);
-            if(cluster.blocks >= divideUp(clustersPerWave, size_t{4}) && wholeWork <= splitCost)
-            {
-                launch.grid = std::min(cluster.blocks, launchLimit / cluster.clusterSize);
-                // Respect a caller's CU cap even though whole blocks do not
-                // need the cooperative residency/flag limit.
-                if(cuBudget < static_cast<size_t>(gpu->computeUnitCount))
-                    launch.grid = std::min(launch.grid, checkedMultiply(clustersPerWave,
-                        static_cast<size_t>(std::max(sizeMapping.CUOccupancy, 1))));
-                wholeBlocks("whole-block-cost");
-                cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
-                launch.clusterGridClamp = cluster.physicalGrid != launch.selectedGrid;
-                return launch;
-            }
-        }
         // One logical worker owns one K interval of one spatial block. All
         // peers use the same split index and store at their real output
         // coordinates in [split][batch][N][M], as the conversion kernel expects.
@@ -8405,8 +8342,7 @@ namespace TensileLite
         pp.staticModel = staticPerformanceModel(
             M, N, K, NumBatches, MT0, MT1, NumCUs, pp.granularities.totalGranularity, GlobalSplitU);
 
-        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity
-                        * streamKClusterUtilization(problem);
+        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity;
         pp.CUs         = NumCUs;
 
         return pp;
