@@ -51,6 +51,9 @@ __all__ = ["Library", "LibraryCollection"]
 
 BIAS_MAP = {0: "S", 4: "H", 6: "I", 7: "B"}
 SAB_MAP = {"Scalar": "SAB", "Vector": "SABV"}
+# Tensile DataType code -> name character, for the activation compute type tag
+# (HA<char>). Int8 (8) accumulates in int32, so it is tagged "I" like int32 (6).
+ACTIVATION_TYPE_CHAR = {0: "S", 1: "D", 4: "H", 6: "I", 7: "B", 8: "I"}
 SUPPORTED_INITIALIZATIONS = ("trig_float", "rand_int", "hpl")
 
 logger = logging.getLogger("GEKO")
@@ -368,13 +371,21 @@ class Library:
             btype = "".join([BIAS_MAP[bt] for bt in self.problem["BiasDataTypeList"]])
             bias_segment = f"_Bias{btype}"
 
-        epilogue_suffix = f"{bias_segment}_HAS{('_' + sab) if sab is not None else ''}_SAV_UserArgs"
+        # Tensile names the activation as HA + the ActivationComputeDataType
+        # character (which defaults to ComputeDataType): HAS for float compute,
+        # HAI for int32 compute (e.g. I8II_BH_HAI_SAV_UserArgs).
+        act_type = self.problem.get(
+            "ActivationComputeDataType",
+            self.problem.get("ComputeDataType", self.problem["DataType"]),
+        )
+        act_char = ACTIVATION_TYPE_CHAR.get(act_type, "S")
+        epilogue_suffix = f"{bias_segment}_HA{act_char}{('_' + sab) if sab is not None else ''}_SAV_UserArgs"
 
         def update_epilogue_string(s: str, suffix: str) -> str:
             if "_UserArgs" not in s:
                 return s
             left, right = s.split("_UserArgs", 1)
-            pattern = r'_(?:Bias[SBH]*|HAS|HA_S|SABV?|SAV)'
+            pattern = r'_(?:Bias[SBHI]*|HA_?[SIH](?![A-Za-z])|SABV?|SAV)'
             left = re.sub(pattern, '', left)
             s = left + "_UserArgs" + right
             return s.replace("_UserArgs", suffix)

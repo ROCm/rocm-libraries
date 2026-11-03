@@ -169,7 +169,8 @@ class ConfigSectionGenerator:
             pt['ComplexConjugateA'] = "True" if self._gt.transA == "C" else "False"
             pt['ComplexConjugateB'] = "True" if self._gt.transB == "C" else "False"
         pt['UseBeta'] = "True"
-        bias_epi_tag = "#" if (epi_tag == "#" or (self._gt.data_type == "I8" and not self._i8_bias_supported())) else ""
+        i8_no_bias = self._gt.data_type == "I8" and not self._i8_bias_supported()
+        bias_epi_tag = "#" if (epi_tag == "#" or i8_no_bias) else ""
         pt[f'{bias_epi_tag}UseBias'] = "1"
 
         pt[f'{epi_tag}Activation'] = "True"

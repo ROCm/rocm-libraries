@@ -344,7 +344,7 @@ def run(
             cu_count = HARDWARE_MAP.get(tuning_config.get("Backend", {}).get("Arch"), {}).get("CUs")
             if cu_count is not None:
                 env["CU"] = str(cu_count)
-                
+
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [

@@ -367,6 +367,28 @@ def test_i8_use_bias_enabled_for_float_compute():
     assert "#UseBias" not in gen._problem_type
 
 
+@pytest.mark.parametrize("compute", ["S", "I"])
+def test_i8_problem_type_has_no_use_scale_ab(compute):
+    """Int8 kernels have no UseScaleAB (unlike fp8/bf8), only a naive '8' check would add it."""
+    cfg = _section_cfg(dtype="I8")
+    gt = GemmType.from_tensile("N", "N", "I8", "I8", compute)
+    cfg["GemmProblem"] = GemmConfig(gt, [[16, 16, 1, 16]])
+    pt = csg.ConfigSectionGenerator(cfg)._problem_type
+    assert not any(key.lstrip("#") == "UseScaleAB" for key in pt)
+
+
+def test_i8_gemm_type_dtype_round_trip():
+    gt = GemmType.from_tensile("N", "N", "I8", "I8", "I")
+    assert (gt.a_type, gt.c_type, gt.compute_type) == ("i8_r", "i8_r", "i32_r")
+
+
+def test_build_config_backend_carries_arch():
+    gen = csg.ConfigSectionGenerator(_section_cfg(dtype="H", backend="ductile", search_space="generic"))
+    e = _mk_entry((16, 16, 1, 16), {"Groups": _fp("Groups", [[{"MatrixInstruction": _fp("MatrixInstruction", [1], metadata={"MT": (64, 64), "wave": (2, 2), "GSU": 1, "LSU": 1})}]])})
+    cfg = gen.build_config(e, backend="ductile", config_name="x", cms_priority=False, soo=True)
+    assert cfg["Backend"]["Arch"] == "gfx950"
+
+
 def test_mx_f8_problem_type_skips_use_scale_ab():
     """MX F8 should not emit UseScaleAB on gfx1250 (never sets it for MX there)."""
     gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True, arch="gfx1250"))
