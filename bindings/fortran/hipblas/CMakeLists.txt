@@ -290,8 +290,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hipblas-fortran-config.cmake"
 
 # Not hipblas_VERSION: standalone, that is the INSTALLED hipBLAS's version.
 set(_fortran_version "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt")
-  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../CMakeLists.txt" _hipblas_root)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipblas/CMakeLists.txt")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipblas/CMakeLists.txt" _hipblas_root)
   string(REGEX MATCH "set[ \t]*\\([ \t]*VERSION_STRING[ \t]+\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
          _m "${_hipblas_root}")
   if(CMAKE_MATCH_1)

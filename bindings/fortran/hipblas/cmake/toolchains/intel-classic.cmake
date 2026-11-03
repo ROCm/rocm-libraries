@@ -22,13 +22,13 @@
 #
 # ########################################################################
 
-# Cray toolchain. ftn and cc are the Cray compiler wrappers, which select the underlying compiler from the loaded PrgEnv module.
+# Classic Intel toolchain (ifort). Deprecated by Intel in favour of ifx; kept for sites still pinned to it.
 #
-# Usage, from projects/hipblas/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/cray.cmake
+# Usage, from bindings/fortran/hipblas:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-classic.cmake
 #
 # No format or line-length flag: the generated source fits within the 132
 # free-form columns, and the CMakeLists sets Fortran_FORMAT/Fortran_PREPROCESS.
 
-set(CMAKE_Fortran_COMPILER ftn CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       cc CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER ifort CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")

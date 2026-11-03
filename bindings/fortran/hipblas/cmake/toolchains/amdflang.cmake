@@ -22,13 +22,13 @@
 #
 # ########################################################################
 
-# Intel oneAPI toolchain (ifx, the LLVM-based compiler).
+# AMD ROCm toolchain (amdflang). The recommended default: amdflang is the LLVM-based Fortran compiler shipped with ROCm.
 #
-# Usage, from projects/hipblas/fortran:
-#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel.cmake
+# Usage, from bindings/fortran/hipblas:
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/amdflang.cmake
 #
 # No format or line-length flag: the generated source fits within the 132
 # free-form columns, and the CMakeLists sets Fortran_FORMAT/Fortran_PREPROCESS.
 
-set(CMAKE_Fortran_COMPILER ifx CACHE FILEPATH "Fortran compiler")
-set(CMAKE_C_COMPILER       icx CACHE FILEPATH "C compiler")
+set(CMAKE_Fortran_COMPILER amdflang CACHE FILEPATH "Fortran compiler")
+set(CMAKE_C_COMPILER       amdclang CACHE FILEPATH "C compiler")
