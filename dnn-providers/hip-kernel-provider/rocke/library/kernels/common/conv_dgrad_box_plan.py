@@ -51,18 +51,24 @@ def _axis_ranges(n_in: int, n_out: int, pad: int, filt: int, dil: int = 1) -> Li
     return out
 
 
-def pixel_classes(p) -> Dict[Box, List[int]]:
-    """dX pixels grouped by their exact filter-offset box (stride 1, dilation 1)."""
+def pixel_classes(p, interior: int = 0) -> Dict[Box, List[int]]:
+    """dX pixels grouped by their exact filter-offset box (stride 1, dilation 1).
+
+    ``interior`` (KernelIdentity.dx_interior_axes bit mask, 1 W / 2 H / 4 D;
+    0 = none): the (F - 1) / 2 halo shell of those axes gets no pixel."""
     Di = p.Di if p.is_3d else 1
+    sd = (p.Z - 1) // 2 if (p.is_3d and interior & 4) else 0
+    sh = (p.Y - 1) // 2 if interior & 2 else 0
+    sw = (p.X - 1) // 2 if interior & 1 else 0
     dr = _axis_ranges(p.Di, p.Do, p.pD, p.Z) if p.is_3d else [(0, 0)]
     hr = _axis_ranges(p.Hi, p.Ho, p.pH, p.Y)
     wr = _axis_ranges(p.Wi, p.Wo, p.pW, p.X)
     hw = p.Hi * p.Wi
     cl: Dict[Box, List[int]] = {}
     for n in range(p.N):
-        for d in range(Di):
-            for h in range(p.Hi):
-                for w in range(p.Wi):
+        for d in range(sd, Di - sd):
+            for h in range(sh, p.Hi - sh):
+                for w in range(sw, p.Wi - sw):
                     key = dr[d] + hr[h] + wr[w]
                     cl.setdefault(key, []).append((n * Di + d) * hw + h * p.Wi + w)
     return cl
@@ -331,9 +337,11 @@ def records_makespan(sub_gemms, kpg: int, tile_k: int, cus: int) -> Tuple[int, i
     return mk, tot
 
 
-def plan_boxes(p, tile_m: int, tile_n: int, tile_k: int, max_split: int, cus: int, round_cus: int = 228):
-    """``(T, [(box, tiles, split, [pixel rows])])`` of the ``pp_boxes`` 8 plan, or None."""
-    cl = pixel_classes(p)
+def plan_boxes(p, tile_m: int, tile_n: int, tile_k: int, max_split: int, cus: int, round_cus: int = 228,
+               interior: int = 0):
+    """``(T, [(box, tiles, split, [pixel rows])])`` of the ``pp_boxes`` 8 plan, or None.
+    ``interior``: as :func:`pixel_classes` (dx_interior: the shell gets no row)."""
+    cl = pixel_classes(p, interior)
     counts = tuple(sorted((c, len(v)) for c, v in cl.items()))
     kpt = _ceil_div(p.kpg, tile_k)
     n_tiles = _ceil_div(p.cpg, tile_n)

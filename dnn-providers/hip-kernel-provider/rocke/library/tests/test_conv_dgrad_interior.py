@@ -151,7 +151,7 @@ class PpBoxInterior(unittest.TestCase):
 
         p = ConvProblem(N=1, Hi=10, Wi=12, C=64, K=64, Y=3, X=3, Di=9, Z=3, sD=1, pD=0, dD=1)
         want = set(np.flatnonzero(interior_mask_np(p).reshape(-1)).tolist())
-        for nclass in (3, 5, 7, 77, 555):
+        for nclass in (3, 5, 7, 77, 8, 555):
             for split in (1, 4):
                 sgs = pp_box_sub_gemms(p, 64, 64, nclass, tile_k=32, max_split=split, cus=64, interior=True)
                 got = [q for sg in sgs for q in _record_pixels(sg, p)]
@@ -209,7 +209,7 @@ class Axes(unittest.TestCase):
         self.assertEqual(len(want), p.Di * p.Ho * p.Wo)
         p = _halo(D=9, H=10, W=12, C=64, K=64)
         want = set(np.flatnonzero(interior_mask_np(p, 3).reshape(-1)).tolist())
-        for nclass in (5, 7, 77):
+        for nclass in (5, 7, 77, 8):
             sgs = pp_box_sub_gemms(p, 64, 64, nclass, tile_k=32, max_split=4, cus=64, interior=3)
             got = [q for sg in sgs for q in _record_pixels(sg, p)]
             self.assertEqual(sorted(got), sorted(want), nclass)

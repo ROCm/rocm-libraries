@@ -670,11 +670,12 @@ def pp_box_sub_gemms(
         from kernels.common.conv_dgrad_box_plan import records_makespan
 
         sgs = _pp_planned_sub_gemms(
-            p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus
+            p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
+            interior=interior,
         )
         old = _pp_pixel_list_sub_gemms(
             p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
-            axis_runs=runs, cheap_tail=False,
+            axis_runs=runs, cheap_tail=False, interior=interior,
         )
         # Never a plan the dispatch model rates worse (makespan, then K tiles)
         # than pp_boxes 7's.
@@ -782,6 +783,7 @@ def _pp_planned_sub_gemms(
     tile_k: int,
     max_split: int,
     cus: int,
+    interior=False,
 ) -> Optional[List[SubGemmParams]]:
     """``pp_boxes`` 8: pixel-list records of the makespan plan of
     :func:`kernels.common.conv_dgrad_box_plan.plan_boxes` (one record per tap
@@ -793,6 +795,7 @@ def _pp_planned_sub_gemms(
     res = plan_boxes(
         p, tile_m, tile_n, tile_k, max_split, cus or PP_BOX_SPLIT_CUS,
         round_cus=PP_BOX_SPLIT_CUS,
+        interior=7 if interior is True else int(interior or 0),
     )
     if res is None:
         return None
