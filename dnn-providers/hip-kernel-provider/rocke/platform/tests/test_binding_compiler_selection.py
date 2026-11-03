@@ -173,8 +173,8 @@ for lower, spec, arch in cases:
         else:
             raise AssertionError(lower.__name__ + " did not propagate resolver failure")
 
-# A failure in the second gfx950 stage must release its reduce builder too.
-calls = 0
+# A failure in the second (reduce) stage must propagate and release its
+# builder too.
 def fail_reduce():
     global calls
     calls += 1
@@ -183,12 +183,15 @@ def fail_reduce():
     return unavailable()
 
 lower_llvm._resolve_llvm_flavor = fail_reduce
-try:
-    rocke_engine.gfx950_attention_tiled_3d_lower_llvm(attention, arch="gfx950")
-except ComgrError:
-    assert calls == 2
-else:
-    raise AssertionError("reduce resolver failure did not propagate")
+for arch in ("gfx942", "gfx950"):
+    calls = 0
+    try:
+        getattr(rocke_engine, arch + "_attention_tiled_3d_lower_llvm")(
+            attention, arch=arch)
+    except ComgrError:
+        assert calls == 2
+    else:
+        raise AssertionError(arch + " reduce resolver failure did not propagate")
 
 # Keep spec validation ahead of automatic compiler selection.
 lower_llvm._resolve_llvm_flavor = unavailable
