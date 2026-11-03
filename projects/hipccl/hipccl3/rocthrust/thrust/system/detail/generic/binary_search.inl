@@ -194,7 +194,6 @@ template <typename DerivedPolicy, typename ForwardIterator, typename T>
 THRUST_HOST_DEVICE ForwardIterator
 lower_bound(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator begin, ForwardIterator end, const T& value)
 {
-  namespace p = thrust::placeholders;
   return thrust::lower_bound(exec, begin, end, value, _THRUST_STD::less<>{});
 }
 
@@ -215,7 +214,6 @@ template <typename DerivedPolicy, typename ForwardIterator, typename T>
 THRUST_HOST_DEVICE ForwardIterator
 upper_bound(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator begin, ForwardIterator end, const T& value)
 {
-  namespace p = thrust::placeholders;
   return thrust::upper_bound(exec, begin, end, value, _THRUST_STD::less<>{});
 }
 
@@ -263,7 +261,6 @@ THRUST_HOST_DEVICE OutputIterator lower_bound(
   InputIterator values_end,
   OutputIterator output)
 {
-  namespace p = thrust::placeholders;
   return thrust::lower_bound(exec, begin, end, values_begin, values_end, output, _THRUST_STD::less<>{});
 }
 
@@ -293,7 +290,6 @@ THRUST_HOST_DEVICE OutputIterator upper_bound(
   InputIterator values_end,
   OutputIterator output)
 {
-  namespace p = thrust::placeholders;
   return thrust::upper_bound(exec, begin, end, values_begin, values_end, output, _THRUST_STD::less<>{});
 }
 
@@ -323,7 +319,6 @@ THRUST_HOST_DEVICE OutputIterator binary_search(
   InputIterator values_end,
   OutputIterator output)
 {
-  namespace p = thrust::placeholders;
   return thrust::binary_search(exec, begin, end, values_begin, values_end, output, _THRUST_STD::less<>{});
 }
 
