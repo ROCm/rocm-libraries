@@ -34,6 +34,7 @@
 #include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
 #include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
 #include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_comparable.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
@@ -292,45 +293,60 @@ struct pointer_traits<const void*>
 };
 
 template <typename FromPtr, typename ToPtr>
-struct is_pointer_system_convertible : _THRUST_STD::is_convertible<iterator_system_t<FromPtr>, iterator_system_t<ToPtr>>
-{};
+inline constexpr bool is_pointer_system_convertible_v =
+  _THRUST_STD::is_convertible_v<iterator_system_t<FromPtr>, iterator_system_t<ToPtr>>;
 
 template <typename FromPtr, typename ToPtr>
-struct is_pointer_convertible
-    : _THRUST_STD::_And<
-        _THRUST_STD::is_convertible<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>,
-        is_pointer_system_convertible<FromPtr, ToPtr>>
-{};
+inline constexpr bool is_pointer_convertible_v =
+  _THRUST_STD::is_convertible_v<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>
+  && is_pointer_system_convertible_v<FromPtr, ToPtr>;
 
 template <typename FromPtr, typename ToPtr>
-struct is_void_pointer_system_convertible
-    : _THRUST_STD::_And<_THRUST_STD::is_same<typename pointer_element<FromPtr>::type, void>,
-                        is_pointer_system_convertible<FromPtr, ToPtr>>
-{};
+inline constexpr bool is_void_pointer_system_convertible_v =
+  _THRUST_STD::is_void_v<typename pointer_element<FromPtr>::type> //
+  && is_pointer_system_convertible_v<FromPtr, ToPtr>;
 
 // avoid inspecting traits of the arguments if they aren't known to be pointers
-template <typename FromPtr, typename ToPtr>
-struct lazy_is_pointer_convertible
-    : thrust::detail::eval_if<is_thrust_pointer_v<FromPtr> && is_thrust_pointer_v<ToPtr>,
-                              is_pointer_convertible<FromPtr, ToPtr>,
-                              _THRUST_STD::type_identity<_THRUST_STD::false_type>>
-{};
+template <typename FromPtr, typename ToPtr, bool = is_thrust_pointer_v<FromPtr> && is_thrust_pointer_v<ToPtr>>
+inline constexpr bool lazy_is_pointer_convertible_v = false;
 
 template <typename FromPtr, typename ToPtr>
-struct lazy_is_void_pointer_system_convertible
-    : thrust::detail::eval_if<is_thrust_pointer_v<FromPtr> && is_thrust_pointer_v<ToPtr>,
-                              is_void_pointer_system_convertible<FromPtr, ToPtr>,
-                              _THRUST_STD::type_identity<_THRUST_STD::false_type>>
-{};
+inline constexpr bool lazy_is_pointer_convertible_v<FromPtr, ToPtr, true> = is_pointer_convertible_v<FromPtr, ToPtr>;
+
+template <typename FromPtr, typename ToPtr, bool = is_thrust_pointer_v<FromPtr> && is_thrust_pointer_v<ToPtr>>
+inline constexpr bool lazy_is_void_pointer_system_convertible_v = false;
+
+template <typename FromPtr, typename ToPtr>
+inline constexpr bool lazy_is_void_pointer_system_convertible_v<FromPtr, ToPtr, true> =
+  is_void_pointer_system_convertible_v<FromPtr, ToPtr>;
 
 template <typename FromPtr, typename ToPtr, typename T = void>
-struct enable_if_pointer_is_convertible
-    : _THRUST_STD::enable_if<lazy_is_pointer_convertible<FromPtr, ToPtr>::type::value, T>
-{};
+using enable_if_pointer_is_convertible_t = _THRUST_STD::enable_if_t<lazy_is_pointer_convertible_v<FromPtr, ToPtr>, T>;
 
 template <typename FromPtr, typename ToPtr, typename T = void>
-struct enable_if_void_pointer_is_system_convertible
-    : _THRUST_STD::enable_if<lazy_is_void_pointer_system_convertible<FromPtr, ToPtr>::type::value, T>
-{};
+using enable_if_void_pointer_is_system_convertible_t =
+  _THRUST_STD::enable_if_t<lazy_is_void_pointer_system_convertible_v<FromPtr, ToPtr>, T>;
+
+// tagged pointers can only compare if they have a matching system and comparable pointer type
+template <typename FromPtr, typename ToPtr>
+inline constexpr bool ptr_can_compare_equal =
+  is_pointer_system_convertible_v<FromPtr, ToPtr>
+  && _THRUST_STD::__is_cpp17_equality_comparable_v<typename FromPtr::value_type*, typename ToPtr::value_type*>;
+
+template <typename FromPtr, typename ToPtr>
+inline constexpr bool ptr_can_compare_less_than =
+  is_pointer_system_convertible_v<FromPtr, ToPtr>
+  && _THRUST_STD::__is_cpp17_less_than_comparable_v<typename FromPtr::value_type*, typename ToPtr::value_type*>;
+
+// tagged references can only compare if they have a matching system and comparable value type
+template <typename FromPtr, typename ToPtr>
+inline constexpr bool ref_can_compare_equal =
+  is_pointer_system_convertible_v<FromPtr, ToPtr>
+  && _THRUST_STD::__is_cpp17_equality_comparable_v<typename FromPtr::value_type, typename ToPtr::value_type>;
+
+template <typename FromPtr, typename ToPtr>
+inline constexpr bool ref_can_compare_less_than =
+  is_pointer_system_convertible_v<FromPtr, ToPtr>
+  && _THRUST_STD::__is_cpp17_less_than_comparable_v<typename FromPtr::value_type, typename ToPtr::value_type>;
 } // namespace detail
 THRUST_NAMESPACE_END
