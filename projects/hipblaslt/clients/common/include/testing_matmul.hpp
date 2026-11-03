@@ -1225,13 +1225,14 @@ inline std::string solution_description(hipblasLtHandle_t      handle,
 }
 
 // After check(), names the solution that the failure lines it printed were for.
-inline void report_failed_solution(int64_t                failures_before,
+// reported_before is hipblaslt_bench_options::reported_failures() before check().
+inline void report_failed_solution(int64_t                reported_before,
                                    hipblasLtHandle_t      handle,
                                    hipblasLtMatmulAlgo_t& algo,
                                    size_t                 sol,
                                    size_t                 count)
 {
-    if(hipblaslt_bench_options::verification_failures() > failures_before)
+    if(hipblaslt_bench_options::reported_failures() > reported_before)
         hipblaslt_cerr << "the failed checks above are for "
                        << solution_description(handle, algo, sol, count, true) << std::endl;
 }
@@ -1537,10 +1538,6 @@ void check(hipStream_t                   stream,
                 }
             }
             hipblaslt_error += norm_error;
-            if(arg.norm_check_assert)
-            {
-                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
-            }
             if(!can_compare)
             {
                 hipblaslt_bench_options::verification_failures()++;
@@ -1556,6 +1553,27 @@ void check(hipStream_t                   stream,
                                << worst_batch << " has norm_error " << worst_error
                                << ", at or above the GEMM limit of " << limit << std::endl;
             }
+            // After the message, so that a failure says why before the assertion stops the run.
+            if(arg.norm_check_assert)
+            {
+                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+            }
+            // The extra outputs' checks print why they failed; like D's, they stop the run only
+            // with norm_check_assert, and they do not count toward --verify_strict.
+            auto reportExtra
+                = [&](const char* output, double error, double extraLimit, hipDataType type) {
+                      if(extraLimit <= 0.0 || !(error < extraLimit))
+                          hipblaslt_bench_options::extra_check_failures()++;
+                      if(extraLimit <= 0.0)
+                          hipblaslt_cerr << "norm check failed for " << output << " of gemm "
+                                         << gemmIdx << ": no norm limit for "
+                                         << hip_datatype_to_string(type) << std::endl;
+                      else if(!(error < extraLimit))
+                          hipblaslt_cerr << "norm check failed for " << output << " of gemm "
+                                         << gemmIdx << ": norm_error " << error
+                                         << ", at or above the limit of " << extraLimit
+                                         << std::endl;
+                  };
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(arg.amaxD)
@@ -1570,6 +1588,7 @@ void check(hipStream_t                   stream,
                                                                     num_batches[gemmIdx],
                                                                     Tc));
                     hipblaslt_error += norm_error;
+                    reportExtra("amaxD", norm_error, norm_tolerance(Tc), Tc);
                     if(arg.norm_check_assert)
                         CHECK_SUCCESS(norm_check(norm_error, Tc));
                 }
@@ -1586,6 +1605,10 @@ void check(hipStream_t                   stream,
                                                              num_batches[gemmIdx],
                                                              Taux));
                     hipblaslt_error += norm_error;
+                    reportExtra("E",
+                                norm_error,
+                                norm_tolerance(Taux, arg.compute_type, arg.a_type, arg.b_type),
+                                Taux);
                     if(arg.norm_check_assert)
                     {
                         CHECK_SUCCESS(
@@ -1605,6 +1628,7 @@ void check(hipStream_t                   stream,
                                                              num_batches[gemmIdx],
                                                              Tbias));
                     hipblaslt_error += norm_error;
+                    reportExtra("the bias gradient", norm_error, norm_tolerance(Tbias), Tbias);
                     if(arg.norm_check_assert)
                     {
                         CHECK_SUCCESS(norm_check(norm_error, Tbias));
@@ -6271,6 +6295,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                 }
                 const int64_t failures_before = hipblaslt_bench_options::verification_failures();
+                const int64_t reported_before = hipblaslt_bench_options::reported_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6305,7 +6330,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
-                report_failed_solution(failures_before,
+                report_failed_solution(reported_before,
                                        handle,
                                        heuristicResult[sol].algo,
                                        sol,
@@ -6896,6 +6921,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                 }
                 const int64_t failures_before = hipblaslt_bench_options::verification_failures();
+                const int64_t reported_before = hipblaslt_bench_options::reported_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6930,7 +6956,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
-                report_failed_solution(failures_before,
+                report_failed_solution(reported_before,
                                        handle,
                                        heuristicResult[sol].algo,
                                        sol,

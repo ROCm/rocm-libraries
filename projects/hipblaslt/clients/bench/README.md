@@ -141,7 +141,14 @@ the failed checks above are for solution 3 of 12 (library index 8805, kernel <ke
 
 If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check.
 
-By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. It checks D only: the checks of E, the bias gradient and amaxD, and `--ulp`, don't affect the exit code. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+The norm checks of E, the bias gradient and amaxD use the limit for their own type (for E, also the input types). A failing one prints a line like D's, and the line naming the solution follows:
+```
+norm check failed for the bias gradient of gemm 0: norm_error 2.44902, at or above the limit of 1e-05
+```
+
+With `norm_check_assert`, which YAML input enables by default and the command line and `--verify_strict` disable, the first failing norm check of D, E, the bias gradient or amaxD prints its line and then ends the run with exit code 1.
+
+By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. It counts the checks of D only: the checks of E, the bias gradient and amaxD, and `--ulp`, don't affect this exit code. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
 
 Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of `--algo_method all` sweeps.
 
