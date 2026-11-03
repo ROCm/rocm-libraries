@@ -811,6 +811,19 @@ def _reused_loop_name_message(name: str) -> str:
     )
 
 
+def _loop_with_body(region: Region, body: Region) -> Op | None:
+    """Return the ``scf.for`` of ``region`` whose body is ``body``, or None.
+
+    The loop is matched by its body, not by its place in ``region``: a loop
+    handle may be created and other ops emitted after it before its body is
+    entered, so the loop need not be the last op of ``region``.
+    """
+    for op in reversed(region.ops):
+        if op.name == "scf.for" and op.regions and op.regions[0] is body:
+            return op
+    return None
+
+
 def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
     """The refusal for the ``scf.for`` ``op`` when it carries a buffer
     descriptor, or None when it does not.
@@ -6339,39 +6352,27 @@ class IRBuilder:
                 raise ValueError(_reused_loop_name_message(name))
             taken.add(name)
 
-    def _enclosing_loop_value_names(self) -> List[str]:
+    def _enclosing_loop_value_names(self) -> list[str]:
         """The names of the induction variables and carried values of every
-        ``scf.for`` the builder is emitting inside, at any depth.
-
-        Each region on the stack below the top is entered from the last op of
-        the region under it (see :meth:`_current_region_is_loop_body`); when
-        that op is an ``scf.for`` and the region is its body, the loop's values
-        are visible from here.
+        ``scf.for`` the builder is emitting inside, at any depth: each region
+        on the stack that is a loop's body (see :func:`_loop_with_body`) makes
+        that loop's values visible from here.
         """
-        names: List[str] = []
+        names: list[str] = []
         for outer, inner in zip(self._region_stack, self._region_stack[1:]):
-            if not outer.ops:
-                continue
-            owner = outer.ops[-1]
-            if owner.name == "scf.for" and owner.regions and owner.regions[0] is inner:
-                names.append(owner.attrs["iv"])
-                names.extend(meta["name"] for meta in owner.attrs.get("iter_args", []))
+            loop = _loop_with_body(outer, inner)
+            if loop is not None:
+                names.append(loop.attrs["iv"])
+                names.extend(meta["name"] for meta in loop.attrs.get("iter_args", []))
         return names
 
     def _current_region_is_loop_body(self) -> bool:
-        """True while the builder is emitting into an ``scf.for`` body.
-
-        The loop op is the last op of the region that encloses its body: it was
-        emitted there before its body was entered, and every op since went into
-        the body.
-        """
+        """True while the builder is emitting into an ``scf.for`` body."""
         if len(self._region_stack) < 2:
             return False
-        enclosing = self._region_stack[-2].ops
-        if not enclosing or enclosing[-1].name != "scf.for":
-            return False
-        loop_regions = enclosing[-1].regions
-        return bool(loop_regions) and loop_regions[0] is self._region_stack[-1]
+        return (
+            _loop_with_body(self._region_stack[-2], self._region_stack[-1]) is not None
+        )
 
     def static_if(
         self,

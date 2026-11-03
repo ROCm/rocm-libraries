@@ -19,11 +19,13 @@ with the value worked out on the host.
 from __future__ import annotations
 
 import ctypes
+import re
 import struct
 
 import numpy as np
 import pytest
 from rocke.core.ir import I32, IRBuilder, PtrType
+from rocke.core.ir_serialize import parse, serialize
 from rocke.tests.engines import lower_with_both_engines
 
 FLAVORS = ("llvm20", "llvm22", "llvm23", "llvm24")
@@ -275,6 +277,56 @@ def test_nested_loop_may_not_reuse_an_enclosing_loop_name(
             with pytest.raises(ValueError) as refused:
                 _inner_loop(b, iv_name, carried, acc, unroll)
     assert str(refused.value) == _reuse_message(taken)
+
+
+@pytest.mark.parametrize("followed", ["outer", "inner"])
+def test_reuse_is_refused_when_an_op_follows_a_loop_handle(followed):
+    """A loop handle may be created and other ops emitted after it before its
+    body is entered, so the loop is not the last op of its region. The names of
+    its values are still taken inside its body; ``followed`` is the loop whose
+    handle an op follows, and the innermost loop reuses one of its names."""
+    b, y, z, lane = _kernel("reuse_after_op_" + followed)
+    outer = _unrolled(b, lane)
+    if followed == "outer":
+        b.add(lane, lane)
+    with outer as (k, (acc,)):
+        inner = _inner_loop(b, "j", "s", acc, unroll=False)
+        if followed == "inner":
+            b.add(acc, k)
+        with inner as (j, (s,)):
+            taken = "k" if followed == "outer" else "j"
+            with pytest.raises(ValueError) as refused:
+                _inner_loop(b, taken, "t", s, unroll=False)
+    assert str(refused.value) == _reuse_message("%" + taken)
+
+
+@pytest.mark.parametrize(
+    "reused, inner_name",
+    [("%k", "%j"), ("%acc", "%s"), ("%j", "%s")],
+    ids=["outer_induction_variable", "outer_carried_value", "same_loop"],
+)
+def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
+    """Serialized IR can name a value of a nested loop like a value of the loop
+    it is in, or two values of one loop alike, past the builder. Both parsers
+    refuse it with the builder's message rather than bind the inner body's
+    reads of that name to one of the values and unbind the other."""
+    b, y, z, lane = _kernel("parse_reuse")
+    outer = _unrolled(b, lane)
+    with outer as (k, (acc,)):
+        inner = _inner_loop(b, "j", "s", acc, unroll=False)
+        with inner as (j, (s,)):
+            b.scf_yield(b.add(s, j))
+        b.scf_yield(inner.results[0])
+    b.global_store(z, lane, outer.results[0])
+    b.ret()
+    text = re.sub(re.escape(inner_name) + r"\b", reused, serialize(b.kernel))
+    with pytest.raises(ValueError) as refused:
+        parse(text)
+    assert str(refused.value) == _reuse_message(reused)
+    engine = pytest.importorskip("rocke_engine")
+    with pytest.raises(RuntimeError) as native:
+        engine.lower_serialized_ir(text, arch="gfx942", flavor="llvm22")
+    assert str(native.value).endswith(": " + _reuse_message(reused)), str(native.value)
 
 
 def test_one_loop_may_not_name_two_of_its_values_alike():

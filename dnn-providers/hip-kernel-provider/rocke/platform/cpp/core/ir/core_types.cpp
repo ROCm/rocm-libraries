@@ -822,6 +822,16 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
     return buf;
 }
 
+const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap)
+{
+    snprintf(buf,
+             cap,
+             "scf.for: the name '%s' is already taken by an induction variable or carried value "
+             "of this loop or of a loop it is nested in; give it a name of its own",
+             name);
+    return buf;
+}
+
 const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     int i;

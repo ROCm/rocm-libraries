@@ -1521,6 +1521,41 @@ static int count_top(const char* s, size_t n, char sep)
 
 static rocke_region_t* parse_region(rocke_ir_builder_t* b, line_reader_t* lr, val_table_t* vt);
 
+/* Mirrors Python _bind_block_value: bind `v`, a block value (iv or iter-arg)
+ * of the scf.for being parsed, under its name. Refuses the name, as the builder
+ * does (rocke_i_reused_loop_name_message), when it is bound to a block value
+ * already: one of an enclosing loop, whose body this loop is in, or an earlier
+ * one of this loop. Rebinding it would make the inner body's reads of the
+ * name read this value, and retiring this loop's values would unbind the
+ * outer one. Returns false (builder failed) on a refusal or OOM. */
+static bool bind_block_value(rocke_ir_builder_t* b, val_table_t* vt, rocke_value_t* v)
+{
+    const rocke_value_t* bound = vt_get(vt, v->name);
+    if(bound && bound->op && bound->op->opcode == ROCKE_OP_SCF_FOR)
+    {
+        bool is_result = false;
+        for(int i = 0; i < bound->op->num_results && !is_result; ++i)
+        {
+            is_result = bound->op->results[i] == bound;
+        }
+        if(!is_result)
+        {
+            char msg[ROCKE_ERR_MSG_CAP];
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "%s",
+                            rocke_i_reused_loop_name_message(v->name, msg, sizeof msg));
+            return false;
+        }
+    }
+    if(vt_put(vt, v->name, v) != 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "value table OOM");
+        return false;
+    }
+    return true;
+}
+
 /* Register block-defined SSA values for an scf.for op (iv + iter-args), so the
  * body operands resolve. Mirrors Python _register_block_values. Returns the
  * names added via out_added (arena array) / out_n. */
@@ -1556,7 +1591,10 @@ static void register_block_values(
             if(v)
             {
                 v->op = op;
-                vt_put(vt, v->name, v);
+                if(!bind_block_value(b, vt, v))
+                {
+                    return;
+                }
                 added[na++] = v->name;
             }
         }
@@ -1577,7 +1615,10 @@ static void register_block_values(
                     if(v)
                     {
                         v->op = op;
-                        vt_put(vt, v->name, v);
+                        if(!bind_block_value(b, vt, v))
+                        {
+                            return;
+                        }
                         added[na++] = v->name;
                     }
                 }

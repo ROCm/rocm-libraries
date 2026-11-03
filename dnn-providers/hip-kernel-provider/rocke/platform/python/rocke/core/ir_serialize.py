@@ -34,6 +34,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _reused_loop_name_message,
 )
 
 FORMAT_NAME = "ckdsl.ir"
@@ -577,19 +578,39 @@ def _register_block_values(op: Op, values: Dict[str, Value]) -> List[str]:
     iv_name = op.attrs.get("iv")
     iv_type = op.attrs.get("iv_type")
     if isinstance(iv_name, str) and isinstance(iv_type, str):
-        v = Value(name=iv_name, type=_parse_type(iv_type))
-        v.op = op
-        values[iv_name] = v
+        _bind_block_value(Value(name=iv_name, type=_parse_type(iv_type)), op, values)
         added.append(iv_name)
     iter_args = op.attrs.get("iter_args")
     if isinstance(iter_args, list):
         for entry in iter_args:
             if isinstance(entry, dict) and "name" in entry and "type" in entry:
-                v = Value(name=entry["name"], type=_parse_type(entry["type"]))
-                v.op = op
-                values[entry["name"]] = v
+                carried = Value(name=entry["name"], type=_parse_type(entry["type"]))
+                _bind_block_value(carried, op, values)
                 added.append(entry["name"])
     return added
+
+
+def _bind_block_value(value: Value, loop: Op, values: dict[str, Value]) -> None:
+    """Bind ``value``, a block value (induction variable or carried value) of
+    the ``scf.for`` ``loop``, under its name.
+
+    Refuses the name, as the builder does (see
+    :func:`~rocke.core.ir._reused_loop_name_message`), when it is bound to a
+    block value already: one of an enclosing loop, whose body ``loop`` is in,
+    or an earlier one of ``loop``. Rebinding it would make the inner body's
+    reads of the name read ``value``, and retiring ``loop``'s values would
+    unbind the outer one.
+    """
+    bound = values.get(value.name)
+    if (
+        bound is not None
+        and bound.op is not None
+        and bound.op.name == "scf.for"
+        and not any(bound is result for result in bound.op.results)
+    ):
+        raise ValueError(_reused_loop_name_message(value.name))
+    value.op = loop
+    values[value.name] = value
 
 
 def _find_results_eq(ln: str) -> int:

@@ -293,6 +293,14 @@ bool rocke_i_is_buffer_descriptor(const rocke_value_t* value);
  * lowered descriptor (an opaque ptr addrspace(8) / rsrc_t). */
 const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t cap);
 
+/* Mirrors ir._reused_loop_name_message: writes into `buf` the refusal for an
+ * scf.for induction variable or carried value named `name` (as the op records
+ * it, "%<name>") when that name is taken by another value of the same loop or
+ * of a loop it is nested in, and returns `buf`. The serialized IR refers to a
+ * value by its name, so a reused name is ambiguous inside the inner body. The
+ * builder and the IR parser use it. */
+const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
+
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
  * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.

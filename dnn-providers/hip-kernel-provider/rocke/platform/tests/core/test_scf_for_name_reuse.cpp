@@ -124,6 +124,18 @@ void refuses_a_reused_name_inside_an_if_in_the_body()
     check(error == message("%k0"), "loop in an scf.if reusing k0: '" + error + "'");
 }
 
+void refuses_a_reused_name_when_an_op_follows_the_loop_handle()
+{
+    /* The outer loop is not the last op of its region: a constant is emitted
+     * after its handle is created and before its body is entered. */
+    Kernel k("reuse_after_op");
+    rocke_for_t outer = k.loop("k0", "acc");
+    k.c(7);
+    rocke_b_region_enter(&k.b, outer.body);
+    const std::string error = refusal(&k.b, [&] { k.loop("k0", "s"); });
+    check(error == message("%k0"), "loop reusing k0 after an op: '" + error + "'");
+}
+
 void refuses_one_loop_naming_two_values_alike()
 {
     Kernel k("same_loop");
@@ -158,6 +170,7 @@ int main()
     refuses_a_nested_loop_reusing_the_induction_variable();
     refuses_a_nested_loop_reusing_a_carried_value();
     refuses_a_reused_name_inside_an_if_in_the_body();
+    refuses_a_reused_name_when_an_op_follows_the_loop_handle();
     refuses_one_loop_naming_two_values_alike();
     accepts_new_names_and_loops_side_by_side();
     if(g_failures)

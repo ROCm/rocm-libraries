@@ -2259,21 +2259,32 @@ void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int
 
 /* ============================ scf / cf control flow ===================== */
 
+/* Python _loop_with_body: the scf.for of `region` whose body is `body`, or
+ * NULL. The loop is matched by its body, not by its place in `region`: a loop
+ * handle may be created and other ops emitted after it before its body is
+ * entered, so the loop need not be the last op of `region`. */
+static const rocke_op_t* flow_loop_with_body(const rocke_region_t* region,
+                                             const rocke_region_t* body)
+{
+    for(int i = region->num_ops - 1; i >= 0; --i)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(op->opcode == ROCKE_OP_SCF_FOR && op->num_regions >= 1 && op->regions[0] == body)
+            return op;
+    }
+    return NULL;
+}
+
 /* Python IRBuilder._enclosing_loop_value_names: true when `name` is the name of
  * the induction variable or of a carried value of an scf.for the builder is
- * emitting inside, at any depth. Each region on the stack below the top is
- * entered from the last op of the region under it; when that op is an scf.for
- * and the region is its body, the loop's values are visible from here. */
+ * emitting inside, at any depth: each region on the stack that is a loop's body
+ * (flow_loop_with_body) makes that loop's values visible from here. */
 static bool flow_enclosing_loop_value_named(const rocke_ir_builder_t* b, const char* name)
 {
     for(int d = 1; d < b->region_depth; ++d)
     {
-        const rocke_region_t* outer = b->region_stack[d - 1];
-        if(outer->num_ops == 0)
-            continue;
-        const rocke_op_t* owner = outer->ops[outer->num_ops - 1];
-        if(owner->opcode != ROCKE_OP_SCF_FOR || owner->num_regions < 1
-           || owner->regions[0] != b->region_stack[d])
+        const rocke_op_t* owner = flow_loop_with_body(b->region_stack[d - 1], b->region_stack[d]);
+        if(!owner)
             continue;
         const char* iv = rocke_attr_get_str(&owner->attrs, "iv");
         if(iv && strcmp(iv, name) == 0)
@@ -2297,8 +2308,7 @@ static bool flow_enclosing_loop_value_named(const rocke_ir_builder_t* b, const c
  * one is taken by a value of a loop the builder is emitting inside, or by an
  * earlier name in `names`. The serialized IR refers to a value by its name, so
  * a reused name inside a nested body is ambiguous and the two engines would
- * read different values. Same text as Python _reused_loop_name_message.
- * Returns false (builder failed) on a refusal. */
+ * read different values. Returns false (builder failed) on a refusal. */
 static bool flow_refuse_taken_loop_names(rocke_ir_builder_t* b, const char* const* names, int count)
 {
     for(int i = 0; i < count; ++i)
@@ -2308,12 +2318,11 @@ static bool flow_refuse_taken_loop_names(rocke_ir_builder_t* b, const char* cons
             taken = strcmp(names[j], names[i]) == 0;
         if(taken)
         {
+            char msg[ROCKE_ERR_MSG_CAP];
             rocke_i_set_err(b,
                             ROCKE_ERR_VALUE,
-                            "scf.for: the name '%s' is already taken by an induction variable or "
-                            "carried value of this loop or of a loop it is nested in; give it a "
-                            "name of its own",
-                            names[i]);
+                            "%s",
+                            rocke_i_reused_loop_name_message(names[i], msg, sizeof msg));
             return false;
         }
     }
@@ -2619,21 +2628,14 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
 }
 
 /* Python IRBuilder._current_region_is_loop_body: true while `b` is emitting
- * into an scf.for body. The loop op is the last op of the region enclosing its
- * body: it was emitted there before its body was entered, and every op since
- * went into the body. */
+ * into an scf.for body. */
 static bool current_region_is_loop_body(const rocke_ir_builder_t* b)
 {
-    const rocke_region_t* enclosing;
-    const rocke_op_t* loop;
     if(b->region_depth < 2)
         return false;
-    enclosing = b->region_stack[b->region_depth - 2];
-    if(enclosing->num_ops == 0)
-        return false;
-    loop = enclosing->ops[enclosing->num_ops - 1];
-    return loop->opcode == ROCKE_OP_SCF_FOR && loop->num_regions >= 1
-           && loop->regions[0] == b->region_stack[b->region_depth - 1];
+    return flow_loop_with_body(b->region_stack[b->region_depth - 2],
+                               b->region_stack[b->region_depth - 1])
+           != NULL;
 }
 
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values)
