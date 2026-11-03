@@ -183,14 +183,12 @@ K-loop recovers, against ceilings measured in the same session:
 | `fp8_trait_ab` | the K-loop traits on the case study's geometry (`tdm_d2`, `split_barrier`, `alternate_issuers`, `early_refill`, each adding one trait), interleaved in one process |
 | `wmma_roofline_probe` | the register-resident WMMA ceiling, on constant, integer or random operand data |
 | `memory_probe` | streaming read/copy bandwidth, and the TDM feed floor: the champion's loop with the math removed |
-| `clock_probe` | per-wave shader cycles and realtime stamped inside a diagnostic copy of one arm, under peak and sustained load, and a device health check |
+| `clock_probe` | per-wave shader cycles and realtime stamped inside a diagnostic copy of one arm, and a device health check |
 | `fp8_data` | the two input sets both A/B tools share (exact integers; e4m3-rounded `normal(0, 0.1)`) |
 
 `fp8_trait_ab` verifies every arm before timing any — bit-exact on the integer
 set, within 2^-7 of the largest output on the random set, on several launches
-each — and stops if one fails. It then times a peak protocol (25 ms idle, then
-1 + 3 launches) on each input set and a sustained one (20 + 400 launches back
-to back) on the random set, and prints each arm's ratio to the first. The
+each — and stops if one fails. It then times every arm (25 ms idle, then 1 warmup and 3 timed launches, median of 15 samples) and prints each arm's ratio to the first. The
 probes and the A/B also print absolute figures for your own record; keep them
 out of the repository.
 
@@ -210,26 +208,24 @@ rocminfo | grep -m1 gfx1250
 rocm-smi --showpids                 # "No KFD PIDs currently running"; keep polling it
 python3 -m $P.clock_probe           # should end with "health: ok"
 
-# 2. ceilings before: WMMA on each operand set, peak and sustained; then memory
+# 2. ceilings before: WMMA on each operand set; then memory
 for d in const int rand; do
   python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d \
-      --json $OUT/wmma_pre_peak_$d.json
-  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d \
-      --gap-ms 0 --warmup 20 --iters 50 --json $OUT/wmma_pre_sus_$d.json
+      --json $OUT/wmma_pre_$d.json
 done
 python3 -m $P.memory_probe | tee $OUT/memory_pre.txt
 
 # 3. the four arms at 4096x4096x65536: verify all, then time
-python3 -m $P.fp8_trait_ab --json $OUT/ab.json | tee $OUT/ab.txt
+python3 -m $P.fp8_trait_ab --sustained-rounds 0 --json $OUT/ab.json | tee $OUT/ab.txt
 
 # 4. the early refill only pays at long K
-python3 -m $P.fp8_trait_ab --k 8192 --arms alternate_issuers,early_refill \
-    --json $OUT/ab_k8192.json
+python3 -m $P.fp8_trait_ab --sustained-rounds 0 --k 8192 \
+    --arms alternate_issuers,early_refill --json $OUT/ab_k8192.json
 
 # 5. ceilings after, as in step 2
 for d in const int rand; do
   python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d \
-      --json $OUT/wmma_post_peak_$d.json
+      --json $OUT/wmma_post_$d.json
 done
 python3 -m $P.memory_probe tdm | tee $OUT/memory_post.txt
 ```
@@ -243,8 +239,8 @@ Reading the output:
 - **The session is valid** if the WMMA ceilings before and after agree within
   about 1% and no other process appeared — `fp8_trait_ab` reports the process
   list at its start and end, which is necessary, not sufficient.
-- **Percent of ceiling** is the `early_refill` arm's peak figure over the
-  same-session WMMA ceiling on the *same* operand data. Never mix data sets:
+- **Percent of ceiling** is the `early_refill` arm's figure in the `peak_rand`
+  column over the same-session WMMA ceiling on the random set. Never mix data sets:
   the ceiling itself depends on the operand bits.
 - **Feed share** is `memory_probe tdm`'s time per K-step over the GEMM's
   (its time per launch divided by K / 256).

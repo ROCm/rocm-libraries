@@ -402,7 +402,7 @@ bytes drawn from the GEMM's own input sets, alternating between two operand
 sets so consecutive WMMAs see different bits, gives a lower ceiling for the
 same instruction:
 
-| probe operand data | ceiling vs constant data (peak) |
+| probe operand data | ceiling vs constant data |
 |---|---|
 | one constant pattern | 1.00 |
 | integers in −5..5 (the exact-check inputs) | 0.83 |
@@ -444,40 +444,35 @@ the tail of the issuing waves' work.
    overlaps it. The loop runs two K-tiles per iteration with static LDS parity
    (immediate fragment-read offsets) over an even tile count; with an odd
    count the extra tile lies past K and is zero-filled. **Enable it for long
-   K.** Against `alternate_issuers` it adds about 1% at peak at both measured
-   K -- 1.013× / 1.011× (integer / random) at K = 65536 and 1.013× / 1.008×
-   at K = 8192 -- but under sustained load it measured 1.012× at K = 65536 and
-   0.989× at K = 8192. A short loop spends a larger share on the second
-   prologue fill and, for an odd tile count, on the zero-filled tile.
+   K.** Against `alternate_issuers` it adds 1.011× at K = 65536 and less,
+   1.008×, at K = 8192 (random inputs): a short loop spends a larger share on
+   the second prologue fill and, for an odd tile count, on the zero-filled
+   tile.
 
 ### Results
 
 `fp8_trait_ab`, one process, arms interleaved with the order alternating per
-round, every arm verified on both input sets first (§17). Ratios are against
-the `tdm_d2` arm; peak is the median of 15 samples, sustained of 3. The
+round, every arm verified on both input sets first (§17), then timed on the
+random inputs as §15 describes. Ratios are against the `tdm_d2` arm. The
 WMMA ceilings measured before and after the A/B agreed within 0.3%, and no
 other GPU process appeared during the run.
 
-| arm | peak, integer inputs | peak, random inputs | sustained, random inputs |
-|---|---|---|---|
-| `tdm_d2` (ping-pong, joint barrier) | 1.000× | 1.000× | 1.000× |
-| `split_barrier` | 1.016× | 1.012× | 1.025× |
-| `alternate_issuers` (split + alternating) | 1.047× | 1.041× | 1.032× |
-| `early_refill` (all three) | **1.061×** | **1.052×** | **1.044×** |
+| arm | random inputs |
+|---|---|
+| `tdm_d2` (ping-pong, joint barrier) | 1.000× |
+| `split_barrier` | 1.012× |
+| `alternate_issuers` (split + alternating) | 1.041× |
+| `early_refill` (all three) | **1.052×** |
 
-Against the same-session ceiling on matching data (§13), the `early_refill`
-arm reaches **75.3%** of the integer-data ceiling and **80.3%** of the
-random-data ceiling at peak.
+The `early_refill` arm reaches about **80%** of the WMMA ceiling measured on
+the same random data, the same way, in the same session (§13).
 
-## 15. Peak and sustained are different regimes
+## 15. How the arms are timed
 
-The peak protocol idles the GPU for 25 ms before every sample and times 1
-warmup plus 3 launches. Run back-to-back (20 warmup, 400 timed), the same
-kernel measures well below its peak throughput, and much further below it than
-the register-resident probe does. Trait ratios are similar in both regimes,
-but **an absolute figure means nothing without its protocol**, and a
-percentage of the ceiling is only meaningful at peak, against the peak
-ceiling.
+Every sample is 25 ms idle, then 1 warmup and 3 timed launches, median of 15 samples; the WMMA ceiling is timed the same
+way. **An absolute figure means nothing without its protocol**, and a
+percentage of the ceiling holds only against a ceiling timed the same way, on
+the same data, in the same session.
 
 ## 16. What did not help
 
@@ -573,21 +568,20 @@ P=rocke.examples.gfx1250.gemm_perf_fp8
 rocm-smi --showpids
 python3 -m $P.clock_probe
 
-# 1. ceilings before, on each input set, peak and sustained (§13, §15)
+# 1. ceilings before, on each input set (§13, §15)
 for d in const int rand; do
   python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d
-  python3 -m $P.wmma_roofline_probe -i f32_16x16x128_f8f6f4.fp8 --data $d \
-      --gap-ms 0 --warmup 20 --iters 50
 done
 
 # 1b. memory side: streaming read/copy bandwidth, and the TDM feed floor (§18)
 python3 -m $P.memory_probe
 
-# 2. the four arms: verify all, then peak (int, rand) and sustained (rand)
-python3 -m $P.fp8_trait_ab --json <out>/ab.json
+# 2. the four arms: verify all, then time (§15)
+python3 -m $P.fp8_trait_ab --sustained-rounds 0 --json <out>/ab.json
 
 # 2b. the early refill at a shorter K (§14)
-python3 -m $P.fp8_trait_ab --k 8192 --arms alternate_issuers,early_refill
+python3 -m $P.fp8_trait_ab --sustained-rounds 0 --k 8192 \
+    --arms alternate_issuers,early_refill
 
 # 3. ceilings after, as in step 1; before and after should agree within ~1%
 ```
@@ -596,10 +590,9 @@ python3 -m $P.fp8_trait_ab --k 8192 --arms alternate_issuers,early_refill
 (for your record); `--arms` takes any subset in any order, the first being the
 reference, `--data` and `--rounds` narrow the run, and `--k` changes the
 problem (the exact integer check needs 25·K < 2^24). The whole sequence takes
-on the order of ten minutes, most of it the host references and the
-sustained rounds. The
-percentage of the ceiling is the `early_refill` arm's peak figure divided by
-the same-session probe figure on the same data.
+on the order of ten minutes, most of it the host references. The
+percentage of the ceiling is the `early_refill` arm's figure in the
+`peak_rand` column divided by the same-session probe figure on the random set.
 
 **Artifacts.** `fp8_trait_ab.py` (arms, verification, interleaved timing),
 `fp8_data.py` (the two input sets and the random-set bound),
