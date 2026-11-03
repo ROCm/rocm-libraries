@@ -1023,8 +1023,24 @@ def _gfx942_3d_spec(idx: int):
     def prob(groups=1, f=3, s=1):
         pad = (f - 1) // 2
         return ConvProblem(
-            N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=f, Y=f, X=f,
-            sD=s, sH=s, sW=s, pD=pad, pH=pad, pW=pad, dD=1, dH=1, dW=1,
+            N=1,
+            Di=16,
+            Hi=16,
+            Wi=16,
+            C=128,
+            K=128,
+            Z=f,
+            Y=f,
+            X=f,
+            sD=s,
+            sH=s,
+            sW=s,
+            pD=pad,
+            pH=pad,
+            pW=pad,
+            dD=1,
+            dH=1,
+            dW=1,
             groups=groups,
         )
 
@@ -1032,10 +1048,19 @@ def _gfx942_3d_spec(idx: int):
         return ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
 
     t256 = dict(
-        tile_m=256, tile_n=64, tile_k=32, warp_m=4, warp_n=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-        vector_size_a=8, vector_size_b=8, vector_size_c=8,
-        pipeline="mem", epilogue="cshuffle",
+        tile_m=256,
+        tile_n=64,
+        tile_k=32,
+        warp_m=4,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        pipeline="mem",
+        epilogue="cshuffle",
     )
     cfgs = {
         54: (prob(), "fp16", t256),
@@ -1044,19 +1069,35 @@ def _gfx942_3d_spec(idx: int):
             prob(s=2),
             "bf16",
             dict(
-                tile_m=128, tile_n=128, tile_k=32, warp_m=2, warp_n=2,
-                warp_tile_m=32, warp_tile_n=32, warp_tile_k=8,
-                pipeline="mem", epilogue="default",
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+                pipeline="mem",
+                epilogue="default",
             ),
         ),
         57: (
             prob(groups=2, f=1),
             "bf16",
             dict(
-                tile_m=128, tile_n=64, tile_k=32, warp_m=2, warp_n=2,
-                warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-                vector_size_a=8, vector_size_b=8, vector_size_c=8,
-                pipeline="mem", epilogue="cshuffle",
+                tile_m=128,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                vector_size_a=8,
+                vector_size_b=8,
+                vector_size_c=8,
+                pipeline="mem",
+                epilogue="cshuffle",
             ),
         ),
     }
@@ -1073,31 +1114,102 @@ def _gfx942_3d_spec(idx: int):
         67: (55, dict(reg_prefetch=1)),
         68: (55, dict(reg_prefetch=2)),
         69: (55, dict(reg_prefetch=1, lds_xor=True)),
-        70: (55, dict(reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
-                      lds_xor_rowkey=True, xcd_remap=6, m_band=32)),
+        70: (
+            55,
+            dict(
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                lds_xor_rowkey=True,
+                xcd_remap=6,
+                m_band=32,
+            ),
+        ),
         71: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True)),
         72: (54, dict(pipeline="compv3", reg_prefetch=2, lds_kpack_read=True)),
         73: (55, dict(lds_xor=True)),
         74: (55, dict(reg_prefetch=1, lds_xor=True, lds_xor_rowkey=True)),
-        75: (55, dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True,
-                      lds_kpack_read=True, lds_xor_rowkey=True, xcd_remap=6, m_band=32)),
+        75: (
+            55,
+            dict(
+                uniform_k_decode=True,
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                lds_xor_rowkey=True,
+                xcd_remap=6,
+                m_band=32,
+            ),
+        ),
         76: (55, dict(uniform_k_decode=True)),
-        77: (55, dict(uniform_k_decode=True, reg_prefetch=2, uk_tap_fast=True,
-                      uk_nopad=True, fb_skip_empty=True)),
-        78: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
-                      uniform_k_decode=True, uk_tap_fast=True, uk_nopad=True,
-                      fb_skip_empty=True, xcd_remap=6)),
-        79: (55, dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True,
-                      uk_tap_fast=True, uk_chunk_group=2, uk_nopad=True)),
+        77: (
+            55,
+            dict(
+                uniform_k_decode=True,
+                reg_prefetch=2,
+                uk_tap_fast=True,
+                uk_nopad=True,
+                fb_skip_empty=True,
+            ),
+        ),
+        78: (
+            55,
+            dict(
+                split_k=2,
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                uniform_k_decode=True,
+                uk_tap_fast=True,
+                uk_nopad=True,
+                fb_skip_empty=True,
+                xcd_remap=6,
+            ),
+        ),
+        79: (
+            55,
+            dict(
+                uniform_k_decode=True,
+                reg_prefetch=1,
+                lds_xor=True,
+                uk_tap_fast=True,
+                uk_chunk_group=2,
+                uk_nopad=True,
+            ),
+        ),
         80: (56, dict(uniform_k_decode=True, reg_prefetch=1, lds_kpack_read=True)),
         81: (57, dict(uniform_k_decode=True)),
-        82: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
-                      uniform_k_decode=True, uk_tap_fast=True, uk_chunk_group=2)),
-        90: (54, dict(pipeline="compv3", reg_prefetch=1, vmem_interleave=2, rpf_setprio=1)),
+        82: (
+            55,
+            dict(
+                split_k=2,
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                uniform_k_decode=True,
+                uk_tap_fast=True,
+                uk_chunk_group=2,
+            ),
+        ),
+        90: (
+            54,
+            dict(pipeline="compv3", reg_prefetch=1, vmem_interleave=2, rpf_setprio=1),
+        ),
     }
-    _s3 = dict(tile_n=128, tile_k=64, warp_n=2, split_k=2, uniform_k_decode=True,
-               reg_prefetch=1, lds_xor=True, lds_kpack_read=True, uk_tap_fast=True,
-               uk_nopad=True, fb_skip_empty=True, xcd_remap=6)
+    _s3 = dict(
+        tile_n=128,
+        tile_k=64,
+        warp_n=2,
+        split_k=2,
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        lds_xor=True,
+        lds_kpack_read=True,
+        uk_tap_fast=True,
+        uk_nopad=True,
+        fb_skip_empty=True,
+        xcd_remap=6,
+    )
     _pp = {
         83: {},
         84: dict(rpf_pingpong=5, vmem_interleave=5, pp_b_double=True, pp_split_fetch=3),
@@ -1110,53 +1222,105 @@ def _gfx942_3d_spec(idx: int):
     }
     _p84 = dict(rpf_pingpong=5, vmem_interleave=5, pp_b_double=True, pp_split_fetch=3)
     _p85 = dict(rpf_pingpong=5, vmem_interleave=6, pp_b_double=True, pp_split_fetch=4)
-    _pp.update({
-        92: dict(_p84, split_tail=True, split_atomic_pairs=True, split_det=2),
-        93: dict(_p84, split_tail=True, split_atomic_pairs=True),
-        94: dict(_p85, split_det=1),
-        95: dict(split_atomic_pairs=True),
-        96: dict(split_tail=True, split_det=2, m_band=32),
-        97: dict(_p84, uk_chunk_group=2),
-    })
+    _pp.update(
+        {
+            92: dict(_p84, split_tail=True, split_atomic_pairs=True, split_det=2),
+            93: dict(_p84, split_tail=True, split_atomic_pairs=True),
+            94: dict(_p85, split_det=1),
+            95: dict(split_atomic_pairs=True),
+            96: dict(split_tail=True, split_det=2, m_band=32),
+            97: dict(_p84, uk_chunk_group=2),
+        }
+    )
     knobs[98] = (54, dict(split_k=2, split_det=2))
-    _pp.update({
-        99: dict(_p84, split_tail=True, split_atomic_pairs=True, split_det=2,
-                 cshuffle_m_chunks=2, epi_lds_barriers=True),
-        100: dict(_p84, split_tail=True, split_atomic_pairs=True, cshuffle_m_chunks=4),
-        101: dict(cshuffle_m_chunks=2),
-    })
+    _pp.update(
+        {
+            99: dict(
+                _p84,
+                split_tail=True,
+                split_atomic_pairs=True,
+                split_det=2,
+                cshuffle_m_chunks=2,
+                epi_lds_barriers=True,
+            ),
+            100: dict(
+                _p84, split_tail=True, split_atomic_pairs=True, cshuffle_m_chunks=4
+            ),
+            101: dict(cshuffle_m_chunks=2),
+        }
+    )
     knobs[102] = (55, dict(reg_prefetch=1, cshuffle_m_chunks=2, epi_lds_barriers=True))
-    _pp.update({
-        104: dict(_p85, xcd_remap=0, split_xcd_remap=6, split_atomic_pairs=True, split_det=3),
-        105: dict(split_det=3, cshuffle_m_chunks=2),
-        106: dict(_p84, xcd_remap=0, split_xcd_remap=6),
-        107: dict(split_det=3, split_tail=True),
-    })
+    _pp.update(
+        {
+            104: dict(
+                _p85,
+                xcd_remap=0,
+                split_xcd_remap=6,
+                split_atomic_pairs=True,
+                split_det=3,
+            ),
+            105: dict(split_det=3, cshuffle_m_chunks=2),
+            106: dict(_p84, xcd_remap=0, split_xcd_remap=6),
+            107: dict(split_det=3, split_tail=True),
+        }
+    )
     knobs[103] = (54, dict(cshuffle_m_chunks=2))
-    _s8 = dict(tile_n=256, tile_k=32, warp_n=2, split_k=2, uniform_k_decode=True,
-               reg_prefetch=1, lds_xor=True, uk_tap_fast=True, cshuffle_m_chunks=4,
-               uk_nopad=True, vmem_interleave=5, lds_kpack_read=True, uk_chunk_group=2,
-               rpf_pingpong=5, lds_xor_rowkey=True, split_atomic_pairs=True,
-               pp_split_fetch=10, fb_skip_empty=True, split_hybrid=16, split_det=3)
+    _s8 = dict(
+        tile_n=256,
+        tile_k=32,
+        warp_n=2,
+        split_k=2,
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        lds_xor=True,
+        uk_tap_fast=True,
+        cshuffle_m_chunks=4,
+        uk_nopad=True,
+        vmem_interleave=5,
+        lds_kpack_read=True,
+        uk_chunk_group=2,
+        rpf_pingpong=5,
+        lds_xor_rowkey=True,
+        split_atomic_pairs=True,
+        pp_split_fetch=10,
+        fb_skip_empty=True,
+        split_hybrid=16,
+        split_det=3,
+    )
     knobs[108] = (55, _s8)
     knobs[109] = (55, dict(_s8, split_hybrid=8, split_det=2))
     knobs[113] = (55, dict(_s8, split_hybrid=0, split_streamk=True, split_det=0))
-    _s4 = dict(uniform_k_decode=True, reg_prefetch=1, xcd_remap=6, lds_xor=True, uk_xhalo=8,
-               rpf_setprio=2, lds_xor_rowkey=True, xh_wait_smem=True, epi_quad_xpose=4,
-               xh_stride_m=True, fxh_dma=1036, lds_kpack_read=True)
+    _s4 = dict(
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        xcd_remap=6,
+        lds_xor=True,
+        uk_xhalo=8,
+        rpf_setprio=2,
+        lds_xor_rowkey=True,
+        xh_wait_smem=True,
+        epi_quad_xpose=4,
+        xh_stride_m=True,
+        fxh_dma=1036,
+        lds_kpack_read=True,
+    )
     knobs[114] = (55, _s4)
-    knobs[115] = (55, dict(_s4, uk_xhalo=4, rpf_setprio=1, no_agpr=True, m_band=32,
-                           fxh_dma=2016))
+    knobs[115] = (
+        55,
+        dict(_s4, uk_xhalo=4, rpf_setprio=1, no_agpr=True, m_band=32, fxh_dma=2016),
+    )
     knobs[116] = (55, dict(_s4, uk_tap_fast=True))
     knobs[117] = (55, dict(_s4, epi_quad_xpose=3))
     knobs[118] = (55, dict(xh_stride_m=True))
     knobs[119] = (55, dict(_s4, uk_tap_fast=True, xh_yring=14))
     knobs[120] = (55, dict(_s4, uk_tap_fast=True, xh_yring=2))
-    _pp.update({
-        110: dict(_p84, xcd_remap=0, split_streamk=True),
-        111: dict(xcd_remap=0, split_hybrid=4, split_det=1),
-        112: dict(_p84, xcd_remap=0, split_streamk=True, split_det=2),
-    })
+    _pp.update(
+        {
+            110: dict(_p84, xcd_remap=0, split_streamk=True),
+            111: dict(xcd_remap=0, split_hybrid=4, split_det=1),
+            112: dict(_p84, xcd_remap=0, split_streamk=True, split_det=2),
+        }
+    )
     if idx in _pp:
         knobs[idx] = (55, dict(_s3, **_pp[idx]))
     extra = {}

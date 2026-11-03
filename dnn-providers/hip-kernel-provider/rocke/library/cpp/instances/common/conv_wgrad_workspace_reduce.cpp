@@ -222,8 +222,10 @@ static void wr_emit_vec_fold(rocke_ir_builder_t* b,
         const rocke_type_t* lt = spec->ws_bf16 ? rocke_bf16() : rocke_f32();
         for(int r = 0; r < reps; ++r)
         {
-            rocke_value_t* off = r == 0 ? ws_base
-                                        : rocke_b_add(b, ws_base, rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
+            rocke_value_t* off
+                = r == 0 ? ws_base
+                         : rocke_b_add(
+                               b, ws_base, rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
             parts[r] = rocke_b_global_load_vN(b, ws_ptr, off, lt, v, 0);
         }
         rocke_value_t* tot[16];
@@ -240,8 +242,10 @@ static void wr_emit_vec_fold(rocke_ir_builder_t* b,
             rocke_value_t* z = rocke_b_zero_vec_f32(b, v);
             for(int r = 0; r < reps; ++r)
             {
-                rocke_value_t* off = r == 0 ? ws_base
-                                            : rocke_b_add(b, ws_base, rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
+                rocke_value_t* off
+                    = r == 0 ? ws_base
+                             : rocke_b_add(
+                                   b, ws_base, rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
                 rocke_b_global_store_vN(b, ws_ptr, off, z, v, 0);
             }
         }
@@ -278,9 +282,11 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
     rocke_value_t* t_m = rocke_b_div(b, e_v, rocke_b_const_i32(b, spec->tile_n));
     rocke_value_t* t_n = rocke_b_mod(b, e_v, rocke_b_const_i32(b, spec->tile_n));
     rocke_value_t* by = rocke_b_block_id_y(b);
-    rocke_value_t* c_m = rocke_b_add(b, rocke_b_mul(b, by, rocke_b_const_i32(b, spec->tile_m)), t_m);
+    rocke_value_t* c_m
+        = rocke_b_add(b, rocke_b_mul(b, by, rocke_b_const_i32(b, spec->tile_m)), t_m);
     rocke_value_t* bx = rocke_b_block_id_x(b);
-    rocke_value_t* cn0 = rocke_b_add(b, rocke_b_mul(b, bx, rocke_b_const_i32(b, spec->tile_n)), t_n);
+    rocke_value_t* cn0
+        = rocke_b_add(b, rocke_b_mul(b, bx, rocke_b_const_i32(b, spec->tile_n)), t_n);
     rocke_value_t* c_n = rocke_b_mul(b, cn0, rocke_b_const_i32(b, v));
     rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_p);
     rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_p);
@@ -312,7 +318,9 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
             for(int u = 0; u < U; ++u)
             {
                 rocke_value_t* off
-                    = u == 0 ? off0 : rocke_b_add(b, off0, rocke_b_mul(b, slab, rocke_b_const_i32(b, u * P)));
+                    = u == 0
+                          ? off0
+                          : rocke_b_add(b, off0, rocke_b_mul(b, slab, rocke_b_const_i32(b, u * P)));
                 wr_load(b, spec, ws_ptr, off, v, vals[u]);
             }
             rocke_value_t* tot[16];
@@ -338,17 +346,20 @@ static void wr_emit_loop_fold(rocke_ir_builder_t* b,
         for(int u = 0; u < (rem + P - 1) / P; ++u)
         {
             const int r_first = r0 + u * P;
-            rocke_value_t* off = rocke_b_add(b, base, rocke_b_mul(b, slab, rocke_b_const_i32(b, r_first)));
+            rocke_value_t* off
+                = rocke_b_add(b, base, rocke_b_mul(b, slab, rocke_b_const_i32(b, r_first)));
             rocke_value_t* vals[16];
             if(r_first + P <= R)
                 wr_load(b, spec, ws_ptr, off, v, vals);
             else
             {
-                rocke_value_t* ok = P > 1 ? rocke_b_cmp_lt(b, p_v, rocke_b_const_i32(b, R - r_first)) : NULL;
+                rocke_value_t* ok
+                    = P > 1 ? rocke_b_cmp_lt(b, p_v, rocke_b_const_i32(b, R - r_first)) : NULL;
                 rocke_value_t* off_c = off;
                 if(ok != NULL)
                 {
-                    rocke_value_t* last = rocke_b_add(b, elem_safe, rocke_b_mul(b, slab, rocke_b_const_i32(b, R - 1)));
+                    rocke_value_t* last = rocke_b_add(
+                        b, elem_safe, rocke_b_mul(b, slab, rocke_b_const_i32(b, R - 1)));
                     off_c = rocke_b_select(b, ok, off, last);
                 }
                 wr_load(b, spec, ws_ptr, off_c, v, vals);
@@ -445,7 +456,9 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
     }
     if(spec->rezero && spec->ws_bf16)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "WgradReduceSpec.rezero stores f32 zeros; not with ws_bf16 scratch");
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "WgradReduceSpec.rezero stores f32 zeros; not with ws_bf16 scratch");
         return NULL;
     }
     if(spec->rezero)

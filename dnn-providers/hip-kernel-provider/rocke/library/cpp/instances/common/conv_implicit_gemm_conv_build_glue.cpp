@@ -368,10 +368,10 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             memset(&fo, 0, sizeof(fo));
             fo.noalias = true;
             fo.noalias_set = true;
-            ctx->fwd_p_sk_flags = rocke_b_param(
-                b, "sk_flags", rocke_ptr_type(b, rocke_i32(), "global"), &fo);
-            ctx->fwd_p_sk_partials = rocke_b_param(
-                b, "sk_partials", rocke_ptr_type(b, rocke_f32(), "global"), &fo);
+            ctx->fwd_p_sk_flags
+                = rocke_b_param(b, "sk_flags", rocke_ptr_type(b, rocke_i32(), "global"), &fo);
+            ctx->fwd_p_sk_partials
+                = rocke_b_param(b, "sk_partials", rocke_ptr_type(b, rocke_f32(), "global"), &fo);
         }
     }
     ctx->fwd_split = spec->split_k > 1 && !ctx->fwd_asplit;
@@ -624,8 +624,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             if(spec->split_xcd_remap)
             {
                 /* The aligned slices (slice-major) XCD-contiguously. */
-                rocke_value_t* rm
-                    = rocke_chiplet_transform_chunked_runtime(b, w, np, spec->split_xcd_remap, NULL);
+                rocke_value_t* rm = rocke_chiplet_transform_chunked_runtime(
+                    b, w, np, spec->split_xcd_remap, NULL);
                 wl = rocke_b_select(b, prim, rm, w);
             }
             rocke_value_t* s_ = rocke_b_div(b, wl, tiles);
@@ -676,15 +676,19 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             ctx->fsk_tile = rocke_b_to_sgpr_u32(b, rocke_b_add(b, t0, seg));
             rocke_value_t* base = rocke_b_mul(b, ctx->fsk_tile, kt);
             rocke_value_t* m1 = rocke_b_smax(b, lo, base);
-            ctx->fsk_k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_sub(b, m1, base), ctx->c_block_k));
+            ctx->fsk_k_lo
+                = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_sub(b, m1, base), ctx->c_block_k));
             rocke_value_t* bk = rocke_b_add(b, base, kt);
             rocke_value_t* m2 = rocke_b_smin(b, hi, bk);
-            ctx->fsk_k_hi = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_sub(b, m2, base), ctx->c_block_k));
+            ctx->fsk_k_hi
+                = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_sub(b, m2, base), ctx->c_block_k));
         }
         rocke_value_t* mt = rocke_b_div(b, ctx->fsk_tile, ctx->p_num_pid_n);
-        ctx->block_m_off_v = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, mt, rocke_b_const_i32(b, ctx->block_m)));
+        ctx->block_m_off_v
+            = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, mt, rocke_b_const_i32(b, ctx->block_m)));
         rocke_value_t* nt = rocke_b_mod(b, ctx->fsk_tile, ctx->p_num_pid_n);
-        ctx->block_n_off_v = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, nt, rocke_b_const_i32(b, ctx->block_n)));
+        ctx->block_n_off_v
+            = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, nt, rocke_b_const_i32(b, ctx->block_n)));
         /* The thread's coordinates through an opaque per-segment copy, so the
          * per-thread values derived from them stay inside the segment loop. */
         rocke_inline_asm_opts_t ao;
@@ -724,7 +728,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         rocke_value_t* zn = rocke_b_mul(b, zy, ctx->p_num_pid_n);
         rocke_value_t* hw = rocke_b_add(b, zn, rocke_b_block_id_x(b));
         rocke_value_t* nw = rocke_b_mul(b, tiles, ctx->fwd_p_ks_count);
-        rocke_value_t* lg = rocke_chiplet_transform_chunked_runtime(b, hw, nw, spec->split_xcd_remap, NULL);
+        rocke_value_t* lg
+            = rocke_chiplet_transform_chunked_runtime(b, hw, nw, spec->split_xcd_remap, NULL);
         ctx->fwd_skx_slice = rocke_b_div(b, lg, tiles);
         rocke_value_t* tile = rocke_b_sub(b, lg, rocke_b_mul(b, ctx->fwd_skx_slice, tiles));
         rocke_value_t* mt = rocke_b_div(b, tile, ctx->p_num_pid_n);
@@ -1172,8 +1177,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* ---- A/B addressing split (Python: the `if split_ab:` block) ----
      * Loop-invariant constants the split descriptors read; every operand is
      * bound to a temporary in Python's left-to-right order. */
-    ctx->split_ab = !ctx->is_pointwise
-                    && !(overrides != NULL && overrides->a_mhw_index_fn != NULL)
+    ctx->split_ab = !ctx->is_pointwise && !(overrides != NULL && overrides->a_mhw_index_fn != NULL)
                     && !(spec->problem.is_3d && ctx->merged);
     ctx->split_neg_pD = NULL;
     ctx->split_zstep = NULL;
@@ -1299,8 +1303,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
             else
             {
                 rocke_value_t* bid_z = ctx.fwd_split ? ctx.group_idx : rocke_b_block_id_z(b);
-                ctx.d_k_out_group_base
-                    = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
+                ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
             }
         }
         else

@@ -364,7 +364,8 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
     const bool atomic = dw_ptr != NULL;
     if(atom == NULL || (fp32_out && atomic) || !(bf16_out || fp32_out))
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "m_chunks > 1: MFMA bf16 (or fp32 buffer-store) output only");
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "m_chunks > 1: MFMA bf16 (or fp32 buffer-store) output only");
         return;
     }
     const int mc = epi->m_chunks;
@@ -372,7 +373,8 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
     const int mfmas_n = rocke_warp_grid_mfmas_per_warp_n(b, grid);
     if(mfmas_m % mc)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "m_chunks %d does not divide mfmas_per_warp_m %d", mc, mfmas_m);
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "m_chunks %d does not divide mfmas_per_warp_m %d", mc, mfmas_m);
         return;
     }
     const int cm = mfmas_m / mc;
@@ -425,8 +427,8 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                 {
                     rocke_value_t *r_in = NULL, *c_in = NULL;
                     rocke_mfma_atom_lane_to_output(b, atom, grid->lane, i, &r_in, &c_in);
-                    rocke_value_t* idx[2] = {rocke_b_add(b, tile_m_base, r_in),
-                                             rocke_b_add(b, tile_n_base, c_in)};
+                    rocke_value_t* idx[2]
+                        = {rocke_b_add(b, tile_m_base, r_in), rocke_b_add(b, tile_n_base, c_in)};
                     if(fp32_out)
                         rocke_b_smem_store_vN_f32(b, c_smem, idx, 2, elems[i], 1);
                     else
@@ -442,7 +444,8 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
             const int n_pairs = rows_c * grid->tile_n / 2;
             if(n_pairs % threads)
             {
-                rocke_i_set_err(b, ROCKE_ERR_VALUE, "m_chunks: pairs do not distribute over the block");
+                rocke_i_set_err(
+                    b, ROCKE_ERR_VALUE, "m_chunks: pairs do not distribute over the block");
                 return;
             }
             for(int e = 0; e < n_pairs / threads; ++e)
@@ -466,7 +469,8 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                     rocke_value_t* n1 = rocke_b_add(b, n_even, rocke_b_const_i32(b, 1));
                     n_ok = rocke_b_cmp_lt(b, n1, bounds_n);
                 }
-                rocke_value_t* okp = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
+                rocke_value_t* okp
+                    = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
                 rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
                 if(col_offset != NULL)
                     c_off = rocke_b_add(b, c_off, col_offset);
@@ -493,7 +497,7 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
             rocke_value_t* w = rocke_b_div(b, row, c_slab);
             rocke_value_t* r_in = rocke_b_sub(b, row, rocke_b_mul(b, w, c_slab));
             rocke_value_t* wr = rocke_b_mul(b, w, c_wrows);
-                rocke_value_t* g0 = rocke_b_add(b, wr, rocke_b_const_i32(b, c * cm * am));
+            rocke_value_t* g0 = rocke_b_add(b, wr, rocke_b_const_i32(b, c * cm * am));
             rocke_value_t* g_row = rocke_b_add(b, g0, r_in);
             rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, g_row);
             rocke_value_t* n_val = rocke_b_add(b, grid->block_n_off, col);
@@ -509,7 +513,8 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                         rocke_value_t* n1 = rocke_b_add(b, n_even, rocke_b_const_i32(b, 1));
                         n_ok = rocke_b_cmp_lt(b, n1, bounds_n);
                     }
-                    rocke_value_t* okp = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
+                    rocke_value_t* okp
+                        = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
                     rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
                     if(col_offset != NULL)
                         c_off = rocke_b_add(b, c_off, col_offset);
@@ -520,11 +525,11 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                         rocke_b_region_enter(b, ifo.then_region);
                     }
                     rocke_value_t* ie[2] = {row, cc};
-                    rocke_value_t* v_e
-                        = rocke_b_vec_extract(b, rocke_b_smem_load_vN(b, c_smem, ie, 2, rocke_bf16(), 1), 0);
+                    rocke_value_t* v_e = rocke_b_vec_extract(
+                        b, rocke_b_smem_load_vN(b, c_smem, ie, 2, rocke_bf16(), 1), 0);
                     rocke_value_t* io[2] = {row, rocke_b_add(b, cc, rocke_b_const_i32(b, 1))};
-                    rocke_value_t* v_o
-                        = rocke_b_vec_extract(b, rocke_b_smem_load_vN(b, c_smem, io, 2, rocke_bf16(), 1), 0);
+                    rocke_value_t* v_o = rocke_b_vec_extract(
+                        b, rocke_b_smem_load_vN(b, c_smem, io, 2, rocke_bf16(), 1), 0);
                     rocke_value_t* el2[2] = {v_e, v_o};
                     rocke_b_global_atomic_add_pk_bf16(
                         b, dw_ptr, c_off, rocke_b_vec_pack(b, el2, 2, v_e->type), NULL);
@@ -533,7 +538,8 @@ static void epi_store_m_chunked(rocke_ir_builder_t* b,
                 }
                 continue;
             }
-            rocke_value_t* ok = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bounds_m, bounds_n, sv);
+            rocke_value_t* ok
+                = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bounds_m, bounds_n, sv);
             rocke_value_t* valid = NULL;
             rocke_value_t* off_elems = addr_fn(b, m_val, n_val, &valid, addr_user);
             if(ok != NULL && valid != NULL)
@@ -686,8 +692,21 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
         return;
     if(epi->m_chunks > 1)
     {
-        epi_store_m_chunked(b, epi, accs, addr_fn, addr_user, d_rsrc, bounds_m, bounds_n,
-                            _lds_dtype, _bf16_out, _fp32_out, warp_n_off, NULL, NULL, NULL);
+        epi_store_m_chunked(b,
+                            epi,
+                            accs,
+                            addr_fn,
+                            addr_user,
+                            d_rsrc,
+                            bounds_m,
+                            bounds_n,
+                            _lds_dtype,
+                            _bf16_out,
+                            _fp32_out,
+                            warp_n_off,
+                            NULL,
+                            NULL,
+                            NULL);
         return;
     }
 
@@ -1044,8 +1063,21 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
         return;
     if(epi->m_chunks > 1)
     {
-        epi_store_m_chunked(b, epi, accs, NULL, NULL, NULL, bounds_m, bounds_n, _lds_dtype,
-                            _bf16_out, _fp32_out, warp_n_off, dw_ptr, wg_N, col_offset);
+        epi_store_m_chunked(b,
+                            epi,
+                            accs,
+                            NULL,
+                            NULL,
+                            NULL,
+                            bounds_m,
+                            bounds_n,
+                            _lds_dtype,
+                            _bf16_out,
+                            _fp32_out,
+                            warp_n_off,
+                            dw_ptr,
+                            wg_N,
+                            col_offset);
         return;
     }
 
@@ -1165,7 +1197,8 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
         rocke_value_t* c_ppr = rocke_b_const_i32(b, ppr);
         for(int e = 0; e < total / thr; ++e)
         {
-            rocke_value_t* pidx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_thr), grid->tid);
+            rocke_value_t* pidx
+                = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_thr), grid->tid);
             rocke_value_t* row = rocke_b_div(b, pidx, c_ppr);
             rocke_value_t* cm = rocke_b_mod(b, pidx, c_ppr);
             rocke_value_t* col = rocke_b_mul(b, cm, rocke_b_const_i32(b, 2));
@@ -1178,8 +1211,7 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
                 rocke_value_t* n1 = rocke_b_add(b, n_even, rocke_b_const_i32(b, 1));
                 n_ok = rocke_b_cmp_lt(b, n1, bounds_n);
             }
-            rocke_value_t* ok
-                = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
+            rocke_value_t* ok = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
             rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
             if(col_offset != NULL)
                 c_off = rocke_b_add(b, c_off, col_offset);

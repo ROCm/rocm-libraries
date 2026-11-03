@@ -18,9 +18,9 @@
  */
 #include <string.h>
 
+#include "rocke/arena.h"
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_pack_f32_to */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
-#include "rocke/arena.h"
 #include <stdio.h>
 
 /* ===================================================================== *
@@ -648,7 +648,8 @@ static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
             it[i].name = rocke_arena_strdup(&b->arena, nb);
             it[i].init = accs[i];
         }
-        rocke_for_t fold = rocke_b_scf_for_iter(b, c0, n_wait, c_1, it, num_accs, "sdet_s", false, true);
+        rocke_for_t fold
+            = rocke_b_scf_for_iter(b, c0, n_wait, c_1, it, num_accs, "sdet_s", false, true);
         rocke_b_region_enter(b, fold.body);
         {
             rocke_value_t* s_base = rocke_b_add(b, t_base, rocke_b_mul(b, fold.iv, c_tile));
@@ -798,8 +799,17 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
         dctx.slab_base = slab_base;
         if(!spec->split_tail)
         {
-            conv_fwd_split_store(
-                sctx, &epi, accs, num_accs, atomic_d, atomic_row_pitch, bound_m, bound_n, k_out_group_base, &dctx, d_rsrc);
+            conv_fwd_split_store(sctx,
+                                 &epi,
+                                 accs,
+                                 num_accs,
+                                 atomic_d,
+                                 atomic_row_pitch,
+                                 bound_m,
+                                 bound_n,
+                                 k_out_group_base,
+                                 &dctx,
+                                 d_rsrc);
             return;
         }
         /* split_tail: a whole-K tile stores plainly; a tail slice adds. */
@@ -809,8 +819,17 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
             b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)&dctx, d_rsrc, bound_m, bound_n);
         rocke_b_region_leave(b);
         rocke_b_region_enter(b, ie.else_region);
-        conv_fwd_split_store(
-            sctx, &epi, accs, num_accs, atomic_d, atomic_row_pitch, bound_m, bound_n, k_out_group_base, &dctx, d_rsrc);
+        conv_fwd_split_store(sctx,
+                             &epi,
+                             accs,
+                             num_accs,
+                             atomic_d,
+                             atomic_row_pitch,
+                             bound_m,
+                             bound_n,
+                             k_out_group_base,
+                             &dctx,
+                             d_rsrc);
         rocke_b_region_leave(b);
         return;
     }

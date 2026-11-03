@@ -1191,19 +1191,49 @@ def _gfx942_3d_spec(idx: int):
     groups = 1 if idx == 57 else 2
     dt = "fp16" if idx == 57 else "bf16"
     p = ConvProblem(
-        N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
-        sD=1, sH=1, sW=1, pD=1, pH=1, pW=1, dD=1, dH=1, dW=1, groups=groups,
+        N=1,
+        Di=16,
+        Hi=16,
+        Wi=16,
+        C=128,
+        K=128,
+        Z=3,
+        Y=3,
+        X=3,
+        sD=1,
+        sH=1,
+        sW=1,
+        pD=1,
+        pH=1,
+        pW=1,
+        dD=1,
+        dH=1,
+        dW=1,
+        groups=groups,
     )
     kw = dict(
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-        vector_size_a=8, vector_size_b=8, vector_size_c=1,
-        lds_k_pad=4, pipeline="mem", epilogue="default",
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=1,
+        lds_k_pad=4,
+        pipeline="mem",
+        epilogue="default",
     )
     if idx in (55, 57):
         kw.update(tile_m=256, tile_n=256, tile_k=32, warp_m=2, warp_n=4)
     else:
-        kw.update(tile_m=128, tile_n=192, tile_k=32, warp_m=1, warp_n=4, split_k=2,
-                  waves_per_eu=2)
+        kw.update(
+            tile_m=128,
+            tile_n=192,
+            tile_k=32,
+            warp_m=1,
+            warp_n=4,
+            split_k=2,
+            waves_per_eu=2,
+        )
         if idx == 56:
             kw.update(two_stage=True, ws_replicas=1024)
     data = ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
@@ -1217,16 +1247,53 @@ _GFX942_3D_KNOBS = {
     # 59: 56 + pfr1 kp2 xcd6 pfs1 wss1
     59: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1)),
     # 60: 59 on w2x2 (wpe3) + m_band 1
-    60: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1,
-                  warp_m=2, warp_n=2, waves_per_eu=3, m_band=1)),
+    60: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            pfr_sched=1,
+            ws_store=1,
+            warp_m=2,
+            warp_n=2,
+            waves_per_eu=3,
+            m_band=1,
+        ),
+    ),
     # 61: 55 + pfr1 kp2 sepa2 kpl8 ppp3
     61: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=3)),
     # 62: 61 on w4x2, split_k=2 two-stage (8 slabs) + xcd6 wss1
-    62: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=3,
-                  warp_m=4, warp_n=2, split_k=2, two_stage=True, xcd_remap=6, ws_store=1)),
+    62: (
+        55,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            sep_addr=2,
+            kp_line=8,
+            plain_pp=3,
+            warp_m=4,
+            warp_n=2,
+            split_k=2,
+            two_stage=True,
+            xcd_remap=6,
+            ws_store=1,
+        ),
+    ),
     # 63: 61 on w4x2 + epi_store_fast
-    63: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=3,
-                  warp_m=4, warp_n=2, epi_store_fast=True)),
+    63: (
+        55,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            sep_addr=2,
+            kp_line=8,
+            plain_pp=3,
+            warp_m=4,
+            warp_n=2,
+            epi_store_fast=True,
+        ),
+    ),
     # 64: 56 + pfr2 (double-buffered tile) kp2
     64: (56, dict(prefetch_regs=2, lds_kpack=2)),
     # 65: 55 + pfr3 (two tiles in flight) sepa1 ilv4
@@ -1240,31 +1307,115 @@ _GFX942_3D_KNOBS = {
     # 69: 61 with plain_pp=4, pfr3-free sepa1
     69: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=1, plain_pp=4)),
     # 70: 59 + xwin 3 (the X window B tile)
-    70: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1, xwin=3)),
+    70: (
+        56,
+        dict(
+            prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1, xwin=3
+        ),
+    ),
     # 71: 70 on w2x2 (wpe3) + m_band 1
-    71: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1, xwin=3,
-                  warp_m=2, warp_n=2, waves_per_eu=3, m_band=1)),
+    71: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            pfr_sched=1,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=2,
+            waves_per_eu=3,
+            m_band=1,
+        ),
+    ),
     # 72: w2x2 xwin 3, 2 groups ping-pong sharing the dY tile (xgn2 xpp8)
-    72: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, warp_m=2,
-                  warp_n=2, xwin_groups=2, xwin_pp=8, xwin_gn=2)),
+    72: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=2,
+            xwin_groups=2,
+            xwin_pp=8,
+            xwin_gn=2,
+        ),
+    ),
     # 73: t64x192 w1x2, 4 groups ping-pong (xgn2 xpp8 xps1 xrot1)
-    73: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, tile_m=64,
-                  warp_m=1, warp_n=2, xwin_groups=4, xwin_pp=8, xwin_gn=2, xwin_pps=1,
-                  xwin_rot=1)),
+    73: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            tile_m=64,
+            warp_m=1,
+            warp_n=2,
+            xwin_groups=4,
+            xwin_pp=8,
+            xwin_gn=2,
+            xwin_pps=1,
+            xwin_rot=1,
+        ),
+    ),
     # 74: 70 with prefetch_regs=2 (two LDS buffers), no xcd_remap
     74: (56, dict(prefetch_regs=2, lds_kpack=2, ws_store=1, xwin=3)),
     # 75: 70 with prefetch_regs=3 (two tiles in flight) and pfr_sched 2
     75: (56, dict(prefetch_regs=3, lds_kpack=2, pfr_sched=2, xwin=3)),
     # 76: one 8-wave tile ping-pong (w2x4, xpp8 xps3)
-    76: (56, dict(prefetch_regs=1, lds_kpack=2, ws_store=1, xwin=3, warp_m=2, warp_n=4,
-                  xwin_pp=8, xwin_pps=3)),
+    76: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=4,
+            xwin_pp=8,
+            xwin_pps=3,
+        ),
+    ),
     # 77: 2 groups, plain loop, xgn1
-    77: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, warp_m=2,
-                  warp_n=2, xwin_groups=2, xwin_gn=1)),
+    77: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=2,
+            xwin_groups=2,
+            xwin_gn=1,
+        ),
+    ),
     # 78: 73 on the 2-D problem
-    78: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, ws_store=1, xwin=3, tile_m=64,
-                  warp_m=1, warp_n=2, xwin_groups=4, xwin_pp=8, xwin_gn=2, xwin_pps=1,
-                  xwin_rot=1)),
+    78: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            tile_m=64,
+            warp_m=1,
+            warp_n=2,
+            xwin_groups=4,
+            xwin_pp=8,
+            xwin_gn=2,
+            xwin_pps=1,
+            xwin_rot=1,
+        ),
+    ),
 }
 
 
@@ -1275,9 +1426,21 @@ def _gfx942_3d_knob_spec(idx: int):
     spec, arch = _gfx942_3d_spec(base)
     if idx == 78:
         # the 2-D twin of the 3-D grouped probe
-        kw = dict(kw, problem=ConvProblem(
-            N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=2,
-        ))
+        kw = dict(
+            kw,
+            problem=ConvProblem(
+                N=1,
+                Hi=16,
+                Wi=16,
+                C=128,
+                K=128,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=2,
+            ),
+        )
     return replace(spec, **kw), arch
 
 

@@ -19,12 +19,12 @@
 #include <stddef.h>
 #include <string.h> /* strcmp -- operand dtype string -> transpose-read elem type */
 
+#include "rocke/arena.h"
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t, rocke_decode_mfma_lanes */
+#include "rocke/helper_rocke.helpers.schedule.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/instance_conv_layouts.h" /* rocke_conv_tr_lane_offsets32 */
-#include "rocke/arena.h"
 #include "rocke/ir_internal.h"
-#include "rocke/helper_rocke.helpers.schedule.h"
 
 /* ====================================================================== *
  * _emit_mfma(b, atom, a, bv, c)  (py 637-638)
@@ -329,7 +329,8 @@ static const rocke_type_t* conv_ir_dtype_a(const rocke_implicit_gemm_conv_spec_t
  * chunk XOR the row key (the in-chunk offset is kept). The key is the row's
  * 256-byte line (128-byte span under lds_kpack_read; the row itself under
  * lds_xor_rowkey). */
-rocke_value_t* rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
+rocke_value_t*
+    rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
@@ -395,12 +396,8 @@ typedef struct
     int kp_nb;
 } conv_frag_env_t;
 
-static void conv_load_frags(conv_frag_env_t* e,
-                            int kk,
-                            rocke_value_t** a_rows,
-                            int* na,
-                            rocke_value_t** b_cols,
-                            int* nb)
+static void conv_load_frags(
+    conv_frag_env_t* e, int kk, rocke_value_t** a_rows, int* na, rocke_value_t** b_cols, int* nb)
 {
     rocke_conv_build_ctx_t* ctx = e->ctx;
     rocke_ir_builder_t* b = ctx->b;
@@ -560,8 +557,8 @@ static void conv_load_frags(conv_frag_env_t* e,
         {
             rocke_value_t *pr, *pc;
             conv_xa(ctx, a_row, col_base, &pr, &pc);
-            a_rows[(*na)++] = rocke_conv_emit_smem_load(
-                b, e->A_src, pr, pc, ctx->a_per_lane, ctx->smem_dtype);
+            a_rows[(*na)++]
+                = rocke_conv_emit_smem_load(b, e->A_src, pr, pc, ctx->a_per_lane, ctx->smem_dtype);
         }
         else if(has_ov)
         {
@@ -612,9 +609,8 @@ static void conv_load_frags(conv_frag_env_t* e,
         rocke_value_t* b_row = rocke_b_add(
             b,
             e->warp_n_off,
-            rocke_b_add(b,
-                        rocke_b_const_i32(b, ni * spec->warp_tile_n + ctx->xh_b_row_off),
-                        e->n_in_atom));
+            rocke_b_add(
+                b, rocke_b_const_i32(b, ni * spec->warp_tile_n + ctx->xh_b_row_off), e->n_in_atom));
         rocke_value_t* b_col = spec->lds_xor ? rocke_conv_lds_swz(ctx, b_row, col_base) : col_base;
         b_cols[(*nb)++] = rocke_conv_load_mma_operand(
             b, e->B_src, b_row, b_col, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
@@ -723,8 +719,7 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
         {
             /* vmem_interleave: the next tile's buffer_loads, issued just before
              * this phase, go one per vmem_interleave MFMAs. */
-            rocke_b_sched_group_barrier(
-                b, ROCKE_SCHED_DS_READ, n_dsr * ctx->ds_reads_per_frag, 0);
+            rocke_b_sched_group_barrier(b, ROCKE_SCHED_DS_READ, n_dsr * ctx->ds_reads_per_frag, 0);
             int n_mf = ctx->mfmas_m * ctx->mfmas_n * ctx->mfmas_per_mma;
             while(n_ld && n_mf)
             {
@@ -740,11 +735,11 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
         }
         else
         {
-            rocke_schedule_policy_emit_after_mfma_step(
-                &ctx->schedule,
-                b,
-                n_dsr * ctx->ds_reads_per_frag,
-                ctx->mfmas_m * ctx->mfmas_n * ctx->mfmas_per_mma);
+            rocke_schedule_policy_emit_after_mfma_step(&ctx->schedule,
+                                                       b,
+                                                       n_dsr * ctx->ds_reads_per_frag,
+                                                       ctx->mfmas_m * ctx->mfmas_n
+                                                           * ctx->mfmas_per_mma);
         }
     }
     ctx->vmi_pending = 0;

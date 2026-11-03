@@ -1422,16 +1422,63 @@ _GFX942_3D = {
     64: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
     65: ("s6", {}),
     # 66-70: the tapk_pingpong block ping-pong (8 waves) on 58
-    66: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=4,
-                    tapk_pp_sched=2, lds_xor=True)),
-    67: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=4,
-                    tapk_pp_sched=5, lds_xor=True, tapk_pp_bslab=3)),
-    68: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=4,
-                    tapk_pp_sched=12, lds_xor=True, tapk_pp_bslab=2)),
-    69: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=5,
-                    tapk_pp_sched=1, lds_xor=True)),
-    70: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6, tapk_pingpong=3,
-                    tapk_pp_sched=2, lds_xor=True)),
+    66: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=4,
+            tapk_pp_sched=2,
+            lds_xor=True,
+        ),
+    ),
+    67: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=4,
+            tapk_pp_sched=5,
+            lds_xor=True,
+            tapk_pp_bslab=3,
+        ),
+    ),
+    68: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=4,
+            tapk_pp_sched=12,
+            lds_xor=True,
+            tapk_pp_bslab=2,
+        ),
+    ),
+    69: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=5,
+            tapk_pp_sched=1,
+            lds_xor=True,
+        ),
+    ),
+    70: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=3,
+            tapk_pp_sched=2,
+            lds_xor=True,
+        ),
+    ),
 }
 
 
@@ -1440,23 +1487,68 @@ _GFX942_3D = {
 # the 3-D grouped problem; keep in lockstep with make_cfg_3d_pp() in
 # conv_implicit_gemm_dgrad_emit.c.
 _PP_COMMON = dict(
-    warp_tile_m=16, warp_tile_n=16, warp_tile_k=16, vector_size_a=8, vector_size_b=8,
-    vector_size_c=8, lds_k_pad=0, pipeline="mem", epilogue="cshuffle", tap_outer_k=True,
-    tapk_prefetch=1, b_kpack=4, tapk_pingpong=4, lds_xor=True, xcd_remap=6,
+    warp_tile_m=16,
+    warp_tile_n=16,
+    warp_tile_k=16,
+    vector_size_a=8,
+    vector_size_b=8,
+    vector_size_c=8,
+    lds_k_pad=0,
+    pipeline="mem",
+    epilogue="cshuffle",
+    tap_outer_k=True,
+    tapk_prefetch=1,
+    b_kpack=4,
+    tapk_pingpong=4,
+    lds_xor=True,
+    xcd_remap=6,
 )
 _T256 = dict(tile_m=256, tile_n=256, tile_k=32, warp_m=4, warp_n=2)
 _T128 = dict(tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4)
 _GFX942_3D_PP = {
-    71: dict(_T256, tapk_pp_sched=5, tapk_pp_bslab=3, cshuffle_m_chunks=2, split_k=8,
-             pp_boxes=7, pp_box_order=2, pp_box_det=1),
-    72: dict(_T256, tapk_pp_sched=5, cshuffle_m_chunks=4, split_k=8, pp_boxes=7,
-             pp_box_order=2, pp_box_det=1),
-    73: dict(_T128, tapk_pp_sched=2, tapk_pp_epi=2, tapk_pp_bslab=3, pp_boxes=77,
-             pp_box_order=2, epi_lds_barriers=True),
-    74: dict(_T256, tapk_pp_sched=12, tapk_pp_bslab=3, cshuffle_m_chunks=2, split_k=3,
-             pp_boxes=77, pp_box_det=1),
-    75: dict(_T128, tapk_pp_sched=5, split_k=4, pp_boxes=77, pp_box_order=3, pp_box_det=1),
-    76: dict(_T128, tapk_pp_sched=2, split_k=8, pp_boxes=7, pp_box_order=1, pp_box_det=1),
+    71: dict(
+        _T256,
+        tapk_pp_sched=5,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_order=2,
+        pp_box_det=1,
+    ),
+    72: dict(
+        _T256,
+        tapk_pp_sched=5,
+        cshuffle_m_chunks=4,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_order=2,
+        pp_box_det=1,
+    ),
+    73: dict(
+        _T128,
+        tapk_pp_sched=2,
+        tapk_pp_epi=2,
+        tapk_pp_bslab=3,
+        pp_boxes=77,
+        pp_box_order=2,
+        epi_lds_barriers=True,
+    ),
+    74: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=3,
+        pp_boxes=77,
+        pp_box_det=1,
+    ),
+    75: dict(
+        _T128, tapk_pp_sched=5, split_k=4, pp_boxes=77, pp_box_order=3, pp_box_det=1
+    ),
+    76: dict(
+        _T128, tapk_pp_sched=2, split_k=8, pp_boxes=7, pp_box_order=1, pp_box_det=1
+    ),
 }
 
 
@@ -1464,22 +1556,63 @@ _GFX942_3D_PP = {
 # pW = 0 view of the grouped 3-D problem; keep in lockstep with
 # make_cfg_3d_xh() in conv_implicit_gemm_dgrad_emit.c.
 _XH_COMMON = dict(
-    tile_m=256, tile_n=64, tile_k=32, warp_m=4, warp_n=1, warp_tile_m=16, warp_tile_n=16,
-    warp_tile_k=16, vector_size_a=8, vector_size_b=8, vector_size_c=8, lds_k_pad=0,
-    pipeline="mem", epilogue="cshuffle", tap_outer_k=True, tapk_xhalo=True, b_kpack=2,
-    xhalo_exact=True, xh_a_k4=True, xh_b_wide=True, xh_b_kpad=4, lds_xor=True, waves_per_eu=2,
+    tile_m=256,
+    tile_n=64,
+    tile_k=32,
+    warp_m=4,
+    warp_n=1,
+    warp_tile_m=16,
+    warp_tile_n=16,
+    warp_tile_k=16,
+    vector_size_a=8,
+    vector_size_b=8,
+    vector_size_c=8,
+    lds_k_pad=0,
+    pipeline="mem",
+    epilogue="cshuffle",
+    tap_outer_k=True,
+    tapk_xhalo=True,
+    b_kpack=2,
+    xhalo_exact=True,
+    xh_a_k4=True,
+    xh_b_wide=True,
+    xh_b_kpad=4,
+    lds_xor=True,
+    waves_per_eu=2,
 )
 _XH_FULL = dict(
-    tapk_prefetch=3, tapk_ilv=4, tapk_lds_ahead=1, tapk_lds_barrier=True, xh_order=6,
-    xh_defer=4, xh_fast_a=1, xh_epi=1, tapk_setprio=1, xcd_remap=6, m_band=11,
-    xh_stride_m=True, xh_epi_lin=True, epi_lds_barriers=True, xh_tap_rsrc=True,
-    tapk_ztrim=2, cshuffle_m_chunks=2,
+    tapk_prefetch=3,
+    tapk_ilv=4,
+    tapk_lds_ahead=1,
+    tapk_lds_barrier=True,
+    xh_order=6,
+    xh_defer=4,
+    xh_fast_a=1,
+    xh_epi=1,
+    tapk_setprio=1,
+    xcd_remap=6,
+    m_band=11,
+    xh_stride_m=True,
+    xh_epi_lin=True,
+    epi_lds_barriers=True,
+    xh_tap_rsrc=True,
+    tapk_ztrim=2,
+    cshuffle_m_chunks=2,
 )
 _GFX942_3D_XH = {
     77: dict(_XH_FULL),
-    78: dict(tapk_prefetch=3, xh_order=1, tapk_setprio=1, tapk_lds_barrier=True, tapk_ilv=4),
-    79: dict(tapk_prefetch=1, tapk_ztrim=1, xh_fast_a=1, xh_tap_rsrc=True, xh_epi=1,
-             tapk_lds_ahead=1, xh_defer=2),
+    78: dict(
+        tapk_prefetch=3, xh_order=1, tapk_setprio=1, tapk_lds_barrier=True, tapk_ilv=4
+    ),
+    79: dict(
+        tapk_prefetch=1,
+        tapk_ztrim=1,
+        xh_fast_a=1,
+        xh_tap_rsrc=True,
+        xh_epi=1,
+        tapk_lds_ahead=1,
+        xh_defer=2,
+    ),
     80: dict(_XH_FULL, tapk_ztrim=0),
     # 81-83: the y-ring (xh_yring) forms
     81: dict(_XH_FULL, xh_order=7, xh_yring=130, tapk_ztrim=1, no_agpr=True),
@@ -1495,22 +1628,62 @@ def _gfx942_3d_xh_spec(idx: int):
         p = ConvProblem(N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=0, groups=2)
     else:
         p = ConvProblem(
-            N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
-            sD=1, sH=1, sW=1, pD=1, pH=1, pW=0, dD=1, dH=1, dW=1, groups=2,
+            N=1,
+            Di=16,
+            Hi=16,
+            Wi=16,
+            C=128,
+            K=128,
+            Z=3,
+            Y=3,
+            X=3,
+            sD=1,
+            sH=1,
+            sW=1,
+            pD=1,
+            pH=1,
+            pW=0,
+            dD=1,
+            dH=1,
+            dW=1,
+            groups=2,
         )
     data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
-    return DgradConvSpec(problem=p, data=data, **_XH_COMMON, **_GFX942_3D_XH[idx]), "gfx942"
+    return (
+        DgradConvSpec(problem=p, data=data, **_XH_COMMON, **_GFX942_3D_XH[idx]),
+        "gfx942",
+    )
 
 
 def _gfx942_3d_pp_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
     p = ConvProblem(
-        N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
-        sD=1, sH=1, sW=1, pD=1, pH=1, pW=1, dD=1, dH=1, dW=1, groups=2,
+        N=1,
+        Di=16,
+        Hi=16,
+        Wi=16,
+        C=128,
+        K=128,
+        Z=3,
+        Y=3,
+        X=3,
+        sD=1,
+        sH=1,
+        sW=1,
+        pD=1,
+        pH=1,
+        pW=1,
+        dD=1,
+        dH=1,
+        dW=1,
+        groups=2,
     )
     data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
-    return DgradConvSpec(problem=p, data=data, **_PP_COMMON, **_GFX942_3D_PP[idx]), "gfx942"
+    return (
+        DgradConvSpec(problem=p, data=data, **_PP_COMMON, **_GFX942_3D_PP[idx]),
+        "gfx942",
+    )
 
 
 def _gfx942_3d_spec(idx: int):
@@ -1520,17 +1693,43 @@ def _gfx942_3d_spec(idx: int):
     groups = 1 if idx == 64 else 2
     pad_d = 0 if idx == 65 else 1
     if idx == 63:
-        p = ConvProblem(N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=groups)
+        p = ConvProblem(
+            N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=groups
+        )
     else:
         p = ConvProblem(
-            N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=3, Y=3, X=3,
-            sD=1, sH=1, sW=1, pD=pad_d, pH=1, pW=1, dD=1, dH=1, dW=1, groups=groups,
+            N=1,
+            Di=16,
+            Hi=16,
+            Wi=16,
+            C=128,
+            K=128,
+            Z=3,
+            Y=3,
+            X=3,
+            sD=1,
+            sH=1,
+            sW=1,
+            pD=pad_d,
+            pH=1,
+            pW=1,
+            dD=1,
+            dH=1,
+            dW=1,
+            groups=groups,
         )
     dt = "fp16" if idx == 62 else "bf16"
     base = dict(
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-        vector_size_a=8, vector_size_b=8, vector_size_c=8,
-        lds_k_pad=0, pipeline="mem", epilogue="cshuffle", tap_outer_k=True,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        lds_k_pad=0,
+        pipeline="mem",
+        epilogue="cshuffle",
+        tap_outer_k=True,
     )
     if tile == "s6":
         base.update(tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4)

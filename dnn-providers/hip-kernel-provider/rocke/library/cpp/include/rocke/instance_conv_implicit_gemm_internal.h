@@ -936,9 +936,8 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx);
 rocke_value_t* rocke_conv_eqx_chan(rocke_conv_build_ctx_t* ctx, rocke_value_t* r);
 
 /* lds_xor column of tile element (row, col) (Python lds_swz). */
-rocke_value_t* rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx,
-                                  rocke_value_t* row,
-                                  rocke_value_t* col);
+rocke_value_t*
+    rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col);
 
 /* async_dma branch (lines 1320-1347): SoftwarePipeline.run_ping_pong over the
  * AsyncTileLoader path. (SoftwarePipeline is a peer port; the driver reproduces

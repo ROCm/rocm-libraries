@@ -8,8 +8,8 @@
  * methods (load / bind / issue) reproduce the const_i32 / arith / load / store
  * call sequence byte-faithfully so the downstream IR is identical to the Python.
  */
-#include "rocke/helper_rocke.helpers.loads.h"
 #include "rocke/arena.h"
+#include "rocke/helper_rocke.helpers.loads.h"
 
 #include <string.h>
 
@@ -418,7 +418,8 @@ static void ctl_chunk_row_col(rocke_ir_builder_t* b,
 {
     if(self->row_kpack <= 1)
     {
-        rocke_value_t* vec_idx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
+        rocke_value_t* vec_idx
+            = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
         ctl_decode_row_col(b, self, vec_idx, c_span, c_load_vec, out_row, out_col);
         return;
     }
@@ -548,7 +549,8 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
             = (rocke_ctl_staged_t*)rocke_arena_alloc(&b->arena, sizeof(rocke_ctl_staged_t));
         if(st == NULL)
             return;
-        rocke_coalesced_tile_loader_load_global(b, self, tid, descriptor, descriptor_user, rsrc, ptr, st);
+        rocke_coalesced_tile_loader_load_global(
+            b, self, tid, descriptor, descriptor_user, rsrc, ptr, st);
         rocke_coalesced_tile_loader_store_lds(b, self, smem_dst, st);
         return;
     }
@@ -870,8 +872,15 @@ void rocke_coalesced_tile_loader_plan_slots(rocke_ir_builder_t* b,
     for(int e = 0; e < vecs_per_thread; ++e)
     {
         /* Python: self._chunk_row_col(b, e, tid, ...) */
-        ctl_chunk_row_col(
-            b, self, e, tid, c_threads, c_span, c_load_vec, &slots->vecs[e].row, &slots->vecs[e].col);
+        ctl_chunk_row_col(b,
+                          self,
+                          e,
+                          tid,
+                          c_threads,
+                          c_span,
+                          c_load_vec,
+                          &slots->vecs[e].row,
+                          &slots->vecs[e].col);
         slots->vecs[e].v = NULL;
     }
     slots->count = vecs_per_thread;

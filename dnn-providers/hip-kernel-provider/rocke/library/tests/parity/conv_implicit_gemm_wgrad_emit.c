@@ -323,8 +323,8 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     *arch = "gfx942";
     const int groups = idx == 57 ? 1 : 2;
     const char* dt = idx == 57 ? "fp16" : "bf16";
-    spec->problem = rocke_conv_problem_make_3d(
-        1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    spec->problem
+        = rocke_conv_problem_make_3d(1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
     spec->problem.groups = groups;
     spec->dtype_a = dt;
     spec->dtype_b = dt;
@@ -371,7 +371,8 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
 
 /* Register-prefetch / addressing / workspace knobs on the 3-D grouped configs
  * 59-69; mirrors _GFX942_3D_KNOBS in the Python emitter (the table is there). */
-static int make_cfg_3d_knobs(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+static int
+    make_cfg_3d_knobs(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     const bool on56 = idx == 59 || idx == 60 || idx == 68;
     make_cfg_3d(on56 || idx == 64 ? 56 : 55, spec, arch);
