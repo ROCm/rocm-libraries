@@ -146,6 +146,12 @@ try
             "                           the function, in bytes.\n"
             "                           ")
 
+        ("mtype",
+         value<rocblas_int>(),
+            "Class of the test matrices, for the functions whose tests generate several\n"
+            "                           (gebal, gebak, hseqr, trexc, trevc3, geev; see their tests).\n"
+            "                           ")
+
         ("perf",
          value<rocblas_int>(&argus.perf)->default_value(0),
             "Ignore CPU timing results? 0 = No, 1 = Yes.\n"
@@ -282,6 +288,18 @@ try
             "                           Leading dimension of matrices C.\n"
             "                           ")
 
+        ("ldh",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices H.\n"
+            "                           ")
+
+        ("ldq",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices Q.\n"
+            "                           ")
+
         ("ldr",
          value<rocblas_int>(),
             "Matrix size parameter.\n"
@@ -304,6 +322,18 @@ try
          value<rocblas_int>(),
             "Matrix size parameter.\n"
             "                           Leading dimension of matrices V.\n"
+            "                           ")
+
+        ("ldvl",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices VL.\n"
+            "                           ")
+
+        ("ldvr",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices VR.\n"
             "                           ")
 
         ("ldw",
@@ -362,10 +392,16 @@ try
             "                           ")
 
 
+        ("strideH",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices/vectors H.\n"
+            "                           ")
+
         ("strideQ",
          value<rocblas_stride>(),
             "Matrix/vector stride parameter.\n"
-            "                           Stride for vectors tauq.\n"
+            "                           Stride for vectors tauq, or for matrices Q.\n"
             "                           ")
 
         ("strideP",
@@ -386,6 +422,12 @@ try
             "                           Stride for matrices/vectors S.\n"
             "                           ")
 
+        ("strideT",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices T.\n"
+            "                           ")
+
         ("strideU",
          value<rocblas_stride>(),
             "Matrix/vector stride parameter.\n"
@@ -396,6 +438,18 @@ try
          value<rocblas_stride>(),
             "Matrix/vector stride parameter.\n"
             "                           Stride for matrices/vectors V.\n"
+            "                           ")
+
+        ("strideVL",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices VL.\n"
+            "                           ")
+
+        ("strideVR",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices VR.\n"
             "                           ")
 
         ("strideW",
@@ -632,6 +686,18 @@ try
             "                           Used in Hessenberg decomposition functions.\n"
             "                           ")
 
+        ("ifst",
+         value<rocblas_int>(),
+            "Row of the diagonal entry to be moved.\n"
+            "                           Used in trexc.\n"
+            "                           ")
+
+        ("ilst",
+         value<rocblas_int>(),
+            "Row to which the diagonal entry is moved.\n"
+            "                           Used in trexc.\n"
+            "                           ")
+
         ("ihi",
          value<rocblas_int>(),
             "Upper index of rows and columns to be reduced.\n"
@@ -664,6 +730,18 @@ try
             "                           Indicates how the eigenvectors are to be calculated and stored.\n"
             "                           ")
 
+        ("jobvl",
+         value<char>()->default_value('N'),
+            "N = none, V = compute the left eigenvectors.\n"
+            "                           Specifies whether the left eigenvectors are computed (geev).\n"
+            "                           ")
+
+        ("jobvr",
+         value<char>()->default_value('V'),
+            "N = none, V = compute the right eigenvectors.\n"
+            "                           Specifies whether the right eigenvectors are computed (geev).\n"
+            "                           ")
+
         ("fast_alg",
          value<char>()->default_value('O'),
             "O = out-of-place, I = in-place.\n"
@@ -676,10 +754,41 @@ try
             "                           Problem type for generalized eigenproblems.\n"
             "                           ")
 
+        ("job",
+         value<char>()->default_value('B'),
+            "N = none, P = permute, S = scale, B = both.\n"
+            "                           Specifies the balancing operations (gebal/gebak).\n"
+            "                           ")
+
+        ("schur_job",
+         value<char>()->default_value('S'),
+            "E = eigenvalues only, S = Schur form.\n"
+            "                           Specifies whether the Schur form is computed (hseqr).\n"
+            "                           ")
+
+        ("compq",
+         value<char>()->default_value('V'),
+            "N = none, V = update.\n"
+            "                           Specifies whether the Schur vectors are updated (trexc).\n"
+            "                           ")
+
+        ("howmny",
+         value<char>()->default_value('B'),
+            "A = all, B = backtransform.\n"
+            "                           Specifies whether the eigenvectors are back-transformed (trevc3).\n"
+            "                           ")
+
+        ("compz",
+         value<char>()->default_value('N'),
+            "N = none, I = initialize, V = update.\n"
+            "                           Specifies how the Schur vectors are computed (hseqr).\n"
+            "                           ")
+
         ("side",
          value<char>(),
-            "L = left, R = right.\n"
+            "L = left, R = right, B = both.\n"
             "                           The side from which a matrix should be multiplied.\n"
+            "                           In trevc3, the eigenvectors to compute (L = left, R = right, B = both).\n"
             "                           ")
 
         ("storev",
@@ -763,6 +872,8 @@ try
     argus.validate_erange("srange");
     argus.validate_workmode("fast_alg");
     argus.validate_evect("evect");
+    argus.validate_evect("jobvl");
+    argus.validate_evect("jobvr");
     argus.validate_erange("erange");
     argus.validate_eorder("eorder");
     argus.validate_esort("esort");
@@ -770,6 +881,11 @@ try
     argus.validate_norm_type("norm_type");
     argus.validate_rfinfo_mode("rfinfo_mode");
     argus.validate_cholshift("cholshift");
+    argus.validate_balance("job");
+    argus.validate_schur_job("schur_job");
+    argus.validate_schur_vectors("compz");
+    argus.validate_schur_vectors("compq");
+    argus.validate_eigenvectors("howmny");
 
     // prepare logging infrastructure and ignore environment variables
     rocsolver_log_begin();

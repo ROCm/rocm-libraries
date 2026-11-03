@@ -71,6 +71,21 @@
 #define LARFT_SWITCHSIZE 64
 #endif
 
+/*! \brief Determine when LARFT (forward direction, column-wise) computes the product V2^H * V2
+    (k <= LARFT_SPLITK_MAXK columns, a long inner dimension) with its own kernels: with at least
+    LARFT_SPLITK_MIN rows in V2, split into chunks of LARFT_SPLITK_ROWS rows whose partial
+    products are added in a fixed order. A matrix product with a small result and a long
+    inner dimension would run on few compute units. */
+#ifndef LARFT_SPLITK_MAXK
+#define LARFT_SPLITK_MAXK 128
+#endif
+#ifndef LARFT_SPLITK_MIN
+#define LARFT_SPLITK_MIN 4096
+#endif
+#ifndef LARFT_SPLITK_ROWS
+#define LARFT_SPLITK_ROWS 1024
+#endif
+
 /***************** geqr2/geqrf and geql2/geqlf ********************************
 *******************************************************************************/
 /*! \brief Determines the size of the block column factorized at each step
@@ -116,7 +131,7 @@
 /*! \brief Determines the size of the block reflector that is applied at each step when
     generating a matrix Q with orthonormal columns with the blocked algorithm (ORGQR/UNGQR or ORGQL/UNGQL). */
 #ifndef xxGQx_BLOCKSIZE
-#define xxGQx_BLOCKSIZE 64
+#define xxGQx_BLOCKSIZE 128
 #endif
 
 /*! \brief Determines the size at which rocSOLVER switches from
@@ -268,6 +283,204 @@
     algorithm (GEHD2).*/
 #ifndef GEHRD_GEHD2_SWITCHSIZE
 #define GEHRD_GEHD2_SWITCHSIZE 512
+#endif
+
+/*! \brief Determines when LAHR2 splits the product of each column with the trailing
+    matrix (the memory-bound part of GEHRD) over the columns of the matrix.
+
+    \details With m >= LAHR2_SPLIT_MIN_ROWS rows, the product is computed by
+    about LAHR2_SPLIT_BLOCKS_PER_CU thread-blocks per compute unit, splitting the
+    columns into at most LAHR2_MAX_SPLIT chunks (the partial sums are kept in the
+    workspace, m * LAHR2_MAX_SPLIT entries per matrix), so that the compute units stay busy
+    when m is small compared with their number. For smaller m the split gains little
+    bandwidth, and the extra kernel launch per column makes it slower overall. */
+#ifndef LAHR2_SPLIT_MIN_ROWS
+#define LAHR2_SPLIT_MIN_ROWS 8000
+#endif
+#ifndef LAHR2_SPLIT_BLOCKS_PER_CU
+#define LAHR2_SPLIT_BLOCKS_PER_CU 4
+#endif
+#ifndef LAHR2_MAX_SPLIT
+#define LAHR2_MAX_SPLIT 64
+#endif
+
+/***************** gebal **********************************************
+*******************************************************************************/
+/*! \brief Determines the number of threads of the thread-block that balances
+    each matrix (GEBAL). Also applies to the corresponding batched and
+    strided-batched routines.
+
+    \details GEBAL follows the sequential order of LAPACK; each matrix is processed
+    by a single thread-block, and the entries of a row or column are distributed
+    among its threads. It must be a multiple of 64.*/
+#ifndef GEBAL_BLOCKSIZE
+#define GEBAL_BLOCKSIZE 256
+#endif
+
+/*! \brief Determines the size from which GEBAL uses several thread-blocks per matrix.
+
+    \details Below it, each matrix is balanced by a single thread-block. From it, the
+    counts of the permutation step and the norms of the scaling step are computed by many
+    thread-blocks: the scaling step visits the rows and columns in batches of
+    GEBAL_BATCH, whose decisions are taken in order by one wavefront (so that they are
+    those of LAPACK), from the norms of the parts of the rows and columns outside the
+    batch, computed beforehand in GEBAL_NSEG segments. GEBAL_BATCH must not exceed 32.
+    (On gfx1150, for a single matrix, the multi-block path is about as fast as the
+    single-block kernel from n = 96 to 224, and faster from n = 256.)*/
+#ifndef GEBAL_MULTI_MIN
+#define GEBAL_MULTI_MIN 256
+#endif
+#ifndef GEBAL_BATCH
+#define GEBAL_BATCH 32
+#endif
+#ifndef GEBAL_NSEG
+#define GEBAL_NSEG 64
+#endif
+
+/***************** hseqr **********************************************
+*******************************************************************************/
+/*! \brief Determines the number of threads of the thread-block that computes
+    the Schur form of each Hessenberg matrix (HSEQR). Also applies to the
+    corresponding batched and strided-batched routines.
+
+    \details Each matrix is processed by a single thread-block; the scalar
+    computations are sequential, as in LAPACK, and the updates of rows and
+    columns of H and Z are distributed among the threads. It must be a multiple of 64.*/
+#ifndef HSEQR_BLOCKSIZE
+#define HSEQR_BLOCKSIZE 256
+#endif
+
+/*! \brief Number of threads of the thread-block that computes the Schur form of each
+    medium-size Hessenberg matrix of a batch with the single-shift QR algorithm (see
+    HSEQR_BATCH_NMAX): HSEQR_MEDIUM_BLOCKSIZE on wave32 targets and for n <= 128, else
+    HSEQR_MEDIUM_BLOCKSIZE_LARGE (fastest on gfx942 and gfx1150). Multiples of 64. */
+#ifndef HSEQR_MEDIUM_BLOCKSIZE
+#define HSEQR_MEDIUM_BLOCKSIZE 128
+#endif
+#ifndef HSEQR_MEDIUM_BLOCKSIZE_LARGE
+#define HSEQR_MEDIUM_BLOCKSIZE_LARGE 256
+#endif
+
+/*! \brief Order of the largest matrix processed by HSEQR with the single-shift QR
+    algorithm (ZLAHQR); larger matrices use the multishift QR algorithm with aggressive
+    early deflation (ZLAQR0). As in LAPACK (IPARMQ, ISPEC = 12). */
+#ifndef HSEQR_NMIN
+#define HSEQR_NMIN 75
+#endif
+
+/*! \brief Order of the matrix on which HSEQR retries, with the multishift QR algorithm, the
+    rows of a small matrix (n < HSEQR_NL) where the single-shift QR algorithm failed: the matrix
+    is padded with zeros to this order. As in LAPACK ZHSEQR (NL = 49). */
+#ifndef HSEQR_NL
+#define HSEQR_NL 49
+#endif
+
+/*! \brief Batches of matrices of order HSEQR_NMIN < n <= HSEQR_BATCH_NMAX are processed by
+    HSEQR with the single-shift QR algorithm (ZLAHQR), all the matrices of the batch in
+    parallel, when the batch has at least max(HSEQR_BATCH_MIN, ceil(n / HSEQR_BATCH_NPER))
+    matrices.
+
+    \details The multishift QR algorithm is driven from the host, one matrix at a time, so
+    that its time grows with the batch, while the single-shift QR algorithm on all the
+    matrices in parallel takes about the time of one matrix until the device is full (one
+    matrix per thread-block), and that time grows faster with n. Timings of zhseqr on gfx942
+    and gfx1150 (n = 100 to 500, 1 to 64 matrices) gave the crossover at about n / 80
+    matrices (at least 2). The rows of the matrices where the single-shift algorithm fails are
+    processed again with the multishift algorithm, as in LAPACK. */
+#ifndef HSEQR_BATCH_NMAX
+#define HSEQR_BATCH_NMAX 512
+#endif
+#ifndef HSEQR_BATCH_MIN
+#define HSEQR_BATCH_MIN 2
+#endif
+#ifndef HSEQR_BATCH_NPER
+#define HSEQR_BATCH_NPER 80
+#endif
+
+/*! \brief Maximum number of simultaneous shifts of the multishift QR sweeps of HSEQR
+    (the largest value recommended by LAPACK IPARMQ is 256). */
+#ifndef HSEQR_MAX_SHIFTS
+#define HSEQR_MAX_SHIFTS 256
+#endif
+
+/*! \brief Number of threads of the thread-block that chases the bulges of the
+    multishift QR sweeps of HSEQR. It must be a multiple of 64.*/
+#ifndef HSEQR_CHASE_BLOCKSIZE
+#define HSEQR_CHASE_BLOCKSIZE 1024
+#endif
+
+/*! \brief Maximum number of thread-blocks that chase the bulges of a chunk of the
+    multishift QR sweeps of HSEQR (when the reflections are accumulated). The
+    multiplications by the reflections are distributed among them, with one grid
+    barrier per step of the chase. At most a quarter of the compute units, and one
+    thread-block per 4 bulges, are used. */
+#ifndef HSEQR_CHASE_GROUPS
+#define HSEQR_CHASE_GROUPS 16
+#endif
+
+/*! \brief Maximum size of the (initial) deflation window of the aggressive early
+    deflation in HSEQR for small and medium matrices, or 0 to use the size recommended
+    by LAPACK IPARMQ.
+
+    \details The Schur form of the window is computed by a single thread-block, so
+    that large windows are expensive on the GPU; windows of at most 64 entries fit in
+    shared memory (lahqr_lds_block), which is much faster. This deviates from LAPACK,
+    which uses windows of NS or 3*NS/2 entries (NS = number of shifts), and the number
+    of shifts is capped likewise. The cap includes the extra entry that the window
+    selection of ZLAQR0 may add. For large matrices the cap is raised (see
+    hseqr_aed_window_cap). (The window may still grow beyond this value after several
+    iterations without deflations, as in LAPACK.)*/
+#ifndef HSEQR_AED_WINDOW_MAX
+#define HSEQR_AED_WINDOW_MAX 64
+#endif
+
+/*! \brief Largest deflation window whose core (Schur form of the window, deflation tests)
+    runs on the host in the hybrid mode of HSEQR; the cores of larger windows (which only
+    occur after several iterations without deflations, as the window then grows) run on the
+    device with the multishift QR algorithm, as LAPACK ZLAQR0 uses ZLAQR4 for windows larger
+    than NMIN (75), while the host only has the single-shift QR algorithm (ZLAHQR). */
+#ifndef HSEQR_HYBRID_WMAX
+#define HSEQR_HYBRID_WMAX 256
+#endif
+
+/***************** trexc **********************************************
+*******************************************************************************/
+/*! \brief Determines the number of threads of the thread-block that reorders
+    the Schur form of each matrix (TREXC). Also applies to the corresponding
+    batched and strided-batched routines. It must be a multiple of 64.*/
+#ifndef TREXC_BLOCKSIZE
+#define TREXC_BLOCKSIZE 256
+#endif
+
+/***************** trevc3 *********************************************
+*******************************************************************************/
+/*! \brief Determines the number of threads of the thread-blocks of TREVC3 (one
+    thread per eigenvector in the triangular solves). Also applies to the
+    corresponding batched and strided-batched routines. It must be a power of 2.*/
+#ifndef TREVC3_BLOCKSIZE
+#define TREVC3_BLOCKSIZE 256
+#endif
+
+/*! \brief Determines the size of the diagonal blocks of T in the triangular solves
+    of TREVC3 (they are kept in shared memory, and each thread keeps a vector of
+    this size).*/
+#ifndef TREVC3_NB
+#define TREVC3_NB 32
+#endif
+
+/*! \brief Determine the number of eigenvectors that TREVC3 computes (and
+    back-transforms) at a time: n/TREVC3_NC_DIV rounded down to a multiple of
+    TREVC3_NC, and between TREVC3_NC and TREVC3_NC_MAX (at most n). The blocks are
+    processed one after the other, so for large n wider blocks mean fewer (and larger)
+    steps; the workspace grows as n times the width.*/
+#ifndef TREVC3_NC
+#define TREVC3_NC 256
+#endif
+#ifndef TREVC3_NC_DIV
+#define TREVC3_NC_DIV 16
+#endif
+#ifndef TREVC3_NC_MAX
+#define TREVC3_NC_MAX 2048
 #endif
 
 /***************** sygs2/sygst and hegs2/hegst ********************************

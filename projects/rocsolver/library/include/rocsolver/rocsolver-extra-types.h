@@ -205,6 +205,48 @@ typedef enum rocsolver_cholqr_shift_
     rocsolver_cholqr_shift_provided = 313, /**< Sigma must be provided by the user. */
 } rocsolver_cholqr_shift;
 
+/*! \brief Used by gebal and gebak to specify the balancing operations.
+ ********************************************************************************/
+typedef enum rocsolver_balance_
+{
+    rocsolver_balance_none = 321, /**< Neither permute nor scale. */
+    rocsolver_balance_permute = 322, /**< Permute only. */
+    rocsolver_balance_scale = 323, /**< Scale only. */
+    rocsolver_balance_both = 324, /**< Both permute and scale. */
+} rocsolver_balance;
+
+/*! \brief Used by hseqr to specify whether the Schur form is required.
+ ********************************************************************************/
+typedef enum rocsolver_schur_job_
+{
+    rocsolver_schur_eigenvalues = 331, /**< Only the eigenvalues are required. */
+    rocsolver_schur_form = 332, /**< The Schur form is also required. */
+} rocsolver_schur_job;
+
+/*! \brief Used by hseqr to specify whether the Schur vectors are computed.
+ ********************************************************************************/
+typedef enum rocsolver_schur_vectors_
+{
+    rocsolver_schur_vectors_none = 341, /**< The Schur vectors are not computed. */
+    rocsolver_schur_vectors_initialize
+    = 342, /**< The Schur vectors of the Hessenberg matrix are computed (Z is initialized
+                to the identity). */
+    rocsolver_schur_vectors_update
+    = 343, /**< The Schur vectors of the original matrix are computed (Z contains, on entry,
+                the unitary matrix used to reduce it to Hessenberg form). */
+} rocsolver_schur_vectors;
+
+/*! \brief Used by trevc3 to specify which eigenvectors are computed.
+ ********************************************************************************/
+typedef enum rocsolver_eigenvectors_
+{
+    rocsolver_eigenvectors_all = 351, /**< All the eigenvectors of the triangular matrix are
+                                           computed. */
+    rocsolver_eigenvectors_backtransform
+    = 352, /**< All the eigenvectors are computed and back-transformed with the matrices given on
+                entry (e.g. the Schur vectors computed by hseqr). */
+} rocsolver_eigenvectors;
+
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/
 typedef enum rocsolver_function_
@@ -223,6 +265,10 @@ typedef enum rocsolver_function_
     /**< 1-stage vs 2-stage tridiagonalization. (Alias) */
     rocsolver_function_hetrd = rocsolver_function_sytrd_hetrd,
     /**< 1-stage vs 2-stage tridiagonalization. (Alias) */
+
+    rocsolver_function_hseqr = 407, /**< In hybrid mode, the aggressive early deflation of
+                                         the multishift QR algorithm runs partly on the host. */
+    rocsolver_function_geev = 408, /**< Affected by hseqr. */
 } rocsolver_function;
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */

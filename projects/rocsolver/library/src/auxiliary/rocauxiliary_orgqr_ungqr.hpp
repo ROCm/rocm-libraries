@@ -40,6 +40,118 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/** The columns j:j+jb-1 of the blocked algorithm (ORGQR_PANEL_*): with the block of reflectors
+    H_j ... H_{j+jb-1} = I - V T V^H (V in A(j:m-1, j:j+jb-1), unit lower trapezoidal, T its
+    triangular factor from larft), the columns are (I - V T V^H) [I; 0] = [I - V1 W; -V2 W], with
+    W = T V1^H (upper triangular), V1 the first jb rows of V and V2 the others. This replaces the
+    unblocked algorithm (org2r/ung2r) on these columns, which applies the jb reflectors one at a
+    time. ORGQR_PANEL_W computes W, ORGQR_PANEL_TOP computes I - V1 W (into a separate buffer, as
+    it overwrites V1), and ORGQR_PANEL_STORE writes the columns (the product V2 W is a gemm). **/
+template <typename T>
+__device__ inline T orgqr_conj(const T x)
+{
+    if constexpr(rocblas_is_complex<T>)
+        return conj(x);
+    else
+        return x;
+}
+
+template <typename T, typename I, typename U>
+ROCSOLVER_KERNEL void orgqr_panel_w(const I jb,
+                                    U A,
+                                    const rocblas_stride shiftV,
+                                    const I lda,
+                                    const rocblas_stride strideA,
+                                    const T* Tf,
+                                    const I ldt,
+                                    const rocblas_stride strideT,
+                                    T* W,
+                                    const rocblas_stride strideW)
+{
+    const I b = hipBlockIdx_z;
+    const I r = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const I c = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    if(r >= jb || c >= jb)
+        return;
+    const T* V = load_ptr_batch<T>(A, b, shiftV, strideA);
+    const T* Tb = Tf + b * strideT;
+    // W(r, c) = sum_{l = r..c} T(r, l) conj(V1(c, l)), V1(c, c) = 1
+    T w = 0;
+    for(I l = r; l <= c; l++)
+        w += Tb[r + l * ldt] * (l == c ? T(1) : orgqr_conj(V[idx2D(c, l, lda)]));
+    W[b * strideW + r + c * jb] = w;
+}
+
+template <typename T, typename I, typename U>
+ROCSOLVER_KERNEL void orgqr_panel_top(const I jb,
+                                      U A,
+                                      const rocblas_stride shiftV,
+                                      const I lda,
+                                      const rocblas_stride strideA,
+                                      const T* W,
+                                      T* Q1,
+                                      const rocblas_stride strideW)
+{
+    const I b = hipBlockIdx_z;
+    const I r = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const I c = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    if(r >= jb || c >= jb)
+        return;
+    const T* V = load_ptr_batch<T>(A, b, shiftV, strideA);
+    const T* Wb = W + b * strideW;
+    // Q1(r, c) = delta(r, c) - sum_{l = 0..min(r, c)} V1(r, l) W(l, c), V1(r, r) = 1
+    T q = (r == c) ? T(1) : T(0);
+    for(I l = 0; l <= std::min(r, c); l++)
+        q -= (l == r ? T(1) : V[idx2D(r, l, lda)]) * Wb[l + c * jb];
+    Q1[b * strideW + r + c * jb] = q;
+}
+
+template <typename T, typename I, typename U>
+ROCSOLVER_KERNEL void orgqr_panel_store(const I mj,
+                                        const I jb,
+                                        U A,
+                                        const rocblas_stride shiftV,
+                                        const I lda,
+                                        const rocblas_stride strideA,
+                                        const T* Q1,
+                                        const T* P,
+                                        const I ldp,
+                                        const rocblas_stride strideW)
+{
+    const I b = hipBlockIdx_z;
+    const I r = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const I c = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    if(r >= mj || c >= jb)
+        return;
+    T* V = load_ptr_batch<T>(A, b, shiftV, strideA);
+    V[idx2D(r, c, lda)]
+        = (r < jb) ? Q1[b * strideW + r + c * jb] : -P[b * strideW + idx2D(r - jb, c, ldp)];
+}
+
+/** ORGQR_PANEL_WORK_SIZE: entries of the workspace of the columns of a block (per matrix): W and
+    I - V1 W (jb x jb each) and V2 W (m x jb). **/
+template <typename I>
+inline size_t orgqr_panel_work_size(const I m, const I jb)
+{
+    return size_t(2) * jb * jb + size_t(m) * jb;
+}
+
+/** ORGQR_PANEL_PTRS: in the batched case, the product V2 W reads V2 through the array of pointers
+    A, and W and V2 W through arrays of pointers built in the workspace (2 * batch_count pointers,
+    more than larf needs in workArr). They follow the blocks of all the matrices. **/
+template <typename T>
+inline T** orgqr_panel_ptrs(T* work, const size_t panel_entries)
+{
+    const size_t a = alignof(T*);
+    const size_t bytes = ((panel_entries * sizeof(T) + a - 1) / a) * a;
+    return reinterpret_cast<T**>(reinterpret_cast<char*>(work) + bytes);
+}
+
+// (the blocked algorithm starts with a block of xxGQx_BLOCKSIZE columns that must end within the
+// k reflectors: j + jb <= k with j = ((k - xxGQx_xxGQx2_SWITCHSIZE - 1) / jb) * jb)
+static_assert(xxGQx_BLOCKSIZE <= xxGQx_xxGQx2_SWITCHSIZE,
+              "xxGQx_BLOCKSIZE must not exceed xxGQx_xxGQx2_SWITCHSIZE");
+
 template <bool BATCHED, typename T>
 void rocsolver_orgqr_ungqr_getMemorySize(const rocblas_int m,
                                          const rocblas_int n,
@@ -84,6 +196,12 @@ void rocsolver_orgqr_ungqr_getMemorySize(const rocblas_int m,
         rocsolver_larfb_getMemorySize<BATCHED, T>(rocblas_side_left, m, n - jb, jb, batch_count,
                                                   &temp, &unused);
 
+        *size_Abyx_tmptr = *size_Abyx_tmptr >= temp ? *size_Abyx_tmptr : temp;
+
+        // the columns of each block (see orgqr_panel_w)
+        temp = sizeof(T) * orgqr_panel_work_size(m, jb) * batch_count;
+        if(BATCHED)
+            temp += sizeof(T*) * (2 * batch_count + 1); // (see orgqr_panel_ptrs)
         *size_Abyx_tmptr = *size_Abyx_tmptr >= temp ? *size_Abyx_tmptr : temp;
 
         // size of temporary array for triangular factor
@@ -153,15 +271,16 @@ rocblas_status rocsolver_orgqr_ungqr_template(rocblas_handle handle,
     // compute the blocked part
     while(j >= 0)
     {
+        // triangular factor of the block reflector
+        rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, (m - j),
+                                    jb, A, shiftA + idx2D(j, j, lda), lda, strideA, (ipiv + j),
+                                    strideP, trfact, ldw, strideW, batch_count, scalars, work,
+                                    workArr);
+
         // first update the already computed part
-        // applying the current block reflector using larft + larfb
+        // applying the current block reflector using larfb
         if(j + jb < n)
         {
-            rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise,
-                                        (m - j), jb, A, shiftA + idx2D(j, j, lda), lda, strideA,
-                                        (ipiv + j), strideP, trfact, ldw, strideW, batch_count,
-                                        scalars, work, workArr);
-
             rocsolver_larfb_template<BATCHED, STRIDED, T>(
                 handle, rocblas_side_left, rocblas_operation_none, rocblas_forward_direction,
                 rocblas_column_wise, m - j, n - j - jb, jb, A, shiftA + idx2D(j, j, lda), lda,
@@ -178,9 +297,37 @@ rocblas_status rocsolver_orgqr_ungqr_template(rocblas_handle handle,
             ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2),
                                     0, stream, j, jb, A, shiftA + idx2D(0, j, lda), lda, strideA);
         }
-        rocsolver_org2r_ung2r_template<T>(handle, m - j, jb, jb, A, shiftA + idx2D(j, j, lda), lda,
-                                          strideA, (ipiv + j), strideP, batch_count, scalars,
-                                          Abyx_tmptr, workArr);
+        // the columns of the block: [I - V1 W; -V2 W], W = T V1^H (see orgqr_panel_w)
+        {
+            const I mj = m - j;
+            const rocblas_stride strideQ = orgqr_panel_work_size(m, jb);
+            T* Wb = Abyx_tmptr;
+            T* Q1 = Abyx_tmptr + jb * jb;
+            T* P = Abyx_tmptr + 2 * jb * jb;
+            const I bx = (jb - 1) / BS2 + 1;
+            ROCSOLVER_LAUNCH_KERNEL((orgqr_panel_w<T, I>), dim3(bx, bx, batch_count),
+                                    dim3(BS2, BS2), 0, stream, jb, A, shiftA + idx2D(j, j, lda),
+                                    lda, strideA, trfact, ldw, strideW, Wb, strideQ);
+            ROCSOLVER_LAUNCH_KERNEL((orgqr_panel_top<T, I>), dim3(bx, bx, batch_count),
+                                    dim3(BS2, BS2), 0, stream, jb, A, shiftA + idx2D(j, j, lda),
+                                    lda, strideA, Wb, Q1, strideQ);
+            if(mj > jb)
+            {
+                // (gemm kernels use scalars on host)
+                rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
+                const T one = T(1);
+                const T zero = T(0);
+                rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, mj - jb, jb,
+                               jb, &one, A, shiftA + idx2D(j + jb, j, lda), lda, strideA, Wb, 0, jb,
+                               strideQ, &zero, P, 0, m, strideQ, batch_count,
+                               BATCHED ? orgqr_panel_ptrs(Abyx_tmptr, strideQ * batch_count)
+                                       : workArr);
+            }
+            ROCSOLVER_LAUNCH_KERNEL((orgqr_panel_store<T, I>),
+                                    dim3((mj - 1) / BS2 + 1, bx, batch_count), dim3(BS2, BS2), 0,
+                                    stream, mj, jb, A, shiftA + idx2D(j, j, lda), lda, strideA, Q1,
+                                    P, m, strideQ);
+        }
 
         j -= jb;
     }
