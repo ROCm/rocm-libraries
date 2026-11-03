@@ -413,6 +413,16 @@ _CONFIGS = {
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
 _REDUCE_LSE = frozenset({20, 21})
 
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    24: (
+        r"unexpected keyword argument 'use_additive_bias'"
+        r"|use_additive_bias is not implemented on gfx942"
+    ),
+}
+
 
 def _kernels(idx: int):
     if idx not in _CONFIGS:

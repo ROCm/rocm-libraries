@@ -1273,6 +1273,18 @@ _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 # params precede lse_ptr in both engines.
 _CONFIGS[78] = {**_CONFIGS[68], "emit_lse": True}
 
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    72: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    73: r"use_register_pv v1 does not support ALiBi, QQ bias, or additive bias",
+    74: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    75: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    76: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
+    77: r"transposed softmax VALU opts do not support .*additive bias",
+}
+
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:

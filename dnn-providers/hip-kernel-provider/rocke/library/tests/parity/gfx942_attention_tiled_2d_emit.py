@@ -314,6 +314,14 @@ _CONFIGS = {
     ),
 }
 
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    # The Python gfx942 spec has no bias field, so Python fails on the keyword.
+    18: r"unexpected keyword argument 'use_additive_bias'|does not emit additive bias",
+}
+
 
 def _kernel(idx: int):
     if idx not in _CONFIGS:

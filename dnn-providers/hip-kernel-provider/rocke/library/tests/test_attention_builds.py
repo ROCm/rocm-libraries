@@ -1283,6 +1283,45 @@ class TestAttentionHelpers(unittest.TestCase):
                 # The same variant without bias is still a valid spec.
                 replace(spec, use_additive_bias=False, **knobs)
 
+    def test_fastkv_register_p_rejects_additive_bias(self):
+        """The fastKV register-P wrapper has no bias score site, so the wrapper
+        itself refuses a biased spec; the same spec without bias builds."""
+        from dataclasses import replace
+
+        from kernels import UnifiedAttention2DTiledSpec
+        from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
+            build_unified_attention_2d_fastkv_register_p,
+        )
+
+        # The fastKV parity family's base, with mask-once off: the spec refuses
+        # bias with mask-once before the wrapper is reached.
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            num_warps=4,
+            waves_per_eu=2,
+            tile_size=64,
+            block_m_per_warp=32,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_transposed_scalar_state=True,
+            use_fast_paged_kv_desc=True,
+            use_additive_bias=True,
+        )
+        with self.assertRaisesRegex(
+            ValueError, "fastKV register-P experiment does not support additive bias"
+        ):
+            build_unified_attention_2d_fastkv_register_p(spec, arch="gfx950")
+        build_unified_attention_2d_fastkv_register_p(
+            replace(spec, use_additive_bias=False), arch="gfx950"
+        )
+
     def test_unified_attention_3d_tiled_kernel_compiles(self):
         from kernels import (
             UnifiedAttention3DTiledSpec,

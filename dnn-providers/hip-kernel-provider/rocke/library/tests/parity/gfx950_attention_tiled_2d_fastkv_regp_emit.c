@@ -81,7 +81,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->emit_lse = true;
         break;
     case 7:
-        /* Additive bias; both engines reject it (BOTH_REJECTED). */
+        /* Additive bias with mask-once off, so the fastKV builder's own
+         * reject fires (the .py's _EXPECTED_REJECTIONS pins the reason). */
+        s->use_transposed_mask_once = false;
         s->use_additive_bias = true;
         break;
     default:

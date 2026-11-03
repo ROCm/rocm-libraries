@@ -110,10 +110,12 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
             )
     # The kernel declares the bias params iff its spec has the flag, and the
     # launcher packs them iff the problem does; kernargs are positional.
-    if bool(getattr(kernel_spec, "use_additive_bias", False)) != (
-        problem.use_additive_bias
-    ):
-        raise ValueError("kernel spec additive bias disagrees with problem")
+    spec_bias = bool(getattr(kernel_spec, "use_additive_bias", False))
+    if spec_bias != problem.use_additive_bias:
+        raise ValueError(
+            f"kernel_spec.use_additive_bias={spec_bias} disagrees with "
+            f"problem.use_additive_bias={problem.use_additive_bias}"
+        )
     expected_kv_dtype = "fp8e4m3" if problem.use_fp8 else None
     if kernel_spec.kv_storage_dtype != expected_kv_dtype:
         raise ValueError("kernel spec K/V storage dtype disagrees with problem")

@@ -9,6 +9,7 @@ runner). The numeric check is ``test_attention_additive_bias_gfx950_numeric.py``
 from __future__ import annotations
 
 import unittest
+from collections import Counter
 from dataclasses import replace
 from unittest import mock
 
@@ -240,8 +241,14 @@ class TestTuningCandidates(unittest.TestCase):
             candidate = _candidate(prefix)
             with self.subTest(candidate=candidate.name):
                 arch = candidate.capability.arches[0]
-                ok, _ = candidate.admits(_pinned(candidate, arch=arch))
+                ok, why = candidate.admits(_pinned(candidate, arch=arch))
                 self.assertFalse(ok)
+                self.assertIn("attn_bias", why)
+                # Bias is the only reason: the same request without it is admitted.
+                ok, why = candidate.admits(
+                    _pinned(candidate, arch=arch, use_attn_bias=False)
+                )
+                self.assertTrue(ok, why)
 
     def test_explicit_spec_is_gfx950_only(self):
         problem = replace(_problem(_req()), use_additive_bias=True)
@@ -295,6 +302,7 @@ class TestTuningCandidates(unittest.TestCase):
         bias_problem = replace(_problem(_req()), use_additive_bias=True)
         plain_problem = replace(_problem(_req()), use_additive_bias=False)
         self.assertTrue(GFX950_TUNING_VARIANTS)
+        compared = Counter()
         for variant in GFX950_TUNING_VARIANTS:
             candidate = _candidate(variant.candidate_name)
             declared = "attn_bias" in candidate.capability.supports_features
@@ -317,6 +325,12 @@ class TestTuningCandidates(unittest.TestCase):
                     f"declared attn_bias={declared} but the kernel "
                     f"{'accepted' if kernel_accepts else 'refused'} a bias spec",
                 )
+                compared[variant.codepath] += 1
+        # The skip above must not empty a code path: each one, including the
+        # wide32 path that refuses bias, has to be compared at least once.
+        for codepath in ("narrow", "transposed32", "wide32", "splitkv"):
+            with self.subTest(codepath=codepath):
+                self.assertGreater(compared[codepath], 0)
 
 
 class TestBinding(unittest.TestCase):
@@ -402,11 +416,19 @@ class TestBinding(unittest.TestCase):
         )
         tensors = _paged_tensors()
         tensors["attn_bias"] = _Tensor((1, 1, 1, 1024), "torch.float32")
-        with self.assertRaisesRegex(ValueError, "additive bias disagrees"):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"kernel_spec\.use_additive_bias=False disagrees with "
+            r"problem\.use_additive_bias=True",
+        ):
             self.candidate.bound_torch(self.req, plain_spec, tensors)
         # The other direction: a bias kernel for a request without bias.
         plain_req = _pinned(self.candidate, use_attn_bias=False)
-        with self.assertRaisesRegex(ValueError, "additive bias disagrees"):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"kernel_spec\.use_additive_bias=True disagrees with "
+            r"problem\.use_additive_bias=False",
+        ):
             self.candidate.bound_torch(plain_req, self.spec, _paged_tensors())
         tensors["problem"] = replace(_tuning_problem(self.req), use_additive_bias=False)
         with self.assertRaisesRegex(ValueError, "use_attn_bias=True disagrees"):

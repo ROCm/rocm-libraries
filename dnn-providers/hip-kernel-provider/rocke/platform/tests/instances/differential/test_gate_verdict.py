@@ -954,5 +954,61 @@ class TestConfigEnumeration(unittest.TestCase):
                 self.assertEqual(actual_status, status)
 
 
+class ExpectedRejectionTest(unittest.TestCase):
+    """A config with a pinned rejection passes only for that reason, on both sides."""
+
+    PATTERN = r"fastKV register-P experiment does not support additive bias"
+    RIGHT = "ValueError: fastKV register-P experiment does not support additive bias"
+    OTHER = "ValueError: use_additive_bias does not support use_transposed_mask_once"
+    TYPO = "TypeError: got an unexpected keyword argument 'use_additve_bias'"
+
+    @staticmethod
+    def rejected(error):
+        return run_diff.Emission(1, False, None, error)
+
+    def check(self, verdict, c_error, p_error):
+        return run_diff.check_expected_rejection(
+            verdict, self.rejected(c_error), self.rejected(p_error), self.PATTERN
+        )
+
+    def test_both_engines_must_give_the_pinned_reason(self):
+        self.assertEqual(
+            self.check("BOTH_REJECTED", self.RIGHT, self.RIGHT), "BOTH_REJECTED"
+        )
+        for c_error, p_error in (
+            (self.RIGHT, self.OTHER),
+            (self.OTHER, self.RIGHT),
+            (self.RIGHT, self.TYPO),
+        ):
+            with self.subTest(c=c_error, p=p_error):
+                self.assertEqual(
+                    self.check("BOTH_REJECTED", c_error, p_error),
+                    "REJECTION_MISMATCH",
+                )
+
+    def test_a_pinned_config_that_builds_is_drift(self):
+        built = run_diff.Emission(0, True, "abc", "")
+        self.assertEqual(
+            run_diff.check_expected_rejection("IDENTICAL", built, built, self.PATTERN),
+            "REJECTION_MISMATCH",
+        )
+        self.assertIn("REJECTION_MISMATCH", DRIFT_VERDICTS)
+
+    def test_drift_verdicts_are_kept(self):
+        for verdict in ("ASYMMETRIC", "CRASH", "MISMATCH"):
+            with self.subTest(verdict=verdict):
+                self.assertEqual(self.check(verdict, self.RIGHT, self.RIGHT), verdict)
+
+    def test_table_is_read_without_importing_the_emitter(self):
+        with TemporaryDirectory() as tmp:
+            emitter = Path(tmp) / "fam_emit.py"
+            emitter.write_text(
+                "import does_not_exist\n_EXPECTED_REJECTIONS = {3: r'boom'}\n"
+            )
+            self.assertEqual(run_diff.expected_rejections(emitter), {3: "boom"})
+            emitter.write_text("_CONFIGS = {}\n")
+            self.assertEqual(run_diff.expected_rejections(emitter), {})
+
+
 if __name__ == "__main__":
     unittest.main()
