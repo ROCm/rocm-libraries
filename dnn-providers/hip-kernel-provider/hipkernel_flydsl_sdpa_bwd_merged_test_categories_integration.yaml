@@ -3,24 +3,26 @@
 #
 # hip-kernel-provider hipkernel:flydsl_sdpa_bwd_merged external integration test categories.
 #
-# Pinned to hipkernel:flydsl_sdpa_bwd_merged via --test-engine. Selects the shared sweeps
-# integration-test-bundles/{quick,standard,comprehensive,full}/SdpaBackward/Default/ by suite,
-# not by text in the case id: import_graph.py names cases in its own format, so a name
-# pattern would miss the cases it adds. Engine pinning and support claims do the rest: a
-# claimed case the engine declines fails its lane, an unclaimed one it declines skips,
-# and an unclaimed one it accepts runs and is reported as unclaimed support.
+# Pinned to hipkernel:flydsl_sdpa_bwd_merged via --test-engine. Selects every backward
+# bundle under integration-test-bundles/{quick,standard,comprehensive,full}/SdpaBackward/
+# by suite, not by text in the case id: import_graph.py names cases in its own format, so
+# a name pattern would miss the cases it adds. The *_fwd_pair bundles beside them are the
+# forward halves of golden pairs and are excluded. Engine pinning and support claims do the
+# rest: a claimed case the engine declines fails its lane, an unclaimed one it declines
+# skips, and an unclaimed one it accepts runs and is reported as unclaimed support.
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick +
 # standard + comprehensive; only "full" runs the full-tier bundles.
 
 _common_excludes: &common_excludes
   - "*DISABLED*"
   - "*SdpaFwd*"
+  - "*_fwd_pair*"
 
 test_categories:
   quick:
     description: "Quick FlyDSL merged SDPA backward bundle coverage"
     test_patterns:
-      - "quick_SdpaBackward_Default.*"
+      - "quick_SdpaBackward_*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -30,8 +32,8 @@ test_categories:
   standard:
     description: "Standard FlyDSL merged SDPA backward bundle coverage"
     test_patterns:
-      - "quick_SdpaBackward_Default.*"
-      - "standard_SdpaBackward_Default.*"
+      - "quick_SdpaBackward_*"
+      - "standard_SdpaBackward_*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -41,9 +43,9 @@ test_categories:
   comprehensive:
     description: "Comprehensive FlyDSL merged SDPA backward coverage: quick + standard + comprehensive-tier bundles"
     test_patterns:
-      - "quick_SdpaBackward_Default.*"
-      - "standard_SdpaBackward_Default.*"
-      - "comprehensive_SdpaBackward_Default.*"
+      - "quick_SdpaBackward_*"
+      - "standard_SdpaBackward_*"
+      - "comprehensive_SdpaBackward_*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -53,7 +55,7 @@ test_categories:
   full:
     description: "Full FlyDSL merged SDPA backward coverage"
     test_patterns:
-      - "*_SdpaBackward_Default.*"
+      - "*_SdpaBackward_*"
     exclude: *common_excludes
     labels:
       - "full"
@@ -62,7 +64,7 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback quick tier: quick bundles"
     test_patterns:
-      - "quick_SdpaBackward_Default.*"
+      - "quick_SdpaBackward_*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"
