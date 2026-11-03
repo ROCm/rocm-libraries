@@ -53,7 +53,7 @@ set(HIPCUB_CCCL_VERSION_MAJOR 3)
 set(HIPCUB_CCCL_VERSION_MINOR 2)
 set(HIPCUB_CCCL_VERSION_PATCH 1)
 # Set the minimum required rocPRIM version
-set(MIN_ROCPRIM_PACKAGE_VERSION "5.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCPRIM_PACKAGE_VERSION "5.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required libhipcxx version
 set(MIN_LIBHIPCXX_PACKAGE_VERSION "3.4.0" CACHE STRING "Minimum version of libhipcxx to search for when LIBHIPCXX_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
