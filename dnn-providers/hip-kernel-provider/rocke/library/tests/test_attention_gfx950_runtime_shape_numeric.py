@@ -283,6 +283,10 @@ def _reference(torch, q, k, v, cu, table, shape, d, bs):
     return out
 
 
+def _cache(path):
+    return au._ATTN_3D_TILED_CACHE if path == "3d" else au._ATTN_TILED_CACHE
+
+
 def _compiled():
     return len(au._ATTN_TILED_CACHE) + len(au._ATTN_3D_TILED_CACHE)
 
@@ -309,10 +313,11 @@ def test_pair_numeric_on_one_binary(torch, path, geometry, first, second):
             softmax_scale=1.0 / math.sqrt(d),
             block_table=table,
             softcap=0.0,
-            backend="tiled",
+            backend="3d" if path == "3d" else "tiled",
             use_graph=False,
         )
         torch.cuda.synchronize()
+        assert _key(problem, path) in _cache(path), f"shape {i} missed the {path} cache"
         if compiled is None:
             compiled = _compiled()
         else:
