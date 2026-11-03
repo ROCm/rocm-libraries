@@ -233,7 +233,7 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
         const auto state = discoveredSharedState(set.engine.id);
         ASSERT_NE(state.get(), nullptr)
             << "no shared state for descriptor set '" << set.engine.name << "'";
-        EXPECT_EQ(state->schema().id, set.schema.id)
+        EXPECT_EQ(state->slots().front().schema.id, set.schema.id)
             << "the id of '" << set.engine.name << "' serves the state of another set";
         // Shared, not rebuilt or handed out once: a second lookup is the same object.
         EXPECT_EQ(discoveredSharedState(set.engine.id).get(), state.get())
@@ -339,7 +339,7 @@ TEST(TestContainer, RediscoveryReplacesTheSharedStateWithoutInvalidatingALiveCon
     const auto after = discoveredSharedState(engineId);
     ASSERT_NE(after.get(), nullptr);
     EXPECT_NE(after.get(), before.get()) << "the reset hook did not rebuild the shared state";
-    EXPECT_EQ(after->schema().id, before->schema().id);
+    EXPECT_EQ(after->slots().front().schema.id, before->slots().front().schema.id);
 
     // The live Container's engine still holds what it was built over; the next Container
     // serves the rebuilt state.

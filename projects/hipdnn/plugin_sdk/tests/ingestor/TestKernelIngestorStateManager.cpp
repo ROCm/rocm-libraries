@@ -1973,12 +1973,12 @@ std::vector<bool> returnsOneFlagTooFew(const MatchContext& /*context*/,
 
 /// Two distinct KernelPrepareFn identities (pointer equality decides "different" in
 /// prepareDefinitions()), for a pack listing both their matchers.
-std::shared_ptr<const void> prepareAsFirstPayload(const KernelDefinition&)
+std::shared_ptr<const void> prepareAsFirstPayload(const KernelDefinition& /*kernel*/)
 {
     return std::make_shared<int>(1);
 }
 
-std::shared_ptr<const void> prepareAsSecondPayload(const KernelDefinition&)
+std::shared_ptr<const void> prepareAsSecondPayload(const KernelDefinition& /*kernel*/)
 {
     return std::make_shared<int>(2);
 }
