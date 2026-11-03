@@ -18,8 +18,9 @@ pinned to one file, ``platform/tests/golden/attention_dense_spec_vectors.json``
 
 So a change to the Python spec fails here first. After an intended change:
 regenerate the file (``python test_attention_dense_spec_vectors.py
---regenerate``), mirror the change in the C++ port, and the C++ test confirms
-the two agree again.
+--regenerate``) and run the C++ test. If a rule the C++ port mirrors changed,
+mirror it there too; a subclass's name parts and hook answers are recorded C
+inputs, so a change to those alone needs no C++ edit.
 
 Each case is built without running ``__post_init__`` so invalid specs can be
 recorded too; the validator is then called explicitly, as
@@ -183,6 +184,9 @@ _CASES: tuple[dict, ...] = (
         num_persistent=8,
         seqlen_q=768,
     ),
+    # Each term of _aligned_causal_error's layout check on its own.
+    dict(persistent=True, persist_decode="gqa_pair", num_persistent=4, varlen=True),
+    dict(persistent=True, persist_decode="gqa_pair", num_persistent=4, paged=True),
     dict(sliding_window=-64),
     dict(causal=False, sliding_window=64),
     dict(sliding_window=100),
@@ -696,13 +700,14 @@ def _dump(data: dict) -> str:
 
 
 def _load() -> dict:
-    return json.loads(VECTORS.read_text())
+    return json.loads(VECTORS.read_text(encoding="utf-8"))
 
 
 _STALE = (
     "AttentionDenseSpec no longer matches {path}. If the Python change is intended: "
-    "run `python {test} --regenerate`, mirror the change in the C++ port ({cpp}), "
-    "and run the rocke_attention_dense_spec ctest."
+    "run `python {test} --regenerate` and the rocke_attention_dense_spec ctest. "
+    "Mirror the change in the C++ port ({cpp}) only if a rule it mirrors changed; "
+    "a subclass's name parts and hook answers are recorded C inputs."
 )
 
 
@@ -798,7 +803,7 @@ def _reject_sites() -> tuple[set, set]:
     divisions = set()
     for mod in (spec_mod, decode_mod):
         path = inspect.getsourcefile(mod)
-        tree = ast.parse(Path(path).read_text())
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef):
                 continue
@@ -857,7 +862,7 @@ def test_cases_reach_every_reject_site():
         (path, line)
         for path, line in all_sites
         if not any(
-            text in Path(path).read_text().splitlines()[line - 1]
+            text in Path(path).read_text(encoding="utf-8").splitlines()[line - 1]
             for text in unreachable
         )
     }
@@ -976,7 +981,7 @@ def test_hook_tables_exercise_every_hook():
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--regenerate"]:
-        VECTORS.write_text(_dump(_build()))
+        VECTORS.write_text(_dump(_build()), encoding="utf-8")
         print(f"wrote {VECTORS}")
     else:
         sys.exit("usage: test_attention_dense_spec_vectors.py --regenerate")
