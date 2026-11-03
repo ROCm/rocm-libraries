@@ -15,6 +15,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -203,6 +204,17 @@ struct MetadataSchema
     std::vector<MetadataField> fields;
     /// Authored semantics; independent of the JSON file-format version.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
+
+    /// The declared field names.
+    std::unordered_set<std::string> fieldNames() const
+    {
+        std::unordered_set<std::string> names;
+        for(const auto& field : fields)
+        {
+            names.insert(field.name);
+        }
+        return names;
+    }
 };
 
 inline bool operator==(const MetadataSchema& lhs, const MetadataSchema& rhs)
@@ -267,17 +279,41 @@ inline bool operator!=(const DescriptorDependency& lhs, const DescriptorDependen
     return !(lhs == rhs);
 }
 
+/// A KMD dependency a slotted model names for one slot (`trained_against.kmds`, RFC 0021 §9).
+struct SlotDependency
+{
+    std::string slot;
+    DescriptorDependency kmd;
+};
+
+inline bool operator==(const SlotDependency& lhs, const SlotDependency& rhs)
+{
+    return std::tie(lhs.slot, lhs.kmd) == std::tie(rhs.slot, rhs.kmd);
+}
+
+inline bool operator!=(const SlotDependency& lhs, const SlotDependency& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// The resolved descriptor definitions used to collect a model's training corpus.
 struct HeuristicProvenance
 {
     DescriptorDependency ued;
-    DescriptorDependency kmd;
+    /// The KMD a model of an unslotted engine, or the ranker of one slot, was trained against.
+    /// Zero-valued when the model names `kmds` instead.
+    DescriptorDependency kmd{};
+    /// The slot a slot ranker's `trained_against.slot` names; empty when it names none.
+    std::string slot;
+    /// A slotted `predict_engine` model's per-slot KMDs; empty for every other model.
+    std::vector<SlotDependency> kmds;
     std::vector<DescriptorDependency> umd;
 };
 
 inline bool operator==(const HeuristicProvenance& lhs, const HeuristicProvenance& rhs)
 {
-    return std::tie(lhs.ued, lhs.kmd, lhs.umd) == std::tie(rhs.ued, rhs.kmd, rhs.umd);
+    return std::tie(lhs.ued, lhs.kmd, lhs.slot, lhs.kmds, lhs.umd)
+           == std::tie(rhs.ued, rhs.kmd, rhs.slot, rhs.kmds, rhs.umd);
 }
 
 inline bool operator!=(const HeuristicProvenance& lhs, const HeuristicProvenance& rhs)
@@ -397,6 +433,29 @@ inline bool operator!=(const HeuristicDescriptor& lhs, const HeuristicDescriptor
     return !(lhs == rhs);
 }
 
+/// RFC 0021 §4: one position of a slotted engine's kernel program. A slot carries the selection
+/// members an unslotted engine carries itself.
+struct SlotDescriptor
+{
+    /// `^[a-z][a-z0-9_]*$`, unique within the engine, never `global`.
+    std::string name;
+    DescriptorId metadataSchemaId;
+    /// The slot's ranker by arch key. Metric-less (RFC 0021 §7).
+    std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
+    std::vector<std::string> knobs;
+};
+
+inline bool operator==(const SlotDescriptor& lhs, const SlotDescriptor& rhs)
+{
+    return std::tie(lhs.name, lhs.metadataSchemaId, lhs.sortKernelCatalog, lhs.knobs)
+           == std::tie(rhs.name, rhs.metadataSchemaId, rhs.sortKernelCatalog, rhs.knobs);
+}
+
+inline bool operator!=(const SlotDescriptor& lhs, const SlotDescriptor& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
 /// engine-id space; must be globally unique, e.g. "rocke:SDPA".
 ///
@@ -434,6 +493,12 @@ struct EngineDescriptor
     std::string graphMatchNativeSymbol;
     /// Authored knob and binding semantics, not the JSON file-format version.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
+    /// RFC 0021 §4 ordered slots; empty for an unslotted engine. When set, @ref
+    /// metadataSchemaId, @ref knobs and @ref sortKernelCatalog are unused: each slot carries its
+    /// own.
+    std::vector<SlotDescriptor> slots;
+    /// RFC 0021 §6 bound token holding the shared workspace region's size; empty when none.
+    std::string sharedWorkspaceToken;
 };
 
 inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
@@ -449,7 +514,9 @@ inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
                     lhs.sdkVersion,
                     lhs.numericalNotes,
                     lhs.graphMatchNativeSymbol,
-                    lhs.revision)
+                    lhs.revision,
+                    lhs.slots,
+                    lhs.sharedWorkspaceToken)
            == std::tie(rhs.id,
                        rhs.name,
                        rhs.sortKernelCatalog,
@@ -461,7 +528,9 @@ inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
                        rhs.sdkVersion,
                        rhs.numericalNotes,
                        rhs.graphMatchNativeSymbol,
-                       rhs.revision);
+                       rhs.revision,
+                       rhs.slots,
+                       rhs.sharedWorkspaceToken);
 }
 
 inline bool operator!=(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
@@ -843,6 +912,27 @@ struct KernelDescriptorPack
     /// resolved truth every consumer reads -- this stays as the authored record. Packs
     /// built in memory leave it empty and fill `kernels` directly.
     std::vector<DescriptorId> kernelIds;
+    /// The slot these kernels serve (RFC 0021 §4). Required for a slotted engine's pack and
+    /// empty for any other.
+    std::string slot;
+};
+
+/// One slot of a slotted engine and everything it resolved to (RFC 0021 §3): the per-slot
+/// counterpart of the selection members an unslotted DescriptorSet holds directly.
+struct SlotDescriptorSet
+{
+    std::string name;
+    MetadataSchema schema;
+    /// The slot's default ranker for the `default` architecture key; see
+    /// DescriptorSet::heuristic. A slot ranker is metric-less, so this is the `""` entry.
+    std::optional<HeuristicDescriptor> heuristic;
+    /// As DescriptorSet::heuristicsByMetric, for this slot's rankers.
+    std::map<std::string, std::map<std::string, HeuristicDescriptor>> heuristicsByMetric;
+    /// As DescriptorSet::unavailableHeuristicArches, for this slot's rankers.
+    std::map<std::string, std::set<std::string>> unavailableHeuristicArches;
+    /// The packs whose `slot` names this one. May be empty: the engine then declines every
+    /// graph (RFC 0021 §8).
+    std::vector<KernelDescriptorPack> packs;
 };
 
 inline bool operator==(const KernelDescriptorPack& lhs, const KernelDescriptorPack& rhs)
@@ -854,7 +944,8 @@ inline bool operator==(const KernelDescriptorPack& lhs, const KernelDescriptorPa
                     lhs.dispatchId,
                     lhs.arch,
                     lhs.kernels,
-                    lhs.kernelIds)
+                    lhs.kernelIds,
+                    lhs.slot)
            == std::tie(rhs.id,
                        rhs.name,
                        rhs.matcherIds,
@@ -862,7 +953,8 @@ inline bool operator==(const KernelDescriptorPack& lhs, const KernelDescriptorPa
                        rhs.dispatchId,
                        rhs.arch,
                        rhs.kernels,
-                       rhs.kernelIds);
+                       rhs.kernelIds,
+                       rhs.slot);
 }
 
 inline bool operator!=(const KernelDescriptorPack& lhs, const KernelDescriptorPack& rhs)
@@ -896,6 +988,12 @@ struct DescriptorSet
     /// architecture's model for the same metric.
     std::map<std::string, std::set<std::string>> unavailableHeuristicArches;
     std::map<std::string, std::set<std::string>> unavailableEnginePredictionArches;
+    /// One entry per `EngineDescriptor::slots`, in declaration order; empty for an unslotted
+    /// engine, whose selection state stays in the members above. For a slotted engine
+    /// @ref schema, @ref heuristic, @ref heuristicsByMetric, @ref unavailableHeuristicArches
+    /// and @ref packs stay empty: that state is per slot. @ref matchers and @ref dispatches
+    /// are the union over every slot's packs, and `predict_engine` models stay engine-level.
+    std::vector<SlotDescriptorSet> slots;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor
