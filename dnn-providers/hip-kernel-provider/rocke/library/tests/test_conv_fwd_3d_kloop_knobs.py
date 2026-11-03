@@ -34,7 +34,7 @@ def _skip_reason() -> str:
         arch = get_device_arch()
     except Exception as e:  # pragma: no cover - no device
         return f"no GPU: {e}"
-    if not arch.startswith(("gfx94", "gfx95")):
+    if not arch or not arch.startswith(("gfx94", "gfx95")):
         return f"MFMA-only knobs; device is {arch}"
     return ""
 
