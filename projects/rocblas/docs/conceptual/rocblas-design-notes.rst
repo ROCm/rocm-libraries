@@ -44,9 +44,9 @@ the data type, and the problem. The architectures which default to hipBLASLt, an
         ``f64_r``, ``f32_c``, ``f64_c``, ``i8_r``, and mixed-precision ``gemm_ex`` forms whose input type is not
         ``f32_r``. Real single precision defaults to Tensile.
 
-    * - gfx942 (MI300X, 304 CUs)
-      - ``f16_r``, ``bf16_r``, and ``f64_r``, including their mixed-precision ``gemm_ex`` forms. All other data types
-        default to Tensile.
+    * - gfx942 (MI300X and MI325X, 304 CUs)
+      - ``f16_r`` and ``bf16_r``, including their mixed-precision ``gemm_ex`` forms. All other data types,
+        including ``f64_r``, default to Tensile.
 
     * - gfx942 (MI300A, 228 CUs)
       - ``f64_r`` only. ``f16_r``, ``bf16_r``, and all other data types default to Tensile.
