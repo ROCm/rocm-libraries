@@ -7,6 +7,7 @@
 // this block sits above the one holding SolutionState.hpp. clang-format sorts
 // within an include block and preserves the order of the blocks themselves.
 #include <Tensile/AMDGPUPredicates.hpp>
+#include <Tensile/Architectures.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/ContractionTaskPredicates.hpp>
@@ -44,11 +45,6 @@ namespace TensileLite
 
         // internalParameters["GlobalSplitUPGR"] in Tensile/Common/GlobalParameters.py.
         constexpr size_t GlobalSplitUPGR = 16;
-
-        // SUPPORTED_BUILD_CHIP_IDS in Tensile/Common/Architectures.py.
-        constexpr std::array<char const*, 14> SupportedBuildChipIds = {
-            "74a0", "74a1", "74a2", "74a3", "74a5", "74a9", "75a0",
-            "75b0", "75a2", "75b2", "75a3", "75b3", "75a8", "75b8"};
 
         // DataType.properties in Tensile/Common/DataType.py, by enum value: the
         // enum name and char it is looked up by, and whether numBytes() > 1.
@@ -658,8 +654,8 @@ namespace TensileLite
         // The selectors resolve_policy reads, by value.
         struct PolicySelectors
         {
-            std::string  strategy   = "None";
-            std::string  assignment = "StaticGrid";
+            std::string  strategy       = "None";
+            std::string  assignment     = "StaticGrid";
             Value const* persistentLoop = nullptr;
         };
 
@@ -746,8 +742,7 @@ namespace TensileLite
                         "Legacy StreamK must be 0, 3, 4, or 5; modes 1 and 2 are retired");
                 if(forceValue)
                 {
-                    if(!isInt(*forceValue)
-                       && forceValue->object().type != object_type::BOOLEAN)
+                    if(!isInt(*forceValue) && forceValue->object().type != object_type::BOOLEAN)
                         throw std::runtime_error("StreamKForceDPOnly must be 0 or 1");
                     force = forceValue->integer();
                 }
@@ -755,7 +750,7 @@ namespace TensileLite
                     throw std::runtime_error("StreamKForceDPOnly must be 0 or 1");
                 if(force && (mode != 3 || config.truthy("StreamKAtomic", false)))
                     throw std::runtime_error("StreamKForceDPOnly requires non-atomic StreamK=3");
-                std::string strategy = force ? "DataParallel" : mode == 0 ? "None" : "StreamK";
+                std::string strategy   = force ? "DataParallel" : mode == 0 ? "None" : "StreamK";
                 std::string assignment = mode == 4   ? "DynamicWorkQueue"
                                          : mode == 5 ? "Hybrid"
                                                      : "StaticGrid";
@@ -768,18 +763,17 @@ namespace TensileLite
                 {
                     if(config.has("WorkAssignment") && selectors.assignment != assignment)
                         throw std::runtime_error("Conflicting legacy StreamK and WorkAssignment="
-                                                 + selectors.assignment + " (expected "
-                                                 + assignment + ")");
+                                                 + selectors.assignment + " (expected " + assignment
+                                                 + ")");
                     selectors.assignment = assignment;
                 }
             }
 
             // ALIASES: the old spelling wins, and must agree with the new one.
             Value const* workQueueStealing = config.find("WorkQueueStealing");
-            for(auto alias : {std::pair<char const*, char const*>{"StreamKXCCMapping",
-                                                                   "PersistentXCCMapping"},
-                              std::pair<char const*, char const*>{"StreamKWorkStealing",
-                                                                   "WorkQueueStealing"}})
+            for(auto alias :
+                {std::pair<char const*, char const*>{"StreamKXCCMapping", "PersistentXCCMapping"},
+                 std::pair<char const*, char const*>{"StreamKWorkStealing", "WorkQueueStealing"}})
             {
                 auto const* old = config.find(alias.first);
                 if(!old)
@@ -793,7 +787,7 @@ namespace TensileLite
             }
 
             NormalizedPolicy rv;
-            rv.policy        = resolvePolicy(selectors);
+            rv.policy          = resolvePolicy(selectors);
             auto const& policy = rv.policy;
 
             for(auto option : {"StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"})
@@ -826,9 +820,9 @@ namespace TensileLite
             rv.prefetchAcrossPersistent
                 = policy.persistent() ? config.integer("PrefetchAcrossPersistent", 0) : 0;
 
-            Dict support = config.has("InternalSupportParams")
-                               ? config.dict("InternalSupportParams")
-                               : emptyDict();
+            Dict    support      = config.has("InternalSupportParams")
+                                       ? config.dict("InternalSupportParams")
+                                       : emptyDict();
             int64_t version      = 0;
             int64_t outerVersion = 3;
             if(auto const* value = support.find("PersistentLoopArgsVersion"))
@@ -848,8 +842,8 @@ namespace TensileLite
             if(outerVersion < 0 || outerVersion > 3)
                 throw std::runtime_error("Unsupported KernArgsVersion");
 
-            bool handwritten = false;
-            auto const* custom = config.find("CustomKernel");
+            bool        handwritten = false;
+            auto const* custom      = config.find("CustomKernel");
             if(custom && custom->object().type == object_type::MAP
                && Dict(*custom).truthy("name", false))
                 handwritten = !Dict(*custom).truthy("generated", false);
@@ -877,8 +871,8 @@ namespace TensileLite
                                   && spatialCluster;
             if(version == 2 && !clusterStreamK
                && (!regenerate || handwritten || config.has("InternalSupportParams")))
-                throw std::runtime_error(
-                    "PersistentLoopArgsVersion=2 requires StreamK/StaticGrid with a spatial cluster");
+                throw std::runtime_error("PersistentLoopArgsVersion=2 requires StreamK/StaticGrid "
+                                         "with a spatial cluster");
             if(version == 2 && outerVersion != 3 && (!regenerate || handwritten))
                 throw std::runtime_error("PersistentLoopArgsVersion=2 requires KernArgsVersion=3");
             return rv;
@@ -932,8 +926,8 @@ namespace TensileLite
 
         // Contractions._computeInputsFromOperandTypes. Mixed MX operands whose
         // MAC inputs are still the DataType default take the operand types.
-        void applyMixedMxComputeInputs(Dict const&                    d,
-                                       rocisa::DataType               srcType,
+        void applyMixedMxComputeInputs(Dict const&                       d,
+                                       rocisa::DataType                  srcType,
                                        ContractionSolution::ProblemType& record)
         {
             if(!d.has("DataTypeA") || !d.has("DataTypeB"))
@@ -958,8 +952,39 @@ namespace TensileLite
                 "Solution state ProblemType index assignments are inconsistent");
         }
 
-        // The only reconstruction of a problem type's index layout. Python builds
-        // its index objects from problemIndexLayout and does not repeat this.
+        struct ProblemIndexSlot
+        {
+            int     kind         = 0;
+            int64_t problemIndex = 0;
+            int64_t kindOrder    = 0;
+            bool    isA          = false;
+            int64_t i            = 0;
+            int64_t c            = 0;
+            int64_t d            = 0;
+            bool    hasA         = false;
+            bool    hasB         = false;
+            int64_t a            = 0;
+            int64_t b            = 0;
+            bool    aMirror      = false;
+            bool    bMirror      = false;
+        };
+
+        struct ProblemIndexLayout
+        {
+            std::string                   operationIdentifier;
+            std::string                   aNames;
+            std::string                   bNames;
+            std::string                   cNames;
+            std::string                   dNames;
+            std::string                   sumNames;
+            int64_t                       aDims = 0;
+            int64_t                       bDims = 0;
+            int64_t                       cDims = 0;
+            std::vector<ProblemIndexSlot> indices;
+        };
+
+        // The reconstruction of a problem type's index layout from one fully
+        // derived state.
         ProblemIndexLayout indexLayout(Dict const& d)
         {
             struct Index
@@ -989,12 +1014,12 @@ namespace TensileLite
                 return int64_t(std::find(list.begin(), list.end(), value) - list.begin());
             };
 
-            auto total       = d.integer("TotalIndices");
-            auto summation   = d["IndicesSummation"].integers();
-            auto mirrorA     = d.has("MirrorDimsA") ? d["MirrorDimsA"].integers()
-                                                    : std::vector<int64_t>{};
-            auto mirrorB     = d.has("MirrorDimsB") ? d["MirrorDimsB"].integers()
-                                                    : std::vector<int64_t>{};
+            auto total     = d.integer("TotalIndices");
+            auto summation = d["IndicesSummation"].integers();
+            auto mirrorA
+                = d.has("MirrorDimsA") ? d["MirrorDimsA"].integers() : std::vector<int64_t>{};
+            auto mirrorB
+                = d.has("MirrorDimsB") ? d["MirrorDimsB"].integers() : std::vector<int64_t>{};
             auto numIndicesC = d.integer("NumIndicesC");
             auto batch       = d["IndicesBatch"].integers();
             auto free        = d["IndicesFree"].integers();
@@ -1006,7 +1031,7 @@ namespace TensileLite
             using IndexPtr = std::shared_ptr<Index>;
             std::vector<IndexPtr> indices(total);
             std::vector<IndexPtr> freeIndices, batchIndices, boundIndices;
-            auto normalize = [&](int64_t i) {
+            auto                  normalize = [&](int64_t i) {
                 if(i < 0)
                     i += total;
                 if(i < 0 || i >= total)
@@ -1027,7 +1052,7 @@ namespace TensileLite
             }
             for(int64_t i = 0; i < numIndicesC; i++)
             {
-                auto index          = std::make_shared<Index>(Index{Index::Free});
+                auto index = std::make_shared<Index>(Index{Index::Free});
                 index->c = index->d = i;
                 index->problemIndex = i;
                 if(contains(batch, i))
@@ -1096,11 +1121,11 @@ namespace TensileLite
             for(auto const& index : freeIndices)
             {
                 name(index->isA ? aNames : bNames, index->i) = name(dNames, index->d);
-                name(cNames, index->c)                       = name(dNames, index->d);
+                name(cNames, index->c) = name(dNames, index->d);
             }
             for(auto const& index : batchIndices)
             {
-                char letter          = name(dNames, index->d);
+                char letter             = name(dNames, index->d);
                 name(aNames, *index->a) = letter;
                 name(bNames, *index->b) = letter;
                 name(cNames, index->c)  = letter;
@@ -1110,21 +1135,21 @@ namespace TensileLite
                 auto const& index = *boundIndices[n];
                 if(!index.a || !index.b)
                     inconsistentIndices();
-                char letter = sumNames[n];
-                char upper  = char(std::toupper(static_cast<unsigned char>(letter)));
+                char letter            = sumNames[n];
+                char upper             = char(std::toupper(static_cast<unsigned char>(letter)));
                 name(aNames, *index.a) = index.aMirror ? upper : letter;
                 name(bNames, *index.b) = index.bMirror ? upper : letter;
             }
 
             ProblemIndexLayout layout;
-            layout.aNames   = aNames;
-            layout.bNames   = bNames;
-            layout.cNames   = cNames;
-            layout.dNames   = dNames;
-            layout.sumNames = sumNames;
-            layout.aDims    = int64_t(assignA.size());
-            layout.bDims    = int64_t(assignB.size());
-            layout.cDims    = numIndicesC;
+            layout.aNames              = aNames;
+            layout.bNames              = bNames;
+            layout.cNames              = cNames;
+            layout.dNames              = dNames;
+            layout.sumNames            = sumNames;
+            layout.aDims               = int64_t(assignA.size());
+            layout.bDims               = int64_t(assignB.size());
+            layout.cDims               = numIndicesC;
             layout.operationIdentifier = "Contraction_" + sumNames + "_A" + aNames
                                          + (d.truthy("ComplexConjugateA") ? "C" : "") + "_B"
                                          + bNames + (d.truthy("ComplexConjugateB") ? "C" : "")
@@ -1220,7 +1245,7 @@ namespace TensileLite
             record.useBias = 0;
             if(d.has("UseBias"))
             {
-                record.useBias = d.integer("UseBias");
+                record.useBias               = d.integer("UseBias");
                 record.biasDataTypeWhiteList = d.has("BiasDataTypeList")
                                                    ? sortedDataTypes(d["BiasDataTypeList"])
                                                    : biasDataTypeListDefault(d);
@@ -1248,34 +1273,29 @@ namespace TensileLite
                           : gateResidualDataTypeListDefault(d);
             }
 
-            record.useGradient      = d.truthy("Gradient", false);
-            record.outputAmaxD      = d.truthy("OutputAmaxD", false);
-            record.useScaleAB       = d.has("UseScaleAB") ? d.text("UseScaleAB") : "";
+            record.useGradient = d.truthy("Gradient", false);
+            record.outputAmaxD = d.truthy("OutputAmaxD", false);
+            record.useScaleAB  = d.has("UseScaleAB") ? d.text("UseScaleAB") : "";
 
             // Contractions.ProblemType.FromOriginalState group-scale checks.
             if(d.has("ScaleBlockSizesA"))
             {
                 auto groups = d["ScaleBlockSizesA"];
                 if(groups.object().type != object_type::ARRAY)
-                    throw std::runtime_error(
-                        "ScaleBlockSizesA must be a list of supported groups");
+                    throw std::runtime_error("ScaleBlockSizesA must be a list of supported groups");
                 for(auto const& group : groups.list())
                 {
                     auto size = group.integer();
                     if(size != 32 && size != 64 && size != 128)
-                        throw std::runtime_error(
-                            "ScaleBlockSizesA entries must be 32, 64 or 128");
-                    if(std::find(rv.scaleBlockSizesA.begin(),
-                                 rv.scaleBlockSizesA.end(),
-                                 int(size))
+                        throw std::runtime_error("ScaleBlockSizesA entries must be 32, 64 or 128");
+                    if(std::find(rv.scaleBlockSizesA.begin(), rv.scaleBlockSizesA.end(), int(size))
                        == rv.scaleBlockSizesA.end())
                         rv.scaleBlockSizesA.push_back(int(size));
                 }
                 std::sort(rv.scaleBlockSizesA.begin(), rv.scaleBlockSizesA.end());
             }
             if(record.aType == rocisa::DataType::Int4 && rv.scaleBlockSizesA.empty())
-                throw std::runtime_error(
-                    "ScaleBlockSizesA must be non-empty for int4 A (W4A16)");
+                throw std::runtime_error("ScaleBlockSizesA must be non-empty for int4 A (W4A16)");
             if(!rv.scaleBlockSizesA.empty() && record.aType != rocisa::DataType::Int4)
                 throw std::runtime_error("ScaleBlockSizesA requires int4 A");
             rv.scaleZeroPointA = d.truthy("ScaleZeroPointA", false);
@@ -1287,8 +1307,7 @@ namespace TensileLite
                 else if(encoding == "UnsignedBias8")
                     rv.int4EncodingA = ContractionProblemGemm::Int4Encoding::UnsignedBias8;
                 else
-                    throw std::runtime_error(
-                        "Int4EncodingA must be Signed or UnsignedBias8");
+                    throw std::runtime_error("Int4EncodingA must be Signed or UnsignedBias8");
             }
 
             record.useScaleCD       = d.truthy("UseScaleCD", false);
@@ -1312,14 +1331,16 @@ namespace TensileLite
             record.swizzleTensorB = d.truthy("SwizzleTensorB", false);
             record.fusedGemmA2A   = d.truthy("FusedGemmA2A", false);
 
-            record.mxBlockA = d.integer("MXBlockA", 0);
-            record.mxBlockB = d.integer("MXBlockB", 0);
+            record.mxBlockA     = d.integer("MXBlockA", 0);
+            record.mxBlockB     = d.integer("MXBlockB", 0);
+            record.mxBlockFreeA = d.integer("MXBlockFreeA", 1);
+            record.mxBlockFreeB = d.integer("MXBlockFreeB", 1);
             record.mxTypeA
                 = d.has("DataTypeMXSA") ? d.dataType("DataTypeMXSA") : rocisa::DataType::Float;
             record.mxTypeB
                 = d.has("DataTypeMXSB") ? d.dataType("DataTypeMXSB") : rocisa::DataType::Float;
 
-            record.metadataLayout = d.integer("MetadataLayout", 0);
+            record.metadataLayout     = d.integer("MetadataLayout", 0);
             record.stochasticRounding = d.truthy("StochasticRounding", false);
 
             record.operationIdentifier = opIdentifier;
@@ -1384,10 +1405,16 @@ namespace TensileLite
                 rv.push_back(withIndexValue<BatchSizeEqual>(size_t(0), size_t(1)));
             rv.push_back(withValue<MXBlockA>(r.mxBlockA));
             if(r.mxBlockA)
+            {
                 rv.push_back(withValue<DataTypeMXSA>(r.mxTypeA));
+                rv.push_back(withValue<MXBlockFreeA>(r.mxBlockFreeA));
+            }
             rv.push_back(withValue<MXBlockB>(r.mxBlockB));
             if(r.mxBlockB)
+            {
                 rv.push_back(withValue<DataTypeMXSB>(r.mxTypeB));
+                rv.push_back(withValue<MXBlockFreeB>(r.mxBlockFreeB));
+            }
             return rv;
         }
 
@@ -1495,7 +1522,7 @@ namespace TensileLite
         {
             using namespace Predicates::Contraction;
             std::vector<std::shared_ptr<ProblemPredicate>> rv;
-            auto const problem = state.dict("ProblemType");
+            auto const                                     problem = state.dict("ProblemType");
 
             if(state.has("BatchSizeEqual"))
                 rv.push_back(withIndexValue<BatchSizeEqual>(
@@ -1516,8 +1543,8 @@ namespace TensileLite
                 else
                     value[2] = int(state.integer("ThreadTile0") * state.integer("ThreadTile1"));
                 if(!state["NumElementsPerBatchStore"].equals(0))
-                    value[3] = int(quotient(state["NumElementsPerThread"],
-                                            state["NumElementsPerBatchStore"]));
+                    value[3] = int(
+                        quotient(state["NumElementsPerThread"], state["NumElementsPerBatchStore"]));
                 else
                     value[3] = int(state.integer("NumElementsPerThread"));
                 value[4] = int(std::ceil(quotient(state["NumThreads"], state["WavefrontSize"])));
@@ -1568,14 +1595,14 @@ namespace TensileLite
             bool bufferLoad = state.has("BufferLoad") && state["BufferLoad"].equals(1);
             if(bufferLoad)
             {
-                bool tlua       = problem.truthy("TLUA");
-                bool tlub       = problem.truthy("TLUB");
-                bool mayShiftA  = tlua
-                                 && state["AssertFree0ElementMultiple"].number()
-                                        < state["GlobalReadVectorWidthA"].number();
-                bool mayShiftB  = tlub
-                                 && state["AssertFree1ElementMultiple"].number()
-                                        < state["GlobalReadVectorWidthB"].number();
+                bool                  tlua      = problem.truthy("TLUA");
+                bool                  tlub      = problem.truthy("TLUB");
+                bool                  mayShiftA = tlua
+                                                  && state["AssertFree0ElementMultiple"].number()
+                                                         < state["GlobalReadVectorWidthA"].number();
+                bool                  mayShiftB = tlub
+                                                  && state["AssertFree1ElementMultiple"].number()
+                                                         < state["GlobalReadVectorWidthB"].number();
                 BufferLoadCheckPacket packet;
                 packet.shiftPtrElemB = mayShiftB ? state.integer("GlobalReadVectorWidthB") : 0;
                 packet.shiftPtrElemA = mayShiftA ? state.integer("GlobalReadVectorWidthA") : 0;
@@ -1602,9 +1629,9 @@ namespace TensileLite
                 // Value only. Construction does not call hipGetDevice; the first
                 // evaluation does. The test constructor freezes a count of 0
                 // and then rejects every kernel.
-                rv.push_back(std::make_shared<WorkgroupMappingXCCCheck>(std::array<int, 2>{
-                    int(state.integer("WorkGroupMappingXCC")),
-                    int(state.integer("WorkGroupMappingXCCGroup"))}));
+                rv.push_back(std::make_shared<WorkgroupMappingXCCCheck>(
+                    std::array<int, 2>{int(state.integer("WorkGroupMappingXCC")),
+                                       int(state.integer("WorkGroupMappingXCCGroup"))}));
             }
 
             if(problem.truthy("SwizzleTensorA"))
@@ -1638,17 +1665,10 @@ namespace TensileLite
 
             if(state.truthy("ReuseAcrossPersistent", false))
             {
-                auto kIdx       = size_t(problem.integer("NumIndicesC"));
-                auto kTiles     = state.integer("_RAPNumResidentKTiles");
-                auto depthU     = state.integer("DepthU");
-                int64_t floorTiles = 1;
-                rv.push_back(
-                    withIndexValue<SizeEqual>(size_t(0), size_t(state.integer("MacroTile0"))));
-                rv.push_back(
-                    withIndexValue<SizeMultiple>(size_t(1), size_t(state.integer("MacroTile1"))));
-                rv.push_back(withIndexValue<SizeMultiple>(kIdx, size_t(depthU)));
-                rv.push_back(
-                    withIndexValue<SizeGreaterThan>(kIdx, size_t(floorTiles * depthU - 1)));
+                auto kIdx   = size_t(problem.integer("NumIndicesC"));
+                auto kTiles = state.integer("_RAPNumResidentKTiles");
+                auto depthU = state.integer("DepthU");
+                rv.push_back(withIndexValue<SizeGreaterThan>(kIdx, size_t(0)));
                 rv.push_back(withIndexValue<SizeLessThan>(kIdx, size_t(kTiles * depthU + 1)));
             }
 
@@ -1696,7 +1716,7 @@ namespace TensileLite
                     names = deviceNames->list();
             }
 
-            static std::regex const deviceName("^Device\\s+([0-9a-fA-F]+)$");
+            static std::regex const                       deviceName("^Device\\s+([0-9a-fA-F]+)$");
             std::vector<std::shared_ptr<AMDGPUPredicate>> predicates;
             for(auto const& name : names)
             {
@@ -1763,7 +1783,7 @@ namespace TensileLite
         {
             auto normalized = normalizeExecutionPolicy(d, false);
 
-            int globalAccum = 0;
+            int         globalAccum  = 0;
             auto const& accumulation = d["_GlobalAccumulation"];
             if(accumulation.isText("SingleBuffer"))
                 globalAccum = 1;
@@ -1785,11 +1805,11 @@ namespace TensileLite
             }
             else
                 tile = d["ThreadTile0"].number() * d["ThreadTile1"].number();
-            double elements = !d["NumElementsPerBatchStore"].equals(0)
-                                  ? std::ceil(quotient(d["NumElementsPerThread"],
-                                                       d["NumElementsPerBatchStore"]))
-                                  : d["NumElementsPerThread"].number();
-            double waves = std::ceil(quotient(d["NumThreads"], d["WavefrontSize"]));
+            double elements              = !d["NumElementsPerBatchStore"].equals(0)
+                                               ? std::ceil(quotient(d["NumElementsPerThread"],
+                                                                    d["NumElementsPerBatchStore"]))
+                                               : d["NumElementsPerThread"].number();
+            double waves                 = std::ceil(quotient(d["NumThreads"], d["WavefrontSize"]));
             auto   synchronizerSizePerWG = std::ceil(tile * elements * waves);
 
             auto workGroupMapping = [&]() -> int {
@@ -1874,20 +1894,20 @@ namespace TensileLite
             s.NumLoadsCoalescedA            = int(d.integer("NumLoadsCoalescedA"));
             s.NumLoadsCoalescedB            = int(d.integer("NumLoadsCoalescedB"));
             assignArray(d["MIWaveGroup"], s.waveGroup);
-            s.VectorWidthA         = int(d.integer("VectorWidthA"));
-            s.VectorWidthB         = int(d.integer("VectorWidthB"));
-            s.LocalSplitU          = int(d.integer("LocalSplitU"));
-            s.DirectToLdsA         = dtlA;
-            s.DirectToLdsB         = dtlB;
-            s.WavefrontSize        = int(d.integer("WavefrontSize"));
-            s.OneLDSBuffer         = d.integer("1LDSBuffer", 0) == 1;
-            s.SourceSwap           = d.truthy("SourceSwap", false);
-            s.UnrollMajorLDSA      = d.has("UnrollMajorLDSA") ? int(d.truthy("UnrollMajorLDSA")) : -1;
-            s.UnrollMajorLDSB      = d.has("UnrollMajorLDSB") ? int(d.truthy("UnrollMajorLDSB")) : -1;
-            s.enableLDSTrA         = d.truthy("enableLDSTrA", false);
-            s.enableLDSTrB         = d.truthy("enableLDSTrB", false);
-            s.BufferLoad           = !d.has("BufferLoad") || d.truthy("BufferLoad");
-            s.BufferStore          = !d.has("BufferStore") || d.truthy("BufferStore");
+            s.VectorWidthA    = int(d.integer("VectorWidthA"));
+            s.VectorWidthB    = int(d.integer("VectorWidthB"));
+            s.LocalSplitU     = int(d.integer("LocalSplitU"));
+            s.DirectToLdsA    = dtlA;
+            s.DirectToLdsB    = dtlB;
+            s.WavefrontSize   = int(d.integer("WavefrontSize"));
+            s.OneLDSBuffer    = d.integer("1LDSBuffer", 0) == 1;
+            s.SourceSwap      = d.truthy("SourceSwap", false);
+            s.UnrollMajorLDSA = d.has("UnrollMajorLDSA") ? int(d.truthy("UnrollMajorLDSA")) : -1;
+            s.UnrollMajorLDSB = d.has("UnrollMajorLDSB") ? int(d.truthy("UnrollMajorLDSB")) : -1;
+            s.enableLDSTrA    = d.truthy("enableLDSTrA", false);
+            s.enableLDSTrB    = d.truthy("enableLDSTrB", false);
+            s.BufferLoad      = !d.has("BufferLoad") || d.truthy("BufferLoad");
+            s.BufferStore     = !d.has("BufferStore") || d.truthy("BufferStore");
             s.expertSchedulingMode = int(d.integer("ExpertSchedulingMode", 0));
             assignSequence(d["ClusterDim"], s.clusterDim);
             s.validateExecutionPolicy();
@@ -1907,6 +1927,7 @@ namespace TensileLite
             rv.wgm                       = isp.truthy("SupportCustomWGM");
             rv.staggerU                  = isp.truthy("SupportCustomStaggerU");
             rv.perTileExtraIters         = isp.truthy("SupportStreamKPerTileExtraIters", false);
+            rv.occupancyProbe            = isp.truthy("SupportOccupancyProbe", false);
             rv.useUniversalArgs          = isp.truthy("UseUniversalArgs");
             rv.useSFC                    = useSFC;
             return rv;
@@ -1962,9 +1983,22 @@ namespace TensileLite
         }
     } // namespace
 
-    ProblemIndexLayout problemIndexLayout(msgpack::object const& problemType)
+    std::vector<std::string> supportedBuildChipIds()
     {
-        return indexLayout(Dict(Value(problemType, "ProblemType")));
+        std::vector<std::string> chipIds;
+        chipIds.reserve(SupportedBuildChipIds.size());
+        for(auto chip : SupportedBuildChipIds)
+            chipIds.emplace_back(chip);
+        return chipIds;
+    }
+
+    std::vector<std::string> supportedDataTypeNames()
+    {
+        std::vector<std::string> names;
+        names.reserve(std::size(DataTypes));
+        for(auto const& type : DataTypes)
+            names.push_back(type.name);
+        return names;
     }
 
     std::shared_ptr<ContractionSolution> solutionFromState(msgpack::object const& state)

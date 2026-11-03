@@ -68,6 +68,31 @@ target_sources(tensilelite-tests
 # (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
 # files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
 if(NOT TENSILELITE_ENABLE_YAML)
+    # The solution-record fixtures live in TEST_DATA_DIR next to the other test
+    # data, so TestData::Instance() finds them from the binary's own location
+    # (build tree and installed tree alike). They are copied by a build step
+    # and not at configure time, so an edited fixture reaches the binary's data
+    # directory on the next build without a reconfigure. The target has no
+    # outputs, so it runs on every build; copying a handful of small files is
+    # cheap.
+    set(SOLUTION_STATE_RECORD_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit/test_data/solution_records")
+    set(SOLUTION_STATE_CATALOG_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit/test_data")
+    set(SOLUTION_STATE_FIXTURE_DIR "${TEST_DATA_DIR}/solution-state")
+    add_custom_target(tensilelite-solution-state-fixtures
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${SOLUTION_STATE_FIXTURE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SOLUTION_STATE_FIXTURE_DIR}/catalog"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${SOLUTION_STATE_RECORD_SOURCE_DIR}"
+                "${SOLUTION_STATE_FIXTURE_DIR}/record"
+        COMMAND ${CMAKE_COMMAND} -E copy
+                "${SOLUTION_STATE_CATALOG_SOURCE_DIR}/catalog_chip_ids.txt"
+                "${SOLUTION_STATE_CATALOG_SOURCE_DIR}/catalog_data_types.txt"
+                "${SOLUTION_STATE_FIXTURE_DIR}/catalog"
+        COMMENT "Copying solution-state fixtures into ${SOLUTION_STATE_FIXTURE_DIR}")
+    add_dependencies(tensilelite-tests tensilelite-solution-state-fixtures)
+
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
@@ -79,10 +104,6 @@ if(NOT TENSILELITE_ENABLE_YAML)
             "${CMAKE_CURRENT_SOURCE_DIR}/SolutionState_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/SolutionRecord_test.cpp"
     )
-    target_compile_definitions(tensilelite-tests PRIVATE
-        "TENSILELITE_SOLUTION_RECORD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit/test_data/solution_records\""
-        "TENSILELITE_SOLUTION_STATE_CPP=\"${CMAKE_CURRENT_SOURCE_DIR}/../src/msgpack/SolutionState.cpp\""
-        "TENSILELITE_SOLUTION_CATALOG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit/test_data\"")
 endif()
 
 if(TENSILELITE_ENABLE_YAML)

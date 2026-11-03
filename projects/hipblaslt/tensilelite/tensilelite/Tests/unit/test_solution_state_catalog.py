@@ -5,8 +5,8 @@
 
 solutionFromState copies the data-type names and the build chip ids by hand.
 The installed tensilelite test tree does not contain SolutionState.cpp, so
-this test compares Python to the checked-in lists. SolutionRecord reads those
-same lists back out of SolutionState.cpp.
+this test compares Python to the checked-in lists. SolutionRecord reads the
+C++ lists back through supportedBuildChipIds() and supportedDataTypeNames().
 """
 
 from pathlib import Path
