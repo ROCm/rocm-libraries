@@ -2086,7 +2086,8 @@ int rocke_encode_tdm_padding(int64_t interval_bytes,
         if(reason != NULL && reason_cap > 0)
             snprintf(reason,
                      reason_cap,
-                     "encode_tdm_padding needs a positive pad; pad_enable=0 otherwise");
+                     "encode_tdm_padding needs a positive pad; pass no pad_interval for an "
+                     "unpadded tile");
         return 0;
     }
     if(interval_bytes % 4 || pad_bytes % 4)

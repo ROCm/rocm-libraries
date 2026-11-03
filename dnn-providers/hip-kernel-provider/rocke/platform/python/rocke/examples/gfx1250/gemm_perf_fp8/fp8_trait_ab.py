@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import statistics
@@ -149,6 +150,11 @@ def other_gpu_processes() -> list[str] | None:
     own = str(os.getpid())
     pids = [line.split()[0] for line in out.splitlines() if line[:1].isdigit()]
     return [pid for pid in pids if pid != own]
+
+
+def _finite_or_inf(x: float) -> float:
+    """``x``, or +inf when it is NaN or infinite, so a NaN error fails a bound."""
+    return x if math.isfinite(x) else math.inf
 
 
 def _summary(samples: list[float]) -> dict[str, float]:
@@ -275,8 +281,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             np.array_equal(run_once(arm), ref_int) for _ in range(args.verify_launches)
         )
         use("rand")
+        # A NaN anywhere makes the launch's error NaN, which max() and ``<=``
+        # would both let through; count it as infinitely wrong instead.
         rel = max(
-            float(np.max(np.abs(run_once(arm) - ref_rand))) / den
+            _finite_or_inf(float(np.max(np.abs(run_once(arm) - ref_rand))) / den)
             for _ in range(args.verify_launches)
         )
         ok = exact and rel <= rand_rel_error_bound()

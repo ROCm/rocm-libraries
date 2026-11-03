@@ -403,6 +403,10 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 "spb": tr.split_barrier,
                 "alti": tr.tdm_alternate_issuers,
                 "erf": tr.tdm_early_refill,
+                # The C dtype, named only when it differs from A's (the fp8/bf8
+                # path), so fp8 with bf16 C and fp8 with fp16 C are two symbols
+                # and every other kernel keeps its name.
+                f"c{self.data.dtype_c}": self.data.dtype_c != self.data.dtype_a,
             },
         )
 
@@ -764,18 +768,30 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         # therefore writes one address and reads another: fast, plausible, and
         # numerically wrong, so a sweep ranks it as a winner while it is
         # incorrect. Under TDM it emits nothing instead, the mover owning the
-        # LDS write -- silently inert rather than silently wrong. Bit-exact and
-        # worth ~+3% on CDNA MFMA, hence family scope rather than a global gate.
+        # LDS write -- silently inert rather than silently wrong. It is bit-exact
+        # on the CDNA MFMA path, hence family scope rather than a global gate.
+        # Rejected on gfx1250 only, where this was found; gfx1151 / gfx1201
+        # keep their earlier behaviour until they have gate configs of their own.
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
             (spec.trait.direct_to_lds, "direct_to_lds"),
             (spec.trait.dtl_prefetch, "dtl_prefetch"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
-            (spec.trait.lds_swizzle, "lds_swizzle"),
+            (spec.trait.lds_swizzle and arch == "gfx1250", "lds_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
+
+    # An element width for the A/B load-vector picker: one of the element sizes.
+    # TDM loads whole tiles and never consults it, so there it would only rename
+    # the kernel (``abeb{N}``).
+    abeb = spec.trait.ab_load_elem_bytes
+    if abeb is not None:
+        if abeb not in (1, 2, 4, 8):
+            return False, f"ab_load_elem_bytes must be 1, 2, 4 or 8 (got {abeb})"
+        if spec.trait.tdm:
+            return False, "ab_load_elem_bytes has no effect with tdm"
 
     if spec.trait.tdm:
         if spec.trait.direct_to_lds:
@@ -905,7 +921,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # here over-counted by a whole C tile and spuriously rejected specs the
     # emitter builds and runs fine: a 256x256 C tile is 128 KiB, enough to push
     # a tile that fits comfortably past every cap we have, which silently
-    # removed the deepest tiles from cshuffle sweeps.
+    # removed the deepest tiles from cshuffle sweeps. Counted as ``max`` on
+    # gfx1250 only, where it has run on silicon; the other targets keep the
+    # sum until they have been run with it.
     #
     # Two flags opt out, and both really are additive. ``cshuffle_no_alias``
     # marks the C tile exclusive so the packer gives it its own byte range.
@@ -930,7 +948,11 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         if spec.trait.epilogue == "cshuffle"
         else 0
     )
-    if c_bytes and not (spec.trait.cshuffle_no_alias or spec.trait.persistent):
+    if (
+        c_bytes
+        and target.gfx == "gfx1250"
+        and not (spec.trait.cshuffle_no_alias or spec.trait.persistent)
+    ):
         bytes_lds = max(ab_bytes, c_bytes)
     else:
         bytes_lds = ab_bytes + c_bytes
@@ -1365,8 +1387,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # K-loop for a fixed, compile-time K (= the env value, a multiple of
     # tile_k), eliminating the scf.for backedge and giving static double-buffer
     # parity offsets. Only valid for split_k==1 and when the launch K matches.
-    # 0 = off (runtime scf.for, default).
-    _unroll_k = int(_os_hsw.environ.get("ROCKE_EXP_UNROLL_K", "0"))
+    # 0 = off (runtime scf.for, default). Ignored with TDM: the unrolled loop
+    # has no TENSORcnt waits or split-barrier signals, yet the kernel would keep
+    # its TDM name and cache key.
+    _unroll_k = (
+        0 if spec.trait.tdm else int(_os_hsw.environ.get("ROCKE_EXP_UNROLL_K", "0"))
+    )
     # EXPERIMENT (ROCKE_EXP_PREFETCH_DEPTH=D>1): D+1-buffer LDS ring in the
     # fully-unrolled fixed-K path (requires ROCKE_EXP_UNROLL_K). Issues loads D
     # tiles ahead. NOTE: buffer_load_lds (DTL) completes OUT OF ORDER, so the
@@ -1731,7 +1757,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             k_remaining = b.smax(b.sub(K, k_off), zero)
 
             def _issue(ptr, row_off, rows, extent, lds_base, batch_off):
-                origin = b.add(batch_off, b.add(b.mul(row_off, K), k_off))
+                # The element offset in i64: an operand past 2^31 elements
+                # (e.g. M = K = 131072) wraps an i32 one, and the GEP would
+                # sign-extend it to an address before the tensor. Every term is
+                # non-negative, so each widens with zext.
+                batch64 = b.zext(batch_off, _I64)
+                row64 = b.mul(b.zext(row_off, _I64), b.zext(K, _I64))
+                origin = b.add(batch64, b.add(row64, b.zext(k_off, _I64)))
                 groups = b.tdm_descriptor_2d(
                     b.global_addr_of(ptr, origin),
                     lds_base,
@@ -2506,8 +2538,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         just finished.  The partial wait count ``(D-2)*per_tile`` is a
         constant because TENSORcnt retires in order.
 
-        Mirrors the upstream PR's implementation exactly (including the
-        prologue clamping and the single trailing ``s_wait_tensorcnt(0)``).
+        Follows the reference ring design exactly (the prologue clamping and
+        the single trailing ``s_wait_tensorcnt(0)`` included).
         """
         nonlocal _for_results
         D = spec.trait.tdm_depth
@@ -2515,9 +2547,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         per_tile = 1 if _tdm_waves > 1 else 2
         allowed = (D - 2) * per_tile
         ahead_k = (D - 1) * block_k
-        # Last in-bounds tile origin, block_k-aligned from k_lo.
-        last_origin = b.add(
-            k_lo, b.mul(b.sub(_k_tile_count(), b.const_i32(1)), c_block_k)
+        # Last in-bounds tile origin, block_k-aligned from k_lo. Never below
+        # k_lo: with no K tile at all (K = 0) every prologue fill starts at k_lo
+        # with an empty K extent instead of one tile before A and B.
+        last_origin = b.smax(
+            b.add(k_lo, b.mul(b.sub(_k_tile_count(), b.const_i32(1)), c_block_k)),
+            k_lo,
         )
 
         # Prologue: fill ring slots 0 .. D-2 (clamped so every fill is real).

@@ -275,8 +275,9 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     const char* parts[5];
     char part_abeb[32];
     char part_tdm[32];
-    const char* flag_names[14];
-    int flag_on[14];
+    char part_c[32];
+    const char* flag_names[15];
+    int flag_on[15];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -325,6 +326,10 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_names[11] = "spb";
     flag_names[12] = "alti";
     flag_names[13] = "erf";
+    /* Python flag key f"c{dtype_c}": the C dtype, named only when it differs
+     * from A's (the fp8/bf8 path), so every other kernel keeps its name. */
+    snprintf(part_c, sizeof(part_c), "c%s", spec->data.dtype_c ? spec->data.dtype_c : "");
+    flag_names[14] = part_c;
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -340,9 +345,13 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[11] = tr->split_barrier ? 1 : 0;
     flag_on[12] = tr->tdm_alternate_issuers ? 1 : 0;
     flag_on[13] = tr->tdm_early_refill ? 1 : 0;
+    flag_on[14] = (spec->data.dtype_c != NULL && spec->data.dtype_a != NULL
+                   && strcmp(spec->data.dtype_c, spec->data.dtype_a) != 0)
+                      ? 1
+                      : 0;
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 14, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 15, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -827,7 +836,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     /* WMMA coverage is narrower than CDNA's MFMA matrix: gfx11/gfx12 RDNA
      * supports the 16x16x16 atom and gfx1250 supports the gfx1250-class
      * 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and dense 16x16x128 (fp8, via the
-     * f8f6f4 opcode) atoms, all through the simple 'mem'/'wmma_v1' pipeline. */
+     * f8f6f4 opcode) atoms, all through the simple 'mem' pipeline. */
     if(strcmp(family, "wmma") == 0)
     {
         bool is_gfx1250 = strcmp(arch, "gfx1250") == 0;
@@ -852,10 +861,12 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                            atom_k,
                            arch);
         }
-        if(strcmp(spec->trait.pipeline, "mem") != 0 && strcmp(spec->trait.pipeline, "wmma_v1") != 0)
+        /* 'mem' only: the C++ engine does not emit the wmma_v1 schedule
+         * (Python's SchedulePolicy for 'wmma_v1'), so it rejects it rather than
+         * build a different kernel under the same name. */
+        if(strcmp(spec->trait.pipeline, "mem") != 0)
         {
-            CK_GEMM_REJECT("WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
-                           "(got '%s') on %s",
+            CK_GEMM_REJECT("WMMA path supports only the 'mem' pipeline (got '%s') on %s",
                            spec->trait.pipeline,
                            arch);
         }
@@ -896,11 +907,29 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
          * store side, and the inverse is applied on the MFMA read path but not
          * the WMMA one, so where it emits at all it writes one address and
          * reads another: fast, plausible, numerically wrong. Under TDM it emits
-         * nothing instead. Bit-exact and worth ~+3% on CDNA MFMA, hence family
-         * scope rather than a global gate. */
-        if(spec->trait.lds_swizzle)
+         * nothing instead. It is bit-exact on the CDNA MFMA path, hence family
+         * scope rather than a global gate. Rejected on gfx1250 only, where this
+         * was found; gfx1151 / gfx1201 keep their earlier behaviour until they
+         * have gate configs of their own. */
+        if(spec->trait.lds_swizzle && is_gfx1250)
         {
             CK_GEMM_REJECT("WMMA path does not support lds_swizzle on %s", arch);
+        }
+    }
+
+    /* An element width for the A/B load-vector picker: one of the element
+     * sizes. TDM loads whole tiles and never consults it, so there it would
+     * only rename the kernel (abeb{N}). */
+    if(spec->trait.ab_load_elem_bytes_set)
+    {
+        int abeb = spec->trait.ab_load_elem_bytes;
+        if(abeb != 1 && abeb != 2 && abeb != 4 && abeb != 8)
+        {
+            CK_GEMM_REJECT("ab_load_elem_bytes must be 1, 2, 4 or 8 (got %d)", abeb);
+        }
+        if(spec->trait.tdm)
+        {
+            CK_GEMM_REJECT("ab_load_elem_bytes has no effect with tdm");
         }
     }
 
@@ -1090,9 +1119,12 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
      * live-interval start, so A lands at offset 0 and the C tile -- live only
      * after the last A/B read -- reuses it. Charging the sum over-counted by a
      * whole C tile and rejected specs the emitter builds and runs fine.
+     * Counted as max on gfx1250 only, where it has run on silicon; the other
+     * targets keep the sum until they have been run with it.
      * cshuffle_no_alias (C marked exclusive) and persistent (the grid-stride
      * tile loop makes A/B and C interfere) really are additive. */
-    if(c_bytes != 0 && !spec->trait.cshuffle_no_alias && !spec->trait.persistent)
+    if(c_bytes != 0 && strcmp(target->gfx, "gfx1250") == 0 && !spec->trait.cshuffle_no_alias
+       && !spec->trait.persistent)
     {
         bytes_lds = (ab_bytes > c_bytes) ? ab_bytes : c_bytes;
     }

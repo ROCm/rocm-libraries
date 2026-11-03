@@ -420,8 +420,11 @@ void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx)
     rocke_value_t* n_tiles = rocke_gemm_k_tile_count(ctx);
     rocke_value_t* c_one_k = rocke_b_const_i32(b, 1);
     rocke_value_t* last_tile = rocke_b_sub(b, n_tiles, c_one_k);
-    rocke_value_t* last_origin
+    /* Never below k_lo: with no K tile at all (K = 0) every prologue fill starts
+     * at k_lo with an empty K extent instead of one tile before A and B. */
+    rocke_value_t* last_k_tile
         = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, last_tile, ctx->c_block_k));
+    rocke_value_t* last_origin = rocke_b_smax(b, last_k_tile, ctx->k_lo);
     rocke_value_t* c_ring;
     rocke_value_t* c_ahead;
     rocke_value_t* c_one;

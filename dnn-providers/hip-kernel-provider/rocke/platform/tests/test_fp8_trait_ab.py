@@ -118,6 +118,12 @@ class TestTraitAbArms(unittest.TestCase):
         ), mock.patch.object(fp8_trait_ab.subprocess, "run", return_value=empty):
             self.assertEqual(fp8_trait_ab.other_gpu_processes(), [])
 
+    def test_a_nan_error_fails_the_random_bound(self):
+        # max() and <= both let a NaN through; the verify step must not.
+        bound = fp8_data.rand_rel_error_bound()
+        self.assertGreater(fp8_trait_ab._finite_or_inf(float("nan")), bound)
+        self.assertEqual(fp8_trait_ab._finite_or_inf(0.5), 0.5)
+
     def test_bad_arguments_fail_before_touching_the_gpu(self):
         for argv in (["--arms", "nope"], ["--data", "fp16"], ["--k", str(1 << 20)]):
             with self.subTest(argv=argv), self.assertRaises(SystemExit):

@@ -179,14 +179,14 @@ class TestGenericEnumeration(unittest.TestCase):
             "tdm_depth": [2, 4],
             "screening": {"tdm_depth": 2},
         }
-        warnings = m.warn_if_sweep_changes_validity(cfg, [])
+        warnings = m.warn_if_sweep_changes_validity(cfg)
         self.assertTrue(warnings, "expected a warning for a validity-changing sweep")
         self.assertIn("tdm_depth", warnings[0])
         self.assertIn("admissible tile pool", warnings[0])
 
     def test_no_warning_when_the_pool_is_unchanged(self):
         m = _sweep()
-        self.assertEqual(m.warn_if_sweep_changes_validity(_cfg(_base_traits()), []), [])
+        self.assertEqual(m.warn_if_sweep_changes_validity(_cfg(_base_traits())), [])
 
 
 class TestInertSweepDetection(unittest.TestCase):
@@ -313,8 +313,8 @@ class TestConfigDerivation(unittest.TestCase):
     def test_the_base_is_what_ships(self):
         """TDM depth 2 is pinned in the base, not left to a variant file.
 
-        The pre-TDM default measured 1.43x worse on the square shape, so a
-        base config without it describes a kernel nobody would run.
+        The pre-TDM default measured slower on the square shape (see the case
+        study), so a base config without it describes a kernel nobody would run.
         """
         m = _sweep()
         pin, _ = m.resolve_traits(m.load_config(CONFIGS / "sq4k.json"))

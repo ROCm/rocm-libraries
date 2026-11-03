@@ -12,7 +12,8 @@ of K: the K loop's bounds and step (``%k0``), plus the tiles each loop handles
 outside it. The loop must process ceil(K / tile_k) tiles; the early-refill loop
 pads the count to an even number with one zero-filled tile past K. The ring also
 clamps its prologue fills to the last tile origin, which must be the start of the
-partial tile.
+partial tile, and never before it: with K = 0 (no K tile) the fills start at
+the first K element with nothing to move, not one tile before A and B.
 """
 
 from __future__ import annotations
@@ -32,7 +33,9 @@ from test_gemm_split_barrier import _lower, _ring_spec, _spec  # noqa: E402
 _ARITH = re.compile(
     r"\s*(%[\w.]+) = (add|sub|mul|sdiv|srem)(?: nsw)? i32 (\S+), (\S+)$"
 )
-_SMIN = re.compile(r"\s*(%[\w.]+) = call i32 @llvm\.smin\.i32\(i32 (\S+), i32 (\S+)\)$")
+_SMIN = re.compile(
+    r"\s*(%[\w.]+) = call i32 @llvm\.(smin|smax)\.i32\(i32 (\S+), i32 (\S+)\)$"
+)
 
 
 class _Kernel:
@@ -47,7 +50,7 @@ class _Kernel:
                 continue
             m = _SMIN.match(line)
             if m:
-                self.defs[m.group(1)] = ("smin", m.group(2).rstrip(","), m.group(3))
+                self.defs[m.group(1)] = (m.group(2), m.group(3).rstrip(","), m.group(4))
         phi = re.search(r"%k0 = phi i32 \[ (\S+), [^\]]+\], \[ (%[\w.]+),", ll)
         assert phi, "no %k0 K loop"
         self.start, iv_next = phi.group(1), phi.group(2)
@@ -68,6 +71,8 @@ class _Kernel:
         a, c = self.value(a, K), self.value(c, K)
         if op == "smin":
             return min(a, c)
+        if op == "smax":
+            return max(a, c)
         if op in ("sdiv", "srem"):
             q = abs(a) // abs(c) * (1 if (a >= 0) == (c >= 0) else -1)
             return q if op == "sdiv" else a - q * c
@@ -127,6 +132,11 @@ class TestTdmKLoopsCoverAPartialLastTile(unittest.TestCase):
                         self.assertGreaterEqual(
                             o + tile_k, K, "the last fill stops short of K"
                         )
+                with self.subTest(depth=depth, K=0):
+                    self.assertEqual(k.trips(0), 0)
+                    self.assertEqual(
+                        k.value(last_origin, 0), 0, "with K = 0 a fill starts before K"
+                    )
 
     def test_early_refill(self):
         """Two tiles per iteration plus two after, over an even tile count."""
@@ -134,6 +144,19 @@ class TestTdmKLoopsCoverAPartialLastTile(unittest.TestCase):
             split_barrier=True, tdm_alternate_issuers=True, tdm_early_refill=True
         )
         self._check(spec, lambda k, K: 2 * k.trips(K) + 2, pad_even=True)
+
+
+class TestTdmKLoopIgnoresTheUnrollExperiment(unittest.TestCase):
+    def test_unroll_env_does_not_replace_the_tdm_loop(self):
+        """``ROCKE_EXP_UNROLL_K`` unrolls a loop with no TENSORcnt waits; a TDM
+        kernel must keep its own loop (and the name that says so)."""
+        from unittest import mock
+
+        spec = _ring_spec(2, split_barrier=True)
+        with mock.patch.dict(os.environ, {"ROCKE_EXP_UNROLL_K": "1024"}):
+            ll = _lower(spec)
+        self.assertIn("s.wait.tensorcnt", ll)
+        self.assertIn("%k0 = phi", ll)
 
 
 if __name__ == "__main__":

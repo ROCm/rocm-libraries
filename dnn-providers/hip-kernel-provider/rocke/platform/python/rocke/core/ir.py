@@ -680,7 +680,8 @@ def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> Tuple[int, int]:
     pad_bytes = int(pad_bytes)
     if pad_bytes <= 0:
         raise ValueError(
-            "encode_tdm_padding needs a positive pad; pad_enable=0 otherwise"
+            "encode_tdm_padding needs a positive pad; pass no pad_interval for an "
+            "unpadded tile"
         )
     if interval_bytes % 4 or pad_bytes % 4:
         raise ValueError(

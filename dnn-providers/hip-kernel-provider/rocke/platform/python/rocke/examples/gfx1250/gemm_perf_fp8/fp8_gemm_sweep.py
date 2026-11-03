@@ -441,11 +441,10 @@ def resolve_traits(
     return pin, swept
 
 
-#: Default margin for :func:`select_finalists`, in percent. 12 is the measured
-#: spread of the stage-2 gain across geometries on the square sweep
-#: (1.022x-1.143x), i.e. how far the trait stage can reorder what stage 1
-#: ranked. Anything closer to the cut than this is inside the noise of the
-#: ranking that produced it.
+#: Default margin for :func:`select_finalists`, in percent: about how far the
+#: trait stage can reorder what stage 1 ranked (see the case study). Anything
+#: closer to the cut than this is inside the noise of the ranking that
+#: produced it.
 DEFAULT_FINALIST_MARGIN_PCT = 12.0
 
 
@@ -465,10 +464,9 @@ def select_finalists(
 
     A fixed top-N cut assumes stage 1's ranking is stage 2's ranking. It is
     not: stage 1 times every geometry under one pinned trait config, and the
-    gain from each geometry's *own* best traits varies -- measured 1.022x to
-    1.143x across the square sweep's finalists, reordering 13 of 20. The cut
-    itself sat at a 0.9% margin between rank 20 and rank 21, far inside that
-    spread, so which geometries survived was close to arbitrary.
+    gain from each geometry's *own* best traits varies enough to reorder the
+    finalists, while the cut can sit at a much smaller margin, so which
+    geometries survive a fixed cut is close to arbitrary.
 
     Keeping everything within a margin of rank-N makes the cost adaptive: a
     well-separated boundary keeps exactly N, a crowded one keeps more --
@@ -659,9 +657,7 @@ def warn_if_sweep_is_inert(
     return warnings
 
 
-def warn_if_sweep_changes_validity(
-    config: Dict[str, Any], finalists: Sequence[UniversalGemmSpec]
-) -> List[str]:
+def warn_if_sweep_changes_validity(config: Dict[str, Any]) -> List[str]:
     """Flag swept traits that change which *geometries* are admissible.
 
     Stage 1 ranks geometry under the screening pin, so a trait that alters
@@ -1094,7 +1090,9 @@ def verify_record(
         )
         actual = _f32_from_bf16(np, problem.c_host)
         error = np.abs(actual - problem.reference)
-        incorrect = int(np.count_nonzero(error > 0.0))
+        # Not ``error > 0.0``: that is False for NaN, so a NaN output would count
+        # as correct.
+        incorrect = int(np.count_nonzero(~(actual == problem.reference)))
         result.update(
             {
                 "verified": incorrect == 0,
@@ -1657,7 +1655,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "failed to build, faulted, or produced a wrong result. Check "
             "tile.csv before widening the search."
         )
-    sweep_warnings = warn_if_sweep_changes_validity(config, finalists)
+    sweep_warnings = warn_if_sweep_changes_validity(config)
     sweep_warnings += warn_if_sweep_is_inert(config, finalists)
     for text in sweep_warnings:
         print(f"  WARNING: {text}", flush=True)

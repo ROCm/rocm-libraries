@@ -43,9 +43,10 @@ _ARMS = {
 
 # Rejected configurations, one per gate; each must fail for the same reason in
 # both engines (an admitted one waits on a barrier nothing signals: a hang).
+# Split barrier with ``wmma_v1`` is Python-only: the C++ engine rejects every
+# ``wmma_v1`` spec on its pipeline (test_gemm_split_barrier covers Python).
 _REJECTS = {
     "split, depth 1": dict(split_barrier=True, tdm_depth=1),
-    "split, wmma_v1": dict(split_barrier=True, pipeline="wmma_v1"),
     "alternate, depth 3": dict(tdm_alternate_issuers=True, tdm_depth=3),
     "early refill, no alternate": dict(tdm_early_refill=True, split_barrier=True),
     "early refill, no split": dict(tdm_early_refill=True, tdm_alternate_issuers=True),
@@ -103,6 +104,14 @@ class TestGemmTdmTraitsKernelName(unittest.TestCase):
         off = replace(spec, trait=replace(spec.trait, tdm=False))
         self.assertNotIn("tdm", off.kernel_name().replace(spec.name, ""))
 
+    def test_c_dtype_is_named_only_when_it_differs_from_a(self):
+        spec = _spec()  # fp8 A/B, bf16 C
+        fp16_c = replace(spec, data=replace(spec.data, dtype_c="fp16"))
+        self.assertTrue(spec.kernel_name().endswith("_cbf16"), spec.kernel_name())
+        self.assertNotEqual(spec.kernel_name(), fp16_c.kernel_name())
+        bf16 = replace(spec, data=replace(spec.data, dtype_a="bf16", dtype_b="bf16"))
+        self.assertNotIn("_cbf16", bf16.kernel_name())
+
 
 class TestGemmTdmTraitsCppEngine(unittest.TestCase):
     @classmethod
@@ -128,6 +137,10 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
                 lower_universal_gemm(
                     _spec(**kw), arch=ARCH, backend="both", want_ir=True
                 )
+        with self.subTest("fp16 C"):  # the C-dtype tag in the kernel name
+            spec = _spec()
+            spec = replace(spec, data=replace(spec.data, dtype_c="fp16"))
+            lower_universal_gemm(spec, arch=ARCH, backend="both", want_ir=True)
 
     def test_both_engines_apply_the_same_storage_rule(self):
         """One fp8/bf8 storage rule per engine: same verdict and same reason."""
@@ -157,6 +170,34 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
                 self.assertEqual(tuple(cpp), tuple(py))
                 if not admitted:
                     self.assertFalse(py[0], f"{label} admitted")
+
+    def test_both_engines_bound_ab_load_elem_bytes(self):
+        """Out-of-range widths, and any width under TDM, fail alike."""
+        import rocke_engine
+
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        base = _spec()  # TDM
+        no_tdm = replace(base, trait=replace(base.trait, tdm=False))
+        cases = {
+            "0": (no_tdm, 0),
+            "-1": (no_tdm, -1),
+            "32": (no_tdm, 32),
+            "2 with tdm": (base, 2),
+        }
+        for label, (spec0, width) in cases.items():
+            with self.subTest(label):
+                spec = replace(
+                    spec0, trait=replace(spec0.trait, ab_load_elem_bytes=width)
+                )
+                py = is_valid_spec(spec, arch=ARCH)
+                cpp = rocke_engine.gemm_is_valid(
+                    universal_gemm_spec_to_dict(spec), ARCH
+                )
+                self.assertFalse(py[0], label)
+                self.assertIn("ab_load_elem_bytes", py[1])
+                self.assertEqual(tuple(cpp), tuple(py))
 
     def test_both_engines_reject_for_the_same_reason(self):
         import rocke_engine

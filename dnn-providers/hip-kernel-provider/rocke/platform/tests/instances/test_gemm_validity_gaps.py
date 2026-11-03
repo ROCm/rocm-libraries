@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Regression tests for three gaps between our validator and upstream's.
 
-All three were found by diffing ``is_valid_spec`` against upstream PR 12658
-rather than by chasing a symptom, and all three live in the validator rather
+All three were found by diffing ``is_valid_spec`` against the reference
+validator this port follows rather than by chasing a symptom, and all three live in the validator rather
 than the emitter -- which is why the byte-identity gate could not see them and
 why every other test in this directory missed them.
 
@@ -12,7 +12,8 @@ why every other test in this directory missed them.
    pool, so peak usage is ``max(AB, C)``. A 256x256 C tile is 128 KiB, enough
    to push a geometry that runs fine past the cap -- it silently removed the
    deepest tiles from every cshuffle sweep, and a perf conclusion was drawn
-   from the resulting (smaller) champion before anyone noticed.
+   from the resulting (smaller) champion before anyone noticed. The gate
+   counts ``max(AB, C)`` on gfx1250 only, where it has run on silicon.
 
 2. **``lds_swizzle`` was admitted on the WMMA path**, where the store side
    permutes the LDS column and ``_emit_wmma_phase`` never applies the inverse.
