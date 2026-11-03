@@ -393,7 +393,7 @@ class TensorView:
         coalesce neighbouring f16 stores.
         """
         if self.addr_space == "lds":
-            if self.dtype.name in ("f16", "bf16"):
+            if self.dtype.name in ("f16", "bf16", "f64"):
                 b.smem_store_vN(self.base, list(indices), value, 1)
                 return
             if self.dtype.name == "f32":

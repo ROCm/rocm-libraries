@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -42,30 +43,45 @@ struct ScoredKernel
 namespace detail
 {
 
+/// The root of the shared-workspace tokens a graph match publishes (RFC 0021 §6): `ws.<name>`.
+inline constexpr std::string_view WORKSPACE_TOKEN_ROOT = "ws.";
+
+/// True when @p name, after an optional leading `$`, is under the `ws.` root that names the
+/// shared-workspace tokens (RFC 0021 §6).
+inline bool isWorkspaceToken(std::string_view name)
+{
+    if(!name.empty() && name.front() == '$')
+    {
+        name.remove_prefix(1);
+    }
+    return name.substr(0, WORKSPACE_TOKEN_ROOT.size()) == WORKSPACE_TOKEN_ROOT;
+}
+
 /// `priority` descending, then id ascending (RFC 0019 §5 step 5). Never discovery order, which
 /// varies by filesystem.
-inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefinition>& entries)
+inline std::vector<const KernelDefinition*>
+    declaredOrder(const std::vector<const KernelDefinition*>& entries)
 {
-    std::vector<KernelDefinition> ordered(entries);
+    std::vector<const KernelDefinition*> ordered(entries);
     std::stable_sort(
-        ordered.begin(), ordered.end(), [](const KernelDefinition& a, const KernelDefinition& b) {
-            if(a.priority != b.priority)
+        ordered.begin(), ordered.end(), [](const KernelDefinition* a, const KernelDefinition* b) {
+            if(a->priority != b->priority)
             {
-                return a.priority > b.priority;
+                return a->priority > b->priority;
             }
-            return a.kernelId < b.kernelId;
+            return a->kernelId < b->kernelId;
         });
     return ordered;
 }
 
 /// Declared order as (id, score) pairs, scoring 0 for "no measurement" (RFC 0019 §5 step 4).
-inline std::vector<ScoredKernel> asScored(const std::vector<KernelDefinition>& ordered)
+inline std::vector<ScoredKernel> asScored(const std::vector<const KernelDefinition*>& ordered)
 {
     std::vector<ScoredKernel> scored;
     scored.reserve(ordered.size());
-    for(const auto& entry : ordered)
+    for(const KernelDefinition* entry : ordered)
     {
-        scored.push_back({entry.kernelId, 0.0});
+        scored.push_back({entry->kernelId, 0.0});
     }
     return scored;
 }
@@ -143,15 +159,15 @@ public:
         scored.reserve(catalog.entries.size());
         try
         {
-            for(const auto& entry : catalog.entries)
+            for(const KernelDefinition* entry : catalog.entries)
             {
                 // A non-finite score sorts last and is reported as 0 (§5 step 4). The keys stay
                 // separate because NaN in the comparator is undefined behaviour.
-                const double raw = score(context, catalog.bound, entry);
+                const double raw = score(context, catalog.bound, *entry);
                 const bool usable = std::isfinite(raw);
                 scored.push_back({usable ? raw : -std::numeric_limits<double>::infinity(),
                                   usable ? raw : 0.0,
-                                  &entry});
+                                  entry});
             }
         }
         catch(const std::exception& e)
@@ -222,24 +238,25 @@ public:
 
     /// The same order as rankScored(), as whole kernels. Non-virtual so the order is decided in
     /// one place.
-    std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
+    std::vector<const KernelDefinition*> rank(const Catalog& catalog,
+                                              const MatchContext& context) const
     {
         const auto scored = rankScored(catalog, context);
 
         std::map<DescriptorId, const KernelDefinition*> byId;
-        for(const auto& entry : catalog.entries)
+        for(const KernelDefinition* entry : catalog.entries)
         {
-            byId.emplace(entry.kernelId, &entry);
+            byId.emplace(entry->kernelId, entry);
         }
 
-        std::vector<KernelDefinition> ordered;
+        std::vector<const KernelDefinition*> ordered;
         ordered.reserve(scored.size());
         // Named member, not a structured binding, so adding ScoredKernel fields needs no edit.
         for(const auto& candidate : scored)
         {
             if(const auto found = byId.find(candidate.kernelId); found != byId.end())
             {
-                ordered.push_back(*found->second);
+                ordered.push_back(found->second);
             }
         }
         return ordered;

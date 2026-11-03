@@ -2,8 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 // Regression tests for a deterministic-mode search hang in the grouped Bwd/Wrw CK xdlops
-// solvers: miopenFindConvolutionBackwardDataAlgorithm() (and the analogous BackwardWeights
-// find) hung on MI300X when TF32 + deterministic + exhaustive find coincided with an empty
+// solvers (2D grouped Bwd/Wrw and 3D grouped Wrw, which share the same SetNextValue()
+// enumeration logic): miopenFindConvolutionBackwardDataAlgorithm() (and the analogous
+// BackwardWeights find) hung on MI300X when TF32 + deterministic + exhaustive find coincided
+// with an empty
 // perf-db cache. Root cause was an inverted return-value polarity bug in the `is_deterministic`
 // branch of SetNextValue(): NextLinear() returns true on wraparound (exhausted) / false on
 // normal advance, but the old code treated a normal advance (`!NextLinear(...)` true) as
@@ -27,9 +29,10 @@
 
 namespace {
 
-using Problem   = miopen::conv::ProblemDescription;
-using BwdConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupBwdXdlops;
-using WrwConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupWrwXdlops;
+using Problem     = miopen::conv::ProblemDescription;
+using BwdConfig   = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupBwdXdlops;
+using WrwConfig   = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupWrwXdlops;
+using Wrw3DConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupWrwXdlops;
 
 // Builds a minimal grouped-conv ProblemDescription whose only purpose is to carry the
 // "deterministic" convolution attribute through to SetNextValue(); the tensor shapes are
@@ -46,6 +49,24 @@ Problem MakeProblem(miopen::conv::Direction direction, bool deterministic)
     const auto y_desc = conv_desc.GetForwardOutputTensor(x_desc, w_desc, miopenFloat);
 
     return Problem(y_desc, w_desc, x_desc, conv_desc, direction);
+}
+
+// 3D variant: the same deterministic-enumeration fix covers the 3D grouped Wrw solver, whose
+// PerformanceConfig is a distinct type. Geometry is still irrelevant (valid_kernels is injected
+// directly), so this only needs to carry the deterministic attribute on a 3D Wrw problem.
+Problem MakeProblem3DWrw(bool deterministic)
+{
+    group_conv::GroupConvTestConfig<3u> conv{
+        1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}};
+
+    const auto x_desc = miopen::TensorDescriptor(miopenFloat, miopenTensorNDHWC, conv.GetInput());
+    const auto w_desc = miopen::TensorDescriptor(miopenFloat, miopenTensorNDHWC, conv.GetWeights());
+    auto conv_desc    = conv.GetConv();
+    if(deterministic)
+        conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
+    const auto y_desc = conv_desc.GetForwardOutputTensor(x_desc, w_desc, miopenFloat);
+
+    return Problem(y_desc, w_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardWeights);
 }
 
 // Hang regression: with exactly one valid kernel, deterministic SetNextValue() must return
@@ -159,4 +180,22 @@ TEST(CPU_PerfConfigGroupWrwNonDeterministic_NONE, VisitsMultipleIndicesAndSplitK
     const auto problem =
         MakeProblem(miopen::conv::Direction::BackwardWeights, /*deterministic=*/false);
     CheckNonDeterministicVisitsMultipleValues<WrwConfig>(problem);
+}
+
+TEST(CPU_PerfConfigGroup3DWrwDeterministic_NONE, HangRegressionSingleKernel)
+{
+    const auto problem = MakeProblem3DWrw(/*deterministic=*/true);
+    CheckHangRegressionSingleKernel<Wrw3DConfig>(problem);
+}
+
+TEST(CPU_PerfConfigGroup3DWrwDeterministic_NONE, UnderTuningThreeKernels)
+{
+    const auto problem = MakeProblem3DWrw(/*deterministic=*/true);
+    CheckUnderTuningThreeKernels<Wrw3DConfig>(problem);
+}
+
+TEST(CPU_PerfConfigGroup3DWrwNonDeterministic_NONE, VisitsMultipleIndicesAndSplitKs)
+{
+    const auto problem = MakeProblem3DWrw(/*deterministic=*/false);
+    CheckNonDeterministicVisitsMultipleValues<Wrw3DConfig>(problem);
 }

@@ -94,6 +94,14 @@ namespace hiptensor
         {
             mGcnArch = hipGcnArch_t::GFX1153;
         }
+        else if(deviceName.find("gfx1170") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1170;
+        }
+        else if(deviceName.find("gfx1171") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1171;
+        }
         else if(deviceName.find("gfx1200") != std::string::npos)
         {
             mGcnArch = hipGcnArch_t::GFX1200;
@@ -173,6 +181,8 @@ namespace hiptensor
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1151
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1152
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1153
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1170
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1171
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1200
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1201
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1250);

@@ -4,7 +4,7 @@
 ################################################################################
 # P4 designed config for gfx1250 TensorDataMover characterization.
 #
-# Target: Tensile/Components/TensorDataMover.py (miss=158 before this test).
+# Target: tensilelite/Components/TensorDataMover.py (miss=158 before this test).
 #
 # The TensorDataMoverLoad class has two global-address calculation methods:
 #   - calculateStartAddr         : called when MIWaveGroup prod == 1 (non-wave-sep)

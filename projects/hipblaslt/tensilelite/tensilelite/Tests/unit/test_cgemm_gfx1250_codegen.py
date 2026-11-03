@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 
 from pathlib import Path
 
-from Tensile import Tensile
+from tensilelite import Tensile
 
 # Reuse the common CGEMM gfx1250 config (small enough to double as codegen input).
 _CONFIG = (Path(__file__).parent / ".." / "common" / "gemm" / "gfx12"

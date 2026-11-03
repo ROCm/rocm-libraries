@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
@@ -37,6 +38,21 @@ struct RankedEntry
 /// fallback.
 using WinnerRecord = std::vector<RankedEntry>;
 
+/// One slot's chosen kernel within a ProgramRecord.
+struct ProgramPick
+{
+    std::string slot;
+    DescriptorId kernelId{};
+};
+
+/// The measured winning combination of per-slot kernels for a whole program. `picks`
+/// are in slot order; `timeMs` is diagnostic only, like `RankedEntry::timeMs`.
+struct ProgramRecord
+{
+    std::vector<ProgramPick> picks;
+    double timeMs = 0.0;
+};
+
 /// Graph content plus device. Knobs are absent: a knob filter narrows which candidates
 /// a run considers, never what the graph computes, so runs with different filters share
 /// a record, which is why the coverage gate exists.
@@ -44,10 +60,14 @@ struct WinnerKey
 {
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
     DeviceKey device;
+    /// Slot name for a per-slot record; empty for the unslotted (whole-graph) record. The
+    /// explicit initializer avoids -Wmissing-field-initializers on WinnerKey{graph, device}.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string slot{};
 
     bool operator==(const WinnerKey& other) const
     {
-        return device == other.device && graph == other.graph;
+        return device == other.device && graph == other.graph && slot == other.slot;
     }
 
     bool operator!=(const WinnerKey& other) const
@@ -63,8 +83,15 @@ struct WinnerKeyHash
         const size_t graphHash
             = std::hash<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey>{}(key.graph);
         const size_t deviceHash = std::hash<DeviceKey>{}(key.device);
-        return graphHash
-               ^ (deviceHash + 0x9e3779b97f4a7c15ULL + (graphHash << 6) + (graphHash >> 2));
+        const size_t base
+            = graphHash
+              ^ (deviceHash + 0x9e3779b97f4a7c15ULL + (graphHash << 6) + (graphHash >> 2));
+        if(key.slot.empty())
+        {
+            return base;
+        }
+        const size_t slotHash = std::hash<std::string>{}(key.slot);
+        return base ^ (slotHash + 0x9e3779b97f4a7c15ULL + (base << 6) + (base >> 2));
     }
 };
 
@@ -82,11 +109,12 @@ enum class WinnerWriteCause
 /// Does @p record carry a measurement for every kernel in @p kernels? One-directional:
 /// entries in @p record absent from @p kernels do not fail coverage. Production
 /// decisions go through `orderIfFullyCovered` below, not this directly.
-inline bool recordCovers(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
+inline bool recordCovers(const WinnerRecord& record,
+                         const std::vector<const KernelDefinition*>& kernels)
 {
-    return std::all_of(kernels.begin(), kernels.end(), [&record](const KernelDefinition& kernel) {
-        return std::any_of(record.begin(), record.end(), [&kernel](const RankedEntry& entry) {
-            return entry.kernelId == kernel.kernelId;
+    return std::all_of(kernels.begin(), kernels.end(), [&record](const KernelDefinition* kernel) {
+        return std::any_of(record.begin(), record.end(), [kernel](const RankedEntry& entry) {
+            return entry.kernelId == kernel->kernelId;
         });
     });
 }
@@ -94,17 +122,17 @@ inline bool recordCovers(const WinnerRecord& record, const std::vector<KernelDef
 /// Reorders @p kernels into @p record's ranked order, dropping any kernel the record
 /// does not carry and any entry whose `packId`/`dispatchId` no longer agree (distinct
 /// from `recordCovers`'s coverage check). An empty result means the caller falls back.
-inline std::vector<KernelDefinition> orderByRecord(const WinnerRecord& record,
-                                                   const std::vector<KernelDefinition>& kernels)
+inline std::vector<const KernelDefinition*>
+    orderByRecord(const WinnerRecord& record, const std::vector<const KernelDefinition*>& kernels)
 {
-    std::vector<KernelDefinition> ordered;
+    std::vector<const KernelDefinition*> ordered;
     ordered.reserve(kernels.size());
     for(const auto& entry : record)
     {
         const auto match = std::find_if(
-            kernels.begin(), kernels.end(), [&entry](const KernelDefinition& kernel) {
-                return kernel.kernelId == entry.kernelId && kernel.packId == entry.packId
-                       && kernel.dispatchId == entry.dispatchId;
+            kernels.begin(), kernels.end(), [&entry](const KernelDefinition* kernel) {
+                return kernel->kernelId == entry.kernelId && kernel->packId == entry.packId
+                       && kernel->dispatchId == entry.dispatchId;
             });
         if(match != kernels.end())
         {
@@ -119,8 +147,9 @@ inline std::vector<KernelDefinition> orderByRecord(const WinnerRecord& record,
 /// `recordCovers` matches by `kernelId` alone, `orderByRecord` requires the full
 /// `(kernelId, packId, dispatchId)` triple -- so an entry covered by id but whose pack
 /// has since moved declines the whole record rather than serving what still resolves.
-inline std::optional<std::vector<KernelDefinition>>
-    orderIfFullyCovered(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
+inline std::optional<std::vector<const KernelDefinition*>>
+    orderIfFullyCovered(const WinnerRecord& record,
+                        const std::vector<const KernelDefinition*>& kernels)
 {
     if(!recordCovers(record, kernels))
     {

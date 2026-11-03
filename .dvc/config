@@ -10,3 +10,6 @@
 ['remote "ingestor"']
     url = s3://therock-dvc/rocm-libraries/hipdnn/ingestor
     allow_anonymous_login = true
+['remote "sparse-matrices"']
+    url = s3://therock-dvc/rocm-libraries/sparse/matrices
+    allow_anonymous_login = true

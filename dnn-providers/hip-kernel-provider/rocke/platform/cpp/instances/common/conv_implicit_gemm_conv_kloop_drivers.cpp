@@ -168,10 +168,11 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
     /* Start at the slice base, not at a bare zero: wgrad hands the drivers a
      * runtime k_lo and only the forward conv leaves it NULL. Reading ctx->c0
      * here worked while wgrad aliased the two, and silently restarted every
-     * split-K slice from 0 once they came apart. */
+     * split-K slice from 0 once they came apart. The forward split-K binary
+     * also ends at its slice: kloop_k_hi (wgrad sets it to c_K_gemm). */
     for_op = rocke_b_scf_for_iter(b,
                                   (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0,
-                                  ctx->c_K_gemm,
+                                  (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm,
                                   ctx->c_block_k,
                                   iter_args,
                                   num_accs,
@@ -350,14 +351,18 @@ static void wavelet_fetch(rocke_conv_build_ctx_t* ctx,
                                             ctx->a_rsrc,
                                             NULL,
                                             a_staged);
-    rocke_coalesced_tile_loader_load_global(b,
-                                            &ctx->b_wavelet_loader,
-                                            ctx->wavelet_load_tid,
-                                            rocke_conv_b_descriptor,
-                                            ctx,
-                                            ctx->b_rsrc,
-                                            NULL,
-                                            b_staged);
+    /* The merged B descriptor under group_merge, as the sync path: Python
+     * swaps the closure once, so every consumer, the wavelet fetch included,
+     * loads through it. */
+    rocke_coalesced_tile_loader_load_global(
+        b,
+        &ctx->b_wavelet_loader,
+        ctx->wavelet_load_tid,
+        (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor,
+        ctx,
+        ctx->b_rsrc,
+        NULL,
+        b_staged);
 }
 
 /* wavelet_store: write staged VGPRs to LDS.

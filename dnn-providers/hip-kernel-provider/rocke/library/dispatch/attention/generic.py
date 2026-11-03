@@ -4,17 +4,27 @@
 """Multi-arch attention candidates: the two unified paths and D256 decode.
 
 This module holds the candidates whose ``Capability`` names more than one arch.
-That is a different claim from "portable": each one still lists its arches
-explicitly, because there is no family wildcard (section 8.1, step 7). A new
-target inherits nothing here until someone opts it in.
+That is a different claim from "portable": D256 decode lists its arches
+explicitly, because there is no family wildcard (section 8.1, step 7), and a new
+target inherits nothing from it until someone opts it in. Naming a generic target
+is not a wildcard either: ``listed_arch_for`` admits the processors whose rows
+point at it, which are the generic's target under their own names. The two
+unified paths are the documented exception and declare every target that holds
+facts of its own (see ``_UNIFIED_CAPABILITY``).
 """
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Tuple
 
-from kernels.common.attention_unified import supports_native_unified_attention
-from rocke.core.arch import known_arches
+from kernels.common.attention_unified import (
+    select_auto_path,
+    supports_native_unified_attention,
+    supports_native_unified_attention_3d_tiled,
+    supports_native_unified_attention_tiled,
+)
+from rocke.core.arch import arches_with_own_facts
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -46,8 +56,11 @@ from .common import (
 # are therefore the second documented exception to wave-size consistency,
 # alongside norm2d. Narrowing them to the wave64 MFMA targets would drop the
 # gfx1250 and RDNA coverage that the scalar and WMMA backends actually provide.
+# A processor whose row points at a generic target is served through that
+# generic's entry (listed_arch_for), so only targets with facts of their own are
+# listed.
 _UNIFIED_CAPABILITY = Capability(
-    arches=known_arches(),
+    arches=arches_with_own_facts(),
     dtypes=UNIFIED_DTYPES,
     shapes=(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
@@ -58,6 +71,11 @@ _UNIFIED_CAPABILITY = Capability(
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
     # the scalar kernel elsewhere (tiled gates reject it off gfx950).
     supports_features=ATTENTION_FEATURES,
+)
+# Both unified paths write the optional LSE output; each path's own gate (in
+# ``support`` below) still refuses it on arches/features that cannot.
+_UNIFIED_LSE_CAPABILITY = dataclasses.replace(
+    _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
 
 
@@ -74,13 +92,36 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=req.arch)
+        # The scalar gate is the coverage check; it refuses LSE (the scalar
+        # kernel writes none), so ask it about the LSE-off problem and let the
+        # path's own gate rule on LSE below.
+        coverage = (
+            dataclasses.replace(problem, emit_lse=False)
+            if problem.emit_lse
+            else problem
+        )
+        ok, why = supports_native_unified_attention(coverage, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != path:
+        # Split-KV also takes the LSE requests that ``select_path(arch)`` sends
+        # to tiled 2D but whose tiled 2D gate declines, as auto does
+        # (``select_auto_path``); the tiled 2D candidate keeps its gate's reason.
+        if problem.select_path(req.arch) != path and not (
+            path == "3d" and select_auto_path(problem, req.arch) == "3d"
+        ):
             return False, (
-                f"problem routes to {problem.select_path()!r} path, not {path!r}"
+                f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
+        if problem.emit_lse:
+            # The path's own gate owns which arches and features can write LSE.
+            gate = (
+                supports_native_unified_attention_3d_tiled
+                if path == "3d"
+                else supports_native_unified_attention_tiled
+            )
+            ok, why = gate(problem, arch=req.arch)
+            if not ok:
+                return False, why
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
@@ -101,6 +142,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             causal_top_left=problem.causal_top_left,
             right_bound=problem.right_bound,
             sliding_window=problem.sliding_window,
+            emit_lse=problem.emit_lse,
         )
 
     candidate = KernelCandidate(
@@ -110,7 +152,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
-        capability=_UNIFIED_CAPABILITY,
+        capability=_UNIFIED_LSE_CAPABILITY,
         _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
@@ -150,9 +192,9 @@ def _make_d256_decode_candidate() -> KernelCandidate:
             return False, why
         if not _d256_decode_cohort(problem):
             return False, "problem is not in the D256 bf16 decode cohort"
-        if problem.select_path() != "3d":
+        if problem.select_path(req.arch) != "3d":
             return False, (
-                f"problem routes to {problem.select_path()!r} path, not '3d'"
+                f"problem routes to {problem.select_path(req.arch)!r} path, not '3d'"
             )
         return True, "ok"
 
