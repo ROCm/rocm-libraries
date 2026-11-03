@@ -469,6 +469,12 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
             return "poly_view is a plain stride-1 1-D loop"
         if not spec.ck or p.cpg % spec.ck or (p.PAD_W * p.cpg) % spec.ck:
             return f"a chunk must lie in one input pixel (cpg {p.cpg}, ck {spec.ck})"
+        if p.PAD_W and spec.ck > 8 * spec.wave_size:
+            # One wave zeroes a leading-pad chunk's view pixel, 8 channels a lane.
+            return (
+                f"a padded poly_view zeroes at most {8 * spec.wave_size} channels "
+                f"of a chunk (ck {spec.ck})"
+            )
         if spec.tile_h != 1:
             return "poly_view tiles one row (tile_w * tile_n == block_p)"
         p = spec.vp

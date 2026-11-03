@@ -20,7 +20,11 @@
  *   - a per-axis padding given to the WMMA convolutions that offset
  *     columns by PAD, which must refuse it; the direct and small-K WMMA
  *     forwards offset columns by PAD_W and must take it (pad_w below -1
- *     is refused everywhere).
+ *     is refused everywhere);
+ *   - the knob sets of the direct WMMA forward whose kernel would read wrong
+ *     data, which its validator must refuse with Python's reason (and the
+ *     neighbouring sets it must keep): a padded polyphase view whose chunk is
+ *     wider than one wave zeroes.
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -282,6 +286,66 @@ static void test_wmma_kernels_refuse_per_axis_padding(void)
     check_wmma_per_axis_padding("fwd_smallk_wmma", smallk, rocke_fwd_smallk_wmma_is_valid_spec);
 }
 
+/* `spec` must be refused with exactly `want` (Python's reason), or accepted
+ * when `want` is NULL. */
+static void
+    expect_fwd_wmma(const char* what, const rocke_direct_fwd_wmma_spec_t* spec, const char* want)
+{
+    char reason[ERR_CAP];
+    reason[0] = '\0';
+    const bool ok = rocke_direct_fwd_wmma_is_valid_spec(spec, "gfx1250", reason, sizeof(reason));
+    if(want == NULL)
+        CHECK(ok, "direct_fwd_wmma refused %s: %s", what, reason);
+    else
+    {
+        CHECK(!ok, "direct_fwd_wmma accepted %s", what);
+        CHECK(strcmp(reason, want) == 0, "direct_fwd_wmma %s reason: %s", what, reason);
+    }
+}
+
+/* A 1-D poly_view spec on one row (tile_w == block_p), as Python's _PV1. */
+static rocke_direct_fwd_wmma_spec_t
+    poly_view_spec(int W, int C, int K, int KW, int stride, int pad_w)
+{
+    rocke_direct_fwd_wmma_spec_t s = rocke_direct_fwd_wmma_spec_default();
+    s.problem = dense_problem(1, W, C, K);
+    s.problem.KH = 1;
+    s.problem.KW = KW;
+    s.problem.PAD = 0;
+    s.problem.pad_w = pad_w;
+    s.problem.stride = stride;
+    s.poly_view = true;
+    s.waves_k = 1;
+    s.waves_p = 4;
+    s.tiles_k = 1;
+    s.tiles_p = 2;
+    s.tile_w = 128;
+    s.stages = 2;
+    return s;
+}
+
+/* A leading-pad chunk's first view pixel is zeroed by one wave, 8 channels a
+ * lane: with column padding, ck above 256 is refused. */
+static void test_fwd_wmma_padded_poly_view_chunk(void)
+{
+    rocke_direct_fwd_wmma_spec_t s = poly_view_spec(600, 288, 64, 4, 2, 1);
+    s.ck = 288;
+    expect_fwd_wmma("ck 288, pad_w 1",
+                    &s,
+                    "a padded poly_view zeroes at most 256 channels of a chunk (ck 288)");
+    s = poly_view_spec(600, 512, 64, 4, 2, 1);
+    s.ck = 512;
+    expect_fwd_wmma("ck 512, pad_w 1",
+                    &s,
+                    "a padded poly_view zeroes at most 256 channels of a chunk (ck 512)");
+    s = poly_view_spec(600, 288, 64, 4, 2, 0);
+    s.ck = 288;
+    expect_fwd_wmma("ck 288, pad_w 0", &s, NULL);
+    s = poly_view_spec(600, 256, 64, 4, 2, 1);
+    s.ck = 256;
+    expect_fwd_wmma("ck 256, pad_w 1", &s, NULL);
+}
+
 static rocke_direct_conv_problem_t stem_problem(int KH, int stride, int PAD)
 {
     rocke_direct_conv_problem_t p = dense_problem(32, 48, 3, 64);
@@ -318,6 +382,7 @@ int main(void)
     test_tiled_dgrad_refuses_cpl();
     test_wmma_kernels_refuse_per_axis_padding();
     test_stem_wmma_kernels_refuse_per_axis_padding();
+    test_fwd_wmma_padded_poly_view_chunk();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d check(s) failed\n", g_failures);

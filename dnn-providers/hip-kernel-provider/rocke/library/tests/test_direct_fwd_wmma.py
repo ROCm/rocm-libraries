@@ -40,6 +40,10 @@ from kernels.common.conv_direct_grouped import DirectConvProblem
 GPU_ARCH = get_device_arch(0)
 
 
+# A one-row tiling a 1-D poly_view takes (tile_w == block_p).
+_PV1 = dict(waves_k=1, waves_p=4, tiles_k=1, tiles_p=2, tile_w=128, stages=2)
+
+
 def _problem(
     N=2,
     H=13,
@@ -136,6 +140,16 @@ class TestFwdWmmaSpec(unittest.TestCase):
                 dict(H=1, W=512, KH=1, KW=8, PAD=0, pad_w=1, stride=4),
                 dict(poly_view=True),
                 "S / 2",
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2, C=288, K=64),
+                dict(poly_view=True, ck=288, **_PV1),
+                "at most 256 channels",
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2, C=512, K=64),
+                dict(poly_view=True, ck=512, **_PV1),
+                "at most 256 channels",
             ),
             (
                 dict(C=128, K=128, groups=2, KH=2, PAD=0, stride=2),
@@ -274,6 +288,18 @@ class TestFwdWmmaSpec(unittest.TestCase):
             (
                 dict(H=1, W=512, KH=1, KW=8, PAD=0, pad_w=1, stride=4),
                 dict(poly_view=True),
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2, C=288, K=64),
+                dict(poly_view=True, ck=288, **_PV1),
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=0, stride=2, C=288, K=64),
+                dict(poly_view=True, ck=288, **_PV1),
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2, C=256, K=64),
+                dict(poly_view=True, ck=256, **_PV1),
             ),
             (
                 dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2),
@@ -421,6 +447,29 @@ class TestFwdWmmaSpec(unittest.TestCase):
         )
         self.assertIsNotNone(spec, why)
         self.assertEqual(spec.problem.PAD_W, 9)
+
+    def test_padded_poly_view_chunk_fits_one_zeroing_wave(self):
+        """A leading-pad chunk's first view pixel is zeroed by one wave, 8
+        channels a lane: with column padding, ck above 256 would leave the
+        rest of the chunk stale, so it is refused; ck = 256, or any ck
+        without column padding, passes this rule."""
+        for C, ck, pad_w, refused in (
+            (288, 288, 1, True),
+            (512, 512, 1, True),
+            (256, 256, 1, False),
+            (288, 288, 0, False),
+        ):
+            p = _problem(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=pad_w, stride=2, C=C)
+            why = fwd_wmma_reason(
+                DirectFwdWmmaSpec(problem=p, poly_view=True, ck=ck, **_PV1)
+            )
+            if refused:
+                self.assertEqual(
+                    why,
+                    f"a padded poly_view zeroes at most 256 channels of a chunk (ck {ck})",
+                )
+            else:
+                self.assertIsNone(why, (C, ck, pad_w))
 
     def test_shipped_strided_views_refuse_grouped_patches(self):
         """A 2x2 stride-2 patch run is KW * cpg contiguous channels only when

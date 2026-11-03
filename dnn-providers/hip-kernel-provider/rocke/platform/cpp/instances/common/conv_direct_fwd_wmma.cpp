@@ -452,6 +452,11 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
             FWW_FAIL("poly_view is a plain stride-1 1-D loop");
         if(spec->ck == 0 || p->cpg % spec->ck || (pad_w * p->cpg) % spec->ck)
             FWW_FAIL("a chunk must lie in one input pixel (cpg %d, ck %d)", p->cpg, spec->ck);
+        /* One wave zeroes a leading-pad chunk's view pixel, 8 channels a lane. */
+        if(pad_w != 0 && spec->ck > 8 * spec->wave_size)
+            FWW_FAIL("a padded poly_view zeroes at most %d channels of a chunk (ck %d)",
+                     8 * spec->wave_size,
+                     spec->ck);
         if(rocke_direct_fwd_wmma_tile_h(spec) != 1)
             FWW_FAIL("poly_view tiles one row (tile_w * tile_n == block_p)");
         pv_view = fww_vp(spec);
