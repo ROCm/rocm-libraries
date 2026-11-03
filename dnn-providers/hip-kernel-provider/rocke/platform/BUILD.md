@@ -116,7 +116,10 @@ index. Discovery does not import torch or initialize the SDK. `ROCM_PATH` and
 `ROCM_HOME` do not select COMGR; a failed selected compiler does not fall back
 to a system or torch compiler.
 
-HIP retains its independent runtime discovery and `ROCKE_HIP_LIB` override.
+HIP and compiler handles share one retained runtime owner. HIP honors
+`ROCKE_HIP_LIB` and already-imported framework ownership, otherwise preferring
+the SDK's owned runtime. Explicit artifact/system runtime use must declare a
+coherent compiler pair before compilation, not silently load another tree.
 torch remains optional for building, lowering, COMGR compilation and NumPy
 launches. See [COMGR and HIP runtime documentation](dsl_docs/runtime/comgr_and_hipmodule.md)
 for installation commands, library ownership, mapped-file checks and HIP discovery.
@@ -139,17 +142,14 @@ artifacts instead copy the frontend to `bin/<provider-test-subdir>/rocke` and
 stage wheels beside it; the test runner must install the platform wheel with
 `[sdk-core]` into its own environment.
 
-For native standalone AUTO discovery, install the SDK distribution and its
-metadata under the same prefix as the engine or executable, using the layouts
-listed in the [native deployment contract](dsl_docs/runtime/comgr_and_hipmodule.md#comgr).
-The build-tree `rocke_sdk_site.txt` descriptor is not installed: an installed
-consumer does not retain the configure machine's SDK path, even when the install
-prefix is below the build directory. Only exact output directories enrolled by the
-current CMake configuration can search ancestors for the descriptor. Enrollment
-markers and the build identity are never installed; old markers cease to qualify
-after reconfiguration. Custom build consumers with target-specific output locations
-can call `rocke_mark_compiler_output(target)` after defining their target. A consumer
-deployed outside the supported layouts needs an explicit `ROCKE_COMGR_LIB` override.
+Native IR consumers do not discover or load COMGR. The compilation owner must
+query its actual compiler and pass that LLVM flavor to the lowering API, or supply
+`ROCKE_LLVM_FLAVOR`. Native AUTO without that setting fails with an actionable
+message; an explicit flavor continues to support offline compiler-free emission.
+Source CTest's selected Python launcher forwards the effective build compiler's
+flavor while preserving caller overrides. Installed native launchers must forward
+deployment evidence separately. There is no build SDK sidecar, output enrollment
+or inferred interpreter-prefix search to leak into a relocated deployment.
 
 ## The rocke_engine Python binding (optional)
 

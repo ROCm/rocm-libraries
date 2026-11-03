@@ -79,26 +79,14 @@ On PowerShell, use `$env:PYTHONPATH = (Join-Path $PWD "python")` and
 `$env:ROCKE_COMGR_LIB = "C:\compiler\bin\amd_comgr.dll"`. An override names
 one file; an unavailable file fails even if another SDK is installed.
 
-Native AUTO uses the physical loaded module or executable, independent of
-`argv[0]`, the working directory, and symlink aliases. Supported adjacent
-layouts include `<prefix>/bin`, `<prefix>/lib` or `lib64` (including nested
-library directories), and Python `site-packages`. Lookup stays within that
-prefix or site; it never selects SDK metadata from a parent installation.
-A build-tree descriptor resolves relative to its physical directory. CMake enrolls
-exact output directories with build-only markers tied to its current configuration.
-Only those outputs may search ancestors for the descriptor at the nearest CMake
-build root. Enrollment is not inherited by installed descendants, and stale markers
-from a previous configuration do not qualify. The markers and build identity are
-never installed. Custom targets can enroll with `rocke_mark_compiler_output(target)`.
+Native C++ lowering is compiler-free. A compilation owner queries the compiler it
+actually uses and passes the resulting LLVM flavor. Native AUTO only accepts an
+explicit `ROCKE_LLVM_FLAVOR` environment setting; without it, it fails rather than
+choosing a compiler. Python bindings continue forwarding the Python owner's flavor.
 
-To relocate an installed native deployment, move the whole prefix, including
-its SDK metadata and payload. If the SDK lives elsewhere, update the runtime
-override to its new location before launching the consumer:
-
-```sh
-export ROCKE_COMGR_LIB=/new/sdk/lib/libamd_comgr.so.3
-/new/install/bin/my_native_consumer
-```
+There is no native interpreter-prefix search, SDK RECORD parser, build descriptor,
+or output-enrollment protocol. A relocated native deployment receives compiler
+flavor/provenance from its runtime launcher or uses an explicit offline flavor.
 
 CMake's provider override, inherited configure-time override, or exported
 `amd_comgr` package can supply the build compiler. Source/build-tree CTests
@@ -142,7 +130,7 @@ AMD_COMGR_STATUS_SUCCESS                         = 0
 ```
 
 Library loading is deferred until the first compiler query or compilation.
-Both Python and native C++ select COMGR with this policy:
+The compiler-acquiring Python runtime selects its desired COMGR with this policy:
 
 1. A nonempty `$ROCKE_COMGR_LIB` selects that explicit library.
 2. Otherwise, select COMGR owned by the installed `rocm-sdk-core` distribution.
@@ -156,43 +144,36 @@ Successful loads are retained for the lifetime of the process; later imports
 or environment changes do not replace that compiler. AUTO flavor selection
 queries its LLVM version, independently of package release metadata.
 
-Python obtains payload ownership from `importlib.metadata`. Native standalone
-AUTO reads distribution metadata under installation locations adjacent to the
-loaded engine or executable, including `site-packages`, Linux
-`lib/python*/site-packages` and `lib64/python*/site-packages`, and Windows
-`Lib/site-packages`. An installed shared engine or executable and its SDK can
-move together without a build-machine SDK path. CMake also writes
-`rocke_sdk_site.txt` at the top-level build root for its selected Python
-interpreter, allowing build-tree binaries to locate that interpreter's SDK.
-The site path is relative when possible. Cross-drive Windows builds use the
-`rocke-sdk-site-absolute-v1` marker with an absolute site directory, still
-resolving the compiler through distribution metadata. This descriptor stays in
-the build tree and is never installed. Reconfigure when changing interpreters
-or moving an SDK referenced by an absolute descriptor; relative descriptors
-support moving the build and environment together.
-Standalone consumers outside those installation locations and the configured
-build tree must select COMGR with `ROCKE_COMGR_LIB`. Python bindings continue
-delegating AUTO to Python's resolver. The native adapter queries compiler version; it does not implement
-Python's COMGR-to-HSACO compilation pipeline.
+Python obtains payload ownership from `importlib.metadata`. Its thread-safe session
+retains the admitted compiler, actual query provenance and HIP handle. C++ lowering
+consumes the owner's flavor and has no independent compiler selection. Source CTest
+queries through its selected interpreter; installed launchers forward the actual
+admitted compiler/flavor without retaining build-machine paths.
 
 The compatibility hook `comgr.prefer_bundled_lib()` remains callable. It uses
 the same resolver without importing torch and returns informational package
 release metadata.
 
-On Linux, before opening the selected COMGR, both loaders reject a distinct
-mapped COMGR file. Aliases of the same file are accepted. The ordinary TheRock
-torch/rocKE shared SDK case therefore reuses one compiler. A different system
-or legacy torch compiler already mapped is a conflict, even in a torch-free
-process, and is never adopted automatically. Loading another COMGR can also
-load another LLVM and abort before an error is returned. Compile in a separate
-process before loading the conflicting framework, then hand the HSACO bytes
-to its launch process. Mapped-file checks establish COMGR file identity; they
-do not prove isolation of every LLVM dependency. An unavailable mapping
-inventory cannot establish that another compiler is absent.
+Before the first acquisition on Linux and Windows, admission identifies actual
+loaded COMGR symbol providers and file identities, including renamed libraries.
+The same file is reused. A distinct file cannot substitute for an explicit override.
+For automatic selection, a single preloaded compiler may be reused only when its
+full LLVM version matches an isolated query of the desired SDK file. Multiple,
+unqueryable or changed-file providers fail. Matching version strings never justify
+opening a second compiler tree in the live process.
 
-HIP keeps its independent runtime policy, described below. Sharing the HIP
-runtime used by torch matters because a second HIP instance has disjoint module
-state; COMGR's env-or-SDK policy does not change HIP selection.
+The normal first load/query remains in-process. The isolated version probe uses a
+fresh interpreter without site hooks, bounded runtime/output and exact-file evidence;
+it runs only for exceptional preloaded-compiler negotiation. Repeated compilation
+uses the cached handle/evidence, not new process scans or probes. Compiler failures
+with no committed handle can retry; a retained unqueryable compiler is not reloaded.
+
+HIP uses the same owner: explicit `ROCKE_HIP_LIB`, already-imported framework
+ownership, then owned SDK HIP, with system roots only when no SDK runtime is owned.
+A compiler-active new HIP acquisition must have a coherent declared companion
+compiler. Precompiled HSACO execution needs HIP only and no compiler bootstrap.
+This protects rocKE-controlled loads, not arbitrary later third-party library loads;
+unsupported mixes require a separate process or explicit coherent deployment.
 
 ## Entry Point
 

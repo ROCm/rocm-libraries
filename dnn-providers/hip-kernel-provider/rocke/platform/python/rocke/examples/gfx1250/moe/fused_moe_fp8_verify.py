@@ -21,9 +21,6 @@ from rocke.runtime.hip_module import Runtime
 
 
 def main() -> int:
-    from rocke.runtime.comgr import prefer_bundled_lib
-
-    prefer_bundled_lib()  # Query the selected compiler for informational release metadata.
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--tokens", type=int, default=2)
     p.add_argument("--experts", type=int, default=8)

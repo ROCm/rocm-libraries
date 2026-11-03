@@ -402,9 +402,6 @@ def verify_moe_smoothquant(rt) -> tuple:
 
 
 def main() -> int:
-    from rocke.runtime.comgr import prefer_bundled_lib
-
-    prefer_bundled_lib()  # Query the selected compiler for informational release metadata.
     rt = Runtime()
     checks = [
         verify_add_rmsnorm2d_bf16,

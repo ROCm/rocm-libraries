@@ -232,8 +232,10 @@ with neither torch nor a GPU installed.
 
 ### ROCm library discovery (libamd_comgr / libamdhip64)
 
-COMGR and HIP use separate discovery policies. Neither loader imports torch
-or initializes the SDK to discover a library.
+One thread-safe runtime session owns retained compiler/HIP handles and compiler
+evidence. Selection never imports torch or initializes HIP to discover a compiler.
+The warm compilation path returns the retained handle/evidence without process
+scans, metadata discovery or subprocesses.
 
 COMGR has exactly two choices:
 
@@ -245,36 +247,30 @@ COMGR has exactly two choices:
    installs it from an AMD wheel index; see
    [compiler installation and release support](dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).
 
-COMGR does not automatically select torch libraries, mapped foreign compilers,
-`ROCM_PATH`, `ROCM_HOME`, `HIP_PATH`, system ROCm trees, or bare library names.
-Python and native C++ use the same env-or-SDK policy. Native standalone AUTO
-finds SDK distribution metadata under the installed engine or executable's
-installation prefix. Build-tree binaries also read an SDK site descriptor generated at the top-level
-build root by CMake for its selected Python interpreter. It uses a relative site
-path when possible and a marked absolute site path for cross-drive Windows
-builds; regenerate absolute descriptors after moving the SDK. The descriptor
-stays in the build tree and is never installed. Only exact output directories
-marked by the current CMake configuration may search ancestors for that descriptor;
-installed descendants and stale output markers do not qualify. The output markers
-and build identity also stay in the build tree. Custom consumer targets can enroll
-their output with `rocke_mark_compiler_output(target)`. Deployments outside those
-locations must use `ROCKE_COMGR_LIB`. Explicit offline IR emission still requires no compiler.
-The compatibility hook `comgr.prefer_bundled_lib()` uses this resolver without
-importing torch. Successful loads are retained; the loaded compiler's LLVM
-version determines AUTO, while package release metadata is informational.
+The desired compiler uses only the explicit override or SDK metadata, never a
+system/Torch fallback. Cold admission inventories actual COMGR symbol owners,
+not filenames, on Linux and Windows. Same-file aliases reuse the loaded handle.
+An explicit override cannot substitute a distinct file even when versions match.
+For automatic selection, a distinct already-loaded compiler can be reused only
+after its full LLVM version matches a fresh-process query of the desired SDK file.
+Unknown, changed-file or ambiguous evidence fails; no second compiler is trial-loaded
+into the live process. Successful handles and version evidence remain retained.
 
-Before loading COMGR on Linux, reject any mapped COMGR that is a different
-file from the selected candidate. An alias of the same file is accepted.
-The ordinary shared SDK used by TheRock torch and rocKE is therefore one
-compiler. A distinct mapped compiler is a conflict, not a fallback candidate;
-compile in a separate process when using another compiler.
+Native C++ IR lowering does not acquire a compiler. Its owner must pass the queried
+LLVM flavor or set `ROCKE_LLVM_FLAVOR`; native AUTO without that evidence fails.
+There is no native SDK-prefix/RECORD discovery or build sidecar/enrollment protocol.
+Source CTest uses the selected Python interpreter to forward the build compiler's
+flavor; installed launchers supply deployment-valid evidence. Explicit offline
+flavors bypass compiler/session acquisition.
 
-HIP keeps its existing runtime policy: `ROCKE_HIP_LIB`, then the copy used by
-already imported torch (an unambiguous mapped copy, `torch/lib`, or the active
-TheRock SDK), then system ROCm roots and the bare library name. Linux does not
-add an independent SDK HIP candidate; Windows also discovers SDK runtime DLLs
-directly. When several distinct HIP copies are mapped, prefer the sole copy
-owned by imported torch or its active SDK rather than address order.
+HIP honors `ROCKE_HIP_LIB`, then an already-imported framework runtime, then the
+SDK distribution's owned HIP payload on both platforms, and finally existing system
+roots when no owned SDK runtime is available. Compiler-active HIP acquisition must
+use a coherent SDK or unambiguous same-directory compiler/runtime pair. Artifact
+validation explicitly selects the artifact's pair; silently using SDK HIP does not
+validate artifact HIP. The session guards its own loads, not arbitrary later
+third-party library acquisition. Metadata-only `prefer_bundled_lib()` is not a
+bootstrap and must not be used to implicitly import Torch or pin HIP.
 
 If COMGR is unavailable in a torch-free process, install `rocke[sdk-core]`
 from an AMD wheel index or point `ROCKE_COMGR_LIB` at the intended compiler.

@@ -33,9 +33,6 @@ from rocke.instances.gfx1250.wmma_gemm import WmmaGemmSpec, build_wmma_gemm
 
 
 def main() -> int:
-    from rocke.runtime.comgr import prefer_bundled_lib
-
-    prefer_bundled_lib()  # Query the selected compiler for informational release metadata.
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", default="gfx1250")
     p.add_argument("--m", type=int, default=16)
