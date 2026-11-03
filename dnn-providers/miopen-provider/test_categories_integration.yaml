@@ -107,6 +107,9 @@ test_categories:
       # signal; this is the smallest quick-tier layernorm bundle case.
       - "quick_Layernorm_Default.2_2_3_2_bfp16_nhwc_normalized_dim_count1_6d6330"
       - "quick_SdpaFwd_bhsd_bf16_hd128_nomask_batch_Small.Small"
+      # ResampleFwd: max pooling that also writes an index, so the run goes
+      # through the index copy out of MIOpen's workspace.
+      - "quick_ResampleFwd_Default.1_2_4_3_fp32_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0"
     exclude: *common_excludes
     labels:
       - "ffm-quick"
