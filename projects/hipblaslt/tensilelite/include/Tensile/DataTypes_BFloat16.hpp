@@ -28,13 +28,10 @@
 
 #include <cinttypes>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 
 #include <tensilelitehost/export.h>
-
-#ifndef __BYTE_ORDER__
-#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
-#endif
 
 #define BFLOAT16_Q_NAN_VALUE 0xFFC1
 
@@ -102,20 +99,11 @@ namespace TensileLite
     private:
         static const int16_t BFLOAT16_ZERO_VALUE = 0x00;
 
-        // zero extend lower 16 bits of bfloat16 to convert to IEEE float
         static float bfloat16_to_float(const BFloat16 v)
         {
-            union
-            {
-                float    fp32 = 0;
-                uint16_t q[2];
-            };
-
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            q[0] = v.data;
-#else
-            q[1]      = v.data;
-#endif
+            const uint32_t bits = uint32_t(v.data) << 16;
+            float          fp32;
+            std::memcpy(&fp32, &bits, sizeof(fp32));
             return fp32;
         }
 
