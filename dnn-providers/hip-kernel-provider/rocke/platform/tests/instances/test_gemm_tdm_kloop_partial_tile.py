@@ -146,6 +146,22 @@ class TestTdmKLoopsCoverAPartialLastTile(unittest.TestCase):
         self._check(spec, lambda k, K: 2 * k.trips(K) + 2, pad_even=True)
 
 
+class TestTdmTileOriginIsI64(unittest.TestCase):
+    def test_every_fill_address_is_an_i64_offset(self):
+        """batch + row * K + k overflows i32 once an operand passes 2^31
+        elements, and the GEP would sign-extend it to an address before the
+        tensor; the offset must be computed, and indexed, in i64."""
+        ll = _lower(_ring_spec(2))
+        geps = [
+            m.group(1)
+            for m in re.finditer(
+                r"%gaddr_gep\S* = getelementptr \S+, ptr addrspace\(1\) \S+, (\S+) ", ll
+            )
+        ]
+        self.assertTrue(geps, "no TDM fill address")
+        self.assertEqual(set(geps), {"i64"})
+
+
 class TestTdmKLoopIgnoresTheUnrollExperiment(unittest.TestCase):
     def test_unroll_env_does_not_replace_the_tdm_loop(self):
         """``ROCKE_EXP_UNROLL_K`` unrolls a loop with no TENSORcnt waits; a TDM

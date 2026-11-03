@@ -199,6 +199,46 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
                 self.assertIn("ab_load_elem_bytes", py[1])
                 self.assertEqual(tuple(cpp), tuple(py))
 
+    def test_cpp_rejects_wmma_v1(self):
+        """The C++ engine does not emit the wmma_v1 schedule, so it must not
+        build a kernel under that pipeline's name; Python keeps it."""
+        import rocke_engine
+
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        base = _spec()
+        spec = replace(base, trait=replace(base.trait, pipeline="wmma_v1"))
+        self.assertTrue(is_valid_spec(spec, arch=ARCH)[0])
+        ok, why = rocke_engine.gemm_is_valid(universal_gemm_spec_to_dict(spec), ARCH)
+        self.assertFalse(ok)
+        self.assertIn("'mem' pipeline", why)
+
+    def test_both_engines_scope_the_gfx1250_rules(self):
+        """The summed cshuffle budget on CDNA and no lds_swizzle reject on RDNA
+        WMMA: both engines agree, verdict and reason."""
+        import rocke_engine
+
+        from test_gemm_validity_gaps import CDNA_CSHUFFLE, RDNA_WMMA, _bf16_spec
+
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for label, spec, arch in (
+            (
+                "gfx950 cshuffle",
+                _bf16_spec(CDNA_CSHUFFLE, epilogue="cshuffle"),
+                "gfx950",
+            ),
+            ("gfx1151 lds_swizzle", _bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151"),
+        ):
+            with self.subTest(label):
+                py = is_valid_spec(spec, arch=arch)
+                cpp = rocke_engine.gemm_is_valid(
+                    universal_gemm_spec_to_dict(spec), arch
+                )
+                self.assertEqual(tuple(cpp), tuple(py))
+
     def test_both_engines_reject_for_the_same_reason(self):
         import rocke_engine
 

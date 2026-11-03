@@ -368,5 +368,69 @@ class TestFp8IsGfx1250Only(unittest.TestCase):
                 self.assertTrue(ok, why)
 
 
+def _bf16_spec(arch_tile, *, epilogue="default", **trait_kw):
+    """A bf16 universal GEMM with the given (tile, warps, warp tile) geometry."""
+    from rocke.instances.common.gemm_universal import (
+        DataSpec,
+        TileSpec,
+        TraitSpec,
+        UniversalGemmSpec,
+    )
+
+    (tm, tn, tk), (wm, wn), (wtm, wtn, wtk), pipeline, wave = arch_tile
+    return UniversalGemmSpec(
+        name="scope_probe",
+        tile=TileSpec(
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_k=1,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+        ),
+        trait=TraitSpec(
+            pipeline=pipeline, scheduler="intrawave", epilogue=epilogue, **trait_kw
+        ),
+        data=DataSpec(
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_c="bf16",
+            dtype_acc="fp32",
+            layout="RCR",
+        ),
+        wave_size=wave,
+    )
+
+
+# gfx950 MFMA, 256x256x64 cshuffle: AB = 64 KiB, C = 128 KiB. The sum (192 KiB)
+# exceeds the 160 KiB cap; the max (128 KiB) would not.
+CDNA_CSHUFFLE = ((256, 256, 64), (2, 2), (32, 32, 16), "compv3", 64)
+# gfx1151 WMMA, the 16x16x16 atom on the mem pipeline.
+RDNA_WMMA = ((64, 64, 32), (2, 2), (16, 16, 16), "mem", 32)
+
+
+class TestGfx1250OnlyRules(unittest.TestCase):
+    """The aliased cshuffle budget and the WMMA lds_swizzle reject are gfx1250
+    rules; the other targets validate as before them."""
+
+    def test_cdna_keeps_the_summed_cshuffle_budget(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        ok, why = is_valid_spec(
+            _bf16_spec(CDNA_CSHUFFLE, epilogue="cshuffle"), "gfx950"
+        )
+        self.assertFalse(ok, "max(AB, C) admitted a CDNA cshuffle spec")
+        self.assertIn("LDS budget", why)
+
+    def test_rdna_wmma_does_not_reject_lds_swizzle(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        _, why = is_valid_spec(_bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151")
+        self.assertNotIn("lds_swizzle", why or "")
+
+
 if __name__ == "__main__":
     unittest.main()
