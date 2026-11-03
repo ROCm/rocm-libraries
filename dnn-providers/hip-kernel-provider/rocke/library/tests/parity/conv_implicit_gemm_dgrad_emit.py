@@ -1622,6 +1622,12 @@ _GFX942_3D_PP = {
         m_band=11,
         cshuffle_m_chunks=2,
     ),
+    # 93-94: the non-box ping-pong through the plain cshuffle store in m_chunks
+    # (93) and the pp_box_det 2 (bf16 slot) split box store (94).
+    93: dict(_T128, tapk_pp_sched=5, cshuffle_m_chunks=2),
+    94: dict(
+        _T128, tapk_pp_sched=2, split_k=8, pp_boxes=7, pp_box_order=1, pp_box_det=2
+    ),
 }
 
 

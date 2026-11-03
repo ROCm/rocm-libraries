@@ -713,7 +713,8 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok) || (s->xh_fast_a && !xh_ok)
        || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode || s->pp_zskip
        || ((s->pp_boxes || s->pp_box_cus || s->pp_box_order) && !s->tapk_pingpong)
-       || (s->pp_box_det && !(s->pp_box_det == 1 && s->pp_boxes && s->split_k > 1))
+       || (s->pp_box_det
+           && !((s->pp_box_det == 1 || s->pp_box_det == 2) && s->pp_boxes && s->split_k > 1))
        || (s->epi_lds_barriers && !s->pp_boxes && !xh_ok) || (s->no_agpr && !xh_ok)
        || (s->cshuffle_m_chunks > 1 && !s->pp_boxes && !xh_ok && !s->tapk_pingpong))
     {
@@ -1829,6 +1830,8 @@ static void _emit_dgrad_cshuffle_epilogue(rocke_ir_builder_t* b,
                           spec->warp_tile_k);
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
+    if(spec->cshuffle_m_chunks > 1)
+        epi.m_chunks = spec->cshuffle_m_chunks;
 
     /* AOT: the GEMM extents are kernargs. */
     rocke_value_t* bounds_m = params->p_dg_M;
