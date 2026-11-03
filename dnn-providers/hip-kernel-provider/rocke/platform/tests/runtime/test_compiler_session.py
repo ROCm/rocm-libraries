@@ -87,6 +87,74 @@ def test_failed_acquisition_is_retryable(owner):
     assert load.call_count == 2
 
 
+def test_failed_acquisition_refreshes_inputs_on_retry(owner, tmp_path, monkeypatch):
+    missing, valid = tmp_path / "missing.so", tmp_path / "valid.so"
+    valid.touch()
+    handle = SimpleNamespace(_name=str(valid))
+    attempts = []
+
+    def load(path):
+        attempts.append(path)
+        if path == str(missing):
+            raise OSError("missing compiler")
+        return handle
+
+    monkeypatch.setattr(comgr._loaded_libraries, "loaded_compilers", lambda: [])
+    monkeypatch.setattr(comgr, "_add_dll_dir", lambda path: None)
+    monkeypatch.setattr(comgr.ctypes, "CDLL", load)
+    monkeypatch.setenv("ROCKE_COMGR_LIB", str(missing))
+    with pytest.raises(comgr.ComgrError, match="missing compiler"):
+        comgr._resolve_lib()
+    assert owner.compiler is None and owner.hip is None
+    monkeypatch.setenv("ROCKE_COMGR_LIB", str(valid))
+    assert comgr._resolve_lib() is handle
+    assert attempts == [str(missing), str(valid)]
+    monkeypatch.setenv("ROCKE_COMGR_LIB", str(missing))
+    assert comgr._resolve_lib() is handle
+    assert owner.environment["ROCKE_COMGR_LIB"] == str(valid)
+    assert attempts == [str(missing), str(valid)]
+
+
+def test_failed_waiters_share_attempt_inputs_then_retry(owner, monkeypatch):
+    entered, release, waiting = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+    waiter_count = 0
+
+    def load():
+        calls.append(owner.environment["ROCKE_COMGR_LIB"])
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(5)
+            raise comgr.ComgrError("old attempt failed")
+        return SimpleNamespace(_name="new")
+
+    monkeypatch.setenv("ROCKE_COMGR_LIB", "old")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        first = pool.submit(owner.resolve, "compiler", load)
+        assert entered.wait(5)
+        real_wait = owner._pending.done.wait
+
+        def wait(*args, **kwargs):
+            nonlocal waiter_count
+            with owner.lock:
+                waiter_count += 1
+                if waiter_count == 7:
+                    waiting.set()
+            return real_wait(*args, **kwargs)
+
+        monkeypatch.setattr(owner._pending.done, "wait", wait)
+        others = [pool.submit(owner.resolve, "compiler", load) for _ in range(7)]
+        assert waiting.wait(5)
+        monkeypatch.setenv("ROCKE_COMGR_LIB", "new")
+        release.set()
+        for future in [first, *others]:
+            with pytest.raises(comgr.ComgrError, match="old attempt failed"):
+                future.result()
+    assert calls == ["old"]
+    assert owner.resolve("compiler", load)._name == "new"
+    assert calls == ["old", "new"]
+
+
 def test_explicit_reinitialization_preserves_exact_file(owner, tmp_path, monkeypatch):
     selected, different = tmp_path / "selected", tmp_path / "different"
     selected.touch()

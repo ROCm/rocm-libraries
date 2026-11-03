@@ -41,13 +41,15 @@ class RuntimeSession:
             handle = getattr(self, kind)
             if handle is not None:
                 return handle
-            if self.environment is None:
-                import os
-
-                self.environment = dict(os.environ)
             attempt = self._pending
             initialize = attempt is None
             if initialize:
+                if self.compiler is None and self.hip is None:
+                    import os
+
+                    # Inputs belong to this attempt until a resource commits.
+                    # Waiters share it; a later failed-load retry gets new inputs.
+                    self.environment = dict(os.environ)
                 attempt = self._pending = _Attempt(kind)
         if not initialize:
             attempt.done.wait()
