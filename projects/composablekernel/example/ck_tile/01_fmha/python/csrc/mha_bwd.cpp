@@ -487,7 +487,7 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
                                          p_dropout,
                                          drop_seed_offset);
 
-        float t = launcher.run(args, stream_config);
+        float t = launcher(args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     }
     else

@@ -486,7 +486,7 @@ std::vector<at::Tensor> mha_varlen_bwd(
                                                 p_dropout,
                                                 drop_seed_offset);
 
-        float t = launcher.run(args, stream_config);
+        float t = launcher(args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     }
     else
