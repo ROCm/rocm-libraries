@@ -21,6 +21,22 @@ from codegen.models import (
 )
 from codegen.generator import resolve_ids
 
+_CONFIGS = Path(__file__).resolve().parents[1] / "configs"
+_MANIFEST_SUFFIX = ".engine.yaml"
+
+
+def shipped_bundles() -> tuple:
+    """Every manifest-backed shipped rocKE bundle, named by its engine manifest
+    (``configs/<bundle>.engine.yaml``; its selection is ``configs/<bundle>.yaml``). The
+    gates over shipped bundles read this, so a new manifest is gated without editing
+    them."""
+    return tuple(
+        sorted(
+            p.name[: -len(_MANIFEST_SUFFIX)]
+            for p in _CONFIGS.glob("*" + _MANIFEST_SUFFIX)
+        )
+    )
+
 
 def make_engine(**overrides) -> EngineSpec:
     defaults = dict(name="hipkernel:Test", knobs=["block_size"])

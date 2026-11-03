@@ -5,8 +5,8 @@
 must already be in the provider's clang-format form. Otherwise the copy reformats
 the live file and an addition-only change shows unrelated hunks.
 
-The shipped gfx950 config regenerates the provider's live census test byte-for-byte
-(no clang-format needed). When a clang-format binary is named, every shipped config's
+Each shipped bundle's config (tests.helpers.shipped_bundles) regenerates the
+provider's live census test byte-for-byte (no clang-format needed). When a clang-format binary is named, every shipped config's
 census test must also be a clang-format fixed point under the provider's style.
 """
 
@@ -21,41 +21,48 @@ import pytest
 
 from codegen.config_loader import load_config
 from codegen.generator import IngestorGenerator
+from tests.helpers import shipped_bundles
 
 _ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _PROVIDER = _REPO_ROOT / "dnn-providers" / "hip-kernel-provider"
 _LIVE_PACKS_DIR = _PROVIDER / "src/tests/engines/kernel_ingestor_engine/packs"
-_LIVE_PACKS = {
-    "gfx950_attention_dense.yaml": _LIVE_PACKS_DIR
-    / "TestGfx950AttentionDensePacks.cpp",
-    "gfx942_attention_dense.yaml": _LIVE_PACKS_DIR
-    / "TestGfx942AttentionDensePacks.cpp",
-}
-_SHIPPED_CONFIGS = (
-    "axes_example.yaml",
-    "binary_ops.yaml",
-    "gfx942_attention_dense.yaml",
-    "gfx950_attention_dense.yaml",
-    "scale_add.yaml",
-    "variants_example.yaml",
+_BUNDLE_CONFIGS = tuple(f"{bundle}.yaml" for bundle in shipped_bundles())
+_SHIPPED_CONFIGS = tuple(
+    sorted(
+        (
+            "axes_example.yaml",
+            "binary_ops.yaml",
+            "scale_add.yaml",
+            "variants_example.yaml",
+        )
+        + _BUNDLE_CONFIGS
+    )
 )
 
 
-def _render_packs_test(config_name: str, out: Path) -> str:
+def _render_packs_file(config_name: str, out: Path) -> Path:
     config = load_config(_ROOT / "configs" / config_name)
     IngestorGenerator(_ROOT / "templates").render(config, out)
     (packs,) = (out / "tests").glob("Test*Packs.cpp")
-    return packs.read_text(encoding="utf-8")
+    return packs
+
+
+def _render_packs_test(config_name: str, out: Path) -> str:
+    return _render_packs_file(config_name, out).read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(
     not _LIVE_PACKS_DIR.is_dir(), reason="provider tree not checked out"
 )
-@pytest.mark.parametrize("config_name", sorted(_LIVE_PACKS))
+@pytest.mark.parametrize("config_name", _BUNDLE_CONFIGS)
 def test_census_test_regenerates_the_live_file(tmp_path, config_name):
-    rendered = _render_packs_test(config_name, tmp_path)
-    assert rendered == _LIVE_PACKS[config_name].read_text(encoding="utf-8")
+    """Each shipped bundle's census test is committed under the name the generator
+    gives it, and is the generator's output."""
+    rendered = _render_packs_file(config_name, tmp_path)
+    live = _LIVE_PACKS_DIR / rendered.name
+    assert live.is_file(), f"{rendered.name} is not committed in {_LIVE_PACKS_DIR}"
+    assert rendered.read_text(encoding="utf-8") == live.read_text(encoding="utf-8")
 
 
 def _clang_format() -> str | None:

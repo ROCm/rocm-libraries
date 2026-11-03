@@ -27,6 +27,7 @@ sys.path.insert(0, str(_ROOT / "tools"))
 
 import catalog_diff  # noqa: E402
 import registry_enumerator as enumerator  # noqa: E402
+from tests.helpers import shipped_bundles  # noqa: E402
 
 _PROVIDER = enumerator._REPO / "dnn-providers" / "hip-kernel-provider"
 _ROCKE_LIBRARY = _PROVIDER / "rocke" / "library"
@@ -63,10 +64,14 @@ class _Engine:
         return _ROOT / "configs" / f"{self.name}.engine.yaml"
 
 
-_ENGINES = (
-    _Engine("gfx950_attention_dense", reduced=False),
-    _Engine("gfx942_attention_dense", reduced=True),
-)
+# Bundles whose selection is a variant_reduce subset of the enumeration. Opt-in, so a
+# new bundle gets the exact g3 by default and a registry that grows fails it.
+_REDUCED = frozenset({"gfx942_attention_dense"})
+_ENGINES = tuple(_Engine(name, reduced=name in _REDUCED) for name in shipped_bundles())
+
+
+def test_every_reduced_bundle_is_shipped():
+    assert _REDUCED <= set(shipped_bundles())
 
 
 @pytest.fixture(scope="module", params=_ENGINES, ids=lambda e: e.name)
@@ -265,6 +270,13 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
     registry, and the kernels variant_reduce dropped are listed as extras."""
     if not engine.shipped_kdp.is_file():
         pytest.skip(f"shipped KDP not in this checkout: {engine.shipped_kdp}")
+    if engine.reduced:
+        shipped = len(json.loads(engine.shipped_kdp.read_text())["kernelDescriptors"])
+        enumerated = sum(len(pack["kernels"]) for pack in registry_config["packs"])
+        assert shipped < enumerated, (
+            f"{engine.name} ships its whole enumeration ({shipped} kernels); drop it "
+            f"from _REDUCED so g3 holds it to equality"
+        )
     out = tmp_path_factory.mktemp("g3")
     path = out / "registry.yaml"
     path.write_text(yaml.safe_dump(registry_config, sort_keys=False))

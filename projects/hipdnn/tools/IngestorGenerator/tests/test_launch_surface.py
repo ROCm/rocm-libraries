@@ -39,6 +39,7 @@ _TOOL = _TOOLS / "launch_surface.py"
 sys.path.insert(0, str(_TOOLS))
 
 import launch_surface  # noqa: E402
+from tests.helpers import shipped_bundles  # noqa: E402
 
 _REPO_ROOT = launch_surface.find_repo_root(_TOOLS)
 
@@ -763,9 +764,7 @@ class TestAgainstTheGfx950Manifest:
 
 
 class TestAgainstTheShippedEngineManifest:
-    @pytest.mark.parametrize(
-        "engine", ["gfx950_attention_dense", "gfx942_attention_dense"]
-    )
+    @pytest.mark.parametrize("engine", shipped_bundles())
     def test_every_declared_surface_is_real_guarded_and_tested(self, engine):
         manifest = _TOOLS.parent / "configs" / f"{engine}.engine.yaml"
         result = _run("--check", str(manifest), cwd=_REPO_ROOT)
