@@ -108,6 +108,16 @@ def test_gemm_zero_accumulator_uses_source_width():
     assert b.mma(atom, acc, acc, acc).type.count == 7
 
 
+def test_gfx942_catalog_keeps_fp64_rows_before_fp16():
+    # Catalog enumeration preserves the established ordering across dtypes.
+    ids = [op.op_id for op in ArchTarget.from_gfx("gfx942").mma.ops]
+    assert ids[4:7] == [
+        "mfma_f64_16x16x4_f64",
+        "mfma_f64_4x4x4_f64",
+        "mfma_f32_16x16x16_f16",
+    ]
+
+
 def test_filtered_catalog_preserves_supported_order_and_fields():
     # Independent snapshot of the supported rows at 72c28a69, filtered with
     # the LLVM legality table. Preserve all remaining fields and relative order.

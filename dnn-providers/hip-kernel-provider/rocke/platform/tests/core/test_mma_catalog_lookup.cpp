@@ -84,6 +84,17 @@ static bool rejects_query(F query)
     return false;
 }
 
+static int test_gfx942_catalog_keeps_fp64_rows_before_fp16()
+{
+    const auto* arch = rocke_arch_target_from_gfx("gfx942");
+    CHECK(arch && arch->mma.num_ops >= 7);
+    const char* expected[]
+        = {"mfma_f64_16x16x4_f64", "mfma_f64_4x4x4_f64", "mfma_f32_16x16x16_f16"};
+    for(int i = 0; i < 3; ++i)
+        CHECK(strcmp(arch->mma.ops[4 + i].op_id, expected[i]) == 0);
+    return 0;
+}
+
 static int test_required_indexed_dtypes()
 {
     const auto* arch = rocke_arch_target_from_gfx("gfx942");
@@ -1236,7 +1247,8 @@ int main()
        || test_scaled_source_values() || test_unscaled_wmma_values()
        || test_scaled_wmma_supported_combinations() || test_emulated_rows_mirror_physical()
        || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom()
-       || test_rdna_integer_wmma_rows_name_i8_and_i4())
+       || test_rdna_integer_wmma_rows_name_i8_and_i4()
+       || test_gfx942_catalog_keeps_fp64_rows_before_fp16())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})

@@ -236,6 +236,48 @@
           "family": "mma",
           "m": 16,
           "n": 16,
+          "k": 4,
+          "op_id": "mfma_f64_16x16x4_f64",
+          "srcs": [
+            {
+              "dtype": "fp64"
+            },
+            {
+              "dtype": "fp64"
+            },
+            {
+              "dtype": "fp64"
+            }
+          ],
+          "dst": {
+            "dtype": "fp64"
+          }
+        },
+        {
+          "family": "mma",
+          "m": 4,
+          "n": 4,
+          "k": 4,
+          "op_id": "mfma_f64_4x4x4_f64",
+          "srcs": [
+            {
+              "dtype": "fp64"
+            },
+            {
+              "dtype": "fp64"
+            },
+            {
+              "dtype": "fp64"
+            }
+          ],
+          "dst": {
+            "dtype": "fp64"
+          }
+        },
+        {
+          "family": "mma",
+          "m": 16,
+          "n": 16,
           "k": 16,
           "op_id": "mfma_f32_16x16x16_f16",
           "srcs": [
@@ -398,48 +440,6 @@
           ],
           "dst": {
             "dtype": "fp32"
-          }
-        },
-        {
-          "family": "mma",
-          "m": 16,
-          "n": 16,
-          "k": 4,
-          "op_id": "mfma_f64_16x16x4_f64",
-          "srcs": [
-            {
-              "dtype": "fp64"
-            },
-            {
-              "dtype": "fp64"
-            },
-            {
-              "dtype": "fp64"
-            }
-          ],
-          "dst": {
-            "dtype": "fp64"
-          }
-        },
-        {
-          "family": "mma",
-          "m": 4,
-          "n": 4,
-          "k": 4,
-          "op_id": "mfma_f64_4x4x4_f64",
-          "srcs": [
-            {
-              "dtype": "fp64"
-            },
-            {
-              "dtype": "fp64"
-            },
-            {
-              "dtype": "fp64"
-            }
-          ],
-          "dst": {
-            "dtype": "fp64"
           }
         }
       ]
