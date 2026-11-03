@@ -66,7 +66,7 @@ static void rocke__mfma_atom_widths(const rocke_gemm_universal_spec_t* spec,
  * Python routes (storage_dtype, warp_tile key) -> the matching ISA-named builder
  * method. We reproduce the exact branch order. The storage dtype is resolved the
  * same way Python's _storage_dtype does: io_ir_type(spec.data.dtype_a) (the
- * homogeneous-dtype / fp32-acc / RCR validation is performed elsewhere; here we
+ * storage-dtype / fp32-acc / RCR validation is performed elsewhere; here we
  * only need the IR storage type to select the f16/bf16 atom family, matching the
  * Python `dtype == F16` / `dtype == BF16` comparisons).
  * ====================================================================== */

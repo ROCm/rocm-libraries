@@ -15,7 +15,8 @@
  *   is_valid_spec(spec, arch)              rocke_gemm_universal_is_valid_spec()
  *   TileSpec.mfmas_per_warp_m / _n         rocke_gemm_tile_mfmas_per_warp_m / _n
  *   TileSpec.k_atoms_per_tile_k            rocke_gemm_tile_k_atoms_per_tile_k
- *   _dtype_ir / _mma_family                (file-static helpers)
+ *   _dtype_ir                              rocke_gemm_dtype_ir
+ *   _mma_family                            (file-static helper)
  *   _acc_dtype / _elem_bytes               (file-static helpers)
  *   _resolve_mma_op / _storage_dtype       (file-static helpers)
  *   _ab_lds_plan / _mfma_atom_widths       (file-static helpers)
@@ -367,11 +368,13 @@ bool rocke_gemm_is_fp8_ab(const char* name)
  * deliberately f16/bf16-only: the small ops that share it promote to f32 on
  * read, which is not what a packed fp8 MMA operand wants.
  *
- * Returns NULL for an unsupported dtype (Python ValueError path -- the caller
- * turns it into a structured reject). */
-static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
+ * Returns NULL for an unsupported dtype (Python ValueError path): with a
+ * builder, after setting its sticky error; without one, for the caller to turn
+ * into a structured reject. Shared by the validator, the emitter and the
+ * epilogue (declared in instance_gemm_internal.h). */
+const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
 {
-    if(strcmp(name, "fp64") == 0)
+    if(name != NULL && strcmp(name, "fp64") == 0)
     {
         return rocke_f64();
     }
@@ -379,7 +382,7 @@ static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
     {
         return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
     }
-    return rocke_io_ir_type(name);
+    return (b != NULL) ? rocke_b_io_ir_type(b, name) : rocke_io_ir_type(name);
 }
 
 /* _acc_dtype(spec): catalog accumulator dtype (validated in _storage_dtype). */
@@ -567,7 +570,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
         return NULL;
     }
 
-    ty = ck_gemm_dtype_ir(d->dtype_a);
+    ty = rocke_gemm_dtype_ir(NULL, d->dtype_a);
     if(ty == NULL)
     {
         if(reason != NULL && reason_cap > 0)
@@ -580,7 +583,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
         }
         return NULL;
     }
-    c_ty = ck_gemm_dtype_ir(d->dtype_c);
+    c_ty = rocke_gemm_dtype_ir(NULL, d->dtype_c);
     if(c_ty == NULL)
     {
         if(reason != NULL && reason_cap > 0)
@@ -614,7 +617,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
         return NULL;
     }
     t = &spec->tile;
-    a_name = spec->data.dtype_a; /* homogeneous A/B/C (validated in storage_dtype) */
+    a_name = spec->data.dtype_a; /* A/B storage dtype (validated in storage_dtype) */
     return rocke_archtarget_op_for_shape(target,
                                          ck_gemm_mma_family(target),
                                          a_name,
@@ -766,7 +769,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 
     t = &spec->tile;
 
-    /* _storage_dtype(spec): validates homogeneous dtypes / fp32 acc / RCR. */
+    /* _storage_dtype(spec): validates the storage dtypes / fp32 acc / RCR. */
     if(ck_gemm_storage_dtype(spec, NULL, reason, reason_cap) == NULL)
     {
         /* reason already written by ck_gemm_storage_dtype. */

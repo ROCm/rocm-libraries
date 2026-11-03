@@ -66,7 +66,7 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                                       const char* arch,
                                                       const rocke_archtarget_t* target)
 {
-    const char* a_name; /* homogeneous A/B/C (validated in _storage_dtype) */
+    const char* a_name; /* A/B storage dtype (validated in _storage_dtype) */
     const rocke_gemm_tile_spec_t* t;
     if(spec == NULL || target == NULL)
     {
@@ -83,22 +83,6 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          t->warp_tile_n,
                                          t->warp_tile_k,
                                          nullptr);
-}
-
-/* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
- * fp64 maps to F64; the 8-bit cases are resolved here rather than in
- * io_ir_type, whose contract is deliberately f16/bf16-only. */
-static const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
-{
-    if(name != NULL && strcmp(name, "fp64") == 0)
-    {
-        return rocke_f64();
-    }
-    if(rocke_gemm_is_fp8_ab(name))
-    {
-        return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
-    }
-    return rocke_b_io_ir_type(b, name);
 }
 
 /* _validate_storage(spec): validate the spec's storage dtypes, then map the A/B

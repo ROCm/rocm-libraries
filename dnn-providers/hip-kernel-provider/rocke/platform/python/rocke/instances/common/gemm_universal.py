@@ -472,7 +472,8 @@ def _acc_dtype(spec: UniversalGemmSpec) -> str:
 
 
 def _elem_bytes(spec: UniversalGemmSpec) -> int:
-    """Storage element size in bytes of the homogeneous A/B/C dtype."""
+    """Bytes per A/B storage element: 2 for f16/bf16, 8 for fp64, 1 for the
+    fp8/bf8 operands (whose C stays 16-bit)."""
     return dtype_info(spec.data.dtype_a).encoded_bits // 8
 
 
@@ -503,7 +504,7 @@ def _resolve_mma_op(spec: "UniversalGemmSpec", arch: str):
 
     target = ArchTarget.from_gfx(arch)
     t = spec.tile
-    a_name = spec.data.dtype_a  # homogeneous A/B/C (validated in _storage_dtype)
+    a_name = spec.data.dtype_a  # A/B storage dtype (validated in _storage_dtype)
     return target.mma.op_for_shape(
         family=_mma_family(arch),
         a_dtype=a_name,
@@ -575,11 +576,6 @@ def _c_storage_dtype(spec: UniversalGemmSpec) -> Type:
 def _dtype_bytes(dtype: str) -> int:
     """Bytes per element for a named dtype string."""
     return dtype_info(dtype).encoded_bits // 8
-
-
-def _ab_dtype_bytes(spec: UniversalGemmSpec) -> int:
-    """Bytes per A/B element -- 2 for f16/bf16, 1 for the fp8/bf8 operands."""
-    return _dtype_bytes(spec.data.dtype_a)
 
 
 def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
@@ -673,7 +669,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
 
     t = spec.tile
     try:
-        _storage_dtype(spec)  # validates homogeneous dtypes / fp32 acc / RCR
+        _storage_dtype(spec)  # validates the storage dtypes / fp32 acc / RCR
     except ValueError as e:
         return False, str(e)
 
@@ -691,7 +687,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # the RDNA wave32 targets (gfx11xx) use WMMA. The same warp-tile shape thus
     # resolves to an MFMA op_id on gfx942/gfx950 and a WMMA op_id on gfx1151.
     family = _mma_family(arch)
-    a_name = spec.data.dtype_a  # homogeneous A/B/C (checked above)
+    a_name = spec.data.dtype_a  # A/B storage dtype (checked above)
     acc_name = _acc_dtype(spec)
     atom = (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
     if not target.supports_dtype_combo(a_name, a_name, acc_name, family=family):
@@ -1084,7 +1080,7 @@ def _choose_load_vec(spec: UniversalGemmSpec) -> int:
     t = spec.tile
     elem_bytes = spec.trait.ab_load_elem_bytes
     if elem_bytes is None:
-        elem_bytes = _ab_dtype_bytes(spec)
+        elem_bytes = _elem_bytes(spec)
     return choose_load_vec(
         t.tile_m, t.tile_n, t.tile_k, spec.block_size, elem_bytes=elem_bytes
     )

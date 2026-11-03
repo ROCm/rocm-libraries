@@ -77,14 +77,6 @@ static rocke_value_t* rocke_gemm_fe_apply_vec(rocke_ir_builder_t* b,
  * epilogue functions stay self-contained, matching the Python module).
  * ===================================================================== */
 
-/* _dtype_ir(name) -> F64 for fp64, else io_ir_type(name). */
-static const rocke_type_t* gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
-{
-    if(name != NULL && strcmp(name, "fp64") == 0)
-        return rocke_f64();
-    return rocke_b_io_ir_type(b, name);
-}
-
 /* _c_storage_dtype(spec): validates the spec's dtypes (A/B homogeneous with C
  * except on the fp8/bf8 path, fp32 acc -- fp64 acc for fp64 storage -- RCR
  * layout), then resolves the *C* dtype to its IR type. Returns NULL with the
@@ -110,7 +102,7 @@ static const rocke_type_t* gemm_c_storage_dtype(rocke_ir_builder_t* b,
         /* Force the ValueError-equivalent sticky error through the io helper. */
         return rocke_b_io_ir_type(b, NULL);
     }
-    return gemm_dtype_ir(b, spec->data.dtype_c);
+    return rocke_gemm_dtype_ir(b, spec->data.dtype_c);
 }
 
 /* =====================================================================

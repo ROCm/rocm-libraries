@@ -310,6 +310,11 @@ int rocke_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec);
  * dtype (fp8e4m3, bf8e5m2). Defined in gemm_spec.cpp. */
 bool rocke_gemm_is_fp8_ab(const char* name);
 
+/* _dtype_ir(name): a GEMM storage dtype string to its IR scalar type (fp64,
+ * fp8/bf8, else io_ir_type). NULL for an unsupported dtype, after setting the
+ * sticky error of `b` when it is non-NULL. Defined in gemm_spec.cpp. */
+const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name);
+
 /* _validate_storage(spec): the GEMM storage-dtype rule. A/B/C are homogeneous
  * f16 / bf16 (f32 acc) or fp64 (fp64 acc), except fp8/bf8 A/B, which need
  * matching A/B and an f16/bf16 C; the layout is RCR. Returns true when the spec
