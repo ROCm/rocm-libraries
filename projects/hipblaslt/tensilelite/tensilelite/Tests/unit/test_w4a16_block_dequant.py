@@ -231,7 +231,7 @@ def test_split_k_starts_the_scale_pointer_at_its_k_range(toolchain, gsu, algorit
     _, src = _emit_solution(toolchain, sol)
     assert "block scale: contiguous split-K" in src
     entry = src.index("block scale: contiguous split-K")
-    offset = src.index("scaleA: groups before this split")
+    offset = src.index("scaleA: groups before this range")
     assert entry < offset < src.index("openLoopL")
     assert "scaleA: skip groups before the split (lower)" in src
     assert ("scaleA: position of the first iteration in its group" in src) == (depthU < blockSize)
@@ -866,7 +866,8 @@ def test_runtime_group_scale_addressing(toolchain, zero_point):
     assert "s[sgprScaleAKMask]" in loop
     assert "s[sgprScaleAInc]" in loop
     if zero_point:
-        assert "s[sgprScaleZeroAInc]" in loop
+        # The zero-point step is the scale step times 4/bpe (4 bytes a group).
+        assert re.search(r"s_lshl_b32 s\d+, s\d+, 1\s+// scaleZeroA: advance only on a wrap", loop)
         assert "scaleZeroA limit -= inc" in loop
 
 

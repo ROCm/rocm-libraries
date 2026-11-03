@@ -712,7 +712,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # print vgpr register pool checkins and checkouts
     self.db["PrintRP"] = False
-    self.db["AssertOnSgprOverflow"] = False
+    self.db["AssertOnSgprOverflow"] = bool(os.environ.get("TENSILE_ASSERT_SGPR_OVERFLOW"))
     self.db["PrintStoreRegisterDb"] = False
 
     self.labels = LabelManager()
@@ -10234,11 +10234,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr("SrdScaleA", 4, 4)
       if len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1:
         for name in ("ScaleAGMinus1", "ScaleAGShift", "ScaleAKMask",
-                     "ScaleAInc", "ScaleZeroAInc", "ScaleAKCnt"):
+                     "ScaleAInc", "ScaleAKCnt"):
           self.defineSgpr(name, 1)
       if blockDequantPackedFp16A(kernel["ProblemType"]):
         # Two nibble masks and two symmetric packed biases.
-        self.defineSgpr("ScaleAPkMagic", 4)
+        # Zero-point kernels take the biases from a VGPR, so only the masks.
+        self.defineSgpr("ScaleAPkMagic", 2 if kernel["ProblemType"]["ScaleZeroPointA"] else 4)
       elif kernel["ProblemType"]["MacDataTypeA"].isBFloat16():
         # bf16 lift: the f32 exponents that put each nibble position's lsb at
         # 1.0, and the 0x8000 rounding bias (see blockScaleADequantBf16).
@@ -10256,6 +10257,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # size, so the public API is still a single pointer.
         self.defineSgpr("AddressScaleZeroA", 2, 2)
         self.defineSgpr("SrdScaleZeroA", 4, 4)
+      if isPersistent(kernel):
+        # Defined after the nonPostLoopSgpr population above, so the store code
+        # would reuse them as temporaries; a persistent kernel reads the scale
+        # pointers and the group-size argument again for its next tile.
+        for name in ("AddressScaleA", "AddressScaleB", "AddressScaleZeroA", "ScaleAGMinus1"):
+          if name in self.sgprs and name not in self.states.nonPostLoopSgpr:
+            self.states.nonPostLoopSgpr.append(name)
 
 
     self.states.numSgprToLoad = self.states.numSgprSizesFree + self.states.numSgprSizesSum + \

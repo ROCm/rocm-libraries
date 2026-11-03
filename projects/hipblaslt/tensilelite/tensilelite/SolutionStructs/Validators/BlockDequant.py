@@ -15,6 +15,7 @@ Public entry point: :func:`validateBlockDequantCombination`.
 from ..Problem import (INT4_ENCODINGS_A, blockDequantItersPerGroupA, usesBlockDequantA,
                        usesBlockDequantZeroPointA)
 from ..Utilities import reject
+from ...ExecutionPolicy import isPersistent
 
 
 #: K-group sizes the prototype generates code for.
@@ -201,7 +202,9 @@ def validateBlockDequantCombination(state, printRejectionReason):
     # pointers at its range (blockScaleAGsuOffset), the partials are already
     # dequantized, and neither reduction path applies a Block scale again. Only
     # the buffered reductions are supported; atomics would round each partial.
-    if state["GlobalSplitU"] not in (1, -1) and state["GlobalSplitU"] <= 0:
+    # Persistent (Stream-K / DP) kernels set GlobalSplitU 0; their K ranges come
+    # from the persistent loop, handled in blockScaleAComputeSrd.
+    if state["GlobalSplitU"] not in (1, -1) and state["GlobalSplitU"] <= 0 and not isPersistent(state):
         reject(state, printRejectionReason, "UseScaleAB=Block requires GlobalSplitU >= 1 or -1")
         return False
     if state["GlobalSplitU"] != 1 and state["GlobalSplitUAlgorithm"] not in (

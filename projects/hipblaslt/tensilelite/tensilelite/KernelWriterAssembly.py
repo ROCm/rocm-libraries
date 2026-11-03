@@ -5351,22 +5351,29 @@ class KernelWriterAssembly(KernelWriter):
                                 shiftHex=log2(kernel["DepthU"])))
       module.add(SMaxU32(dst=sgpr("ScaleAKMask"), src0=sgpr("ScaleAKMask"), src1=1))
       module.add(SSubU32(dst=sgpr("ScaleAKMask"), src0=sgpr("ScaleAKMask"), src1=1))
-      module.add(SMovB32(dst=sgpr("ScaleZeroAInc"), src=kernel["DepthU"]))
-      module.add(SLShiftRightB32(dst=sgpr("ScaleZeroAInc"), src=sgpr("ScaleZeroAInc"),
+      # Groups per increment, max(DepthU/G, 1), in scale bytes. The zero-point
+      # step (4 bytes per group) is derived from it in the loop, saving an SGPR.
+      module.add(SMovB32(dst=sgpr("ScaleAInc"), src=kernel["DepthU"]))
+      module.add(SLShiftRightB32(dst=sgpr("ScaleAInc"), src=sgpr("ScaleAInc"),
                                 shiftHex=sgpr("ScaleAGShift")))
-      module.add(SMaxU32(dst=sgpr("ScaleZeroAInc"), src0=sgpr("ScaleZeroAInc"), src1=1))
-      module.add(SLShiftLeftB32(dst=sgpr("ScaleAInc"), src=sgpr("ScaleZeroAInc"),
+      module.add(SMaxU32(dst=sgpr("ScaleAInc"), src0=sgpr("ScaleAInc"), src1=1))
+      module.add(SLShiftLeftB32(dst=sgpr("ScaleAInc"), src=sgpr("ScaleAInc"),
                                shiftHex=log2(bpe)))
-      module.add(SLShiftLeftB32(dst=sgpr("ScaleZeroAInc"), src=sgpr("ScaleZeroAInc"), shiftHex=2))
-      module.add(SSubU32(dst=sgpr("ScaleAGMinus1"), src0=sgpr("ScaleAGMinus1"), src1=1))
+      # ScaleAGMinus1 holds the kernel argument G and is left as it is: a
+      # persistent kernel runs this setup once per tile.
       module.add(SMovB32(dst=sgpr("ScaleAKCnt"), src=0))
 
     with self.allocTmpSgpr(2, tag="blockScaleAComputeSrd") as tmpSgprInfo:
       tmp = tmpSgprInfo.idx
 
       # StrideScaleA = ceil(SizeL / blockSize), in scale elements.
-      module.add(SAddU32(dst=sgpr("StrideScaleA"), src0=self.sizeRef(unrollIdx),
-                         src1=sgpr("ScaleAGMinus1") if runtimeGroup else hex(blockSize - 1), comment="SizeL + G-1"))
+      if runtimeGroup:
+        module.add(SAddU32(dst=sgpr("StrideScaleA"), src0=self.sizeRef(unrollIdx),
+                           src1=sgpr("ScaleAGMinus1"), comment="SizeL + G"))
+        module.add(SSubU32(dst=sgpr("StrideScaleA"), src0=sgpr("StrideScaleA"), src1=1, comment="SizeL + G-1"))
+      else:
+        module.add(SAddU32(dst=sgpr("StrideScaleA"), src0=self.sizeRef(unrollIdx),
+                           src1=hex(blockSize - 1), comment="SizeL + G-1"))
       module.add(SLShiftRightB32(dst=sgpr("StrideScaleA"), shiftHex=sgpr("ScaleAGShift") if runtimeGroup else log2(blockSize),
                                  src=sgpr("StrideScaleA"),
                                  comment="StrideScaleA = ceil(SizeL/%u) scale elements" % blockSize))
@@ -5403,6 +5410,8 @@ class KernelWriterAssembly(KernelWriter):
       for i, (mask, magicBits, _value, shift) in enumerate(self.FP16_PK_LIFTS):
         module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % i), src=hex(mask)))
         bias = (0x8000 | magicBits) | (8 << shift)
+        if kernel["ProblemType"]["ScaleZeroPointA"]:
+          continue
         module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % (2 + i)),
                            src=hex((bias << 16) | bias)))
 
@@ -5428,6 +5437,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.blockScaleZeroAComputeSrd(kernel))
     if kernel["GlobalSplitU"] != 0:
       module.add(self.blockScaleAGsuOffset(kernel))
+    elif isStreamK(kernel) and not isPersistentDataParallel(kernel):
+      # A Stream-K work item covers iterations [StreamKLocalStart, StreamKLocalEnd)
+      # of its tile; A's SRD starts at StreamKLocalStart*DepthU (StreamK.py).
+      with self.allocTmpSgpr(2, tag="blockScaleASkOffset") as tmpSgprInfo:
+        module.add(self.blockScaleASkipIters(kernel, "StreamKLocalStart", tmpSgprInfo.idx))
     return module
 
   def blockScaleAGsuOffset(self, kernel):
@@ -5457,25 +5471,40 @@ class KernelWriterAssembly(KernelWriter):
                                  comment="scaleA: K iterations"))
       module.add(self.calculateLoopNumIterOffsetGsu(kernel, t, ContinuousRegister(idx=t + 1, size=2)))
       iterOffset = t + 1
-      if runtimeGroup or itersPerGroup > 1:
-        module.add(SAndB32(dst=sgpr("ScaleAKCnt"), src0=sgpr(iterOffset),
-                           src1=sgpr("ScaleAKMask") if runtimeGroup else hex(itersPerGroup - 1),
-                           comment="scaleA: position of the first iteration in its group"))
-      module.add(SMulI32(dst=sgpr(t), src0=sgpr(iterOffset), src1=depthU, comment="scaleA: first K of this split"))
-      module.add(SLShiftRightB32(dst=sgpr(t), src=sgpr(t),
-                                 shiftHex=sgpr("ScaleAGShift") if runtimeGroup else log2(blockSize),
-                                 comment="scaleA: groups before this split"))
-      module.add(SMulI32(dst=sgpr(t + 1), src0=sgpr(t), src1=bpe, comment="scaleA: skipped bytes"))
-      module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=sgpr(t + 1), comment="scaleA: skip groups before the split (lower)"))
-      module.add(SAddCU32(dst=sgpr("SrdScaleA+1"), src0=sgpr("SrdScaleA+1"), src1=0, comment="scaleA: skip groups before the split (upper)"))
-      module.add(SSubU32(dst=sgpr("SrdScaleA+2"), src0=sgpr("SrdScaleA+2"), src1=sgpr(t + 1), comment="scaleA: limit shrinks by the skip"))
-      if kernel["ProblemType"]["ScaleZeroPointA"]:
-        # One K-group is one uint32 word of an eight-row block.
-        module.add(SLShiftLeftB32(dst=sgpr(t + 1), src=sgpr(t), shiftHex=2, comment="scaleZeroA: skipped bytes"))
-        module.add(SAddU32(dst=sgpr("SrdScaleZeroA+0"), src0=sgpr("SrdScaleZeroA+0"), src1=sgpr(t + 1), comment="scaleZeroA: skip groups before the split (lower)"))
-        module.add(SAddCU32(dst=sgpr("SrdScaleZeroA+1"), src0=sgpr("SrdScaleZeroA+1"), src1=0, comment="scaleZeroA: skip groups before the split (upper)"))
-        module.add(SSubU32(dst=sgpr("SrdScaleZeroA+2"), src0=sgpr("SrdScaleZeroA+2"), src1=sgpr(t + 1), comment="scaleZeroA: limit shrinks by the skip"))
+      module.add(SMovB32(dst=sgpr(t), src=sgpr(iterOffset), comment="scaleA: first iteration of this split"))
+      module.add(self.blockScaleASkipIters(kernel, t, t + 1))
     module.add(skip)
+    return module
+
+  def blockScaleASkipIters(self, kernel, iterOffset, t):
+    """Advance the scale (and zero-point) SRDs past the K groups before
+    iteration `iterOffset` (an SGPR name or index), and when DepthU < G start
+    the group counter at that iteration's position in its group. Uses SGPRs
+    t, t+1 (iterOffset may alias t)."""
+    module = Module("blockScaleASkipIters")
+    blockSize = min(kernel["ProblemType"]["ScaleBlockSizesA"])
+    bpe       = self.blockScaleABytesPerElement(kernel)
+    runtimeGroup = len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1
+    itersPerGroup = self.blockScaleAItersPerGroup(kernel)
+    depthU = kernel["DepthU"]
+    if runtimeGroup or itersPerGroup > 1:
+      module.add(SAndB32(dst=sgpr("ScaleAKCnt"), src0=sgpr(iterOffset),
+                         src1=sgpr("ScaleAKMask") if runtimeGroup else hex(itersPerGroup - 1),
+                         comment="scaleA: position of the first iteration in its group"))
+    module.add(SMulI32(dst=sgpr(t), src0=sgpr(iterOffset), src1=depthU, comment="scaleA: first K of this range"))
+    module.add(SLShiftRightB32(dst=sgpr(t), src=sgpr(t),
+                               shiftHex=sgpr("ScaleAGShift") if runtimeGroup else log2(blockSize),
+                               comment="scaleA: groups before this range"))
+    module.add(SMulI32(dst=sgpr(t + 1), src0=sgpr(t), src1=bpe, comment="scaleA: skipped bytes"))
+    module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=sgpr(t + 1), comment="scaleA: skip groups before the split (lower)"))
+    module.add(SAddCU32(dst=sgpr("SrdScaleA+1"), src0=sgpr("SrdScaleA+1"), src1=0, comment="scaleA: skip groups before the split (upper)"))
+    module.add(SSubU32(dst=sgpr("SrdScaleA+2"), src0=sgpr("SrdScaleA+2"), src1=sgpr(t + 1), comment="scaleA: limit shrinks by the skip"))
+    if kernel["ProblemType"]["ScaleZeroPointA"]:
+      # One K-group is one uint32 word of an eight-row block.
+      module.add(SLShiftLeftB32(dst=sgpr(t + 1), src=sgpr(t), shiftHex=2, comment="scaleZeroA: skipped bytes"))
+      module.add(SAddU32(dst=sgpr("SrdScaleZeroA+0"), src0=sgpr("SrdScaleZeroA+0"), src1=sgpr(t + 1), comment="scaleZeroA: skip groups before the split (lower)"))
+      module.add(SAddCU32(dst=sgpr("SrdScaleZeroA+1"), src0=sgpr("SrdScaleZeroA+1"), src1=0, comment="scaleZeroA: skip groups before the split (upper)"))
+      module.add(SSubU32(dst=sgpr("SrdScaleZeroA+2"), src0=sgpr("SrdScaleZeroA+2"), src1=sgpr(t + 1), comment="scaleZeroA: limit shrinks by the skip"))
     return module
 
   def blockScaleZeroAComputeSrd(self, kernel):
@@ -5624,8 +5653,14 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCSelectB32(dst=sgpr(inc), src0=0, src1=sgpr("ScaleAInc") if runtimeGroup else hex(incBytes),
                            comment="scaleA: advance only on a wrap"))
     if kernel["ProblemType"]["ScaleZeroPointA"]:
-      module.add(SCSelectB32(dst=sgpr(inc + 1), src0=0, src1=sgpr("ScaleZeroAInc") if runtimeGroup else hex(zeroIncBytes),
-                             comment="scaleZeroA: advance only on a wrap"))
+      if runtimeGroup:
+        # 4 zero-point bytes per group against bpe scale bytes. Writes SCC,
+        # which no longer matters: both selects are done.
+        module.add(SLShiftLeftB32(dst=sgpr(inc + 1), src=sgpr(inc), shiftHex=2 - log2(self.blockScaleABytesPerElement(kernel)),
+                                  comment="scaleZeroA: advance only on a wrap"))
+      else:
+        module.add(SCSelectB32(dst=sgpr(inc + 1), src0=0, src1=hex(zeroIncBytes),
+                               comment="scaleZeroA: advance only on a wrap"))
 
     module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=sgpr(inc),
                        comment="scaleA SRD += inc(lower)"))
