@@ -5,6 +5,15 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Added
+
+* Added `ALLOW_FETCH_DEPS` and `ALLOW_BUILD_DEPS` cmake options to control fetching and building
+  dependencies.
+
+### Resolved issues
+
+* Fixed cmake build for client sub-projects.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added

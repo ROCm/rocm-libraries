@@ -5,6 +5,15 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.28
 
+### Changed
+
+* Added `ALLOW_FETCH_DEPS` and `ALLOW_BUILD_DEPS` cmake options to control fetching and building
+  dependencies.
+
+### Resolved issues
+
+* Fixed cmake build for client sub-projects.
+
 ## hipFFT 1.0.27 for ROCm 10.2
 
 ### Changed

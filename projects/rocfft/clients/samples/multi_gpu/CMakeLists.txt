@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.25 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -40,7 +40,9 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-samples-multi_gpu LANGUAGES CXX )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-samples-multi_gpu LANGUAGES CXX )
+endif()
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -50,10 +52,6 @@ endif( )
 
 if( NOT HIP_FOUND )
   find_package( hip REQUIRED PATHS /opt/rocm/lib/cmake/hip/ )
-endif()
-
-if( USE_HIPRAND AND NOT hiprand_FOUND )
-  find_package( hiprand REQUIRED )
 endif()
 
 set( sample_list mgpu_complex)
@@ -71,16 +69,8 @@ foreach( sample ${sample_list} )
   target_link_libraries(
     ${sample}
     PRIVATE roc::rocfft
+    hip::device
     )
-
-  if( USE_HIPRAND )
-    target_link_libraries(
-      ${sample}
-      PRIVATE
-      hip::hiprand
-    )
-    target_compile_definitions( ${sample} PRIVATE USE_HIPRAND )
-  endif()
 
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
 
@@ -90,20 +80,17 @@ foreach( sample ${sample_list} )
   )
 
   if( ROCFFT_BUILD_SCOPE )
-    set( SAMPLES_ROCFFT_OUT_DIR "/../../staging" )
-  elseif( ROCFFT_CLIENTS_BUILD_SCOPE )
-    set( SAMPLES_ROCFFT_OUT_DIR "/../../bin" )
-  elseif( ROCFFT_CLIENTS_SAMPLES_BUILD_SCOPE )
-    set( SAMPLES_ROCFFT_OUT_DIR "/../bin" )
+    set( SAMPLES_ROCFFT_OUT_DIR "/clients/staging" )
   else()
     set( SAMPLES_ROCFFT_OUT_DIR "/bin" )
   endif()
   string( CONCAT SAMPLES_ROCFFT_OUT_DIR "${PROJECT_BINARY_DIR}" ${SAMPLES_ROCFFT_OUT_DIR} )
 
   set_target_properties(${sample}
-                        PROPERTIES 
-                        RUNTIME_OUTPUT_DIRECTORY 
-                        ${SAMPLES_ROCFFT_OUT_DIR})
+    PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY 
+    ${SAMPLES_ROCFFT_OUT_DIR}
+  )
 
   target_link_libraries( ${sample} PRIVATE hip::host hip::device )
 

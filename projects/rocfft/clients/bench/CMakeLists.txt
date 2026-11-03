@@ -42,7 +42,9 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-bench LANGUAGES CXX )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-bench LANGUAGES CXX )
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -56,8 +58,15 @@ if( NOT HIP_FOUND )
   find_package( hip REQUIRED PATHS /opt/rocm/lib/cmake/hip/ )
 endif()
 
+if( ROCFFT_MPI_ENABLE AND NOT MPI_FOUND )
+  find_package( MPI REQUIRED )
+endif()
+
 if( NOT ROCmCMakeBuildTools_FOUND )
-  find_package( ROCmCMakeBuildTools REQUIRED )
+  find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
+  if( NOT ROCmCMakeBuildTools_FOUND )
+    include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-rocmcmake.cmake )
+  endif()
 endif()
 
 if( USE_HIPRAND AND NOT hiprand_FOUND )
@@ -156,9 +165,7 @@ foreach( bench ${bench_list})
   )
 
   if( ROCFFT_BUILD_SCOPE )
-    set( BENCH_OUT_DIR "/../staging" )
-  elseif( ROCFFT_CLIENTS_BUILD_SCOPE )
-    set( BENCH_OUT_DIR "/../bin" )
+    set( BENCH_OUT_DIR "/clients/staging" )
   else()
     set( BENCH_OUT_DIR "/bin")
   endif()

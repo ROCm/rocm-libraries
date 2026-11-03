@@ -44,17 +44,23 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-set( ROCFFT_CLIENTS_BUILD_SCOPE ON )
-
-# This project may compile dependencies for clients
-project( rocfft-clients LANGUAGES CXX C )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients LANGUAGES CXX C )
+  include( ../cmake/buildopts.cmake )
+  set( BUILD_CLIENTS_SAMPLES ON )
+  set( BUILD_CLIENTS_TESTS ON )
+  set( BUILD_CLIENTS_BENCH ON )
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
 if( NOT ROCmCMakeBuildTools_FOUND )
-  find_package( ROCmCMakeBuildTools REQUIRED )
+  find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
+  if( NOT ROCmCMakeBuildTools_FOUND )
+    include( ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/build-rocmcmake.cmake )
+  endif()
 endif()
 
 include( ROCMInstallTargets )
@@ -71,14 +77,6 @@ rocm_install ( FILES ${PROJECT_BINARY_DIR}/package/client-version DESTINATION .i
 # used with clang tooling or vim.
 set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
-if(NOT ROCFFT_BUILD_SCOPE AND 
-   NOT BUILD_CLIENTS_SAMPLES AND 
-   NOT BUILD_CLIENTS_TESTS AND 
-   NOT BUILD_CLIENTS_BENCH)
-  set( BUILD_CLIENTS_SAMPLES ON )
-  set( BUILD_CLIENTS_TESTS ON )
-  set( BUILD_CLIENTS_BENCH ON )
-endif()
 
 if( ROCFFT_MPI_ENABLE )
   find_package( MPI REQUIRED )

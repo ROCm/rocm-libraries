@@ -64,38 +64,3 @@ else()
   find_package(CUDAToolkit REQUIRED)
 endif()
 
-# ROCm
-find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )
-if(NOT ROCmCMakeBuildTools_FOUND)
-  set( PROJECT_EXTERN_DIR "${CMAKE_CURRENT_BINARY_DIR}/extern" )
-
-  include( FetchContent )
-
-  FetchContent_Declare( rocm_cmake_local
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake
-    GIT_TAG rocm-6.4.1
-    GIT_SHALLOW ON
-  )
-
-  FetchContent_MakeAvailable( rocm_cmake_local )
-
-  execute_process( COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-    WORKING_DIRECTORY ${rocm_cmake_local_SOURCE_DIR} )
-  execute_process( COMMAND ${CMAKE_COMMAND} --build ${rocm_cmake_local_SOURCE_DIR} --target install
-    WORKING_DIRECTORY ${rocm_cmake_local_SOURCE_DIR} )
-
-  find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
-endif()
-if( ROCmCMakeBuildTools_FOUND )
-  message(STATUS "Found ROCm")
-  include(ROCMSetupVersion)
-  include(ROCMCreatePackage)
-  include(ROCMInstallTargets)
-  include(ROCMPackageConfigHelpers)
-  include(ROCMInstallSymlinks)
-  include(ROCMCheckTargetIds)
-  include(ROCMClients)
-  include(ROCMHeaderWrapper)
-else()
-  message(WARNING "Could not find rocm-cmake, packaging will fail.")
-endif( )

@@ -22,9 +22,21 @@
 
 CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
 
-project( hipfft-clients-bench LANGUAGES CXX )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( hipfft-clients-bench LANGUAGES CXX )
+  find_package( hipfft REQUIRED CONFIG PATHS )
+endif()
 
-set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp ../../shared/data_gen_device.cpp )
+find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-rocmcmake.cmake )
+endif( )
+include(ROCMInstallTargets)
+
+set( hipfft_bench_source bench.cpp
+  ../../shared/array_validator.cpp
+  ../../shared/data_gen_device.cpp
+)
 set( hipfft_bench_includes bench.h ../../shared/array_validator.h )
 
 add_executable( hipfft-bench ${hipfft_bench_source} ${hipfft_bench_includes} )
@@ -33,13 +45,6 @@ target_compile_options( hipfft-bench PRIVATE ${WARNING_FLAGS} )
 
 set_target_properties( hipfft-bench PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON )
 
-target_include_directories( hipfft-bench
-  PRIVATE
-  $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocFFT/library/include>
-  )
   
 if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
@@ -89,9 +94,7 @@ set_target_properties( hipfft-bench PROPERTIES CXX_EXTENSIONS NO )
 set_target_properties( hipfft-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging" )
 
 if( HIPFFT_BUILD_SCOPE )
-  set( BENCH_OUT_DIR "/../staging" )
-elseif( HIPFFT_CLIENTS_BUILD_SCOPE )
-  set( BENCH_OUT_DIR "/../bin" )
+  set( BENCH_OUT_DIR "/clients/staging" )
 else()
   set( BENCH_OUT_DIR "/bin")
 endif()
