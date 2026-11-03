@@ -14,7 +14,7 @@ QK MFMA only through a multiply by the ``k_scale`` kernel argument. It also
 pins the K slab pad: a laid-out pad is refused when Q would be staged in the
 single K slot, and otherwise every K read goes through the padded slab layout;
 a zero-width pad is not laid out. And it pins where the kernel stages Q to the
-spec's rule.
+spec's rule, and that every fp8 LDS load claims only its byte width.
 
 Pure Python: it builds the kernel IR and needs no GPU. The C++ engine tests
 need the ``rocke_engine`` binding (``ROCKE_BUILD_PYBIND=ON``), which CI does
@@ -25,6 +25,7 @@ with the change.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import asdict
 
@@ -113,6 +114,24 @@ def test_every_qk_path_reads_fp8_k_as_fp8(path):
     ]
     assert k_reads, f"{path}: no QK read of the fp8 K buffer"
     assert set(k_reads) == {"fp8e4m3"}
+
+
+@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+def test_fp8_k_lds_loads_claim_their_byte_width(path):
+    # Lanes 32-63 of a 32x32 K read start 8 bytes into a 16-byte line, so an
+    # <8 x i8> load may claim only 8 bytes of alignment; a 16-byte claim is
+    # undefined behaviour in LLVM.
+    spec = UnifiedAttention2DTiledSpec(**_BASE, **_QK_PATHS[path], **_FP8_K_IN_LDS)
+    text = _lower_kernel_to_llvm_python(
+        build_unified_attention_2d_tiled(spec, arch="gfx950"), arch="gfx950"
+    )
+    loads = re.findall(
+        r"= load (?:volatile )?<(\d+) x i8>, ptr addrspace\(3\) [^,]+, align (\d+)",
+        text,
+    )
+    assert loads, f"{path}: no fp8 LDS vector load"
+    over_claimed = sorted({(int(n), int(a)) for n, a in loads if int(a) != int(n)})
+    assert not over_claimed, f"{path}: (elements, align) over-claimed: {over_claimed}"
 
 
 def _users(kernel):

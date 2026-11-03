@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""``zero_vec`` of f64 and i16, and LDS loads and stores of i16.
+"""``zero_vec`` of f64 and i16, LDS loads and stores of i16, and LDS loads of the
+8-bit float types at their natural alignment.
 
 ``zero_vec`` is what ``fill_fragment`` builds on, so without f64 an f64 fragment could
 not be zero-filled. Lowering goes through the active engine, so a strict both-engines run
@@ -10,7 +11,7 @@ test runs only on a visible GPU whose arch it names, and skips otherwise.
 
 import numpy as np
 import pytest
-from rocke.core.ir import F64, I16, I64, TF32, IRBuilder, PtrType
+from rocke.core.ir import BF8E5M2, F64, FP8E4M3, I16, I64, TF32, IRBuilder, PtrType
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.tests.gpu import run_on_device
@@ -58,6 +59,30 @@ def test_lds_loads_and_stores_i16_at_natural_alignment(n):
     if n > 1:
         assert any(f"<{n} x i16>" in line for line in loads)
     assert_target_accepts(text, "gfx90a")
+
+
+@pytest.mark.parametrize("dtype", [FP8E4M3, BF8E5M2], ids=lambda t: t.name)
+@pytest.mark.parametrize("n", [1, 2, 4, 8, 16])
+def test_lds_loads_of_8_bit_floats_claim_their_byte_width(dtype, n):
+    # An <n x i8> LDS load claims only n bytes of alignment: a claim of 2n
+    # (the 16-bit width) is more than an address at an odd multiple of n
+    # guarantees, which LLVM treats as undefined behaviour.
+    b = IRBuilder(f"lds_load_{dtype.name}_{n}")
+    dst = b.param("DST", PtrType(dtype, "global"))
+    tid = b.thread_id_x()
+    smem = b.smem_alloc(dtype, [64 * n])
+    loaded = b.smem_load_vN(smem, b.mul(tid, b.const_i32(n)), dtype=dtype, n=n)
+    b.global_store(dst, tid, b.vec_extract(loaded, 0))
+    text = lower_kernel_to_llvm(b.kernel, arch="gfx950")
+    loads = [
+        line
+        for line in text.splitlines()
+        if "ptr addrspace(3)" in line and " = load " in line
+    ]
+    assert loads
+    for line in loads:
+        assert line.rstrip().endswith(f"align {n}"), line
+    assert_target_accepts(text, "gfx950")
 
 
 def test_lds_loads_outside_the_element_rules_still_raise():
