@@ -289,7 +289,7 @@ namespace
         peer0[FUSED_A2A_SLOT_FLAG_PTR] = const_cast<char*>(&fusedPeerFlag);
 
         ContractionInputs inputs;
-        inputs.fusedA2APeers   = {peer0};
+        inputs.fusedA2APeers   = {peer0, FusedA2APeerFields{}};
         inputs.fusedA2ACounter = const_cast<char*>(&fusedCounter);
         inputs.fusedA2AMyRank  = 1;
         inputs.fusedA2ADrain   = FUSED_A2A_DRAIN_RECV;

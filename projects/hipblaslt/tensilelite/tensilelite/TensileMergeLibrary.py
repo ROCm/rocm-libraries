@@ -34,7 +34,7 @@ from . import __version__
 from . import LibraryIO
 from .SolutionStructs.Naming import getSolutionNameMin
 from .SolutionStructs.Naming import getKernelNameMin
-from .SolutionStructs.Problem import ProblemType, isFusedA2A, problemTypeToEnum
+from .SolutionStructs.Problem import ProblemType, isFusedA2A, problemTypeToEnum, splitFusedA2ARow
 from .Common import ParallelMap2
 from .Common.GlobalParameters import defaultSolution
 from .Common import assignParameterWithDefault
@@ -98,8 +98,9 @@ def fixSizeInconsistencies(sizes, fileType, problemType=None):
     fusedA2A = isFusedA2A(problemType)
     sizesDict = dict()
     for size, index in sizes:
-        if fusedA2A and len(size) >= 10:
-            size = size[:-6] + size[-2:]
+        if fusedA2A:
+            sizes, _, keys = splitFusedA2ARow(size, problemType)
+            size = sizes + keys
         elif len(size) >= 8:
             size = size[:-4]
         sizesDict[tuple(value for value in size)] = [size, index]

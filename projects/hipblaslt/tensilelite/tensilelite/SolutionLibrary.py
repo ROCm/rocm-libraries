@@ -30,6 +30,7 @@ from . import Contractions
 from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
     Tag = "Single"
@@ -90,7 +91,7 @@ class MatchingLibrary:
     StateKeys = [("type", "tag"), "properties", "table", "distance", "useKdTree"]
 
     @classmethod
-    def FromOriginalState(cls, d, solutions, fusedGemmA2A=False):
+    def FromOriginalState(cls, d, solutions, problemType=None):
         indices = d["indexOrder"]
         distance = d["distance"]
         origTable = d["table"]
@@ -115,9 +116,13 @@ class MatchingLibrary:
                 7: Properties.Property("BoundSize", index=0)
             }
 
+        fusedA2A = isFusedA2A(problemType)
+        if fusedA2A and distance != "Equality":
+            raise RuntimeError("fused GEMM+A2A logic supports only the Equality distance; got %s" % distance)
+
         properties = list([propertyKeys[i] for i in indices if i in propertyKeys])
         keyOrder = [i for i, j in enumerate(indices) if j in propertyKeys]
-        if fusedGemmA2A:
+        if fusedA2A:
             properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
         table = []
@@ -127,8 +132,8 @@ class MatchingLibrary:
                 index = row[1][0]
                 value = IndexSolutionLibrary(solutions[index])
                 key = list([row[0][i] for i in keyOrder])
-                if fusedGemmA2A:
-                    key += list(row[0][-2:])
+                if fusedA2A:
+                    key += splitFusedA2ARow(row[0], problemType)[2]
                 if distance == "GridBased":
                     entry = {"key": key, "index": value}
                 else:
@@ -476,7 +481,7 @@ class MasterSolutionLibrary:
                 else:
                     predicate = Properties.Predicate(tag="GridBasedMatching") # to make different from TruePred
 
-                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions, problemType.fusedGemmA2A)
+                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions, d["ProblemType"])
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": matchingLib})
             elif d["LibraryType"] == "FreeSize":

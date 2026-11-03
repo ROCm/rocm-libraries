@@ -810,6 +810,8 @@ namespace TensileLite
                     "[fused-a2a] --fused-a2a-drain-send=0 is not supported; leave it at 1.");
             if(args["use-user-args"].as<bool>())
                 throw std::runtime_error("[fused-a2a] --use-user-args is not supported.");
+            if(!args["library-update-file"].as<std::string>().empty())
+                throw std::runtime_error("[fused-a2a] --library-update-file is not supported.");
             if(args["rotating-buffer-size"].as<int32_t>() > 0
                && args["rotating-buffer-mode"].as<int32_t>() == 1)
                 throw std::runtime_error(

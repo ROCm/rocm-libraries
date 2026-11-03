@@ -292,7 +292,10 @@ of ClientWriter.writeClientConfig() by converting ExactLogic to list of `Problem
 class ProblemSizesMock:
   def __init__(self, exactLogic, problemType=None):
     if isFusedA2A(problemType):
-      self.problems = [Problem(sizes[:-2], world=sizes[-2], a2aExtent=sizes[-1]) for sizes, solution in exactLogic]
+      self.problems = []
+      for size, solution in exactLogic:
+        sizes, lds, (world, extent) = splitFusedA2ARow(size, problemType)
+        self.problems.append(Problem(sizes + lds, world=world, a2aExtent=extent))
     else:
       self.problems = [Problem(problem) for problem, solution in exactLogic]
 
@@ -558,6 +561,16 @@ _defaultProblemType = {
 def isFusedA2A(problemType):
   """problemType: a ProblemType or a raw logic ProblemType dict."""
   return bool((problemType or {}).get("FusedGemmA2A", False))
+
+
+def splitFusedA2ARow(size, problemType):
+  """Returns (sizes, LDs, [world, a2aExtent]) of a fused logic row; LDs may be absent."""
+  numSizes = problemType["TotalIndices"]
+  numFields = (numSizes + 2, numSizes + problemType["NumIndicesLD"] + 2)
+  if len(size) not in numFields:
+    raise RuntimeError("fused GEMM+A2A logic row %s has %d fields; expected %d or %d"
+                       % (list(size), len(size), numFields[0], numFields[1]))
+  return list(size[:numSizes]), list(size[numSizes:-2]), list(size[-2:])
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
 # DataType (Ti)        = The data-type of the input matrices: A/B

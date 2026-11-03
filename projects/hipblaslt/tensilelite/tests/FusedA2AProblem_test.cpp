@@ -8,6 +8,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/KernelArguments.hpp>
 
 #include <memory>
 #include <stdexcept>
@@ -18,8 +19,13 @@ using namespace TensileLite;
 
 namespace
 {
-    ContractionProblemGemm fusedProblem(
-        size_t M, size_t N, size_t ldd, uint32_t world, int64_t extent, size_t batch = 1)
+    ContractionProblemGemm fusedProblem(size_t           M,
+                                        size_t           N,
+                                        size_t           ldd,
+                                        uint32_t         world,
+                                        int64_t          extent,
+                                        size_t           batch = 1,
+                                        rocisa::DataType dType = rocisa::DataType::BFloat16)
     {
         constexpr size_t K = 2048;
         auto             p = ContractionProblemGemm::GEMM_Strides(true,
@@ -27,7 +33,7 @@ namespace
                                                       rocisa::DataType::BFloat16,
                                                       rocisa::DataType::BFloat16,
                                                       rocisa::DataType::BFloat16,
-                                                      rocisa::DataType::BFloat16,
+                                                      dType,
                                                       M,
                                                       N,
                                                       K,
@@ -53,6 +59,8 @@ TEST(FusedA2AProblem, ShapePredicate)
     Predicates::Contraction::GemmA2AShape mt256(256);
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 4, 2048)));
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 8, 2048)));
+    // D is not 2 bytes
+    EXPECT_FALSE(mt256(fusedProblem(3072, 512, 3072, 4, 2048, 1, rocisa::DataType::Float)));
     // AM % (MT0 * W) != 0
     EXPECT_FALSE(mt256(fusedProblem(3072, 512, 3072, 8, 3072)));
     // AM > M
@@ -73,6 +81,18 @@ TEST(FusedA2AProblem, ShapePredicate)
     auto plain
         = ContractionProblemGemm::GEMM(false, true, 3000, 500, 100, 3000, 500, 3000, 0.0, false, 1);
     EXPECT_TRUE(mt256(plain));
+}
+
+TEST(FusedA2AProblem, SegmentNeedsOnePeerGroupPerRank)
+{
+    KernelArguments args(false);
+    appendFusedSegment(args, std::vector<FusedA2APeerFields>(4), nullptr, 0, 4, 0, 2048);
+    EXPECT_EQ(args.size(), FUSED_A2A_SEGMENT_BYTES);
+
+    KernelArguments shortArgs(false);
+    EXPECT_THROW(
+        appendFusedSegment(shortArgs, std::vector<FusedA2APeerFields>(1), nullptr, 0, 4, 0, 2048),
+        std::runtime_error);
 }
 
 namespace

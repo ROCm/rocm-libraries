@@ -2946,6 +2946,8 @@ namespace TensileLite
                             return false;
                     const int64_t m       = problem.freeSizeA(0);
                     const auto&   d       = problem.d();
+                    if(d.elementBytes() != 2)
+                        return false;
                     const size_t  mStride = d.strides()[problem.freeIndices()[0].d];
                     const size_t  ldd     = d.strides()[problem.freeIndices()[1].d];
                     return am % (value * world) == 0 && m % value == 0 && am <= m
@@ -2967,14 +2969,16 @@ namespace TensileLite
                     {
                         const auto& d = problem.d();
                         details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
-                                << " m=" << problem.freeSizeA(0) << " MT0=" << value
+                                << " dBytes=" << d.elementBytes() << " m=" << problem.freeSizeA(0)
+                                << " MT0=" << value
                                 << " mStride=" << d.strides()[problem.freeIndices()[0].d]
                                 << " ldd=" << d.strides()[problem.freeIndices()[1].d];
                         for(size_t i = 0; i < problem.batchIndices().size(); i++)
                             details << " batch=" << problem.batchSize(i);
-                        details << " (need am % (MT0*world) == 0, m % MT0 == 0, am <= m,"
-                                   " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
-                                   " ldd>>3 < 2^19, batch == 1)";
+                        details
+                            << " (need dBytes == 2, am % (MT0*world) == 0, m % MT0 == 0, am <= m,"
+                               " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
+                               " ldd>>3 < 2^19, batch == 1)";
                     }
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;

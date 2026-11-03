@@ -97,9 +97,20 @@ class TestFusedMatchingKey:
 
     def test_world_and_extent_join_the_key(self):
         d = {"indexOrder": [2, 3, 0, 1], "distance": "Equality", "table": [self._ROW]}
-        lib = SL.MatchingLibrary.FromOriginalState(d, [_FakeSol(0)], fusedGemmA2A=True)
+        lib = SL.MatchingLibrary.FromOriginalState(d, [_FakeSol(0)], _problemType())
         assert [p.tag for p in lib.properties][-2:] == ["World", "FusedA2AExtent"]
         assert lib.table[0]["key"] == [3072, 512, 1, 2048, 4, 2048]
+
+    def test_row_without_world_raises(self):
+        row = [self._ROW[0][:8], self._ROW[1]]
+        d = {"indexOrder": [2, 3, 0, 1], "distance": "Equality", "table": [row]}
+        with pytest.raises(RuntimeError, match="has 8 fields"):
+            SL.MatchingLibrary.FromOriginalState(d, [_FakeSol(0)], _problemType())
+
+    def test_rejects_non_equality(self):
+        d = {"indexOrder": [2, 3, 0, 1], "distance": "Euclidean", "table": [self._ROW]}
+        with pytest.raises(RuntimeError, match="only the Equality distance"):
+            SL.MatchingLibrary.FromOriginalState(d, [_FakeSol(0)], _problemType())
 
     def test_non_fused_key_unchanged(self):
         row = [self._ROW[0][:8], self._ROW[1]]
@@ -113,11 +124,16 @@ class TestMergeKeepsWorld:
     def test_strips_lds_only(self):
         rows, n = fixSizeInconsistencies(
             [[[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 2, 2048], [0, 1.0]],
-             [[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 4, 2048], [0, 2.0]]], "base", _FUSED_CONFIG)
+             [[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 4, 2048], [0, 2.0]]], "base", _problemType())
         assert n == 2
         assert sorted(r[0] for r in rows) == [[3072, 512, 1, 2048, 2, 2048],
                                               [3072, 512, 1, 2048, 4, 2048]]
-        assert fixSizeInconsistencies(rows, "base", _FUSED_CONFIG) == (rows, 2)
+        assert fixSizeInconsistencies(rows, "base", _problemType()) == (rows, 2)
+
+    def test_row_without_world_raises(self):
+        with pytest.raises(RuntimeError, match="has 8 fields"):
+            fixSizeInconsistencies(
+                [[[3072, 512, 1, 2048, 3072, 3072, 2048, 2048], [0, 1.0]]], "base", _problemType())
 
 
 class TestClientWriterWorld:
@@ -230,7 +246,7 @@ class TestLibLogicToYamlWorld:
     def test_fused_logic_row_becomes_an_exact_dict(self):
         from tensilelite.TensileLibLogicToYaml import formProblemSize
         logic = [(self._ROW + [4, 2048], [0, 1.0]), (self._ROW + [8, 1024], [1, 2.0])]
-        data = formProblemSize(logic, 1, dict(_FUSED_CONFIG))
+        data = formProblemSize(logic, 1, dict(_problemType().state))
         p = self._reload(_problemType(), data)[0]
         assert (list(p.sizes), p.world, p.a2aExtent) == (self._ROW, 8, 1024)
 
