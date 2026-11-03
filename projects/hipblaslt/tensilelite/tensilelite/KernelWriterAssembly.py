@@ -20930,7 +20930,8 @@ class KernelWriterAssembly(KernelWriter):
       for _ in range(0, gwvw):
         idx = 0
         while idx < maxKId:
-          gwvwK = 2 if (idx + 1 < maxKId * gwvw) else 1
+          # Pair two K groups of the same value; a pair never spans two values.
+          gwvwK = 2 if (idx + 1 < maxKId) else 1
           bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvwK
           numRegs = max(1, bps // 4)
           ds  = DSModifiers(offset=dsOffset)

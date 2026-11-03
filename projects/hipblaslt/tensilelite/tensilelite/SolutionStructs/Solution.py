@@ -7247,9 +7247,9 @@ class Solution(collections.abc.Mapping):
         # Don't need to calculate lds bias
         if tile01 > -1:
           maxKId = state["WavefrontSize"] // ((state["MatrixInstM"] if (tile01 == 0) else state["MatrixInstN"]) * state["MatrixInstB"])
-          # Every LocalSplitU group stores its own partial sums.
-          for dataType in state["ProblemType"]["BiasDataTypeList"]:
-            epilogueSize = max(epilogueSize, int(state["MacroTile%d"%tile01] * maxKId * state["LocalSplitU"] * dataType.numBytes())) # TODO- GetTurn ?
+          # Every LocalSplitU group stores its own partial sums, in ComputeDataType
+          # whatever the bias types (SumUnroll.storeSumLDS).
+          epilogueSize = max(epilogueSize, int(state["MacroTile%d"%tile01] * maxKId * state["LocalSplitU"] * state["ProblemType"]["ComputeDataType"].numBytes()))
       else:
         epilogueSize = int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.bias(0).turn)
     # Calculate max ldsNumBytes for other epilogues
