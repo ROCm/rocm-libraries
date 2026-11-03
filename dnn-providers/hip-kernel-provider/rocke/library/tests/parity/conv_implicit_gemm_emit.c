@@ -1125,6 +1125,25 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->defer_mfma = idx == 125 ? 2 : 0;
         spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
         return 0;
+    case 131:
+    case 132:
+        if(make_cfg_3d(130, spec, arch) != 0)
+            return -1;
+        spec->epi_quad_xpose = idx == 131 ? 4 : 3;
+        spec->xh_stride_m = true;
+        if(idx == 131)
+        {
+            spec->defer_mfma = 2;
+            spec->vmem_interleave = 2;
+        }
+        else
+        {
+            spec->uk_xhalo = 4;
+            spec->uk_tap_fast = true;
+            spec->uk_chunk_group = 2;
+            spec->lds_ahead = true;
+        }
+        return 0;
     case 128:
     case 129:
     case 130:

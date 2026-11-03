@@ -358,11 +358,11 @@ rocke_value_t*
 /* Python _xa (xh_stride_m): the LDS (row, col) of x-halo A element (row,
  * col): row bit 0 flipped by row bit 2 and the 16-byte chunk XOR (row/4) % 4
  * (+ the xh_yring region base row). */
-static void conv_xa(rocke_conv_build_ctx_t* ctx,
-                    rocke_value_t* row,
-                    rocke_value_t* col,
-                    rocke_value_t** prow_out,
-                    rocke_value_t** col_out)
+void rocke_conv_xa(rocke_conv_build_ctx_t* ctx,
+                   rocke_value_t* row,
+                   rocke_value_t* col,
+                   rocke_value_t** prow_out,
+                   rocke_value_t** col_out)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* hi = rocke_b_lshr(b, row, rocke_b_const_i32(b, 2));
@@ -447,7 +447,7 @@ static void conv_load_frags(
             if(spec->xh_stride_m && ctx->xh_a_rows != NULL)
             {
                 rocke_value_t *pr, *pc;
-                conv_xa(ctx, a_row, cb, &pr, &pc);
+                rocke_conv_xa(ctx, a_row, cb, &pr, &pc);
                 pa[npa++] = rocke_conv_emit_smem_load(
                     b, e->A_src, pr, pc, 2 * ctx->a_per_lane, ctx->smem_dtype);
                 continue;
@@ -556,7 +556,7 @@ static void conv_load_frags(
         else if(!has_ov && spec->xh_stride_m && ctx->xh_a_rows != NULL)
         {
             rocke_value_t *pr, *pc;
-            conv_xa(ctx, a_row, col_base, &pr, &pc);
+            rocke_conv_xa(ctx, a_row, col_base, &pr, &pc);
             a_rows[(*na)++]
                 = rocke_conv_emit_smem_load(b, e->A_src, pr, pc, ctx->a_per_lane, ctx->smem_dtype);
         }

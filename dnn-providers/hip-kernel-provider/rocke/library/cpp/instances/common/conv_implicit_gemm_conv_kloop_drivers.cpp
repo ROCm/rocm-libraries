@@ -2125,8 +2125,15 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
                 const int vec = w == 0 ? lva : lvb;
                 for(int i = 0; i < sl_n[w]; ++i)
                 {
-                    rocke_value_t* sc = rocke_conv_lds_swz(ctx, sl_row[w][i], sl_col[w][i]);
-                    rocke_value_t* idx[2] = {sl_row[w][i], sc};
+                    rocke_value_t* idx[2];
+                    if(spec->xh_stride_m && w == 0)
+                        rocke_conv_xa(ctx, sl_row[w][i], sl_col[w][i], &idx[0], &idx[1]);
+                    else
+                    {
+                        rocke_value_t* sc = rocke_conv_lds_swz(ctx, sl_row[w][i], sl_col[w][i]);
+                        idx[0] = sl_row[w][i];
+                        idx[1] = sc;
+                    }
                     rocke_b_smem_store_vN(b, dst, idx, 2, w == 0 ? stg->va[i] : stg->vb[i], vec);
                 }
             }
@@ -2138,8 +2145,20 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
             rocke_value_t* cur[ROCKE_CONV_MAX_ACCS];
             for(int i = 0; i < n_acc; ++i)
                 cur[i] = accs_t[i];
+            /* xh_stride_m: each tap records its A fragments (a_rec) and the
+             * next reads them shifted (a_shift_prev). */
+            typedef rocke_value_t* xrec_t[ROCKE_CONV_MAX_ACCS];
+            xrec_t* xrecs = NULL;
+            if(spec->xh_stride_m)
+                xrecs
+                    = (xrec_t*)rocke_arena_alloc(&b->arena, (size_t)XT * k_atoms * sizeof(xrec_t));
             for(int xx = 0; xx < XT; ++xx)
             {
+                if(xrecs != NULL)
+                {
+                    ctx->xh_prev = xx == 0 ? NULL : xrecs + (size_t)(xx - 1) * k_atoms;
+                    ctx->xh_rec = xrecs + (size_t)xx * k_atoms;
+                }
                 if(defer_last && xx == XT - 1)
                 {
                     dfr = (rocke_conv_frag_t*)rocke_arena_alloc(
@@ -2159,6 +2178,8 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
                 rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, cur, n_acc, nx);
                 ctx->xh_a_rows = NULL;
                 ctx->xh_b_row_off = 0;
+                ctx->xh_prev = NULL;
+                ctx->xh_rec = NULL;
                 for(int i = 0; i < n_acc; ++i)
                     cur[i] = nx[i];
             }
@@ -2264,7 +2285,6 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         rocke_b_region_leave(b);
         for(int i = 0; i < n_acc; ++i)
             out_accs[i] = pf.op->results[i];
-        (void)k_atoms;
         return xh_ok;
     }
 

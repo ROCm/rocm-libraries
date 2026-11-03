@@ -793,6 +793,18 @@ rocke_value_t* rocke_conv_emit_smem_load(rocke_ir_builder_t* b,
                                          int n,
                                          const rocke_type_t* smem_dtype);
 
+/* rocke_conv_emit_smem_load with an explicit LDS element type (NULL / f16: the
+ * f16 path); the name the 3-D K-loop twins use. */
+static inline rocke_value_t* rocke_conv_emit_smem_load_dt(rocke_ir_builder_t* b,
+                                                          rocke_value_t* smem,
+                                                          rocke_value_t* row,
+                                                          rocke_value_t* col,
+                                                          int n,
+                                                          const rocke_type_t* dtype)
+{
+    return rocke_conv_emit_smem_load(b, smem, row, col, n, dtype);
+}
+
 /* _to_mma_operand(b, frag, data): hand an fp32 LDS fragment to a TF32 MMA as
  * vec<tf32xN> (a bitcast, no rounding). Every non-TF32 spec gets frag back. */
 rocke_value_t* rocke_conv_to_mma_operand(rocke_ir_builder_t* b, rocke_value_t* frag, bool is_tf32);
@@ -948,6 +960,12 @@ rocke_value_t* rocke_conv_eqx_chan(rocke_conv_build_ctx_t* ctx, rocke_value_t* r
 /* lds_xor column of tile element (row, col) (Python lds_swz). */
 rocke_value_t*
     rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col);
+/* Python _xa (xh_stride_m): the LDS (row, col) of x-halo A element (row, col). */
+void rocke_conv_xa(rocke_conv_build_ctx_t* ctx,
+                   rocke_value_t* row,
+                   rocke_value_t* col,
+                   rocke_value_t** prow_out,
+                   rocke_value_t** col_out);
 
 /* async_dma branch (lines 1320-1347): SoftwarePipeline.run_ping_pong over the
  * AsyncTileLoader path. (SoftwarePipeline is a peer port; the driver reproduces

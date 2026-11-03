@@ -1020,6 +1020,7 @@ _GFX942_3D_OFFSET = 32
 #  121-123: 55 + reg_prefetch=1 with rpf_lds_barrier / rpf_fetch_late / sched_strategy
 #  124-127: 56 / 55 + lds_ahead / defer_mfma / defer_mfma_per_write
 #  128-130: 55 + the plain uk_xhalo loop (defer_mfma, lds_ahead, chunk groups)
+#  131-132: 55 + the plain uk_xhalo loop with xh_stride_m
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1381,6 +1382,21 @@ def _gfx942_3d_spec(idx: int):
         ),
     )
     knobs[130] = (55, dict(_xp, epi_quad_xpose=0))
+    # 131-132: the plain uk_xhalo loop with xh_stride_m (the A store's _xa
+    # map, each tap's fragments shifted from the previous tap's).
+    knobs[131] = (55, dict(_xp, xh_stride_m=True, defer_mfma=2, vmem_interleave=2))
+    knobs[132] = (
+        55,
+        dict(
+            _xp,
+            xh_stride_m=True,
+            epi_quad_xpose=3,
+            uk_xhalo=4,
+            uk_tap_fast=True,
+            uk_chunk_group=2,
+            lds_ahead=True,
+        ),
+    )
     _pp.update(
         {
             110: dict(_p84, xcd_remap=0, split_streamk=True),

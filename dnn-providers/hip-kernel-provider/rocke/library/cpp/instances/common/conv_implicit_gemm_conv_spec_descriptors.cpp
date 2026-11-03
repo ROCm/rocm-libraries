@@ -1433,12 +1433,12 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             "uk_xhalo is implemented in the 3-D uniform_k_decode + "
                             "reg_prefetch=1 lds_xor loop only");
         /* C port: the wave-private DMA staging form only (Python-only otherwise). */
-        const bool plain_ok = s->fxh_dma == 0 && !s->xh_stride_m && !s->xh_yring;
+        const bool plain_ok = s->fxh_dma == 0 && !s->xh_yring;
         if((s->fxh_dma < 1000 && !plain_ok) || s->rpf_pingpong || s->xh_yring / 10 == 2)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
-                            "uk_xhalo: the C port carries the plain loop (no xh_stride_m / "
-                            "xh_yring) and the fxh_dma >= 1000 loop only");
+                            "uk_xhalo: the C port carries the plain loop (no xh_yring) and the "
+                            "fxh_dma >= 1000 loop only");
     }
     if(s->rpf_pingpong && s->uk_xhalo && s->rpf_pingpong < 4)
         ROCKE_SPEC_FAIL(reason,
