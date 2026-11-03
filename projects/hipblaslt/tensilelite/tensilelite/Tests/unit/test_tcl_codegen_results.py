@@ -3,7 +3,6 @@
 """Unit tests for what TensileCreateLibrary's assembly codegen workers return:
 each worker writes and assembles its kernel's source itself, so the result sent
 back to the parent carries the kernel info but not the source."""
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -28,19 +27,22 @@ def _result():
         cuoccupancy=2,
         pgr=1,
         mathclk=7,
+        # Not the default, so that a field lost on the way back to the parent shows.
+        customKernelDef={"name": "custom0"},
     )
 
 
 @pytest.fixture
-def written(monkeypatch, tmp_path):
-    """Runs writeSolutionsAndKernelsTCL on one fake kernel with real composed
-    codegen, recording the result each worker writes to disk."""
-    written = []
+def run(monkeypatch, tmp_path):
+    """Runs writeSolutionsAndKernelsTCL on one fake kernel through the real
+    codegen composition: generating the source is faked, but the worker writes
+    the real .s file and calls the (mock) assembler on it."""
+    sourceCalls = []
     kernel = {"KernelLanguage": "Assembly", "ISA": list(_ISA)}
 
-    def writeAssembly(asmPath, result):
-        written.append(result)
-        return Path(asmPath) / f"{result.name}.s", result.isa, result.wavefrontSize, None
+    def processKernelSource(*args, **kwargs):
+        sourceCalls.append(kwargs)
+        return _result()
 
     monkeypatch.setattr(Run, "rocisa", MagicMock())
     monkeypatch.setattr(
@@ -48,8 +50,7 @@ def written(monkeypatch, tmp_path):
         "_normalizeKernelGroups",
         lambda kernels, splitGSU: [SimpleNamespace(representative=k, aliases=[k]) for k in kernels],
     )
-    monkeypatch.setattr(Run, "processKernelSource", lambda *a, **kw: _result())
-    monkeypatch.setattr(Run, "writeAssembly", writeAssembly)
+    monkeypatch.setattr(Run, "processKernelSource", processKernelSource)
     monkeypatch.setattr(Run, "_alignAmdgcnTargetToStepping", lambda *a, **kw: None)
     monkeypatch.setattr(Run, "_stinky_asm_verify_wanted", lambda isa: False)
     monkeypatch.setattr(Run, "ParallelMap2", lambda fn, items, *a, **kw: [fn(k) for k in items])
@@ -57,9 +58,10 @@ def written(monkeypatch, tmp_path):
     monkeypatch.setattr(Run, "buildSourceCodeObjectFiles", lambda *a, **kw: [])
     monkeypatch.setattr(Run, "writeHelpers", lambda *a, **kw: None)
 
+    asmToolchain = MagicMock()
     _, _, results = Run.writeSolutionsAndKernelsTCL(
         str(tmp_path),
-        MagicMock(),  # asmToolchain
+        asmToolchain,
         MagicMock(),  # srcToolchain
         [],  # solutions
         [kernel],
@@ -68,15 +70,22 @@ def written(monkeypatch, tmp_path):
         ["gfx942"],
         removeTemporaries=False,
     )
-    return written, results
+    return SimpleNamespace(
+        tmp=tmp_path, assembler=asmToolchain.assembler, sourceCalls=sourceCalls, results=results
+    )
 
 
-def test_worker_writes_the_full_source(written):
-    written, _ = written
-    assert [r.src for r in written] == ["s_endpgm\n"]
+def test_worker_writes_and_assembles_the_full_source(run):
+    (asmFile,) = run.tmp.rglob("kernel0.s")
+    assert asmFile.read_text() == "s_endpgm\n"
+    run.assembler.assert_called_once()
+    assert run.assembler.call_args.args[2] == str(asmFile)
 
 
-def test_result_returned_to_the_parent_has_no_source(written):
-    _, results = written
-    assert [(r.src, r.header) for r in results] == [(None, None)]
-    assert results[0]._replace(src=_result().src, header=_result().header) == _result()
+def test_source_is_not_compressed_for_the_parent(run):
+    assert run.sourceCalls == [{}]
+
+
+def test_result_returned_to_the_parent_has_no_source(run):
+    assert [(r.src, r.header) for r in run.results] == [(None, None)]
+    assert run.results[0]._replace(src=_result().src, header=_result().header) == _result()
