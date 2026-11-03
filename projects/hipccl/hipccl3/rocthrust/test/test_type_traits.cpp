@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -29,7 +28,7 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/pair.h>
-#include <thrust/tuple.h>
+#include _THRUST_STD_INCLUDE(tuple)
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 #include "test_param_fixtures.hpp"
@@ -66,7 +65,7 @@ TEST(TypeTraitsTests, TestIsContiguousIterator)
 
   ASSERT_EQ(thrust::is_contiguous_iterator_v<thrust::device_ptr<int>>, true);
 
-  using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
+  using HostIteratorTuple = _THRUST_STD::tuple<HostVector::iterator, HostVector::iterator>;
 
   using ConstantIterator  = thrust::constant_iterator<int>;
   using CountingIterator  = thrust::counting_iterator<int>;
@@ -182,7 +181,7 @@ TEST(TypeTraitsTests, TestIsCommutative)
   }
 
   {
-    using T  = thrust::tuple<int, int>;
+    using T  = _THRUST_STD::tuple<int, int>;
     using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
@@ -219,25 +218,25 @@ TEST(TypeTraitsTests, TestTriviallyRelocatable)
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::pair<int, thrust::complex<float>>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<int, _THRUST_STD::complex<float>>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<thrust::tuple<int, thrust::complex<float>, char>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, thrust::complex<float>, char>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value,
                 "");
 #endif // THRUST_COMPILER(GCC, >=, 7)
   static_assert(thrust::is_trivially_relocatable<
-                  _THRUST_STD::tuple<thrust::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,
-                                     thrust::tuple<_THRUST_STD::pair<int, thrust::tuple<>>, int>>>::value,
+                  _THRUST_STD::tuple<thrust::pair<int, _THRUST_STD::tuple<int, _THRUST_STD::tuple<>>>,
+                                     _THRUST_STD::tuple<_THRUST_STD::pair<int, _THRUST_STD::tuple<>>, int>>>::value,
                 "");
 
   static_assert(!thrust::is_trivially_relocatable<thrust::pair<int, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::pair<int, std::string>>::value, "");
-  static_assert(!thrust::is_trivially_relocatable<thrust::tuple<int, float, std::string>>::value, "");
+  static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, float, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, float, std::string>>::value, "");
 
   // test propagation of relocatability through pair and tuple
   static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::pair<NonTriviallyCopyable, int>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<NonTriviallyCopyable, int>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<thrust::tuple<NonTriviallyCopyable>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
 }
 

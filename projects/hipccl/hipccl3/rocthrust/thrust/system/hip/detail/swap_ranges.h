@@ -55,11 +55,11 @@ namespace hip_rocprim
 struct __swap_f
 {
   template <typename T, typename U>
-  THRUST_HOST_DEVICE auto operator()(T t, U u) const -> tuple<T, U>
+  THRUST_HOST_DEVICE auto operator()(T t, U u) const -> _THRUST_STD::tuple<T, U>
   {
     using _THRUST_STD::swap;
     swap(t, u);
-    return tuple{t, u};
+    return _THRUST_STD::tuple{t, u};
   }
 };
 
@@ -83,7 +83,7 @@ swap_ranges(execution_policy<Derived>& policy, ItemsIt1 first1, ItemsIt1 last1, 
   if constexpr (is_indirectly_trivially_relocate_to_v<ItemsIt1, ItemsIt2>
                 && is_indirectly_trivially_relocate_to_v<ItemsIt2, ItemsIt1>)
   {
-    return get<1>(
+    return _THRUST_STD::get<1>(
       hip_rocprim::transform(
         policy,
         first1,

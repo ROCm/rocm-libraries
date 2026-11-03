@@ -237,7 +237,7 @@ struct zip_adj_not_predicate
   template <typename TupleType>
   bool THRUST_HOST_DEVICE operator()(TupleType&& tuple)
   {
-    return !binary_pred(thrust::get<0>(tuple), thrust::get<1>(tuple));
+    return !binary_pred(_THRUST_STD::get<0>(tuple), _THRUST_STD::get<1>(tuple));
   }
 
   BinaryPred binary_pred;

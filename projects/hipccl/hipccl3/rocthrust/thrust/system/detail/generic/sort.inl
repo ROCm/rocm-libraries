@@ -31,11 +31,11 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/system/detail/generic/sort.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(__functional/operations.h)
 #include _THRUST_STD_INCLUDE(__iterator/advance.h)
 #include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
@@ -136,7 +136,7 @@ THRUST_HOST_DEVICE ForwardIterator is_sorted_until(
     return last;
   }
 
-  using IteratorTuple = thrust::tuple<ForwardIterator, ForwardIterator>;
+  using IteratorTuple = _THRUST_STD::tuple<ForwardIterator, ForwardIterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ForwardIterator first_plus_one = first;
@@ -145,7 +145,7 @@ THRUST_HOST_DEVICE ForwardIterator is_sorted_until(
   ZipIterator zipped_first = thrust::make_zip_iterator(first_plus_one, first);
   ZipIterator zipped_last  = thrust::make_zip_iterator(last, first);
 
-  return thrust::get<0>(
+  return _THRUST_STD::get<0>(
     thrust::find_if(exec, zipped_first, zipped_last, thrust::detail::tuple_binary_predicate<Compare>{comp})
       .get_iterator_tuple());
 } // end is_sorted_until()

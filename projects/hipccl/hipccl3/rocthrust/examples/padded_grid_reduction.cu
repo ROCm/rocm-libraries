@@ -43,8 +43,8 @@
 template <typename IndexType, typename ValueType>
 struct transform_tuple
 {
-  using InputTuple  = typename thrust::tuple<IndexType, ValueType>;
-  using OutputTuple = typename thrust::tuple<bool, ValueType, ValueType>;
+  using InputTuple  = typename _THRUST_STD::tuple<IndexType, ValueType>;
+  using OutputTuple = typename _THRUST_STD::tuple<bool, ValueType, ValueType>;
 
   IndexType n, N;
 
@@ -55,8 +55,8 @@ struct transform_tuple
 
   __host__ __device__ OutputTuple operator()(const InputTuple& t) const
   {
-    bool is_valid = (thrust::get<0>(t) % N) < n;
-    return OutputTuple(is_valid, thrust::get<1>(t), thrust::get<1>(t));
+    bool is_valid = (_THRUST_STD::get<0>(t) % N) < n;
+    return OutputTuple(is_valid, _THRUST_STD::get<1>(t), _THRUST_STD::get<1>(t));
   }
 };
 
@@ -65,20 +65,21 @@ struct transform_tuple
 template <typename IndexType, typename ValueType>
 struct reduce_tuple
 {
-  using Tuple = typename thrust::tuple<bool, ValueType, ValueType>;
+  using Tuple = typename _THRUST_STD::tuple<bool, ValueType, ValueType>;
 
   __host__ __device__ Tuple operator()(const Tuple& t0, const Tuple& t1) const
   {
-    if (thrust::get<0>(t0) && thrust::get<0>(t1)) // both valid
+    if (_THRUST_STD::get<0>(t0) && _THRUST_STD::get<0>(t1)) // both valid
     {
-      return Tuple(
-        true, thrust::min(thrust::get<1>(t0), thrust::get<1>(t1)), thrust::max(thrust::get<2>(t0), thrust::get<2>(t1)));
+      return Tuple(true,
+                   thrust::min(_THRUST_STD::get<1>(t0), _THRUST_STD::get<1>(t1)),
+                   thrust::max(_THRUST_STD::get<2>(t0), _THRUST_STD::get<2>(t1)));
     }
-    else if (thrust::get<0>(t0))
+    else if (_THRUST_STD::get<0>(t0))
     {
       return t0;
     }
-    else if (thrust::get<0>(t1))
+    else if (_THRUST_STD::get<0>(t1))
     {
       return t1;
     }
@@ -124,7 +125,7 @@ int main(void)
   std::cout << "\n";
 
   // compute min & max over valid region of the 2d grid
-  using result_type = thrust::tuple<bool, float, float>;
+  using result_type = _THRUST_STD::tuple<bool, float, float>;
 
   result_type init(true, FLT_MAX, -FLT_MAX); // initial value
   transform_tuple<int, float> unary_op(n, N); // transformation operator
@@ -132,13 +133,13 @@ int main(void)
 
   result_type result = thrust::transform_reduce(
     thrust::make_zip_iterator(thrust::counting_iterator<int>(0), data.begin()),
-    thrust::make_zip_iterator(thrust::counting_iterator<int>(0), data.begin()) + data.size(),
+    thrust::make_zip_iterator(_THRUST_STD::tuple(thrust::counting_iterator<int>(0), data.begin())) + data.size(),
     unary_op,
     init,
     binary_op);
 
-  std::cout << "minimum value: " << thrust::get<1>(result) << std::endl;
-  std::cout << "maximum value: " << thrust::get<2>(result) << std::endl;
+  std::cout << "minimum value: " << _THRUST_STD::get<1>(result) << std::endl;
+  std::cout << "maximum value: " << _THRUST_STD::get<2>(result) << std::endl;
 
   return 0;
 }

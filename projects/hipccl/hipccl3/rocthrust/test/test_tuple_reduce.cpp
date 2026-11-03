@@ -17,7 +17,7 @@
 
 #include <thrust/reduce.h>
 #include <thrust/transform.h>
-#include <thrust/tuple.h>
+#include _THRUST_STD_INCLUDE(tuple)
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -30,18 +30,18 @@ struct SumTupleFunctor
   template <typename Tuple>
   THRUST_HOST_DEVICE Tuple operator()(const Tuple& lhs, const Tuple& rhs)
   {
-    using thrust::get;
+    using _THRUST_STD::get;
 
-    return thrust::make_tuple(get<0>(lhs) + get<0>(rhs), get<1>(lhs) + get<1>(rhs));
+    return _THRUST_STD::tuple(get<0>(lhs) + get<0>(rhs), get<1>(lhs) + get<1>(rhs));
   }
 };
 
 struct MakeTupleFunctor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
   {
-    return thrust::make_tuple(lhs, rhs);
+    return _THRUST_STD::tuple(lhs, rhs);
   }
 };
 
@@ -65,19 +65,19 @@ TYPED_TEST(TupleReduceTests, TestTupleReduce)
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
       // zip up the data
-      host_vector<tuple<T, T>> h_tuples(size);
+      host_vector<_THRUST_STD::tuple<T, T>> h_tuples(size);
       thrust::transform(h_t1.begin(), h_t1.end(), h_t2.begin(), h_tuples.begin(), MakeTupleFunctor());
 
       // copy to device
-      device_vector<tuple<T, T>> d_tuples = h_tuples;
+      device_vector<_THRUST_STD::tuple<T, T>> d_tuples = h_tuples;
 
-      tuple<T, T> zero(0, 0);
+      _THRUST_STD::tuple<T, T> zero(0, 0);
 
       // sum on host
-      tuple<T, T> h_result = thrust::reduce(h_tuples.begin(), h_tuples.end(), zero, SumTupleFunctor());
+      _THRUST_STD::tuple<T, T> h_result = thrust::reduce(h_tuples.begin(), h_tuples.end(), zero, SumTupleFunctor());
 
       // sum on device
-      tuple<T, T> d_result = thrust::reduce(d_tuples.begin(), d_tuples.end(), zero, SumTupleFunctor());
+      _THRUST_STD::tuple<T, T> d_result = thrust::reduce(d_tuples.begin(), d_tuples.end(), zero, SumTupleFunctor());
 
       ASSERT_EQ_QUIET(h_result, d_result);
     }

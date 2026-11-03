@@ -86,9 +86,9 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> merge_by_
   OutputIterator2 values_result,
   Compare comp)
 {
-  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
-  using iterator_tuple2 = thrust::tuple<InputIterator2, InputIterator4>;
-  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
+  using iterator_tuple1 = _THRUST_STD::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = _THRUST_STD::tuple<InputIterator2, InputIterator4>;
+  using iterator_tuple3 = _THRUST_STD::tuple<OutputIterator1, OutputIterator2>;
 
   using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
   using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
@@ -108,7 +108,7 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> merge_by_
     thrust::merge(exec, zipped_first1, zipped_last1, zipped_first2, zipped_last2, zipped_result, comp_first)
       .get_iterator_tuple();
 
-  return _THRUST_STD::make_pair(thrust::get<0>(result), thrust::get<1>(result));
+  return _THRUST_STD::make_pair(_THRUST_STD::get<0>(result), _THRUST_STD::get<1>(result));
 } // end merge_by_key()
 
 template <typename DerivedPolicy,
