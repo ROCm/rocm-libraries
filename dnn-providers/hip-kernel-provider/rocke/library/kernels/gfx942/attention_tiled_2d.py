@@ -898,6 +898,16 @@ class UnifiedAttention2DTiledSpec:
                     "use_fast_paged_kv_desc is restricted to bf16 h64kv8 "
                     "HD=64 BS=32 T=64 num_warps=4"
                 )
+            # The direct K and V reads address the cache through the paged-KV
+            # descriptor, which the fast descriptor path does not build.
+            if self.use_k_hbm_direct or self.use_v_hbm_direct:
+                raise ValueError(
+                    "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
+                    f"use_k_hbm_direct={self.use_k_hbm_direct}, "
+                    f"use_v_hbm_direct={self.use_v_hbm_direct}, expected both "
+                    "False: the direct K and V reads address the cache through the "
+                    "paged-KV descriptor, which the fast descriptor path does not build"
+                )
         if self.use_agpr_alloc_zero:
             _agpr0_r4_s1mask_hlpv = (
                 self.use_mfma_32x32

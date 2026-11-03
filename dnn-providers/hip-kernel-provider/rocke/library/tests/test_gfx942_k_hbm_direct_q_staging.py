@@ -14,7 +14,9 @@ The kernel must therefore gather Q straight from global memory, exactly as the
 explicit ``use_q_direct_global`` knob does. These tests check that in the
 emitted LLVM IR for two K-HBM-direct configurations (bf16 head size 128 with V
 also from HBM, and fp16 head size 64 with sinks and the causal-mask phase
-split).
+split). They also check that the spec refuses the fast paged-KV descriptor
+with K or V read from HBM: those reads address the cache through the paged-KV
+descriptor, which the fast path does not build.
 
 No GPU required.
 """
@@ -118,3 +120,34 @@ def test_k_from_hbm_reads_q_like_the_direct_q_knob(spec):
     )
     assert name != direct_q_name
     assert ir.replace(name, "KERNEL") == direct_q_ir.replace(direct_q_name, "KERNEL")
+
+
+@pytest.mark.parametrize("knob", ["use_k_hbm_direct", "use_v_hbm_direct"])
+def test_hbm_reads_refuse_the_fast_paged_kv_descriptor(knob):
+    # The one geometry the fast descriptor accepts, on the transposed-x8 path.
+    fast_descriptor = {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32x8": True,
+        "use_transposed_qk_32x32": True,
+        "use_fast_paged_kv_desc": True,
+    }
+    UnifiedAttention2DTiledSpec(**fast_descriptor)
+    with pytest.raises(ValueError) as refusal:
+        UnifiedAttention2DTiledSpec(**fast_descriptor, **{knob: True})
+    assert str(refusal.value) == (
+        "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
+        f"use_k_hbm_direct={knob == 'use_k_hbm_direct'}, "
+        f"use_v_hbm_direct={knob == 'use_v_hbm_direct'}, expected both "
+        "False: the direct K and V reads address the cache through the "
+        "paged-KV descriptor, which the fast descriptor path does not build"
+    )
