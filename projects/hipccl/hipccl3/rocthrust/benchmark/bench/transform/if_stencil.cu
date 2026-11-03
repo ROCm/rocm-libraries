@@ -34,7 +34,7 @@ struct negate_if_stencil_benchmark : public primbench::benchmark_interface
   void run(primbench::state& state) override
   {
     const T val       = bench_utils::lerp_min_max<T>(bench_utils::get_entropy_percentage(entropy));
-    auto transform_op = thrust::negate<T>{};
+    auto transform_op = _THRUST_STD::negate<T>{};
     bench_utils::less_then_t<T> select_op{val};
 
     bench_utils::caching_allocator_t alloc{}; // transform_if shouldn't allocate, but let's be consistent
