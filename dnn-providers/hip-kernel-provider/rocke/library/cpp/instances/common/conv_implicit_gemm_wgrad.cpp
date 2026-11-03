@@ -934,9 +934,11 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
     if(s->lds_bswz || s->ws_fuse || s->ws_tree || s->epi_quad_xpose || s->ws_lc || s->ws_gred)
         BR_REJECT("wgrad lds_bswz / ws_fuse / ws_tree / epi_quad_xpose / ws_lc / ws_gred are "
                   "Python-only (no C++ twin yet)");
-    if(s->xwin_rows != 1 || s->xwin_mrow != 1 || s->xwin_kband || s->xwin_bq || s->xwin_aq)
-        BR_REJECT("wgrad xwin_rows / xwin_mrow / xwin_kband / xwin_bq / xwin_aq are "
+    if(s->xwin_rows != 1 || s->xwin_mrow != 1 || s->xwin_kband || s->xwin_bq)
+        BR_REJECT("wgrad xwin_rows / xwin_mrow / xwin_kband / xwin_bq are "
                   "Python-only (no C++ twin yet)");
+    if(s->xwin_aq && (s->xwin_aq < 1 || s->xwin_aq > 2 || s->xwin_gn != 2))
+        BR_REJECT("xwin_aq is 0, 1 or 2 and needs xwin_gn 2");
     if(s->xwin_kord && (s->xwin_kord != 1 || (s->tile_k & (s->tile_k - 1))))
         BR_REJECT("xwin_kord is 0 or 1 (xwin_mrow 1, no xwin_kband, power-of-two tile_k)");
     if(s->xwin)
@@ -6004,6 +6006,7 @@ typedef struct wg_xw
     rocke_value_t *m_in_atom, *n_in_atom, *k_blk, *wn_c, *w_cw;
     const rocke_type_t *dt_b, *i32x2, *i32x1, *bfx4;
     rocke_value_t *ash_store, *ash_lead; /* xwin_gn 2 (NULL off) */
+    int xwin_aq; /* xwin_aq: leader-only dY stores (2: pinned packs) */
     rocke_value_t *xg_aoff, *xg_boff; /* _xg_off (NULL: None) */
     rocke_value_t *pp_upper, *pp_lower;
     /* the _tile_steps generator */
@@ -6627,7 +6630,31 @@ typedef struct wg_xw_item
     bool is_b;
     rocke_value_t *r, *c, *v;
     int n;
+    rocke_value_t* pred; /* xwin_aq: store under scf_if(pred) (NULL: plain) */
 } wg_xw_item_t;
+
+/* xwin_aq 2 (_pin): route a packed store value through an empty
+ * side-effecting asm where it is computed, so the compiler cannot sink its
+ * packing into the conditional store block. */
+static rocke_value_t* wg_xw_pin(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    const rocke_type_t* vt = v->type;
+    const rocke_type_t* et = vt->elem;
+    const bool b16 = strcmp(et->name, "bf16") == 0 || strcmp(et->name, "f16") == 0;
+    const int nb = vt->count * (b16 ? 2 : 4);
+    rocke_value_t* iv = rocke_b_vec_bitcast(b, v, rocke_vector_type(b, rocke_i32(), nb / 4));
+    rocke_value_t* outs[16];
+    rocke_inline_asm_opts_t opts;
+    memset(&opts, 0, sizeof opts);
+    const rocke_type_t* i32t = rocke_i32();
+    for(int k = 0; k < nb / 4; ++k)
+    {
+        rocke_value_t* e = rocke_b_vec_extract(b, iv, k);
+        rocke_op_t* op = rocke_b_inline_asm(b, "; xaq pin $0", "=v,0", &e, 1, &i32t, 1, &opts);
+        outs[k] = op ? op->results[0] : NULL;
+    }
+    return rocke_b_vec_bitcast(b, rocke_b_vec_pack(b, outs, nb / 4, rocke_i32()), vt);
+}
 
 /* The pp work items: packs (one LDS store value each), loads, MMAs, steps. */
 typedef enum
@@ -6682,8 +6709,16 @@ static void wg_xw_pack_a(wg_xw_pp_t* P, int g, int i)
         for(int q = 0; q < kp; ++q)
             parts[q] = rocke_b_vec_extract(b, P->vals[g + q], i);
         v = rocke_b_vec_pack(b, parts, kp, ld->elem_dtype ? ld->elem_dtype : rocke_f16());
+        if(W->xwin_aq && W->ash_lead != NULL)
+        {
+            /* xwin_aq: only the slot's leader group stores the dY tile */
+            if(W->xwin_aq == 2)
+                v = wg_xw_pin(b, v);
+            P->items[P->n_items++] = (wg_xw_item_t){false, r, col, v, kp, W->ash_lead};
+            return;
+        }
     }
-    P->items[P->n_items++] = (wg_xw_item_t){false, r, col, v, kp};
+    P->items[P->n_items++] = (wg_xw_item_t){false, r, col, v, kp, NULL};
 }
 
 static void wg_xw_pack_b(wg_xw_pp_t* P, int ui, int ci)
@@ -6695,7 +6730,10 @@ static void wg_xw_pack_b(wg_xw_pp_t* P, int ui, int ci)
     rocke_value_t* const* vs = P->vals + P->n_a + 2 * ui;
     rocke_value_t* row = u->lrow;
     rocke_value_t* col = u->j0;
-    if(u->inr != NULL)
+    rocke_value_t* pred = NULL;
+    if(u->inr != NULL && W->xwin_aq == 2)
+        pred = u->inr; /* idle units: exec-masked (pinned packs) */
+    else if(u->inr != NULL)
     {
         rocke_value_t* tr = rocke_b_const_i32(b, W->Cb);
         row = rocke_b_select(b, u->inr, row, tr);
@@ -6708,7 +6746,9 @@ static void wg_xw_pack_b(wg_xw_pp_t* P, int ui, int ci)
     parts[0] = rocke_b_vec_extract(b, vs[0], ci);
     parts[1] = rocke_b_vec_extract(b, vs[1], ci);
     rocke_value_t* pair = rocke_b_vec_pack(b, parts, 2, W->dt_b);
-    P->items[P->n_items++] = (wg_xw_item_t){true, rr, col, pair, 2};
+    if(pred != NULL)
+        pair = wg_xw_pin(b, pair);
+    P->items[P->n_items++] = (wg_xw_item_t){true, rr, col, pair, 2, pred};
 }
 
 /* _pack_items' thunk list (A packs then B packs), in Python order. */
@@ -6737,11 +6777,30 @@ static int wg_xw_pack_list(wg_xw_pp_t* P, wg_xw_work_t* out)
 static void wg_xw_put(wg_xw_pp_t* P)
 {
     rocke_conv_build_ctx_t* ctx = P->W->ctx;
-    for(int i = 0; i < P->n_items; ++i)
+    rocke_ir_builder_t* b = ctx->b;
+    /* Python _put: consecutive items of one predicate go in one scf_if. */
+    int i = 0;
+    while(i < P->n_items)
     {
         wg_xw_item_t* it = &P->items[i];
-        rocke_value_t* idx[2] = {it->r, it->c};
-        rocke_b_smem_store_vN(ctx->b, it->is_b ? ctx->B_smem : ctx->A_smem, idx, 2, it->v, it->n);
+        if(it->pred == NULL)
+        {
+            rocke_value_t* idx[2] = {it->r, it->c};
+            rocke_b_smem_store_vN(b, it->is_b ? ctx->B_smem : ctx->A_smem, idx, 2, it->v, it->n);
+            ++i;
+            continue;
+        }
+        rocke_value_t* pred = it->pred;
+        rocke_if_t if_op = rocke_b_scf_if(b, pred);
+        rocke_b_region_enter(b, if_op.then_region);
+        while(i < P->n_items && P->items[i].pred == pred)
+        {
+            wg_xw_item_t* q = &P->items[i];
+            rocke_value_t* idx[2] = {q->r, q->c};
+            rocke_b_smem_store_vN(b, q->is_b ? ctx->B_smem : ctx->A_smem, idx, 2, q->v, q->n);
+            ++i;
+        }
+        rocke_b_region_leave(b);
     }
     P->n_items = 0;
 }
@@ -7236,6 +7295,7 @@ static void wgrad_emit_kloop_xwin(rocke_conv_build_ctx_t* ctx,
         rocke_value_t* ss = rocke_b_select(b, lead, a_read, tr);
         W->ash_store = rocke_b_to_sgpr_u32(b, ss);
         W->ash_lead = lead;
+        W->xwin_aq = spec->xwin_aq;
         W->xg_aoff = a_read;
     }
     if(spec->xwin_pp)

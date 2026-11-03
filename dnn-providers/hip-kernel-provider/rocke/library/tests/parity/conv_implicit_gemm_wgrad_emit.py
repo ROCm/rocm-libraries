@@ -1426,6 +1426,13 @@ for _i, _b in ((79, 73), (80, 70), (81, 78)):
         _GFX942_3D_KNOBS[_b][0],
         dict(_GFX942_3D_KNOBS[_b][1], xwin_kord=1),
     )
+# 82-83: xwin_aq (only a slot's leader group stores the shared dY tile) 1 on
+# 72 and 2 (pinned packs, exec-masked idle B units) on 73.
+for _i, _b, _aq in ((82, 72, 1), (83, 73, 2)):
+    _GFX942_3D_KNOBS[_i] = (
+        _GFX942_3D_KNOBS[_b][0],
+        dict(_GFX942_3D_KNOBS[_b][1], xwin_aq=_aq),
+    )
 
 
 def _gfx942_3d_knob_spec(idx: int):
