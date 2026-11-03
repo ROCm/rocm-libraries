@@ -2191,16 +2191,16 @@ TYPED_TEST(solvers, divergence_tolerance_below_one_stops_at_the_first_check)
 TYPED_TEST(solvers, idr_stops_when_the_shadow_space_breaks_down)
 {
     using T = typename TypeParam::value_type;
-    KNOWN_BUG("IDR ends the program on a breakdown instead of stopping");
-    expect_in_child([&] {
-        // A P^T A U block of zero
-        const Csr<T> ref = diagonal(Vec<T>(4, 0));
-        auto         A   = this->make(ref);
-        IDR<T>       solver;
-        solver.Init(0.0, 1e-10, 1e8, 10);
-        set_up(solver, idr<T>(2), *A, nullptr);
-        solve_reporting(solver, *A, rhs<T>(4), "M(k,k) == 0");
-    });
+    // A P^T A U block of zero
+    const Csr<T> ref = diagonal(Vec<T>(4, 0));
+    auto         A   = this->make(ref);
+    IDR<T>       solver;
+    solver.Init(0.0, 1e-10, 1e8, 10);
+    set_up(solver, idr<T>(2), *A, nullptr);
+    const Outcome<T> out = solve_reporting(solver, *A, rhs<T>(4), "M(k,k) == 0");
+    EXPECT_EQ(out.x, Vec<T>(4, 0));
+    EXPECT_EQ(out.iterations, 0);
+    EXPECT_EQ(out.status, 0);
 }
 
 // The first step of IDR(1) takes U = r = b and M = (P, A b). On the zero matrix M is
@@ -2242,20 +2242,17 @@ TYPED_TEST(solvers, idr_reports_the_breakdown_and_stops)
                           {&huge, {-10 * sign1, 10 * sign0}, "M(k,k) == NaN"},
                           {&rotation, {1, 2}, "w == NaN"}};
 
-    KNOWN_BUG("IDR ends the program on a breakdown instead of stopping");
     for(const Case& c : cases)
     {
         for(bool precond : {false, true})
         {
             SCOPED_TRACE(std::string(c.message) + (precond ? " with Jacobi" : ""));
-            expect_in_child([&] {
-                auto      A = this->make(*c.A);
-                Jacobi<T> jacobi;
-                IDR<T>    solver;
-                solver.Init(0.0, 0.0, 1e8, 10);
-                quietly([&] { set_up(solver, idr<T>(1), *A, precond ? &jacobi : nullptr); });
-                solve_reporting(solver, *A, c.b, c.message);
-            });
+            auto      A = this->make(*c.A);
+            Jacobi<T> jacobi;
+            IDR<T>    solver;
+            solver.Init(0.0, 0.0, 1e8, 10);
+            quietly([&] { set_up(solver, idr<T>(1), *A, precond ? &jacobi : nullptr); });
+            EXPECT_EQ(solve_reporting(solver, *A, c.b, c.message).status, 0);
         }
     }
 }

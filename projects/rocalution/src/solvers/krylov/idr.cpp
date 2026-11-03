@@ -245,7 +245,6 @@ namespace rocalution
             {
                 this->U_[i]->Zeros();
                 this->G_[i]->Zeros();
-                this->P_[i]->Zeros();
             }
 
             if(this->precond_ != NULL)
@@ -393,6 +392,8 @@ namespace rocalution
             }
         }
 
+        bool breakdown = false;
+
         // IDR(s) iteration
         while(true)
         {
@@ -458,21 +459,24 @@ namespace rocalution
                 if(M[DENSE_IND(k, k, s, s)] == zero)
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == 0.0");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Check M_kk for NaN
                 if(M[DENSE_IND(k, k, s, s)] != M[DENSE_IND(k, k, s, s)])
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == NaN");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Check M_kk for zero
                 if(M[DENSE_IND(k, k, s, s)] == std::numeric_limits<ValueType>::infinity())
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == inf");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Make residual r orthogonal to P
@@ -500,6 +504,11 @@ namespace rocalution
                 {
                     f[i] -= beta * M[DENSE_IND(i, k, s, s)];
                 }
+            }
+
+            if(breakdown)
+            {
+                break;
             }
 
             // Check convergence
@@ -531,21 +540,21 @@ namespace rocalution
             if(omega == zero)
             {
                 LOG_INFO("IDR(s) break down ; w == 0.0");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for NaN
             if(omega != omega)
             {
                 LOG_INFO("IDR(s) break down ; w == NaN");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for inf
             if(omega == std::numeric_limits<ValueType>::infinity())
             {
                 LOG_INFO("IDR(s) break down ; w == inf");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // x = x + omega * r
@@ -621,6 +630,8 @@ namespace rocalution
             }
         }
 
+        bool breakdown = false;
+
         // IDR(s) iteration
         while(true)
         {
@@ -689,21 +700,24 @@ namespace rocalution
                 if(M[DENSE_IND(k, k, s, s)] == zero)
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == 0.0");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Check M_kk for NaN
                 if(M[DENSE_IND(k, k, s, s)] != M[DENSE_IND(k, k, s, s)])
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == NaN");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Check M_kk for zero
                 if(M[DENSE_IND(k, k, s, s)] == std::numeric_limits<ValueType>::infinity())
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == inf");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Make residual r orthogonal to P
@@ -731,6 +745,11 @@ namespace rocalution
                 {
                     f[i] -= beta * M[DENSE_IND(i, k, s, s)];
                 }
+            }
+
+            if(breakdown)
+            {
+                break;
             }
 
             // Check convergence
@@ -765,21 +784,21 @@ namespace rocalution
             if(omega == zero)
             {
                 LOG_INFO("IDR(s) break down ; w == 0.0");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for NaN
             if(omega != omega)
             {
                 LOG_INFO("IDR(s) break down ; w == NaN");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for inf
             if(omega == std::numeric_limits<ValueType>::infinity())
             {
                 LOG_INFO("IDR(s) break down ; w == inf");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // r = r - omega * t
