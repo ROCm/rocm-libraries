@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 
 #include <thrust/detail/config.h>
 
+#include <thrust/detail/libcxx_wrapper/__functional/maximum.h>
 #include <thrust/device_free.h>
 #include <thrust/device_malloc.h>
 #include <thrust/functional.h>
@@ -27,33 +28,19 @@
 
 #include <unittest/unittest.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#endif
 #include _THRUST_STD_INCLUDE(array)
 
-template <typename T>
-struct max_functor
-{
-  THRUST_HOST_DEVICE T operator()(T rhs, T lhs) const
-  {
-    return thrust::max(rhs, lhs);
-  }
-};
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
+#endif
 
 template <class Vector>
 void TestScanSimple()
 {
   using T = typename Vector::value_type;
-
-  // icc miscompiles the intermediate sum updates for custom_numeric.
-  // The issue doesn't happen with opts disabled, or on other compilers.
-  // Printing the intermediate sum each iteration "fixes" the issue,
-  // so likely a bad optimization.
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
-  if (std::is_same<T, custom_numeric>::value)
-  {
-    return;
-  }
-#endif
-
   typename Vector::iterator iter;
 
   Vector input(5);
@@ -318,12 +305,12 @@ struct TestScanWithOperator
     thrust::host_vector<T> h_output(n);
     thrust::device_vector<T> d_output(n);
 
-    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), max_functor<T>());
-    thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), max_functor<T>());
+    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), ::internal::maximum<T>{});
+    thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), ::internal::maximum<T>{});
     ASSERT_EQUAL(d_output, h_output);
 
-    thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), T(13), max_functor<T>());
-    thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), T(13), max_functor<T>());
+    thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), T(13), ::internal::maximum<T>{});
+    thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), T(13), ::internal::maximum<T>{});
     ASSERT_EQUAL(d_output, h_output);
   }
 };
@@ -340,19 +327,19 @@ struct TestScanWithOperatorToDiscardIterator
     thrust::discard_iterator<> reference(n);
 
     thrust::discard_iterator<> h_result =
-      thrust::inclusive_scan(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), max_functor<T>());
+      thrust::inclusive_scan(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), ::internal::maximum<T>{});
 
     thrust::discard_iterator<> d_result =
-      thrust::inclusive_scan(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), max_functor<T>());
+      thrust::inclusive_scan(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), ::internal::maximum<T>{});
 
     ASSERT_EQUAL_QUIET(reference, h_result);
     ASSERT_EQUAL_QUIET(reference, d_result);
 
-    h_result =
-      thrust::exclusive_scan(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), T(13), max_functor<T>());
+    h_result = thrust::exclusive_scan(
+      h_input.begin(), h_input.end(), thrust::make_discard_iterator(), T(13), ::internal::maximum<T>{});
 
-    d_result =
-      thrust::exclusive_scan(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), T(13), max_functor<T>());
+    d_result = thrust::exclusive_scan(
+      d_input.begin(), d_input.end(), thrust::make_discard_iterator(), T(13), ::internal::maximum<T>{});
 
     ASSERT_EQUAL_QUIET(reference, h_result);
     ASSERT_EQUAL_QUIET(reference, d_result);
@@ -604,24 +591,29 @@ struct only_set_when_expected_it
   }
 };
 
-THRUST_NAMESPACE_BEGIN
-template <>
-struct iterator_traits<only_set_when_expected_it>
-{
-  using value_type = long long;
-  using reference  = only_set_when_expected_it;
-};
-THRUST_NAMESPACE_END
-
 namespace std
 {
 template <>
 struct iterator_traits<only_set_when_expected_it>
 {
-  using value_type = long long;
-  using reference  = only_set_when_expected_it;
+  using value_type      = long long;
+  using reference       = only_set_when_expected_it;
+  using difference_type = _THRUST_STD::ptrdiff_t;
 };
 } // namespace std
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+_THRUST_STD_NAMESPACE_BEGIN
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type        = long long;
+  using reference         = only_set_when_expected_it;
+  using iterator_category = thrust::random_access_device_iterator_tag;
+  using difference_type   = _THRUST_STD::ptrdiff_t;
+};
+_THRUST_STD_NAMESPACE_END
+#endif
 
 void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 {

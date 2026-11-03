@@ -3,6 +3,19 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 5.0.0 for ROCm 10.2.0
+ 
+### Added
+* rocThrust is now largely in feature parity with CCCL/thrust v3.0.3. If there isn't a libhipcxx corresponding to CCCL/libcudacxx version 3.0.3 or later, `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` will fall back to rocThrust 4.4.0 implementations.
+ 
+### Resolved issues
+
+* Fixed build failures when libhipcxx is not on the include path. The OMP and TBB backends included `<cuda/std/...>` headers directly and `thrust/unique_ptr.h` included `<compare>` unconditionally. They now use the standard library fallback, and `<compare>` is only included for C++20 and later.
+
+### Removed
+
+* rocThrust compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Use PyTorch v2.11 or later.
+
 ## rocThrust 4.7.0 for ROCm 10.1.0
 
 ### Changed

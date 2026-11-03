@@ -17,9 +17,17 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/pair.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/function.h>
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/pair.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -35,24 +43,18 @@ namespace generic
 namespace scalar
 {
 
-template<typename RandomAccessIterator, typename Size, typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-RandomAccessIterator lower_bound_n(RandomAccessIterator first,
-                                   Size n,
-                                   const T &val,
-                                   BinaryPredicate comp)
+template <typename RandomAccessIterator, typename Size, typename T, typename BinaryPredicate>
+THRUST_HOST_DEVICE RandomAccessIterator
+lower_bound_n(RandomAccessIterator first, Size n, const T& val, BinaryPredicate comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<
-    BinaryPredicate,
-    bool
-  > wrapped_comp{comp};
+  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp{comp};
 
   Size start = 0, i;
-  while(start < n)
+  while (start < n)
   {
-    i = start + (n - start) / 2;  // Overflow-safe variant of (a+b)/2
-    if(wrapped_comp(first[i], val))
+    i = start + (n - start) / 2; // Overflow-safe variant of (a+b)/2
+    if (wrapped_comp(first[i], val))
     {
       start = i + 1;
     }
@@ -67,34 +69,26 @@ RandomAccessIterator lower_bound_n(RandomAccessIterator first,
 
 // XXX generalize these upon implementation of scalar::distance & scalar::advance
 
-template<typename RandomAccessIterator, typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-RandomAccessIterator lower_bound(RandomAccessIterator first, RandomAccessIterator last,
-                                 const T &val,
-                                 BinaryPredicate comp)
+template <typename RandomAccessIterator, typename T, typename BinaryPredicate>
+THRUST_HOST_DEVICE RandomAccessIterator
+lower_bound(RandomAccessIterator first, RandomAccessIterator last, const T& val, BinaryPredicate comp)
 {
-  typename thrust::iterator_difference<RandomAccessIterator>::type n = last - first;
+  thrust::detail::it_difference_t<RandomAccessIterator> n = last - first;
   return lower_bound_n(first, n, val, comp);
 }
 
-template<typename RandomAccessIterator, typename Size, typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-RandomAccessIterator upper_bound_n(RandomAccessIterator first,
-                                   Size n,
-                                   const T &val,
-                                   BinaryPredicate comp)
+template <typename RandomAccessIterator, typename Size, typename T, typename BinaryPredicate>
+THRUST_HOST_DEVICE RandomAccessIterator
+upper_bound_n(RandomAccessIterator first, Size n, const T& val, BinaryPredicate comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<
-    BinaryPredicate,
-    bool
-  > wrapped_comp{comp};
+  thrust::detail::wrapped_function<BinaryPredicate, bool> wrapped_comp{comp};
 
   Size start = 0, i;
-  while(start < n)
+  while (start < n)
   {
-    i = start + (n - start) / 2;  // Overflow-safe variant of (a+b)/2
-    if(wrapped_comp(val, first[i]))
+    i = start + (n - start) / 2; // Overflow-safe variant of (a+b)/2
+    if (wrapped_comp(val, first[i]))
     {
       n = i;
     }
@@ -107,50 +101,40 @@ RandomAccessIterator upper_bound_n(RandomAccessIterator first,
   return first + start;
 }
 
-template<typename RandomAccessIterator, typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-RandomAccessIterator upper_bound(RandomAccessIterator first, RandomAccessIterator last,
-                                 const T &val,
-                                 BinaryPredicate comp)
+template <typename RandomAccessIterator, typename T, typename BinaryPredicate>
+THRUST_HOST_DEVICE RandomAccessIterator
+upper_bound(RandomAccessIterator first, RandomAccessIterator last, const T& val, BinaryPredicate comp)
 {
-  typename thrust::iterator_difference<RandomAccessIterator>::type n = last - first;
+  thrust::detail::it_difference_t<RandomAccessIterator> n = last - first;
   return upper_bound_n(first, n, val, comp);
 }
 
-template<typename RandomAccessIterator, typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  pair<RandomAccessIterator,RandomAccessIterator>
-    equal_range(RandomAccessIterator first, RandomAccessIterator last,
-                const T &val,
-                BinaryPredicate comp)
+template <typename RandomAccessIterator, typename T, typename BinaryPredicate>
+THRUST_HOST_DEVICE pair<RandomAccessIterator, RandomAccessIterator>
+equal_range(RandomAccessIterator first, RandomAccessIterator last, const T& val, BinaryPredicate comp)
 {
   RandomAccessIterator lb = thrust::system::detail::generic::scalar::lower_bound(first, last, val, comp);
   return thrust::make_pair(lb, thrust::system::detail::generic::scalar::upper_bound(lb, last, val, comp));
 }
 
-
-template<typename RandomAccessIterator, typename T, typename Compare>
-THRUST_HOST_DEVICE
-bool binary_search(RandomAccessIterator first, RandomAccessIterator last, const T &value, Compare comp)
+template <typename RandomAccessIterator, typename T, typename Compare>
+THRUST_HOST_DEVICE bool binary_search(RandomAccessIterator first, RandomAccessIterator last, const T& value, Compare comp)
 {
   RandomAccessIterator iter = thrust::system::detail::generic::scalar::lower_bound(first, last, value, comp);
 
   // wrap comp
-  thrust::detail::wrapped_function<
-    Compare,
-    bool
-  > wrapped_comp{comp};
+  thrust::detail::wrapped_function<Compare, bool> wrapped_comp{comp};
 
-  return iter != last && !wrapped_comp(value,*iter);
+  return iter != last && !wrapped_comp(value, *iter);
 }
 
-} // end scalar
+} // namespace scalar
 
-} // end generic
+} // namespace generic
 
-} // end detail
+} // namespace detail
 
-} // end system
+} // namespace system
 
 THRUST_NAMESPACE_END
 

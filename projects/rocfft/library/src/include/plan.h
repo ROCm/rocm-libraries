@@ -615,16 +615,14 @@ private:
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
      * @param[in] exec_plan_location location of the single-device execution plan.
-     * @param[in] antecedents indices of the plan items that must complete before
-     * the gather steps may be initiated.
-     * @return An `std::vector<size_t>` of indices of the created plan items. When these
-     * items complete, the execution plan's input buffer is set for computing the desired
-     * transform.
+     * @return An `std::vector<size_t>` of indices of the created
+     * plan items that the execution plan would need to wait for before beginning.
+     * Note that other items for packing/unpacking data may be added
+     * to the multi-plan that these returned items depend on.
      */
     std::vector<size_t>
-        CreateInputGatheringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
-                                          const rocfft_location_t&   exec_plan_location,
-                                          const std::vector<size_t>& antecedents = {});
+        CreateInputGatheringItemsIfNeeded(const NodeMetaData&      exec_plan_metadata,
+                                          const rocfft_location_t& exec_plan_location);
 
     /**
      * @brief Creates the plan items required to scatter the output buffer of the (single-device)
@@ -635,16 +633,18 @@ private:
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
      * @param[in] exec_plan_location location of the single-device execution plan.
-     * @param[in] antecedents indices of the plan items that must complete before
-     * the scatter steps may be initiated. 
-     * @return An `std::vector<size_t>` of indices of the created plan items. When these items
-     * complete, the user's output buffers are set with the corresponding portions of the
-     * transform's results.
+     * @param[in] device_specific_ops store ops that are bound to specific output bricks
+     * (i.e. JIT callbacks)
+     * @return An `std::vector<size_t>` of indices of the created
+     * plan items that read the execution plan's output (and hence
+     * would need to depend on the execution plan completing first).
+     * Note that other items for packing/unpacking data may be added
+     * to the multi-plan that depend on these returned items.
      */
     std::vector<size_t>
-        CreateOutputScatteringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
-                                            const rocfft_location_t&   exec_plan_location,
-                                            const std::vector<size_t>& antecedents);
+        CreateOutputScatteringItemsIfNeeded(const NodeMetaData&            exec_plan_metadata,
+                                            const rocfft_location_t&       exec_plan_location,
+                                            const std::optional<StoreOps>& dev_specific_store_ops);
 
     // Transform (complex-complex FFT) a whole field along specified
     // dimensions.  Input and output ptrs are provided as a vector of

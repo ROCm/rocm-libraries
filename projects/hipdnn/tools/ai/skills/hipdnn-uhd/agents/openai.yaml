@@ -1,0 +1,8 @@
+interface:
+  display_name: "hipDNN UHD"
+  short_description: "Generate, judge, validate and install UHD heuristics locally"
+  default_prompt: >-
+    Use $hipdnn-uhd to take a hipDNN engine through the UHD lifecycle on the local machine:
+    read the page for the ask (generate, data, evaluate, validate, triage, onboarding), keep
+    every set, dataset and model to one device, and report each step's evidence. Install a
+    validated model only on the user's go-ahead; commit only when asked and never push.

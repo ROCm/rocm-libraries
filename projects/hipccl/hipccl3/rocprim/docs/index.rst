@@ -10,7 +10,7 @@ rocPRIM documentation
 
 rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to provide a set of portable, commonly used, GPU-accelerated parallel primitive algorithms. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs.
 
-The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim.
+The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipccl/hipccl3/rocprim.
 
 .. grid:: 2
   :gutter: 3
@@ -30,16 +30,15 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
   .. grid-item-card:: How to
 
     * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
-    * :doc:`Use primbench for benchmarking <./how-to/rocPRIM-primbench>`
     * :doc:`Run unit tests on multiple GPUs <./how-to/rocPRIM-run-tests>`
 
-   
   .. grid-item-card:: Reference
 
+    * `Benchmarking with Primbench <https://rocm.docs.amd.com/projects/primbench/en/latest>`_
     * :ref:`glossary`
     * :doc:`rocPRIM precision support <./reference/data-type-support>`
     * :ref:`reference`
-
+    
       * :ref:`Iterators <iterators>` 
       * :ref:`Intrinsics <intrinsics>` 
       * :ref:`Utility types <types>`
@@ -53,6 +52,3 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
-
-
-

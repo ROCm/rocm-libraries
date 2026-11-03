@@ -32,8 +32,7 @@
 // CI: an added or dropped public symbol turns the baseline gate red. The
 // signature half is NOT enforced anywhere -- these are extern "C" declarations,
 // so a drifted signature links cleanly and misbehaves at run time.
-#ifndef MIOPEN_PRIVATE_RENAME_H
-#define MIOPEN_PRIVATE_RENAME_H
+#pragma once
 
 #ifndef MIOPEN_BUILDING_PRIVATE
 #error "miopen_private_rename.h included outside of MIOpen Private build"
@@ -315,5 +314,3 @@
 #define miopenMultiMarginLossForward miopenMultiMarginLossForward_impl
 #define miopenSetTuningPolicy miopenSetTuningPolicy_impl
 #define miopenGetTuningPolicy miopenGetTuningPolicy_impl
-
-#endif // MIOPEN_PRIVATE_RENAME_H

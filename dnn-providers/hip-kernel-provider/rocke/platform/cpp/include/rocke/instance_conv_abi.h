@@ -60,13 +60,27 @@ typedef struct
 /* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32"). */
 const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind);
 
-/* Implicit-GEMM ABI for one direction ("fwd", "wgrad", "dgrad"). Returns
- * false -- leaving *out empty -- for an unknown direction or for two_stage
- * outside wgrad, the cases conv_arg_names() raises on. */
+/* Implicit-GEMM ABI for one direction ("fwd", "wgrad", "dgrad"). two_stage
+ * is wgrad's two-stage epilogue, and on fwd the split-K binary (a trailing
+ * ws_ptr, ws_bytes, ks, ks_count). Returns false -- leaving *out empty -- for
+ * an unknown direction or for two_stage on dgrad, the cases conv_arg_names()
+ * raises on. */
 bool rocke_conv_arg_names(const char* direction,
                           bool is_3d,
                           bool two_stage,
                           rocke_conv_arg_list_t* out);
+
+/* As above, plus wgrad's stream-K variant: `streamk` names the reduction
+ * ("atomic", "workspace", "linear" or "tree") of a stream-K kernel, or is NULL
+ * for a kernel without stream-K. A stream-K list carries the reduction's
+ * buffers after ks_count and then the partition block. Returns false for a
+ * non-wgrad direction, an unknown reduction, or stream-K combined with
+ * two_stage -- the cases conv_arg_names() raises on. */
+bool rocke_conv_arg_names_ex(const char* direction,
+                             bool is_3d,
+                             bool two_stage,
+                             const char* streamk,
+                             rocke_conv_arg_list_t* out);
 
 /* Direct grouped conv ABI ("fwd", "dgrad" or "wgrad"); false for any other
  * direction. */

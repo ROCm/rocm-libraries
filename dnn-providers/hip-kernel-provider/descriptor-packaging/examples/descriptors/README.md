@@ -19,9 +19,10 @@ Neither set reaches a product build: `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` 
 the provider's shipped descriptor root, so nothing points at this tree unless a build
 overrides it, and no install rule copies it. Two things do use it.
 `hipdnn-superbuild-ci.yml` points the production source root here in the Linux lane, which
-runs the production packaging path end to end on these fixtures. `test_hkp_pack_layout.py` packs
-the tree directly, which is what makes its layout assertion strict: changing anything here
-changes what those tests pin.
+runs the production packaging path end to end on these fixtures.
+`tests/rocke/test_hkp_pack_layout_rocke.py` packs the whole tree and
+`tests/test_hkp_pack_layout.py` packs its `hip/` subtree, which is what makes their layout
+assertions strict: changing anything here changes what those tests pin.
 
 ## Layout
 
@@ -79,12 +80,11 @@ compiled artifact. Authoring it would let the descriptor disagree with the kerne
 authored.** `file` resolves relative to the descriptor that names it, must stay
 inside the source root, and has no root-relative fallback, like a hip `source`.
 The object is packed as-is, with no compile. This tree contains no hsaco example.
-Each hsaco UKD must list in `arch` the arch(es) its object runs on (a
-generic-target object lists every arch it runs on); an absent or empty `arch`
-is rejected.
+Each hsaco UKD needs a non-empty `arch`: [rules](../../README.md#hsaco-kernels-and-arch).
 
 **`arch` filters which shard a descriptor ships in.** It does not select a
-builder: naming `gfx942` does not make a gfx950 builder produce gfx942 code.
+builder: naming `gfx942` does not make a gfx950 builder produce gfx942 code. For generic
+targets, see [Generic GPU targets](../../README.md#generic-gpu-targets).
 
 **`library` is relative to the descriptor that declared it**, and the archive is
 one per arch at the arch root — so a descriptor in a child folder climbs back out

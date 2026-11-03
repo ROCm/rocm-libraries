@@ -17,10 +17,18 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/detail/generic/temporary_buffer.h>
-#include <thrust/detail/pointer.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/malloc_and_free.h>
+#include <thrust/detail/pointer.h>
 #include <thrust/pair.h>
+#include <thrust/system/detail/generic/temporary_buffer.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -30,16 +38,16 @@ namespace detail
 namespace generic
 {
 
-
-template<typename T, typename DerivedPolicy>
+template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE
-  thrust::pair<thrust::pointer<T,DerivedPolicy>, typename thrust::pointer<T,DerivedPolicy>::difference_type>
-    get_temporary_buffer(thrust::execution_policy<DerivedPolicy> &exec, typename thrust::pointer<T,DerivedPolicy>::difference_type n)
+thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
+get_temporary_buffer(thrust::execution_policy<DerivedPolicy>& exec,
+                     typename thrust::pointer<T, DerivedPolicy>::difference_type n)
 {
-  thrust::pointer<T,DerivedPolicy> ptr = thrust::malloc<T>(exec, n);
+  thrust::pointer<T, DerivedPolicy> ptr = thrust::malloc<T>(exec, n);
 
   // check for a failed malloc
-  if(!ptr.get())
+  if (!ptr.get())
   {
     n = 0;
   } // end if
@@ -47,11 +55,9 @@ THRUST_HOST_DEVICE
   return thrust::make_pair(ptr, n);
 } // end get_temporary_buffer()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename Pointer>
-THRUST_HOST_DEVICE
-  void return_temporary_buffer(thrust::execution_policy<DerivedPolicy> &exec, Pointer p, std::ptrdiff_t)
+template <typename DerivedPolicy, typename Pointer>
+THRUST_HOST_DEVICE void return_temporary_buffer(thrust::execution_policy<DerivedPolicy>& exec, Pointer p, std::ptrdiff_t)
 {
   // If we are here, no user customization of the three-argument signature with
   // a size parameter of `return_temporary_buffer` was found. There may be an
@@ -66,11 +72,9 @@ THRUST_HOST_DEVICE
   return_temporary_buffer(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), p);
 } // end return_temporary_buffer()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename Pointer>
-THRUST_HOST_DEVICE
-  void return_temporary_buffer(thrust::execution_policy<DerivedPolicy> &exec, Pointer p)
+template <typename DerivedPolicy, typename Pointer>
+THRUST_HOST_DEVICE void return_temporary_buffer(thrust::execution_policy<DerivedPolicy>& exec, Pointer p)
 {
   // If we are here, no user customization of either the old two-argument
   // signature or the new three-argument signature with a size parameter of
@@ -78,8 +82,7 @@ THRUST_HOST_DEVICE
   thrust::free(exec, p);
 } // end return_temporary_buffer()
 
-
-} // end generic
-} // end detail
-} // end system
+} // namespace generic
+} // namespace detail
+} // namespace system
 THRUST_NAMESPACE_END

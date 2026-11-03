@@ -7,7 +7,7 @@
  *
  * Each `_op_*` Python method becomes a static `rocke_h_op_*` handler with the
  * (lw, op) signature from lower_hip_internal.h. Shared helpers (rocke_h_emit /
- * rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
+ * rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip / rocke_h_require_hip_scalar /
  * rocke_h_f32_literal / rocke_attr_get_*) are DEFINED in lower_hip_core.c and only
  * called here. The registration table is exported via rocke_h_handlers_arith(),
  * which the core bucket stitches into the dispatch table.
@@ -20,6 +20,7 @@
 #include <string.h> /* strcmp   */
 
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 
@@ -67,6 +68,8 @@ static void h_binary(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* c_
  *             self._emit(f"{cpp_t} {_name(res)} = (fp16){literal};")
  *         else:
  *             self._emit(f"{cpp_t} {_name(res)} = {literal};")
+ *     elif ity == "f64":
+ *         self._emit(f"{cpp_t} {_name(res)} = {_f64_literal(float(val))};")
  *     else:
  *         self._emit(f"{cpp_t} {_name(res)} = {val};") */
 static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const rocke_op_t* op)
@@ -79,11 +82,7 @@ static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const roc
     {
         ity = "i32";
     }
-    cpp_t = rocke_h_hip_scalar(ity);
-    if(!cpp_t)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.constant: unknown ity %s", ity);
-    }
+    cpp_t = rocke_h_require_hip_scalar(lw, ity);
     val = rocke_attr_get(&op->attrs, "value");
     if(!val)
     {
@@ -106,6 +105,13 @@ static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const roc
         { /* f32 */
             rocke_h_emitf(lw, "%s %s = %s;", cpp_t, rocke_h_name(lw, res), literal);
         }
+    }
+    else if(strcmp(ity, "f64") == 0)
+    {
+        double v = (val->kind == ROCKE_ATTR_FLOAT) ? val->u.f
+                   : (val->kind == ROCKE_ATTR_INT) ? (double)val->u.i
+                                                   : 0.0;
+        rocke_h_emitf(lw, "%s %s = %s;", cpp_t, rocke_h_name(lw, res), rocke_h_f64_literal(lw, v));
     }
     else
     {
@@ -205,10 +211,54 @@ static rocke_status_t rocke_h_op_arith_constant_vec(rocke_h_lowerer_t* lw, const
 
 /* ----------------------------- arith: int binary --------------------------- */
 
-/* def _op_arith_add(self, op): self._binary(op, "+") */
+/* def _op_arith_add(self, op): "nsw" (the default) is self._binary(op, "+");
+ * "nuw" adds as unsigned and casts back, because a signed a + b that passes
+ * the signed maximum is undefined behaviour in C++ (clang emits it nsw). */
 static rocke_status_t rocke_h_op_arith_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    h_binary(lw, op, "+");
+    char wrap_buf[128];
+    const char* wrap_error
+        = rocke_i_add_wrap_error(&op->attrs, op->operands[0]->type, wrap_buf, sizeof wrap_buf);
+    if(wrap_error)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", wrap_error);
+    }
+    const char* wrap = rocke_attr_get_str(&op->attrs, "wrap");
+    if(wrap == NULL || strcmp(wrap, "nsw") == 0)
+    {
+        h_binary(lw, op, "+");
+        return lw->status;
+    }
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    const char* unsigned_t = rocke_h_unsigned_int_type(r->type);
+    if(!unsigned_t)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", r->type->name);
+    }
+    rocke_h_emitf(lw,
+                  "%s %s = (int%s_t)((%s)%s + (%s)%s);",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  r->type->name + 1,
+                  unsigned_t,
+                  rocke_h_name(lw, a),
+                  unsigned_t,
+                  rocke_h_name(lw, b));
+    return lw->status;
+}
+
+/* def _op_arith_assume_range(self, op): a range marker is a copy of its
+ * first operand. */
+static rocke_status_t rocke_h_op_arith_assume_range(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, op->operands[0]));
     return lw->status;
 }
 
@@ -257,6 +307,22 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
     if(!pred)
     {
         pred = "lt";
+    }
+    if(strcmp(pred, "ult") == 0)
+    {
+        const char* unsigned_t = rocke_h_unsigned_int_type(a->type);
+        if(!unsigned_t)
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", a->type->name);
+        }
+        rocke_h_emitf(lw,
+                      "bool %s = (%s)%s < (%s)%s;",
+                      rocke_h_name(lw, r),
+                      unsigned_t,
+                      rocke_h_name(lw, a),
+                      unsigned_t,
+                      rocke_h_name(lw, b));
+        return lw->status;
     }
     if(strcmp(pred, "lt") == 0)
     {
@@ -353,11 +419,13 @@ static rocke_status_t rocke_h_op_arith_or(rocke_h_lowerer_t* lw, const rocke_op_
     return lw->status;
 }
 
-/* def _op_arith_smax(self, op):
+/* def _select_by_compare(self, op, compare):
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
- *                f"({_name(a)} > {_name(b)} ? {_name(a)} : {_name(b)});") */
-static rocke_status_t rocke_h_op_arith_smax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+ *                f"({_name(a)} {compare} {_name(b)} ? {_name(a)} : {_name(b)});")
+ * The maximum (">") or minimum ("<") of the two operands, as a C ternary. */
+static rocke_status_t
+    h_select_by_compare(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* compare)
 {
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
@@ -365,36 +433,40 @@ static rocke_status_t rocke_h_op_arith_smax(rocke_h_lowerer_t* lw, const rocke_o
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
     rocke_h_emitf(lw,
-                  "%s %s = (%s > %s ? %s : %s);",
+                  "%s %s = (%s %s %s ? %s : %s);",
                   rocke_h_type_to_hip(lw, r->type),
                   rocke_h_name(lw, r),
                   an,
+                  compare,
                   bn,
                   an,
                   bn);
     return lw->status;
 }
 
-/* def _op_arith_smin(self, op):
- *     a, b = op.operands
- *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
- *                f"({_name(a)} < {_name(b)} ? {_name(a)} : {_name(b)});") */
+/* smax / smin are signed, so they refuse a u8 operand; umax / umin take u8.
+ * uint8_t operands promote to int, so C's own comparison and the ternary are
+ * the unsigned maximum / minimum. */
+static rocke_status_t rocke_h_op_arith_smax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_i_refuse_unsigned_operands(op, "arith.umax");
+    return h_select_by_compare(lw, op, ">");
+}
+
 static rocke_status_t rocke_h_op_arith_smin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const rocke_value_t* a = op->operands[0];
-    const rocke_value_t* b = op->operands[1];
-    const rocke_value_t* r = h_res(op);
-    const char* an = rocke_h_name(lw, a);
-    const char* bn = rocke_h_name(lw, b);
-    rocke_h_emitf(lw,
-                  "%s %s = (%s < %s ? %s : %s);",
-                  rocke_h_type_to_hip(lw, r->type),
-                  rocke_h_name(lw, r),
-                  an,
-                  bn,
-                  an,
-                  bn);
-    return lw->status;
+    rocke_i_refuse_unsigned_operands(op, "arith.umin");
+    return h_select_by_compare(lw, op, "<");
+}
+
+static rocke_status_t rocke_h_op_arith_umax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return h_select_by_compare(lw, op, ">");
+}
+
+static rocke_status_t rocke_h_op_arith_umin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return h_select_by_compare(lw, op, "<");
 }
 
 /* def _op_arith_not(self, op):
@@ -508,6 +580,9 @@ static rocke_status_t rocke_h_op_arith_fneg(rocke_h_lowerer_t* lw, const rocke_o
 /* def _op_arith_fabs(self, op):
  *     (v,) = op.operands
  *     ty = _type_to_hip(op.result.type)
+ *     if op.result.type.name == "f64":
+ *         self._emit(f"{ty} {_name(op.result)} = fabs({_name(v)});")
+ *         return
  *     helper = {"f32":"fabsf","f16":"__builtin_fabsf","bf16":"__builtin_fabsf"}
  *              .get(op.result.type.name, "fabsf")
  *     self._emit(f"{ty} {_name(op.result)} = ({ty}){helper}((float){_name(v)});") */
@@ -517,6 +592,13 @@ static rocke_status_t rocke_h_op_arith_fabs(rocke_h_lowerer_t* lw, const rocke_o
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
     const char* tname = r->type->name;
+    if(tname && strcmp(tname, "f64") == 0)
+    {
+        /* The double overload stays in double; the float helper below would
+         * round the value to f32. */
+        rocke_h_emitf(lw, "%s %s = fabs(%s);", ty, rocke_h_name(lw, r), rocke_h_name(lw, v));
+        return lw->status;
+    }
     const char* helper = "fabsf";
     if(tname && (strcmp(tname, "f16") == 0 || strcmp(tname, "bf16") == 0))
     {
@@ -530,6 +612,7 @@ static rocke_status_t rocke_h_op_arith_fabs(rocke_h_lowerer_t* lw, const rocke_o
 /* def _op_arith_fma(self, op):
  *     a, b, c = op.operands
  *     ty = _type_to_hip(op.result.type)
+ *     _reject_f64(op, op.result.type.name)
  *     self._emit(f"{ty} {_name(op.result)} = ({ty})fmaf("
  *                f"(float){_name(a)}, (float){_name(b)}, (float){_name(c)});") */
 static rocke_status_t rocke_h_op_arith_fma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
@@ -539,6 +622,7 @@ static rocke_status_t rocke_h_op_arith_fma(rocke_h_lowerer_t* lw, const rocke_op
     const rocke_value_t* c = op->operands[2];
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
+    rocke_h_reject_f64(lw, op, r->type->name);
     rocke_h_emitf(lw,
                   "%s %s = (%s)fmaf((float)%s, (float)%s, (float)%s);",
                   ty,
@@ -553,6 +637,7 @@ static rocke_status_t rocke_h_op_arith_fma(rocke_h_lowerer_t* lw, const rocke_op
 /* def _op_arith_fmax3(self, op):
  *     a, b, c = op.operands
  *     ty = _type_to_hip(op.result.type)
+ *     _reject_f64(op, op.result.type.name)
  *     self._emit(f"{ty} {_name(op.result)} = "
  *                f"(({_name(b)} > {_name(c)}) ? {_name(b)} : {_name(c)});")
  *     self._emit(f"{_name(op.result)} = "
@@ -564,6 +649,7 @@ static rocke_status_t rocke_h_op_arith_fmax3(rocke_h_lowerer_t* lw, const rocke_
     const rocke_value_t* c = op->operands[2];
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
+    rocke_h_reject_f64(lw, op, r->type->name);
     const char* rn = rocke_h_name(lw, r);
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
@@ -576,6 +662,7 @@ static rocke_status_t rocke_h_op_arith_fmax3(rocke_h_lowerer_t* lw, const rocke_
 /* def _op_arith_fmin3(self, op):
  *     a, b, c = op.operands
  *     ty = _type_to_hip(op.result.type)
+ *     _reject_f64(op, op.result.type.name)
  *     self._emit(f"{ty} {_name(op.result)} = "
  *                f"(({_name(b)} < {_name(c)}) ? {_name(b)} : {_name(c)});")
  *     self._emit(f"{_name(op.result)} = "
@@ -587,6 +674,7 @@ static rocke_status_t rocke_h_op_arith_fmin3(rocke_h_lowerer_t* lw, const rocke_
     const rocke_value_t* c = op->operands[2];
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
+    rocke_h_reject_f64(lw, op, r->type->name);
     const char* rn = rocke_h_name(lw, r);
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
@@ -728,6 +816,7 @@ static rocke_status_t rocke_h_op_arith_fcmp(rocke_h_lowerer_t* lw, const rocke_o
  *       (v,) = op.operands
  *       tname = op.result.type.name
  *       cpp_t = _type_to_hip(op.result.type)
+ *       _reject_f64(op, tname)
  *       if tname == "f32":
  *           self._emit(f"{cpp_t} {_name(op.result)} = {fn_f32}({_name(v)});")
  *       else:
@@ -741,6 +830,7 @@ static void h_math1(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* fn_
     const char* cpp_t = rocke_h_type_to_hip(lw, r->type);
     const char* rn = rocke_h_name(lw, r);
     const char* vn = rocke_h_name(lw, v);
+    rocke_h_reject_f64(lw, op, tname);
     if(tname && strcmp(tname, "f32") == 0)
     {
         rocke_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, fn_f32, vn);
@@ -754,6 +844,7 @@ static void h_math1(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* fn_
 /* An amdgcn-builtin reciprocal-style math op (rcp / rcp_fast / rsqrt). Same
  * promote-compute-demote shape as _math1 but the f32 path drops the (cpp_t)
  * cast since the builtin already returns float:
+ *   _reject_f64(op, tname)
  *   if tname == "f32":
  *       self._emit(f"{cpp_t} {_name} = {builtin}({_name(v)});")
  *   else:
@@ -766,6 +857,7 @@ static void h_amdgcn_unary(rocke_h_lowerer_t* lw, const rocke_op_t* op, const ch
     const char* cpp_t = rocke_h_type_to_hip(lw, r->type);
     const char* rn = rocke_h_name(lw, r);
     const char* vn = rocke_h_name(lw, v);
+    rocke_h_reject_f64(lw, op, tname);
     if(tname && strcmp(tname, "f32") == 0)
     {
         rocke_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, builtin, vn);
@@ -790,9 +882,20 @@ static rocke_status_t rocke_h_op_math_log2(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
-/* def _op_math_rcp(self, op): -- __builtin_amdgcn_rcpf, promote/demote else. */
+/* def _op_math_rcp(self, op): -- f64 divides in double, else
+ * __builtin_amdgcn_rcpf with promote/demote. */
 static rocke_status_t rocke_h_op_math_rcp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    const rocke_value_t* r = h_res(op);
+    if(r->type->name && strcmp(r->type->name, "f64") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "%s %s = 1.0 / %s;",
+                      rocke_h_type_to_hip(lw, r->type),
+                      rocke_h_name(lw, r),
+                      rocke_h_name(lw, op->operands[0]));
+        return lw->status;
+    }
     h_amdgcn_unary(lw, op, "__builtin_amdgcn_rcpf");
     return lw->status;
 }
@@ -833,6 +936,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_ARITH_CONSTANT, rocke_h_op_arith_constant},
         {ROCKE_OP_ARITH_CONSTANT_VEC, rocke_h_op_arith_constant_vec},
         {ROCKE_OP_ARITH_ADD, rocke_h_op_arith_add},
+        {ROCKE_OP_ARITH_ASSUME_RANGE, rocke_h_op_arith_assume_range},
         {ROCKE_OP_ARITH_SUB, rocke_h_op_arith_sub},
         {ROCKE_OP_ARITH_MUL, rocke_h_op_arith_mul},
         {ROCKE_OP_ARITH_DIV, rocke_h_op_arith_div},
@@ -843,6 +947,8 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_ARITH_OR, rocke_h_op_arith_or},
         {ROCKE_OP_ARITH_SMAX, rocke_h_op_arith_smax},
         {ROCKE_OP_ARITH_SMIN, rocke_h_op_arith_smin},
+        {ROCKE_OP_ARITH_UMAX, rocke_h_op_arith_umax},
+        {ROCKE_OP_ARITH_UMIN, rocke_h_op_arith_umin},
         {ROCKE_OP_ARITH_NOT, rocke_h_op_arith_not},
         {ROCKE_OP_ARITH_XOR, rocke_h_op_arith_xor},
         {ROCKE_OP_ARITH_SHL, rocke_h_op_arith_shl},

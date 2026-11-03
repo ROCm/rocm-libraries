@@ -28,8 +28,8 @@ using namespace hipdnn_data_sdk::utilities;
 namespace
 {
 
-// Canonical BSHD-packed ragged geometry, mirroring the data SDK's ragged tests:
-// dims [B, S_max, H, D] with batch 0 holding 2 sequence rows and batch 1 holding 3.
+// BSHD-packed ragged geometry with physically ordered dims [B, S_max, H, D] (seq axis 1),
+// with batch 0 holding 2 sequence rows and batch 1 holding 3.
 // Read as NCHW this is a legal convolution/normalization input, so the references get
 // past their shape checks and reach the ragged guard under test.
 const std::vector<int64_t> RAGGED_DIMS = {2, 3, 2, 2};

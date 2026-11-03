@@ -20,7 +20,7 @@ namespace hipdnn_integration_tests
 {
 
 using InputTensorMap
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+    = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 struct FillResult
 {
@@ -38,6 +38,11 @@ struct FillResult
         return {false, std::move(why), 0};
     }
 };
+
+// Fill used for an input of this data type when neither the test nor the op
+// registers one. Covers every DataType except UNSET, which throws, so a new
+// data type cannot fall through to a range that misses its encodings.
+FillRecipe defaultFillFor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
 /// A device fill failed: generator creation, the scaling kernel's compile, a scratch
 /// allocation, a launch, or the wait for them. A fault in the harness or the device,
@@ -105,6 +110,11 @@ private:
 /// they have no device, everything is filled on the host. All device fills have
 /// finished by the time this returns or throws. Throws DeviceInputError when a device
 /// fill fails.
+///
+/// After the fill, the O and stats inputs of each SDPA backward node are replaced by
+/// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever
+/// recipe they were filled with. A node whose forward cannot be derived makes the
+/// result unsupported, with the reason.
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,

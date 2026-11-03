@@ -66,6 +66,17 @@
         }                                                        \
     }
 
+#define CHECK_HIP_STATUS(stat_t)                                      \
+    {                                                                 \
+        hipError_t err_t = (stat_t);                                  \
+        if(err_t != hipSuccess)                                       \
+        {                                                             \
+            LOG_INFO("HIP error: " << hipGetErrorString(err_t));      \
+            LOG_INFO("File: " << __FILE__ << "; line: " << __LINE__); \
+            exit(1);                                                  \
+        }                                                             \
+    }
+
 #define CHECK_ROCBLAS_ERROR(stat_t, file, line)               \
     {                                                         \
         if(stat_t != rocblas_status_success)                  \

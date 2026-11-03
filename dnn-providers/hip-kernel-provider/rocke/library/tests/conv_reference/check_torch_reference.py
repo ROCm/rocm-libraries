@@ -22,17 +22,19 @@ def test_torch_oracles_agree_with_numpy_and_detect_bad_baseline(case):
     assert report["device"] == "cpu"
     assert set(report["results"]) == {"float32", "float64"}
     for result in report["results"].values():
-        assert result["numpy_distance_upper"] <= case.margin
+        assert result["numpy_distance_upper"] < case.tolerance
         assert result["baseline_error_bound"] > case.tolerance
 
 
-def test_torch_cross_check_rejects_wrong_numpy_answer():
+def test_torch_cross_check_reports_disagreement_without_reserve():
     case = get_architecture("gfx942").CASES[0]
     inputs = make_inputs(case)
     reference = independent_reference(case, inputs)
     scale = reference_scale(reference)
-    with pytest.raises(ValueError, match="disagreement"):
-        cross_check(case, inputs, reference + scale, reference, scale)
+    report = cross_check(case, inputs, reference + scale, reference, scale)
+    for result in report["results"].values():
+        assert result["numpy_distance_upper"] > 0.9
+        assert result["baseline_error_bound"] < case.tolerance
 
 
 def test_torch_cross_check_rejects_nonfinite_answer(monkeypatch):

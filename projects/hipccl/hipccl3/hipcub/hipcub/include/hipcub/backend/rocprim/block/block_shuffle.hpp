@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,8 +31,6 @@
 #define HIPCUB_ROCPRIM_BLOCK_BLOCK_SHUFFLE_HPP_
 
 #include "../../../config.hpp"
-
-#include "../thread/thread_operators.hpp"
 
 #include <rocprim/block/block_shuffle.hpp> // IWYU pragma: export
 

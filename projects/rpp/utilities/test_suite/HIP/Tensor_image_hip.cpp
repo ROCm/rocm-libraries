@@ -2625,6 +2625,7 @@ int main(int argc, char** argv) {
         }
     }
     rppDestroy(handle, backend);
+    CHECK_RETURN_STATUS(hipStreamDestroy(stream));
     if (testType == PERFORMANCE_TEST)  // performance test mode
     {
         // Display measured times

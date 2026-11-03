@@ -252,10 +252,10 @@ TEST_F(BsrxMV, masked_diagonal)
     const rocsparse_int       nnzb         = 2;
     const rocsparse_int       block_dim    = 2;
 
-    device_vector<int32_t> mask{std::vector<int32_t>{0, 1}};
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1}};
-    device_vector<int32_t> end_ptr{std::vector<int32_t>{1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
+    device_vector<rocsparse_int> mask{std::vector<rocsparse_int>{0, 1}};
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1}};
+    device_vector<rocsparse_int> end_ptr{std::vector<rocsparse_int>{1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
     // Two 2x2 identity blocks (row-major) -> block-diagonal identity.
     device_vector<float> val{std::vector<float>{1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f}};
     device_vector<float> x{std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}};
@@ -291,15 +291,15 @@ TEST_F(BsrxMV, masked_diagonal)
 
 TEST_F(BsrxMV, bad_args)
 {
-    MatDescr               descr;
-    device_vector<int32_t> mask{std::vector<int32_t>{0, 1}};
-    device_vector<int32_t> row_ptr{std::vector<int32_t>{0, 1}};
-    device_vector<int32_t> end_ptr{std::vector<int32_t>{1, 2}};
-    device_vector<int32_t> col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val{std::vector<float>{2.0f, 3.0f}};
-    device_vector<float>   x{std::vector<float>{1.0f, 1.0f}};
-    device_vector<float>   y{std::vector<float>{0.0f, 0.0f}};
-    const float            alpha = 1.0f, beta = 0.0f;
+    MatDescr                     descr;
+    device_vector<rocsparse_int> mask{std::vector<rocsparse_int>{0, 1}};
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1}};
+    device_vector<rocsparse_int> end_ptr{std::vector<rocsparse_int>{1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{2.0f, 3.0f}};
+    device_vector<float>         x{std::vector<float>{1.0f, 1.0f}};
+    device_vector<float>         y{std::vector<float>{0.0f, 0.0f}};
+    const float                  alpha = 1.0f, beta = 0.0f;
 
     EXPECT_EQ(rocsparse_sbsrxmv(nullptr,
                                 rocsparse_direction_row,
@@ -343,10 +343,10 @@ TEST_F(Gemvi, dense_times_sparse_vector)
     ASSERT_TRUE(tmp.ptr);
 
     // A column-major 2x2 = [[1,3],[2,4]] -> {1,2,3,4}, lda=2.
-    device_vector<float>   A{std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}};
-    device_vector<float>   x_val{std::vector<float>{5.0f}};
-    device_vector<int32_t> x_ind{std::vector<int32_t>{0}};
-    device_vector<float>   y{std::vector<float>{0.0f, 0.0f}};
+    device_vector<float>         A{std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}};
+    device_vector<float>         x_val{std::vector<float>{5.0f}};
+    device_vector<rocsparse_int> x_ind{std::vector<rocsparse_int>{0}};
+    device_vector<float>         y{std::vector<float>{0.0f, 0.0f}};
     ASSERT_TRUE(A.ptr && x_val.ptr && x_ind.ptr && y.ptr);
 
     const float alpha = 1.0f, beta = 0.0f;
@@ -376,12 +376,12 @@ TEST_F(Gemvi, dense_times_sparse_vector)
 TEST_F(Gemvi, bad_args)
 {
     // gemvi validates the handle first in the compute entry point.
-    device_vector<float>   A{std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}};
-    device_vector<float>   x_val{std::vector<float>{5.0f}};
-    device_vector<int32_t> x_ind{std::vector<int32_t>{0}};
-    device_vector<float>   y{std::vector<float>{0.0f, 0.0f}};
-    device_vector<char>    tmp{size_t(16)};
-    const float            alpha = 1.0f, beta = 0.0f;
+    device_vector<float>         A{std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f}};
+    device_vector<float>         x_val{std::vector<float>{5.0f}};
+    device_vector<rocsparse_int> x_ind{std::vector<rocsparse_int>{0}};
+    device_vector<float>         y{std::vector<float>{0.0f, 0.0f}};
+    device_vector<char>          tmp{size_t(16)};
+    const float                  alpha = 1.0f, beta = 0.0f;
     EXPECT_EQ(rocsparse_sgemvi(nullptr,
                                rocsparse_operation_none,
                                2,

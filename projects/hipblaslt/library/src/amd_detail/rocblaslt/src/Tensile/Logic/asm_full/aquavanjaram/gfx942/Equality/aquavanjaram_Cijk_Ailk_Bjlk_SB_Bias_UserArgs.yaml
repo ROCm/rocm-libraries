@@ -252,6 +252,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2vpeePzDb
   KernelNameMin: Cijk_Ailk_Bjlk_SB_Bias_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB1_GRVWA2_GSUAMB_K1_LBSPPB512_LPB0_MIWT1_2_VWB2
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_Bias_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB1_GRVWA2_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_LPB0_MIWT1_2_SU8_SUM1_SUS128_VWB2_WGM1_WGMXCC8_WGMXCCG304
   1LDSBuffer: 1

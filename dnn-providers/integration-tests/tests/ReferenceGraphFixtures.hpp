@@ -126,7 +126,7 @@ inline flatbuffers::DetachedBuffer buildSdpaGraph(int64_t seq)
                                    {"right_bound", 0},
                                    {"max_seq_len_kv", nullptr},
                                    {"diagonal_alignment", "BOTTOM_RIGHT"},
-                                   {"mma_core_mode", "float"},
+                                   {"mma_core_mode", "unset"},
                                    {"implementation", "AUTO"}}}}})},
         {"tensors", nlohmann::json::array({tensor(0), tensor(1), tensor(2), tensor(3)})},
         {"io_data_type", "half"},

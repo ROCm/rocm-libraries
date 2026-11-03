@@ -13,13 +13,14 @@ using namespace hip_kernel_provider::core;
 #define HIPDNN_PLUGIN_HANDLE_TYPE Handle
 #define HIPDNN_PLUGIN_CONTEXT_TYPE Context
 
-#define HIPDNN_PLUGIN_API_VERSION "1.2.0"
+#define HIPDNN_PLUGIN_API_VERSION "1.4.0"
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
-/// Drops every ingestor pack's cached kpack modules. FOR TESTS ONLY.
+/// Drops every ingestor pack's cached kpack modules and closes every kpack archive the
+/// provider retains, so the next dispatch re-reads its archive from disk. FOR TESTS ONLY.
 ///
 /// Deliberately absent from EnginePluginApi.h: this is not part of the plugin ABI, the
 /// loader never calls it, and no product code path does either. It is reachable only by

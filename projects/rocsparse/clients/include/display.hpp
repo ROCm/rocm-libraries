@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -105,6 +105,8 @@ struct display_key_t
         rbdim_C,
         cbdim_C,
         order,
+        order_B,
+        order_C,
         diag_type,
         fill_mode,
         analysis_policy,
@@ -148,6 +150,16 @@ struct display_key_t
         case order:
         {
             return "order";
+        }
+
+        case order_B:
+        {
+            return "orderB";
+        }
+
+        case order_C:
+        {
+            return "orderC";
         }
 
         case diag_type:

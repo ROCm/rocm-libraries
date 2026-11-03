@@ -15,6 +15,9 @@ namespace hipconv::explicit_gemm
 // query and the launch agree on one definition.
 bool is_patch_embedding(const ConvParams& par);
 
+// Whether hipBLASLt has an algorithm for the GEMM the layer reduces to; see has_algorithm.
+bool patch_embed_has_algorithm(const ConvParams& par);
+
 // Bytes of scratch the permuted A matrix needs: n*p*q rows of kh*kw*c.
 std::size_t patch_embed_workspace_bytes(const ConvParams& par);
 

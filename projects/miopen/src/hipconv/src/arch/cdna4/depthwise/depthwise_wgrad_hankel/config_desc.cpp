@@ -1,9 +1,9 @@
 #include "config_desc.h"
+#include "direction_field.h"
 
 namespace hipconv::cdna4::depthwise_wgrad_hankel
 {
 
-// Direction is omitted: it is Wgrad for every config here, so it selects nothing.
 ConfigMatcher::ConfigMatcher(const Config& cfg)
 {
     int_field("kh", cfg.kh);
@@ -13,6 +13,7 @@ ConfigMatcher::ConfigMatcher(const Config& cfg)
     int_field("stage_depth", cfg.stage_depth, /*default=*/2);
     int_field("stride", cfg.stride, /*default=*/1);
     int_field("chan_vec", cfg.chan_vec, /*default=*/8);
+    direction_field(*this, cfg.direction, Direction::Wgrad);
 }
 
 } // namespace hipconv::cdna4::depthwise_wgrad_hankel

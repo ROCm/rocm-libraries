@@ -76,6 +76,17 @@ TEST_F(IntegrationGpuTimedExecute, ReportsTimingFromActivePlan)
     ExecutionTiming timing;
     error = bundle.graph->execute_timed_ext(_handle, bundle.variantPack, workspace.get(), timing);
     ASSERT_TRUE(error.is_good()) << error.get_message();
+#if defined(_WIN32)
+    // On Windows, hipEventElapsedTime can return a negative value for a short span
+    // (https://github.com/ROCm/rocm-systems/issues/12925). execute_timed_ext() reports
+    // that as INVALID with no elapsed time, which is its documented contract. Remove this
+    // when the runtime fix ships.
+    if(timing.quality == TimingQuality::INVALID && !timing.timedOut)
+    {
+        EXPECT_FALSE(timing.elapsedMs.has_value());
+        return;
+    }
+#endif
     ASSERT_TRUE(timing.elapsedMs.has_value());
     EXPECT_TRUE(std::isfinite(*timing.elapsedMs));
     EXPECT_GT(*timing.elapsedMs, 0.0f);

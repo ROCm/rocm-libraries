@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,15 +37,13 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/minmax.h>
 #  include <thrust/detail/raw_reference_cast.h>
 #  include <thrust/detail/temporary_array.h>
-#  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/dispatch.h>
@@ -78,7 +76,7 @@ namespace __reduce
 {
 
 template <typename Derived, typename InputIt, typename Size, typename T, typename BinaryOp>
-THRUST_RUNTIME_FUNCTION T
+THRUST_HIP_RUNTIME_FUNCTION T
 reduce(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
@@ -150,7 +148,7 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
     {
       return init = __reduce::reduce(policy, first, num_items, init, binary_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static T
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
     {
@@ -158,7 +156,7 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, num_items, init, binary_op);
 #  else
   return workaround::seq(policy, first, num_items, init, binary_op);
@@ -168,7 +166,7 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
 template <class Derived, class InputIt, class T, class BinaryOp>
 THRUST_HOST_DEVICE T reduce(execution_policy<Derived>& policy, InputIt first, InputIt last, T init, BinaryOp binary_op)
 {
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
   // FIXME: Check for RA iterator.
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));
   return hip_rocprim::reduce_n(policy, first, num_items, init, binary_op);
@@ -181,10 +179,10 @@ THRUST_HOST_DEVICE T reduce(execution_policy<Derived>& policy, InputIt first, In
 }
 
 template <class Derived, class InputIt>
-THRUST_HOST_DEVICE typename iterator_traits<InputIt>::value_type
+THRUST_HOST_DEVICE thrust::detail::it_value_t<InputIt>
 reduce(execution_policy<Derived>& policy, InputIt first, InputIt last)
 {
-  using value_type = typename iterator_traits<InputIt>::value_type;
+  using value_type = thrust::detail::it_value_t<InputIt>;
   return hip_rocprim::reduce(policy, first, last, value_type(0));
 }
 

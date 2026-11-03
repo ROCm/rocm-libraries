@@ -156,8 +156,8 @@ namespace
     __global__ void k_atomic_load_store(const T* in, T* out)
     {
         T tmp;
-        rocsparse::atomic_store(&tmp, in[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        out[0] = rocsparse::atomic_load(&tmp, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        rocsparse::atomic_store(&tmp, in[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        out[0] = rocsparse::atomic_load(&tmp, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     template <typename T>

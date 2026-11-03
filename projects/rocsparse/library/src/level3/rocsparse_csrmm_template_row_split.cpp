@@ -168,7 +168,7 @@ namespace rocsparse
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrmmnn_row_split_shared_kernel<CSRMMNN_DIM, WF_SIZE>),
                 dim3((m - 1) / (CSRMMNN_DIM / WF_SIZE) + 1,
-                     (n - 1) / WF_SIZE + 1,
+                     get_grid_size_y<J>(handle, (n - 1) / WF_SIZE + 1),
                      get_grid_size_z<J>(handle, batch_count_C)),
                 dim3(CSRMMNN_DIM),
                 0,
@@ -209,7 +209,7 @@ namespace rocsparse
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrmmnn_row_split_kernel<CSRMMNN_DIM, SUB_WF_SIZE, 8>),
                     dim3((m - 1) / (CSRMMNN_DIM / SUB_WF_SIZE) + 1,
-                         ((end - start) - 1) / 8 + 1,
+                         get_grid_size_y<J>(handle, ((end - start) - 1) / 8 + 1),
                          get_grid_size_z<J>(handle, batch_count_C)),
                     dim3(CSRMMNN_DIM),
                     0,
@@ -246,7 +246,7 @@ namespace rocsparse
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrmmnn_row_split_kernel<CSRMMNN_DIM, SUB_WF_SIZE, 1>),
                     dim3((m - 1) / (CSRMMNN_DIM / SUB_WF_SIZE) + 1,
-                         ((end - start) - 1) / 1 + 1,
+                         get_grid_size_y<J>(handle, ((end - start) - 1) / 1 + 1),
                          get_grid_size_z<J>(handle, batch_count_C)),
                     dim3(CSRMMNN_DIM),
                     0,
@@ -627,7 +627,7 @@ namespace rocsparse
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrmmtn_row_split_kernel<CSRMMTN_DIM, WF_SIZE>),
             dim3((m - 1) / (CSRMMTN_DIM / WF_SIZE) + 1,
-                 (n - 1) / WF_SIZE + 1,
+                 get_grid_size_y<J>(handle, (n - 1) / WF_SIZE + 1),
                  get_grid_size_z<J>(handle, batch_count_C)),
             dim3(CSRMMTN_DIM),
             0,
@@ -639,6 +639,7 @@ namespace rocsparse
             conj_B,
             m,
             n,
+            k,
             batch_count_C,
             offsets_batch_stride_A,
             columns_values_batch_stride_A,
@@ -698,7 +699,7 @@ namespace rocsparse
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrmmtt_row_split_kernel<CSRMMTT_DIM, WF_SIZE>),
             dim3((m - 1) / (CSRMMTT_DIM / WF_SIZE) + 1,
-                 (n - 1) / WF_SIZE + 1,
+                 get_grid_size_y<J>(handle, (n - 1) / WF_SIZE + 1),
                  get_grid_size_z<J>(handle, batch_count_C)),
             dim3(CSRMMTT_DIM),
             0,
@@ -710,6 +711,7 @@ namespace rocsparse
             conj_B,
             m,
             n,
+            k,
             batch_count_C,
             offsets_batch_stride_A,
             columns_values_batch_stride_A,

@@ -3,7 +3,9 @@
 /* Mirrors core/tf32.py. Validation sees logical types, never carrier equality. */
 #ifndef ROCKE_TF32_INTERNAL_H
 #define ROCKE_TF32_INTERNAL_H
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
+#include <stdio.h>
 #include <string.h>
 static inline int rocke_tf32_mma_count(const char* id)
 {
@@ -15,11 +17,53 @@ static inline int rocke_tf32_mma_count(const char* id)
         return 16;
     return 0;
 }
+/* Mirrors tf32_mma_target_error: for a TF32 MMA `op_id` that the MMA catalog of
+ * target `gfx` does not list, writes the error into `out` and returns true. Any
+ * other op_id, and a TF32 op_id the catalog lists, returns false. Defined in
+ * cpp/core/tf32.cpp, the one TU that needs the arch catalog for it. */
+bool rocke_tf32_mma_target_error(const char* op_id, const char* gfx, char* out, size_t cap);
+/* The operand contract of a TF32 atom the hardware does not encode (mirrors
+ * core/tf32.py::_emulated_tf32_mma_error). Same ABI as the native atoms -- logical
+ * TF32 A/B carried as I32, FP32 accumulator -- with fragment lengths from the
+ * catalog. The message names the atom's own lengths, so it is formatted into a
+ * per-thread buffer rather than returned as a literal. */
+static inline const char* rocke_tf32_emulated_mma_error(
+    const char* id, int a_len, int b_len, int c_len, rocke_value_t* const* args, int n)
+{
+    static thread_local char msg[192];
+    char a[24], b[24], c[24];
+    snprintf(a, sizeof a, "vec<tf32x%d>", a_len);
+    snprintf(b, sizeof b, "vec<tf32x%d>", b_len);
+    snprintf(c, sizeof c, "vec<f32x%d>", c_len);
+    if(n != 3 || !args[0] || !args[1] || !args[2] || strcmp(args[0]->type->name, a) != 0
+       || strcmp(args[1]->type->name, b) != 0 || strcmp(args[2]->type->name, c) != 0)
+    {
+        snprintf(msg, sizeof msg, "%s requires %s, %s and %s", id, a, b, c);
+        return msg;
+    }
+    return NULL;
+}
+static inline const char*
+    rocke_tf32_emulated_result_error(const char* id, int c_len, const rocke_op_t* op)
+{
+    static thread_local char msg[192];
+    char c[24];
+    snprintf(c, sizeof c, "vec<f32x%d>", c_len);
+    if(op->num_results != 1 || strcmp(op->results[0]->type->name, c) != 0)
+    {
+        snprintf(msg, sizeof msg, "%s result must match its FP32 accumulator", id);
+        return msg;
+    }
+    return NULL;
+}
 static inline const char* rocke_tf32_mma_error(const char* id, rocke_value_t* const* args, int n)
 {
     int count = rocke_tf32_mma_count(id);
     if(!count)
     {
+        int a_len, b_len, c_len;
+        if(rocke_arch_mma_op_id_emulated_operands(id, &a_len, &b_len, &c_len))
+            return rocke_tf32_emulated_mma_error(id, a_len, b_len, c_len, args, n);
         for(int i = 0; i < n; ++i)
             if(args[i]
                && (strcmp(args[i]->type->name, "tf32") == 0
@@ -44,6 +88,16 @@ static inline const char* rocke_tf32_op_error(const rocke_op_t* op)
     if(error)
         return error;
     int count = rocke_tf32_mma_count(id);
+    if(is_mma && !count)
+    {
+        int a_len, b_len, c_len;
+        if(rocke_arch_mma_op_id_emulated_operands(id, &a_len, &b_len, &c_len))
+        {
+            error = rocke_tf32_emulated_result_error(id, c_len, op);
+            if(error)
+                return error;
+        }
+    }
     if(is_mma && !count)
         for(int i = 0; i < op->num_results; ++i)
             if(strcmp(op->results[i]->type->name, "tf32") == 0

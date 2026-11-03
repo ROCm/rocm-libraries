@@ -13,7 +13,7 @@ Usage:
 
     Hint: add -rs to see skip reasons, or -v for verbose output.
 
-    ``TestPipelineFast`` exercises ``geko.pipeline.run_optimize`` with Tensile/GPU
+    ``TestPipelineFast`` exercises ``geko.pipeline.run_optimize`` with TensileLite/GPU
     work mocked; it runs in CI without hipBLASLt. ``TestIntegration`` runs configure
     then real optimize (long-running; needs a built hipBLASLt and GPU).
 """
@@ -35,7 +35,7 @@ from geko.pipeline import run_optimize
 ROOT = Path(__file__).resolve().parents[1]
 
 
-# Configure step matches test_configure.py; optimize can take much longer (Tensile / Ductile).
+# Configure step matches test_configure.py; optimize can take much longer (TensileLite / Ductile).
 _CONFIGURE_TIMEOUT_S = 600
 _OPTIMIZE_TIMEOUT_S = 7200
 

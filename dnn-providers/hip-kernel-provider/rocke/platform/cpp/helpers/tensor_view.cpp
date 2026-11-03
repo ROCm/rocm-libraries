@@ -3,7 +3,8 @@
 /*
  * C99 port of rocke.helpers.tensor_view --- the byte-identical builder-call
  * sequence for make_global_view / make_tile_window / TensorDescriptor /
- * TensorView.
+ * TensorView, and the buffer address space (make_buffer_resource /
+ * make_buffer_view / the TensorView buffer branches).
  *
  * Every IR-emitting routine here mirrors its Python counterpart line for line:
  * same builder calls, same order, same arguments. Dispatch on dtype keys off
@@ -24,9 +25,11 @@ static bool rocke_tv_name_is(const rocke_type_t* t, const char* name)
     return t != NULL && t->name != NULL && strcmp(t->name, name) == 0;
 }
 
-/* Python ``_dtype_elem_bytes`` -- used only by the buffer path (out of scope
- * this phase) but kept for parity with the module surface. The unused attribute
- * documents that this is an intentionally-retained parity anchor. */
+/* Python ``_dtype_elem_bytes`` -- used only by the buffer path, through
+ * rocke_tv_buffer_elem_bytes below, which adds the Python NotImplementedError
+ * for the 0 (unsupported dtype) result. The unused attribute dates from when
+ * this was only a parity anchor; it is left as is so the existing line stays
+ * unchanged, and it is harmless on a function that is called. */
 __attribute__((unused)) static int rocke_tv_dtype_elem_bytes(const rocke_type_t* dtype)
 {
     if(rocke_tv_name_is(dtype, "f16") || rocke_tv_name_is(dtype, "bf16"))
@@ -39,6 +42,24 @@ __attribute__((unused)) static int rocke_tv_dtype_elem_bytes(const rocke_type_t*
         return 8;
     return 0; /* Python raises NotImplementedError */
 }
+
+/* Python ``_dtype_elem_bytes`` including its raise:
+ *   raise NotImplementedError(f"buffer-space load/store not wired for dtype {name}")
+ */
+static int rocke_tv_buffer_elem_bytes(rocke_ir_builder_t* b, const rocke_type_t* dtype)
+{
+    int n = rocke_tv_dtype_elem_bytes(dtype);
+    if(n == 0)
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "buffer-space load/store not wired for dtype %s",
+                        dtype && dtype->name ? dtype->name : "<null>");
+    return n;
+}
+
+/* Python ``TensorView._OOB_SENTINEL``: the byte offset a buffer op gets for a
+ * lane whose mask is False, (1 << 31) - 1, beyond any rsrc's num_bytes. */
+#define ROCKE_TV_OOB_SENTINEL ((int64_t)2147483647)
 
 /* ======================================================== TensorDescriptor */
 
@@ -175,6 +196,109 @@ int rocke_tensor_view_rank(const rocke_tensor_view_t* v)
     return v ? v->desc.rank : 0;
 }
 
+const rocke_tv_buffer_resource_t* rocke_tensor_view_buffer(rocke_ir_builder_t* b,
+                                                           const rocke_tensor_view_t* v)
+{
+    /* Python TensorView.buffer:
+     *   if self.addr_space != "buffer":
+     *       raise TypeError(f"TensorView.buffer requires addr_space='buffer', got ...")
+     *   if not isinstance(self.base, BufferResource):
+     *       raise TypeError("buffer TensorView's base must be a BufferResource")
+     *   return self.base
+     */
+    if(b == NULL || v == NULL)
+        return NULL;
+    if(v->addr_space != ROCKE_ADDR_BUFFER)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_TYPE,
+                        "TensorView.buffer requires addr_space='buffer', got '%s'",
+                        v->addr_space == ROCKE_ADDR_LDS ? "lds" : "global");
+        return NULL;
+    }
+    if(v->buffer.rsrc == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_TYPE, "buffer TensorView's base must be a BufferResource");
+        return NULL;
+    }
+    return &v->buffer;
+}
+
+/* C-only guard with no Python counterpart (Python cannot pass a missing value):
+ * a buffer store refuses a NULL value, as global_store_vN does, before any IR
+ * is emitted. */
+static bool
+    rocke_tv_buffer_store_has_value(rocke_ir_builder_t* b, rocke_value_t* value, const char* op)
+{
+    if(value != NULL)
+        return true;
+    rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer %s: null value", op);
+    return false;
+}
+
+/* Buffer branch of TensorView.load_vec_at / store_vec_at, shared by the
+ * unmasked and masked entry points (Python passes mask=None for the former).
+ *   rsrc = self.buffer
+ *   byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+ *   if mask is not None:
+ *       byte_off = b.select(mask, byte_off, b.const_i32(self._OOB_SENTINEL))
+ *   if self.dtype.name == "f16":
+ *       if n not in (2, 4, 8): raise ValueError(...)
+ *       load:  return b.buffer_load_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset, dwords=n // 2)
+ *       store: b.buffer_store_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset, value, dwords=n // 2)
+ *   raise NotImplementedError(...)
+ * Each builder call is its own statement: C argument evaluation order is
+ * unspecified, and the SSA numbering follows the Python left-to-right order. */
+static rocke_value_t* rocke_tv_buffer_vec_at(rocke_ir_builder_t* b,
+                                             const rocke_tensor_view_t* v,
+                                             rocke_value_t* elem_off,
+                                             bool is_store,
+                                             rocke_value_t* value,
+                                             int n,
+                                             rocke_value_t* mask)
+{
+    const rocke_tv_buffer_resource_t* rsrc;
+    const rocke_type_t* dt = v->desc.dtype;
+    rocke_value_t* c_bytes;
+    rocke_value_t* byte_off;
+    int elem_bytes;
+    if(is_store && !rocke_tv_buffer_store_has_value(b, value, "store_vec_at"))
+        return NULL;
+    rsrc = rocke_tensor_view_buffer(b, v);
+    if(rsrc == NULL)
+        return NULL;
+    elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
+    c_bytes = rocke_b_const_i32(b, elem_bytes);
+    byte_off = rocke_b_mul(b, elem_off, c_bytes);
+    if(mask != NULL)
+    {
+        rocke_value_t* c_oob = rocke_b_const_i32(b, ROCKE_TV_OOB_SENTINEL);
+        byte_off = rocke_b_select(b, mask, byte_off, c_oob);
+    }
+    if(rocke_tv_name_is(dt, "f16"))
+    {
+        if(!(n == 2 || n == 4 || n == 8))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            is_store ? "buffer store_vec_at f16 supports n in {2, 4, 8} (got %d)"
+                                     : "buffer load_vec_at f16 supports n in {2, 4, 8} (got %d)",
+                            n);
+            return NULL;
+        }
+        if(!is_store)
+            return rocke_b_buffer_load_vN_f16(b, rsrc->rsrc, byte_off, rsrc->soffset, n / 2);
+        rocke_b_buffer_store_vN_f16(b, rsrc->rsrc, byte_off, rsrc->soffset, value, n / 2);
+        return NULL;
+    }
+    rocke_i_set_err(b,
+                    ROCKE_ERR_NOTIMPL,
+                    is_store ? "buffer store_vec_at not wired for dtype %s"
+                             : "buffer load_vec_at not wired for dtype %s",
+                    dt && dt->name ? dt->name : "<null>");
+    return NULL;
+}
+
 rocke_value_t* rocke_tensor_view_load_scalar(rocke_ir_builder_t* b,
                                              const rocke_tensor_view_t* v,
                                              rocke_value_t* const* indices,
@@ -206,19 +330,29 @@ rocke_value_t* rocke_tensor_view_load_scalar(rocke_ir_builder_t* b,
     }
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
-        /* NAMED GAP (buffer-view load_scalar): Python's buffer branch reads
-         * self.buffer, a BufferResource carrying {rsrc, soffset, num_bytes},
-         * then emits b.buffer_load_f16(rsrc.rsrc, byte_off, rsrc.soffset). The
-         * builder prims exist (rocke_b_buffer_rsrc / rocke_b_buffer_load_f16), but
-         * rocke_tensor_view_t.base is a bare rocke_value_t* with no soffset/
-         * num_bytes slots, so there is nowhere to hold the BufferResource. A
-         * faithful port REQUIRES adding buffer-resource fields to the shared
-         * rocke_tensor_view_t struct (a header change in
-         * helper_rocke.helpers.tensor_view.h, included by many TUs). No
-         * producer in the current C scope ever builds a ROCKE_ADDR_BUFFER view
-         * through this shared path (instances roll private buffer-resource
-         * structs), so this branch is unreachable; left unported to avoid a
-         * cross-TU header change for dead code. */
+        /* Python:
+         *   rsrc = self.buffer
+         *   byte_off = b.mul(off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+         *   if self.dtype.name == "f16":
+         *       return b.buffer_load_f16(rsrc.rsrc, byte_off, rsrc.soffset)
+         *   raise NotImplementedError(...)
+         */
+        const rocke_tv_buffer_resource_t* rsrc = rocke_tensor_view_buffer(b, v);
+        rocke_value_t* c_bytes;
+        rocke_value_t* byte_off;
+        int elem_bytes;
+        if(rsrc == NULL)
+            return NULL;
+        elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
+        c_bytes = rocke_b_const_i32(b, elem_bytes);
+        byte_off = rocke_b_mul(b, off, c_bytes);
+        if(rocke_tv_name_is(dt, "f16"))
+            return rocke_b_buffer_load_f16(b, rsrc->rsrc, byte_off, rsrc->soffset);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "buffer scalar load not yet wired for dtype %s "
+                        "(only f16 is exposed by the IR builder today)",
+                        dt && dt->name ? dt->name : "<null>");
         return NULL;
     }
     /* global */
@@ -232,6 +366,8 @@ rocke_value_t* rocke_tensor_view_load_scalar(rocke_ir_builder_t* b,
         return rocke_b_global_load_i32(b, v->base, off, 0);
     if(rocke_tv_name_is(dt, "i64"))
         return rocke_b_global_load_i64(b, v->base, off, 0);
+    if(rocke_tv_name_is(dt, "f64"))
+        return rocke_b_global_load_f64(b, v->base, off, 0);
     return rocke_b_global_load(b, v->base, off, dt, 0);
 }
 
@@ -251,7 +387,8 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
 
     if(v->addr_space == ROCKE_ADDR_LDS)
     {
-        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16")
+           || rocke_tv_name_is(dt, "f64"))
         {
             rocke_b_smem_store_vN(b, v->base, indices, num_indices, value, 1);
             return;
@@ -265,14 +402,42 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
     }
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
-        /* NAMED GAP (buffer-view store_scalar): mirrors load_scalar. Python
-         * emits b.buffer_store_f16(rsrc.rsrc, byte_off, rsrc.soffset, value)
-         * from self.buffer (a BufferResource). Blocked on the same missing
-         * buffer-resource fields in the shared rocke_tensor_view_t struct (would
-         * require a cross-TU header change). Unreachable in current C scope. */
+        /* Python (``align`` is not used on the buffer path):
+         *   rsrc = self.buffer
+         *   byte_off = b.mul(self.desc.offset(b, indices),
+         *                    b.const_i32(_dtype_elem_bytes(self.dtype)))
+         *   if self.dtype.name == "f16":
+         *       b.buffer_store_f16(rsrc.rsrc, byte_off, rsrc.soffset, value)
+         *       return
+         *   raise NotImplementedError(...)
+         */
+        const rocke_tv_buffer_resource_t* rsrc;
+        rocke_value_t* c_bytes;
+        rocke_value_t* byte_off;
+        int elem_bytes;
+        if(!rocke_tv_buffer_store_has_value(b, value, "store_scalar"))
+            return;
+        rsrc = rocke_tensor_view_buffer(b, v);
+        if(rsrc == NULL)
+            return;
+        off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+        elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
+        c_bytes = rocke_b_const_i32(b, elem_bytes);
+        byte_off = rocke_b_mul(b, off, c_bytes);
+        if(rocke_tv_name_is(dt, "f16"))
+        {
+            rocke_b_buffer_store_f16(b, rsrc->rsrc, byte_off, rsrc->soffset, value);
+            return;
+        }
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "buffer scalar store not yet wired for dtype %s",
+                        dt && dt->name ? dt->name : "<null>");
         return;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+    if(align <= 0 && rocke_tv_name_is(dt, "f64"))
+        align = 8; /* Same 8-byte element alignment as the f64 load_scalar. */
     if(align <= 0)
         rocke_b_global_store(b, v->base, off, value, 0); /* Python: align default 1 */
     else
@@ -302,16 +467,45 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
     }
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
-        /* NAMED GAP (buffer-view load_vec): Python emits
-         * b.buffer_load_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset, dwords=n/2)
-         * for f16 (n in {2,4,8}) from self.buffer. Builder prim
-         * rocke_b_buffer_load_vN_f16 exists; blocked on the missing
-         * buffer-resource fields in shared rocke_tensor_view_t (cross-TU header
-         * change). Unreachable in current C scope. */
+        /* Python:
+         *   rsrc = self.buffer
+         *   elem_off = self.desc.offset(b, indices)
+         *   byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+         *   if self.dtype.name == "f16":
+         *       if n not in (2, 4, 8): raise ValueError(...)
+         *       return b.buffer_load_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset,
+         *                                   dwords=n // 2)
+         *   raise NotImplementedError(...)
+         */
+        const rocke_tv_buffer_resource_t* rsrc = rocke_tensor_view_buffer(b, v);
+        rocke_value_t* elem_off;
+        rocke_value_t* c_bytes;
+        rocke_value_t* byte_off;
+        int elem_bytes;
+        if(rsrc == NULL)
+            return NULL;
+        elem_off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+        elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
+        c_bytes = rocke_b_const_i32(b, elem_bytes);
+        byte_off = rocke_b_mul(b, elem_off, c_bytes);
+        if(rocke_tv_name_is(dt, "f16"))
+        {
+            if(!(n == 2 || n == 4 || n == 8))
+            {
+                rocke_i_set_err(
+                    b, ROCKE_ERR_VALUE, "buffer load f16 supports n in {2, 4, 8} (got %d)", n);
+                return NULL;
+            }
+            return rocke_b_buffer_load_vN_f16(b, rsrc->rsrc, byte_off, rsrc->soffset, n / 2);
+        }
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "buffer vec load not yet wired for dtype %s",
+                        dt && dt->name ? dt->name : "<null>");
         return NULL;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
-    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16") || rocke_tv_name_is(dt, "f64"))
         return rocke_b_global_load_vN(b, v->base, off, dt, n, 0);
     if(rocke_tv_name_is(dt, "f32"))
     {
@@ -355,11 +549,47 @@ void rocke_tensor_view_store_vec(rocke_ir_builder_t* b,
     }
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
-        /* NAMED GAP (buffer-view store_vec): Python emits
-         * b.buffer_store_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset, ...) from
-         * self.buffer. Builder prim rocke_b_buffer_store_vN_f16 exists; blocked
-         * on the missing buffer-resource fields in shared rocke_tensor_view_t
-         * (cross-TU header change). Unreachable in current C scope. */
+        /* Python:
+         *   rsrc = self.buffer
+         *   elem_off = self.desc.offset(b, indices)
+         *   byte_off = b.mul(elem_off, b.const_i32(_dtype_elem_bytes(self.dtype)))
+         *   if self.dtype.name == "f16":
+         *       if n not in (2, 4, 8): raise ValueError(...)
+         *       b.buffer_store_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset, value,
+         *                             dwords=n // 2)
+         *       return
+         *   raise NotImplementedError(...)
+         */
+        const rocke_tv_buffer_resource_t* rsrc;
+        const rocke_type_t* dt = v->desc.dtype;
+        rocke_value_t* elem_off;
+        rocke_value_t* c_bytes;
+        rocke_value_t* byte_off;
+        int elem_bytes;
+        if(!rocke_tv_buffer_store_has_value(b, value, "store_vec"))
+            return;
+        rsrc = rocke_tensor_view_buffer(b, v);
+        if(rsrc == NULL)
+            return;
+        elem_off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+        elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
+        c_bytes = rocke_b_const_i32(b, elem_bytes);
+        byte_off = rocke_b_mul(b, elem_off, c_bytes);
+        if(rocke_tv_name_is(dt, "f16"))
+        {
+            if(!(n == 2 || n == 4 || n == 8))
+            {
+                rocke_i_set_err(
+                    b, ROCKE_ERR_VALUE, "buffer store f16 supports n in {2, 4, 8} (got %d)", n);
+                return;
+            }
+            rocke_b_buffer_store_vN_f16(b, rsrc->rsrc, byte_off, rsrc->soffset, value, n / 2);
+            return;
+        }
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "buffer vec store not yet wired for dtype %s",
+                        dt && dt->name ? dt->name : "<null>");
         return;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
@@ -371,8 +601,8 @@ rocke_value_t* rocke_tensor_view_load_vec_at(rocke_ir_builder_t* b,
                                              rocke_value_t* elem_off,
                                              int n)
 {
-    /* Python TensorView.load_vec_at (no mask path here -- mask requires
-     * addr_space="buffer", which is out of phase scope). */
+    /* Python TensorView.load_vec_at with mask=None; the mask form is
+     * rocke_tensor_view_load_vec_at_masked. */
     const rocke_type_t* dt;
     if(b == NULL || v == NULL)
         return NULL;
@@ -380,12 +610,8 @@ rocke_value_t* rocke_tensor_view_load_vec_at(rocke_ir_builder_t* b,
 
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
-        /* NAMED GAP (buffer-view load_vec_at): the buffer branch additionally
-         * carries the bounds-checked mask path keyed on the BufferResource.
-         * Blocked on the missing buffer-resource fields in shared
-         * rocke_tensor_view_t (cross-TU header change). Unreachable in current C
-         * scope. */
-        return NULL;
+        /* Python buffer branch with mask=None (see rocke_tv_buffer_vec_at). */
+        return rocke_tv_buffer_vec_at(b, v, elem_off, false, NULL, n, NULL);
     }
     if(v->addr_space == ROCKE_ADDR_LDS)
     {
@@ -411,17 +637,85 @@ void rocke_tensor_view_store_vec_at(rocke_ir_builder_t* b,
                                     rocke_value_t* value,
                                     int n)
 {
-    /* Python TensorView.store_vec_at (no mask path -- buffer out of scope). */
+    /* Python TensorView.store_vec_at with mask=None; the mask form is
+     * rocke_tensor_view_store_vec_at_masked. */
     if(b == NULL || v == NULL)
         return;
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
-        /* NAMED GAP (buffer-view store_vec_at): mirrors load_vec_at. Blocked on
-         * the missing buffer-resource fields in shared rocke_tensor_view_t
-         * (cross-TU header change). Unreachable in current C scope. */
+        /* Python buffer branch with mask=None (see rocke_tv_buffer_vec_at). */
+        rocke_tv_buffer_vec_at(b, v, elem_off, true, value, n, NULL);
         return;
     }
     rocke_b_global_store_vN(b, v->base, elem_off, value, n, 0);
+}
+
+static const char* rocke_tv_addr_space_name(rocke_addr_space_t a)
+{
+    if(a == ROCKE_ADDR_LDS)
+        return "lds";
+    if(a == ROCKE_ADDR_BUFFER)
+        return "buffer";
+    return "global";
+}
+
+rocke_value_t* rocke_tensor_view_load_vec_at_masked(rocke_ir_builder_t* b,
+                                                    const rocke_tensor_view_t* v,
+                                                    rocke_value_t* elem_off,
+                                                    int n,
+                                                    rocke_value_t* mask)
+{
+    /* Python TensorView.load_vec_at(b, elem_off, n, mask=mask):
+     *   if mask is not None and self.addr_space != "buffer":
+     *       raise NotImplementedError(f"mask= requires addr_space='buffer' ...")
+     *   if self.addr_space == "buffer": <buffer branch, with the mask>
+     *   <lds / global branches, which never see a mask>
+     */
+    if(b == NULL || v == NULL)
+        return NULL;
+    if(mask != NULL && v->addr_space != ROCKE_ADDR_BUFFER)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "mask= requires addr_space='buffer' (got '%s'); "
+                        "software masking for global/lds is not yet wired",
+                        rocke_tv_addr_space_name(v->addr_space));
+        return NULL;
+    }
+    if(v->addr_space == ROCKE_ADDR_BUFFER)
+        return rocke_tv_buffer_vec_at(b, v, elem_off, false, NULL, n, mask);
+    return rocke_tensor_view_load_vec_at(b, v, elem_off, n);
+}
+
+void rocke_tensor_view_store_vec_at_masked(rocke_ir_builder_t* b,
+                                           const rocke_tensor_view_t* v,
+                                           rocke_value_t* elem_off,
+                                           rocke_value_t* value,
+                                           int n,
+                                           rocke_value_t* mask)
+{
+    /* Python TensorView.store_vec_at(b, elem_off, value, n, mask=mask):
+     *   if mask is not None and self.addr_space != "buffer":
+     *       raise NotImplementedError(f"mask= requires addr_space='buffer' ...")
+     *   if self.addr_space == "buffer": <buffer branch, with the mask>
+     *   b.global_store_vN(self.base, elem_off, value, n)
+     */
+    if(b == NULL || v == NULL)
+        return;
+    if(mask != NULL && v->addr_space != ROCKE_ADDR_BUFFER)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "mask= requires addr_space='buffer' (got '%s')",
+                        rocke_tv_addr_space_name(v->addr_space));
+        return;
+    }
+    if(v->addr_space == ROCKE_ADDR_BUFFER)
+    {
+        rocke_tv_buffer_vec_at(b, v, elem_off, true, value, n, mask);
+        return;
+    }
+    rocke_tensor_view_store_vec_at(b, v, elem_off, value, n);
 }
 
 rocke_status_t rocke_tensor_view_tile(rocke_tile_window_t* out,
@@ -509,6 +803,34 @@ void rocke_tile_window_store_vec(rocke_ir_builder_t* b,
     if(!rocke_tile_window_global_indices(b, w, local_indices, num_indices, gidx))
         return;
     rocke_tensor_view_store_vec(b, w->view, gidx, w->rank, value, n);
+}
+
+void rocke_tile_window_load_vec_scalars(rocke_ir_builder_t* b,
+                                        const rocke_tile_window_t* w,
+                                        rocke_value_t* const* local_indices,
+                                        int num_indices,
+                                        int n,
+                                        rocke_value_t** out)
+{
+    /* Python TileWindow.load_vec_scalars:
+     *   if n == 1:
+     *       return [self.load_scalar(b, *local_indices)]
+     *   v = self.load_vec(b, *local_indices, n=n)
+     *   return [b.vec_extract(v, i) for i in range(n)]
+     */
+    int i;
+    if(b == NULL || w == NULL || w->view == NULL || out == NULL)
+        return;
+    if(n == 1)
+    {
+        out[0] = rocke_tile_window_load_scalar(b, w, local_indices, num_indices);
+        return;
+    }
+    {
+        rocke_value_t* v = rocke_tile_window_load_vec(b, w, local_indices, num_indices, n);
+        for(i = 0; i < n; ++i)
+            out[i] = rocke_b_vec_extract(b, v, i);
+    }
 }
 
 rocke_value_t* rocke_tile_window_load_scalar(rocke_ir_builder_t* b,
@@ -725,6 +1047,61 @@ rocke_status_t rocke_make_global_view(rocke_tensor_view_t* out,
         return st;
     out->base = base;
     out->addr_space = ROCKE_ADDR_GLOBAL;
+    memset(&out->buffer, 0, sizeof(out->buffer)); /* no BufferResource */
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_tv_make_buffer_resource(rocke_ir_builder_t* b,
+                                             rocke_tv_buffer_resource_t* out,
+                                             rocke_value_t* ptr,
+                                             rocke_value_t* num_bytes,
+                                             rocke_value_t* soffset)
+{
+    /* Python make_buffer_resource:
+     *   rsrc = b.buffer_rsrc(ptr, num_bytes)
+     *   if soffset is None:
+     *       soffset = b.const_i32(0)
+     *   n = int(num_bytes) if isinstance(num_bytes, int) else 0
+     *   return BufferResource(rsrc=rsrc, soffset=soffset, num_bytes=n)
+     */
+    rocke_value_t* rsrc;
+    if(b == NULL || out == NULL)
+        return ROCKE_ERR_VALUE;
+    rsrc = rocke_b_buffer_rsrc(b, ptr, num_bytes);
+    if(soffset == NULL)
+        soffset = rocke_b_const_i32(b, 0);
+    out->rsrc = rsrc;
+    out->soffset = soffset;
+    out->num_bytes = 0; /* num_bytes is an SSA Value, never a host int, here */
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_tv_make_buffer_view(rocke_tensor_view_t* out,
+                                         const rocke_tv_buffer_resource_t* rsrc,
+                                         const int* shape,
+                                         int rank,
+                                         const rocke_type_t* dtype,
+                                         const rocke_stride_t* strides)
+{
+    /* Python make_buffer_view:
+     *   desc = packed(shape, dtype) if strides is None else with_strides(...)
+     *   return TensorView(base=rsrc, desc=desc, addr_space="buffer")
+     */
+    rocke_status_t st;
+    if(out == NULL)
+        return ROCKE_ERR_VALUE;
+    if(strides == NULL)
+        st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+    else
+        st = rocke_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
+    if(st != ROCKE_OK)
+        return st;
+    out->base = NULL; /* the Python base (the BufferResource) is out->buffer */
+    out->addr_space = ROCKE_ADDR_BUFFER;
+    if(rsrc != NULL)
+        out->buffer = *rsrc;
+    else
+        memset(&out->buffer, 0, sizeof(out->buffer)); /* TypeError on first use */
     return ROCKE_OK;
 }
 
@@ -777,6 +1154,7 @@ rocke_status_t rocke_make_lds_view_ex(rocke_ir_builder_t* b,
         return st;
     out->base = smem;
     out->addr_space = ROCKE_ADDR_LDS;
+    memset(&out->buffer, 0, sizeof(out->buffer)); /* no BufferResource */
     return ROCKE_OK;
 }
 
@@ -806,5 +1184,6 @@ rocke_status_t rocke_make_lds_view(rocke_ir_builder_t* b,
         return st;
     out->base = smem;
     out->addr_space = ROCKE_ADDR_LDS;
+    memset(&out->buffer, 0, sizeof(out->buffer)); /* no BufferResource */
     return ROCKE_OK;
 }

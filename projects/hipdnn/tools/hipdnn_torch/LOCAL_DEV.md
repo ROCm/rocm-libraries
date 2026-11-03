@@ -21,21 +21,19 @@ hipDNN](#6-verify--prove-its-hipdnn).
 |-------|--------------------|-----------|
 | **PyTorch + ROCm SDK base** | a TheRock ROCm nightly `pip` wheel set (torch + bundled `_rocm_sdk_libraries_gfx1151`) | `pip install` into a venv |
 | **Engine plugin** (`libhip_kernel_provider.so` + the AOT `.co`/`family.json` catalog) | `hip-kernel-provider`, on the **catalog branch** | superbuild preset |
-| **Frontend bindings** (`hipdnn_frontend_python.abi3.so`) | `projects/hipdnn/python/frontend_bindings`, on **PR #10600's branch** (`users/sareeder/hipdnn-python-graph-bindings`) | standalone CMake, against an SDPA-ON frontend |
-| **Injection package** (`hipdnn_torch/`) | this directory, on the **injection branch** | run in place (no build) |
+| **Frontend bindings** (`hipdnn_frontend_python.abi3.so`) | `projects/hipdnn/python/frontend_bindings` on `develop` (graph bindings merged in #10600) | standalone CMake, against an SDPA-ON frontend |
+| **Injection package** (`hipdnn_torch/`) | this directory on `develop` (merged in #10562) | run in place (no build) |
 
-The three checkouts stay **separate on purpose** and are combined only at runtime through
+The checkouts stay **separate on purpose** and are combined only at runtime through
 `HIPDNN_TORCH_PROVIDER_SO` + the frontend on `PYTHONPATH`:
 
-- `users/brpepers/aot-catalog-engine` — the provider/engine + catalog. Never merged into
-  the injection branch.
-- `users/sareeder/hipdnn-python-graph-bindings` (**PR #10600**) — the canonical Python
-  graph bindings (rmsnorm / layernorm / sdpa / `NormFwdPhase`). This injection branch used
-  to carry its own copies of those bindings; they were **dropped** in favor of #10600, so
-  check that branch out for the `frontend_bindings/` you build in §3b.
-- `users/brpepers/hipdnn-torch-injection` — **only** this Python package now (no
-  frontend-binding commits). It calls the standard binding API #10600 exposes (e.g.
-  `SdpaAttributes.set_attn_scale(float)`, not a custom `set_attn_scale_value`).
+- `users/brpepers/aot-catalog-engine` — the provider/engine + catalog (PR #10556, **closed without
+  merging**). **This branch is not merged to `develop`**: `develop` has no `AOT_CATALOG_ENGINE`
+  engine and no `aot_catalog` tree, so the AOT sections below only apply when you build that branch.
+- Python graph bindings (rmsnorm / layernorm / sdpa / `NormFwdPhase`) — merged to `develop`
+  in #10600. Build `frontend_bindings/` (§3b) from `develop` or any branch based on it.
+- `hipdnn_torch/` — merged to `develop` in #10562. It calls the standard binding API (e.g.
+  `SdpaAttributes.set_attn_scale(float)`).
 
 > [!IMPORTANT]
 > The single hardest lesson of this bring-up: **the frontend binds to exactly one
@@ -70,8 +68,8 @@ Pick your two worktrees/checkouts and export their roots — the rest of this do
 
 ```bash
 export CAT=/path/to/worktree/aot-catalog-engine        # provider/catalog branch (also the SDPA-ON frontend)
-export INJ=/path/to/worktree/hipdnn-torch-injection    # this Python injection package
-export FE=/path/to/worktree/hipdnn-python-graph-bindings # PR #10600 (users/sareeder/...) -- the bindings
+export INJ=/path/to/worktree/hipdnn-torch-injection    # this Python injection package (`projects/hipdnn/tools/hipdnn_torch` on develop)
+export FE=/path/to/worktree/rocm-libraries             # a develop-based checkout; provides projects/hipdnn/python/frontend_bindings (#10600)
 export VENV=~/aot-ab-venv
 export SDKLIB=$(python -c "import glob,site; print(glob.glob(site.getsitepackages()[0]+'/_rocm_sdk_libraries_gfx1151/lib')[0])")
 ```
@@ -128,12 +126,11 @@ $CAT/build/lib/hipdnn_plugins/engines/arch_content/aot_catalog/gfx1151 # the 7-f
 > nm -C "$CAT/build/lib/hipdnn_plugins/engines/libhip_kernel_provider.so" | grep -iE 'layernorm|conv|pointwise|matmul|rmsnorm|sdpa' | head
 > ```
 
-### 3b. Frontend bindings (on `$FE` — PR #10600)
+### 3b. Frontend bindings (on `$FE`)
 
-The Python graph bindings come from **PR #10600**
-(`users/sareeder/hipdnn-python-graph-bindings`), *not* this injection branch — the
-injection branch dropped its own copies in favor of #10600. Check that branch out at `$FE`
-and build its `frontend_bindings/`. It references recent frontend surface — `BehaviorNote`,
+The Python graph bindings live in `projects/hipdnn/python/frontend_bindings` on `develop`
+(merged in **#10600**). Check out a `develop`-based tree at `$FE` and build its
+`frontend_bindings/`. It references recent frontend surface — `BehaviorNote`,
 the RFC-0016 `is_override_shape_enabled` graph attribute — that is **newer than what a
 several-months-old nightly's header-only frontend provides**, so build against the
 **SDPA-ON hipDNN build tree from §3a** (`$CAT/build`), not the pip nightly's stale
@@ -456,9 +453,9 @@ target is a build flag. Follow §§1–8 for the build, §9 for your OS, and use
 below as the invariants-and-acceptance checklist.
 
 **The three PRs** (build separately, combine only at *runtime* — see §1):
-- **#10556** `users/brpepers/aot-catalog-engine` — AOT catalog engine in `hip-kernel-provider`; rocKE AOT-creates kernels for your arch.
-- **#10600** `users/sareeder/hipdnn-python-graph-bindings` — the hipDNN Python graph bindings the injection depends on.
-- **#10562** `users/brpepers/hipdnn-torch-injection` — the `hipdnn_torch` injection package, this runbook, the pytest suite, model samples.
+- **#10556** (closed, not merged) `users/brpepers/aot-catalog-engine` — AOT catalog engine in `hip-kernel-provider`; rocKE AOT-creates kernels for your arch. Not on `develop`.
+- **#10600** (merged) — the hipDNN Python graph bindings the injection depends on.
+- **#10562** (merged) — the `hipdnn_torch` injection package, this runbook, the pytest suite, model samples.
 
 **Invariants (get these right or it silently no-ops):**
 1. **Probe the GPU first** on your candidate nightly (one `cuda` matmul) before building — nightly×driver pairing is not portable (§9, and §2/Phase 0).

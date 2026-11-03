@@ -18,6 +18,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -236,6 +237,16 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid MoE grouped matmul backward graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidGdnGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid GDN graph)";
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidKdaGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid KDA graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
@@ -349,6 +360,47 @@ TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
     EXPECT_EQ(outputs.at("dweight_tensor_uid").get<int64_t>(), 4);
 
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
+}
+
+// GraphToJsonAndBack covers one graph per node type; these cover the second
+// GDN and KDA graphs, whose flag values differ from the first ones.
+TEST(TestJson, GdnSafeGateRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidGdnSafeGateGraph();
+    toJsonAndBackTestSuite(GetGraph(graphBuilder.GetBufferPointer()), "(GDN safe-gate graph)");
+}
+
+TEST(TestJson, KdaStatePoolRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidKdaStatePoolGraph();
+    toJsonAndBackTestSuite(GetGraph(graphBuilder.GetBufferPointer()), "(KDA state-pool graph)");
+}
+
+TEST(TestJson, LinearAttentionRejectsUnknownGateDomain)
+{
+    const std::vector<std::pair<std::string, flatbuffers::FlatBufferBuilder>> graphs = [] {
+        std::vector<std::pair<std::string, flatbuffers::FlatBufferBuilder>> result;
+        result.emplace_back("GDN", hipdnn_test_sdk::utilities::createValidGdnGraph());
+        result.emplace_back("KDA", hipdnn_test_sdk::utilities::createValidKdaGraph());
+        return result;
+    }();
+
+    for(const auto& [op, graphBuilder] : graphs)
+    {
+        const nlohmann::json validJson = *GetGraph(graphBuilder.GetBufferPointer());
+        for(const nlohmann::json& gateDomain : {nlohmann::json("Linear"),
+                                                nlohmann::json("LOG"),
+                                                nlohmann::json("exp"),
+                                                nlohmann::json(1)})
+        {
+            nlohmann::json graphJson = validJson;
+            graphJson.at("nodes").at(0).at("attributes")["gate_domain"] = gateDomain;
+            flatbuffers::FlatBufferBuilder builder;
+            EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson),
+                         std::runtime_error)
+                << op << " gate_domain " << gateDomain.dump();
+        }
+    }
 }
 
 namespace

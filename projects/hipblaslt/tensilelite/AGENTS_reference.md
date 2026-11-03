@@ -6,16 +6,16 @@ Supplementary reference for `AGENTS.md` — load this when you need test command
 
 ```bash
 # Full test suite (builds client + runs all common tests)
-tox -e py3 -- Tensile/Tests -m common
+tox -e py3 -- tensilelite/Tests -m common
 
 # Python unit tests only (skips the long client build; requires a prior build)
-tox -e unit -- Tensile/Tests/unit
+tox -e unit -- tensilelite/Tests/unit
 
 # Run a specific test category
-tox -e py3 -- Tensile/Tests -m gemm
+tox -e py3 -- tensilelite/Tests -m gemm
 
 # Run a single test directly (after a prior `invoke build-client`)
-Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
+tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-out
 ```
 
 ## Custom CMake Build
@@ -25,11 +25,11 @@ cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
 # Run test with custom client path
-./my-custom-build/Tensile.sh Tensile/Tests/common/<test>.yaml tensile-out \
+./my-custom-build/Tensile.sh tensilelite/Tests/common/<test>.yaml tensile-out \
     --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
 
 # Build with custom args (e.g., Debug + specific GPU)
-TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
+TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
 ```
 
 Iterate on rocisa C++ without re-pip-installing:
@@ -52,7 +52,7 @@ tox -e isort         # isort (black profile) on same directories
 
 ## Rebuilding Assembly Without Full Rerun
 
-After a Tensile run creates `tensile-out/`, you can edit assembly and rebuild only object code:
+After a TensileLite run creates `tensile-out/`, you can edit assembly and rebuild only object code:
 
 ```bash
 make co TENSILE_OUT=tensile-out                          # auto-detect arch
@@ -72,6 +72,6 @@ make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32  # gfx11 explicit
 
 ## Supported Targets
 
-GPU architectures (see `Tensile/Common/Architectures.py`): gfx900, gfx906, gfx908, gfx90a, gfx942, gfx950, gfx1010/1011/1012, gfx1030, gfx1100/1101/1102, gfx1200/1201, gfx1250 (each with optional `:xnack+/-`).
+GPU architectures (see `tensilelite/Common/Architectures.py`): gfx900, gfx906, gfx908, gfx90a, gfx942, gfx950, gfx1010/1011/1012, gfx1030, gfx1100/1101/1102, gfx1200/1201, gfx1250 (each with optional `:xnack+/-`).
 
 Test markers for architectures (see `pytest.ini`): `gfx11`, `gfx12`, `gfx94x`, `gfx950`, `gfx1250`, plus per-arch `xfail-gfxNNN` / `skip-gfxNNN`. Data type markers: `Float`, `Double`, `Half`, `BFloat16`, `Int8`, `Float8`/`BFloat8` (OCP and `_fnuz` NANOO variants), mixed `Float8BFloat8`, `Float4`, `Float6`, `BFloat6`.

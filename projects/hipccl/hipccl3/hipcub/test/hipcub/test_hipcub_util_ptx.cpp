@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -156,9 +156,9 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
-            std::max<size_t>(1, logical_warp_size / 2),
+            _HIPCUB_STD::max<size_t>(1, logical_warp_size / 2),
             1U,
-            std::max<unsigned int>(1, logical_warp_size - 1),
+            _HIPCUB_STD::max<unsigned int>(1, logical_warp_size - 1),
             seed_value + seed_value_addition);
 
         T* device_data;
@@ -267,9 +267,9 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
-            std::max<size_t>(1, logical_warp_size / 2),
+            _HIPCUB_STD::max<size_t>(1, logical_warp_size / 2),
             1U,
-            std::max<unsigned int>(1, logical_warp_size - 1),
+            _HIPCUB_STD::max<unsigned int>(1, logical_warp_size - 1),
             seed_value + seed_value_addition);
 
         T* device_data;
@@ -379,10 +379,11 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
                                                     seed_value);
         std::vector<T> output(input.size());
 
-        auto src_offsets = test_utils::get_random_data<int>(hardware_warp_size / logical_warp_size,
-                                                            0,
-                                                            std::max<int>(1, logical_warp_size - 1),
-                                                            seed_value + seed_value_addition);
+        auto src_offsets
+            = test_utils::get_random_data<int>(hardware_warp_size / logical_warp_size,
+                                               0,
+                                               _HIPCUB_STD::max<int>(1, logical_warp_size - 1),
+                                               seed_value + seed_value_addition);
 
         // Calculate expected results on host
         std::vector<T> expected(size, test_utils::convert_to_device<T>(0));
@@ -481,9 +482,9 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
         }
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
-            std::max<size_t>(1, logical_warp_size / 2),
+            _HIPCUB_STD::max<size_t>(1, logical_warp_size / 2),
             1U,
-            std::max<unsigned int>(1, logical_warp_size - 1),
+            _HIPCUB_STD::max<unsigned int>(1, logical_warp_size - 1),
             seed_value + seed_value_addition);
 
         T* device_data;
@@ -592,9 +593,9 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
         }
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
-            std::max<size_t>(1, logical_warp_size / 2),
+            _HIPCUB_STD::max<size_t>(1, logical_warp_size / 2),
             1U,
-            std::max<unsigned int>(1, logical_warp_size - 1),
+            _HIPCUB_STD::max<unsigned int>(1, logical_warp_size - 1),
             seed_value + seed_value_addition);
 
         T* device_data;
@@ -670,7 +671,11 @@ __global__
 void warp_id_kernel(unsigned int* output)
 {
     const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
-    output[index]            = ::rocprim::warp_id();
+#ifdef __HIP_PLATFORM_NVIDIA__
+    output[index] = hipThreadIdx_x / warpSize;
+#else
+    output[index] = ::rocprim::warp_id();
+#endif
 }
 
 TEST(HipcubUtilPtxTests, WarpId)
@@ -754,7 +759,11 @@ template<unsigned int LogicalWarpSize>
 HIPCUB_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
 test_warp_mask_pow_two() {
+#ifdef __HIP_PLATFORM_NVIDIA__
+    const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
+#else
     const unsigned int logical_warp_id = ::rocprim::lane_id() / LogicalWarpSize;
+#endif
     const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
 
     const unsigned int warp_start      = logical_warp_id * LogicalWarpSize;
@@ -795,7 +804,11 @@ template<unsigned int LogicalWarpSize>
 HIPCUB_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
 test_warp_mask_non_pow_two() {
+#ifdef __HIP_PLATFORM_NVIDIA__
+    const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
+#else
     const unsigned int logical_warp_id = ::rocprim::lane_id() / LogicalWarpSize;
+#endif
     const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
 
     for(unsigned int lane = 0; lane < LogicalWarpSize; ++lane)

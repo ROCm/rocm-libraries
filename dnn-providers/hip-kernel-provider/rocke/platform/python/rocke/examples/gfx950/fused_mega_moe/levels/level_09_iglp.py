@@ -91,8 +91,8 @@ __all__ = [
 # AGPR operand staging: route the gate/up/down K=128 fp8 MFMAs through the
 # inline-asm helper (``v_mfma_f32_16x16x128_f8f6f4`` with AGPR srcA/srcB +
 # VGPR acc, the hand-tuned asm staging layout) instead of the scaled intrinsic. The
-# helper is numerically identical (cbsz/blgp=0 => fp8e4m3, scales pinned to
-# the neutral E8M0 0 => factor 1.0) and verified bit-exact vs the intrinsic
+# helper is numerically identical (cbsz/blgp=0 => fp8e4m3, both scales at
+# literal 0, which selects the unscaled instruction) and verified bit-exact vs the intrinsic
 # (asm_mfma_parity / asm_mfma_fp8frag). Forcing the fp8 A/B fragments to live
 # in the AGPR file across the K-loop is the lever (hand-tuned asm keeps ~192 AGPR of
 # operand state; the intrinsic path leaves srcA/srcB placement to the register
@@ -1272,7 +1272,7 @@ def build_moe_fused_mega_gemm_fp8(
     atom = spec.gate_up_atom()
     # L6: the unscaled fp8 16x16x128 hero atom reuses the (catalog-registered)
     # ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with the in-instruction E8M0
-    # scales pinned to the neutral value (verified numerically standalone), so it
+    # scales at literal 0 (unscaled instruction; verified numerically standalone), so it
     # is gfx950-valid even though the plain unscaled 16x16x128 fp8 SHAPE is not a
     # separate JSON catalog row. Only run the per-arch catalog guard for atoms
     # that ARE catalog shapes (the legacy 16x16x32 path); skip it for the hero

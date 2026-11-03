@@ -183,11 +183,13 @@ int main(int argc, char** argv)
     }
 #endif
     // Device query
-    int devs;
-    if(hipGetDeviceCount(&devs) != hipSuccess)
+    int              devs         = 0;
+    const hipError_t count_status = hipGetDeviceCount(&devs);
+    if(count_status != hipSuccess)
     {
-        std::cerr << "Error: cannot get device count" << std::endl;
-        return -1;
+        std::cerr << "rocsparse-test error: cannot get device count: "
+                  << hipGetErrorString(count_status) << " (" << count_status << ")" << std::endl;
+        return EXIT_FAILURE;
     }
 
     std::cout << "Query device success: there are " << devs << " devices" << std::endl;
@@ -196,10 +198,16 @@ int main(int argc, char** argv)
     {
         hipDeviceProp_t prop;
 
-        if(hipGetDeviceProperties(&prop, i) != hipSuccess)
+        // This inventory is informational only and covers every device, including ones
+        // this run will not use, so a failure here warns. The selected device is
+        // validated below.
+        const hipError_t prop_status = hipGetDeviceProperties(&prop, i);
+        if(prop_status != hipSuccess)
         {
-            std::cerr << "rocsparse-test error: cannot get device properties" << std::endl;
-            return rocsparse_status_internal_error;
+            std::cerr << "rocsparse-test warning: cannot get properties of device ID " << i << ": "
+                      << hipGetErrorString(prop_status) << " (" << prop_status << ")" << std::endl;
+            (void)hipGetLastError(); // don't leak this into the first kernel-launch check
+            continue;
         }
 
         std::cout << "Device ID " << i << ": " << prop.name << std::endl;
@@ -216,18 +224,32 @@ int main(int argc, char** argv)
                   << std::endl;
     }
 
-    // Set device
-    if(hipSetDevice(dev) != hipSuccess || dev >= devs)
+    // Validate the requested device before selecting it, so that an out of range ID is
+    // reported rather than handed to hipSetDevice.
+    if(dev < 0 || dev >= devs)
     {
-        std::cerr << "Error: cannot set device ID " << dev << std::endl;
-        return -1;
+        std::cerr << "rocsparse-test error: invalid device ID " << dev << " (detected " << devs
+                  << " device(s))" << std::endl;
+        return EXIT_FAILURE;
     }
 
-    hipDeviceProp_t prop;
-    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+    // Set device
+    const hipError_t set_status = hipSetDevice(dev);
+    if(set_status != hipSuccess)
     {
-        std::cerr << "rocsparse-test error: cannot get device properties" << std::endl;
-        return rocsparse_status_internal_error;
+        std::cerr << "rocsparse-test error: cannot set device ID " << dev << ": "
+                  << hipGetErrorString(set_status) << " (" << set_status << ")" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    hipDeviceProp_t  prop;
+    const hipError_t prop_status = hipGetDeviceProperties(&prop, dev);
+    if(prop_status != hipSuccess)
+    {
+        std::cerr << "rocsparse-test error: cannot get properties of the selected device ID " << dev
+                  << ": " << hipGetErrorString(prop_status) << " (" << prop_status << ")"
+                  << std::endl;
+        return EXIT_FAILURE;
     }
 
     std::cout << "Using device ID " << dev << " (" << prop.name << ") for rocSPARSE" << std::endl;
@@ -341,16 +363,6 @@ int main(int argc, char** argv)
     auto& reproducibility = rocsparse_reproducibility_t::instance();
     if(reproducibility.config().is_enabled())
     {
-        static hipDeviceProp_t prop;
-        static int             dev;
-        if(hipGetDevice(&dev) != hipSuccess)
-        {
-            return -1;
-        }
-        if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
-        {
-            return -1;
-        }
         reproducibility.config().set_gpu_name(prop.gcnArchName);
         rocsparse_reproducibility_write_report(reproducibility);
     }

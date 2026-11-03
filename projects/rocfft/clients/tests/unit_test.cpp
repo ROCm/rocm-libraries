@@ -351,6 +351,7 @@ struct LocalCleanup
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
+    SKIP_ON_QUICK_TESTS();
     PROB_SKIP_UNITTEST();
 
     try
@@ -1125,6 +1126,12 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+// Plan capacity tests are stress tests and aren't really adding
+// extra code path coverage over other test cases.  ASAN can hit
+// problems with address space fragmentation with a huge number of
+// plans, so disable these test cases in that build.
+#if !__has_feature(address_sanitizer) && !defined(__SANITIZE_ADDRESS__)
+
 // Create M identical Bluestein plans concurrently to stress the
 // hipModule refcount cache.  Plans destroyed before returning.
 static void run_plan_capacity_test(size_t M)
@@ -1185,6 +1192,7 @@ static void run_plan_capacity_test(size_t M)
 // rocFFT fails around 65k plans due to vm.max_map_count exhaustion.
 TEST(rocfft_UnitTest, plan_capacity_100k)
 {
+    SKIP_ON_QUICK_TESTS();
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(100'000);
 }
@@ -1193,13 +1201,19 @@ TEST(rocfft_UnitTest, plan_capacity_100k)
 // run manually with --gtest_also_run_disabled_tests.
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
+    SKIP_ON_QUICK_TESTS();
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
 }
 
+#endif
+
 // Test calling rocfft_destroy after any library singletons are torn down
 TEST(rocfft_DeathTest, plan_destroyed_at_exit)
 {
+    SKIP_ON_QUICK_TESTS();
+    PROB_SKIP_UNITTEST();
+
     struct exit_time_plan
     {
         rocfft_plan plan = nullptr;

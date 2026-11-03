@@ -1,10 +1,9 @@
 #include "config_matcher.hpp"
+#include "direction_field.h"
 
 namespace hipconv::cdna5::depthwise_wgrad_hankel
 {
 
-// Direction is omitted: every entry here is Wgrad, so it selects nothing.
-//
 // make_configs varies kh, kw, stride, q_cols, wmmas_per_wave, waves_per_wg and
 // n_per_block, so those seven pin exactly one entry. channels_per_wave follows from kh, kw and
 // wmmas_per_wave; it is registered to be read rather than to select, a tile
@@ -22,6 +21,7 @@ ConfigMatcher::ConfigMatcher(const Config& cfg)
     int_field("n_per_block", cfg.n_per_block, /*default=*/1);
     int_field("prefetch_depth", cfg.prefetch_depth, /*default=*/4);
     int_field("min_rows_per_chunk", cfg.min_rows_per_chunk, /*default=*/4);
+    direction_field(*this, cfg.direction, Direction::Wgrad);
 }
 
 } // namespace hipconv::cdna5::depthwise_wgrad_hankel

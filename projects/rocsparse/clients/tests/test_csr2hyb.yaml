@@ -31,6 +31,20 @@ Tests:
   function: csr2hyb_bad_arg
   precision: *single_double_precisions_complex_real
 
+# half-dense conversion whose padded ELL size ell_width * m overflows
+# a 32-bit product (40000 * 53688 > 2^31) while csr_nnz stays under 2^31. Reproduces
+# the pre-fix silent ELL under-allocation / out-of-bounds write. Needs ~26 GB device
+# (CSR input + padded ELL output), so the memory guard filters it out on smaller cards.
+# Setting M selects this case in testing_csr2hyb_extra; the quick csr2hyb_extra entry
+# leaves M at the default and runs the HYB reuse regression.
+- name: csr2hyb_extra
+  category: nightly
+  function: csr2hyb_extra
+  M: [53688]
+  N: [40000]
+  host_memory_gb: 12
+  device_memory_gb: 30
+
 - name: csr2hyb
   category: quick
   function: csr2hyb
@@ -41,6 +55,11 @@ Tests:
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33, 0, 2147483647]
   matrix: [rocsparse_matrix_random]
+
+- name: csr2hyb_extra
+  category: quick
+  function: csr2hyb_extra
+  precision: *single_precision
 
 - name: csr2hyb_file
   category: quick

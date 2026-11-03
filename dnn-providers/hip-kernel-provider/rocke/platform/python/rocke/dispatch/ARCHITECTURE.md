@@ -105,6 +105,19 @@ Selection is not reproducible for a target that is not the host, which rules out
 AOT compilation, cross-arch CI, and any offline tuning record that is keyed by
 architecture.
 
+*Fixed (AICK-2146).* Every selector and spec-builder on the attention selection
+path now takes `arch` as a required argument, so the cohort heuristics gate on
+the request's arch rather than the device's; `_resolve_attention_arch()` survives
+only on the launch path, where compile-then-run does target the local device.
+`library/tests/dispatch/attention/test_host_independent_dispatch.py` holds the
+ratchet: an AST sweep fails if any call site omits the arch or passes a live
+device probe in that slot, and a second sweep confines every
+`_resolve_attention_arch()` call to an allow-list of launch entry points.
+One scoped exception remains: with `num_cus` left at 0 the CU count is still
+read from a matching-arch host, so the guarantee is arch-independence rather
+than full host-independence — `dispatch/attention/common.py::_resolve_num_cus`
+states the boundary, and callers pass an explicit `num_cus` to close it.
+
 **Identifiers are write-only.** `CandidateRegistry` exposes `register`,
 `candidates`, `supported`, `select`, `extend`. There is no `get(name)` and no
 way to resolve a `KernelId`. Names are already unique (`register` enforces it),
@@ -816,10 +829,13 @@ Rules:
   the trace. `"not eligible"` is useless; `"seqlen_k=192 below the 256 tile  floor for block_n=64"` is not.
 3. **Be pure and host-independent.** No device probes. Selection for `gfx1250`
   must be reproducible from a `gfx950` host, otherwise AOT compilation and
-   cross-arch testing are impossible. This is the single largest constraint the
-   current attention stack violates: `_tiled_spec_from_problem` calls
-   `_resolve_attention_arch()`, which reads the running device — the cause of
-   the host-dependent gfx942 selection shown in section 2.
+   cross-arch testing are impossible. The attention stack used to be the
+   standing violation of this — `_tiled_spec_from_problem` called
+   `_resolve_attention_arch()`, which reads the running device. AICK-2146 made
+   `arch` a required argument there and on every other selector (section 2),
+   so a predicate taking a device probe in an arch slot now fails an AST sweep
+   rather than shipping. The one remaining read is the CU count behind an unset
+   `num_cus`; see `dispatch/attention/common.py::_resolve_num_cus`.
 4. **Share cohort predicates with the builder.** When a heuristic decides both
   eligibility and geometry, it must have one definition imported by both, so
    selection and codegen cannot drift.
@@ -1243,7 +1259,8 @@ library/dispatch/                         # library-owned kernels
 platform/python/rocke/dispatch/           # platform-owned kernels
   core.py              # request / candidate / registry / result / identity
   tuning/              # shared machinery for tuned candidates (section 14)
-    axes.py  walk.py  identity.py  space.py  candidate.py  spec.py  testing.py
+    axes.py  walk.py  identity.py  space.py  waves.py  candidate.py  spec.py
+    testing.py
   families/
     moe.py  norm.py                       # cohort-parameterized, no lane earned
   gemm/
@@ -1492,12 +1509,14 @@ computes wrong output. The LDS model is the pool the LLVM lowering packs
 applies it while walking, so the LDS-saving enabler axes that lead the axis
 order can still make a large tile legal.
 
-`WavesPerEuSpace` (`attention/waves.py`) is a thin `KnobSpace` subclass both
-attention spaces derive from. It is where `waves_per_eu` meets the generic
-outer-knob hooks: it sets `outer_knob = "waves_per_eu"` and the
-`{variant_id}_wpe{N}` stem and its prefix, so `rocke.dispatch.tuning` itself
-names no kernel field. Each space still supplies its own `outer_values`: the
-unified tables in `waves.py`, or values derived from the dense base spec's WPE.
+`WavesPerEuSpace` (`rocke.dispatch.tuning.waves`) is a thin `KnobSpace`
+subclass that both attention spaces (and GDN decode's) derive from. It is where
+`waves_per_eu` meets the generic outer-knob hooks: it sets
+`outer_knob = "waves_per_eu"` and the `{variant_id}_wpe{N}` stem and its
+prefix, so every family spells that stored identifier the same way and
+`KnobSpace` itself names no kernel field. Each space still supplies its own
+`outer_values`: the unified tables in `attention/waves.py`, or values derived
+from the dense base spec's WPE.
 
 The dense candidates are the same shape with `DenseSpace` (whose `base` is the
 candidate's default kernel spec for the request) and `make_dense_candidate`; it
@@ -1693,7 +1712,7 @@ its field-complete kernel cache key (addressing width included), not
 A tuned attention spec (dense or unified) is one registered variant plus a
 **canonical knob dict**: the kernel fields set away from the variant's default
 spec, `waves_per_eu` included. `waves_per_eu` is the attention spaces' outer
-knob and shows in the stem (`library/dispatch/attention/waves.py`); the
+knob and shows in the stem (`rocke.dispatch.tuning.WavesPerEuSpace`); the
 generic form is `{stem}@{config_key}` (section 14).
 
 ```text
@@ -2077,7 +2096,7 @@ signature of every family, so it waits for a family that needs it.
 
 **Build through the C++ builder from dispatch.** The `build` hook in section 5.2
 calls the Python builder. The C++ engine has builders of its own for most
-families — `rocke_build_wmma_fmha_fwd`, `rocke_build_gemm_multi_d`,
+families — `rocke_build_wmma_fmha_fwd_v2`, `rocke_build_gemm_multi_d`,
 `rocke_build_deep_fused_conv_pool`, and the rest of the `rocke_build_*` surface —
 and they emit byte-identical IR from the same spec. Dispatch should be able to
 drive either engine through a binding it owns, rather than through the
@@ -2141,6 +2160,7 @@ behavior of section 11.1 without writing it:
 | `tuning.identity` | `config_key`, `tuning_id`, `TUNING_ID_VERSION` |
 | `tuning.space` | `KnobSpace`: canonicalize, default, stream, sample, find |
 | `tuning.candidate` | `make_tuned_candidate`, `resolve_pinned`, `explicitly_pinned` |
+| `tuning.waves` | `WavesPerEuSpace`: `waves_per_eu` as the outer knob and its `_wpe{N}` id stem |
 | `tuning.spec` | the `TunedSpec` and `TunableRequest` protocols |
 | `tuning.testing` | `assert_tuning_contract`, the conformance kit |
 
@@ -2178,7 +2198,7 @@ needs:
 | `defaults(base, kernel)` | `{}` | always, in practice: the problem-independent defaults the knobs are a delta against (fingerprinted into `config_key`) |
 | `known_knobs(base)` | the in-scope axes | axes are scoped per problem; out-of-scope knobs are then dropped instead of refused |
 | `recorded(base)` | none | `base` resolves a field per problem (work size, dtype) |
-| `outer_knob`, `outer_values(base, level)`, `outer_default(base)` | none | one field is cheap to sweep on top of every knob set (attention: `waves_per_eu`, in `attention/waves.py`) |
+| `outer_knob`, `outer_values(base, level)`, `outer_default(base)` | none | one field is cheap to sweep on top of every knob set (`waves_per_eu`: subclass `tuning.waves.WavesPerEuSpace`) |
 | `stem(kernel)`, `stem_prefix()` | `variant_id` / `"{variant_id}@"` | the id should show more than the variant (attention: `_wpe{N}`) |
 | `production(base, axes, is_valid)` | every knob on its own | curated stacks |
 | `is_valid(base, knobs)` | canonical and valid | the walk should prune differently |
@@ -2206,19 +2226,37 @@ request's hash/equality-visible fields: it is memoized once and shared by
 resolution, sweeping and sampling. Normalize device or process state into the
 request first; do not probe it from `base`. Attention's explicit tuning
 candidates therefore use `_tuning_problem`, while production path routing uses
-the live-CU-aware `_problem`.
+the live-CU-aware `_problem`. The candidate is opt-in by default. A family
+whose `auto` is itself one configuration of a registered variant passes
+`route_auto(req)` instead: the candidate is then not opt-in, resolves an
+`auto` request as if it pinned the candidate's `algorithm` and `spec_id`, and
+`route_auto` says whether it takes a request whose `spec_id` is `auto`. Its
+`auto` runs the space's default unless the family also passes
+`auto_knobs(req)`: the knobs `auto` runs on that candidate, resolved as a
+`tuning_knobs` pin is (a knob the request cannot read drops). An empty mapping
+runs the default; knobs that do not resolve on a request whose default does
+raise `RuntimeError` with the reason, never a quiet fallback; `auto_knobs`
+without `route_auto` is a construction error. An `auto` request that carries
+its own tuning pin (a `tuning_id` other than `auto`, or `tuning_knobs`)
+resolves that pin; the hook never replaces it. GDN decode uses both: `auto` is
+the case's knob stack on the case's tile (`library/dispatch/gdn/axes.py`,
+`AUTO_DEFAULTS`), and a fallback tile's default where the case's tile is
+illegal.
 
 **The test.** Call `assert_tuning_contract(candidate, requests,
 other_requests=..., default_knobs=..., refused_knobs=...)` for a
 representative set of candidates (`representative(candidates, prefixes)`
-picks them by name). It checks that `auto` is the first production spec, ids
+picks them by name). It checks that a pinned `auto` (the candidate's
+`spec_id`, no knobs: the space's default) is the first production spec, ids
 are unique, `(id, knobs)`, knobs alone, a bare id, and the stored dispatch
 request all reselect the spec, mismatched knobs are refused, default-valued
 knobs canonicalize to the default, and `config_key` survives a change of
-problem.
+problem. It does not exercise a production `auto` with `auto_knobs`; the
+family's own dispatch tests cover that.
 
 Worked examples: the toy family in
 `platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py` (every
 piece in one file) and attention (`library/dispatch/attention`: `DenseSpace`
 in `dense_rules.py`, `UnifiedSpace` in `unified_rules.py`, factories in
-`candidate.py`).
+`candidate.py`; `WmmaSpace` in `wmma_rules.py` for a per-problem policy whose
+every knob is `recorded`, with its candidates in `gfx1151.py`).

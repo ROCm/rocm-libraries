@@ -415,7 +415,7 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
     __device__ static bool constexpr IsValidCompilationParameter()
     {
-#if defined(__gfx11__) || defined(__gfx120__)
+#if defined(__gfx11__) || defined(__gfx120__) || defined(__gfx117__)
         if constexpr(is_same_v<AComputeDataType_, float>)
         {
 
@@ -450,7 +450,8 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
             return false;
         }
 
-        constexpr bool IsGfx11            = is_same_v<decltype(get_device_arch()), gfx11_t>;
+        constexpr bool IsGfx11 = is_same_v<decltype(get_device_arch()), gfx11_t> ||
+                                 is_same_v<decltype(get_device_arch()), gfx117_t>;
         constexpr auto EstimateVgprCount  = GetEstimateVgprCount<IsGfx11>();
         constexpr auto AvailableVgprCount = get_max_vgpr_count(get_device_arch());
         if constexpr(EstimateVgprCount > (AvailableVgprCount + AvailableVgprCount / 4))
@@ -492,7 +493,7 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
 #ifndef __HIPCC_RTC__
         if constexpr(KPerBlock < 16)
         {
-            if(ck::is_gfx12_supported() || ck::is_gfx11_supported())
+            if(ck::is_gfx12_supported() || ck::is_gfx117_supported() || ck::is_gfx11_supported())
             {
                 return false;
             }
@@ -564,7 +565,7 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
             {
                 return get_max_vgpr_count(gfx120_t{});
             }
-            else if(ck::is_gfx11_supported())
+            else if(ck::is_gfx11_supported() || ck::is_gfx117_supported())
             {
                 return get_max_vgpr_count(gfx11_t{});
             }
@@ -573,8 +574,9 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
                 return get_max_vgpr_count(gfx9_t{});
             }
         }();
-        const auto estimateVgprCount =
-            ck::is_gfx11_supported() ? GetEstimateVgprCount<true>() : GetEstimateVgprCount<false>();
+        const auto estimateVgprCount = (ck::is_gfx11_supported() || ck::is_gfx117_supported())
+                                           ? GetEstimateVgprCount<true>()
+                                           : GetEstimateVgprCount<false>();
         if(estimateVgprCount > (availableVgprCount + availableVgprCount / 4))
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
@@ -840,7 +842,7 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
                is_same<AComputeDataType, bhalf_t>::value) &&
               lcm_AK1_BK1 <= 4) ||
              (is_same<AComputeDataType, int8_t>::value && lcm_AK1_BK1 <= 8) ||
-             ((is_same<AComputeDataType, f8_t>::value || is_same<AComputeDataType, bf8_t>::value) &&
+             ((is_f8_type_v<AComputeDataType> || is_bf8_type_v<AComputeDataType>) &&
 #if defined(__gfx125__)
               lcm_AK1_BK1 < 128))
 #else

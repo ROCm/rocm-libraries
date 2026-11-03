@@ -604,6 +604,27 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
+TEST_F(TestMiopenUnaryActivationPlanBuilder,
+       IsApplicableReturnsFalseForReluWithNonZeroLowerClipAndZeroSlope)
+{
+    // A zero slope is no slope, so this is a standard ReLU with a shifted knee, which MIOpen
+    // cannot represent.
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/0.5f,
+                                                         std::nullopt,
+                                                         /*reluLowerClipSlope=*/0.0f));
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
 // ============================================================================
 // Binary-node hardening (see MiopenBinaryPointwiseChecks.cpp for the counterpart)
 // ============================================================================

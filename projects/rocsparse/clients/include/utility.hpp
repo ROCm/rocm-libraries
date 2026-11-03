@@ -444,7 +444,7 @@ struct test_hyb
     rocsparse_int           m;
     rocsparse_int           n;
     rocsparse_hyb_partition partition;
-    rocsparse_int           ell_nnz;
+    rocsparse_int           ell_nnz_legacy;
     rocsparse_int           ell_width;
     rocsparse_int*          ell_col_ind;
     void*                   ell_val;
@@ -452,6 +452,8 @@ struct test_hyb
     rocsparse_int*          coo_row_ind;
     rocsparse_int*          coo_col_ind;
     void*                   coo_val;
+    rocsparse_datatype      data_type_T;
+    int64_t                 ell_nnz;
 };
 
 /*! \brief  local hyb matrix structure which is automatically created and destroyed  */
@@ -959,8 +961,14 @@ public:
         }
     }
 
-    template <memory_mode::value_t MODE, typename T>
-    explicit rocsparse_local_dnmat(dense_matrix<MODE, T>& h)
+    template <memory_mode::value_t MODE, typename T, typename I>
+    explicit rocsparse_local_dnmat(dense_matrix<MODE, T, I>& h)
+        : rocsparse_local_dnmat(h.m, h.n, h.ld, (T*)h, get_datatype<T>(), h.order)
+    {
+    }
+
+    template <memory_mode::value_t MODE, typename T, typename I>
+    explicit rocsparse_local_dnmat(dense_matrix_view<MODE, T, I>& h)
         : rocsparse_local_dnmat(h.m, h.n, h.ld, (T*)h, get_datatype<T>(), h.order)
     {
     }

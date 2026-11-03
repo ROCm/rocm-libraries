@@ -68,14 +68,14 @@ struct enable_if_destroy_range_case1
 template <typename Allocator, typename Pointer>
 struct enable_if_destroy_range_case2
     : _THRUST_STD::enable_if<!has_effectful_member_destroy<Allocator, typename pointer_element<Pointer>::type>::value
-                            && !_THRUST_STD::is_trivially_destructible<typename pointer_element<Pointer>::type>::value>
+                             && !_THRUST_STD::is_trivially_destructible<typename pointer_element<Pointer>::type>::value>
 {};
 
 // case 3: Allocator has no member function "destroy", and T has a trivial destructor
 template <typename Allocator, typename Pointer>
 struct enable_if_destroy_range_case3
     : _THRUST_STD::enable_if<!has_effectful_member_destroy<Allocator, typename pointer_element<Pointer>::type>::value
-                            && _THRUST_STD::is_trivially_destructible<typename pointer_element<Pointer>::type>::value>
+                             && _THRUST_STD::is_trivially_destructible<typename pointer_element<Pointer>::type>::value>
 {};
 
 template <typename Allocator>

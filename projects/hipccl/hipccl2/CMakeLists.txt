@@ -42,11 +42,11 @@ cmake_minimum_required(VERSION 3.25.2)
 # --- hipCCL umbrella version ---
 # Versions the hipCCL umbrella only - the CPack package and
 # find_package(hipccl) - NOT the individual components, which keep their own
-# 4.7.0 line (see the Component versioning note below). Deliberately kept
-# identical to hipccl3's HIPCCL_VERSION so that CI or other tooling built
-# against one layout's version number doesn't need to special-case the other.
-set(HIPCCL_VERSION_MAJOR 0)
-set(HIPCCL_VERSION_MINOR 1)
+# 4.x line (see the Component versioning note below). hipccl2 is the CCCL
+# 2.x snapshot, so this tracks the CCCL 2.8 line (matching
+# HIPCUB_CCCL_VERSION_*); hipccl3 is versioned 3.0.0 for the CCCL 3.0 line.
+set(HIPCCL_VERSION_MAJOR 2)
+set(HIPCCL_VERSION_MINOR 8)
 set(HIPCCL_VERSION_PATCH 0)
 set(HIPCCL_VERSION "${HIPCCL_VERSION_MAJOR}.${HIPCCL_VERSION_MINOR}.${HIPCCL_VERSION_PATCH}")
 
@@ -69,7 +69,7 @@ include(install_legacy_header_symlink)
 set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
     "Unified hipCCL include install directory" FORCE)
 
-# NOTE(hipccl2): temporary migration aid, default OFF. Pre-hipccl code doing
+# NOTE(hipccl2): temporary migration aid, default ON. Pre-hipccl code doing
 # `#include <rocprim/...>` (etc.) against a plain `-I<prefix>/include` breaks
 # once headers move to include/hipccl/rocprim above. When enabled, installs a
 # relative symlink at <prefix>/include/<component> pointing back into

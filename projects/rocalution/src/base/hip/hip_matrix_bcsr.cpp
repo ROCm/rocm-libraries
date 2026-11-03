@@ -217,8 +217,7 @@ namespace rocalution
 
         this->Clear();
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->nrow_ = nrowb * blockdim;
         this->ncol_ = ncolb * blockdim;
@@ -247,8 +246,7 @@ namespace rocalution
         assert(this->nnz_ >= 0);
         assert(this->mat_.blockdim > 1);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->DestroySpMatDescr_();
 
@@ -852,6 +850,7 @@ namespace rocalution
                                           this->mat_.blockdim,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with the other solve functions
         if(this->mat_buffer_ == NULL)
@@ -1322,6 +1321,7 @@ namespace rocalution
                                           this->mat_.blockdim,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with the other solve functions
         if(this->mat_buffer_ == NULL)
@@ -1398,6 +1398,7 @@ namespace rocalution
                                           this->mat_.blockdim,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with the other solve functions
         if(this->mat_buffer_ == NULL)

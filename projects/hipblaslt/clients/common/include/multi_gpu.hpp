@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "benchmark_collective.hpp"
 #include "hipblaslt_ostream.hpp"
+#include <hipblaslt_benchmark/benchmark_collective.hpp>
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
