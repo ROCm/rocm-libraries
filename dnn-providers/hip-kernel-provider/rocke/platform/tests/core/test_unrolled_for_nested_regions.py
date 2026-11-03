@@ -12,23 +12,25 @@ uses and definitions inside regions nested in the body: an ``scf.if`` body, an
 
 Each kernel below puts one of those shapes in a loop of ``TRIPS`` unrolled
 trips. The tests lower each kernel with both engines (same text) at every LLVM
-flavor, compile it, and, when a GPU is present, run it and compare every lane
-with the value worked out on the host.
+flavor, compile and link it, and, when a GPU is present, run it and compare
+every lane with the value worked out on the host.
+``tests/core/test_unrolled_for_nested_regions.cpp`` lowers the same kernels with
+the C++ engine alone.
 """
 
 from __future__ import annotations
 
-import ctypes
 import re
-import struct
 
 import numpy as np
 import pytest
 from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
+from rocke.core.lower_llvm import LLVM_FLAVORS, lower_kernel_to_llvm
 from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.gpu import run_on_device
+from rocke.tests.ir_validity import assert_target_accepts
 
-FLAVORS = ("llvm20", "llvm22", "llvm23", "llvm24")
 LANES = 64
 TRIPS = 4
 # The GPUs the run test has run on; on any other it skips until it has.
@@ -99,7 +101,7 @@ def _carried_value_used_only_in_branch_yield():
     """An if/else gives the carried value on its then branch and the lane on
     its else branch; the carried value is read only by the then branch's
     ``scf.yield``. The loop then adds the induction variable."""
-    b, y, z, lane = _kernel("unroll_carried_in_branch_yield")
+    b, _, z, lane = _kernel("unroll_carried_in_branch_yield")
     loop = _unrolled(b, b.const_i32(0))
     with loop as (k, (acc,)):
         branch = b.scf_if_else(b.cmp_lt(lane, b.const_i32(SPLIT)), result_types=[I32])
@@ -126,9 +128,11 @@ def _nested_if_in_if():
     b, y, z, lane = _kernel("unroll_if_in_if")
     loop = _unrolled(b, b.const_i32(0))
     with loop as (k, (acc,)):
-        with b.scf_if(b.cmp_lt(lane, b.const_i32(SPLIT))):
-            with b.scf_if(b.cmp_eq(lane, k)):
-                b.global_store(y, lane, b.add(acc, b.const_i32(1000)))
+        with (
+            b.scf_if(b.cmp_lt(lane, b.const_i32(SPLIT))),
+            b.scf_if(b.cmp_eq(lane, k)),
+        ):
+            b.global_store(y, lane, b.add(acc, b.const_i32(1000)))
         b.scf_yield(b.add(acc, b.const_i32(1)))
     b.global_store(z, lane, loop.results[0])
     b.ret()
@@ -145,7 +149,7 @@ def _rolled_loop_in_unrolled_loop():
     """A rolled ``scf.for`` inside the unrolled body: trip ``k`` sums
     ``j`` over ``0 <= j <= k`` on top of the lane. The inner loop's induction
     variable and carried value are defined once per trip."""
-    b, y, z, lane = _kernel("unroll_rolled_inner_loop")
+    b, _, z, lane = _kernel("unroll_rolled_inner_loop")
     loop = _unrolled(b, b.const_i32(0))
     with loop as (k, (acc,)):
         inner = b.scf_for_iter(
@@ -173,7 +177,7 @@ def _rolled_loops_side_by_side_in_unrolled_loop():
     both naming their values ``j`` and ``s``: trip ``k`` adds ``j`` over
     ``0 <= j <= k`` twice. Every trip lowers both loops, so the kernel holds
     ``2 * TRIPS`` loops of the same names."""
-    b, y, z, lane = _kernel("unroll_rolled_loops_side_by_side")
+    b, _, z, lane = _kernel("unroll_rolled_loops_side_by_side")
     loop = _unrolled(b, lane)
     with loop as (k, (acc,)):
         carried = acc
@@ -220,7 +224,7 @@ def _shared_memory_in_nested_if():
 def _unrolled_loop_in_unrolled_loop():
     """An unrolled ``scf.for`` of three trips inside the unrolled body; its body
     reads the outer induction variable and defines a value."""
-    b, y, z, lane = _kernel("unroll_unrolled_inner_loop")
+    b, _, z, lane = _kernel("unroll_unrolled_inner_loop")
     loop = _unrolled(b, lane)
     with loop as (k, (acc,)):
         inner = _unrolled(b, acc, trips=3, name="s", iv_name="j")
@@ -282,18 +286,6 @@ def _names_defined_more_than_once(text):
     return sorted(name for name in set(defined) if defined.count(name) > 1)
 
 
-def _compile(kernel, arch):
-    """Compile ``kernel`` for ``arch``; skip when COMGR cannot be loaded."""
-    from rocke.helpers.compile import compile_kernel
-    from rocke.runtime import comgr
-
-    try:
-        comgr._resolve_lib()
-    except comgr.ComgrError as error:
-        pytest.skip(f"COMGR not loadable: {str(error)[:200]}")
-    return compile_kernel(kernel, arch=arch).hsaco
-
-
 def _reuse_message(name):
     return (
         f"scf.for: the name '{name}' is already taken by an induction variable or "
@@ -346,13 +338,15 @@ def test_nested_loop_may_not_reuse_an_enclosing_loop_name(
     the reused name in the inner body would be ambiguous: the C++ engine would
     read one value and the Python engine the other. The C++ builder refuses
     with the same text (``tests/core/test_scf_for_name_reuse.cpp``)."""
-    b, y, z, lane = _kernel("reuse_" + taken.lstrip("%"))
+    b, _, _, lane = _kernel("reuse_" + taken.lstrip("%"))
     loop = _unrolled(b, lane)
-    with loop as (k, (acc,)):
+    with loop as (_, (acc,)):
         if through_if:
-            with b.scf_if(b.cmp_lt(lane, b.const_i32(SPLIT))):
-                with pytest.raises(ValueError) as refused:
-                    _inner_loop(b, iv_name, carried, acc, unroll)
+            with (
+                b.scf_if(b.cmp_lt(lane, b.const_i32(SPLIT))),
+                pytest.raises(ValueError) as refused,
+            ):
+                _inner_loop(b, iv_name, carried, acc, unroll)
         else:
             with pytest.raises(ValueError) as refused:
                 _inner_loop(b, iv_name, carried, acc, unroll)
@@ -365,7 +359,7 @@ def test_reuse_is_refused_when_an_op_follows_a_loop_handle(followed):
     body is entered, so the loop is not the last op of its region. The names of
     its values are still taken inside its body; ``followed`` is the loop whose
     handle an op follows, and the innermost loop reuses one of its names."""
-    b, y, z, lane = _kernel("reuse_after_op_" + followed)
+    b, _, _, lane = _kernel("reuse_after_op_" + followed)
     outer = _unrolled(b, lane)
     if followed == "outer":
         b.add(lane, lane)
@@ -373,7 +367,7 @@ def test_reuse_is_refused_when_an_op_follows_a_loop_handle(followed):
         inner = _inner_loop(b, "j", "s", acc, unroll=False)
         if followed == "inner":
             b.add(acc, k)
-        with inner as (j, (s,)):
+        with inner as (_, (s,)):
             taken = "k" if followed == "outer" else "j"
             with pytest.raises(ValueError) as refused:
                 _inner_loop(b, taken, "t", s, unroll=False)
@@ -390,9 +384,9 @@ def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
     it is in, or two values of one loop alike, past the builder. Both parsers
     refuse it with the builder's message rather than bind the inner body's
     reads of that name to one of the values and unbind the other."""
-    b, y, z, lane = _kernel("parse_reuse")
+    b, _, z, lane = _kernel("parse_reuse")
     outer = _unrolled(b, lane)
-    with outer as (k, (acc,)):
+    with outer as (_, (acc,)):
         inner = _inner_loop(b, "j", "s", acc, unroll=False)
         with inner as (j, (s,)):
             b.scf_yield(b.add(s, j))
@@ -410,7 +404,7 @@ def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
 
 
 def test_one_loop_may_not_name_two_of_its_values_alike():
-    b, y, z, lane = _kernel("reuse_in_one_loop")
+    b, _, _, lane = _kernel("reuse_in_one_loop")
     with pytest.raises(ValueError) as refused:
         _unrolled(b, lane, name="k", iv_name="k")
     assert str(refused.value) == _reuse_message("%k")
@@ -419,8 +413,8 @@ def test_one_loop_may_not_name_two_of_its_values_alike():
 def test_loops_side_by_side_may_share_names():
     """Names are only taken inside the loop that defines them: two loops one
     after the other may use the same names, and so may each loop nested in
-    them. The kernel still defines each name once and compiles."""
-    b, y, z, lane = _kernel("names_side_by_side")
+    them. The kernel still defines each name once, compiles and links."""
+    b, _, z, lane = _kernel("names_side_by_side")
     start = lane
     for _ in range(2):
         rolled = _inner_loop(b, "j", "s", start, unroll=False)
@@ -441,13 +435,12 @@ def test_loops_side_by_side_may_share_names():
         b.scf_yield(inner.results[0])
     b.global_store(z, lane, second.results[0])
     b.ret()
-    assert (
-        _names_defined_more_than_once(lower_with_both_engines(b.kernel, "gfx942")) == []
-    )
-    assert _compile(b.kernel, "gfx942")
+    text = lower_with_both_engines(b.kernel, "gfx942")
+    assert _names_defined_more_than_once(text) == []
+    assert_target_accepts(text, "gfx942")
 
 
-@pytest.mark.parametrize("flavor", FLAVORS)
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_both_engines_emit_the_same_text(case, flavor):
     lower_with_both_engines(CASES[case][0](), "gfx942", llvm_flavor=flavor)
@@ -461,61 +454,17 @@ def test_each_trip_defines_its_own_values(case):
 
 
 @pytest.mark.parametrize("case", sorted(CASES))
-def test_kernel_compiles(case):
-    assert _compile(CASES[case][0](), "gfx942")
-
-
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
-def _run(blob, kernel_name):
-    """Launch one workgroup of ``LANES`` lanes on zeroed ``Y`` and ``Z``."""
-    from rocke.runtime.hip_module import Runtime
-
-    runtime = Runtime()
-    module = runtime.load_module(blob)
-    outputs = [np.zeros(LANES, dtype=np.int32) for _ in range(2)]
-    buffers = [runtime.alloc(out.nbytes) for out in outputs]
-    try:
-        for buffer, out in zip(buffers, outputs):
-            runtime.memcpy_h2d(
-                buffer, (ctypes.c_ubyte * out.nbytes).from_buffer(out), out.nbytes
-            )
-        runtime.launch_blocking(
-            module.get_function(kernel_name),
-            (1, 1, 1),
-            (LANES, 1, 1),
-            struct.pack("2Q", *buffers),
-        )
-        for buffer, out in zip(buffers, outputs):
-            runtime.memcpy_d2h(
-                (ctypes.c_ubyte * out.nbytes).from_buffer(out), buffer, out.nbytes
-            )
-    finally:
-        for buffer in buffers:
-            runtime.free(buffer)
-        module.unload()
-    return outputs
+def test_kernel_compiles_and_links(case):
+    assert_target_accepts(
+        lower_kernel_to_llvm(CASES[case][0](), arch="gfx942"), "gfx942"
+    )
 
 
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_gpu_every_lane_matches_the_host(case):
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
-    if arch not in GPU_ARCHES_RUN_ON:
-        pytest.skip(f"has not run on {arch} hardware yet; enable once it has")
     build, expected = CASES[case]
-    kernel = build()
-    y, z = _run(_compile(kernel, arch), kernel.name)
+    y, z = (np.zeros(LANES, dtype=np.int32) for _ in range(2))
+    run_on_device(build(), {"Y": y, "Z": z}, LANES, GPU_ARCHES_RUN_ON)
     expected_y, expected_z = expected(np.arange(LANES, dtype=np.int32))
     np.testing.assert_array_equal(y, expected_y)
     np.testing.assert_array_equal(z, expected_z)

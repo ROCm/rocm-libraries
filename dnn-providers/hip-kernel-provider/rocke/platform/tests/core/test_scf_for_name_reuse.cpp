@@ -9,16 +9,20 @@
  * name of a value of a loop it sits in, or one loop gives two of its values the
  * same name, a read of that name inside the inner body is ambiguous, and the
  * two engines would read different values. The builder refuses such a name with
- * the Python engine's text; loops side by side may share names.
- * tests/core/test_unrolled_for_nested_regions.py covers the Python builder.
+ * the Python engine's text; loops side by side may share names. Serialized IR
+ * can name values that way past the builder, and the parser refuses it with the
+ * same text. tests/core/test_unrolled_for_nested_regions.py covers the Python
+ * builder and parser.
  */
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <regex>
 #include <string>
 
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
 
 namespace
 {
@@ -163,6 +167,60 @@ void accepts_new_names_and_loops_side_by_side()
           std::string("distinct and side-by-side names refused: ") + rocke_ir_builder_error(&k.b));
 }
 
+/* The serialized IR of a rolled loop "k0" over "acc" whose body holds a rolled
+ * loop "j" over "s", with every occurrence of the name `inner_name` (a value of
+ * the inner loop) renamed to `reused`. */
+std::string kernel_text_naming(const std::string& inner_name, const std::string& reused)
+{
+    Kernel k("parse_reuse");
+    rocke_for_t outer = k.loop("k0", "acc");
+    rocke_b_region_enter(&k.b, outer.body);
+    rocke_for_t inner = k.loop("j", "s");
+    rocke_b_region_enter(&k.b, inner.body);
+    rocke_value_t* sum = rocke_b_add(&k.b, inner.iter_vars[0], inner.iv);
+    rocke_b_scf_yield(&k.b, &sum, 1);
+    rocke_b_region_leave(&k.b);
+    rocke_b_scf_yield(&k.b, inner.op->results, 1);
+    rocke_b_region_leave(&k.b);
+    rocke_b_ret(&k.b);
+    char* serialized = NULL;
+    check(rocke_ir_serialize(rocke_ir_builder_kernel(&k.b), &serialized) == ROCKE_OK,
+          "serializing the parse_reuse kernel failed");
+    const std::string text = serialized ? serialized : "";
+    free(serialized);
+    /* Whole names only: "%s" must not match the start of a longer name. */
+    return std::regex_replace(text, std::regex(inner_name + R"((?![-a-zA-Z$._0-9]))"), reused);
+}
+
+void parser_refuses_a_reused_loop_name(const std::string& reused, const std::string& inner_name)
+{
+    const std::string text = kernel_text_naming(inner_name, reused);
+    Kernel parsed("parsed");
+    rocke_kernel_def_t* kernel = NULL;
+    const rocke_status_t status = rocke_ir_parse(text.c_str(), &parsed.b, &kernel);
+    const std::string error = status == ROCKE_OK ? "" : rocke_ir_builder_error(&parsed.b);
+    check(status == ROCKE_ERR_VALUE && error == message(reused),
+          "parsing " + inner_name + " renamed to " + reused + ": status " + std::to_string(status)
+              + ", '" + error + "'");
+}
+
+void parser_refuses_reused_loop_names()
+{
+    parser_refuses_a_reused_loop_name("%k0", "%j"); /* the outer induction variable */
+    parser_refuses_a_reused_loop_name("%acc", "%s"); /* the outer carried value */
+    parser_refuses_a_reused_loop_name("%j", "%s"); /* a value of the same loop */
+}
+
+void parser_accepts_the_names_the_builder_gave()
+{
+    const std::string text = kernel_text_naming("%s", "%s");
+    Kernel parsed("parsed");
+    rocke_kernel_def_t* kernel = NULL;
+    check(rocke_ir_parse(text.c_str(), &parsed.b, &kernel) == ROCKE_OK,
+          std::string("parsing the parse_reuse kernel failed: ")
+              + rocke_ir_builder_error(&parsed.b));
+}
+
 } // namespace
 
 int main()
@@ -173,6 +231,8 @@ int main()
     refuses_a_reused_name_when_an_op_follows_the_loop_handle();
     refuses_one_loop_naming_two_values_alike();
     accepts_new_names_and_loops_side_by_side();
+    parser_refuses_reused_loop_names();
+    parser_accepts_the_names_the_builder_gave();
     if(g_failures)
     {
         fprintf(stderr, "%d failure(s)\n", g_failures);
