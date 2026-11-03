@@ -1214,9 +1214,11 @@ def _main():
             status |= _golden_step(args, kind, flavor, cur, scope, failures=[])
         return status
 
-    # A golden is per flavor, so its runs always pin one; a plain parity run
-    # leaves each emitter to resolve its own unless --flavor is given.
-    flavor = pin_llvm_flavor(flavors[0]) if (golden or args.flavor) else "host"
+    # LLVM emission has one compilation owner. Pin its resolved profile for
+    # both children: the native emitter cannot discover Python's compiler.
+    # Serialization/verification without an explicit profile stays compiler-free.
+    needs_profile = golden or args.flavor or (args.mode == "ll" and fams)
+    flavor = pin_llvm_flavor(flavors[0]) if needs_profile else "host"
 
     archive = Path(args.archive)
     if not archive.exists():

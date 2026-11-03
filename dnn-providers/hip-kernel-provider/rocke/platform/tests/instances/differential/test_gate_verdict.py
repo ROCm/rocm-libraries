@@ -664,6 +664,32 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
         environment = mock.patch.dict(os.environ)
         environment.start()
         self.addCleanup(environment.stop)
+        # These tests replace emitters with records; their offline profile must
+        # not depend on a compiler installed in the test interpreter.
+        os.environ.setdefault("ROCKE_LLVM_FLAVOR", "llvm20")
+
+    def test_unqualified_ll_run_forwards_owner_profile_to_emitters(self):
+        from rocke.core import lower_llvm
+
+        os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+        with TemporaryDirectory() as d:
+            with mock.patch.object(
+                lower_llvm, "_resolve_llvm_flavor", return_value="llvm24"
+            ) as query:
+                observed = []
+
+                def emit(*args, **kwargs):
+                    observed.append(os.environ.get("ROCKE_LLVM_FLAVOR"))
+                    return green("fake", 1)
+
+                with mock.patch.object(
+                    run_diff,
+                    "_run_families",
+                    side_effect=lambda *args, **kwargs: [emit()],
+                ):
+                    self.assertEqual(self.drive_main(green("fake", 1), Path(d)), 0)
+                self.assertEqual(observed, ["llvm24"])
+                query.assert_called_once_with()
 
     def drive_main(self, family_record, tmp):
         archive = tmp / "librocke_core.a"
