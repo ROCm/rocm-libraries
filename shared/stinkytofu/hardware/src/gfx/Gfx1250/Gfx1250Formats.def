@@ -179,6 +179,17 @@ DEF_FORMAT(VOP1,
     },
 )
 
+// Architected no-operand vector NOP.  It shares the VOP1 encoding class but
+// does not inherit VOP1's ordinary destination/source operand fields.
+DEF_FORMAT(VOP1_NO_OPERANDS,
+    .microcode = MC_VOP1,
+    .unit = VALU,
+    .encoding = {32},
+    .maxOperands = 0,
+    .cost = {1, 5},
+    .flags = {VALU},
+)
+
 // Vector 2-operand (32-bit encoding)
 // Used for: v_add_f32, v_mul_f32, etc.
 DEF_FORMAT(VOP2,

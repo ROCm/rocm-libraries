@@ -758,7 +758,7 @@ DEF_BATCH(.format = VOP2_COMMUTATIVE,
 )
 
 // Vector ALU — VOP1 (no operands)
-DEF_T(VNopInst, "v_nop", .format = VOP1, .flags = {HasSideEffect}, .logical = "VNop")
+DEF_T(VNopInst, "v_nop", .format = VOP1_NO_OPERANDS, .flags = {HasSideEffect}, .logical = "VNop")
 
 // Vector ALU — VOP2 non-commutative (dual VOP2/VOP3 encoding)
 DEF_BATCH(.format = VOP2,
