@@ -244,14 +244,13 @@ def _lower(kernel):
 @pytest.mark.parametrize("block_size", [16, 32, 64])
 @pytest.mark.parametrize("head_size", [64, 128, 256])
 def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size, dtype, gqa):
-    """The catalog drops ``num_seqs`` (batch) from the kernel axes: on the decode
-    grid the segment IR must not depend on it. Covers every catalog D x block x
-    dtype, with the tile the runtime picks for (D, block), at GQA ratios 1/4/16
-    (8 KV heads). The reduce comparison is structural only -- the reduce spec has
-    no ``num_seqs`` -- so the segment half and the off-grid control carry the
-    test. Off the decode grid ``num_seqs`` sizes the sequence binary search, so
-    the segment IR differs there -- the control that shows this comparison can
-    see a change."""
+    """The catalog drops ``num_seqs`` (batch) from the kernel axes: the segment IR
+    must not depend on it. Covers every catalog D x block x dtype, with the tile the
+    runtime picks for (D, block), at GQA ratios 1/4/16 (8 KV heads). The reduce
+    comparison is structural only -- the reduce spec has no ``num_seqs``. The
+    control, a different ``num_segments``, shows the comparison can see a change
+    (``num_seqs`` sizes nothing in the IR since the sequence search reads it as a
+    kernarg, ``RUNTIME_SEARCH_ITERS``)."""
     seg_1, _ = _runtime_specs(head_size, block_size, 1, dtype, nhead_q=8 * gqa)
     expected_tile = block_size // 2 if head_size >= 128 and block_size >= 32 else None
     assert seg_1.tile_size_override == expected_tile
@@ -265,13 +264,37 @@ def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size, dtype,
     for k_1, k_64 in zip(mod_1.kernels, mod_64.kernels):
         assert k_1.name == k_64.name
         assert _lower(k_1) == _lower(k_64)
-    off_grid = [
-        mod.build_unified_attention_3d_tiled(
-            replace(s, use_decode_grid=False), arch="gfx942"
+    other = mod.build_unified_attention_3d_tiled(
+        replace(seg_1, num_segments=32), arch="gfx942"
+    )
+    assert _lower(other) != _lower(mod_1.primary)
+
+
+@pytest.mark.parametrize("gqa", [1, 4, 16])
+@pytest.mark.parametrize("head_size", [64, 128, 256])
+def test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio(head_size, gqa):
+    """The catalog keeps one kernel per GQA ratio, not per head pair: the segment
+    and reduce read ``num_query_heads`` / ``num_kv_heads`` as kernargs
+    (``RUNTIME_KERNARG_FIELDS``), so head pairs sharing a ratio lower to one IR.
+    The control, the next ratio up, shows the comparison can see a change."""
+    seg, _ = _runtime_specs(head_size, 16, 1, "bf16", nhead_q=8 * gqa)
+    seg = replace(seg, num_segments=16)
+    pairs = [(gqa * h, h) for h in (1, 2, 8)]
+    lowered = []
+    for hq, hkv in pairs:
+        module = mod.build_unified_attention_3d_module(
+            replace(seg, num_query_heads=hq, num_kv_heads=hkv), arch="gfx942"
         )
-        for s in (seg_1, seg_64)
-    ]
-    assert _lower(off_grid[0]) != _lower(off_grid[1])
+        lowered.append([(k.name, _lower(k)) for k in module.kernels])
+    assert all(x == lowered[0] for x in lowered[1:]), pairs
+    other = mod.build_unified_attention_3d_tiled(
+        replace(seg, num_query_heads=2 * gqa * 8, num_kv_heads=8), arch="gfx942"
+    )
+    assert _lower(other) != lowered[0][0][1]
+    assert {
+        replace(seg, num_query_heads=hq, num_kv_heads=hkv).resolved_num_queries_per_kv()
+        for hq, hkv in pairs
+    } == {gqa}
 
 
 @pytest.mark.parametrize("tile", [None, 16])

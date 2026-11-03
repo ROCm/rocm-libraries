@@ -1646,6 +1646,10 @@ bool rocke_transforms_descriptor_offset_i64_split(rocke_ir_builder_t* b,
     {
         const char* name = desc->base_names[i];
         int stride = desc->base_strides[i];
+        rocke_value_t* stride_v
+            = desc->is_dynamic
+                  ? ((const rocke_dynamic_tensor_descriptor_t*)desc)->dynamic_strides[i]
+                  : NULL;
         const rocke_coord_var_t* c = rocke_i_map_get(&coords, name);
         if(c == NULL)
         {
@@ -1653,7 +1657,19 @@ bool rocke_transforms_descriptor_offset_i64_split(rocke_ir_builder_t* b,
             return false;
         }
         valid = rocke_i_and(b, valid, c->valid);
-        if(strcmp(name, base_coord) == 0)
+        if(stride_v != NULL && strcmp(name, base_coord) == 0)
+        {
+            rocke_value_t* base_val = rocke_b_to_sgpr_u32(b, c->value);
+            rocke_value_t* base_w = rocke_b_zext(b, base_val, rocke_i64());
+            rocke_value_t* stride_w = rocke_b_zext(b, stride_v, rocke_i64());
+            base_i64 = rocke_b_mul(b, base_w, stride_w);
+        }
+        else if(stride_v != NULL)
+        {
+            rocke_value_t* term = rocke_b_mul(b, c->value, stride_v);
+            within = (within == NULL) ? term : rocke_b_add(b, within, term);
+        }
+        else if(strcmp(name, base_coord) == 0)
         {
             /* i64 term: pin the wave-uniform block id to an SGPR before widening
              * (Python b.mul(b.zext(b.to_sgpr_u32(c.value), I64), const_i64(stride))).
@@ -1959,6 +1975,52 @@ rocke_dynamic_tensor_descriptor_t*
     return ddesc;
 }
 
+rocke_dynamic_tensor_descriptor_t*
+    rocke_tensor_descriptor_naive_dynamic_mixed(rocke_ir_builder_t* b,
+                                                const char* name,
+                                                const char* const* coord_names,
+                                                int n_coords,
+                                                rocke_value_t* const* strides,
+                                                const int* static_strides)
+{
+    rocke_dynamic_tensor_descriptor_t* ddesc;
+    rocke_tensor_descriptor_t* base;
+    int fake_lengths[8];
+    int base_strides[8];
+    int i;
+
+    if(!rocke_i_live(b) || n_coords < 1 || n_coords > 8)
+    {
+        return NULL;
+    }
+    ddesc = (rocke_dynamic_tensor_descriptor_t*)rocke_arena_calloc(
+        &b->arena, sizeof(rocke_dynamic_tensor_descriptor_t));
+    if(ddesc == NULL)
+    {
+        return NULL;
+    }
+    /* Python create(): base_lengths all 0, base_strides the int stride or 1. */
+    for(i = 0; i < n_coords; ++i)
+    {
+        fake_lengths[i] = 0;
+        base_strides[i] = strides[i] != NULL ? 1 : static_strides[i];
+    }
+    base = rocke_tensor_descriptor_naive(
+        b, name, fake_lengths, n_coords, base_strides, coord_names, n_coords);
+    if(base == NULL)
+    {
+        return NULL;
+    }
+    ddesc->base = *base;
+    ddesc->n_dynamic = n_coords;
+    for(i = 0; i < n_coords; ++i)
+    {
+        ddesc->dynamic_strides[i] = strides[i];
+    }
+    ddesc->base.is_dynamic = 1;
+    return ddesc;
+}
+
 bool rocke_dynamic_tensor_descriptor_offset(rocke_ir_builder_t* b,
                                             const rocke_dynamic_tensor_descriptor_t* desc,
                                             const char* const* in_names,
@@ -2013,7 +2075,18 @@ bool rocke_dynamic_tensor_descriptor_offset(rocke_ir_builder_t* b,
         }
         valid = rocke_i_and(b, valid, cv->valid);
         stride_v = desc->dynamic_strides[i];
-        term = rocke_b_mul(b, cv->value, stride_v);
+        if(stride_v != NULL)
+        {
+            term = rocke_b_mul(b, cv->value, stride_v);
+        }
+        else if(base->base_strides[i] == 1)
+        {
+            term = cv->value;
+        }
+        else
+        {
+            term = rocke_b_mul(b, cv->value, rocke_b_const_i32(b, (int64_t)base->base_strides[i]));
+        }
         off = (off == NULL) ? term : rocke_b_add(b, off, term);
     }
     if(off == NULL)
