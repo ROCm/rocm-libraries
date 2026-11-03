@@ -830,8 +830,8 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
 - **Random GEMMs under CPU rocjitsu.** The Multi-Arch nightly sidecar checks 100
   fixed-seed GEMMs per emulated target, currently gfx950 only (including MXFP8 and
   MXFP4), using the nightly run's BLAS artifacts for numerics and races. It is
-  outside the Multi-Arch summary and gates nothing, though a failure marks that
-  nightly run as failed. It requires no GPU and retains every case's input and logs.
+  outside the Multi-Arch summary and advisory: a failure shows on the job, but the
+  nightly run still succeeds. It requires no GPU and retains every case's input and logs.
   The race detector sees only races within one workgroup: a register or LDS value
   read before the required `s_waitcnt` or `s_barrier`. It does not see races
   between workgroups through global memory, such as in stream-K fixups or split-K

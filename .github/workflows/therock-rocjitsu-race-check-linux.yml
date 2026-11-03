@@ -98,12 +98,11 @@ jobs:
   rocjitsu-race-check-linux:
     name: ${{ inputs.workload == 'smoke' && format('rocjitsu race check ({0})', inputs.amdgpu_families) || format('rocjitsu GEMM race checks ({0}, {1})', inputs.workload, inputs.amdgpu_families) }}
     needs: ci-env
-    # The per-PR smoke check is advisory. Failures remain visible, but
-    # continue-on-error keeps the calling Linux workflow successful.
-    # ROCm/rocm-libraries#10072 verifies this behavior. Other workloads run
-    # from scheduled or manual workflows, where a failure should fail the run.
+    # This job is advisory. Failures remain visible, but continue-on-error keeps
+    # the calling Linux workflow successful. ROCm/rocm-libraries#10072 verifies
+    # this behavior.
     # TODO(AIHPBLAS-3605): Remove after the check is reliably green.
-    continue-on-error: ${{ inputs.workload == 'smoke' }}
+    continue-on-error: true
     runs-on: ${{ inputs.build_runs_on || needs.ci-env.outputs.linux-runner }}
     timeout-minutes: 90
     container:

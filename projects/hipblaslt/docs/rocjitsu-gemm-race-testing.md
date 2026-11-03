@@ -75,8 +75,8 @@ runs this as its `random-gemms` workload. It uses the library and benchmark
 built by the same workflow, and
 [its driver](../../../.github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh)
 builds a fixed version of rocjitsu. It attempts every sample and uploads reports
-even after a failure. A failure marks that nightly run as failed, but the job is
-not part of the Multi-Arch summary, so it gates nothing.
+even after a failure. The job is advisory: a failure shows on the job, but the
+nightly run still succeeds, and the job is not part of the Multi-Arch summary.
 The job sends no notifications; its owner, James Newling (@newling), checks the
 nightly results.
 
