@@ -3,11 +3,13 @@
 """Unit tests for the lighter logic loading in TensileCreateLibrary: shared
 solution wrappers in matching tables, and the parse wrapper the loading
 workers run."""
+import pickle
+
 import pytest
 
 import tensilelite.TensileCreateLibrary.Run as Run
 from tensilelite import LibraryIO
-from tensilelite.SolutionLibrary import IndexSolutionLibrary, MatchingLibrary
+from tensilelite.SolutionLibrary import IndexSolutionLibrary, MasterSolutionLibrary, MatchingLibrary
 
 pytestmark = pytest.mark.unit
 
@@ -33,13 +35,19 @@ def test_rows_for_one_solution_share_its_wrapper():
     assert [w.state() for w in wrappers] == [0, 1, 0]
 
 
-def test_shared_wrapper_follows_solution_reindexing():
+def test_shared_wrapper_follows_solution_reindexing_after_pickle():
     sols = [_Sol(0)]
     lib = MatchingLibrary.FromOriginalState(
         _matching([[[1, 64], [0, 0.9]], [[1, 256], [0, 0.7]]]), sols
     )
-    sols[0].index = 5
-    assert [row["index"].state() for row in lib.table] == [5, 5]
+    master = MasterSolutionLibrary({0: sols[0]}, lib)
+    restored = pickle.loads(pickle.dumps(master))
+    restored.remapSolutionIndicesStartingFrom(5)
+
+    wrappers = [row["index"] for row in restored.library.table]
+    assert wrappers[0] is wrappers[1]
+    assert wrappers[0].solution is restored.solutions[5]
+    assert [wrapper.state() for wrapper in wrappers] == [5, 5]
 
 
 def test_rows_without_a_solution_are_still_skipped():
