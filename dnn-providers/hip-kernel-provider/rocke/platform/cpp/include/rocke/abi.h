@@ -136,8 +136,11 @@ extern "C" {
  * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
  *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
  *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
- *     returns long long (it returned int), which changes its signature. */
-#define ROCKE_ABI_VERSION 20
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_attention_tiled_2d_spec_t gained use_v_hbm_direct and
+ *     use_k_hbm_direct after use_q_direct_global, which moves every later
+ *     field. */
+#define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
