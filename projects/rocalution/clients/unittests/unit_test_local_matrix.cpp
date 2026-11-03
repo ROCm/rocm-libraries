@@ -2082,27 +2082,8 @@ TEST_P(local_matrix_formats, matrix_mult_takes_the_format_of_the_factors)
 
         // The second product goes into a matrix of the same size, which MatrixMult
         // clears first
-        auto multiply_twice = [&] {
-            auto C = empty<T>();
-            multiply_into(*C);
-            multiply_into(*C);
-        };
-
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(multiply_twice);
-            return;
-        }
-
         auto C = empty<T>();
         multiply_into(*C);
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(multiply_twice);
-            return;
-        }
         multiply_into(*C);
     });
 }
@@ -2533,45 +2514,23 @@ TEST_P(local_matrix_formats, writes_and_reads_matrix_market_and_csr_files)
 
         const Csr<T> ref = banded<T>();
 
-        auto read_mtx = [&] {
-            const std::string mtx = temp_file("mtx");
-            make(ref)->WriteFileMTX(mtx);
-            auto B = empty<T>();
-            B->ReadFileMTX(mtx);
-            expect_kept(*B, ref);
-            std::remove(mtx.c_str());
-        };
+        const std::string mtx = temp_file("mtx");
+        make(ref)->WriteFileMTX(mtx);
+        auto B = empty<T>();
+        B->ReadFileMTX(mtx);
+        expect_kept(*B, ref);
+        std::remove(mtx.c_str());
 
         // Deprecated, but still part of the interface. The read clears the matrix first.
-        auto read_csr = [&] {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-            const std::string csr = temp_file("csr");
-            make(ref)->WriteFileCSR(csr);
-            auto C = make(spd<T>(4));
-            C->ReadFileCSR(csr);
+        const std::string csr = temp_file("csr");
+        make(ref)->WriteFileCSR(csr);
+        auto C = make(spd<T>(4));
+        C->ReadFileCSR(csr);
 #pragma GCC diagnostic pop
-            expect_kept(*C, ref);
-            std::remove(csr.c_str());
-        };
-
-        // Both reads clear the matrix and then move it to the host, to read it there
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(read_mtx);
-            expect_in_child(read_csr);
-            return;
-        }
-
-        read_mtx();
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(read_csr);
-            return;
-        }
-        read_csr();
+        expect_kept(*C, ref);
+        std::remove(csr.c_str());
     });
 }
 

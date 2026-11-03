@@ -60,6 +60,9 @@ namespace rocalution
         this->mat_.row_offset = NULL;
         this->mat_.col        = NULL;
         this->mat_.val        = NULL;
+        this->mat_.nrowb      = 0;
+        this->mat_.ncolb      = 0;
+        this->mat_.nnzb       = 0;
         this->mat_.blockdim   = blockdim;
         this->set_backend(local_backend);
 
@@ -155,6 +158,10 @@ namespace rocalution
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
+
+        this->mat_.nrowb = 0;
+        this->mat_.ncolb = 0;
+        this->mat_.nnzb  = 0;
 
         this->LAnalyseClear();
         this->UAnalyseClear();

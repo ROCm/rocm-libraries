@@ -42,6 +42,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed copying an MCSR matrix that was never allocated to, from or on the accelerator ending the process with a HIP error. This also affected `MatrixMult()` into an MCSR matrix and reading a matrix file into an MCSR matrix on the accelerator.
+* Fixed copying a BCSR matrix that was never allocated or was cleared asserting or failing with a HIP out-of-memory error, because the block counts were left uninitialized or kept. This also affected `MatrixMult()` into a BCSR matrix and `ReadFileCSR()` into a BCSR matrix on the accelerator.
 
 ## (Unreleased) rocALUTION 4.1.1
 

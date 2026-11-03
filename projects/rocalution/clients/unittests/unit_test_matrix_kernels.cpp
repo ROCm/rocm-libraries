@@ -666,28 +666,10 @@ TEST_P(matrix_kernels_without_entries, copies_have_no_entries)
 
 TEST_P(matrix_kernels_without_entries, copies_of_a_never_allocated_matrix_are_empty)
 {
-    auto checks = [&] {
-        test_copies_without_entries<float>(
-            backend(), format(), empty_matrix<float>(backend(), format()).get());
-        test_copies_without_entries<double>(
-            backend(), format(), empty_matrix<double>(backend(), format()).get());
-    };
-
-    if(format().id == rocalution::BCSR)
-    {
-        KNOWN_BUG("the BCSR constructors leave the block counts uninitialised, so the copy "
-                  "asserts or exits with a HIP error");
-        expect_in_child(checks);
-        return;
-    }
-    if(format().id == rocalution::MCSR && backend() == Backend::Accelerator)
-    {
-        KNOWN_BUG("the HIP MCSR copies read the row offsets of an unallocated source and exit "
-                  "with a HIP error");
-        expect_in_child(checks);
-        return;
-    }
-    checks();
+    test_copies_without_entries<float>(
+        backend(), format(), empty_matrix<float>(backend(), format()).get());
+    test_copies_without_entries<double>(
+        backend(), format(), empty_matrix<double>(backend(), format()).get());
 }
 
 // HYB has no data pointer interface
