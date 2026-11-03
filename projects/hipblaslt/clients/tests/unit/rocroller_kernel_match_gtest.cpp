@@ -286,3 +286,28 @@ TEST(HostUnitRocRollerKernelMatch, smoke_FirstFillingKeepsTheHeadUnlessAnEarlyEn
     // A head that already fills stays.
     EXPECT_EQ(rocRollerFirstFilling({0.5, 1.0}, 5, rocRollerRankedMinFill), 0u);
 }
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPickTakesTheFirstFillingElseTheFullest)
+{
+    // The first candidate reaching the threshold wins, even over a fuller one.
+    EXPECT_EQ(rocRollerFallbackPick({0.25, 0.8, 1.0}, rocRollerFallbackMinFill), 1u);
+    EXPECT_EQ(rocRollerFallbackPick({0.75, 1.0}, rocRollerFallbackMinFill), 0u);
+    // None reaches it: the fullest wins, and a tie goes to the earlier candidate.
+    EXPECT_EQ(rocRollerFallbackPick({0.25, 0.5, 0.3, 0.5}, rocRollerFallbackMinFill), 1u);
+    EXPECT_EQ(rocRollerFallbackPick({0.6, 0.6}, rocRollerFallbackMinFill), 0u);
+    EXPECT_EQ(rocRollerFallbackPick({0.1}, rocRollerFallbackMinFill), 0u);
+    EXPECT_EQ(rocRollerFallbackPick({}, rocRollerFallbackMinFill), 0u);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPickPrefersMoreTilesOnATinyGrid)
+{
+    // 64 x 64 on 256 CUs: one 64x256 tile, or sixteen 16x16 tiles. Neither
+    // fills three quarters of the CUs, so the fuller grid goes first.
+    const std::vector<double> fills
+        = {rocRollerLastWaveFill(kernel(64, 256, 128, false, true), 64, 64, 1, 256),
+           rocRollerLastWaveFill(kernel(32, 32, 128, false, false), 64, 64, 1, 256),
+           rocRollerLastWaveFill(kernel(16, 16, 128, false, false), 64, 64, 1, 256)};
+    EXPECT_DOUBLE_EQ(fills[0], 1.0 / 256);
+    EXPECT_DOUBLE_EQ(fills[2], 16.0 / 256);
+    EXPECT_EQ(rocRollerFallbackPick(fills, rocRollerFallbackMinFill), 2u);
+}

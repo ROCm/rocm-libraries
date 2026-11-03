@@ -115,6 +115,23 @@ inline size_t rocRollerFirstFilling(const std::vector<double>& fills, size_t win
     return 0;
 }
 
+// Position of the fallback candidate to put first: the first whose fill reaches
+// `minFill`, else the fullest last wave, the earlier position winning a tie.
+// Without a ranked order to keep, a candidate that leaves most CUs idle should
+// not stay first because of its tile alone.
+inline size_t rocRollerFallbackPick(const std::vector<double>& fills, double minFill)
+{
+    size_t fullest = 0;
+    for(size_t i = 0; i < fills.size(); ++i)
+    {
+        if(fills[i] >= minFill)
+            return i;
+        if(fills[i] > fills[fullest])
+            fullest = i;
+    }
+    return fullest;
+}
+
 // Where an accepting checked-in kernel stands when no ranked tile has one.
 // Compared in this order, the first difference deciding:
 //   1. the earliest position of the kernel's macro tile in the ranked list,
