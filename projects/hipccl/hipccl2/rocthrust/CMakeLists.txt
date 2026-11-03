@@ -321,6 +321,9 @@ if(BUILD_CODE_COVERAGE)
     $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
     $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
   )
+  add_link_options(
+    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
+  )
 endif()
 
 # Tests
