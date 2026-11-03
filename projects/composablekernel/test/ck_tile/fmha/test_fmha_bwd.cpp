@@ -1492,43 +1492,38 @@ TEST_P(DeterministicChunking, DataTypeConfig)
     const int hdim = std::get<0>(hdims);
 
     fmha_bwd_capture whole, split;
-    whole.runs = 2;
-    split.runs = 2;
-    bwd_result result;
-    {
-        ScopedEnv no_split("CK_DET_HEAD_CHUNK", std::string("0"));
-        result = fmha_bwd_det_run(mode_enum::batch,
-                                  hdim,
-                                  perm,
-                                  batch,
-                                  nhead,
-                                  nhead_k,
-                                  {seqlen_q},
-                                  {seqlen_k},
-                                  mask_str,
-                                  sink_grad,
-                                  whole);
-    }
+    whole.runs              = 2;
+    whole.force_head_chunk  = 0;
+    whole.force_batch_chunk = 0;
+    split.runs              = 2;
+    split.force_head_chunk  = heads;
+    split.force_batch_chunk = batches;
+
+    bwd_result result = fmha_bwd_det_run(mode_enum::batch,
+                                         hdim,
+                                         perm,
+                                         batch,
+                                         nhead,
+                                         nhead_k,
+                                         {seqlen_q},
+                                         {seqlen_k},
+                                         mask_str,
+                                         sink_grad,
+                                         whole);
     if(result == bwd_result::no_instance)
         GTEST_SKIP() << "No deterministic instance";
     ASSERT_EQ(result, bwd_result::success);
-    {
-        ScopedEnv h("CK_DET_HEAD_CHUNK",
-                    heads > 0 ? std::optional{std::to_string(heads)} : std::nullopt);
-        ScopedEnv b("CK_DET_BATCH_CHUNK",
-                    batches > 0 ? std::optional{std::to_string(batches)} : std::nullopt);
-        result = fmha_bwd_det_run(mode_enum::batch,
-                                  hdim,
-                                  perm,
-                                  batch,
-                                  nhead,
-                                  nhead_k,
-                                  {seqlen_q},
-                                  {seqlen_k},
-                                  mask_str,
-                                  sink_grad,
-                                  split);
-    }
+    result = fmha_bwd_det_run(mode_enum::batch,
+                              hdim,
+                              perm,
+                              batch,
+                              nhead,
+                              nhead_k,
+                              {seqlen_q},
+                              {seqlen_k},
+                              mask_str,
+                              sink_grad,
+                              split);
     ASSERT_EQ(result, bwd_result::success);
 
     EXPECT_EQ(whole.head_chunk, 0);

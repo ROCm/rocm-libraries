@@ -115,7 +115,6 @@ struct BlockFmhaBwdOGradDotO
         const bool sink_on = (atomic_sink_grad_ptr != nullptr || sink_partial_slot != nullptr) &&
                              sink_value != -numeric<LSEDataType>::infinity();
 
-        // This thread's share of d_sink, then the warp's in lane 0; 0 if the sink path is skipped.
         float thread_sum = 0.f;
 
         if(sink_on)

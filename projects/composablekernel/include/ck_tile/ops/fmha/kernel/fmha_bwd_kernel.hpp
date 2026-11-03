@@ -1720,8 +1720,6 @@ struct FmhaBwdDQDKDVKernel
                                           ibatch),
                                      isplit,
                                      amd_wave_read_first_lane(bs->nsplits));
-                                // Same as the batch loop: let this job's LDS reads and TDM
-                                // stores retire before the next job loads into the same LDS.
                                 ck_tile::s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
                                 w_chunk += amd_wave_read_first_lane(bs->sq);
                                 ++c_start_0;

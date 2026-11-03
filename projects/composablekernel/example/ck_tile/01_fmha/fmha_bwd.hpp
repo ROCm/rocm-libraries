@@ -623,41 +623,30 @@ struct fmha_bwd_traits
     bool has_dropout;
     bool is_store_randval;
     bool is_deterministic;
-    // Set when the runs will pass d_sink_ptr: the launcher then reserves workspace to reduce
-    // d_sink in two stages instead of with atomics, which is faster. Optional, d_sink is
-    // correct either way; deterministic runs always use the two-stage reduction.
-    bool has_sink_grad = false;
+    bool has_sink_grad  = false;
+    int det_head_chunk  = -1;
+    int det_batch_chunk = -1;
     // TODO: padding check is inside this api
 };
 
-// Workspace limits of tile-split determinism, in bytes. The launcher aims for the budget when
-// it splits a run into batch/head chunks, and goes over it only as far as needed to keep the
-// GPU busy. The cap is never exceeded: when even one batch and one head would need more, the
-// dispatch picks the persistent instance instead. Both scale with hdim like a dq_acc slot does.
-// CK_DET_WS_BUDGET_MB and CK_DET_WS_CAP_MB override them (MiB; ignored unless positive).
-inline size_t fmha_bwd_det_ws_limit_(const char* env, size_t mib_per_128, int hdim_q)
+inline size_t fmha_bwd_det_ws_per_hdim_(size_t mib_per_128, int hdim_q)
 {
-    if(const char* e = std::getenv(env))
+    const size_t hdim_mult = hdim_q > 128 ? static_cast<size_t>(hdim_q / 128) : 1;
+    return (mib_per_128 * hdim_mult) << 20;
+}
+inline size_t fmha_bwd_det_ws_budget(int hdim_q) { return fmha_bwd_det_ws_per_hdim_(4096, hdim_q); }
+// CK_DET_WS_CAP_MB overrides the cap (MiB; ignored unless positive).
+inline size_t fmha_bwd_det_ws_cap(int hdim_q)
+{
+    if(const char* e = std::getenv("CK_DET_WS_CAP_MB"))
     {
         const long long mib = std::atoll(e);
         if(mib > 0)
             return static_cast<size_t>(mib) << 20;
     }
-    const size_t hdim_mult = hdim_q > 128 ? static_cast<size_t>(hdim_q / 128) : 1;
-    return (mib_per_128 * hdim_mult) << 20;
-}
-inline size_t fmha_bwd_det_ws_budget(int hdim_q)
-{
-    return fmha_bwd_det_ws_limit_("CK_DET_WS_BUDGET_MB", 4096, hdim_q);
-}
-inline size_t fmha_bwd_det_ws_cap(int hdim_q)
-{
-    return fmha_bwd_det_ws_limit_("CK_DET_WS_CAP_MB", 16384, hdim_q);
+    return fmha_bwd_det_ws_per_hdim_(16384, hdim_q);
 }
 
-// Whether a tile-split instance with kv tile size kN0 fits the cap. Its smallest chunk, one
-// batch and one head, still holds one fp32 dq_acc slot per kv tile, so it grows with
-// seqlen_q * seqlen_k; the persistent kernel's workspace grows with seqlen_q only.
 inline bool fmha_bwd_tile_split_fits(const fmha_bwd_traits& t, int kN0)
 {
     const size_t slots = ck_tile::integer_divide_ceil(t.seqlen_k, kN0);
@@ -703,8 +692,6 @@ float fmha_bwd(const fmha_bwd_traits&, fmha_bwd_args, const ck_tile::stream_conf
 struct fmha_bwd_launcher
 {
     // Layout: [host_ws_size_ bytes (host-prepared metadata)][dq_acc region]
-    //         [d_sink partials, with has_sink_grad on a ConvertQGrad kernel set, or deterministic]
-    //         [d_sink arrival counters, deterministic kernel sets without ConvertQGrad only]
     size_t workspace_size = 0;
 
     fmha_bwd_launcher(const fmha_bwd_traits&);
@@ -714,13 +701,8 @@ struct fmha_bwd_launcher
     ~fmha_bwd_launcher() = default;
 
     ck_tile::index_t selected_max_seqlen_q() const { return selected_max_seqlen_q_; }
-    // Whether the workspace must be prepared again before every run because the kernels
-    // accumulate into dq_acc. Otherwise one prepare_workspace_async serves any number of runs
-    // of the same problem.
     bool needs_prepare_per_run() const { return needs_zero_dq_acc_; }
-    // Deterministic dq reduction of the selected instance: tile split or persistent.
     bool uses_tile_split() const { return det_tile_split_; }
-    // Heads and batches per launch when a tile-split run is split into chunks; 0 = all.
     int head_chunk() const { return head_chunk_; }
     int batch_chunk() const { return batch_chunk_; }
 
@@ -738,8 +720,6 @@ struct fmha_bwd_launcher
     {
         hipStream_t stream = s.stream_id_;
 
-        // d_sink arrival counters start at zero and every run leaves them so. The d_sink
-        // partials are fully rewritten by every run and are not zeroed.
         if(sink_counter_bytes_ > 0)
             HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + sink_counter_offset_,
                                            0,
@@ -936,15 +916,8 @@ struct fmha_bwd_launcher
         };
     }
 
-    // Splits a tile-split run into batch/head chunks that take turns on one workspace. Returns
-    // the heads per chunk and sets batch_chunk, 0 meaning all. CK_DET_HEAD_CHUNK and
-    // CK_DET_BATCH_CHUNK force a split (a divisor of nhead_q / batch); CK_DET_HEAD_CHUNK=0
-    // turns chunking off.
     int pick_chunks_(const fmha_bwd_traits& t, size_t device_ws_size, int& batch_chunk)
     {
-        // Measured on gfx1250: a chunk that gives each CU a single workgroup runs up to 1.7x
-        // slower under a causal mask, as the uneven kv tiles have nothing to overlap with; two
-        // per CU recover it. Each extra chunk also costs about kChunkTail of a wave.
         constexpr long long kMinWorkgroupsPerCu = 2;
         constexpr double kChunkTail             = 0.3;
         batch_chunk                             = 0;
@@ -957,21 +930,11 @@ struct fmha_bwd_launcher
         if(t.nhead_q <= 0 || t.nhead_k <= 0 || t.nhead_q % t.nhead_k != 0 || t.batch <= 0)
             return 0;
 
-        auto forced = [](const char* name, int n) {
-            const char* e = std::getenv(name);
-            if(e == nullptr || std::string(e) == "auto")
-                return -1;
-            const int k = std::atoi(e);
-            return (k > 0 && k < n && n % k == 0) ? k : 0;
-        };
-        const int forced_h = forced("CK_DET_HEAD_CHUNK", t.nhead_q);
-        const int forced_b = forced("CK_DET_BATCH_CHUNK", t.batch);
-        if(std::getenv("CK_DET_HEAD_CHUNK") && forced_h == 0)
-            return 0;
-        if(forced_h > 0 || forced_b > 0)
+        if(t.det_head_chunk >= 0 || t.det_batch_chunk >= 0)
         {
-            batch_chunk = forced_b > 0 ? forced_b : 0;
-            return forced_h > 0 ? forced_h : 0;
+            auto divisor = [](int k, int n) { return (k > 0 && k < n && n % k == 0) ? k : 0; };
+            batch_chunk  = divisor(t.det_batch_chunk, t.batch);
+            return divisor(t.det_head_chunk, t.nhead_q);
         }
 
         const long long denom = 4LL * t.batch * t.nhead_q * t.seqlen_q * t.hdim_q;
@@ -982,9 +945,6 @@ struct fmha_bwd_launcher
         if(jph <= 0)
             return 0;
 
-        // Workgroups of a chunk of `units` batch-heads, as FmhaBwdDQDKDVKernel::GridSize lays
-        // them out: mask tile pairing halves the kv tiles while the paired grid still covers
-        // enough CUs.
         const bool can_pair = CK_TILE_FMHA_BWD_MASK_TILE_PAIRING &&
                               t.mask_type != mask_enum::no_mask &&
                               jph <= CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD;
@@ -999,9 +959,6 @@ struct fmha_bwd_launcher
         const size_t budget = fmha_bwd_det_ws_budget(t.hdim_q);
         const size_t cap    = fmha_bwd_det_ws_cap(t.hdim_q);
 
-        // In order of preference: the cheapest split within the budget that keeps every CU
-        // busy; the smallest within the cap that does; the cheapest within the cap; the
-        // smallest overall (only when the cap was overridden below what dispatch assumed).
         struct split
         {
             int b       = 0;
@@ -1086,9 +1043,8 @@ struct fmha_bwd_launcher
                 c.dq_ptr            = advw(a.dq_ptr, h0, a.nhead_stride_dq, eb);
                 c.dk_ptr            = advw(a.dk_ptr, h0, a.nhead_stride_dk, eb);
                 c.dv_ptr            = advw(a.dv_ptr, h0, a.nhead_stride_dv, eb);
-                // sink is [nhead] and indexed by the chunk-local head, so it follows h0
-                c.sink_ptr   = a.sink_ptr ? adv(a.sink_ptr, h0, 1, 4) : nullptr;
-                c.d_sink_ptr = a.d_sink_ptr ? advw(a.d_sink_ptr, h0, 1, 4) : nullptr;
+                c.sink_ptr          = a.sink_ptr ? adv(a.sink_ptr, h0, 1, 4) : nullptr;
+                c.d_sink_ptr        = a.d_sink_ptr ? advw(a.d_sink_ptr, h0, 1, 4) : nullptr;
 
                 if(b0 != 0)
                 {

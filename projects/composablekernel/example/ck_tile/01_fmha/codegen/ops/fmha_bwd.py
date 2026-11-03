@@ -24,14 +24,6 @@ from codegen.cpp_symbol_map import (
 )
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
 
-
-# Which archs get tile split for a deterministic request; every other arch gets persistent.
-# Decided here, per arch, rather than by a build option, so a fat build gets the right
-# algorithm for each of its targets. Measured: gfx1250 is ~28% faster with tile split over
-# 20 shapes; gfx950 is 1.1-2.5x slower and uses 2-5x the workspace even when not chunked, and
-# gfx942 has not been measured. Tile split is chosen only where that was shown to pay.
-# Names are codegen's arch families (ArchTrait.name): "gfx125" is the gfx1250 family and
-# "gfx9" covers gfx942 and gfx90a, so neither is listed here by chip name.
 DET_TILE_SPLIT_ARCHS = ("gfx125",)
 
 
@@ -946,7 +938,6 @@ class FmhaBwdApiTrait:
     mask_impl: str
     tr_load: str
     tile_split: bool = False  # deterministic only: one dq_acc slot per kv tile
-    # persistent instance standing in for a tile-split one whose workspace does not fit
     tile_split_twin: bool = False
 
     @property

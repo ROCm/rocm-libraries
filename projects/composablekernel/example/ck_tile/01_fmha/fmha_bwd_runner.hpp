@@ -75,17 +75,14 @@ enum class sink_regime
     saturated,
 };
 
-// Lets a caller check more than "valid:y". The validation pass is launched `runs` times on the
-// same workspace, each run is compared bit for bit with the first, and the first run's
-// gradients are kept so that two configurations of the same problem can be compared.
 struct fmha_bwd_capture
 {
-    int runs = 1;
-    // Prepare the workspace before every run. When false, later runs skip it wherever the
-    // launcher allows, which is what exercises the d_sink arrival counters re-arming.
+    int runs       = 1;
     bool reprepare = true;
+    // Passed on as fmha_bwd_traits::det_head_chunk / det_batch_chunk.
+    int force_head_chunk  = -1;
+    int force_batch_chunk = -1;
 
-    // Filled in by fmha_bwd_run.
     size_t workspace_size           = 0;
     ck_tile::index_t decode_max_seq = 0; // > 0: a decode (QrQtrDor) kernel set was selected
     bool tile_split                 = false;
@@ -440,6 +437,8 @@ bwd_result fmha_bwd_run(mode_enum mode,
         s_randval,
         deterministic,
         sink_grad,
+        capture ? capture->force_head_chunk : -1,
+        capture ? capture->force_batch_chunk : -1,
     });
     const auto t1_launcher = std::chrono::high_resolution_clock::now();
     const double launcher_ctor_ms =
@@ -506,7 +505,6 @@ bwd_result fmha_bwd_run(mode_enum mode,
     const std::size_t workspace_size_in_megabytes =
         ck_tile::integer_divide_ceil(ws_size, 1024 * 1024);
 
-    // Which reduction the deterministic run got, and the batches/heads per launch if split.
     const std::string det_desc = [&]() -> std::string {
         if(!deterministic)
             return "";

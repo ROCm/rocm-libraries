@@ -179,7 +179,7 @@ args:
                 'b:l,r', bottom-r sliding window attn(swa) with FA style left right size
                 'xt:window_size', xformer style masking from top-left, window_size negative is causal, positive is swa
                 'xb:window_size', xformer style masking from bottom-r, window_size negative is causal, positive is swa
-                'g:l,r', generic window with FA style left right size, bottom-r aligned like 'b:l,r' (only debug purpose for now)
+                'g:y,x', generic attention mask coordinate with y/x size (only debug purpose for now)
     -vlayout    r for row-major(seqlen*hdim), c for col-major(hdim*seqlen) (default:r)
         -lse    0 not store lse, 1 store lse (default:0)
       -kname    if set to 1 will print kernel name (default:0)
@@ -354,14 +354,8 @@ turns on one workspace (bit-identical to the unsplit run). It aims for a budget 
 hdim, and goes over it only as far as needed to give every CU two workgroups per launch: with one,
 a causal mask leaves CUs idle and the run is up to 1.7x slower. It never exceeds the cap of 16 GiB
 per 128 of hdim; when a single batch and head alone would, which is around 64K tokens at hdim 128,
-the dispatch picks the persistent kernel instead.
-
-| environment variable | effect |
-|---|---|
-| `CK_DET_WS_BUDGET_MB` | the budget, in MiB |
-| `CK_DET_WS_CAP_MB` | the cap, in MiB |
-| `CK_DET_HEAD_CHUNK` | heads per launch, a divisor of `nhead`; `0` turns splitting off |
-| `CK_DET_BATCH_CHUNK` | batches per launch, a divisor of `batch` |
+the dispatch picks the persistent kernel instead. The environment variable `CK_DET_WS_CAP_MB`
+sets the cap in MiB, for instance to leave more memory to the rest of the application.
 
 The example prints the choice after `deterministic:`, for instance `1(tile_split,chunk:b1h2)`.
 
