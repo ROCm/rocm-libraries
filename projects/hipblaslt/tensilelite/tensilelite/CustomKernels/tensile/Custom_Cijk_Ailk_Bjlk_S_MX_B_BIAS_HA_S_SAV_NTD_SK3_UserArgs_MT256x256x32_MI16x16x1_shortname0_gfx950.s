@@ -88,7 +88,6 @@ custom.config:
   GlobalSplitUWorkGroupMappingRoundRobin: false
   PrefetchGlobalRead: 2
   PrefetchLocalRead: 1
-  SourceSwap: True
   StreamK: 3
   StreamKAtomic: 0
   StreamKXCCMapping: 0

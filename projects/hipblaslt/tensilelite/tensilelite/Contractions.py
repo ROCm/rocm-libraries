@@ -779,7 +779,6 @@ class CustomKernel:
 
 class SizeMapping:
     StateKeys = ['waveNum',
-                 'WavefrontSize',
                  'workGroup',
                  'macroTile',
                  'threadTile',
@@ -837,12 +836,6 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
-                 'OneLDSBuffer',
-                 'SourceSwap',
-                 'UnrollMajorLDSA',
-                 'UnrollMajorLDSB',
-                 'enableLDSTrA',
-                 'enableLDSTrB',
                  'ExpertSchedulingMode',
                  'clusterDim',
                  'BufferLoad',
@@ -888,7 +881,6 @@ class SizeMapping:
         dtlB = bool(d['DirectToLdsB'])
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
-                   WavefrontSize            = d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
                    macroTile                = cls.ReadOriginalMacroTile(d),
                    threadTile               = d['ThreadTile'],
@@ -946,12 +938,6 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
-                   OneLDSBuffer             = d.get('1LDSBuffer', 0) == 1,
-                   SourceSwap               = bool(d.get('SourceSwap', False)),
-                   UnrollMajorLDSA          = int(bool(d['UnrollMajorLDSA'])) if 'UnrollMajorLDSA' in d else -1,
-                   UnrollMajorLDSB          = int(bool(d['UnrollMajorLDSB'])) if 'UnrollMajorLDSB' in d else -1,
-                   enableLDSTrA             = bool(d.get('enableLDSTrA', False)),
-                   enableLDSTrB             = bool(d.get('enableLDSTrB', False)),
                    ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
                    clusterDim               = d['ClusterDim'],
                    # BufferLoad/BufferStore were only added to SizeMapping's
