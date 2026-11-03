@@ -11,8 +11,9 @@ module defined that name twice.
 
 Because builder names always end in ``_`` and digits, a name the author picks
 (a kernel parameter, a loop induction variable, a loop-carried value) is
-refused when it ends that way, or when it is not an identifier. A hint that is
-empty or starts with a digit is refused too.
+refused when it ends that way. It is also refused when it is not an identifier
+or is a C++ keyword, since the HIP lowering prints it unchanged as a C++
+identifier. A hint that is empty or starts with a digit is refused too.
 
 These tests cover the Python builder and check that both engines lower the
 kernel to the same LLVM IR. tests/core/test_value_names.cpp checks the C++
@@ -23,9 +24,10 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 
 import pytest
-from rocke.core.ir import F32, I32, IRBuilder, PtrType
+from rocke.core.ir import _CXX_KEYWORDS, F32, I32, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -55,6 +57,18 @@ def _reserved(what: str, name: str) -> str:
         f"{what} name '{name}' ends in '_' and digits, the form the builder gives "
         "the values it names; choose a name that does not end in '_<digits>'"
     )
+
+
+def _keyword(what: str, name: str) -> str:
+    return (
+        f"{what} name '{name}' is a C++ keyword, and the HIP lowering prints value "
+        "names as C++ identifiers; choose another name"
+    )
+
+
+# One keyword of each kind: a statement, a type, an alternative operator token,
+# and the C++11 and C++20 additions.
+_SAMPLE_KEYWORDS = ["for", "int", "and", "nullptr", "co_await", "char8_t"]
 
 
 def _hint(hint: str) -> str:
@@ -116,7 +130,39 @@ def test_a_parameter_name_that_is_not_an_identifier_is_refused(name):
         b.param(name, I32)
 
 
-@pytest.mark.parametrize("name", ["stride0", "x_y", "_", "acc_m0_n1"])
+@pytest.mark.parametrize("name", _SAMPLE_KEYWORDS)
+def test_a_parameter_name_that_is_a_cxx_keyword_is_refused(name):
+    b = IRBuilder("param_name")
+    with pytest.raises(ValueError, match=re.escape(_keyword("kernel parameter", name))):
+        b.param(name, I32)
+
+
+def test_a_loop_name_that_is_a_cxx_keyword_is_refused():
+    b = IRBuilder("loop_name")
+    zero = b.const_i32(0)
+    iv = "loop induction variable"
+    with pytest.raises(ValueError, match=re.escape(_keyword(iv, "for"))):
+        b.scf_for(*_bounds(b), iv_name="for")
+    with pytest.raises(ValueError, match=re.escape(_keyword(iv, "do"))):
+        b.scf_for_iter(*_bounds(b), [("acc", zero)], iv_name="do")
+    carried = "loop-carried value"
+    with pytest.raises(ValueError, match=re.escape(_keyword(carried, "float"))):
+        b.scf_for_iter(*_bounds(b), [("acc", zero), ("float", zero)])
+
+
+def test_both_engines_refuse_the_same_keywords():
+    """The C++ builder's kCxxKeywords table holds the same words as this one."""
+    source = Path(__file__).resolve().parents[2] / "cpp/core/ir/core_builder.cpp"
+    if not source.is_file():
+        pytest.skip(f"the C++ engine source is not in this tree: {source}")
+    table = re.search(
+        r"kCxxKeywords\[\]\s*=\s*\{(.*?)\};", source.read_text(), flags=re.DOTALL
+    )
+    assert table, f"no kCxxKeywords table in {source}"
+    assert set(re.findall(r'"([^"]+)"', table.group(1))) == _CXX_KEYWORDS
+
+
+@pytest.mark.parametrize("name", ["stride0", "x_y", "_", "acc_m0_n1", "for_each"])
 def test_other_parameter_names_are_accepted(name):
     b = IRBuilder("param_name")
     assert b.param(name, I32).name == f"%{name}"

@@ -52,9 +52,9 @@ bool rocke_i_live(const rocke_ir_builder_t* b);
 
 /* ------------------------------------------------------ value / op plumbing */
 
-/* Throw ckc::ValueError when an author-chosen value name is not an identifier
- * or ends in '_' and digits (the form builder-made names take). `what` names
- * the kind of name ("kernel parameter", ...). The twin of
+/* Throw ckc::ValueError when an author-chosen value name is not an identifier,
+ * is a C++ keyword, or ends in '_' and digits (the form builder-made names
+ * take). `what` names the kind of name ("kernel parameter", ...). The twin of
  * core/ir.py::_refuse_declared_name, with the same messages. */
 void rocke_i_refuse_declared_name(rocke_ir_builder_t* b, const char* what, const char* name);
 
