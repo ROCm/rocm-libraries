@@ -354,7 +354,9 @@ Before allocating, every `hipblaslt-test` matmul case estimates the device and h
 needs, including the CPU reference's float or double copies of A and B, and skips with both amounts
 when either does not fit. A case that runs out anyway, at a pinned host allocation or a device
 allocation, also skips. Every such skip begins "Not enough memory:", and the end of the run lists
-them under `[ MEMORY   ]`. Two environment variables help a large-memory lane:
+them under `[ MEMORY   ]`. On Linux the run's last lines also give the process's peak resident
+memory, pinned host buffers included, under `[ PEAK RSS ]`. Two environment variables help a
+large-memory lane:
 
 - `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1` turns those skips into failures, so a run can require
   that every case ran.

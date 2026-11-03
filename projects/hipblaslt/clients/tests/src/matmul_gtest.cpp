@@ -606,6 +606,33 @@ namespace
         }
     }
 
+    TEST(MatmulMemory_pre_checkin, peak_resident_memory_survives_the_estimate_check)
+    {
+#ifndef __linux__
+        GTEST_SKIP() << "the peak resident memory is read from /proc";
+#endif
+        // The check resets the kernel's peak, which GNU time and getrusage report too. The peak
+        // printed at the end of the run still includes memory touched before the reset.
+        const size_t   pinned = size_t(1) << 30;
+        ScopedVariable no_limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", nullptr);
+        {
+            HipHostBuffer touched(HIP_R_8I, pinned);
+            ASSERT_EQ(touched.memcheck(), hipSuccess);
+        }
+        auto before = peak_resident_bytes();
+        ASSERT_GE(before.value_or(0), pinned);
+        ScopedVariable check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
+        for(int i = 0; i < 2; i++) // the first check in a process measures nothing
+            MemoryEstimateCheck{MemoryEstimateCheck::kMinBytes};
+        ASSERT_TRUE(last_memory_estimate_measurement().measured)
+            << "the peak resident memory could not be reset";
+        // The kernel's resident counts drift by a few MiB, so compare with half the pinned size.
+        size_t hwm = 0;
+        ASSERT_TRUE(read_self_status("VmHWM:", hwm));
+        EXPECT_LT(hwm, *before - pinned / 2);
+        EXPECT_GE(peak_resident_bytes().value_or(0), *before - pinned / 2);
+    }
+
     // ----------------------------------------------------------------------------
     // matmul
     // ----------------------------------------------------------------------------

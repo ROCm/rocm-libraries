@@ -29,6 +29,7 @@
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_parse_data.hpp"
 #include "hipblaslt_test.hpp"
+#include "memory_estimate_check.hpp"
 #include "test_cleanup.hpp"
 #include "utility.hpp"
 
@@ -153,6 +154,12 @@ public:
         if(skipped_tests)
             hipblaslt_cout << "[ SKIPPED  ] " << skipped_tests << " tests." << std::endl;
         hipblaslt_cout << memory_shortages.summary() << std::flush;
+        if(auto peak = peak_resident_bytes())
+        {
+            char gib[32];
+            snprintf(gib, sizeof(gib), "%.2f", double(*peak) / double(size_t(1) << 30));
+            hipblaslt_cout << "[ PEAK RSS ] " << gib << " GiB of host memory" << std::endl;
+        }
         eventListener->OnTestProgramEnd(unit_test);
     }
 };

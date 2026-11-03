@@ -215,10 +215,10 @@ jobs:
           # The image's Python 3.12, not actions/setup-python: setup-python's interpreter
           # lives in the runner's tool cache, which persists across jobs, and its exported
           # LD_LIBRARY_PATH and Python_ROOT_DIR steer CMake away from this venv.
-          # python3-dev provides the headers hipBLASLt's Development.Module needs; time reports
-          # each test process's peak memory; the rest is for the hipBLASLt build.
+          # python3-dev provides the headers hipBLASLt's Development.Module needs; the rest is
+          # for the hipBLASLt build.
           apt-get update -qq || echo "::warning::apt-get update failed; installing from the image's package lists"
-          apt-get install -y -qq python3-venv python3-dev time \
+          apt-get install -y -qq python3-venv python3-dev \
             ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev
           # --clear: a venv left by an earlier job (e.g. one killed before the final
           # chown, so the runner couldn't empty RUNNER_TEMP) is emptied, not reused.
@@ -413,13 +413,9 @@ jobs:
           # Each log is scrubbed as it runs (hardware info and timing), so no unscrubbed
           # output reaches disk. The subshell makes wait return the test's status
           # (pipefail), not awk's.
-          # /usr/bin/time records each process's peak resident memory, pinned host
-          # buffers included, in $log.time.
           run_tests() {  # log name, then hipblaslt-test arguments
             local log="$1"; shift
-            local -a timer=()
-            [ -x /usr/bin/time ] && timer=(/usr/bin/time -v -o "$OUT/$log.time")
-            ( "${timer[@]}" "$BIN" "$@" 2>&1 | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
+            ( "$BIN" "$@" 2>&1 | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
                 | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/$log" )
           }
           OUT="$GITHUB_WORKSPACE/test_results"
@@ -474,16 +470,17 @@ jobs:
           done
           grep -hE '^\[(==========|  PASSED  |  SKIPPED |  FAILED  )\] [0-9]+ test' "$OUT"/hipblaslt_test_shard*.log || true
           grep -hE '^\[  FAILED  \] [^0-9]' "$OUT"/hipblaslt_test_shard*.log | sed -E 's/, where GetParam.*//' | sort -u || true
-          # Peak memory per process, and every test that stopped for lack of memory.
+          # Peak memory per process, as hipblaslt-test reports it at the end (empty for a
+          # process that did not finish), and every test that stopped for lack of memory.
           {
             echo "### hipBLASLt test processes"
             echo "| Process | Peak resident memory (GiB) | Tests stopped for memory |"
             echo "| --- | --- | --- |"
             for f in "$OUT"/hipblaslt_test_shard*.log; do
-              kib="$(awk -F': ' '/Maximum resident set size/ {print $2}' "$f.time" 2>/dev/null)"
+              peak="$(awk '/^\[ PEAK RSS \] / {print $5}' "$f")"
               # The summary's first line is a count; the rest name one test each.
               short="$(grep -c '^\[ MEMORY   \] [^0-9]' "$f" || true)"
-              echo "| $(basename "$f" .log) | ${kib:+$(awk -v k="$kib" 'BEGIN {printf "%.1f", k / 1048576}')} | ${short:-0} |"
+              echo "| $(basename "$f" .log) | $peak | ${short:-0} |"
             done
             if grep -qh '^\[ MEMORY   \] [^0-9]' "$OUT"/hipblaslt_test_shard*.log; then
               echo
