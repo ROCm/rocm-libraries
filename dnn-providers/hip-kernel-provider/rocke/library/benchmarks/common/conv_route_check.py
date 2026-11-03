@@ -88,6 +88,16 @@ def main(argv=None) -> int:
     ap.add_argument("--iters", type=int, default=20)
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--parts", action="store_true", help="also time each step of the route alone")
+    ap.add_argument("--ref-routes", default=None, metavar="ROUTE_TABLE[#MODE]",
+                    help="also time this table's route of every case on the same buffers, interleaved with the "
+                         "routed call (same-session A/B; e.g. a table of direct pins)")
+    ap.add_argument("--ref-dropin", action="store_true",
+                    help="winograd routes: also run kernels.common.conv_winograd3d_dropin.Winograd3dDropin on the "
+                         "same plan and buffers -- its output must equal the route's bitwise -- and time it "
+                         "interleaved (ms_dropin)")
+    ap.add_argument("--ref-torchws", action="store_true",
+                    help="also bind the route with its workspaces from torch's allocator (timed interleaved, "
+                         "ms_torchws): isolates the workspace placement")
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--against", default=None, help="results jsonl of another run: compare output sha256")
     ap.add_argument("--results", default=None)
@@ -113,6 +123,10 @@ def main(argv=None) -> int:
         pf, _, pm = a.pins.partition("#")
         pins = load_conv_pins(pf, pm or None)
     by_case = routes.by_case()
+    ref_routes = None
+    if a.ref_routes:
+        rf, _, rm = a.ref_routes.partition("#")
+        ref_routes = load_conv_routes(rf, rm or None)
     names = a.cases.split(",") if a.cases else sorted(by_case)
     if a.route:
         keep = set(a.route.split(","))
@@ -182,22 +196,63 @@ def main(argv=None) -> int:
                 if not row["against_identical"]:
                     rc = 1
             del first
+        rbr = None
+        if ref_routes is not None and ref_routes.lookup(req) is not None:
+            rplan = dispatch_conv_route(req, ref_routes, pins)
+            rbr = RouteBinding(rplan, cache, rt, a.arch, ptrs=rb.ptrs, sizes=rb.sizes, stage2_kernels=stage2, B=B)
+            row["ref_route"], row["ref_kernel"] = rplan.route, rplan.kernel_label
+        drop = None
+        if a.ref_dropin and plan.route == "winograd":
+            from types import SimpleNamespace
+
+            from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+
+            dobj = Winograd3dDropin(p, plan.direction, plan.winograd, arch=a.arch)
+            Dd = D.view(dobj.out)
+            drop = SimpleNamespace(run=lambda dobj=dobj, A=A, Bt=Bt, Dd=Dd: dobj(A, Bt, Dd), obj=dobj)
+            if "sha256" in row:
+                D.view(torch.int16).fill_(-1)
+                drop.run()
+                torch.cuda.synchronize()
+                row["dropin_sha256"] = hashlib.sha256(D.view(torch.int16).cpu().numpy().tobytes()).hexdigest()[:16]
+                row["dropin_identical"] = row["dropin_sha256"] == row["sha256"]
+                if not row["dropin_identical"]:
+                    rc = 1
+        rtw = None
+        if a.ref_torchws and plan.workspaces:
+            def _talloc(n):
+                t = torch.empty(n, device="cuda", dtype=torch.uint8)
+                return t.data_ptr(), t
+
+            rtw = RouteBinding(plan, cache, rt, a.arch, ptrs=rb.ptrs, sizes=rb.sizes, stage2_kernels=stage2, B=B,
+                               alloc=_talloc)
         rows[case] = row
-        bound[case] = (rb, A, Bt, D)
+        bound[case] = (rb, A, Bt, D, rbr, drop, rtw)
         print(f"[route] {case}: {plan.route} {row.get('verify', '')} det={row.get('det_identical', '')} "
-              f"sha={row.get('sha256', '')} ws={plan.workspace_bytes / 2**20:.1f}MB", flush=True)
+              f"sha={row.get('sha256', '')} ws={plan.workspace_bytes / 2**20:.1f}MB"
+              + (f" dropin_identical={row['dropin_identical']}" if "dropin_identical" in row else ""), flush=True)
         if a.rounds <= 0:
             torch.cuda.synchronize()
             rb.free(B)
+            if rbr is not None:
+                rbr.free(B)
             del bound[case]
             torch.cuda.empty_cache()
     if a.rounds > 0:
         ms = {c: [] for c in bound}
+        ms_ref = {c: [] for c in bound}
+        ms_drop = {c: [] for c in bound}
+        ms_tw = {c: [] for c in bound}
         parts = {c: {} for c in bound}
-        for _ in range(a.rounds):
-            for c, (rb, *_x) in bound.items():
-                ms[c].append(statistics.median(
-                    time_launches_staged(rb.run, warmup=a.warmup, iters=a.iters)))
+        for rnd in range(a.rounds):
+            for c, (rb, _A, _B, _D, rbr, drop, rtw) in bound.items():
+                order = [(ms[c], rb)] + ([(ms_ref[c], rbr)] if rbr is not None else []) + (
+                    [(ms_drop[c], drop)] if drop is not None else []) + (
+                    [(ms_tw[c], rtw)] if rtw is not None else [])
+                if rnd % 2:
+                    order.reverse()
+                for acc, b in order:
+                    acc.append(statistics.median(time_launches_staged(b.run, warmup=a.warmup, iters=a.iters)))
                 if a.parts and len(rb.runs) > 1:
                     for i, (run, nm) in enumerate(zip(rb.runs, rb.plan.launches)):
                         parts[c].setdefault(f"{i}:{nm[:40]}", []).append(statistics.median(
@@ -205,9 +260,21 @@ def main(argv=None) -> int:
         for c in bound:
             rows[c]["ms_rounds"] = [round(x, 4) for x in ms[c]]
             rows[c]["ms"] = round(statistics.median(ms[c]), 4)
+            if ms_ref[c]:
+                rows[c]["ms_ref_rounds"] = [round(x, 4) for x in ms_ref[c]]
+                rows[c]["ms_ref"] = round(statistics.median(ms_ref[c]), 4)
+                rows[c]["ratio_vs_ref"] = round(rows[c]["ms"] / rows[c]["ms_ref"], 4)
+            if ms_tw[c]:
+                rows[c]["ms_torchws"] = round(statistics.median(ms_tw[c]), 4)
+            if ms_drop[c]:
+                rows[c]["ms_dropin_rounds"] = [round(x, 4) for x in ms_drop[c]]
+                rows[c]["ms_dropin"] = round(statistics.median(ms_drop[c]), 4)
             if parts[c]:
                 rows[c]["ms_parts"] = {k: round(statistics.median(v), 4) for k, v in parts[c].items()}
             print(f"[route] {c}: staged {rows[c]['ms']:.4f} ms  rounds {rows[c]['ms_rounds']}"
+                  + (f"  ref {rows[c]['ms_ref']:.4f} ({rows[c]['ratio_vs_ref']:.3f}x)" if ms_ref[c] else "")
+                  + (f"  dropin {rows[c]['ms_dropin']:.4f}" if ms_drop[c] else "")
+                  + (f"  torchws {rows[c]['ms_torchws']:.4f}" if ms_tw[c] else "")
                   + (f"  parts {rows[c]['ms_parts']}" if parts[c] else ""), flush=True)
     if a.results:
         with open(a.results, "a") as f:

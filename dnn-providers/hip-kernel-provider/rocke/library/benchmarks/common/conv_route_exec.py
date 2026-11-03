@@ -67,7 +67,7 @@ class RouteBinding:
     workspaces are scratch, reused call after call)."""
 
     def __init__(self, plan, cache, rt, arch, ptrs, sizes, *, stage2_kernels=None, cfg_cls=None,
-                 workspaces=None, live_extras=None, B=None):
+                 workspaces=None, live_extras=None, B=None, alloc=None):
         from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         if B is None:
@@ -78,14 +78,19 @@ class RouteBinding:
         self.live_extras = live_extras if live_extras is not None else []
         self._owned = []
         ws = workspaces if workspaces is not None else {}
+        self._keep = []
         for w in plan.workspaces:
             if w.name not in ws:
-                p = rt.alloc(w.nbytes)
+                if alloc is not None:  # caller's allocator: alloc(nbytes) -> (ptr, keepalive)
+                    p, keep = alloc(w.nbytes)
+                    self._keep.append(keep)
+                else:
+                    p = rt.alloc(w.nbytes)
+                    if workspaces is None:
+                        self._owned.append(p)
                 if w.zero_once:
                     rt.memset(p, 0, w.nbytes)
                 ws[w.name] = p
-                if workspaces is None:
-                    self._owned.append(p)
         self.workspaces = ws
         bufs = {"x": self.ptrs[0], "w": self.ptrs[1], "y": self.ptrs[2], **ws}
         nbytes = {"x": self.sizes[0], "w": self.sizes[1], "y": self.sizes[2],
@@ -133,3 +138,4 @@ class RouteBinding:
         for p in self._owned:
             self.rt.free(p)
         self._owned = []
+        self._keep = []
