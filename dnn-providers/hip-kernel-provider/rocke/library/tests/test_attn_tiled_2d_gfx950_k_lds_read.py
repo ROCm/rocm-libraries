@@ -12,7 +12,9 @@ read, so this test walks the built kernel and checks every LDS load against
 the element type of the buffer it reads, and that every fp8 K read reaches the
 QK MFMA only through a multiply by the ``k_scale`` kernel argument. It also
 pins the K slab pad: a laid-out pad is refused when Q would be staged in the
-single K slot, and otherwise every K read goes through the padded slab layout.
+single K slot, and otherwise every K read goes through the padded slab layout;
+a zero-width pad is not laid out. And it pins where the kernel stages Q to the
+spec's rule.
 
 Pure Python: it builds the kernel IR and needs no GPU. The C++ engine tests
 need the ``rocke_engine`` binding (``ROCKE_BUILD_PYBIND=ON``), which CI does
@@ -247,6 +249,64 @@ def test_k_pad_the_kernel_cannot_lay_out_is_inert():
     assert spec.kq_lds_pad_off_reason == (
         "the KQ LDS pad is only laid out for a single-K schedule"
     )
+
+
+def test_zero_width_k_pad_builds_the_unpadded_kernel():
+    # A zero-width pad lays out no pad, so Q may still be staged in the single
+    # K slot and the kernel is the one built without the knob.
+    padded = UnifiedAttention2DTiledSpec(
+        **_BASE, **dict(_LAID_OUT_K_PAD, kq_lds_pad_halves=0)
+    )
+    assert padded.kq_lds_pad_slab_rows == 0
+    assert padded.kq_lds_pad_off_reason == "the KQ LDS pad width is 0"
+    assert padded.q_staged_in_k_lds
+    unpadded = UnifiedAttention2DTiledSpec(**_BASE, use_k_single_buffer=True)
+
+    def lowered(spec):
+        kernel = build_unified_attention_2d_tiled(spec, arch="gfx950")
+        return _lower_kernel_to_llvm_python(kernel, arch="gfx950")
+
+    assert lowered(padded) == lowered(unpadded)
+
+
+def test_negative_k_pad_width_is_refused():
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^KQ LDS pad width failed - kq_lds_pad_halves=-8, expected >= 0 "
+            r"\(0 lays out no pad\)$"
+        ),
+    ):
+        UnifiedAttention2DTiledSpec(**_BASE, use_kq_lds_pad=True, kq_lds_pad_halves=-8)
+
+
+_TRANSPOSED = _QK_PATHS["32x32 transposed"]
+
+# (knobs, whether the spec stages Q in K_lds)
+_Q_STAGING = {
+    "16x16 bf16 K": ({}, True),
+    "16x16 fp8 K": (_FP8_K_IN_LDS, False),
+    "Q larger than both K slots": (
+        {"num_warps": 8, "tile_size": 32, "head_size": 128},
+        False,
+    ),
+    "transposed, Q re-read": (dict(_TRANSPOSED, use_q_reread=True), False),
+    "transposed, Q in registers": (dict(_TRANSPOSED, use_q_direct_reg=True), False),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_Q_STAGING))
+def test_kernel_stages_q_where_the_spec_says(case):
+    knobs, staged = _Q_STAGING[case]
+    spec = UnifiedAttention2DTiledSpec(**dict(_BASE, **knobs))
+    assert spec.q_staged_in_k_lds is staged
+    kernel = build_unified_attention_2d_tiled(spec, arch="gfx950")
+    has_q_slab = any(
+        op.name == "tile.smem_alloc" and "Qlds" in op.results[0].name
+        for op in _walk(kernel.body.ops)
+    )
+    # Q gets its own slab unless it is staged in K_lds or gathered to registers.
+    assert has_q_slab is not (staged or spec.use_q_direct_reg)
 
 
 @pytest.mark.parametrize("path", sorted(_QK_PATHS))
