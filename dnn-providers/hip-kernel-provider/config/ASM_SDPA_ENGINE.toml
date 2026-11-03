@@ -42,3 +42,317 @@ rtol = 2.5e-3
 filters = ["*_SdpaBackward_*.*_bfp16_*"]
 atol = 1e-2
 rtol = 1e-2
+
+# -- SdpaFwdPlan known engine defects --
+# Non-fp8 SdpaFwdPlan cases with a Q, K or V descale. The reference gap is ALMIOPEN-3132.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "full_SdpaFwdPlan_DkBv.*",
+    "full_SdpaFwdPlan_DqBv.*",
+    "full_SdpaFwdPlan_DvBv.*",
+]
+reason = "ALMIOPEN-3133: Q/K/V descales on non-fp8 inputs are accepted and ignored (unverifiable until ALMIOPEN-3132)"
+
+# SdpaFwdPlan cases with FP8_E4M3_FNUZ inputs.
+[[test_skips]]
+archs = ["gfx942"]
+filters = [
+    "*_SdpaFwdPlan_*.fp8_e4m3_fnuz_*",
+]
+reason = "ALMIOPEN-3125: FP8_E4M3_FNUZ inputs give a wrong or non-finite O"
+
+# SdpaFwdPlan cases with a negative or zero attention scale.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "comprehensive_SdpaFwdPlan_Base.bf16_1d28598cc5637249",
+    "comprehensive_SdpaFwdPlan_Base.bf16_ae432f90f8535be2",
+    "comprehensive_SdpaFwdPlan_Base.bf16_c3d40b3d964c86e9",
+    "comprehensive_SdpaFwdPlan_Base.bf16_dab84f0a24b7a129",
+    "full_SdpaFwdPlan_Base.bf16_157886b798b2b528",
+    "full_SdpaFwdPlan_Base.bf16_2d91cab8429ac76f",
+    "full_SdpaFwdPlan_Base.bf16_58bcee22b05c3561",
+    "full_SdpaFwdPlan_Base.bf16_77c391edd314ab4e",
+    "full_SdpaFwdPlan_Base.bf16_9a1b1be1390f658b",
+    "full_SdpaFwdPlan_Base.bf16_c562c263abfa6588",
+    "full_SdpaFwdPlan_Base.bf16_ddb5acae2f5b72d9",
+    "full_SdpaFwdPlan_Base.bf16_f6f1679d90f99bc8",
+    "full_SdpaFwdPlan_ScRt.bf16_09c19db3237cdd48",
+    "full_SdpaFwdPlan_ScRt.bf16_1dd77921c69b7b07",
+    "standard_SdpaFwdPlan_Base.bf16_01ca817d65882c59",
+    "standard_SdpaFwdPlan_Base.bf16_02e16137e6854e32",
+    "standard_SdpaFwdPlan_Base.bf16_1006ba5a5e0630ae",
+    "standard_SdpaFwdPlan_Base.bf16_246357a22e79fd74",
+    "standard_SdpaFwdPlan_Base.bf16_523b3b4e787127be",
+    "standard_SdpaFwdPlan_Base.bf16_57910cba53bdaf63",
+    "standard_SdpaFwdPlan_Base.bf16_58e80ae173f3d348",
+    "standard_SdpaFwdPlan_Base.bf16_60c3ebf179113354",
+    "standard_SdpaFwdPlan_Base.bf16_6d117e65696e7854",
+    "standard_SdpaFwdPlan_Base.bf16_7d9ecc2abf54c2f3",
+    "standard_SdpaFwdPlan_Base.bf16_7e31a697b174bdd2",
+    "standard_SdpaFwdPlan_Base.bf16_8381092c8cddf0e6",
+    "standard_SdpaFwdPlan_Base.bf16_86e118712762be78",
+    "standard_SdpaFwdPlan_Base.bf16_8e7d0e7baa92f80c",
+    "standard_SdpaFwdPlan_Base.bf16_93a453bc1f46fbd6",
+    "standard_SdpaFwdPlan_Base.bf16_9b37e2bc361f7075",
+    "standard_SdpaFwdPlan_Base.bf16_b53cc9cb9bd7d229",
+    "standard_SdpaFwdPlan_Base.bf16_b64289c3ce5c4310",
+    "standard_SdpaFwdPlan_Base.bf16_bdd77c0a6940a2df",
+    "standard_SdpaFwdPlan_Base.bf16_c483841861e5a3dc",
+    "standard_SdpaFwdPlan_Base.bf16_cab14036d2582e74",
+    "standard_SdpaFwdPlan_Base.bf16_cd939cca94979445",
+    "standard_SdpaFwdPlan_Base.bf16_ce1c8adb22065015",
+    "standard_SdpaFwdPlan_Base.bf16_e5acf648e8930762",
+    "standard_SdpaFwdPlan_Base.bf16_edcc472c92c9eef6",
+    "standard_SdpaFwdPlan_ScRt.bf16_3ccf3d830af90486",
+    "standard_SdpaFwdPlan_ScRt.bf16_f6a36e58d617af96",
+    "standard_SdpaFwdPlan_Stats.bf16_0bcd85e3eb63a103",
+    "standard_SdpaFwdPlan_Stats.bf16_5d9aaab3a2afa285",
+    "standard_SdpaFwdPlan_Stats.bf16_91a044715e2c0d8c",
+    "standard_SdpaFwdPlan_SumExp.bf16_39039c0e809c7cb8",
+]
+reason = "ALMIOPEN-3043: a negative or zero attention scale gives NaN in O"
+
+# SdpaFwdPlan cases with a negative or zero attention scale.
+[[test_skips]]
+archs = ["gfx942"]
+filters = [
+    "comprehensive_SdpaFwdPlan_Base.bf16_e2a5c8a2105ee079",
+    "full_SdpaFwdPlan_Base.bf16_39bd7cbbfa5fe92b",
+    "standard_SdpaFwdPlan_Base.bf16_47d623f715e3e1df",
+    "standard_SdpaFwdPlan_Base.bf16_a979e3bb9d1ce8ea",
+]
+reason = "ALMIOPEN-3043: a negative or zero attention scale gives NaN in O"
+
+# SdpaFwdPlan cases that request the dropout RNG dump.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "comprehensive_SdpaFwdPlan_DSeedBv_DOffBv_Rng.*",
+    "comprehensive_SdpaFwdPlan_DSeedBv_DOffBv_Rng_Max.*",
+    "comprehensive_SdpaFwdPlan_DSeedBv_DOffBv_Rng_SumExp.*",
+    "comprehensive_SdpaFwdPlan_ScRt_DSeedBv_DOffBv_Rng_Stats.*",
+    "full_SdpaFwdPlan_DSeedBv_DOffBv_Rng.*",
+    "full_SdpaFwdPlan_DSeedBv_DOffBv_Rng_Max.*",
+    "full_SdpaFwdPlan_DSeedBv_DOffBv_Rng_SumExp.*",
+    "full_SdpaFwdPlan_ScRt_DSeedBv_DOffBv_Rng_Stats.*",
+    "standard_SdpaFwdPlan_DSeedBv_DOffBv_Rng.*",
+    "standard_SdpaFwdPlan_DSeedBv_DOffBv_Rng_Max.*",
+    "standard_SdpaFwdPlan_DSeedBv_DOffBv_Rng_SumExp.*",
+    "standard_SdpaFwdPlan_ScRt_DSeedBv_DOffBv_Rng_Stats.*",
+]
+reason = "ALMIOPEN-3126: the dropout RNG dump is accepted but never written"
+
+# SdpaFwdPlan cases that request the Max and Sum-exp outputs.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "comprehensive_SdpaFwdPlan_Max.*",
+    "comprehensive_SdpaFwdPlan_Max_SumExp.*",
+    "comprehensive_SdpaFwdPlan_SumExp.*",
+    "full_SdpaFwdPlan_Max.*",
+    "full_SdpaFwdPlan_Max_SumExp.*",
+    "full_SdpaFwdPlan_ScBv_Max.*",
+    "full_SdpaFwdPlan_ScRt_Max.*",
+    "full_SdpaFwdPlan_ScRt_Max_SumExp.*",
+    "full_SdpaFwdPlan_SumExp.*",
+    "standard_SdpaFwdPlan_Max.*",
+    "standard_SdpaFwdPlan_Max_SumExp.*",
+    "standard_SdpaFwdPlan_ScBv_Max.*",
+    "standard_SdpaFwdPlan_ScRt_Max.*",
+    "standard_SdpaFwdPlan_ScRt_Max_SumExp.*",
+    "full_SdpaFwdPlan_ScBv_SumExp.bf16_6af13bf3c50e59ce",
+    "full_SdpaFwdPlan_Stats_SumExp.bf16_95ebcad3e418e7a5",
+    "full_SdpaFwdPlan_Stats_SumExp.bf16_a07dd8ada783d165",
+    "standard_SdpaFwdPlan_Stats_SumExp.bf16_21e3009c3fc9f879",
+    "standard_SdpaFwdPlan_Stats_SumExp.bf16_2cd687c193c9d330",
+    "standard_SdpaFwdPlan_SumExp.bf16_02745646c017d098",
+    "standard_SdpaFwdPlan_SumExp.bf16_2c0e105eb52bf94d",
+    "standard_SdpaFwdPlan_SumExp.bf16_3367126b7dcad559",
+    "standard_SdpaFwdPlan_SumExp.bf16_8403b4943f0aa999",
+    "standard_SdpaFwdPlan_SumExp.bf16_8790941fa3767c97",
+    "standard_SdpaFwdPlan_SumExp.bf16_8c41f49630069787",
+    "standard_SdpaFwdPlan_SumExp.bf16_a1d43eac3d0fd8ae",
+    "standard_SdpaFwdPlan_SumExp.bf16_cb37e8b9af1f9e1a",
+    "standard_SdpaFwdPlan_SumExp.bf16_d463f9eca753eb02",
+    "standard_SdpaFwdPlan_SumExp.bf16_da13c4c1bb79c696",
+    "standard_SdpaFwdPlan_SumExp.bf16_df25bf903b3b576c",
+    "standard_SdpaFwdPlan_SumExp.bf16_e07c7d64dbf17e2b",
+    "standard_SdpaFwdPlan_SumExp.bf16_f0176650dc330dc3",
+    "standard_SdpaFwdPlan_SumExp.bf16_fdcfca465fde08de",
+]
+reason = "ALMIOPEN-3124: the Max and Sum-exp outputs are accepted but never written"
+
+# SdpaFwdPlan cases that request the Max and Sum-exp outputs.
+[[test_skips]]
+archs = ["gfx942"]
+filters = [
+    "standard_SdpaFwdPlan_SumExp.bf16_a23d601f2fc04707",
+    "standard_SdpaFwdPlan_SumExp.bf16_f39f9e8a8cb11495",
+]
+reason = "ALMIOPEN-3124: the Max and Sum-exp outputs are accepted but never written"
+
+# SdpaFwdPlan cases with a Stats layout the kernel cannot address.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "comprehensive_SdpaFwdPlan_Stats.bf16_3ca9eacd020201fc",
+    "comprehensive_SdpaFwdPlan_Stats.bf16_4d38d21a40e2f9e3",
+    "comprehensive_SdpaFwdPlan_Stats.bf16_616818f26c39eb6f",
+    "comprehensive_SdpaFwdPlan_Stats.bf16_803aa494d44aaee5",
+    "comprehensive_SdpaFwdPlan_Stats.bf16_b71e622a7dfd4a91",
+    "comprehensive_SdpaFwdPlan_Stats.bf16_cdb0ddcc9b21dabd",
+    "full_SdpaFwdPlan_ScBv_Stats.bf16_7e6bd828849fac9f",
+    "full_SdpaFwdPlan_ScBv_Stats.bf16_967c2bfc5ccc0110",
+    "full_SdpaFwdPlan_Stats.bf16_055b78f5119b9800",
+    "full_SdpaFwdPlan_Stats.bf16_2091b9232ba0314d",
+    "full_SdpaFwdPlan_Stats.bf16_231ef84a2ebf94eb",
+    "full_SdpaFwdPlan_Stats.bf16_27836e4b762c604a",
+    "full_SdpaFwdPlan_Stats.bf16_2a71d620e8c9942a",
+    "full_SdpaFwdPlan_Stats.bf16_2c43229d8220fbd2",
+    "full_SdpaFwdPlan_Stats.bf16_2c956b02d909a8b5",
+    "full_SdpaFwdPlan_Stats.bf16_2fb3a5009c2cb785",
+    "full_SdpaFwdPlan_Stats.bf16_41df0f1e5283e3cd",
+    "full_SdpaFwdPlan_Stats.bf16_59ec23fcebd18c3d",
+    "full_SdpaFwdPlan_Stats.bf16_5b7ab7a5286b4860",
+    "full_SdpaFwdPlan_Stats.bf16_5d606c7d35138b50",
+    "full_SdpaFwdPlan_Stats.bf16_6e2fcade4b591470",
+    "full_SdpaFwdPlan_Stats.bf16_7e70aca74c2e7741",
+    "full_SdpaFwdPlan_Stats.bf16_8fcba311181ebf89",
+    "full_SdpaFwdPlan_Stats.bf16_9d627bca71011871",
+    "full_SdpaFwdPlan_Stats.bf16_abc978a51ab1c879",
+    "full_SdpaFwdPlan_Stats.bf16_b52e1843e93bd9ac",
+    "full_SdpaFwdPlan_Stats.bf16_b6f232db1a34dd12",
+    "full_SdpaFwdPlan_Stats.bf16_b7811d943ee2ca81",
+    "full_SdpaFwdPlan_Stats.bf16_c5d4a35eb7471df7",
+    "full_SdpaFwdPlan_Stats.bf16_c74a3cc756318254",
+    "full_SdpaFwdPlan_Stats.bf16_d0f2fec8b70acd7e",
+    "full_SdpaFwdPlan_Stats.bf16_d49f98ba13135ff1",
+    "full_SdpaFwdPlan_Stats.bf16_d526e1dff743a2bb",
+    "full_SdpaFwdPlan_Stats.bf16_e10324a2e48c3b33",
+    "full_SdpaFwdPlan_Stats_SumExp.bf16_17e9b85d53154b92",
+    "full_SdpaFwdPlan_Stats_SumExp.bf16_da3beac017df4621",
+    "quick_SdpaFwdPlan_ScBv_Stats.bf16_3bc488ba2e0c1f62",
+    "quick_SdpaFwdPlan_Stats.bf16_1fa1cc6221848628",
+    "quick_SdpaFwdPlan_Stats.bf16_2e617feadf7b9741",
+    "quick_SdpaFwdPlan_Stats.bf16_54c71e0baf03e89e",
+    "quick_SdpaFwdPlan_Stats.bf16_618c3d5751795684",
+    "quick_SdpaFwdPlan_Stats.bf16_c0bcf20e8d8d87bf",
+    "quick_SdpaFwdPlan_Stats.bf16_c736effc2edbe7b3",
+    "quick_SdpaFwdPlan_Stats.bf16_cb8f51a524ee1cf4",
+    "quick_SdpaFwdPlan_Stats.bf16_e84622a9a7e4a434",
+    "quick_SdpaFwdPlan_Stats.bf16_ead44c23c3c4e194",
+    "quick_SdpaFwdPlan_Stats.bf16_ee7258c4cb84144f",
+    "quick_SdpaFwdPlan_Stats.bf16_fbd9f4b45ac8c554",
+    "standard_SdpaFwdPlan_ScBv_Stats.bf16_c7903e3944721d01",
+    "standard_SdpaFwdPlan_Stats.bf16_0d3c2a79e7e31be4",
+    "standard_SdpaFwdPlan_Stats.bf16_16362d7e490ba9ba",
+    "standard_SdpaFwdPlan_Stats.bf16_18f0e3ed1539a64b",
+    "standard_SdpaFwdPlan_Stats.bf16_1ced320167a5b42c",
+    "standard_SdpaFwdPlan_Stats.bf16_43a21da85cf1379f",
+    "standard_SdpaFwdPlan_Stats.bf16_45ff04a7adcd638f",
+    "standard_SdpaFwdPlan_Stats.bf16_47d95cace423cc68",
+    "standard_SdpaFwdPlan_Stats.bf16_6281a0838e8d9de2",
+    "standard_SdpaFwdPlan_Stats.bf16_6645b063b829bac9",
+    "standard_SdpaFwdPlan_Stats.bf16_6fd9d52376f77369",
+    "standard_SdpaFwdPlan_Stats.bf16_77689ee044377dcf",
+    "standard_SdpaFwdPlan_Stats.bf16_7e102e483a7a2461",
+    "standard_SdpaFwdPlan_Stats.bf16_8113ad5d555464a8",
+    "standard_SdpaFwdPlan_Stats.bf16_8717af4c2b92bdfb",
+    "standard_SdpaFwdPlan_Stats.bf16_92b846d45bd381ac",
+    "standard_SdpaFwdPlan_Stats.bf16_c33a349a77ca9561",
+    "standard_SdpaFwdPlan_Stats.bf16_cc22177750b3150a",
+    "standard_SdpaFwdPlan_Stats.bf16_d05337256cbc8c60",
+    "standard_SdpaFwdPlan_Stats.bf16_d9bf5eee30446b0c",
+    "standard_SdpaFwdPlan_Stats.bf16_e94f2838f70a0009",
+    "standard_SdpaFwdPlan_Stats_SumExp.bf16_1dac8b5e1b60fd9e",
+    "standard_SdpaFwdPlan_Stats_SumExp.bf16_c868341d9fbfbcfe",
+]
+reason = "ALMIOPEN-3042: Stats is written with only the head stride, so other Stats layouts are wrong"
+
+# SdpaFwdPlan cases with overlapping or zero Q/K/V sequence strides. The result depends on the input data.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "comprehensive_SdpaFwdPlan_Base.bf16_0713c0bf80d6a576",
+    "comprehensive_SdpaFwdPlan_Base.bf16_a3db943853222605",
+    "comprehensive_SdpaFwdPlan_Base.bf16_da2803d39933d9c2",
+    "full_SdpaFwdPlan_Base.bf16_2d90f4c3410fc54b",
+    "full_SdpaFwdPlan_Base.bf16_2f5350bb21b4d345",
+    "full_SdpaFwdPlan_Base.bf16_3c53a0ec89fc81d3",
+    "full_SdpaFwdPlan_Base.bf16_7b4bf10e7c2c91a4",
+    "full_SdpaFwdPlan_Base.bf16_986316a4011d347a",
+    "full_SdpaFwdPlan_Base.bf16_a64a870174377700",
+    "full_SdpaFwdPlan_Base.bf16_aed3d9958af59a32",
+    "full_SdpaFwdPlan_Base.bf16_d8b91f2814f972bb",
+    "full_SdpaFwdPlan_Base.bf16_dfb95fa95c528834",
+    "full_SdpaFwdPlan_Base.bf16_e85e25adf8566bfa",
+    "full_SdpaFwdPlan_Base.bf16_ec9d80ed61d71b32",
+    "full_SdpaFwdPlan_Base.bf16_ef914c4cbbb560a8",
+    "full_SdpaFwdPlan_Base.bf16_f60653d4872b10c9",
+    "full_SdpaFwdPlan_ScBv.bf16_947ab6ea4b9d178e",
+    "full_SdpaFwdPlan_ScBv.bf16_cb0154d906a5d879",
+    "full_SdpaFwdPlan_ScBv_SumExp.bf16_ebba327af827c7af",
+    "full_SdpaFwdPlan_Stats.bf16_2e62a03e6f84a7c8",
+    "full_SdpaFwdPlan_Stats.bf16_345a0d1d76346b29",
+    "full_SdpaFwdPlan_Stats.bf16_8d53fe10f0c97305",
+    "full_SdpaFwdPlan_Stats.bf16_b44f0167af7efce5",
+    "standard_SdpaFwdPlan_Base.bf16_27546a2fe788ff0a",
+    "standard_SdpaFwdPlan_Base.bf16_2d1e4d37179f350e",
+    "standard_SdpaFwdPlan_Base.bf16_359d0624f1cba0d1",
+    "standard_SdpaFwdPlan_Base.bf16_3db1d2b2bd3e8a58",
+    "standard_SdpaFwdPlan_Base.bf16_3ed74454b50fc9f1",
+    "standard_SdpaFwdPlan_Base.bf16_41806ea5b83adc5c",
+    "standard_SdpaFwdPlan_Base.bf16_46b51c72f0b20103",
+    "standard_SdpaFwdPlan_Base.bf16_4994d9e4221ccd15",
+    "standard_SdpaFwdPlan_Base.bf16_4b4ade173e4d0afa",
+    "standard_SdpaFwdPlan_Base.bf16_4ca5ddb7b0c61892",
+    "standard_SdpaFwdPlan_Base.bf16_4da858f68e51621c",
+    "standard_SdpaFwdPlan_Base.bf16_5431bef26a109caf",
+    "standard_SdpaFwdPlan_Base.bf16_5754b6fe3d578b9c",
+    "standard_SdpaFwdPlan_Base.bf16_6f2c317f2d0485bd",
+    "standard_SdpaFwdPlan_Base.bf16_78338cb1bc366b42",
+    "standard_SdpaFwdPlan_Base.bf16_7e02aeaae1804cca",
+    "standard_SdpaFwdPlan_Base.bf16_7e8ec1651ded5d0e",
+    "standard_SdpaFwdPlan_Base.bf16_8054cfc353d3673c",
+    "standard_SdpaFwdPlan_Base.bf16_8dac291fc2080122",
+    "standard_SdpaFwdPlan_Base.bf16_936c12c045d1b0df",
+    "standard_SdpaFwdPlan_Base.bf16_aadf95810267c472",
+    "standard_SdpaFwdPlan_Base.bf16_bcb38650e41badf1",
+    "standard_SdpaFwdPlan_Base.bf16_bddbd1bf8961e9e3",
+    "standard_SdpaFwdPlan_Base.bf16_c476a8b8514fe11e",
+    "standard_SdpaFwdPlan_Base.bf16_c74b674da6c90099",
+    "standard_SdpaFwdPlan_Base.bf16_c7f9541754d5b1fa",
+    "standard_SdpaFwdPlan_Base.bf16_ce474e06922c2397",
+    "standard_SdpaFwdPlan_Base.bf16_dd094ae781ed71ef",
+    "standard_SdpaFwdPlan_Base.bf16_e7697f1b7893ff5c",
+    "standard_SdpaFwdPlan_Base.bf16_f6bc08c3235d8409",
+    "standard_SdpaFwdPlan_Base.bf16_fc1d35bada0c7d3a",
+    "standard_SdpaFwdPlan_ScBv.bf16_65b7c59db6a46095",
+    "standard_SdpaFwdPlan_ScBv.bf16_c7a6fdd0e3fc3d58",
+    "standard_SdpaFwdPlan_ScBv_SumExp.bf16_07c21ab7eba17861",
+    "standard_SdpaFwdPlan_ScBv_SumExp.bf16_770e215de83713e2",
+    "standard_SdpaFwdPlan_Stats.bf16_2544ff6d8943aa9b",
+    "standard_SdpaFwdPlan_Stats.bf16_2557c7a0fc74e7f9",
+    "standard_SdpaFwdPlan_Stats.bf16_736f1adc2e7d0026",
+    "standard_SdpaFwdPlan_Stats.bf16_7a7ee063a4b52b80",
+    "standard_SdpaFwdPlan_Stats.bf16_8bec946bd80e3cc4",
+    "standard_SdpaFwdPlan_Stats.bf16_98e96a206233c714",
+    "standard_SdpaFwdPlan_SumExp.bf16_c3939c2fad57cc9f",
+    "standard_SdpaFwdPlan_SumExp.bf16_e7eb3151c08cdda6",
+]
+reason = "ALMIOPEN-3042: overlapping or zero Q/K/V sequence strides give a wrong O"
+
+# SdpaFwdPlan cases with overlapping or zero Q/K/V sequence strides. The result depends on the input data.
+[[test_skips]]
+archs = ["gfx942"]
+filters = [
+    "comprehensive_SdpaFwdPlan_Base.bf16_691c6ff4959c93f8",
+    "comprehensive_SdpaFwdPlan_Base.bf16_bad0db8554fb8424",
+    "full_SdpaFwdPlan_Base.bf16_50cdf9b97d5e6707",
+    "standard_SdpaFwdPlan_Base.bf16_9260d899bd2ac793",
+    "standard_SdpaFwdPlan_Base.bf16_c6513e853c6ca045",
+    "standard_SdpaFwdPlan_Base.bf16_df3e932591fbeffd",
+]
+reason = "ALMIOPEN-3042: overlapping or zero Q/K/V sequence strides give a wrong O"
