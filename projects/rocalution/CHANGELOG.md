@@ -42,6 +42,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed the preconditioned BiCGStab solver returning a wrong solution after a breakdown in the second half of an iteration.
+* Fixed the QMRCGStab solver starting a second solve from the search direction of the previous solve, returning NaN when the first half step solves the system exactly, and reporting one iteration more than it performed.
 
 ## (Unreleased) rocALUTION 4.1.1
 

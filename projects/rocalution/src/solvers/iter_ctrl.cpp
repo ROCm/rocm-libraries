@@ -257,6 +257,8 @@ namespace rocalution
     {
         assert(this->init_res_ == true);
 
+        this->current_res_ = res;
+
         if((std::abs(res) == std::numeric_limits<double>::infinity()) || // infinity
            (res != res))
         { // not a number (NaN)
@@ -351,20 +353,18 @@ namespace rocalution
     {
         if(this->minimum_iter_ > 0)
         {
-            LOG_INFO("IterationControl criteria: "
-                     << "abs tol=" << this->absolute_tol_ << "; "
-                     << "rel tol=" << this->relative_tol_ << "; "
-                     << "div tol=" << this->divergence_tol_ << "; "
-                     << "min iter=" << this->minimum_iter_ << "; "
-                     << "max iter=" << this->maximum_iter_);
+            LOG_INFO("IterationControl criteria: " << "abs tol=" << this->absolute_tol_ << "; "
+                                                   << "rel tol=" << this->relative_tol_ << "; "
+                                                   << "div tol=" << this->divergence_tol_ << "; "
+                                                   << "min iter=" << this->minimum_iter_ << "; "
+                                                   << "max iter=" << this->maximum_iter_);
         }
         else
         {
-            LOG_INFO("IterationControl criteria: "
-                     << "abs tol=" << this->absolute_tol_ << "; "
-                     << "rel tol=" << this->relative_tol_ << "; "
-                     << "div tol=" << this->divergence_tol_ << "; "
-                     << "max iter=" << this->maximum_iter_);
+            LOG_INFO("IterationControl criteria: " << "abs tol=" << this->absolute_tol_ << "; "
+                                                   << "rel tol=" << this->relative_tol_ << "; "
+                                                   << "div tol=" << this->divergence_tol_ << "; "
+                                                   << "max iter=" << this->maximum_iter_);
         }
     }
 

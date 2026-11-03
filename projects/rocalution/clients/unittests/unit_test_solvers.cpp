@@ -1342,7 +1342,6 @@ TYPED_TEST(solvers, qmrcgstab_iterates_follow_the_qmrcgstab_recurrence)
         }
     }
 
-    KNOWN_BUG("the residual check after the last iteration is counted as an iteration");
     EXPECT_EQ(iterations, std::vector<int>({1, 2, 3, 4, 1, 2, 3, 4}));
 }
 
@@ -1365,8 +1364,6 @@ TYPED_TEST(solvers, qmrcgstab_starts_every_solve_afresh)
     const double tolerance = std::is_same_v<T, float> ? 1e-6 : 1e-10;
     const Vec<T> expected  = qmrcgstab_iterate(D, b, x0, 3, identity<T>);
     expect_near(solve(*solver, *A, b, x0).x, expected, tolerance);
-
-    KNOWN_BUG("the first step adds r to the search direction of the previous solve");
     expect_near(solve(*solver, *A, b, x0).x, expected, tolerance);
 }
 
@@ -1384,8 +1381,6 @@ TYPED_TEST(solvers, qmrcgstab_solves_a_system_that_its_first_half_step_solves)
     solver->Init(0.0, 1e-10, 1e8, 10);
     set_up(*solver, m, *A, nullptr);
     const Outcome<T> out = quietly([&] { return solve(*solver, *A, b, Vec<T>(8, 0)); });
-
-    KNOWN_BUG("the first step, before the loop, has no breakdown check and returns NaN");
     expect_near(out.x, scaled(0.5, b), scaled_tol<T>(1e-14));
 }
 
@@ -2146,8 +2141,7 @@ TYPED_TEST(solvers, bicgstab_stops_when_the_residual_is_orthogonal_to_the_shadow
     }
 }
 
-// Jacobi is the identity on these unit diagonals. A known bug counts a residual check as
-// an iteration, which makes the iteration counts unreliable.
+// Jacobi is the identity on these unit diagonals
 TYPED_TEST(solvers, qmrcgstab_stops_at_a_breakdown_of_its_second_iteration)
 {
     using T = typename TypeParam::value_type;
@@ -2187,6 +2181,7 @@ TYPED_TEST(solvers, qmrcgstab_stops_at_a_breakdown_of_its_second_iteration)
 
             const Outcome<T> out = solve_reporting(*solver, *A, c.b, c.name);
             expect_near(out.x, c.x, loose_tol<T>(1e-12));
+            EXPECT_EQ(out.iterations, 1);
             EXPECT_EQ(out.status, 0);
         }
     }
