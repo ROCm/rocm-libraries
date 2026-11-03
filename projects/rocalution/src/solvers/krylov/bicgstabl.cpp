@@ -325,7 +325,12 @@ namespace rocalution
         r0->ScaleAdd(static_cast<ValueType>(-1), rhs);
 
         ValueType res = this->Norm_(*r0);
-        this->iter_ctrl_.InitResidual(std::abs(res));
+
+        if(this->iter_ctrl_.InitResidual(std::abs(res)) == false)
+        {
+            log_debug(this, "BiCGStabl::SolveNonPrecond_()", " #*# end");
+            return;
+        }
 
         // r_0 = r0
         r[0]->CopyFrom(*r0);
@@ -529,7 +534,11 @@ namespace rocalution
         // Using preconditioned residual
         ValueType res = this->Norm_(*r0);
 
-        this->iter_ctrl_.InitResidual(std::abs(res));
+        if(this->iter_ctrl_.InitResidual(std::abs(res)) == false)
+        {
+            log_debug(this, "BiCGStabl::SolvePrecond_()", " #*# end");
+            return;
+        }
 
         // r_0 = r0
         r[0]->CopyFrom(*r0);

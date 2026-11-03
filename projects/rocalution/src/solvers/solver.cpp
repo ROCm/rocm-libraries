@@ -810,6 +810,7 @@ namespace rocalution
 
             if(steps < 1)
             {
+                x->Zeros();
                 return;
             }
 
@@ -843,6 +844,7 @@ namespace rocalution
         {
             if(this->iter_ctrl_.GetMaximumIterations() < 1)
             {
+                x->Zeros();
                 return;
             }
 
@@ -854,6 +856,7 @@ namespace rocalution
 
             if(this->iter_ctrl_.InitResidual(std::abs(res)) == false)
             {
+                x->Zeros();
                 log_debug(this, "FixedPoint::SolveZeroSol_()", " #*# end");
                 return;
             }

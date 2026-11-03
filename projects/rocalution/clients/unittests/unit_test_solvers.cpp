@@ -1932,8 +1932,7 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_guess_solves_the_sys
                 solver->Init(0.0, 1e-10, 1e8, 100);
                 set_up(*solver, p.method, *A, precond ? &jacobi : nullptr);
 
-                const Vec<T> x0 = zero ? Vec<T>(n, 0) : exact;
-                // BiCGStab(l) goes on to a breakdown it reports
+                const Vec<T>     x0 = zero ? Vec<T>(n, 0) : exact;
                 const Outcome<T> out
                     = quietly([&] { return solve(*solver, *A, zero ? Vec<T>(n, 0) : b, x0); });
                 EXPECT_EQ(out.x, x0);
@@ -1958,7 +1957,6 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_residual_is_nan_or_w
     Vec<T> nan = exact;
     nan[3]     = std::numeric_limits<T>::quiet_NaN();
 
-    std::vector<Problem<T>> later;
     for(const Problem<T>& p : problems<T>(n))
     {
         auto         A = this->make(p.A);
@@ -1978,11 +1976,6 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_residual_is_nan_or_w
             EXPECT_EQ(out.iterations, 0);
             EXPECT_EQ(out.status, 0);
         }
-        if(is_bicgstabl(p.method))
-        {
-            later.push_back(p);
-            continue;
-        }
         SCOPED_TRACE(trace(p.method, p.method.needs_preconditioner, "within the tolerance"));
         Jacobi<T> jacobi;
         auto      solver = p.method.make();
@@ -1993,18 +1986,6 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_residual_is_nan_or_w
         EXPECT_EQ(out.x, close);
         EXPECT_EQ(out.iterations, 0);
         EXPECT_EQ(out.status, 1);
-    }
-
-    KNOWN_BUG("BiCGStab(l) ignores that the initial residual already meets the tolerance");
-    for(const Problem<T>& p : later)
-    {
-        SCOPED_TRACE(trace(p.method, false, "within the tolerance"));
-        auto A      = this->make(p.A);
-        auto solver = p.method.make();
-        solver->Init(1.0, 1e-10, 1e8, 100);
-        set_up(*solver, p.method, *A, nullptr);
-        const Outcome<T> out = solve(*solver, *A, multiply(dense(p.A), exact), close);
-        EXPECT_EQ(out.x, close);
     }
 }
 
@@ -2969,7 +2950,6 @@ TYPED_TEST(solvers, fixed_point_solve_zero_sol_returns_zero_when_it_does_not_ite
         int         max_iter;
         Vec<T>      b;
     };
-    std::vector<Vec<T>> results;
     for(const Case& c : {Case{"zero right-hand side", false, 10, Vec<T>(8, 0)},
                          Case{"no iterations", false, 0, rhs<T>(8)},
                          Case{"smoother without sweeps", true, 0, rhs<T>(8)}})
@@ -2987,14 +2967,7 @@ TYPED_TEST(solvers, fixed_point_solve_zero_sol_returns_zero_when_it_does_not_ite
         auto rhs_vector = make_local_vector(*A, c.b);
         auto x          = make_local_vector(*A, Vec<T>(8, 1000));
         solver.SolveZeroSol(*rhs_vector, x.get());
-        results.push_back(values_of(*x));
-    }
-
-    KNOWN_BUG("FixedPoint::SolveZeroSol returns before it sets x to zero when the initial residual "
-              "meets the tolerance or there are no iterations");
-    for(const Vec<T>& x : results)
-    {
-        EXPECT_EQ(x, Vec<T>(8, 0));
+        EXPECT_EQ(values_of(*x), Vec<T>(8, 0));
     }
 }
 
