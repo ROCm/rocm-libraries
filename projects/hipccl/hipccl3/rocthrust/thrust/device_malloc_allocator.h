@@ -62,6 +62,10 @@ device_ptr<T> device_malloc(const std::size_t n);
  *  \see device_ptr
  *  \see device_allocator
  *  \see https://en.cppreference.com/w/cpp/memory/allocator
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T>
 class device_malloc_allocator
@@ -92,11 +96,19 @@ public:
    *  instantiated with another type.
    *
    *  \tparam U The other type to use for instantiation.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   template <typename U>
   struct rebind
   {
     /*! The alias \p other gives the type of the rebound \p device_malloc_allocator.
+     *
+     *  \verbatim embed:rst:leading-asterisk
+     *     .. versionadded:: 2.2.0
+     *  \endverbatim
      */
     using other = device_malloc_allocator<U>;
   }; // end rebind
@@ -120,6 +132,10 @@ public:
 
   /*! Returns the address of an allocated object.
    *  \return <tt>&r</tt>.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline pointer address(reference r)
   {
@@ -128,6 +144,10 @@ public:
 
   /*! Returns the address an allocated object.
    *  \return <tt>&r</tt>.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline const_pointer address(const_reference r)
   {
@@ -138,6 +158,10 @@ public:
    *  \param cnt The number of objects to allocate.
    *  \return A \p pointer to uninitialized storage for \p cnt objects.
    *  \note Memory allocated by this function must be deallocated with \p deallocate.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST inline pointer allocate(size_type cnt, const_pointer = const_pointer(static_cast<T*>(0)))
   {
@@ -154,6 +178,10 @@ public:
    *  \param cnt The size of the previous allocation.
    *  \note Memory deallocated by this function must previously have been
    *        allocated with \p allocate.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST inline void deallocate(pointer p, [[maybe_unused]] size_type cnt) noexcept
   {
@@ -170,6 +198,10 @@ public:
 
   /*! Compares against another \p device_malloc_allocator for equality.
    *  \return \c true
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline bool operator==(device_malloc_allocator const&) const
   {
@@ -178,6 +210,10 @@ public:
 
   /*! Compares against another \p device_malloc_allocator for inequality.
    *  \return \c false
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline bool operator!=(device_malloc_allocator const& a) const
   {

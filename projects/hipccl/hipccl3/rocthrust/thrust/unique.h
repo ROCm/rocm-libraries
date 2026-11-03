@@ -80,6 +80,10 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique
  *  \see unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator>
 THRUST_HOST_DEVICE ForwardIterator
@@ -119,6 +123,10 @@ unique(const thrust::detail::execution_policy_base<DerivedPolicy>& exec, Forward
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique
  *  \see unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator>
 ForwardIterator unique(ForwardIterator first, ForwardIterator last);
@@ -166,6 +174,10 @@ ForwardIterator unique(ForwardIterator first, ForwardIterator last);
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique
  *  \see unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
 THRUST_HOST_DEVICE ForwardIterator unique(
@@ -211,6 +223,10 @@ THRUST_HOST_DEVICE ForwardIterator unique(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique
  *  \see unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator, typename BinaryPredicate>
 ForwardIterator unique(ForwardIterator first, ForwardIterator last, BinaryPredicate binary_pred);
@@ -267,6 +283,10 @@ ForwardIterator unique(ForwardIterator first, ForwardIterator last, BinaryPredic
  *
  *  \see unique
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator unique_copy(
@@ -321,6 +341,10 @@ THRUST_HOST_DEVICE OutputIterator unique_copy(
  *
  *  \see unique
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator>
 OutputIterator unique_copy(InputIterator first, InputIterator last, OutputIterator result);
@@ -370,6 +394,10 @@ OutputIterator unique_copy(InputIterator first, InputIterator last, OutputIterat
  *
  *  \see unique
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryPredicate>
 THRUST_HOST_DEVICE OutputIterator unique_copy(
@@ -418,6 +446,10 @@ THRUST_HOST_DEVICE OutputIterator unique_copy(
  *
  *  \see unique
  *  \see https://en.cppreference.com/w/cpp/algorithm/unique_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator, typename BinaryPredicate>
 OutputIterator unique_copy(InputIterator first, InputIterator last, OutputIterator result, BinaryPredicate binary_pred);
@@ -477,6 +509,10 @@ OutputIterator unique_copy(InputIterator first, InputIterator last, OutputIterat
  *  \see unique
  *  \see unique_by_key_copy
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
 THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
@@ -534,6 +570,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_
  *  \see unique
  *  \see unique_by_key_copy
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator1, typename ForwardIterator2>
 _THRUST_STD::pair<ForwardIterator1, ForwardIterator2>
@@ -592,6 +632,10 @@ unique_by_key(ForwardIterator1 keys_first, ForwardIterator1 keys_last, ForwardIt
  *  \see unique
  *  \see unique_by_key_copy
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
 THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
@@ -648,6 +692,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_
  *  \see unique
  *  \see unique_by_key_copy
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
 _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
@@ -709,6 +757,10 @@ _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
  *  \see unique_copy
  *  \see unique_by_key
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -773,6 +825,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator1, typename OutputIterator2>
 _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
@@ -841,6 +897,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
  *  \see unique_copy
  *  \see unique_by_key
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -910,6 +970,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see reduce_by_key
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,
@@ -960,6 +1024,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
  *  \see unique_copy
  *  \see unique_by_key_copy
  *  \see reduce_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
 THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count(
@@ -1003,6 +1071,10 @@ THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count
  *  \see unique_copy
  *  \see unique_by_key_copy
  *  \see reduce_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename ForwardIterator>
 THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count(
@@ -1040,6 +1112,10 @@ THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count
  *  \see unique_copy
  *  \see unique_by_key_copy
  *  \see reduce_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator, typename BinaryPredicate>
 THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator>
@@ -1076,6 +1152,10 @@ unique_count(ForwardIterator first, ForwardIterator last, BinaryPredicate binary
  *  \see unique_copy
  *  \see unique_by_key_copy
  *  \see reduce_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename ForwardIterator>
 THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator>
