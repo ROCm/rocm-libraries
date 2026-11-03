@@ -96,9 +96,8 @@ namespace rocalution
         {
             for(int64_t i = 0; i < this->size_; ++i)
             {
-                if((std::abs(this->vec_[i]) == std::numeric_limits<ValueType>::infinity()) || // inf
-                   (this->vec_[i] != this->vec_[i]))
-                { // NaN
+                if(!rocalution_is_finite(this->vec_[i]))
+                {
                     // LCOV_EXCL_START
                     LOG_VERBOSE_INFO(2, "*** error: Vector:Check - problems with vector data");
                     return false;

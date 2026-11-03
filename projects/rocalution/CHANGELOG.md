@@ -41,6 +41,8 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::Check()` on the host accepting CSR column indices equal to the number of columns and values of minus infinity, and rejecting complex matrices with a stored zero.
+* Fixed `LocalVector::Check()` on the host rejecting integer and complex vectors with a zero entry, and accepting complex vectors with an infinite entry.
 
 ## (Unreleased) rocALUTION 4.1.1
 

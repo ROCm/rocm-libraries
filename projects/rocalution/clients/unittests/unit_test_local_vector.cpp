@@ -486,25 +486,11 @@ TYPED_TEST(local_vector_data, check_accepts_finite_values_and_rejects_nan_and_in
         const R inf = std::numeric_limits<R>::infinity();
         EXPECT_FALSE(
             logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(nan), from_int<T>(3)})));
-        if constexpr(!is_complex_v<T>)
-        {
-            EXPECT_FALSE(
-                logged_check(*this->vec(std::vector<T>{from_int<T>(1), -inf, from_int<T>(3)})));
-        }
-    }
-
-    if constexpr(is_complex_v<T> || std::is_same_v<T, int> || std::is_same_v<T, int64_t>)
-    {
-        KNOWN_BUG("HostVector::Check compares |v| with numeric_limits<T>::infinity(), which is "
-                  "zero for integers and complex numbers");
-    }
-    EXPECT_TRUE(logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(0), from_int<T>(3)})));
-    if constexpr(is_complex_v<T>)
-    {
-        const R inf = std::numeric_limits<R>::infinity();
         EXPECT_FALSE(
             logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(-inf), from_int<T>(3)})));
     }
+
+    EXPECT_TRUE(logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(0), from_int<T>(3)})));
 }
 
 // operator[] accesses the host data; on the accelerator it is an assert, see

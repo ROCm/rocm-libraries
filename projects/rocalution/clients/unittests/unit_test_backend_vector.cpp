@@ -1091,11 +1091,6 @@ TYPED_TEST(host_vector_check, accepts_finite_values)
     EXPECT_TRUE(host_vector_of(from_ints<T>({1, 2, 3}))->Check());
     EXPECT_TRUE(host_vector_of(std::vector<T>())->Check());
 
-    if constexpr(is_complex_v<T> || std::is_same_v<T, int> || std::is_same_v<T, int64_t>)
-    {
-        KNOWN_BUG("it compares |v| with numeric_limits<T>::infinity(), which is zero for "
-                  "integers and complex numbers");
-    }
     EXPECT_TRUE(host_vector_of(std::vector<T>{from_int<T>(1), T(0), from_int<T>(3)})->Check());
 }
 
@@ -1116,10 +1111,6 @@ TYPED_TEST(host_vector_check, rejects_nan_and_infinity)
         EXPECT_FALSE(
             host_vector_of(std::vector<T>{from_int<T>(1), T(nan), from_int<T>(3)})->Check());
 
-        if constexpr(is_complex_v<T>)
-        {
-            KNOWN_BUG("numeric_limits<complex>::infinity() is zero, so no entry is infinite");
-        }
         EXPECT_FALSE(
             host_vector_of(std::vector<T>{from_int<T>(1), T(-inf), from_int<T>(3)})->Check());
     }

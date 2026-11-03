@@ -1736,8 +1736,6 @@ TYPED_TEST(host_matrix_csr, check_rejects_invalid_column_indices)
     negative.col[0] = -1;
     EXPECT_FALSE(negative.host_csr()->Check());
 
-    KNOWN_BUG("a column index equal to the number of columns passes");
-
     Csr<T> outside                      = general<T>(8);
     outside.col[outside.col.size() - 1] = outside.m;
     EXPECT_FALSE(outside.host_csr()->Check());
@@ -1762,8 +1760,6 @@ TYPED_TEST(host_matrix_csr, check_rejects_invalid_row_offsets_and_values)
         EXPECT_FALSE(A.host_csr()->Check()) << bad;
     }
 
-    KNOWN_BUG("Check compares the values with +infinity only");
-
     Csr<T> A = general<T>(8);
     A.val[3] = -std::numeric_limits<T>::infinity();
     EXPECT_FALSE(A.host_csr()->Check());
@@ -1783,6 +1779,45 @@ TYPED_TEST(host_matrix_csr, check_accepts_matrices_without_entries)
 
     HostMatrixCSR<T> unallocated(descriptor());
     EXPECT_TRUE(unallocated.Check());
+}
+
+namespace
+{
+    template <typename P>
+    class host_matrix_csr_values : public TypedBackendTest<P>
+    {
+    };
+}
+
+TYPED_TEST_SUITE(host_matrix_csr_values, HostOnly<FloatingTypes>, TypedName);
+
+// A stored zero is valid, an infinite or NaN real or imaginary part is not
+TYPED_TEST(host_matrix_csr_values, check_accepts_zeros_and_rejects_nan_and_infinity)
+{
+    using T     = typename TypeParam::value_type;
+    using R     = real_t<T>;
+    const R inf = std::numeric_limits<R>::infinity();
+    const R nan = std::numeric_limits<R>::quiet_NaN();
+
+    Csr<T> A(2);
+    A.add(0, T(1));
+    A.add(1, T(0));
+    A.end_row();
+    A.add(1, T(2));
+    A.end_row();
+    EXPECT_TRUE(A.host_csr()->Check());
+
+    std::vector<T> bad = {T(inf), T(-inf), T(nan)};
+    if constexpr(is_complex_v<T>)
+    {
+        bad.insert(bad.end(), {T(0, inf), T(0, -inf), T(0, nan)});
+    }
+    for(const T& v : bad)
+    {
+        Csr<T> B = A;
+        B.val[1] = v;
+        EXPECT_FALSE(B.host_csr()->Check()) << v;
+    }
 }
 
 TYPED_TEST(host_matrix_csr, info_names_the_class)

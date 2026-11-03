@@ -204,7 +204,7 @@ namespace rocalution
                     int col      = this->mat_.col[aj];
                     int prev_col = (aj > this->mat_.row_offset[ai]) ? this->mat_.col[aj - 1] : -1;
 
-                    if((col < 0) || (col > this->ncol_))
+                    if((col < 0) || (col >= this->ncol_))
                     {
                         // LCOV_EXCL_START
                         LOG_VERBOSE_INFO(
@@ -223,8 +223,7 @@ namespace rocalution
                         // LCOV_EXCL_STOP
                     }
 
-                    ValueType val = this->mat_.val[aj];
-                    if((val == std::numeric_limits<ValueType>::infinity()) || (val != val))
+                    if(!rocalution_is_finite(this->mat_.val[aj]))
                     {
                         // LCOV_EXCL_START
                         LOG_VERBOSE_INFO(
