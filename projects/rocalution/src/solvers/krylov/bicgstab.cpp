@@ -442,8 +442,8 @@ namespace rocalution
                     "BiCGStab omega == 0 || Nan || Inf !!! Updated solution only in p-direction");
 
                 // Update only for p
-                // x = x + alpha * p
-                x->AddScale(*p, alpha);
+                // x = x + alpha * z, z = M^-1 p
+                x->AddScale(*z, alpha);
 
                 op->Apply(*x, p);
                 p->ScaleAdd(static_cast<ValueType>(-1), rhs);

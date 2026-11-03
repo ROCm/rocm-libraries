@@ -1539,8 +1539,6 @@ TYPED_TEST(solvers, bicgstab_solves_a_system_that_its_preconditioned_first_half_
     EXPECT_NE(testing::internal::GetCapturedStdout().find("only in p-direction"),
               std::string::npos);
     EXPECT_EQ(out.iterations, 1);
-
-    KNOWN_BUG("the breakdown branch updates x along p instead of the preconditioned M^-1 p");
     expect_near(out.x, solution, scaled_tol<T>(1e-14));
 }
 
