@@ -1679,6 +1679,11 @@ _GFX942_3D_PP = {
     106: dict(
         _T128, tapk_pp_sched=5, tapk_pp_epi=2, xh_epi_lin=True, epi_lds_barriers=True
     ),
+    # 107-109: tapk_pingpong 1 / 2 / 3 with the plain loop (tapk_pp_sched 0;
+    # 109 split-K).
+    107: dict(_T128, tapk_pingpong=1),
+    108: dict(_T128, tapk_pingpong=2, lds_xor=False),
+    109: dict(_T128, tapk_pingpong=3, split_k=4),
 }
 
 
@@ -1814,7 +1819,7 @@ def _gfx942_3d_pp_spec(idx: int):
     )
     data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
     return (
-        DgradConvSpec(problem=p, data=data, **_PP_COMMON, **_GFX942_3D_PP[idx]),
+        DgradConvSpec(problem=p, data=data, **{**_PP_COMMON, **_GFX942_3D_PP[idx]}),
         "gfx942",
     )
 

@@ -597,6 +597,8 @@ static bool _dgrad_pp_a_partial(const rocke_dgrad_conv_spec_t* s)
     return chunks % bs != 0 && chunks % s->wave_size == 0;
 }
 
+static int _dgrad_xhalo_lds_rows(const rocke_dgrad_conv_spec_t* s);
+
 // Arch-aware spec validation (Python is_valid_dgrad_spec)
 // ---------------------------------------------------------------------------
 
@@ -736,6 +738,44 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         if(s->cshuffle_m_chunks < 1)
         {
             snprintf(reason, reason_cap, "cshuffle_m_chunks must be >= 1");
+            return false;
+        }
+    }
+    /* _xhalo_knob_conflict: xh_order, xh_stride_m and xh_tap_rsrc. */
+    {
+        const bool tpf13 = s->tapk_prefetch == 1 || s->tapk_prefetch == 3;
+        if(s->xh_order < 0 || s->xh_order > 7 || (s->xh_order && !(s->tapk_xhalo && tpf13))
+           || ((s->xh_order & 4) && s->tapk_prefetch != 3))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "xh_order is 0..7 and needs tapk_xhalo with tapk_prefetch 1 or 3");
+            return false;
+        }
+        const int mpw = (s->warp_m && s->warp_tile_m) ? s->tile_m / s->warp_m / s->warp_tile_m : 0;
+        if(s->xh_stride_m
+           && !(s->tapk_xhalo && tpf13 && (s->tapk_lds_ahead || s->xh_defer) && s->xh_a_k4
+                && (s->xh_epi == 1 || s->xh_epi == 3) && s->tapk_setprio != 2 && s->split_k == 1
+                && !s->xh_persist && (mpw == 2 || mpw == 4 || mpw == 8)
+                && s->tile_m % (16 * (mpw ? mpw : 1)) == 0
+                && _dgrad_xhalo_lds_rows(s) - s->tile_m <= 16 && s->wave_size == 64
+                && !s->lds_k_outer))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "xh_stride_m needs tapk_xhalo (tpf 1/3, tapk_lds_ahead or xh_defer, xh_a_k4, "
+                     "xh_epi 1 or 3, not setprio 2 / xh_persist), split_k 1, 2, 4 or 8 MFMAs per "
+                     "wave");
+            return false;
+        }
+        if(s->xh_tap_rsrc
+           && !(s->tapk_xhalo && tpf13 && s->xh_fast_a == 1 && s->xh_b_wide && s->xhalo_exact
+                && !s->xh_dlds && !s->xh_persist && s->split_k == 1 && !s->lds_k_outer))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "xh_tap_rsrc needs the x-halo prefetch loop with xh_fast_a 1, xh_b_wide, "
+                     "xhalo_exact");
             return false;
         }
     }
@@ -7470,6 +7510,12 @@ static rocke_kernel_def_t*
                 }
                 return;
             }
+            if(L->vector_axis_row && L->row_kpack <= 1)
+            {
+                rocke_i_set_err(
+                    b, ROCKE_ERR_VALUE, "tapk_pingpong lds_xor needs a col-mode or kpack loader");
+                return;
+            }
             for(int e = 0; e < st->count; ++e)
             {
                 rocke_value_t* sc = pp_swz(st->vecs[e].row, st->vecs[e].col);
@@ -8122,13 +8168,67 @@ static rocke_kernel_def_t*
             }
             const int half = k_atoms / 2;
             const int pps = spec->tapk_pp_sched;
-            if(pps == 0 || (pps == 7 && a_partial))
+            if(pps == 7 && a_partial)
             {
                 rocke_i_set_err(
                     b, ROCKE_ERR_VALUE, "tapk_pp_sched %d is Python-only (no C++ twin yet)", pps);
                 return NULL;
             }
-            if(pps == 7)
+            if(pps == 0)
+            {
+                /* the plain ping-pong loop: [mem A] loads + fragment reads,
+                 * [compute A], [mem B] store, [compute B]. */
+                for(int i = 0; i < n_st; ++i, ++n_it)
+                {
+                    pit[n_it].name = st_names[i];
+                    pit[n_it].init = nxt0[i];
+                }
+                rocke_for_t loop
+                    = rocke_b_scf_for_iter(b, c0, n_tiles, pc1, pit, n_it, "t", false, true);
+                rocke_b_region_enter(b, loop.body);
+                {
+                    rocke_value_t** iv = loop.iter_vars;
+                    rocke_value_t* st[4] = {iv[num_accs],
+                                            iv[num_accs + 1],
+                                            iv[num_accs + 2],
+                                            is_3d ? iv[num_accs + 3] : NULL};
+                    set_tile(st[0], st[1], st[2], st[3], NULL);
+                    rocke_ctl_staged_t sa, sb;
+                    load_tile(&sa, &sb);
+                    frag_reads();
+                    rocke_b_sched_barrier(b, 0);
+                    rocke_b_sync_lds_only(b);
+                    rocke_b_s_setprio(b, 1);
+                    rocke_value_t* acc_a[ROCKE_CONV_MAX_ACCS];
+                    mfmas(0, half, iv, acc_a);
+                    rocke_b_sched_barrier(b, 0);
+                    rocke_b_s_setprio(b, 0);
+                    rocke_b_sync_lds_only(b);
+                    store_tile(&sa, &sb, A_smem, B_smem);
+                    rocke_b_sched_barrier(b, 0);
+                    rocke_b_sync_lds_only(b);
+                    rocke_b_s_setprio(b, 1);
+                    rocke_value_t* acc_b[ROCKE_CONV_MAX_ACCS];
+                    mfmas(half, k_atoms, acc_a, acc_b);
+                    rocke_b_sched_barrier(b, 0);
+                    rocke_b_s_setprio(b, 0);
+                    rocke_b_sync_lds_only(b);
+                    rocke_value_t* nxt[4] = {};
+                    advance(st, nxt);
+                    rocke_value_t* y[256];
+                    int ny = 0;
+                    for(int i = 0; i < num_accs; ++i)
+                        y[ny++] = acc_b[i];
+                    for(int i = 0; i < n_st; ++i)
+                        y[ny++] = nxt[i];
+                    rocke_b_scf_yield(b, y, ny);
+                }
+                rocke_b_region_leave(b);
+                for(int i = 0; i < num_accs; i++)
+                    final_accs[i] = loop.op->results[i];
+                num_final = num_accs;
+            }
+            else if(pps == 7)
             {
                 /* _pp_three_ahead: tiles t+1 and t+2 ride in two staging
                  * register sets; two tiles per trip, an odd last tile in a

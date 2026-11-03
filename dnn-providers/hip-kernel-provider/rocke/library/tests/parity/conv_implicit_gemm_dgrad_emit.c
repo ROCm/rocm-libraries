@@ -218,7 +218,7 @@ static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch
     return 0;
 }
 
-/* 71-76, 84-94, 97-106: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
+/* 71-76, 84-94, 97-109: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
  * Python emitter (the table is there). */
 static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
@@ -257,6 +257,14 @@ static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** a
         spec->tapk_ztrim = 1;
         spec->tapk_pp_bslab = 3;
         spec->cshuffle_m_chunks = 7;
+        return 0;
+    }
+    if(idx >= 107 && idx <= 109)
+    {
+        /* tapk_pingpong 1 / 2 / 3, tapk_pp_sched 0 */
+        spec->tapk_pingpong = idx - 106;
+        spec->lds_xor = idx != 108;
+        spec->split_k = idx == 109 ? 4 : 1;
         return 0;
     }
     if(idx == 106)
@@ -502,7 +510,7 @@ static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** 
     }
     if(idx >= 77 && idx <= 83)
         return make_cfg_3d_xh(idx, spec, arch);
-    if((idx >= 71 && idx <= 76) || (idx >= 84 && idx <= 94) || (idx >= 97 && idx <= 106))
+    if((idx >= 71 && idx <= 76) || (idx >= 84 && idx <= 94) || (idx >= 97 && idx <= 109))
         return make_cfg_3d_pp(idx, spec, arch);
     if(idx >= 57 && idx <= 70)
         return make_cfg_3d(idx, spec, arch);
