@@ -56,7 +56,7 @@ public:
      *
      * An id already claimed keeps the incumbent and logs the loser rather than throwing:
      * two engines hashing onto one id (RFC 0003) is an authoring collision, and this is
-     * the backstop for pairs the descriptor policy can't see -- RFC 0020 §10.2.1 drops
+     * the backstop for pairs the descriptor policy can't see -- RFC 0020 §13.2.1 drops
      * every UED in a name collision before it reaches this list, but two hand-written
      * engines have no such gate, and refusing both here would take a working engine down
      * to punish one duplicate.
@@ -91,7 +91,20 @@ public:
         std::vector<int64_t> applicable;
         for(const auto& [id, engine] : _engines)
         {
-            if(engine->isApplicable(handle, opGraph))
+            bool isApplicable = false;
+            try
+            {
+                isApplicable = engine->isApplicable(handle, opGraph);
+            }
+            catch(const std::exception& e)
+            {
+                // One engine failing its check must not hide the plugin's other engines.
+                HIPDNN_PLUGIN_LOG_WARN("engine manager: "
+                                       << describeEngine(id, {})
+                                       << " threw from isApplicable and is skipped: " << e.what());
+            }
+
+            if(isApplicable)
             {
                 applicable.push_back(id);
             }

@@ -86,9 +86,9 @@ typedef struct rocke_mfma_atom
  *   m / n        -> self.m / self.n
  *   k_per_xdlops -> self.k
  *   is_f4f6      -> self.dtype_in in ("fp4", "fp6")
- *   mfma_cycle   -> C_MFMA_Inst_Cycle table (blkgemmpipe_scheduler.hpp:63-74);
- *                   returns -1 for shapes outside NPerXDL in {16, 32} (the
- *                   Python NotImplementedError path).
+ *   mfma_cycle   -> C_MFMA_Inst_Cycle table (blkgemmpipe_scheduler.hpp:63-74),
+ *                   32 for the fp64 atom; returns -1 for shapes outside
+ *                   NPerXDL in {16, 32} (the Python NotImplementedError path).
  */
 const char* rocke_mfma_atom_dtype_in(const rocke_mfma_atom_t* atom);
 int rocke_mfma_atom_m(const rocke_mfma_atom_t* atom);
@@ -109,7 +109,8 @@ bool rocke_mfma_atom_is_f4f6(const rocke_mfma_atom_t* atom);
  *
  * Lookup an atom by (dtype_in, m, n, k) over the static MFMA_ATOMS catalog,
  * after canonicalising the dtype spelling through _DTYPE_ALIAS
- * (fp8->fp8e4m3, bf8->bf8e5m2, fp16->f16, bfloat16->bf16, identity otherwise).
+ * (fp8->fp8e4m3, bf8->bf8e5m2, fp16->f16, bfloat16->bf16, f64/double->fp64,
+ * identity otherwise).
  *
  * Pure spelling: returns a pointer to the static catalog entry, or NULL if no
  * atom matches (the Python ValueError path). No builder, no error state. */
@@ -126,20 +127,22 @@ const rocke_mfma_atom_t*
  * Python:
  *
  *     def c_warp_params(atom) -> (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane):
- *         key = (atom.m, atom.n)
+ *         key = (atom.m, atom.n, atom.dtype_out)
  *         if key not in _C_WARP_PARAMS: raise NotImplementedError(...)
  *         m0, m_lane, m1, n_lane = _C_WARP_PARAMS[key]
  *         if m0 * m1 != atom.c_per_lane: raise ValueError(...)
  *         return m0, m_lane, m1, n_lane
  *
  * Table:
- *     (16, 16): (1, 4, 4, 16)
- *     (32, 32): (4, 2, 4, 32)
+ *     (16, 16, "f32"): (1, 4, 4, 16)
+ *     (32, 32, "f32"): (4, 2, 4, 32)
+ *     (16, 16, "f64"): (4, 4, 1, 16)
  *
  * On success writes the four constants to the out-params (any may be NULL to
- * skip) and returns ROCKE_OK. Returns ROCKE_ERR_NOTIMPL if (atom->m, atom->n) is not
- * in the table (the batched 4x4 atom and every non-square shape), and
- * ROCKE_ERR_VALUE if kCM0PerLane*kCM1PerLane != atom->c_per_lane. On any error the
+ * skip) and returns ROCKE_OK. Returns ROCKE_ERR_NOTIMPL if
+ * (atom->m, atom->n, atom->dtype_out) is not in the table (the batched 4x4 atom
+ * and every non-square shape), and ROCKE_ERR_VALUE if
+ * kCM0PerLane*kCM1PerLane != atom->c_per_lane. On any error the
  * out-params are left untouched. `atom` must be non-NULL. */
 rocke_status_t rocke_c_warp_params(const rocke_mfma_atom_t* atom,
                                    int* out_kCM0PerLane,

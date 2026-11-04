@@ -108,6 +108,13 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         raise ValueError("kernel spec K/V storage dtype disagrees with problem")
     if bool(spec.fp8_fnuz) != bool(problem.fp8_fnuz):
         raise ValueError("tuning wrapper FP8 encoding disagrees with problem")
+    if spec.path == "2d":
+        spec_lse = bool(getattr(kernel_spec, "emit_lse", False))
+        if spec_lse != problem.emit_lse:
+            raise ValueError(
+                f"kernel_spec.emit_lse={spec_lse} disagrees with "
+                f"problem.emit_lse={problem.emit_lse}"
+            )
 
     reduce_spec = spec.reduce_spec
     if reduce_spec is not None:
@@ -419,6 +426,10 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
+    # FP8 K/V dequant scales (per tensor); the runner defaults them to 1.0, so
+    # they must be forwarded or an FP8 cache is read unscaled.
+    k_scale = float(kwargs.get("k_scale", 1.0))
+    v_scale = float(kwargs.get("v_scale", 1.0))
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
@@ -438,6 +449,8 @@ def bind_tuning_attention_torch(
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
             backend=backend,
             stream=int(_kw.get("stream", stream)),
+            k_scale=float(_kw.get("k_scale", k_scale)),
+            v_scale=float(_kw.get("v_scale", v_scale)),
             tuning_spec=spec,
             lse=_kw.get("lse", tensors.get("lse")),
         )
