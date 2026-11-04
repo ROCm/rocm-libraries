@@ -523,11 +523,25 @@ def _findPartitionZeroPrefetchOrder(preMfmaOrders, emittedModules):
     return None
 
 
+def _isCurrentPartitionLocalRead(em) -> bool:
+    """A local read consumed by the partition that issues it.
+
+    Scale reads and the current cell's A/B reads carry the issuing
+    partition as their target. Next-partition prefetch does not.
+    """
+    if em.opType != "lr":
+        return False
+    source = em.source
+    return getattr(source, "targetPartition", None) == getattr(source, "partition", None)
+
+
 def _splitPartitionZeroPrefetch(preMfmaOrders, emittedModules):
     """Split partition 0's prefetch into a pre-MFMA prefix and its reads.
 
-    The returned sync list is the barrier the phase scheduler may move to
-    after the first MFMA, once the epoch wait owns the ordering.
+    Reads this cell consumes stay in the prefix, ahead of the local-read
+    wait. Only next-partition prefetch becomes payload. The returned sync
+    list is the barrier the phase scheduler may move to after the first
+    MFMA, once the epoch wait owns the ordering.
     """
     order = _findPartitionZeroPrefetchOrder(preMfmaOrders, emittedModules)
     if order is None:
@@ -535,23 +549,24 @@ def _splitPartitionZeroPrefetch(preMfmaOrders, emittedModules):
 
     prefixInsts = []
     syncInsts = []
-    for opType in ("wait_gr", "sync", "wait_lr"):
-        for mid in order:
-            em = emittedModules[mid]
-            if em.opType != opType:
-                continue
+    payloadOrder = []
+    for mid in order:
+        em = emittedModules[mid]
+        if _isCurrentPartitionLocalRead(em):
             for inst in em.instructions:
-                if opType == "wait_lr" and _isWaitCnt(inst):
+                prefixInsts.append((mid, inst))
+            continue
+        if em.opType in ("wait_gr", "sync", "wait_lr"):
+            for inst in em.instructions:
+                if em.opType == "wait_lr" and _isWaitCnt(inst):
                     inst.dscnt = 0
-                    inst.comment = "Wait for preloop LR before p0 MFMA"
+                    inst.comment = "Wait for current-cell LR before p0 MFMA"
                 item = (mid, inst)
                 prefixInsts.append(item)
-                if opType == "sync":
+                if em.opType == "sync":
                     syncInsts.append(item)
-    payloadOrder = [
-        mid for mid in order
-        if emittedModules[mid].opType not in ("wait_gr", "sync", "wait_lr")
-    ]
+            continue
+        payloadOrder.append(mid)
     return (order, prefixInsts, payloadOrder,
             _flattenPath(payloadOrder, emittedModules), syncInsts)
 
