@@ -24,12 +24,11 @@ from __future__ import annotations
 
 import argparse
 import base64
-import binascii
 import hashlib
 import json
-import struct
 import math
 import statistics
+import struct
 import sys
 import traceback
 from collections import Counter, defaultdict
@@ -49,20 +48,24 @@ from codegen.models import EVERY_ARCH  # noqa: E402
 
 # WinnerCacheFile.hpp detail::WINNER_LINE_*: line, device and entry fields; version.
 _LINE_FIELDS = frozenset({"v", "graph", "device", "entries"})
-_ENTRY_FIELDS = frozenset({"kernel_id", "pack_id", "dispatch_id", "time_ms"})
-# WINNER_LINE_FORMAT_VERSION -> the device fields a line of that version carries. Version 2
-# added the memory fields DeviceKey compares; the rankings read the same either way.
-_V1_DEVICE_FIELDS = frozenset({"gcn_arch_name", "warp_size", "multi_processor_count"})
-_DEVICE_FIELDS_BY_VERSION = {
-    1: _V1_DEVICE_FIELDS,
-    2: _V1_DEVICE_FIELDS
-    | {
+_DEVICE_FIELDS = frozenset(
+    {
+        "gcn_arch_name",
+        "warp_size",
+        "multi_processor_count",
         "total_global_mem",
         "memory_bus_width",
         "memory_clock_rate",
         "shared_mem_per_block",
-    },
-}
+    }
+)
+_ENTRY_FIELDS = frozenset({"kernel_id", "pack_id", "dispatch_id", "time_ms"})
+_LINE_FORMAT_VERSION = 2
+# GraphContentKey.hpp CONTENT_FIELD: the graph half of a line, the raw Graph flatbuffer.
+_GRAPH_FIELDS = frozenset({"content_base64"})
+# graph.fbs `table Graph`: `id: Uuid (cache_ignore)` is field 9, an inline [ubyte:16].
+_GRAPH_ID_FIELD = 9
+_GRAPH_ID_BYTES = 16
 
 EPSILON_GRID = tuple(i / 100 for i in range(51)) + (math.inf,)
 # A healthy elapsed may be 0 (BenchmarkPlan.hpp); ratios use this floor instead.
@@ -224,40 +227,38 @@ def _require_fields(obj, expected: frozenset, where: str) -> None:
         raise ReduceError(f"{where}: missing {missing}")
 
 
-# graph_generated.h Graph::VT_ID and the size of its inline `Uuid` struct (graph.fbs).
-_GRAPH_ID_VTABLE_OFFSET = 22
-_GRAPH_ID_BYTES = 16
+def graph_identity(graph, where: str) -> str:
+    """The graph half of a ranking's key: the line's Graph bytes with ``Graph.id`` zeroed.
 
-
-def _graph_key(graph, where: str):
-    """``graph`` with the serialized Graph's ``id`` zeroed.
-
-    hipDNN mints ``Graph.id`` at finalization, so the same graph serializes to different
-    bytes in each run, while GraphContentKey compares it as equal (the field is
-    ``cache_ignore``). Every other field of a sweep's graph is the staged file's, the same
-    in every round. A graph without ``content_base64`` is keyed as given."""
-    content = graph.get("content_base64") if isinstance(graph, dict) else None
-    if not isinstance(content, str):
-        return graph
+    hipDNN mints a fresh ``Graph.id`` each time it finalizes a graph, and the C++ key
+    compares content with that ``(cache_ignore)`` field skipped, but a line keeps the raw
+    bytes. Every sweep round finalizes the same graph file again, so rounds only match
+    once the id is cleared.
+    """
+    _require_fields(graph, _GRAPH_FIELDS, f"{where} graph")
     try:
-        buffer = bytearray(base64.b64decode(content, validate=True))
-        table = struct.unpack_from("<I", buffer, 0)[0]
-        vtable = table - struct.unpack_from("<i", buffer, table)[0]
-        vtable_bytes = struct.unpack_from("<H", buffer, vtable)[0]
-        field = 0
-        if vtable_bytes > _GRAPH_ID_VTABLE_OFFSET:
-            field = struct.unpack_from("<H", buffer, vtable + _GRAPH_ID_VTABLE_OFFSET)[
-                0
-            ]
-        if field and table + field + _GRAPH_ID_BYTES > len(buffer):
-            raise ValueError("Graph.id runs past the buffer")
-    except (binascii.Error, struct.error, ValueError) as exc:
+        content = bytearray(base64.b64decode(graph["content_base64"], validate=True))
+        table = struct.unpack_from("<I", content, 0)[0]
+        vtable = table - struct.unpack_from("<i", content, table)[0]
+        (vtable_size,) = struct.unpack_from("<H", content, vtable)
+        slot = 4 + 2 * _GRAPH_ID_FIELD
+        offset = (
+            struct.unpack_from("<H", content, vtable + slot)[0]
+            if slot < vtable_size
+            else 0
+        )
+    except (ValueError, TypeError, struct.error) as exc:
         raise ReduceError(
-            f"{where}: graph content is not a Graph buffer ({exc})"
+            f"{where}: graph content is not a Graph flatbuffer ({exc})"
         ) from exc
-    if field:
-        buffer[table + field : table + field + _GRAPH_ID_BYTES] = bytes(_GRAPH_ID_BYTES)
-    return {**graph, "content_base64": base64.b64encode(bytes(buffer)).decode("ascii")}
+    if offset:
+        start = table + offset
+        if start + _GRAPH_ID_BYTES > len(content):
+            raise ReduceError(
+                f"{where}: Graph.id runs past the end of the graph content"
+            )
+        content[start : start + _GRAPH_ID_BYTES] = bytes(_GRAPH_ID_BYTES)
+    return base64.b64encode(bytes(content)).decode("ascii")
 
 
 def read_shard(path) -> dict:
@@ -281,15 +282,12 @@ def read_shard(path) -> dict:
         if not isinstance(doc, dict):
             raise ReduceError(f"{where}: expected a JSON object")
         version = doc.get("v")
-        if type(version) is not int or version not in _DEVICE_FIELDS_BY_VERSION:
+        if type(version) is not int or version != _LINE_FORMAT_VERSION:
             raise ReduceError(
-                f"{where}: line format v={version!r}, expected one of "
-                f"{sorted(_DEVICE_FIELDS_BY_VERSION)}"
+                f"{where}: line format v={version!r}, expected {_LINE_FORMAT_VERSION}"
             )
         _require_fields(doc, _LINE_FIELDS, where)
-        _require_fields(
-            doc["device"], _DEVICE_FIELDS_BY_VERSION[version], f"{where} device"
-        )
+        _require_fields(doc["device"], _DEVICE_FIELDS, f"{where} device")
         if not isinstance(doc["entries"], list):
             raise ReduceError(f"{where}: 'entries' must be a list")
         for index, entry in enumerate(doc["entries"]):
@@ -298,7 +296,7 @@ def read_shard(path) -> dict:
             if type(t) not in (int, float) or not math.isfinite(t) or t < 0:
                 raise ReduceError(f"{where} entries[{index}]: bad time_ms {t!r}")
         key = json.dumps(
-            [_graph_key(doc["graph"], where), doc["device"]], sort_keys=True
+            [graph_identity(doc["graph"], where), doc["device"]], sort_keys=True
         )
         records[key] = doc["entries"]
     return records
@@ -872,7 +870,8 @@ def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
 
 def write_selection(selection, names, out) -> int:
     """Write the selection restricted to ``names``, factorised and round-trip
-    checked; returns its line count."""
+    checked; returns its line count. The compact form has no per-kernel
+    ``provenance``, so a kept kernel's is not carried (see the README)."""
     import factorise_config
     from codegen.config_loader import ConfigError
 
@@ -979,15 +978,17 @@ def _single_round_warning(noise: NoiseFloor) -> str | None:
     )
 
 
+def graph_label(identity: str) -> str:
+    """A short, stable name for one `graph_identity`: its content hash."""
+    return hashlib.sha256(identity.encode()).hexdigest()[:12]
+
+
 def _graph_at_device(key: str) -> str:
-    """``graph@device`` for one ranking key, a JSON ``[graph, device]`` pair."""
+    """``graph@device`` for one ranking key, a JSON ``[graph identity, device]`` pair."""
     graph, device = json.loads(key)
-
-    def label(doc, field):
-        shown = doc.get(field) if isinstance(doc, dict) else None
-        return shown if isinstance(shown, str) else json.dumps(doc, sort_keys=True)
-
-    return f"{label(graph, 'key')}@{label(device, 'gcn_arch_name')}"
+    shown = device.get("gcn_arch_name") if isinstance(device, dict) else None
+    arch = shown if isinstance(shown, str) else json.dumps(device, sort_keys=True)
+    return f"{graph_label(graph)}@{arch}"
 
 
 def _applied_loss(applied, rankings) -> tuple:

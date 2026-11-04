@@ -5,9 +5,11 @@
 
 import base64
 import json
+import re
 import shutil
 import struct
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -21,7 +23,15 @@ import variant_reduce  # noqa: E402
 
 PACK_ID = "3d3ae611-244d-558b-958c-bd385a92913a"
 DISPATCH_ID = "451e1a7b-429c-5d37-85b3-afc5bbdbbdb0"
-DEVICE = {"gcn_arch_name": "gfx950", "warp_size": 64, "multi_processor_count": 256}
+DEVICE = {
+    "gcn_arch_name": "gfx950",
+    "warp_size": 64,
+    "multi_processor_count": 256,
+    "total_global_mem": 309220868096,
+    "memory_bus_width": 8192,
+    "memory_clock_rate": 1900000,
+    "shared_mem_per_block": 163840,
+}
 
 # (dtype, tile, unroll, default); tile is a `divides` knob, unroll is not.
 KERNELS = [
@@ -43,6 +53,19 @@ GRAPHS = {
 
 def kname(dtype, tile, unroll):
     return f"softmax_{dtype}_t{tile}_u{unroll}"
+
+
+def graph_content(name, graph_id):
+    """A minimal Graph flatbuffer: a vtable naming only field 9 (`id`), then ``name``."""
+    vtable = struct.pack("<HH", 24, 20) + struct.pack("<10H", *([0] * 9 + [4]))
+    table = struct.pack("<i", 24) + graph_id + name.encode()
+    return base64.b64encode(struct.pack("<I", 28) + vtable + table).decode("ascii")
+
+
+def identity(name):
+    """`variant_reduce.graph_identity` of the fixture graph ``name``, whatever its id."""
+    graph = {"content_base64": graph_content(name, bytes(16))}
+    return variant_reduce.graph_identity(graph, "fixture")
 
 
 def build(
@@ -87,6 +110,8 @@ def build(
         phases.append(("correctness", 1, {"g_perf": [(checked, 1.0)]}))
     written = []
     for kind, number, graphs in phases:
+        # hipDNN mints a fresh Graph.id per finalization, so every round's id differs.
+        graph_id = uuid.uuid4().bytes
         attempt = tmp_path / "sweep" / "attempts" / f"{kind}__c__full__r{number}-0001"
         shard = attempt / "winners" / "ingestor-winners" / "1.0.0" / "e" / "gfx950"
         shard.mkdir(parents=True)
@@ -101,7 +126,8 @@ def build(
             entries = [
                 {"kernel_id": f"id-{kname(*k)}", **ids, "time_ms": t} for k, t in ranked
             ]
-            line = {"v": 1, "graph": {"key": graph}, "device": DEVICE}
+            line = {"v": 2, "graph": {"content_base64": graph_content(graph, graph_id)}}
+            line["device"] = DEVICE
             line["entries"] = entries
             if edit:
                 edit(line)
@@ -267,7 +293,8 @@ def test_applied_rules_whose_union_loses_more_than_epsilon_are_refused(
     assert variant_reduce.main(args + ["--apply-rules", chosen]) == 1
     assert not (tmp_path / "reduced.yaml").exists()
     report = (tmp_path / "report.md").read_text()
-    assert "graph_alpha" in report and "graph_beta" in report
+    for name in ("graph_alpha", "graph_beta"):
+        assert variant_reduce.graph_label(identity(name)) in report
     assert "applied" in capsys.readouterr().err
 
 
@@ -521,13 +548,13 @@ def test_a_graph_ranked_by_two_corpora_in_a_round_takes_the_later_corpus(tmp_pat
     path.write_text(json.dumps(record))
     reduction = variant_reduce.analyse(*args[1:6:2])
     assert reduction.duplicate_keys == 1
-    (perf,) = [r for r in reduction.rankings if "g_perf" in r.key]
+    (perf,) = [r for r in reduction.rankings if identity("g_perf") in r.key]
     assert (perf.corpus, perf.entries[0][0]) == ("d", kname("fp32", 128, 1))
 
 
 def test_a_record_with_no_entries_is_skipped_not_fatal(tmp_path):
     def empty(line):
-        if line["graph"]["key"] == "g_noise":
+        if variant_reduce.graph_identity(line["graph"], "edit") == identity("g_noise"):
             line["entries"] = []
 
     args = build(tmp_path, empty)
@@ -536,66 +563,6 @@ def test_a_record_with_no_entries_is_skipped_not_fatal(tmp_path):
     assert len(reduction.rankings) == 2
     assert variant_reduce.main(args) == 0
     assert "records with no usable entry: 1" in (tmp_path / "report.md").read_text()
-
-
-def test_a_version_2_line_reads_like_version_1(tmp_path):
-    """WinnerCacheFile.hpp writes v=2, which adds the DeviceKey memory fields."""
-
-    def v2(line):
-        line["v"] = 2
-        line["device"] = {
-            **line["device"],
-            "total_global_mem": 1 << 34,
-            "memory_bus_width": 8192,
-            "memory_clock_rate": 1300000,
-            "shared_mem_per_block": 65536,
-        }
-
-    assert variant_reduce.main(build(tmp_path, v2)) == 0
-
-
-def test_a_version_2_line_without_its_memory_fields_exits_2(tmp_path, capsys):
-    def edit(line):
-        line["v"] = 2
-
-    assert variant_reduce.main(build(tmp_path, edit)) == 2
-    assert "missing" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("version", [0, 3, "2"])
-def test_an_unknown_line_version_exits_2(tmp_path, capsys, version):
-    def edit(line):
-        line["v"] = version
-
-    assert variant_reduce.main(build(tmp_path, edit)) == 2
-    assert f"line format v={version!r}" in capsys.readouterr().err
-
-
-def _graph_buffer(graph_id: bytes, payload: int = 0) -> str:
-    """A minimal serialized Graph: a vtable with every slot through VT_ID (22) and the
-    table holding only `id` (16 bytes) plus one u32 in an unrelated slot."""
-    # Slots VT 4..18 absent, VT 20 (min_required_engine_api_version's slot, reused here
-    # as an opaque u32) at table+20, VT_ID at table+4.
-    vtable = struct.pack("<HH", 24, 24) + struct.pack("<10H", *([0] * 8), 20, 4)
-    table = 4 + len(vtable)
-    body = struct.pack("<i", table - 4) + graph_id + struct.pack("<I", payload)
-    return base64.b64encode(struct.pack("<I", table) + vtable + body).decode("ascii")
-
-
-def test_graphs_differing_only_in_their_minted_id_share_a_key():
-    a = {"content_base64": _graph_buffer(b"\x11" * 16)}
-    b = {"content_base64": _graph_buffer(b"\x22" * 16)}
-    other = {"content_base64": _graph_buffer(b"\x11" * 16, payload=7)}
-    key = variant_reduce._graph_key
-    assert key(a, "a") == key(b, "b")
-    assert key(a, "a") != key(other, "other")
-    assert key({"key": "g"}, "plain") == {"key": "g"}
-
-
-@pytest.mark.parametrize("content", ["not base64!", base64.b64encode(b"\x00").decode()])
-def test_graph_content_that_is_not_a_graph_buffer_is_unusable(content):
-    with pytest.raises(variant_reduce.ReduceError, match="not a Graph buffer"):
-        variant_reduce._graph_key({"content_base64": content}, "where")
 
 
 def test_equal_gains_take_the_smaller_kernel_name_first(tmp_path):
@@ -704,7 +671,13 @@ def test_a_multi_launch_selection_writes_and_reloads_its_launches(tmp_path):
     "edit, reduction, extra, message",
     [
         (lambda d: d["entries"][0].update(pack_id="0"), True, [], "stale ranking"),
-        (lambda d: d.update(v=3), True, [], "line format v=3"),
+        (lambda d: d.update(v=1), True, [], "line format v=1"),
+        (
+            lambda d: d["graph"].update(content_base64="AAAA"),
+            True,
+            [],
+            "not a Graph flatbuffer",
+        ),
         (
             lambda d: d["entries"][0].update(score=1),
             True,
@@ -714,8 +687,41 @@ def test_a_multi_launch_selection_writes_and_reloads_its_launches(tmp_path):
         (None, False, [], "'reduction'"),
         (None, True, ["--apply-rules", "R99"], "R99"),
     ],
-    ids=["stale-pack-id", "line-v3", "unknown-field", "no-reduction", "bad-rule"],
+    ids=[
+        "stale-pack-id",
+        "line-v1",
+        "bad-graph",
+        "unknown-field",
+        "no-reduction",
+        "bad-rule",
+    ],
 )
 def test_unusable_input_exits_2(tmp_path, capsys, edit, reduction, extra, message):
     assert variant_reduce.main(build(tmp_path, edit, reduction) + extra) == 2
     assert message in capsys.readouterr().err
+
+
+def test_graph_identity_ignores_the_graph_id_and_nothing_else():
+    """Rounds match on content: a re-minted id is the same graph, other bytes are not."""
+    one, two = uuid.uuid4().bytes, uuid.uuid4().bytes
+    same = variant_reduce.graph_identity(
+        {"content_base64": graph_content("g", one)}, "x"
+    )
+    assert same == variant_reduce.graph_identity(
+        {"content_base64": graph_content("g", two)}, "x"
+    )
+    assert same != variant_reduce.graph_identity(
+        {"content_base64": graph_content("h", one)}, "x"
+    )
+
+
+def test_the_graph_id_slot_is_graph_fbs_field_order():
+    """The zeroed slot is `id`'s position in `table Graph`, an inline 16-byte struct."""
+    schema = Path(__file__).resolve().parents[3] / "flatbuffers_sdk/schemas/graph.fbs"
+    text = schema.read_text(encoding="utf-8")
+    body = re.search(r"^table Graph \{(.*?)^\}", text, re.S | re.M).group(1)
+    fields = re.findall(r"^\s*(\w+)\s*:\s*(\w+|\[[^\]]+\])", body, re.M)
+    assert [name for name, _ in fields].index("id") == variant_reduce._GRAPH_ID_FIELD
+    assert dict(fields)["id"] == "Uuid"
+    uuid_struct = re.search(r"^struct Uuid \{(.*?)^\}", text, re.S | re.M).group(1)
+    assert "[ubyte:16]" in uuid_struct and variant_reduce._GRAPH_ID_BYTES == 16

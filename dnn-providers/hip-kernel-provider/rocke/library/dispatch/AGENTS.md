@@ -273,10 +273,15 @@ spec, and a test that calls `assert_tuning_contract`. `common.py` holds what eve
 shares (request, spec, gates) and imports none of the arch modules, so assembly
 order does not matter. `generic.py` is for candidates declaring more than one arch --
 the two unified paths and `d256_decode` -- which is not the same as portable:
-each still lists its arches explicitly, because there is no family wildcard.
+`d256_decode` lists its arches explicitly, because there is no family wildcard.
+Naming a generic target (`gfx11-generic`) is not a wildcard: `listed_arch_for`
+admits only the processors whose rows point at it and so share its facts; a
+target with facts of its own is covered only when it is named.
 
-The two generic candidates declare every known arch on purpose: they select a
-**path**, and `attention_unified` picks the concrete backend downstream from the
+The two generic candidates cover every known arch on purpose. They declare every
+target with facts of its own (`arches_with_own_facts()`), and `listed_arch_for`
+admits each other processor through the generic target its row points at. They
+select a **path**, and `attention_unified` picks the concrete backend downstream from the
 running device (wave64 MFMA on gfx942/gfx950, wave32 WMMA on gfx1250, the
 arch-neutral scalar kernel elsewhere). They are an explicit, tested exception to
 the wave-size consistency invariant.

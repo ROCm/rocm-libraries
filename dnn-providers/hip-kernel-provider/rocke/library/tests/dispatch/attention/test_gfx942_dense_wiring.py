@@ -35,6 +35,7 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
+from dispatch.attention.gfx942_dense import _base_spec
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     attention_dense_cache_key,
@@ -205,16 +206,39 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             ok, why = _candidate().admits(_req(sliding_window=128, use_sinks=True))
             self.assertTrue(ok, why)
 
-    def test_rejects_ragged_sequence_length(self):
-        """The default spec sets ragged=True for any non-256-multiple
-        self-attention length. The kernel must decline, not select-then-fail.
+    def test_rejects_a_partial_tile_and_names_the_length(self):
+        """The default spec sets ragged=True for any self-attention length that is
+        not a tile multiple. The kernel must decline, not select-then-fail.
         Capability cannot see this one: it is a property of the BUILT spec, so
-        it stays in the predicate."""
+        it stays in the predicate. The graph is not ragged, so the reason names
+        the length and the tile instead of saying "ragged"."""
+        # The default tile depends on the shape (128 rows when the 256-row grid
+        # would leave CUs idle), so the expected tile is read from the default spec
+        # the factory builds (dispatch refuses it, so it cannot come from dispatch).
+        # 1152 is a block_n multiple, so only the query length is named there.
         with _Gfx942Arch():
-            ok, why = _candidate().admits(_req(seqlen_q=1000, seqlen_k=1000))
-            self.assertFalse(ok)
-            self.assertNotIn("capability", why)
-            self.assertIn("ragged", why)
+            for seqlen in (1152, 1000):
+                with self.subTest(seqlen=seqlen):
+                    req = _req(seqlen_q=seqlen, seqlen_k=seqlen)
+                    spec = _base_spec(req)
+                    self.assertNotEqual(seqlen % spec.block_m, 0)
+                    ok, why = _candidate().admits(req)
+                    self.assertFalse(ok)
+                    self.assertNotIn("capability", why)
+                    self.assertNotIn("ragged", why)
+                    self.assertIn(
+                        f"seqlen_q {seqlen} is not a multiple of block_m "
+                        f"{spec.block_m}",
+                        why,
+                    )
+                    kv_part = (
+                        f"seqlen_kv {seqlen} is not a multiple of block_n "
+                        f"{spec.block_n}"
+                    )
+                    if seqlen % spec.block_n:
+                        self.assertIn(kv_part, why)
+                    else:
+                        self.assertNotIn("seqlen_kv", why)
 
 
 class TestGfx942BottomRightSafety(unittest.TestCase):
