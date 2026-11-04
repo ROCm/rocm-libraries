@@ -23,8 +23,8 @@
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-! ROCRAND_FORTRAN_EXACT_VERSION is set only in-tree, where the module and the
-! library come from the same headers; standalone a mismatch is only reported.
+! A version mismatch between the module and the library is only reported,
+! unless ROCRAND_FORTRAN_EXACT_VERSION is set.
 !
 ! This is a pure query routine that touches no device memory, so the Fortran
 ! 2008 variant is identical to the Fortran 2003 one apart from the banner.
