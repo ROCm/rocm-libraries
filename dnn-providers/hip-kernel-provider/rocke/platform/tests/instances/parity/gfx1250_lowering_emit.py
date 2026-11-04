@@ -530,6 +530,37 @@ def build_tdm_iterate(b: IRBuilder) -> None:
 CONFIGS.append((build_tdm_iterate, "gfx1250"))
 
 
+def build_tdm_iterations(b: IRBuilder) -> None:
+    """An iterate-mode TDM load whose iteration count is a runtime value."""
+    src = b.param("src", PtrType(I8, "global"), readonly=True, align=16)
+    dim0 = b.param("dim0", I32)
+    dim1 = b.param("dim1", I32)
+    stride = b.param("stride", I32)
+    iterations = b.param("iterations", I32)
+    lds = b.smem_addr_of(b.smem_alloc(I8, [8 * 2064], name_hint="tile"))
+    b.tensor_load_to_lds(
+        *b.tdm_descriptor_2d(
+            src,
+            lds,
+            elem_bytes=1,
+            tensor_dim0=dim0,
+            tensor_dim1=dim1,
+            row_stride=stride,
+            tile_dim0=256,
+            tile_dim1=8,
+            iterate_count=8,
+            lds_increment=2064,
+            global_increment=b.mul(stride, b.const_i32(8)),
+            iterations=iterations,
+        )
+    )
+    b.s_wait_tensorcnt(0)
+    b.ret()
+
+
+CONFIGS.append((build_tdm_iterations, "gfx1250"))
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

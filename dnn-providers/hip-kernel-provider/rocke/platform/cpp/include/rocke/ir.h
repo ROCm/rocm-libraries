@@ -1743,13 +1743,16 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
 /* Optional rocke_b_tdm_descriptor_2d_ex fields (zero-initialise for the
  * defaults). ``workgroup_mask_value`` (i32, wave-uniform) is ORed into the
  * static mask. ``iterate_count`` > 0 enables iterate mode with
- * ``lds_increment`` / ``global_increment`` (i32 value) in elements. */
+ * ``lds_increment`` / ``global_increment`` (i32 value) in elements.
+ * ``iterations`` (i32, wave-uniform, 1..iterate_count) runs fewer at run
+ * time; NULL runs ``iterate_count``. */
 typedef struct rocke_tdm_descriptor_opts
 {
     rocke_value_t* workgroup_mask_value;
     int iterate_count;
     uint32_t lds_increment;
     rocke_value_t* global_increment;
+    rocke_value_t* iterations;
 } rocke_tdm_descriptor_opts_t;
 int rocke_b_tdm_descriptor_2d_ex(rocke_ir_builder_t* b,
                                  rocke_value_t* global_ptr,

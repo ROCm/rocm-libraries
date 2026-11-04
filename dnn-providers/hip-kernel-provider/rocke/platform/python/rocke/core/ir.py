@@ -5179,6 +5179,7 @@ class IRBuilder:
         iterate_count: int = 0,
         lds_increment: int = 0,
         global_increment: Value | None = None,
+        iterations: Value | None = None,
     ) -> tuple[Value, Value, Value, Value, Value]:
         """Build the five D# groups for a rank-2 TDM tile transfer.
 
@@ -5201,7 +5202,9 @@ class IRBuilder:
         ``global_increment`` elements (an i32 value) after each one. It is
         how an LDS pad period longer than the 1024 B the pad field can encode
         is built: each iteration writes one pad period and ``lds_increment``
-        skips the pad.
+        skips the pad. ``iterations`` (a wave-uniform i32 value in
+        1..``iterate_count``) runs fewer at run time: each iteration moves a
+        whole tile, so one past ``tensor_dim1`` reads beyond the tensor.
 
         Group 0 holds the addresses, group 1 the shape and element size;
         group 2 holds the iteration fields (zero unless iterating); groups
@@ -5255,6 +5258,10 @@ class IRBuilder:
             )
         if iterate:
             self._check_i32_value(name, "global_increment", global_increment)
+        if iterations is not None:
+            if not iterate:
+                raise ValueError(f"{name} iterations needs iterate_count")
+            self._check_i32_value(name, "iterations", iterations)
         if lds_increment < 0 or lds_increment > 0xFFFFFFFF:
             raise ValueError(
                 f"{name} lds_increment must fit in 32 bits (got {lds_increment})"
@@ -5314,12 +5321,13 @@ class IRBuilder:
         if iterate:
             # Group 2 (mode 0): tensor_dim2 = 0 | lds increment | global
             # increment lo | global increment hi[15:0], iterate_count - 1 [31:16].
-            group2 = (
-                self.const_i32(0),
-                word(lds_increment),
-                global_increment,
-                word((iterate_count - 1) << 16),
-            )
+            dim2_word = self.const_i32(0)
+            lds_word = word(lds_increment)
+            if iterations is None:
+                count_word = word((iterate_count - 1) << 16)
+            else:
+                count_word = self.shl(self.sub(iterations, self.const_i32(1)), c16)
+            group2 = (dim2_word, lds_word, global_increment, count_word)
             d2 = self.vec_pack([self.readfirstlane(v) for v in group2], I32)
         return d0, d1, d2, zero4, self.zero_vec(I32, 8)
 

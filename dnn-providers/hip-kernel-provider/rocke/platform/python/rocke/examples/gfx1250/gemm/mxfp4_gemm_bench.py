@@ -97,27 +97,42 @@ def check_inputs(spec: MxFp4GemmSpec, *, signed: bool = False):
     return tuple(inputs)
 
 
+def _pad_scale_groups(scales_mn_k: np.ndarray) -> np.ndarray:
+    """Zero-pad ``[MN][K/32]`` scales to whole 128-K steps, as hipBLASLt's
+    ``preSwizzleScalesGFX1250`` does when 128 does not divide K."""
+    pad = -scales_mn_k.shape[1] % 4
+    return np.pad(scales_mn_k, ((0, 0), (0, pad))) if pad else scales_mn_k
+
+
 def device_inputs(inputs) -> tuple[np.ndarray, ...]:
-    """A, B, A_scale, B_scale, C with the scales swizzled ``[K/128][MN][4]``."""
+    """A, B, A_scale, B_scale, C with the scales swizzled ``[ceil(K/128)][MN][4]``."""
     a, b, a_scale, b_scale, c = inputs[:5]
     return (
         a,
         b,
-        swizzle_mx_scales_gfx1250(a_scale),
-        swizzle_mx_scales_gfx1250(np.ascontiguousarray(b_scale.T)),
+        swizzle_mx_scales_gfx1250(_pad_scale_groups(a_scale)),
+        swizzle_mx_scales_gfx1250(_pad_scale_groups(np.ascontiguousarray(b_scale.T))),
         c,
     )
 
 
-def reference(spec: MxFp4GemmSpec, inputs, *, alpha, beta) -> np.ndarray:
+def reference(
+    spec: MxFp4GemmSpec, inputs, *, alpha, beta, rows=None, cols=None
+) -> np.ndarray:
     """FP32 grouped-scale reference rounded to ``spec.out_dtype`` the way the
-    kernel stores it (FP8 saturating, FP16/BF16 round to nearest even)."""
+    kernel stores it (FP8 saturating, FP16/BF16 round to nearest even).
+
+    ``rows`` and ``cols`` (index arrays) restrict it to that block of D."""
     _, _, a_scale, b_scale, c, a_codes, b_codes = inputs
+    if rows is not None:
+        a_codes, a_scale, c = a_codes[rows], a_scale[rows], c[rows]
+    if cols is not None:
+        b_codes, b_scale, c = b_codes[cols], b_scale[:, cols], c[:, cols]
     a = (a_codes == _FP4_ONE).astype(np.float32) - (a_codes == _FP4_MINUS_ONE)
     b = (b_codes == _FP4_ONE).astype(np.float32) - (b_codes == _FP4_MINUS_ONE)
     sa = decode_e8m0(a_scale).astype(np.float32)
     sb = decode_e8m0(b_scale).astype(np.float32)
-    out = np.zeros((spec.M, spec.N), dtype=np.float32)
+    out = np.zeros((a.shape[0], b.shape[0]), dtype=np.float32)
     for group in range(spec.K // spec.block_k):
         begin, end = group * spec.block_k, (group + 1) * spec.block_k
         out += (a[:, begin:end] * sa[:, group, None]) @ (
@@ -130,8 +145,28 @@ def reference(spec: MxFp4GemmSpec, inputs, *, alpha, beta) -> np.ndarray:
     return out.astype(_out_numpy_dtype(spec.out_dtype))
 
 
+def block_indices(
+    extent: int, tile: int, count: int, rng: np.random.Generator
+) -> np.ndarray:
+    """The first and last tile plus ``count`` random indices, sorted."""
+    edges = np.concatenate(
+        [np.arange(min(tile, extent)), np.arange(max(0, extent - tile), extent)]
+    )
+    rest = rng.choice(extent, size=min(count, extent), replace=False)
+    return np.unique(np.concatenate([edges, rest]))
+
+
+def verify_block(spec: MxFp4GemmSpec, count: int) -> tuple[np.ndarray, np.ndarray]:
+    """Rows and columns of D that ``--verify block`` checks."""
+    rng = np.random.default_rng(0xB10C)
+    return (
+        block_indices(spec.M, spec.tile_m, count, rng),
+        block_indices(spec.N, spec.tile_n, count, rng),
+    )
+
+
 def _check(spec, got, expected, *, verify: str, samples: int) -> bool:
-    if verify == "full":
+    if verify in ("full", "block"):
         return bool(np.array_equal(got, expected))
     rng = np.random.default_rng(0x32F4)
     count = min(samples, spec.M * spec.N)
@@ -271,13 +306,20 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
     launcher = _Launcher(
         runtime, artifact, grid, cluster, device_inputs(inputs), out_bytes
     )
+    rows = cols = None
+    if args.verify == "block":
+        rows, cols = verify_block(spec, args.samples)
     try:
         failed = []
         for beta in args.check_betas:
             launcher.launch(launcher.arguments(m, n, k, alpha, beta))
             got = np.frombuffer(launcher.output(), dtype=np.uint8).reshape(m, n, -1)
-            expected = reference(spec, inputs, alpha=alpha, beta=beta)
-            expected = expected.view(np.uint8).reshape(m, n, -1)
+            expected = reference(
+                spec, inputs, alpha=alpha, beta=beta, rows=rows, cols=cols
+            )
+            if rows is not None:
+                got = got[np.ix_(rows, cols)]
+            expected = expected.view(np.uint8).reshape(got.shape)
             if not _check(
                 spec, got, expected, verify=args.verify, samples=args.samples
             ):
@@ -429,8 +471,19 @@ def main(argv: list[str] | None = None) -> int:
         )
     parser.add_argument("--base", action="store_true", help=f"time {BASE_VARIANT} too")
     parser.add_argument("--check-betas", default="0,0.5")
-    parser.add_argument("--verify", choices=("full", "sampled"), default=None)
-    parser.add_argument("--samples", type=int, default=4096)
+    parser.add_argument(
+        "--verify",
+        choices=("full", "sampled", "block"),
+        default=None,
+        help="block: rows x cols of the first and last tile plus --samples "
+        "random rows and columns",
+    )
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=4096,
+        help="sampled: elements checked; block: random rows and columns",
+    )
     parser.add_argument("--warmup", type=int, default=200)
     parser.add_argument("--iters", type=int, default=50)
     parser.add_argument("--batch", type=int, default=2000)

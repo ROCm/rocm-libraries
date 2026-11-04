@@ -9,11 +9,20 @@ import re
 import shutil
 import unittest
 
+import numpy as np
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-from rocke.examples.gfx1250.gemm.mxfp4_gemm_bench import loop_scratch_ops, run_case
+from rocke.examples.gfx1250.gemm.mxfp4_gemm_bench import (
+    check_inputs,
+    device_inputs,
+    loop_scratch_ops,
+    reference,
+    run_case,
+    verify_block,
+)
 from rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm import YAML_TILE
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.instances.gfx1250.mxfp4_gemm import (
+    OUT_DTYPES,
     TILE_K,
     TILE_MN,
     WAVE_GROUPS,
@@ -31,6 +40,7 @@ from rocke.runtime.hip_module import get_device_arch
 _BENCH = (4096, 4096, 65536)
 _SMOKE = (1024, 1024, 2048)
 _WMMA = r"call [^\n]*@llvm\.amdgcn\.wmma\.scale\."
+_MUL_I64 = r"= mul (nsw |nuw )*i64"
 
 
 def _spec(*problem, **fields) -> MxFp4GemmSpec:
@@ -70,12 +80,11 @@ class MxFp4GemmSpecTest(unittest.TestCase):
         self.assertIsNone(validate(_spec(*_BENCH, cluster_order="aid")))
         self.assertIsNone(validate(_spec(cluster_dim=(1, 1, 1), out_dtype="bf16")))
         self.assertIsNone(validate(_spec(half_plr="none", local_prefetch=0)))
-        self.assertEqual(len(list(_valid_geometries())), 20)
+        self.assertEqual(len(list(_valid_geometries())), 36)
         bad = {
             "tile_m": {"tile_m": 64},
-            "tile_k": {"tile_k": 128},
+            "tile_k": {"tile_k": 64},
             "wave_group": {"wave_group": (1, 2)},
-            "wave_repeat_n": {"tile_n": 128, "wave_group": (1, 4)},
             "short K": {"tile_k": 512, "wave_group": (2, 2)},
             "grid": {"cluster_dim": (8, 1, 1)},
             "half_plr": {"local_prefetch": 0},
@@ -87,10 +96,131 @@ class MxFp4GemmSpecTest(unittest.TestCase):
             "pad bytes": {"b_scale_lds_pad": LdsPad(12, 256)},
             "prefetch": {"gl2_prefetch_distance": 1},
         }
+        bad_problems = {"short K": (1024, 1024, 256), "K step": (1024, 1024, 2064)}
+        bad["K step"] = {}
         for label, fields in bad.items():
-            problem = (1024, 1024, 512) if label == "short K" else _SMOKE
+            problem = bad_problems.get(label, _SMOKE)
             with self.subTest(label):
                 self.assertIsNotNone(validate(_spec(*problem, **fields)))
+
+    def test_i64_offsets_past_2_31(self):
+        """A and B bytes and D elements past 2^31 switch that operand to i64
+        offsets; the scales stay i32 and bound the problem."""
+        at_limit = {
+            "D": (32768, 65536, 1024),
+            "A": (4096, 256, 1 << 20),
+            "B": (256, 4096, 1 << 20),
+        }
+        past_limit = {
+            "D": (32768, 65536 + 256, 1024),
+            "A": (4096, 256, (1 << 20) + 512),
+            "B": (256, 4096 + 256, 1 << 20),
+        }
+        for label, problem in at_limit.items():
+            spec = _spec(*problem, cluster_dim=(1, 1, 1))
+            with self.subTest(f"{label} at 2^31"):
+                self.assertIsNone(validate(spec))
+                self.assertEqual((spec.wide_a, spec.wide_b, spec.wide_d), (0, 0, 0))
+                self.assertNotRegex(_llvm(spec), _MUL_I64)
+        for label, problem in past_limit.items():
+            spec = _spec(*problem, cluster_dim=(1, 1, 1))
+            with self.subTest(f"{label} past 2^31"):
+                self.assertIsNone(validate(spec))
+                wide = {"A": spec.wide_a, "B": spec.wide_b, "D": spec.wide_d}
+                self.assertEqual([name for name, on in wide.items() if on], [label])
+                self.assertRegex(_llvm(spec), _MUL_I64)
+        # Partial tiles count whole: M*N is under 2^31, the tiles are not.
+        spec = _spec(32768 - 100, 65536 + 100, 1024, cluster_dim=(1, 1, 1))
+        self.assertLess(spec.M * spec.N, 1 << 31)
+        self.assertTrue(spec.wide_d)
+        # Scale bytes: M (or N) * ceil(K/128) * 4.
+        self.assertIsNone(validate(_spec(4096, 256, 1 << 24, cluster_dim=(1, 1, 1))))
+        reason = validate(_spec(4096, 256, (1 << 24) + 512, cluster_dim=(1, 1, 1)))
+        self.assertIn("scale bytes", reason or "")
+        # Shapes the converted hipBLASLt problem set holds: D spans more than
+        # 2^31 elements.
+        for problem, tile in (
+            ((6016, 721536, 1024), (128, 128, 512)),
+            ((5760, 838784, 3584), (128, 128, 512)),
+            ((61696, 51968, 4608), (256, 256, 512)),
+            ((951552, 3712, 4352), (256, 128, 256)),
+            ((44416, 56832, 1280), (128, 256, 256)),
+            ((61056, 48256, 5376), (128, 128, 256)),
+            ((7552, 540544, 1024), (128, 128, 512)),
+        ):
+            spec = _spec(
+                *problem,
+                tile_m=tile[0],
+                tile_n=tile[1],
+                tile_k=tile[2],
+                cluster_dim=(1, 1, 1),
+            )
+            with self.subTest(problem=problem):
+                self.assertIsNone(validate(spec))
+                self.assertTrue(spec.wide_d)
+
+    def test_partial_tile_stores_cover_d_once(self):
+        """Every D element is stored by exactly one lane vector, none outside:
+        the epilogue's row and column map with its masks and store width."""
+        for (m, n), out_dtype, (tm, tn, wg) in itertools.product(
+            ((300, 300), (256, 201), (300, 512), (512, 512)),
+            OUT_DTYPES,
+            ((128, 128, (2, 2)), (256, 128, (1, 4)), (128, 256, (4, 1))),
+        ):
+            spec = _spec(
+                m,
+                n,
+                2048,
+                tile_m=tm,
+                tile_n=tn,
+                wave_group=wg,
+                out_dtype=out_dtype,
+                cluster_dim=(1, 1, 1),
+            )
+            with self.subTest(m=m, n=n, out_dtype=out_dtype, tile=(tm, tn, wg)):
+                self.assertIsNone(validate(spec))
+                rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
+                width = spec.store_width
+                self.assertEqual(n % width, 0)
+                hits = np.zeros((m, n), dtype=np.int64)
+                gx, gy, _ = (-(-n // tn), -(-m // tm), 1)
+                for by, bx, wave, lane in itertools.product(
+                    range(gy), range(gx), range(4), range(32)
+                ):
+                    wave_m, wave_n = divmod(wave, spec.warp_n)
+                    col = bx * tn + wave_n * rn_count * 16 + (lane % 16) * rn_count
+                    for rm, slot in itertools.product(range(rm_count), range(16)):
+                        m_local = slot // 8 * 16 + slot % 8 + lane // 16 * 8
+                        row = by * tm + wave_m * rm_count * 32 + m_local * rm_count + rm
+                        for begin in range(0, rn_count, width):
+                            c = col + begin
+                            if row < m and c < n:
+                                self.assertLessEqual(c + width, n)
+                                hits[row, c : c + width] += 1
+                self.assertTrue((hits == 1).all())
+
+    def test_partial_tile_build(self):
+        """Edge problems guard each D vector and C load; whole tiles do not."""
+        whole = _llvm(_spec(cluster_dim=(1, 1, 1), out_dtype="bf16"))
+        for problem, out_dtype, vector in (
+            ((1000, 1000, 2048), "bf16", "<8 x bfloat>"),
+            ((1024, 1001, 2048), "bf16", "bfloat"),
+            ((1000, 1024, 2048), "fp8e4m3", "<8 x i8>"),
+        ):
+            spec = _spec(*problem, cluster_dim=(1, 1, 1), out_dtype=out_dtype)
+            with self.subTest(problem=problem):
+                self.assertTrue(spec.edge_m or spec.edge_n)
+                llvm = _llvm(spec)
+                stores = len(re.findall(r"\bstore [^\n]*addrspace\(1\)", llvm))
+                self.assertEqual(
+                    stores,
+                    len(re.findall(r"\bstore [^\n]*addrspace\(1\)", whole))
+                    * 8
+                    // spec.store_width,
+                )
+                self.assertIn(f"store {vector}", llvm)
+        self.assertEqual(_spec(1024, 1001, 2048).store_width, 1)
+        self.assertEqual(_spec(1024, 1000, 2048).store_width, 8)
 
     def test_derived_defaults(self):
         spec = _spec()
@@ -168,7 +298,7 @@ class MxFp4GemmLayoutTest(unittest.TestCase):
                             used.append((land, end))
                 for name, chunk in (
                     ("a_scale", 4 * min(spec.wave_repeat_m, 4)),
-                    ("b_scale", 16),
+                    ("b_scale", 4 * min(spec.wave_repeat_n, 4)),
                 ):
                     op = layout.operand(name)
                     for component, step in itertools.product(
@@ -216,6 +346,23 @@ class MxFp4GemmIrTest(unittest.TestCase):
             _comgr_options_for_kernel(new_kernel), _comgr_options_for_kernel(old_kernel)
         )
 
+    def test_partial_n_tile_walks_only_the_rows_left(self):
+        """B data is in TDM iterate mode (8 rows a walk). With a partial N
+        tile its walk count comes from the rows left; otherwise it is the
+        static 16 (``15 << 16`` in group 2)."""
+        static_count = f"readfirstlane.i32(i32 {15 << 16})"
+        for (m, n), runtime in (
+            ((1024, 1040), True),
+            ((1040, 1024), False),
+            ((1024, 1024), False),
+        ):
+            spec = _spec(m, n, 2048, cluster_dim=(1, 1, 1))
+            self.assertEqual(spec.lds_layout.b.iterate_rows, 8)
+            with self.subTest(M=m, N=n):
+                llvm = _llvm(spec)
+                self.assertEqual(static_count in llvm, not runtime)
+                self.assertEqual("@llvm.smin.i32(" in llvm, runtime)
+
     def test_peeled_and_looped_tiles(self):
         """The init-C peel, the odd-count peel and the two-tile loop body are
         emitted once each; the loop covers the rest."""
@@ -229,6 +376,101 @@ class MxFp4GemmIrTest(unittest.TestCase):
                 # odd-count peel) reads the zero vector directly.
                 zero_c = len(re.findall(_WMMA + r"[^\n]*<16 x float> %cz", llvm))
                 self.assertEqual(zero_c, 32 if init_c or tiles % 2 else 0)
+
+    def test_k_tail_tile(self):
+        """K not a multiple of tile_k: the full tiles as before, then one
+        tile of the remaining K-steps (loaded clipped at K)."""
+        for tail_steps, init_c in itertools.product((1, 2, 3), (True, False)):
+            spec = _spec(1024, 1024, 4 * 512 + tail_steps * 128, init_c_peel=init_c)
+            self.assertEqual(spec.tail_steps, tail_steps)
+            emitted = int(init_c) + (4 - int(init_c)) % 2 + 2
+            with self.subTest(tail_steps=tail_steps, init_c_peel=init_c):
+                llvm = _llvm(spec)
+                self.assertEqual(
+                    len(re.findall(_WMMA, llvm)), (emitted * 4 + tail_steps) * 32
+                )
+                # Every tile, the tail included, signals the cluster once.
+                self.assertEqual(llvm.count("s_cmp_eq_u32 $0, 0"), emitted + 1)
+
+    def test_k_partial_step(self):
+        """K a multiple of 32 but not 128: the tail rounds up to a whole
+        K-step, read clipped at K, and the scale loads count ceil(K/128)."""
+        for extra in (32, 64, 96, 128 + 32, 384 + 96):
+            spec = _spec(1024, 1024, 4 * 512 + extra)
+            with self.subTest(K=spec.K):
+                self.assertIsNone(validate(spec))
+                self.assertEqual(spec.tail_steps, -(-extra // 128))
+                llvm = _llvm(spec)
+                emitted = 1 + 3 % 2 + 2
+                self.assertEqual(
+                    len(re.findall(_WMMA, llvm)),
+                    (emitted * 4 + spec.tail_steps) * 32,
+                )
+                self.assertRegex(llvm, r"add nsw i32 %K, 127|add i32 %K, 127")
+        self.assertNotIn("%K, 127", _llvm(_spec(1024, 1024, 4 * 512 + 128)))
+
+    def test_k_not_a_scale_block_multiple(self):
+        """K % 32 != 0 is rejected before any other K or size check."""
+        for M, N, K in (
+            (1024, 1024, 2048 + 16),
+            (160, 16840, 16840),
+            (2**20, 2**20, 2**20 + 1),
+        ):
+            with self.subTest(K=K):
+                reason = validate(_spec(M, N, K))
+                self.assertEqual(
+                    reason,
+                    f"K must be a multiple of 32: each E8M0 scale covers 32 K values (got K={K})",
+                )
+                with self.assertRaisesRegex(ValueError, "multiple of 32"):
+                    build_mxfp4_gemm(_spec(M, N, K))
+
+    def test_short_k(self):
+        """One or two full tiles, with or without a tail. The loop body is
+        emitted (it runs zero times) after the init-C and odd-count peels."""
+        for k_dim, tile_k, init_c in itertools.product(
+            (128, 256, 384, 512, 640), (128, 256, 512), (True, False)
+        ):
+            spec = _spec(
+                1024,
+                1024,
+                k_dim,
+                tile_m=128,
+                tile_n=128,
+                tile_k=tile_k,
+                init_c_peel=init_c,
+            )
+            if validate(spec) is not None:
+                self.assertLess(k_dim, tile_k)
+                continue
+            full = k_dim // tile_k
+            if full > 2:
+                continue
+            with self.subTest(K=k_dim, tile_k=tile_k, init_c_peel=init_c):
+                llvm = _llvm(spec)
+                per_step = spec.wave_repeat_m * spec.wave_repeat_n
+                tiles = int(init_c) + (full - int(init_c)) % 2 + 2
+                steps = tiles * spec.k_steps + spec.tail_steps
+                self.assertEqual(len(re.findall(_WMMA, llvm)), steps * per_step)
+
+    def test_one_step_tiles_signal_the_cluster(self):
+        """tile_k 128 has no second-to-last K-step: each tile still signals
+        once, before its cluster wait."""
+        for fields in (
+            {"cluster_signal": "wave0"},
+            {"cluster_signal": "wave0", "half_plr": "none"},
+            {"cluster_signal": "drained"},
+            {"cluster_signal": "drained", "half_plr": "none", "local_prefetch": 0},
+        ):
+            spec = _spec(tile_k=128, **fields)
+            with self.subTest(**fields):
+                llvm = _llvm(spec)
+                self.assertEqual(len(re.findall(_WMMA, llvm)), 4 * 32)
+                if fields["cluster_signal"] == "drained":
+                    self.assertEqual(llvm.count("s_barrier_signal_isfirst"), 2 + 4)
+                else:
+                    self.assertEqual(llvm.count("s_cmp_eq_u32 $0, 0"), 4)
+                self.assertEqual(llvm.count("s_barrier_wait -3"), 2 + 4)
 
     def test_schedule_variants_emit_their_waits_and_barriers(self):
         """Four tiles are emitted at the smoke shape (see the peel test), four
@@ -259,6 +501,27 @@ class MxFp4GemmIrTest(unittest.TestCase):
         self.assertEqual(default.count(prefetch), 6 * 2)
         self.assertEqual(_llvm(_spec(tile_k=256)).count(prefetch), 3 * (2 + 1))
 
+    def test_two_n_repeats(self):
+        """wave_repeat_n 2 (1x4 waves, tile_n 128): one 8 B B-scale read per
+        K-step, counted in the LDS waits, and 2-wide stores."""
+        for tile_m, out_dtype in itertools.product((128, 256), OUT_DTYPES):
+            spec = _spec(
+                tile_m=tile_m, tile_n=128, wave_group=(1, 4), out_dtype=out_dtype
+            )
+            with self.subTest(tile_m=tile_m, out_dtype=out_dtype):
+                self.assertIsNone(validate(spec))
+                self.assertEqual(spec.wave_repeat_n, 2)
+                self.assertEqual(spec.b_scale_reads, 1)
+                llvm = _llvm(spec)
+                self.assertIn("load <2 x i32>", llvm)
+                self.assertIn(f'"s_wait_dscnt {spec.reads_per_step}"', llvm)
+                store = {
+                    "fp8e4m3": "<2 x i8>",
+                    "fp16": "<2 x half>",
+                    "bf16": "<2 x bfloat>",
+                }
+                self.assertIn(f"store {store[out_dtype]}", llvm)
+
     def test_output_types(self):
         for out_dtype, store in (("fp16", "<8 x half>"), ("bf16", "<8 x bfloat>")):
             with self.subTest(out_dtype):
@@ -270,6 +533,38 @@ class MxFp4GemmIrTest(unittest.TestCase):
         self.assertIn(
             "@llvm.amdgcn.cvt.pk.fp8.f32", _llvm(_spec(tile_m=128, tile_n=128))
         )
+
+
+class MxFp4GemmBenchReferenceTest(unittest.TestCase):
+    def test_block_reference_is_the_full_reference_sliced(self):
+        """``--verify block`` checks the first and last tiles plus random
+        rows and columns, against the same values the full reference has."""
+        for out_dtype, beta in itertools.product(OUT_DTYPES, (0.0, 0.5)):
+            spec = _spec(384, 640, 512, tile_m=128, tile_n=128, out_dtype=out_dtype)
+            inputs = check_inputs(spec)
+            rows, cols = verify_block(spec, 37)
+            with self.subTest(out_dtype=out_dtype, beta=beta):
+                self.assertTrue(np.array_equal(rows[:128], np.arange(128)))
+                self.assertTrue(np.array_equal(rows[-128:], np.arange(256, 384)))
+                self.assertTrue(np.array_equal(cols[-128:], np.arange(512, 640)))
+                self.assertGreater(len(cols), 256)
+                alpha = np.float32(1.0 / 512)
+                full = reference(spec, inputs, alpha=alpha, beta=beta)
+                block = reference(
+                    spec, inputs, alpha=alpha, beta=beta, rows=rows, cols=cols
+                )
+                self.assertEqual(full[np.ix_(rows, cols)].tobytes(), block.tobytes())
+
+    def test_scales_pad_to_whole_k_steps(self):
+        """K/32 not a multiple of 4: each MN's last step is zero-padded."""
+        spec = _spec(256, 384, 512 + 96, tile_m=128, tile_n=128)
+        inputs = check_inputs(spec)
+        _, _, a_scale, b_scale, _ = device_inputs(inputs)
+        for swizzled, canonical in ((a_scale, inputs[2]), (b_scale, inputs[3].T)):
+            self.assertEqual(swizzled.shape, (5, canonical.shape[0], 4))
+            self.assertTrue((swizzled[4, :, 3] == 0).all())
+            self.assertTrue(np.array_equal(swizzled[4, :, :3], canonical[:, 16:19]))
+            self.assertTrue(np.array_equal(swizzled[0], canonical[:, :4]))
 
 
 @unittest.skipIf(shutil.which("llvm-objdump") is None, "needs llvm-objdump")
@@ -286,6 +581,11 @@ class MxFp4GemmHostBuildTest(unittest.TestCase):
             _spec(*_BENCH, cluster_order="aid"),
             _spec(tile_m=128, tile_n=256, tile_k=256, wave_group=(4, 1)),
             _spec(cluster_dim=(1, 1, 1), half_plr="none", out_dtype="fp16"),
+            _spec(1024, 1024, 2048 + 384, tile_m=128, tile_n=128),
+            _spec(tile_m=128, tile_n=128, tile_k=128),
+            _spec(1000, 1000, 2048),
+            _spec(1024, 1024, 2048 + 96, tile_m=128, tile_n=128),
+            _spec(1024, 1001, 2048, tile_m=128, tile_n=128, out_dtype="bf16"),
         ):
             with self.subTest(spec.kernel_name()):
                 artifact = compile_kernel(

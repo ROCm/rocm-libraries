@@ -1986,12 +1986,11 @@ int rocke_b_tdm_descriptor_2d_ex(rocke_ir_builder_t* b,
                                  rocke_value_t* out[5])
 {
     static const char* name = "tdm_descriptor_2d";
-    static const rocke_tdm_descriptor_opts_t no_opts = {NULL, 0, 0, NULL};
+    static const rocke_tdm_descriptor_opts_t no_opts = {NULL, 0, 0, NULL, NULL};
     const rocke_type_t* lty = lds_addr ? lds_addr->type : NULL;
     int lds_is_i32, lds_is_i64, data_size, pad_enable, iterate;
     uint32_t flags;
-    rocke_value_t *c16, *lds32, *gaddr, *g_hi, *lo, *hi, *group0[4], *group1[8], *group2[4],
-        *zero4;
+    rocke_value_t *c16, *lds32, *gaddr, *g_hi, *lo, *hi, *group0[4], *group1[8], *group2[4], *zero4;
     int i;
     if(!rocke_i_live(b))
         return 0;
@@ -2082,6 +2081,16 @@ int rocke_b_tdm_descriptor_2d_ex(rocke_ir_builder_t* b,
     }
     if(iterate && !rocke_i_check_i32_value(b, name, "global_increment", opts->global_increment))
         return 0;
+    if(opts->iterations)
+    {
+        if(!iterate)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s iterations needs iterate_count", name);
+            return 0;
+        }
+        if(!rocke_i_check_i32_value(b, name, "iterations", opts->iterations))
+            return 0;
+    }
     /* pad_interval < 0 means "no LDS padding" (Python: pad_interval=None). */
     pad_enable = pad_interval >= 0;
     if(pad_enable && pad_interval > 7)
@@ -2148,7 +2157,13 @@ int rocke_b_tdm_descriptor_2d_ex(rocke_ir_builder_t* b,
         group2[0] = rocke_b_const_i32(b, 0);
         group2[1] = rocke_i_tdm_word(b, opts->lds_increment);
         group2[2] = opts->global_increment;
-        group2[3] = rocke_i_tdm_word(b, (uint32_t)(opts->iterate_count - 1) << 16);
+        if(opts->iterations)
+        {
+            lo = rocke_b_sub(b, opts->iterations, rocke_b_const_i32(b, 1));
+            group2[3] = rocke_b_shl(b, lo, c16);
+        }
+        else
+            group2[3] = rocke_i_tdm_word(b, (uint32_t)(opts->iterate_count - 1) << 16);
         for(i = 0; i < 4; ++i)
             group2[i] = rocke_b_readfirstlane(b, group2[i]);
         out[2] = rocke_b_vec_pack(b, group2, 4, rocke_i32());

@@ -61,7 +61,7 @@ _OP_ID = "wmma_scale_f32_32x16x128_f4"
 _SCALE_GROUPS_PER_STEP = _ATOM_K // 32
 
 TILE_MN = (128, 256)
-TILE_K = (256, 512)
+TILE_K = (128, 256, 512)
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
@@ -85,6 +85,8 @@ _TDM_PAD_MAX_BYTES = 128 * 4
 _LDS_PAD_STEP_BYTES = 8
 # s_wait_dscnt immediates are 6 bits on gfx1250.
 _DSCNT_MAX = 63
+# Global offsets are i32: A and B in bytes, C and D in elements.
+_I32_SPAN = 1 << 31
 
 _GL2_LINE_BYTES = 256
 # th:TH_LOAD_NT (bits 0..2) | scope:SCOPE_SE (bits 3..4), as in the winner.
@@ -210,6 +212,45 @@ class MxFp4GemmSpec:
         return self.tile_k // _ATOM_K
 
     @property
+    def tail_steps(self) -> int:
+        """K-steps of the last, partial tile when ``tile_k`` does not divide K,
+        counting a partial last K-step when 128 does not divide K."""
+        return -(-(self.K % self.tile_k) // _ATOM_K)
+
+    @property
+    def edge_m(self) -> bool:
+        """The last M tile is partial: its loads are clipped, its stores masked."""
+        return self.M % self.tile_m != 0
+
+    @property
+    def edge_n(self) -> bool:
+        return self.N % self.tile_n != 0
+
+    @property
+    def wide_a(self) -> bool:
+        """A's byte offsets, whole tiles counted, pass i32: address it in i64."""
+        return _round_up(self.M, self.tile_m) * self.packed_k > _I32_SPAN
+
+    @property
+    def wide_b(self) -> bool:
+        return _round_up(self.N, self.tile_n) * self.packed_k > _I32_SPAN
+
+    @property
+    def wide_d(self) -> bool:
+        return (
+            _round_up(self.M, self.tile_m) * _round_up(self.N, self.tile_n) > _I32_SPAN
+        )
+
+    @property
+    def store_width(self) -> int:
+        """Elements per D store and C load: at most 16 B and a divisor of N,
+        so a vector is wholly inside or outside N and stays aligned."""
+        width = min(self.wave_repeat_n, 16 // _OUT_BYTES[self.out_dtype])
+        while self.N % width:
+            width //= 2
+        return width
+
+    @property
     def packed_k(self) -> int:
         return self.K // 2
 
@@ -256,7 +297,7 @@ class MxFp4GemmSpec:
 
     @property
     def b_scale_reads(self) -> int:
-        return self.wave_repeat_n // 4
+        return max(1, self.wave_repeat_n // 4)
 
     @property
     def reads_per_step(self) -> int:
@@ -511,6 +552,11 @@ def validate(spec: MxFp4GemmSpec, arch: str = "gfx1250") -> str | None:
         return f"mxfp4_gemm is gfx1250-only (got {arch!r})"
     if min(spec.M, spec.N, spec.K) <= 0:
         return "M, N and K must be positive"
+    if spec.K % spec.block_k:
+        return (
+            f"K must be a multiple of {spec.block_k}: each E8M0 scale covers "
+            f"{spec.block_k} K values (got K={spec.K})"
+        )
     if spec.out_dtype not in OUT_DTYPES:
         return f"out_dtype must be one of {OUT_DTYPES}"
     if spec.tile_m not in TILE_MN or spec.tile_n not in TILE_MN:
@@ -522,12 +568,16 @@ def validate(spec: MxFp4GemmSpec, arch: str = "gfx1250") -> str | None:
     if spec.tile_m % (spec.warp_m * _ATOM_M) or spec.tile_n % (spec.warp_n * _ATOM_N):
         return "the tile must hold whole 32x16 WMMA atoms per wave"
     rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
-    if rn < 4:
-        return "wave_repeat_n must be at least 4 (vector epilogue, B scale reads)"
-    if spec.M % spec.tile_m or spec.N % spec.tile_n or spec.K % spec.tile_k:
-        return "M, N and K must divide their tile"
-    if spec.K < 2 * spec.tile_k:
-        return "K must hold at least two tiles (double buffer, init-C peel)"
+    # A, B and D offsets switch to i64 past 2^31 (wide_*); the scales' stay
+    # i32. A partial last tile's rows reach the next whole tile.
+    mn_span = max(_round_up(spec.M, spec.tile_m), _round_up(spec.N, spec.tile_n))
+    if mn_span * -(-spec.K // _ATOM_K) * 4 > _I32_SPAN:
+        return "A and B scale bytes must each be at most 2^31 (i32 offsets)"
+    # K < 2 * tile_k is supported but is a poor fit for this pipeline:
+    # the tile k+2 refills and GL2 prefetches past K re-load the last tile, and
+    # with one or two tiles they are most of the loads. Prefer a short-K kernel.
+    if spec.K < spec.tile_k:
+        return "K must hold at least one full tile"
     if spec.local_prefetch not in (0, 1):
         return "local_prefetch must be 0 or 1"
     if spec.half_plr not in ("b", "none"):
@@ -562,7 +612,7 @@ def validate(spec: MxFp4GemmSpec, arch: str = "gfx1250") -> str | None:
         ("a", spec.tile_m // 2, 16, True),
         ("b", spec.tile_n // 2, 16, True),
         ("a_scale", spec.tile_m // 2, min(16, 4 * rm), False),
-        ("b_scale", spec.tile_n // 2, 16, False),
+        ("b_scale", spec.tile_n // 2, min(16, 4 * rn), False),
     ):
         pad = pads[name]
         reason = _pad_reason(
@@ -667,6 +717,20 @@ class _Kernel:
         else:
             self.b.s_barrier_bare()
 
+    def offset64(self, row, stride, col):
+        """``row * stride + col`` in i64, for offsets past 2^31."""
+        b, ops = self.b, self.ops
+        wide = b.mul(b.zext(ops.v(row), I64), b.zext(ops.v(stride), I64))
+        return b.add(wide, b.zext(ops.v(col), I64))
+
+    def k_atoms(self):
+        """WMMA K-steps, the last one partial when 128 does not divide K;
+        the swizzled scales hold that many rows, zero-padded."""
+        ops, K = self.ops, self.params["K"]
+        if self.spec.K % _ATOM_K:
+            return ops.div(ops.add(K, _ATOM_K - 1), _ATOM_K)
+        return ops.div(K, _ATOM_K)
+
     def clamp_k(self, k):
         b = self.b
         return b.select(
@@ -757,17 +821,33 @@ class TdmLoader:
             return k.layout.a, k.block_m, p["M"], self.a_mask
         return k.layout.b, k.block_n, p["N"], self.b_mask
 
+    def _rows_left(self, operand: str, row0):
+        """Rows from ``row0`` to the end of the operand; in a partial last
+        tile a component can start past the end and then gets 0."""
+        k = self.k
+        b, ops = k.b, k.ops
+        _, _, extent, _ = self._operand(operand)
+        left = b.sub(extent, ops.v(row0))
+        edge = k.spec.edge_m if operand == "a" else k.spec.edge_n
+        if not edge:
+            return left
+        return b.select(b.cmp_lt(ops.v(row0), extent), left, k.c0)
+
     def data_descriptor(self, operand: str, parity, component, k_byte, remaining_k):
         k = self.k
         b, ops, p = k.b, k.ops, k.params
-        layout, block, extent, mask = self._operand(operand)
+        layout, block, _, mask = self._operand(operand)
         base_ptr = p["A"] if operand == "a" else p["B"]
         lds = ops.add(
             k.buffer_base(parity), k.layout.component_base(ops, layout, component)
         )
         rows = layout.rows
         row0 = ops.add(block, ops.mul(component, rows))
-        element = ops.add(ops.mul(row0, k.packed_k), k_byte)
+        if k.spec.wide_a if operand == "a" else k.spec.wide_b:
+            element = k.offset64(row0, k.packed_k, k_byte)
+        else:
+            element = ops.add(ops.mul(row0, k.packed_k), k_byte)
+        rows_left = None
         extra: dict = {}
         tile_rows = rows
         if layout.iterate_rows:
@@ -777,6 +857,13 @@ class TdmLoader:
                 lds_increment=layout.iterate_stride,
                 global_increment=ops.v(ops.mul(k.packed_k, tile_rows)),
             )
+            if k.spec.edge_m if operand == "a" else k.spec.edge_n:
+                # Each iteration moves tile_rows rows whatever tensor_dim1 says,
+                # so walk ceil(rows left / tile_rows), at least one: with no
+                # rows left, tensor_dim1 0 keeps that one off memory.
+                rows_left = self._rows_left(operand, row0)
+                held = b.smax(b.smin(rows_left, b.const_i32(rows)), k.c1)
+                extra["iterations"] = ops.div(ops.add(held, tile_rows - 1), tile_rows)
         elif layout.pad.on:
             extra.update(tdm_pad_fields(layout.pad.block_bytes, layout.pad.pad_bytes))
         return b.tdm_descriptor_2d(
@@ -784,7 +871,9 @@ class TdmLoader:
             self.lds_ptr(lds),
             elem_bytes=1,
             tensor_dim0=remaining_k,
-            tensor_dim1=b.sub(extent, ops.v(row0)),
+            tensor_dim1=(
+                self._rows_left(operand, row0) if rows_left is None else rows_left
+            ),
             row_stride=k.packed_k,
             tile_dim0=k.layout.row_bytes,
             tile_dim1=tile_rows,
@@ -809,14 +898,22 @@ class TdmLoader:
         )
         rows = layout.rows
         row_stride = ops.mul(extent, 4)
-        col0 = ops.mul(ops.add(block, ops.mul(component, rows)), 4)
+        mn0 = ops.add(block, ops.mul(component, rows))
+        col0 = ops.mul(mn0, 4)
         element = ops.add(ops.mul(k_step, row_stride), col0)
+        global_ptr = b.global_ptr_add(base_ptr, ops.v(element))
+        lds_ptr = self.lds_ptr(lds)
+        edge = k.spec.edge_m if operand == "a" else k.spec.edge_n
+        if edge:
+            bytes_left = ops.v(ops.mul(self._rows_left(operand, mn0), 4))
+        else:
+            bytes_left = b.sub(ops.v(row_stride), ops.v(col0))
         return b.tdm_descriptor_2d(
-            b.global_ptr_add(base_ptr, ops.v(element)),
-            self.lds_ptr(lds),
+            global_ptr,
+            lds_ptr,
             elem_bytes=1,
-            tensor_dim0=b.sub(ops.v(row_stride), ops.v(col0)),
-            tensor_dim1=b.sub(ops.div(p["K"], _ATOM_K), ops.v(k_step)),
+            tensor_dim0=bytes_left,
+            tensor_dim1=b.sub(k.k_atoms(), ops.v(k_step)),
             row_stride=ops.v(row_stride),
             tile_dim0=rows * 4,
             tile_dim1=k.layout.k_steps,
@@ -894,7 +991,7 @@ class TdmLoader:
         )
         k_step = ops.v(ops.div(k0, _ATOM_K))
         scale = self.scale
-        steps_left = b.sub(ops.v(ops.div(k.params["K"], _ATOM_K)), k_step)
+        steps_left = b.sub(ops.v(k.k_atoms()), k_step)
         s2, s3 = b.vec_extract(scale[1], 2), b.vec_extract(scale[1], 3)
         b.tensor_load_to_lds(
             *self._patched(
@@ -943,21 +1040,40 @@ class Gl2Prefetcher:
         else:
             cluster_m0, cluster_n0 = k.block_m, k.block_n
 
-        def data_line(base_ptr, row0):
+        def last_inside(value, limit, edge: bool):
+            """``value``, or ``limit - 1`` past a partial tile's end."""
+            if not edge:
+                return value
+            return b.select(
+                b.cmp_lt(ops.v(value), ops.v(limit)),
+                ops.v(value),
+                b.sub(ops.v(limit), k.c1),
+            )
+
+        def data_line(base_ptr, row0, extent, edge, wide):
             def address(index):
                 row = ops.add(row0, ops.div(index, data_lines))
+                row = last_inside(row, extent, edge)
                 offset = ops.add(
                     k_byte, ops.mul(ops.mod(index, data_lines), _GL2_LINE_BYTES)
                 )
+                if wide:
+                    return b.global_ptr_add(
+                        base_ptr, k.offset64(row, k.packed_k, offset)
+                    )
                 return b.global_ptr_add(
                     base_ptr, ops.v(ops.add(ops.mul(row, k.packed_k), offset))
                 )
 
             return address
 
-        def scale_line(base_ptr, extent, mn0, mn_count):
+        def scale_line(base_ptr, extent, mn0, mn_count, edge):
             lines_per_row = mn_count * 4 // _GL2_LINE_BYTES
             k_step = ops.div(k_ahead, _ATOM_K)
+            # A partial last tile has fewer K-steps than the k_steps rows
+            # prefetched for it; a partial M/N tile has lines past the end.
+            clamp = edge or bool(spec.tail_steps)
+            scale_bytes = ops.mul(k.k_atoms(), ops.mul(extent, 4)) if clamp else None
 
             def address(index):
                 row = ops.add(k_step, ops.div(index, lines_per_row))
@@ -965,24 +1081,30 @@ class Gl2Prefetcher:
                     ops.mul(mn0, 4),
                     ops.mul(ops.mod(index, lines_per_row), _GL2_LINE_BYTES),
                 )
-                return b.global_ptr_add(
-                    base_ptr, ops.v(ops.add(ops.mul(row, ops.mul(extent, 4)), offset))
-                )
+                element = ops.add(ops.mul(row, ops.mul(extent, 4)), offset)
+                element = last_inside(element, scale_bytes, clamp)
+                return b.global_ptr_add(base_ptr, ops.v(element))
 
             return address, k.layout.k_steps * lines_per_row
 
         categories = []
         if data_lines:
             categories += [
-                (cluster_y * spec.tile_m * data_lines, data_line(p["A"], cluster_m0)),
-                (cluster_x * spec.tile_n * data_lines, data_line(p["B"], cluster_n0)),
+                (
+                    cluster_y * spec.tile_m * data_lines,
+                    data_line(p["A"], cluster_m0, p["M"], spec.edge_m, spec.wide_a),
+                ),
+                (
+                    cluster_x * spec.tile_n * data_lines,
+                    data_line(p["B"], cluster_n0, p["N"], spec.edge_n, spec.wide_b),
+                ),
             ]
         if (cluster_x * spec.tile_n * 4) % _GL2_LINE_BYTES == 0:
             b_scale_address, b_scale_lines = scale_line(
-                p["B_scale"], p["N"], cluster_n0, cluster_x * spec.tile_n
+                p["B_scale"], p["N"], cluster_n0, cluster_x * spec.tile_n, spec.edge_n
             )
             a_scale_address, a_scale_lines = scale_line(
-                p["A_scale"], p["M"], cluster_m0, cluster_y * spec.tile_m
+                p["A_scale"], p["M"], cluster_m0, cluster_y * spec.tile_m, spec.edge_m
             )
             categories += [
                 (b_scale_lines, b_scale_address),
@@ -1099,9 +1221,13 @@ class LdsReader:
             k.layout.scale_offset(ops, "b_scale", step, self.rows.n_row(0, k.lane_col)),
         )
         b_scales = []
-        for chunk in range(rn_count // 4):
-            words = self.load_i32(ops.add(b_base, chunk * 16))
-            b_scales += [b.vec_extract(words, i) for i in range(4)]
+        if rn_count >= 4:
+            for chunk in range(rn_count // 4):
+                words = self.load_i32(ops.add(b_base, chunk * 16))
+                b_scales += [b.vec_extract(words, i) for i in range(4)]
+        else:
+            words = self.load_i32(b_base, n=rn_count)
+            b_scales = [b.vec_extract(words, i) for i in range(rn_count)]
         return a_scales, b_scales
 
     def head(self, buffer, step):
@@ -1200,21 +1326,35 @@ class TileCompute:
         head=None,
         next_parity=None,
         seed_zero=False,
+        steps=None,
     ):
         """Returns ``(accumulators, head)``; ``head`` is the next tile's
-        K-step 0 reads (``None`` with ``local_prefetch`` 0)."""
+        K-step 0 reads (``None`` with ``local_prefetch`` 0). ``steps`` is the
+        tile's K-step count (all of them unless it is the K tail)."""
+        steps = self.k.spec.k_steps if steps is None else steps
         if self.k.spec.local_prefetch == 0:
-            return self._run_direct(parity, accumulators, seed_zero, hooks)
+            return self._run_direct(parity, accumulators, seed_zero, hooks, steps)
         if self.k.spec.half_b:
             return self._run_half_b(
-                parity, accumulators, head, next_parity, seed_zero, hooks
+                parity, accumulators, head, next_parity, seed_zero, hooks, steps
             )
-        return self._run_full(parity, accumulators, head, next_parity, seed_zero, hooks)
+        return self._run_full(
+            parity, accumulators, head, next_parity, seed_zero, hooks, steps
+        )
 
-    def _run_half_b(self, parity, accumulators, head, next_parity, seed_zero, hooks):
+    @staticmethod
+    def _signal_before_late(hooks, steps: int) -> None:
+        """A one-K-step tile has no second-to-last K-step to signal in: it
+        signals just before its cluster wait."""
+        if steps == 1 and hooks.signal is not None:
+            hooks.signal()
+
+    def _run_half_b(
+        self, parity, accumulators, head, next_parity, seed_zero, hooks, steps
+    ):
         k, reader = self.k, self.reader
         spec = k.spec
-        rm_count, rn_count, steps = spec.wave_repeat_m, spec.wave_repeat_n, spec.k_steps
+        rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         half = rn_count // 2
         buffer = k.buffer_base(parity)
         out = list(accumulators)
@@ -1237,6 +1377,7 @@ class TileCompute:
                 elif which == 1:
                     next_second = reader.b_group(next_buffer, 0, half, half)
                 if which == 1 and last:
+                    self._signal_before_late(hooks, steps)
                     hooks.late_refill()
                 signal_here = (
                     hooks.signal is not None and which == 1 and step + 2 == steps
@@ -1264,10 +1405,12 @@ class TileCompute:
                 b_halves = [next_first, next_second]
         return out, (*head, [next_first, next_second])
 
-    def _run_full(self, parity, accumulators, head, next_parity, seed_zero, hooks):
+    def _run_full(
+        self, parity, accumulators, head, next_parity, seed_zero, hooks, steps
+    ):
         k, reader = self.k, self.reader
         spec = k.spec
-        rm_count, rn_count, steps = spec.wave_repeat_m, spec.wave_repeat_n, spec.k_steps
+        rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         buffer = k.buffer_base(parity)
         out = list(accumulators)
         mma = self._mma_fn(out, seed_zero)
@@ -1286,6 +1429,7 @@ class TileCompute:
                     *reader.head(next_buffer, 0),
                     reader.b_group(next_buffer, 0, 0, rn_count),
                 )
+                self._signal_before_late(hooks, steps)
                 hooks.late_refill()
             signal_here = hooks.signal is not None and step + 2 == steps
             self._wait(spec.reads_per_step)
@@ -1309,14 +1453,14 @@ class TileCompute:
             a_frags, a_scales, b_scales, b_frags = ahead
         return out, (a_frags, a_scales, b_scales, [b_frags])
 
-    def _run_direct(self, parity, accumulators, seed_zero, hooks):
+    def _run_direct(self, parity, accumulators, seed_zero, hooks, steps):
         """local_prefetch 0: each K-step reads, drains and computes. The
         tile's last read is the last K-step's: its refill (GL2 prefetch, the
         signal) follows the drain, the cluster wait and TDM come
         ``cluster_signal_wmmas`` WMMAs later (at once without a cluster)."""
         k, reader = self.k, self.reader
         spec = k.spec
-        rm_count, rn_count, steps = spec.wave_repeat_m, spec.wave_repeat_n, spec.k_steps
+        rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         buffer = k.buffer_base(parity)
         out = list(accumulators)
         mma = self._mma_fn(out, seed_zero)
@@ -1429,7 +1573,12 @@ class Pipeline:
         tile = self.tile
         k.cluster_sync()
         self.tdm.issue(c0, c0)
-        self.tdm.issue(k.tile_k_v, c1)
+        if spec.K == spec.tile_k:
+            # One tile: buffer 1 gets tile 0 again and is never read. The
+            # refill and GL2 prefetches load it again too; see validate().
+            self.tdm.issue(k.clamp_k(k.tile_k_v), c1)
+        else:
+            self.tdm.issue(k.tile_k_v, c1)
         for ahead in range(2, spec.gl2_prefetch_distance):
             self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
         peel = spec.init_c_peel
@@ -1455,7 +1604,7 @@ class Pipeline:
             head_values = tile.flatten(head) if read_ahead else []
             start, start_parity = k.tile_k_v, 1
 
-        def loop_tile(k_tile, parity: int, acc, head_vals):
+        def loop_tile(k_tile, parity: int, acc, head_vals, steps=None):
             if not read_ahead:
                 self.wait_next_tile()
             updated, head = tile.run(
@@ -1464,6 +1613,7 @@ class Pipeline:
                 hooks=self.hooks(k_tile, parity, parity),
                 head=tile.unflatten(head_vals) if read_ahead else None,
                 next_parity=1 - parity,
+                steps=steps,
             )
             return updated, tile.flatten(head) if read_ahead else []
 
@@ -1472,14 +1622,15 @@ class Pipeline:
                 (f"head{i}", v) for i, v in enumerate(head_vals)
             ]
 
-        if (spec.K // spec.tile_k - start_parity) % 2:
+        full_tiles = spec.K // spec.tile_k
+        if (full_tiles - start_parity) % 2:
             accumulators, head_values = loop_tile(
                 start, start_parity, accumulators, head_values
             )
             start, start_parity = ops.add(start, spec.tile_k), 1 - start_parity
         loop = b.scf_for_iter(
             ops.v(start),
-            k.params["K"],
+            b.const_i32(full_tiles * spec.tile_k) if spec.tail_steps else k.params["K"],
             b.const_i32(2 * spec.tile_k),
             carried(accumulators, head_values),
             iv_name="k0",
@@ -1492,12 +1643,23 @@ class Pipeline:
                     ops.add(k0, pair_index * spec.tile_k), parity, acc, head_vals
                 )
             b.scf_yield(*acc, *head_vals)
+        results = loop.results[:n_acc]
+        if spec.tail_steps:
+            # The K tail is one more tile: its TDM loads are clipped at K and
+            # only its first tail_steps K-steps are read.
+            results, _ = loop_tile(
+                b.const_i32(full_tiles * spec.tile_k),
+                full_tiles % 2,
+                list(results),
+                list(loop.results[n_acc:]),
+                steps=spec.tail_steps,
+            )
         # No workgroup may exit while a TDM load into its LDS is in flight:
         # with multicast, peers' loads write here too.
         b.s_wait_tensorcnt(0)
         if spec.has_cluster:
             k.cluster_sync()
-        return loop.results[:n_acc]
+        return results
 
 
 class Epilogue:
@@ -1524,6 +1686,13 @@ class Epilogue:
             width, convert = 8, b.cvt_pk8_fp8_f32x8
         else:
             width, convert = 4, b.cvt_pk_fp8_f32x4
+        if len(values) < width:
+            # Fewer values than one convert: pad with zeros, keep the first.
+            zeros = [b.const_f32(0.0)] * (width - len(values))
+            part = convert(b.vec_pack(list(values) + zeros, F32))
+            return b.vec_pack(
+                [b.vec_extract(part, i) for i in range(len(values))], FP8E4M3
+            )
         packed = None
         for chunk in range(len(values) // width):
             part = convert(b.vec_pack(values[chunk * width : (chunk + 1) * width], F32))
@@ -1536,8 +1705,7 @@ class Epilogue:
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         out_type = _OUT_TYPES[spec.out_dtype]
         out_bytes = _OUT_BYTES[spec.out_dtype]
-        # One global access moves at most 16 B.
-        width = min(rn_count, 16 // out_bytes)
+        width = spec.store_width
         chunks = range(0, rn_count, width)
         fp8 = spec.out_dtype == "fp8e4m3"
         col = ops.add(k.block_n, self.rows.n_row(0, k.lane_col))
@@ -1545,7 +1713,21 @@ class Epilogue:
             for slot in range(_ACCUMULATORS_PER_ATOM):
                 m_local = ops.add((slot // 8) * 16 + slot % 8, ops.mul(k.lane_half, 8))
                 row = ops.add(k.block_m, self.rows.m_row(rm, m_local))
-                index = ops.v(ops.add(ops.mul(row, p["N"]), col))
+                c_ptr, d_ptr = p["C"], p["D"]
+                if spec.wide_d:
+                    # Row base in i64, the column offset in i32.
+                    row_bytes = k.offset64(row, ops.mul(p["N"], out_bytes), 0)
+                    d_ptr = b.global_ptr_add(p["D"], row_bytes)
+                    if read_c:
+                        c_ptr = b.global_ptr_add(p["C"], row_bytes)
+                    index = ops.v(col)
+                else:
+                    index = ops.v(ops.add(ops.mul(row, p["N"]), col))
+                if spec.edge_m or spec.edge_n:
+                    self._store_masked(
+                        final, read_c, rm, slot, row, col, (c_ptr, d_ptr, index)
+                    )
+                    continue
                 values = [
                     b.fmul(p["alpha"], b.vec_extract(final[rm * rn_count + rn], slot))
                     for rn in range(rn_count)
@@ -1553,7 +1735,7 @@ class Epilogue:
                 if read_c:
                     c_words = [
                         b.global_load_vN(
-                            p["C"],
+                            c_ptr,
                             ops.v(ops.add(index, begin)),
                             out_type,
                             width,
@@ -1583,12 +1765,62 @@ class Epilogue:
                             [b.trunc_f32_to_bf16(v) for v in part], BF16
                         )
                     b.global_store_vN(
-                        p["D"],
+                        d_ptr,
                         ops.v(ops.add(index, begin)),
                         packed,
                         width,
                         align=width * out_bytes,
                     )
+
+    def _store_masked(self, final, read_c: bool, rm: int, slot: int, row, col, at_row):
+        """One accumulator slot of a partial tile: each vector of ``width``
+        columns is read and written only if its row and columns are in D.
+        ``at_row`` is the C and D pointers and the slot's index from them."""
+        c_ptr, d_ptr, index = at_row
+        k = self.k
+        b, ops, spec, p = k.b, k.ops, k.spec, k.params
+        rn_count, width = spec.wave_repeat_n, spec.store_width
+        out_type = _OUT_TYPES[spec.out_dtype]
+        out_bytes = _OUT_BYTES[spec.out_dtype]
+        fp8 = spec.out_dtype == "fp8e4m3"
+        row_inside = b.cmp_lt(ops.v(row), p["M"]) if spec.edge_m else None
+        for begin in range(0, rn_count, width):
+            inside = row_inside
+            if spec.edge_n:
+                col_inside = b.cmp_lt(ops.v(ops.add(col, begin)), p["N"])
+                inside = b.land(row_inside, col_inside) if spec.edge_m else col_inside
+            with b.scf_if(inside):
+                at = ops.v(ops.add(index, begin))
+                values = [
+                    b.fmul(p["alpha"], b.vec_extract(final[rm * rn_count + rn], slot))
+                    for rn in range(begin, begin + width)
+                ]
+                if read_c:
+                    if width == 1:
+                        c_values = [b.global_load(c_ptr, at, out_type, align=out_bytes)]
+                    else:
+                        words = b.global_load_vN(
+                            c_ptr, at, out_type, width, align=width * out_bytes
+                        )
+                        c_values = [b.vec_extract(words, i) for i in range(width)]
+                    c_values = [
+                        b.cvt_fp8_to_f32(c) if fp8 else b.cast_to_f32(c)
+                        for c in c_values
+                    ]
+                    values = [
+                        b.fadd(v, b.fmul(p["beta"], c))
+                        for v, c in zip(values, c_values)
+                    ]
+                if fp8:
+                    packed = self._pack_fp8([self._saturate(v) for v in values])
+                elif spec.out_dtype == "fp16":
+                    packed = b.vec_pack([b.trunc_f32_to_f16(v) for v in values], F16)
+                else:
+                    packed = b.vec_pack([b.trunc_f32_to_bf16(v) for v in values], BF16)
+                if width == 1:
+                    b.global_store(d_ptr, at, b.vec_extract(packed, 0), align=out_bytes)
+                else:
+                    b.global_store_vN(d_ptr, at, packed, width, align=width * out_bytes)
 
     def emit(self, final) -> None:
         b, beta = self.k.b, self.k.params["beta"]

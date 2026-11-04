@@ -612,6 +612,49 @@ static void build_tdm_iterate(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* An iterate-mode TDM load whose iteration count is a runtime value. */
+static void build_tdm_iterations(rocke_ir_builder_t* b)
+{
+    static const int shape[] = {8 * 2064};
+    rocke_param_opts_t ro;
+    rocke_tdm_descriptor_opts_t opts;
+    rocke_value_t* g[5];
+    memset(&ro, 0, sizeof(ro));
+    memset(&opts, 0, sizeof(opts));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i8(), "global"), &ro);
+    rocke_value_t* dim0 = rocke_b_param(b, "dim0", rocke_i32(), NULL);
+    rocke_value_t* dim1 = rocke_b_param(b, "dim1", rocke_i32(), NULL);
+    rocke_value_t* stride = rocke_b_param(b, "stride", rocke_i32(), NULL);
+    rocke_value_t* iterations = rocke_b_param(b, "iterations", rocke_i32(), NULL);
+    rocke_value_t* lds
+        = rocke_b_smem_addr_of(b, rocke_b_smem_alloc(b, rocke_i8(), shape, 1, "tile"));
+    opts.iterate_count = 8;
+    opts.lds_increment = 2064;
+    opts.global_increment = rocke_b_mul(b, stride, rocke_b_const_i32(b, 8));
+    opts.iterations = iterations;
+    rocke_b_tdm_descriptor_2d_ex(b,
+                                 src,
+                                 lds,
+                                 /*elem_bytes=*/1,
+                                 dim0,
+                                 dim1,
+                                 stride,
+                                 /*tile_dim0=*/256,
+                                 /*tile_dim1=*/8,
+                                 /*workgroup_mask=*/0,
+                                 /*pad_interval=*/-1,
+                                 /*pad_amount=*/0,
+                                 &opts,
+                                 g);
+    rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -709,6 +752,7 @@ static const config_t FEATURE_CONFIGS[] = {
     {build_multicast, "gfx1250"},
     {build_tdm, "gfx1250"},
     {build_tdm_iterate, "gfx1250"},
+    {build_tdm_iterations, "gfx1250"},
 };
 static const int NUM_FEATURE_CONFIGS = (int)(sizeof(FEATURE_CONFIGS) / sizeof(FEATURE_CONFIGS[0]));
 

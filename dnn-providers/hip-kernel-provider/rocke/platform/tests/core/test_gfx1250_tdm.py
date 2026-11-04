@@ -175,6 +175,39 @@ class TestGfx1250Tdm(unittest.TestCase):
         )
         self.assertIs(groups[2], groups[3])
 
+    def test_iterations_value_sets_group2_count(self):
+        def group2_count(**iterate):
+            b = IRBuilder("iterate")
+            src = b.param("src", PtrType(I32, "global"))
+            iters = b.param("iters", I32)
+            n = b.const_i32(64)
+            groups = b.tdm_descriptor_2d(
+                src,
+                b.const_i32(0),
+                elem_bytes=4,
+                tensor_dim0=n,
+                tensor_dim1=n,
+                row_stride=n,
+                tile_dim0=64,
+                tile_dim1=8,
+                iterate_count=16,
+                lds_increment=520,
+                global_increment=n,
+                **{k: iters if v == "param" else v for k, v in iterate.items()},
+            )
+            b.tensor_load_to_lds(*groups)
+            b.ret()
+            llvm = _lower(b.kernel)
+            # Group 2 dwords follow 4 group-0 and 8 group-1 dwords.
+            return llvm, _readfirstlane_args(llvm)[12:16]
+
+        _, static = group2_count()
+        self.assertEqual(static, ["0", "520", "64", str(15 << 16)])
+        llvm, dynamic = group2_count(iterations="param")
+        self.assertEqual(dynamic[:3], static[:3])
+        self.assertRegex(llvm, rf"{re.escape(dynamic[3])} = shl i32 %sub\d+, 16")
+        self.assertRegex(llvm, r"%sub\d+ = sub (nsw )?i32 %iters, 1")
+
     def test_global_ptr_to_i64(self):
         b = IRBuilder("p2i")
         src = b.param("src", PtrType(I32, "global"))
@@ -252,6 +285,7 @@ class TestGfx1250Tdm(unittest.TestCase):
             ("pad_interval must be in 0..7", dict(pad_interval=8)),
             ("pad_amount must be in 0..127", dict(pad_interval=0, pad_amount=128)),
             ("pad_amount .* needs pad_interval", dict(pad_amount=1)),
+            ("iterations needs iterate_count", dict(iterations=n)),
         )
         for message, overrides in value_errors:
             with self.subTest(message=message):
