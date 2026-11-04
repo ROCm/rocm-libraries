@@ -2743,6 +2743,17 @@ def _arch_filter_accepts(
 STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
 
 
+def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
+    """Drop configs whose ``.name`` (the kernel identity) repeats an earlier one.
+
+    First occurrence wins and input order is kept.
+    """
+    first: Dict[str, GemmKernelConfig] = {}
+    for c in configs:
+        first.setdefault(c.name, c)
+    return list(first.values())
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
@@ -2954,7 +2965,6 @@ def expand_sweep(
         md_combos = [("PassThrough", 0)]
 
     configs: List[GemmKernelConfig] = []
-    seen: set = set()
     for (
         tm,
         tn,
@@ -3105,8 +3115,6 @@ def expand_sweep(
                         if rejects is not None:
                             rejects[reason] = rejects.get(reason, 0) + 1
                         continue
-                    if cv.name in seen:
-                        continue
                     if val is None:
                         # After the vector-width rejects, as in the codegen.
                         val = _cu.validate_kernel_config(
@@ -3126,7 +3134,6 @@ def expand_sweep(
                     if not val:
                         # Keep counting the later widths' rejects, as the codegen does.
                         continue
-                    seen.add(cv.name)
                     configs.append(cv)
 
-    return configs
+    return unique_by_name(configs)

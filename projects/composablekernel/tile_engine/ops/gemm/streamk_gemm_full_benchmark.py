@@ -51,6 +51,7 @@ from gemm_utils import (  # noqa: E402
     _resolve_arch,
     expand_sweep,
     setup_multiple_gemm_dispatchers,
+    unique_by_name,
 )
 from smi_utils import detect_gpu_ids  # noqa: E402
 from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
@@ -355,7 +356,9 @@ def main():
 
     vfb.report_rejects()
 
-    all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
+    # Positional configs can share kernels (e.g. once the reduction override maps
+    # atomic and linear configs to tree): dedupe so --max-kernels counts distinct ones.
+    all_configs = vfb.limit_base_kernels(unique_by_name(all_configs), args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
     print(f"  Build workers: {args.workers}")
