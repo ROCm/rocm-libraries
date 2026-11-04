@@ -222,10 +222,10 @@ TEST(TestGfx950AttentionUnified2DSignature, RefusesEachExchangeOfTwoLikeSlots)
             ++exchanged;
         }
     }
-    // Ten pointers and eight scalars, every one of each group the same kind and size:
-    // C(10, 2) + C(8, 2) pairs. A signature that grew or lost a slot changes this count.
+    // Ten pointers and eleven scalars, every one of each group the same kind and size:
+    // C(10, 2) + C(11, 2) pairs. A signature that grew or lost a slot changes this count.
     constexpr std::size_t POINTER_PAIRS = 45;
-    constexpr std::size_t SCALAR_PAIRS = 28;
+    constexpr std::size_t SCALAR_PAIRS = 55;
     EXPECT_EQ(exchanged, POINTER_PAIRS + SCALAR_PAIRS);
 }
 
