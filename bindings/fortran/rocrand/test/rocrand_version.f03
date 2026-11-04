@@ -23,8 +23,8 @@
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-! ROCRAND_FORTRAN_EXACT_VERSION is set only in-tree, where the module and the
-! library come from the same headers; standalone a mismatch is only reported.
+! A version mismatch between the module and the library is only reported,
+! unless ROCRAND_FORTRAN_EXACT_VERSION is set.
 program rocrand_version_test
 
     use iso_c_binding
