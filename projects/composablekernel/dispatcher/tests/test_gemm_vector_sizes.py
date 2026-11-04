@@ -795,7 +795,9 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
         # are covered with the bridge, in test_streamk_gfx1250.py.
         from gemm_utils import expand_sweep
 
-        row_major_c = r"row-major C .*'rrc'; valid: \['ccr', 'crr', 'rcr', 'rrr'\]"
+        row_major_c = (
+            r"row-major C .*'rrc'; expected one of \('ccr', 'crr', 'rcr', 'rrr'\)"
+        )
         cases = [("rcr", "standard", "linear", "Stream-K only")] + [
             ("rrc", "stream_k", s, row_major_c) for s in self.ALL_STRATEGIES
         ]

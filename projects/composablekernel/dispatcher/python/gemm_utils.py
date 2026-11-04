@@ -2803,6 +2803,7 @@ def expand_sweep(
     expansion, so an override never multiplies the sweep by the config's own
     strategies. An unknown strategy name raises ``ValueError`` before any
     codegen/build.
+
     Applying it before expansion also checks each fixed vector width against the
     strategy that runs it: a C width that is illegal for atomic is legal for
     linear and tree. The argument with another variant, and Stream-K with a
@@ -2887,7 +2888,7 @@ def expand_sweep(
         if c_reason:
             raise ValueError(
                 f"{c_reason}, got layout {layout!r}; "
-                f"valid: {list(_codegen_common().STREAMK_GEMM_LAYOUTS)}"
+                f"expected one of {_codegen_common().STREAMK_GEMM_LAYOUTS}"
             )
     elif reduction_strategies:
         raise ValueError(f"reduction_strategies is Stream-K only, not {variant!r}")
