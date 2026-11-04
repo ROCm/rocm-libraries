@@ -55,7 +55,8 @@ class TestSourceBuildId(unittest.TestCase):
                 "tools/gen_arch_domain_cpp.py": b"generator\n",
                 "tests/portable_ir/replay_cli.cpp": b"cli\n",
                 "CMakeLists.txt": b"root recipe\n",
-                "tests/CMakeLists.txt": b"CLI recipe\n",
+                "tests/CMakeLists.txt": b"test orchestrator\n",
+                "tests/cmake/PortableIrTests.cmake": b"CLI recipe\n",
                 "cmake/rocke_build_id.cmake": b"hash recipe\n",
                 "cmake/generate_rocke_build_id.cmake": b"header recipe\n",
             }
@@ -114,6 +115,19 @@ class TestSourceBuildId(unittest.TestCase):
             recipe.write_text("second\n")
             self.assertNotEqual(first, online.source_build_id(root))
 
+    def test_replay_cli_recipe_changes_the_bundle_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            engine = root / "cpp" / "engine.cpp"
+            engine.parent.mkdir(parents=True)
+            engine.write_text("engine\n")
+            recipe = root / "tests" / "cmake" / "PortableIrTests.cmake"
+            recipe.parent.mkdir(parents=True)
+            recipe.write_text("first\n")
+            first = online.source_build_id(root)
+            recipe.write_text("second\n")
+            self.assertNotEqual(first, online.source_build_id(root))
+
     def test_python_id_matches_the_cmake_generator(self):
         source_cmake = Path(online._platform_root()) / "cmake"
         script_names = ("rocke_build_id.cmake", "generate_rocke_build_id.cmake")
@@ -130,7 +144,10 @@ class TestSourceBuildId(unittest.TestCase):
             replay_cli.parent.mkdir(parents=True)
             replay_cli.write_text("replay CLI\n")
             (root / "CMakeLists.txt").write_text("root recipe\n")
-            (root / "tests" / "CMakeLists.txt").write_text("CLI recipe\n")
+            (root / "tests" / "CMakeLists.txt").write_text("test orchestrator\n")
+            cli_recipe = root / "tests" / "cmake" / "PortableIrTests.cmake"
+            cli_recipe.parent.mkdir()
+            cli_recipe.write_text("CLI recipe\n")
             for relative in _TABLE_INPUTS:
                 table_input = root / relative
                 table_input.parent.mkdir(parents=True, exist_ok=True)
