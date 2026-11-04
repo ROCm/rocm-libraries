@@ -30,6 +30,9 @@ class _Records(logging.Handler):
 @pytest.fixture
 def timing_lines():
     """The TIMING lines written to the tensile.timing logger during the test."""
+    # Import first: TimingInstrumentation sets the logger up (INFO level) only if it has no
+    # handlers yet, so attaching ours before its first import would leave the logger at WARNING.
+    import tensilelite.Common.TimingInstrumentation  # noqa: F401
     handler = _Records()
     logger = logging.getLogger("tensile.timing")
     logger.addHandler(handler)
