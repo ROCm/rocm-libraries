@@ -591,62 +591,27 @@ TEST_P(TestGpuRMSNormFwdRef5DBfp16, MatchesCpuRef)
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-// --- Quick tests ---
+// --- Quick tests (fp32) + Standard small-shape reduced precision ---
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuRMSNormFwdRef4DFp32,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormFwdRef4DFp16,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormFwdRef4DBfp16,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 
+// P1 (dtype orthogonality): medium shapes are fp32-only; reduced precision is covered by the
+// standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormFwdRef4DFp32,
-                         ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRef4DFp16,
-                         ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRef4DBfp16,
                          ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuRMSNormFwdRef4DFp32,
                          ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRef4DFp16,
-                         ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRef4DBfp16,
-                         ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef4DFp32, ::testing::ValuesIn([]() {
-                             auto v = getRMSnormSmall4DTestCases();
-                             auto m = getRMSnormMedium4DTestCases();
-                             auto l = getRMSnormLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef4DFp16, ::testing::ValuesIn([]() {
-                             auto v = getRMSnormSmall4DTestCases();
-                             auto m = getRMSnormMedium4DTestCases();
-                             auto l = getRMSnormLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef4DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getRMSnormSmall4DTestCases();
-                             auto m = getRMSnormMedium4DTestCases();
-                             auto l = getRMSnormLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
 
 // ============================================================================
 // 5D (NCDHW/NDHWC) shape tests
@@ -655,57 +620,22 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef4DBfp16, ::testing::ValuesIn(
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuRMSNormFwdRef5DFp32,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormFwdRef5DFp16,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormFwdRef5DBfp16,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
 
+// P1 (dtype orthogonality): medium shapes are fp32-only; reduced precision is covered by the
+// standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormFwdRef5DFp32,
-                         ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRef5DFp16,
-                         ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRef5DBfp16,
                          ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuRMSNormFwdRef5DFp32,
                          ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRef5DFp16,
-                         ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRef5DBfp16,
-                         ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DFp32, ::testing::ValuesIn([]() {
-                             auto v = getRMSnormSmall5DTestCases();
-                             auto m = getRMSnormMedium5DTestCases();
-                             auto l = getRMSnormLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DFp16, ::testing::ValuesIn([]() {
-                             auto v = getRMSnormSmall5DTestCases();
-                             auto m = getRMSnormMedium5DTestCases();
-                             auto l = getRMSnormLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getRMSnormSmall5DTestCases();
-                             auto m = getRMSnormMedium5DTestCases();
-                             auto l = getRMSnormLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
 
 // ============================================================================
 // Edge case tests with DISABLED_ prefix to avoid running in CI.

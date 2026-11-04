@@ -9,8 +9,8 @@ a bare ``op_id`` string via three pieces:
 
 * ``_mma_c_frag_len`` — accumulator fragment length, resolved from the arch SSOT
   ``core.arch.target._MMA_FRAGMENT_INFO`` (no ir-side copy);
-* ``_mma_c_dtype`` -- the atom's accumulator dtype, resolved from the JSON catalog
-  (``target._op_id_c_dtype``); every catalog accumulator has an IR type;
+* ``_mma_dst_dtype`` -- the atom's result dtype, resolved from the JSON catalog
+  (``target._op_id_dst_dtype``); every catalog result has an IR type;
 * ``_MMA_RESULT_HINT`` — the ir-side SSA result-name hints (naming only, kept in
   ir.py to preserve byte-identical value numbering).
 
@@ -38,16 +38,18 @@ from rocke.core.arch.target import (
     _frag_info,
     _load_specs,
     _op_id_c_dtype,
+    _op_id_dst_dtype,
     _op_id_physical_op_id,
 )
 from rocke.core.ir import (
     _MMA_RESULT_HINT,
+    BF16,
     F16,
     F32,
     I32,
     IRBuilder,
-    _mma_c_dtype,
     _mma_c_frag_len,
+    _mma_dst_dtype,
     dtype_to_ir_type,
 )
 
@@ -126,7 +128,7 @@ class TestMmaFragTables(unittest.TestCase):
             int_op_ids, "expected at least one i32-accumulator atom in the catalog"
         )
         for op_id in int_op_ids:
-            self.assertEqual(_mma_c_dtype(op_id), "i32")
+            self.assertEqual(_mma_dst_dtype(op_id), "i32")
             self.assertGreater(
                 _mma_c_frag_len(op_id),
                 0,
@@ -148,15 +150,24 @@ class TestMmaFragTables(unittest.TestCase):
                     _mma_c_frag_len(op_id), _MMA_FRAGMENT_INFO[physical].c_frag_len
                 )
 
-    def test_an_op_id_outside_the_catalog_accumulates_in_fp32(self):
+    def test_an_op_id_outside_the_catalog_returns_fp32(self):
         # mfma_f32_4x4x4_f16 has fragment information but no catalog row.
-        self.assertNotIn("mfma_f32_4x4x4_f16", _op_id_c_dtype())
-        self.assertEqual(_mma_c_dtype("mfma_f32_4x4x4_f16"), "fp32")
+        self.assertNotIn("mfma_f32_4x4x4_f16", _op_id_dst_dtype())
+        self.assertEqual(_mma_dst_dtype("mfma_f32_4x4x4_f16"), "fp32")
 
-    def test_mma_results_take_the_accumulator_dtype(self):
+    def test_mma_results_take_the_result_dtype(self):
+        # The result dtype is the accumulator's except where the row records
+        # another one (the gfx1250 bf16 result from an fp32 accumulator).
         for gfx, op_id, c, a_type, result in (
             ("gfx942", "mfma_f32_16x16x16_f16", (F32, 4), (F16, 4), "vec<f32x4>"),
             ("gfx1151", "wmma_i32_16x16x16_iu8", (I32, 8), (I32, 4), "vec<i32x8>"),
+            (
+                "gfx1250",
+                "wmma_gfx1250_bf16f32_16x16x32_bf16",
+                (F32, 8),
+                (BF16, 16),
+                "vec<bf16x8>",
+            ),
         ):
             with self.subTest(op_id=op_id):
                 b = IRBuilder(f"result_{op_id}")
@@ -165,12 +176,13 @@ class TestMmaFragTables(unittest.TestCase):
                 self.assertEqual(b.mma(op, a, a, b.zero_vec(*c)).type.name, result)
                 self.assertEqual(b.mma(op_id, a, a, b.zero_vec(*c)).type.name, result)
 
-    def test_every_catalog_accumulator_has_an_ir_type(self):
+    def test_every_catalog_accumulator_and_result_has_an_ir_type(self):
         for gfx in known_arches():
             for op in ArchTarget.from_gfx(gfx).mma.ops:
                 with self.subTest(gfx=gfx, op_id=op.op_id):
                     dtype_to_ir_type(op.c_dtype)
-                    self.assertEqual(_mma_c_dtype(op.op_id), op.c_dtype)
+                    dtype_to_ir_type(op.dst_dtype)
+                    self.assertEqual(_mma_dst_dtype(op.op_id), op.dst_dtype)
 
     def test_native_mma_results_match_the_python_builder(self):
         executable = os.environ.get("ROCKE_IR_TYPES_TEST")
