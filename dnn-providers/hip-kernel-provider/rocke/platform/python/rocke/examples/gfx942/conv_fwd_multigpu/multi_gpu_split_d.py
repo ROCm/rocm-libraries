@@ -401,6 +401,24 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
 
     can_p2p = P >= 2 and torch.cuda.can_device_access_peer(0, 1)
 
+    # Precompute each device's launch_values()/grid/cfg once: X_dev/W_dev/Y_dev
+    # are fixed buffers reused every iteration (halo_exchange() mutates their
+    # *contents* in place, not their identity, so the packed kernarg values --
+    # which only embed data_ptr()s and sizes -- stay valid). Rebuilding these
+    # from scratch inside the timed loop is a fixed per-launch host cost that
+    # does not shrink with the per-shard kernel: at P=2 (~1.3ms/launch) it is
+    # noise, but at P=4 (~0.56ms/launch, a quarter-depth shard) it is large
+    # enough to look like a per-device throughput collapse that is actually
+    # pure host overhead, not GPU time. Confirmed via a pure-kernel no_fence
+    # concurrency probe: 2 and 4 devices launching the same shard kernel
+    # scale identically (~same TFLOPS/dev as isolated) with no caching
+    # needed -- the fixed-overhead-per-launch is specific to this harness.
+    launch_values, launch_grids, launch_cfgs = {}, {}, {}
+    for d in range(P):
+        launch_values[d] = _launch_values(ConvArgs, shard_problem, specs[d], X_dev[d], W_dev[d], Y_dev[d])
+        launch_grids[d] = _grid_for_spec(specs[d], shard_problem)
+        launch_cfgs[d] = LaunchConfig(grid=launch_grids[d], block=(specs[d].launch_block_size, 1, 1), stream=0)
+
     def halo_exchange():
         for d in range(P - 1):
             # the (Z-1) rows shard d is missing are exactly the first (Z-1)
@@ -421,10 +439,7 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
         with no_fence():
             for d in range(P):
                 with torch.cuda.device(d):
-                    values = _launch_values(ConvArgs, shard_problem, specs[d], X_dev[d], W_dev[d], Y_dev[d])
-                    grid = _grid_for_spec(specs[d], shard_problem)
-                    cfg = LaunchConfig(grid=grid, block=(specs[d].launch_block_size, 1, 1), stream=0)
-                    launchers[d](values, config=cfg)
+                    launchers[d](launch_values[d], config=launch_cfgs[d])
 
     def sync_all():
         for d in range(P):
