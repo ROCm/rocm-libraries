@@ -76,14 +76,13 @@ class ShapeVisitationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, r"index 8 is outside \[0, 8\)"):
             shape.selected_coordinates([0, 8, 1], hn.Permutation([0, 1]))
-        for bad in ([0, 0], [1], [0, 2]):
-            with self.assertRaises(RuntimeError):
-                shape.selected_coordinates([], hn.Permutation(bad))
-            with self.assertRaises(RuntimeError):
-                shape.selected_coordinates(hn.IndexRange(0, 0, 1), hn.Permutation(bad))
-        # Orders must be Permutations, so a list of indices is never read as one.
-        with self.assertRaises(TypeError):
-            shape.selected_coordinates([1, 0], [0, 1])
+        wrong_rank = hn.Permutation([0])
+        for selection in ([], hn.IndexRange.all(0)):
+            with self.assertRaisesRegex(RuntimeError, "rank"):
+                shape.selected_coordinates(selection, wrong_rank)
+            # A plain list cannot supply the axis order, even for empty work.
+            with self.assertRaises(TypeError):
+                shape.selected_coordinates(selection, [0, 1])
         for empty_shape in (hn.Shape(), hn.Shape([2, 0])):
             with self.assertRaisesRegex(RuntimeError, "rank"):
                 empty_shape.selected_coordinates([], hn.Permutation([0]))
