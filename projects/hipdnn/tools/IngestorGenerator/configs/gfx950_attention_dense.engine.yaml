@@ -251,9 +251,12 @@ launch_surface:
   - name: score
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
-    kmd_fields: [head_size, block_m, block_n]
+    kmd_fields: [head_size, causal, block_m, block_n]
     guard: >
-      scoreKernel() returns 0 for a record without a launchable tile; otherwise
-      an applicable 256/64 baseline first, then ascending (block_m, block_n),
-      a distinct positive score per tile.
+      scoreKernel() returns 0 for a record without a launchable tile; otherwise a
+      distinct positive score per tile, ordered by closeness to preferredTile()
+      for the graph's (head_size, causal) cohort and seqlen_q, with the
+      historical ascending (block_m, block_n) order as the remainder. causal is
+      read from the candidate's own metadata, which kernelMatches has already
+      required to agree with the graph.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
