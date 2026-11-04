@@ -277,7 +277,8 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
                 hC[i + j * lda] -= hA[b][i + j * lda];
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
-        err /= n;
+        if(n > 0)
+            err /= n;
         if(A_norms[b] != 0)
             err /= A_norms[b];
         max_errors[0] = rocblas_max_nan(err, max_errors[0]);
@@ -320,7 +321,8 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
 
         // Compute norm( I - Q * Q^H ).
         double err = cpu_lange('1', min_mn, min_mn, hR.data(), min_mn, hrwork.data());
-        err /= n;
+        if(n > 0)
+            err /= n;
         max_errors[1] = rocblas_max_nan(err, max_errors[1]);
     }
 

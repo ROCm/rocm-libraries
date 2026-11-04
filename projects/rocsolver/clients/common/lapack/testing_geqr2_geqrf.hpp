@@ -286,7 +286,8 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
 
         double err = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hC.data(), (rocblas_int)lda,
                                hrwork.data());
-        err /= m;
+        if(m > 0)
+            err /= m;
         if(A_norms[b] != 0)
             err /= A_norms[b];
         max_errors[0] = rocblas_max_nan(err, max_errors[0]);
@@ -340,7 +341,9 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
                                             min_mn, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
 
-        double err = hnorm[0][0] / m;
+        double err = hnorm[0][0];
+        if(m > 0)
+            err /= m;
         max_errors[1] = rocblas_max_nan(err, max_errors[1]);
     }
 
