@@ -496,6 +496,35 @@ std::vector<roc::hostnumerics::ComparisonTolerance>
     return tolerances;
 }
 
+// After output validation, the solution that was never launched must
+// fail the checks of D, and every other solution must pass them. Returns whether sol is the
+// solution that was never launched.
+inline bool check_skip_launch_self_test(const Arguments&       arg,
+                                        int64_t                failures_before,
+                                        hipblasLtHandle_t      handle,
+                                        hipblasLtMatmulAlgo_t& algo,
+                                        size_t                 sol,
+                                        size_t                 count)
+{
+    if(arg.skip_launch_solution < 0)
+        return false;
+    const bool skipped  = int64_t(sol) == arg.skip_launch_solution;
+    const bool reported = hipblaslt_bench_options::verification_failures() > failures_before;
+    if(skipped != reported)
+    {
+        const std::string error
+            = "skip_launch_solution: " + solution_description(handle, algo, sol, count, true)
+              + (skipped ? " was never launched, but D passed its checks"
+                         : " failed the checks of D");
+#ifdef GOOGLE_TEST
+        ADD_FAILURE() << error;
+#else
+        hipblaslt_cerr << error << std::endl;
+#endif
+    }
+    return skipped;
+}
+
 void testing_matmul_with_bias(const Arguments&                                  arg,
                               std::span<const hipblaslt::client::MatmulProblem> matmulProblems,
                               const hipblaslt::client::MatmulDataTypes&         dataTypes);
@@ -529,12 +558,18 @@ private:
 
 void testing_matmul(Arguments arg)
 {
-    if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-       && char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T)
-        throw std::runtime_error("scaleA=1001 requires transA=T");
-    if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-       && char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N)
-        throw std::runtime_error("scaleB=1001 requires transB=N");
+    const auto transA               = char_to_hipblas_operation(arg.transA);
+    const auto transB               = char_to_hipblas_operation(arg.transB);
+    const bool preswizzledAnyLayout = arg.a_type == HIP_R_4F_E2M1 && arg.b_type == HIP_R_4F_E2M1;
+    if(!preswizzledAnyLayout)
+    {
+        if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+           && transA != HIPBLAS_OP_T)
+            throw std::runtime_error("scaleA=1001 requires transA=T");
+        if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+           && transB != HIPBLAS_OP_N)
+            throw std::runtime_error("scaleB=1001 requires transB=N");
+    }
     hipblaslt_apply_validation_options(arg);
     // After the validation options, so --verify cannot restore the norm assertion that
     // --verify_strict turns off to count every failure.
@@ -545,6 +580,23 @@ void testing_matmul(Arguments arg)
     arg_revised.aux_type   = dataTypes.auxiliary;
 
     const auto matmulProblems = hipblaslt::client::normalizeMatmulProblems(arg_revised);
+
+    for(const auto& problem : matmulProblems)
+    {
+        if(isBlockScaling(arg.scaleA) && problem.a.leadingDimension() != problem.a.rows())
+            throw std::runtime_error("MX scales require lda equal to the rows stored");
+        if(isBlockScaling(arg.scaleB) && problem.b.leadingDimension() != problem.b.rows())
+            throw std::runtime_error("MX scales require ldb equal to the rows stored");
+        const bool kAlongColumns
+            = (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+               && transA == HIPBLAS_OP_N)
+              || (arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                  && transB != HIPBLAS_OP_N);
+        if(kAlongColumns && problem.k % 32 != 0)
+            throw std::runtime_error(
+                "GFX950 scales with K along the columns require K to be a multiple of 32, got "
+                + std::to_string(problem.k));
+    }
 
     if(arg.validation_inject >= 0
        && (arg.batch_count == 0 || matmulProblems.front().m == 0 || matmulProblems.front().n == 0))
@@ -993,6 +1045,31 @@ void testing_matmul_with_bias(const Arguments&                                  
             FAIL() << why;
 #else
             throw std::invalid_argument(why);
+#endif
+        }
+    }
+
+    // The self-test counts the allclose failures that validation reports per solution: unit_check
+    // and norm_check would fail the case outright on the NaN in the skipped solution's D. The
+    // skipped solution follows one that wrote D.
+    if(arg.skip_launch_solution != -1)
+    {
+        std::string why;
+        if(arg.skip_launch_solution < 1)
+            why = "skip_launch_solution must be -1 (none) or a position after the first solution";
+        else if(!arg.allclose_check || arg.unit_check || arg.norm_check || arg.freivalds
+                || arg.bounds_check || arg.c_equal_d)
+            why = "skip_launch_solution requires allclose_check, without unit_check, norm_check, "
+                  "freivalds, bounds_check or c_equal_d";
+        else if(arg.use_ext || arg.grouped_gemm || batchMode != HIPBLASLT_BATCH_MODE_STRIDED)
+            why = "skip_launch_solution supports only the C API with strided batches";
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
 #endif
         }
     }
@@ -3448,6 +3525,16 @@ void testing_matmul_with_bias(const Arguments&                                  
         }
         else if(arg.api_method == kApiMethodGroupedC)
         {
+            const bool                      mx = arg.scaleA != hipblaslt_scaling_format::none;
+            std::vector<std::vector<void*>> sa(mx ? block_count : 0,
+                                               std::vector<void*>(problem_count));
+            std::vector<std::vector<void*>> sb(sa);
+            for(int32_t b = 0; b < int32_t(sa.size()); b++)
+                for(int gemmIdx = 0; gemmIdx < problem_count; gemmIdx++)
+                {
+                    sa[b][gemmIdx] = rotatingBlockAddress(dScaleA[gemmIdx], b);
+                    sb[b][gemmIdx] = rotatingBlockAddress(dScaleB[gemmIdx], b);
+                }
             groupedC = std::make_unique<GroupedCApiProblem>(
                 handle,
                 arg,
@@ -3468,6 +3555,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                 db,
                 dc,
                 dd,
+                sa,
+                sb,
                 max_workspace_size);
             EXPECT_HIPBLAS_STATUS(groupedC->status(), HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(groupedC->heuristic(requestAlgoCount, heuristicResult),
@@ -3536,6 +3625,20 @@ void testing_matmul_with_bias(const Arguments&                                  
             return;
 #endif
         }
+    }
+
+    if(arg.skip_launch_solution >= int64_t(heuristicResult.size()))
+    {
+        const std::string why = "skip_launch_solution " + std::to_string(arg.skip_launch_solution)
+                                + " needs at least " + std::to_string(arg.skip_launch_solution + 1)
+                                + " solutions, and this case has "
+                                + std::to_string(heuristicResult.size());
+#ifdef GOOGLE_TEST
+        GTEST_SKIP() << why;
+#else
+        hipblaslt_cout << why << std::endl;
+        return;
+#endif
     }
 
     // A placed workspace replaces the ordinary allocation for all launches.
@@ -4164,10 +4267,14 @@ void testing_matmul_with_bias(const Arguments&                                  
         }
     };
 
+    bool skippedSolutionChecked = false;
+
     // Validates the outputs of solution sol and names it after any failure lines.
     auto validateSolutionOutputs = [&](size_t sol) {
         const int64_t failuresBefore = hipblaslt_bench_options::verification_failures();
         auto          summary        = validateOutputs();
+        skippedSolutionChecked |= check_skip_launch_self_test(
+            arg, failuresBefore, handle, heuristicResult[sol].algo, sol, heuristicResult.size());
         if(hipblaslt_bench_options::verification_failures() > failuresBefore)
             hipblaslt_cerr << "the failed checks above are for "
                            << solution_description(handle,
@@ -5312,6 +5419,8 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 // One launch of candidate sol on rotation block i % block_count, cold or timed.
                 auto launchMatmul = [&](size_t sol, int64_t i) {
+                    if(int64_t(sol) == arg.skip_launch_solution)
+                        return HIPBLAS_STATUS_SUCCESS;
                     int   b          = static_cast<int>(i % block_count);
                     auto& ptr_matmul = firstRuntimeProblem.matmulDescriptors[b];
                     return hipblasLtMatmul(handle,

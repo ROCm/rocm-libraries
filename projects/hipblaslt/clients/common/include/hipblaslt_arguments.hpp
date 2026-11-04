@@ -183,6 +183,8 @@ struct Arguments
     int32_t validation_iters;
     int32_t validation_inject;
     int8_t  requires_streamk;
+    // Position of an unlaunched solution that the allclose self-test must report (-1 = none).
+    int32_t skip_launch_solution;
     // integer_exact value pattern: '' (standard), ternary or sparse_k.
     char integer_exact_pattern[16];
     // skip, rather than fail, when the library offers no solution (size-threshold sweeps)

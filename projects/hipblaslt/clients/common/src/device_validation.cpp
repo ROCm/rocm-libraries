@@ -878,6 +878,16 @@ namespace
 
 std::string validation_memory_shortfall(size_t device_bytes, size_t host_bytes)
 {
+    return validation_memory_shortfall(device_bytes, host_bytes, [](size_t& free) {
+        size_t total = 0;
+        return hipMemGetInfo(&free, &total) == hipSuccess;
+    });
+}
+
+std::string validation_memory_shortfall(size_t                                   device_bytes,
+                                        size_t                                   host_bytes,
+                                        const std::function<bool(size_t& free)>& free_device_bytes)
+{
     auto gib = [](size_t bytes) {
         std::ostringstream s;
         s.precision(3);
@@ -885,8 +895,8 @@ std::string validation_memory_shortfall(size_t device_bytes, size_t host_bytes)
         return s.str();
     };
     auto shortfall = [&]() -> std::string {
-        size_t free_bytes = 0, total_bytes = 0;
-        if(hipMemGetInfo(&free_bytes, &total_bytes) == hipSuccess && device_bytes > free_bytes)
+        size_t free_bytes = 0;
+        if(free_device_bytes(free_bytes) && device_bytes > free_bytes)
             return "this case needs " + gib(device_bytes) + " of device memory and "
                    + gib(free_bytes) + " is free";
 

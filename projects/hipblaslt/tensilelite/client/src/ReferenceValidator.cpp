@@ -73,7 +73,12 @@ namespace TensileLite
             if(m_freivalds && m_printTensorRef)
                 throw std::invalid_argument(
                     "Freivalds does not compute a reference tensor to print.");
-            m_enabled = m_freivalds || m_elementsToValidate != 0 || m_printAny;
+            m_enabled               = m_freivalds || m_elementsToValidate != 0 || m_printAny;
+            m_validateAfterEnqueues = args.count("validate-after-enqueues")
+                                      && args["validate-after-enqueues"].as<bool>();
+            if(m_validateAfterEnqueues && args.count("c-equal-d") && args["c-equal-d"].as<bool>())
+                throw std::runtime_error("validate-after-enqueues requires c-equal-d=false: "
+                                         "repeated launches must preserve the reference inputs.");
         }
 
         bool ReferenceValidator::needMoreBenchmarkRuns() const
@@ -429,7 +434,8 @@ namespace TensileLite
                                                   TimingEvents const&        startEvents,
                                                   TimingEvents const&        stopEvents)
         {
-            if(m_enabled && m_devices.size() > 1)
+            // Fused A2A validates here; others only when validate-after-enqueues is on.
+            if(m_enabled && (m_validateAfterEnqueues || m_devices.size() > 1))
             {
                 validateSlots(slots);
                 m_validatedSolution = true;

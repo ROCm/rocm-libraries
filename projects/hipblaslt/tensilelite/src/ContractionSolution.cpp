@@ -388,9 +388,9 @@ namespace TensileLite
                                                       size_t          itersPerTile,
                                                       size_t          kGranularity = 1)
         {
-            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-            const int overrideTiles = pAMDGPU ? pAMDGPU->skTiles : -1;
-            const int overrideSplit = pAMDGPU ? pAMDGPU->skSplit : -1;
+            AMDGPU const*       pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
+            const int           overrideTiles = pAMDGPU ? pAMDGPU->skTiles : -1;
+            const int           overrideSplit = pAMDGPU ? pAMDGPU->skSplit : -1;
             StreamKDynamicItems items;
             items.skTiles        = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0;
             items.skSplit        = overrideSplit > -1 ? static_cast<uint32_t>(overrideSplit) : 2;
@@ -1583,19 +1583,8 @@ namespace TensileLite
 
                 auto itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
                 auto tiles        = problem.getNumTiles(sizeMapping, 1);
-                // Determine number of stream-k tiles and splitting factor
-                uint32_t skTiles = 0;
-                uint32_t skSplit = 2;
-                // Check for debug overrides
-                if(overrideTiles > -1)
-                    skTiles = overrideTiles;
-                if(overrideSplit > -1)
-                    skSplit = overrideSplit;
-                // Calculate number of stream-k iterations per workitem
-                uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
-                // Calculate real splitting factor in case iterations don't divide evenly
-                skSplit             = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
-                uint32_t totalItems = (tiles - skTiles) + skTiles * skSplit;
+                const auto [skTiles, skSplit, skItersPerWI, totalItems]
+                    = streamKDynamicItems(*hardware, tiles, itersPerTile);
 
                 args.template append<uint32_t>("ItersPerTile", itersPerTile);
                 args.template append<uint32_t>("TotalItems", totalItems);
@@ -1623,19 +1612,8 @@ namespace TensileLite
 
                 if(effectiveDynamic)
                 {
-                    int      overrideTiles = pAMDGPU->skTiles;
-                    int      overrideSplit = pAMDGPU->skSplit;
-                    uint32_t sk4_skTiles   = 0;
-                    uint32_t sk4_skSplit   = 2;
-                    if(overrideTiles > -1)
-                        sk4_skTiles = overrideTiles;
-                    if(overrideSplit > -1)
-                        sk4_skSplit = overrideSplit;
-                    uint32_t sk4_skItersPerWI
-                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile), sk4_skSplit);
-                    sk4_skSplit
-                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile), sk4_skItersPerWI);
-                    uint32_t sk4_totalItems = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
+                    const auto [sk4_skTiles, sk4_skSplit, sk4_skItersPerWI, sk4_totalItems]
+                        = streamKDynamicItems(*hardware, sk3_tiles, sk3_itersPerTile);
 
                     // Slot 2 aliases MagicShiftItersPerTile on the static
                     // sub-path, whose top three bits are abit(31), the SK5 mode
@@ -1654,8 +1632,7 @@ namespace TensileLite
                     args.template append<uint32_t>("SKSplit", sk4_skSplit);
                     args.template append<uint32_t>("SKItersPerWI", sk4_skItersPerWI);
                     args.template append<uint32_t>("SKGrid", launch.grid);
-                    assertStreamKDynamicGridCoversQueues(
-                        *hardware, launch.grid, sk4_totalItems);
+                    assertStreamKDynamicGridCoversQueues(*hardware, launch.grid, sk4_totalItems);
                 }
                 else
                 {
@@ -6794,17 +6771,6 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
-    double ContractionSolution::streamKClusterUtilization(Problem const& problem) const
-    {
-        if(!usesStreamKSpatialCluster())
-            return 1.0;
-        const auto geometry = spatialClusterGeometry(*this, problem);
-        if(geometry.totalBlocks == 0)
-            return 1.0;
-        return static_cast<double>(geometry.totalTiles)
-               / (static_cast<double>(geometry.totalBlocks) * geometry.clusterSize);
-    }
-
     StreamKSettings
         ContractionSolution::resolveClusteredStreamKSettings(Problem const&  problem,
                                                              Hardware const& hardware) const
@@ -6916,55 +6882,6 @@ namespace TensileLite
             launch.grid   = std::min(launch.grid, cluster.blocks);
             cluster.split = {};
         };
-        // The tile predictor does not price spatial block padding or clustered
-        // tree fixup. Compare its resolved physical grid with a whole-block
-        // candidate, in units of DepthU iterations on the busiest CU. Count
-        // physical waves (including padded peers), not just logical workers.
-        // The fixup allowance is calibrated for gfx1250 dense clustered tree
-        // kernels at a full physical wave, scaled by the block footprint so
-        // underfilled waves still favor K parallelism. Keep small grids (<1/4
-        // CU coverage), other
-        // architectures and parallel reduction on their existing policies.
-        if(!cluster.fixedGridUsed && !wholeTileGrid && cluster.blocks % launch.grid != 0
-           && gpu->processor == AMDGPU::Processor::gfx1250
-           && gpu->persistentDynamicGrid
-                  == static_cast<int>(origami::grid_selection_t::k_split_aware)
-           && launch.reduction == origami::reduction_t::tree && !handwrittenCustomKernel()
-           && !sizeMapping.useSubtileImpl && !problemType.useGradient && !problemType.sparse
-           && k != 0)
-        {
-            size_t cuBudget = gpu->computeUnitCount;
-            if(gpu->persistentMaxCUs > 0)
-                cuBudget = std::min(cuBudget, static_cast<size_t>(gpu->persistentMaxCUs));
-            if(launch.smCountTarget > 0)
-                cuBudget = std::min(cuBudget, static_cast<size_t>(launch.smCountTarget));
-            const size_t clustersPerWave = std::max(size_t{1}, cuBudget / cluster.clusterSize);
-            const size_t wholeWaves      = divideUp(cluster.blocks, clustersPerWave);
-            const size_t splitWaves      = divideUp(launch.grid, clustersPerWave);
-            const size_t wholeWork       = checkedMultiply(wholeWaves, iters);
-            const size_t splitWork = checkedMultiply(splitWaves, divideUp(totalIters, launch.grid));
-            constexpr size_t TreeFixupItersPerWave = 48;
-            const size_t     fixupWork
-                = checkedMultiply(checkedMultiply(splitWaves, TreeFixupItersPerWave),
-                                  std::min(cluster.blocks, clustersPerWave))
-                  / clustersPerWave;
-            const size_t splitCost = checkedAdd(splitWork, fixupWork);
-            if(cluster.blocks >= divideUp(clustersPerWave, size_t{4}) && wholeWork <= splitCost)
-            {
-                launch.grid = std::min(cluster.blocks, launchLimit / cluster.clusterSize);
-                // Respect a caller's CU cap even though whole blocks do not
-                // need the cooperative residency/flag limit.
-                if(cuBudget < static_cast<size_t>(gpu->computeUnitCount))
-                    launch.grid = std::min(
-                        launch.grid,
-                        checkedMultiply(clustersPerWave,
-                                        static_cast<size_t>(std::max(sizeMapping.CUOccupancy, 1))));
-                wholeBlocks("whole-block-cost");
-                cluster.physicalGrid    = checkedMultiply(launch.grid, cluster.clusterSize);
-                launch.clusterGridClamp = cluster.physicalGrid != launch.selectedGrid;
-                return launch;
-            }
-        }
         // One logical worker owns one K interval of one spatial block. All
         // peers use the same split index and store at their real output
         // coordinates in [split][batch][N][M], as the conversion kernel expects.
@@ -8074,6 +7991,30 @@ namespace TensileLite
                 }
             }
 
+            // Give every non-empty work queue a home workgroup (see
+            // assertStreamKDynamicGridCoversQueues); part of grid selection, so
+            // before outSelectedGrid.
+            if(grid > 0 && streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode()))
+            {
+                const size_t totalItems
+                    = streamKDynamicItems(
+                          hardware, tiles, problem.getItersPerTile(self.sizeMapping))
+                          .totalItems;
+                const size_t minGrid = std::min(totalItems, streamKBakedQueueCount(hardware));
+                if(grid < minGrid)
+                {
+                    if(Debug::Instance().printPropertyEvaluation())
+                    {
+                        std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
+                                  << "' dynamic StreamK grid " << grid << " leaves work queues "
+                                  << "without a home workgroup; raising it to " << minGrid << ".\n";
+                    }
+                    if(pAMDGPU->persistentFixedGrid > 0 || pAMDGPU->persistentMaxCUs > 0)
+                        warnStreamKDynamicGridRaiseOnce(grid, minGrid);
+                    grid = minGrid;
+                }
+            }
+
             // Grid selected by the config/CU/override logic, captured before the
             // "reset to tiles" tree-fixup-bounds fallback below.
             //
@@ -8746,9 +8687,8 @@ namespace TensileLite
         pp.staticModel = staticPerformanceModel(
             M, N, K, NumBatches, MT0, MT1, NumCUs, pp.granularities.totalGranularity, GlobalSplitU);
 
-        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity
-                         * streamKClusterUtilization(problem);
-        pp.CUs = NumCUs;
+        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity;
+        pp.CUs         = NumCUs;
 
         return pp;
     }
