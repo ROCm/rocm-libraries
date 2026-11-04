@@ -1,0 +1,184 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 1
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+  CpuThreads: 1
+  KeepBuildTmp: True
+  PrintLevel: 2
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  ########################################
+  # TDMStore stores the beta=0 epilogue's narrowest edge block with
+  # tensor_store_from_lds. With AdaptiveGemm only odd M reaches that block;
+  # without it every M-edge workgroup does. The other sizes check that the
+  # remaining store blocks are unchanged. The last size has a leading
+  # dimension larger than M, so BoundsCheck also checks the gap between columns.
+  ########################################
+  -
+    - &problem_type_bf16 # ProblemType TN, beta=0 epilogue only
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      UseBeta: False
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [0, 1]
+        - TDMStore: [0, 1]
+        - SourceSwap: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 128]
+          - Exact: [511, 512, 1, 128]
+          - Exact: [257, 512, 1, 128]
+          - Exact: [510, 512, 1, 128]
+          - Exact: [508, 512, 1, 128]
+          - Exact: [504, 512, 1, 128]
+          - Exact: [512, 509, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # SIA4 (StinkyTofu keeps the staging wait) and the D cache policy:
+  # TemporalHintD -> th:, NonTemporalD -> scope:, NonVolatileD -> nv.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [1]
+        - Groups:
+          - - ScheduleIterAlg: [4]
+              TDMStore: [0, 1]
+            - TDMStore: [1]
+              TemporalHintD: [3, 7]
+              NonTemporalD: [2]
+            - TDMStore: [1]
+              TemporalHintD: [1]
+              NonTemporalD: [1]
+              NonVolatileD: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # fp16 output.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      DataType: h
+      DestDataType: h
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [1]
+        - TDMStore: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # beta != 0: a TDMStore kernel keeps buffer_store in its beta != 0 epilogue.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      UseBeta: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [1]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+  ########################################
+  # MacroTile0 512 over 8 waves: staging offsets above the 16-bit DS offset.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 8, 8, 1]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - AdaptiveGemm: [1]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1023, 256, 1, 128]
