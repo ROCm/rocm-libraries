@@ -45,10 +45,16 @@
  * implement is rejected, and never gets the default order's empty name tag.
  *
  * REASON STRINGS. Every ValueError reason is the Python text byte for byte, so a
- * C caller can log the same message the Python predicate returns. The two
- * paged geometries where Python raises ZeroDivisionError instead (block_m < 32,
- * or more waves than block_n rows) return the fixed text "division by zero";
- * CPython's own text varies by version, so those are compared by verdict only.
+ * C caller can log the same message the Python predicate returns. The rejects
+ * with no Python ValueError text:
+ *   - the two paged geometries where Python raises ZeroDivisionError instead
+ *     (block_m < 32, or more waves than block_n rows): the fixed text
+ *     "division by zero" (CPython 3.14's; 3.12 says "integer division or
+ *     modulo by zero"), so those are compared by verdict only;
+ *   - a decode the traits list but this port does not implement (Python raises
+ *     KeyError): "<field> '<name>' is not implemented by the C++ port";
+ *   - a NULL spec or traits: "attention dense spec is NULL" from validate,
+ *     "attention dense spec, traits or type_name is NULL" from preflight.
  * A reason longer than the caller's buffer ends in "...".
  *
  * SPEC PRECONDITION. Python cannot reach a property on a spec __post_init__

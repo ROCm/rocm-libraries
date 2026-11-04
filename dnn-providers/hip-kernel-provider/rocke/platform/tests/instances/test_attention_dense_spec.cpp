@@ -12,8 +12,8 @@
  * tests/CMakeLists.txt). The Python side,
  * library/tests/test_attention_dense_spec_vectors.py, recomputes every case with
  * the current Python and owns regenerating the file; this test requires the same
- * answers from the C++ port. A Python change therefore fails there first, and the
- * regenerated file then fails here until the C++ port is updated to match.
+ * answers from the C++ port. When a regenerate needs a C++ edit, and when it
+ * does not, is in that file's module docstring.
  *
  * "cases" run with the base hooks: hand-picked cases, then a seeded slice drawn
  * around the auto block-order thresholds. "hook_tables" hold one table per
