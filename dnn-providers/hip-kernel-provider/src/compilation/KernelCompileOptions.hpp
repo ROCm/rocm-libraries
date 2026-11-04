@@ -48,6 +48,26 @@ public:
         addArchName(archName);
     }
 
+    /// Overload for callers with no input tensor to derive dtype and layout from.
+    ///
+    /// The tensor overloads probe the layout, which classifies stride order against NCHW/
+    /// NHWC or NCDHW/NDHWC and throws on any other rank (`core::utils::isChannelLastLayout`).
+    /// That is right for the convolutional packs and wrong for a pack whose operands are
+    /// rank-2 rows -- there is no channel axis to be last.
+    ///
+    /// Only meaningful for a pack whose kernels are pre-built: `buildIngestorKernelCode`
+    /// ignores these options entirely on the KPACK path, since a kpack blob's build defines
+    /// were baked at pack time. A pack that compiles from source wants a tensor overload,
+    /// because the HIP_PLUGIN_USE_* defines omitted here are what select its element type.
+    ///
+    /// @param archName Raw gcnArchName, suffix intact, as `--offload-arch` wants.
+    explicit KernelCompileOptions(const std::string& archName)
+    {
+        _baseCompileOptions.emplace_back("-std=c++17");
+        _baseCompileOptions.emplace_back("--offload-arch=" + archName);
+        addArchName(archName);
+    }
+
     ~KernelCompileOptions() = default;
 
     KernelCompileOptions(const KernelCompileOptions&) = delete;
@@ -114,7 +134,7 @@ private:
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensorAttrs)
     {
         auto inputDataType = tensorAttrs->data_type();
-        auto isLayoutNhwc = core::utils::isChannelLastLayout(tensorAttrs);
+        auto isLayoutChannelLast = core::utils::isChannelLastLayout(tensorAttrs);
 
         add("HIP_PLUGIN_USE_FP32",
             inputDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
@@ -125,7 +145,9 @@ private:
         add("HIP_PLUGIN_USE_RNE_BFLOAT16", true);
         add("HIP_PLUGIN_USE_FPMIX", false);
         add("HIP_PLUGIN_USE_BFPMIX", false);
-        add("HIP_PLUGIN_LAYOUT_NHWC", isLayoutNhwc);
+        add("HIP_PLUGIN_USE_FPUPCAST", false);
+        add("HIP_PLUGIN_USE_BFPUPCAST", false);
+        add("HIP_PLUGIN_LAYOUT_CHANNEL_LAST", isLayoutChannelLast);
         add("HIP_PLUGIN_USE_AMDGCN", 0);
     }
 

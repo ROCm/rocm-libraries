@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  Dense vector descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalDnVec
@@ -40,9 +40,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreateDnVec(&descr, size, values, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateDnVec failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateDnVec", status);
         }
     }
 
@@ -53,7 +51,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroyDnVec(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalDnVec destructor");
+                log_hipsparse_error("hipsparseDestroyDnVec", status);
             }
         }
     }
@@ -67,9 +65,16 @@ public:
     }
 };
 
-// Exact match for the wrapper, so this beats the implicit conversion to
-// hipsparseDnVecDescr_t. A leftover hipsparseDestroyDnVec(wrapper) is a compile
-// error instead of destroying the descriptor twice.
-hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalDnVec&) = delete;
+// These beat the implicit conversion to void*. The handle, matrix descriptor,
+// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
+// void*, so a leftover destroy of the wrong kind would otherwise compile and
+// free this descriptor twice.
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalDnVec&)          = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalDnVec&)  = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalDnVec&)    = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalDnVec&) = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalDnVec&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalDnVec&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalDnVec&)     = delete;
 
 #endif // HIPSPARSE_LOCAL_DNVEC_HPP
