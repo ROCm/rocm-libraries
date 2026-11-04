@@ -22,6 +22,7 @@
 import ctypes
 import os
 import unittest
+from unittest.mock import patch
 
 from rocke.portable_ir.examples import recipe_toy
 from rocke.portable_ir.src import abi
@@ -106,6 +107,18 @@ class TestBinaryAbiRefusal(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             self._adopt(abi.BINARY_ABI - 1)
         self.assertIn(f"binary ABI v{abi.BINARY_ABI - 1}", str(cm.exception))
+
+    def test_previous_native_layout_is_refused_before_binding(self):
+        """Equal old tags cannot license the combined matrix/convolution layout."""
+        from rocke.portable_ir.src import online
+
+        with (
+            patch.object(online, "_check_source_freshness"),
+            patch.object(online, "_bind") as bind,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "binary ABI v8"):
+                online._adopt(_StubLibrary(8), "/stub/librocke.so")
+            bind.assert_not_called()
 
     def test_pre_indexed_mma_library_is_refused(self):
         """ABI 5 lacks the indexed MMA layout even with buffer-capable views."""

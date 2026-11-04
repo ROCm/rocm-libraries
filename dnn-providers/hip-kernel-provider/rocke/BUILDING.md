@@ -156,6 +156,20 @@ template and graphs, so losing that copy is a failure rather than a capability
 skip. A bundle root with no selected graphs provides no external comparison
 coverage and does not enable that requirement.
 
+### External provider pack-header test inputs
+
+`ROCKE_HKP_PACKS_DIR` independently supplies the directory containing
+`Gfx950AttentionDenseGeometry.hpp` and `Gfx950AttentionUnified3DGeometry.hpp`.
+Explicit inputs must contain both files. An omitted or empty input keeps these
+provider-specific comparisons optional; the embedding provider supplies its
+available defaults without overriding explicit values or depending on SDPA
+inputs.
+
+The headers are copied beside the installed attention host tests. When staged,
+that cohort uses `--rocke-require-hkp-pack-headers`: missing installed headers
+fail instead of skipping or falling back to a source checkout. Other test
+cohorts and standalone SDK use retain their existing policy.
+
 ## C++ engine
 
 The platform C++ engine (`platform/cpp/` → `librocke_core.a`) and its

@@ -525,6 +525,14 @@ The source-superbuild asset step uses this same checkout and its configured Pyth
 from the repository root. It reuses source, dependencies and runners already needed
 by those jobs; it does not enroll these source-only tests in a source-less artifact.
 The standalone SDK developer runner still collects its staging tests normally.
+The Linux source step sets `CMAKE_GENERATOR=Ninja` for its nested configurations,
+matching the runner's installed build tool without changing the Windows lane.
+
+Provider pack-header inputs are independent of SDPA graph inputs. When both
+attention geometry headers are staged, the installed attention CPU cohort uses
+`--rocke-require-hkp-pack-headers`. Missing installed headers then fail the actual
+mirror check rather than skipping or using a checkout fallback. With no header
+input, standalone SDK tests retain optional provider comparisons.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform

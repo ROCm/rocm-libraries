@@ -405,10 +405,11 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
 
-      # The embedding provider supplies external hipDNN test inputs. The SDK
-      # stages a source-free copy without assuming a repository layout; the
-      # installed SDPA entry requires the copy whenever graphs were staged.
+      # The embedding provider supplies external test inputs. Stage independent
+      # source-free copies without assuming a repository layout; each installed
+      # cohort requires only the assets staged for its own comparisons.
       include(cmake/StageHipdnnSdpaTestAssets.cmake)
+      include(cmake/StageHkpPackTestAssets.cmake)
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -517,10 +518,27 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 
+    set(_rocke_barrier_parity_entries "")
+    if(TARGET rocke_optimization_barrier_emit)
+      rocke_cxx_test_installed_name(_rocke_installed_name
+                                  rocke_optimization_barrier_emit)
+      string(APPEND _rocke_barrier_parity_entries
+             "add_test(rocke_optimization_barrier_hip_pair python "
+             "\"${ROCKE_TEST_CTEST_REL}tests/core/"
+             "test_optimization_barrier_cli.py\" --native "
+             "\"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" "
+             "--launcher \"${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/"
+             "subprocess_launcher.py\" --emitter "
+             "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
+             "optimization_barrier_emit.py\" --count 17)\n"
+             "set_tests_properties(rocke_optimization_barrier_hip_pair "
+             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT 120)\n")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n"
+           "${_rocke_barrier_parity_entries}")
 
     # Compiler tool locations for Python entries that compile and disassemble
     # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
@@ -629,6 +647,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_aot_grid_limits.py"
         "tests/library/tests/test_dgrad_stem_wmma.py"
         "tests/library/tests/test_fwd_small_wmma.py"
+        "tests/library/tests/test_direct_dw_fwd_wmma.py"
+        "tests/library/tests/test_direct_fwd_gstream_wmma.py"
+        "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
         "tests/library/tests/test_conv_fwd_split_k.py"
@@ -646,6 +667,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_library_layering.py"
         "tests/library/tests/test_aot_launch_zeroing.py"
         "tests/library/tests/test_batched_timing.py"
+        "tests/library/tests/test_conv_fill.py"
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
         "tests/library/tests/test_run_conv_shards.py")
@@ -672,8 +694,10 @@ if(ROCKE_INSTALL_TESTS)
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store, the backward/gfx1250
     # MMA accumulator-input versus result-role regressions, the host-side SDPA
-    # sequence-length and padding-mask adapters/specs, the fmha_mfma
-    # free-stride ABI and layout contracts, and the backward-test memo bound
+    # sequence-length and padding-mask adapters/specs, the fmha_mfma free-stride
+    # ABI and layout contracts, the 2D/3D mask_type fields, the 3D segment+reduce
+    # module's pairing, the reduce's LDS segment bound against the compiled code
+    # object, and the backward-test memo bound
     # in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
@@ -685,8 +709,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
+        "tests/library/tests/test_attention_tiled_2d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_tiled_3d_mask_type.py"
+        "tests/library/tests/test_attention_tiled_3d_module.py"
+        "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
         "tests/library/tests/test_sdpa_seqlen.py"
@@ -699,8 +727,12 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
     endforeach()
+    set(_ROCKE_ATTENTION_CPU_PYTEST_ARGS "")
+    if(_ROCKE_HKP_PACK_HEADERS_STAGED)
+      set(_ROCKE_ATTENTION_CPU_PYTEST_ARGS " --rocke-require-hkp-pack-headers")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_cpu_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
+           "add_test(rocke_library_attention_cpu_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS}${_ROCKE_ATTENTION_CPU_PYTEST_ARGS} -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
@@ -930,6 +962,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
+        "tests/library/tests/test_direct_dw_fwd_wmma.py"
+        "tests/library/tests/test_direct_fwd_gstream_wmma.py"
+        "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
         "tests/library/tests/test_conv_winograd_fwd_gpu.py"
         "tests/library/tests/test_conv_winograd_fwd_rt_gpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"

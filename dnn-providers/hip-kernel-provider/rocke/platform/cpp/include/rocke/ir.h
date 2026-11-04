@@ -751,8 +751,31 @@ bool rocke_attr_get_float(const rocke_attr_map_t* m, const char* key, double* ou
 const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key); /* NULL if absent */
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
 
+/* The scheduler strategies, sorted, as normalize_scheduler_strategy's
+ * ValueError lists them ("...; expected one of: <these>, or None"). The one
+ * C++ list of them: rocke_scheduler_strategy_is_valid reads it. */
+#define ROCKE_SCHEDULER_STRATEGY_CHOICES \
+    "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, max-memory-clause"
 /* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
 bool rocke_scheduler_strategy_is_valid(const char* strategy);
+/* normalize_scheduler_strategy's ValueError: returns true (and writes the
+ * reason, word for word, the name quoted as Python's repr by
+ * rocke_py_str_repr) when `strategy` is not NULL and not one of
+ * ROCKE_SCHEDULER_STRATEGY_CHOICES. */
+bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t reason_cap);
+
+/* Python's repr() of the str `s` (UTF-8), as an f-string's {s!r} writes it:
+ * quoted with ' -- or with " when `s` contains ' and no " -- with the
+ * backslash and the quote character escaped, \t \n \r named and every other
+ * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex). Writes
+ * the NUL-terminated text into `out` (truncated to `cap` - 1 characters; NULL
+ * / 0 writes nothing) and returns its full length, like snprintf.
+ *
+ * Supported subset: every ASCII string exactly. Bytes >= 0x80 are copied
+ * unchanged, which is Python's repr for printable non-ASCII characters
+ * (letters, CJK, ...) but not for the non-printable ones Python escapes as
+ * \xNN / \uNNNN / \UNNNNNNNN (e.g. U+00A0, U+0085) or for invalid UTF-8. */
+size_t rocke_py_str_repr(const char* s, char* out, size_t cap);
 
 /* ============================ OPCODE TABLE ============================== */
 

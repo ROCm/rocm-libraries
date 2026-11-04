@@ -135,7 +135,7 @@ All Python query methods accept `src_dtypes` and `dst_dtype`; native queries
 provide corresponding `_indexed` entry points with the same optional scale filter.
 Native three-dtype queries also accept a trailing nullable `dst_dtype` argument
 (defaulted in C++). Omitted destinations default to `src2`, not a wildcard.
-C callers must supply the trailing argument and rebuild against ABI8. When
+C callers must supply the trailing argument and rebuild against ABI9. When
 Python callers also supply indexed source dtypes, each supplied legacy dtype
 must agree with its corresponding source after alias normalization.
 

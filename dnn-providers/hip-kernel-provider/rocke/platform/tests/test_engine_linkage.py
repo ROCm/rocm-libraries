@@ -117,10 +117,32 @@ def test_online_build_uses_the_cmake_shared_target(
     ["", "hip_kernel_provider"],
     ids=["standalone", "provider"],
 )
+@pytest.mark.parametrize(
+    "suffix_override", [None, ".test-bin"], ids=["host-suffix", "explicit-suffix"]
+)
 def test_installed_ctest_entries_get_scoped_environment_contracts(
-    tmp_path, provider_subdir
+    tmp_path, provider_subdir, suffix_override
 ):
     build = tmp_path / "build"
+    packs = tmp_path / "pack-headers"
+    packs.mkdir()
+    for header in (
+        "Gfx950AttentionDenseGeometry.hpp",
+        "Gfx950AttentionUnified3DGeometry.hpp",
+    ):
+        (packs / header).write_text("// header fixture\n")
+    # Exercise filename construction with a real CMake suffix override, not a
+    # substituted Python host platform. This is not a Windows execution test.
+    project_include = tmp_path / "suffix.cmake"
+    project_include.write_text(
+        (
+            f'set(CMAKE_EXECUTABLE_SUFFIX "{suffix_override}")\n'
+            if suffix_override
+            else ""
+        )
+        + 'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/emitter-name.txt" '
+        'CONTENT "$<TARGET_FILE_NAME:rocke_optimization_barrier_emit>")\n'
+    )
     subprocess.run(
         [
             "cmake",
@@ -131,6 +153,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             "-DBUILD_TESTING=ON",
             "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
             f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+            f"-DCMAKE_PROJECT_INCLUDE={project_include}",
+            f"-DROCKE_HKP_PACKS_DIR={packs}",
         ],
         check=True,
         capture_output=True,
@@ -141,7 +165,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
     shutil.copy2(
         build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
     )
-    executable_suffix = ".exe" if os.name == "nt" else ""
+    executable_suffix = (
+        suffix_override if suffix_override else (".exe" if os.name == "nt" else "")
+    )
+    emitter_filename = (build / "emitter-name.txt").read_text()
     test_ctest_rel = "./" if provider_subdir else "../"
 
     def native_artifact(target):
@@ -187,6 +214,36 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             env=ctest_env,
         )
         tests = json.loads(listed.stdout)["tests"]
+        pair = next(
+            test
+            for test in tests
+            if test["name"] == "rocke_optimization_barrier_hip_pair"
+        )
+        # A mixed private-variable spelling can configure successfully while
+        # appending this incoming registration to an unused CMake string.
+        sdpa = next(
+            test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
+        )
+        for test in tests:
+            assert ("--rocke-require-hkp-pack-headers" in test.get("command", ())) == (
+                test["name"] == "rocke_library_attention_cpu_pytest"
+            )
+        install_script = (build / "cmake_install.cmake").read_text()
+        assert "/tests/library/tests/hkp_packs" in install_script
+        assert "Gfx950AttentionUnified3DGeometry.hpp" in install_script
+        assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
+        assert environment_for(tests, "rocke_library_sdpa_pytest") == {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library"
+        }
+        if "--rocke-require-hipdnn-assets" in sdpa["command"]:
+            install_script = (build / "cmake_install.cmake").read_text()
+            assert "attention_sdpa_fwd.graph.json" in install_script
+            assert "/tests/library/tests/sdpa/hipdnn" in install_script
+        command = pair["command"]
+        native = command[command.index("--native") + 1]
+        assert native == native_artifact("rocke_optimization_barrier_emit")
+        assert Path(native).name == emitter_filename
+        assert command[command.index("--count") + 1] == "17"
         expected_platform_environment = {
             "PYTHONPATH": ".",
             **expected_artifacts,
@@ -248,8 +305,17 @@ def test_relocated_cmake_consumer_links_lowerer(tmp_path, consumer):
     else:
         (source / "main.c").write_text(
             '#include "rocke/arch_target.h"\n'
+            '#include "rocke/abi.h"\n'
+            '#include "rocke/instance_conv_direct_fwd_wmma.h"\n'
             "#include <stddef.h>\n#include <string.h>\n"
             "int main(void) {\n"
+            "  if (ROCKE_ABI_VERSION != 9 || rocke_abi_version() != ROCKE_ABI_VERSION) return 6;\n"
+            "  if (rocke_recipe_abi_level() != 3) return 7;\n"
+            "  if (sizeof(rocke_mma_op_t) != 216 || sizeof(rocke_direct_fwd_wmma_spec_t) != 152) return 8;\n"
+            "  rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();\n"
+            "  p.groups = p.cpg = p.kpg = 1 << 20;\n"
+            "  if (rocke_direct_conv_problem_total_c(&p) != (1LL << 40)) return 9;\n"
+            "  if (rocke_direct_conv_problem_total_k(&p) != (1LL << 40)) return 10;\n"
             '  const char* id = "wmma_gfx1250_bf16f32_16x16x32_bf16";\n'
             "  const char* c = rocke_arch_mma_op_id_c_dtype(id);\n"
             "  const char* d = rocke_arch_mma_op_id_dst_dtype(id);\n"

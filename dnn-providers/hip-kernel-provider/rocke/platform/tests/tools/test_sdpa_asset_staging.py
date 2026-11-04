@@ -42,19 +42,19 @@ def _inputs(root):
     return template, bundles, files
 
 
-def _configure_stage(tmp_path, template=None, bundles=None):
+def _configure_stage(tmp_path, template=None, bundles=None, packs=None):
     source = tmp_path / "copied-sdk"
     source.mkdir()
-    shutil.copy2(
-        PLATFORM / "cmake/StageHipdnnSdpaTestAssets.cmake",
-        source / "StageHipdnnSdpaTestAssets.cmake",
-    )
+    for module in ("StageHipdnnSdpaTestAssets", "StageHkpPackTestAssets"):
+        shutil.copy2(PLATFORM / f"cmake/{module}.cmake", source / f"{module}.cmake")
     (source / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(AssetStage NONE)\n"
         'set(ROCKE_TEST_INSTALL_DIR "bin/renamed-provider")\n'
         'include("${CMAKE_CURRENT_LIST_DIR}/StageHipdnnSdpaTestAssets.cmake")\n'
-        'file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/asset-state.txt" "${_ROCKE_SDPA_HIPDNN_ASSETS}")\n',
+        'include("${CMAKE_CURRENT_LIST_DIR}/StageHkpPackTestAssets.cmake")\n'
+        'file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/asset-state.txt" "${_ROCKE_SDPA_HIPDNN_ASSETS}")\n'
+        'file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/header-state.txt" "${_ROCKE_HKP_PACK_HEADERS_STAGED}")\n',
         encoding="utf-8",
     )
     build = tmp_path / "build"
@@ -63,8 +63,72 @@ def _configure_stage(tmp_path, template=None, bundles=None):
         command.append(f"-DROCKE_HIPDNN_SDPA_TEMPLATE={template}")
     if bundles is not None:
         command.append(f"-DROCKE_HIPDNN_SDPA_BUNDLES_DIR={bundles}")
+    if packs is not None:
+        command.append(f"-DROCKE_HKP_PACKS_DIR={packs}")
     result = subprocess.run(command, capture_output=True, text=True)
     return build, result
+
+
+_PACK_HEADERS = (
+    "Gfx950AttentionDenseGeometry.hpp",
+    "Gfx950AttentionUnified3DGeometry.hpp",
+)
+
+
+def _pack_inputs(root):
+    root.mkdir()
+    for header in _PACK_HEADERS:
+        (root / header).write_text(f"// {header}\n")
+    return root
+
+
+@pytest.mark.parametrize("with_graphs", [False, True])
+def test_pack_headers_stage_independently_and_relocate(tmp_path, with_graphs):
+    packs = _pack_inputs(tmp_path / "external headers")
+    expected = {header: (packs / header).read_bytes() for header in _PACK_HEADERS}
+    template, bundles = (
+        _inputs(tmp_path / "graphs")[:2] if with_graphs else (None, None)
+    )
+    build, result = _configure_stage(tmp_path, template, bundles, packs)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (build / "header-state.txt").read_text() == "ON"
+    assert (build / "asset-state.txt").read_text() == ("ON" if with_graphs else "OFF")
+    prefix = tmp_path / "prefix"
+    subprocess.run(
+        ["cmake", "--install", str(build), "--prefix", str(prefix)], check=True
+    )
+    relocated = tmp_path / "relocated"
+    prefix.rename(relocated)
+    shutil.rmtree(packs)
+    shutil.rmtree(tmp_path / "copied-sdk")
+    installed = relocated / "bin/renamed-provider/tests/library/tests/hkp_packs"
+    assert {path.name for path in installed.iterdir()} == set(_PACK_HEADERS)
+    for header in _PACK_HEADERS:
+        assert (installed / header).read_bytes() == expected[header]
+
+
+@pytest.mark.parametrize("explicit", [None, ""])
+def test_no_pack_input_keeps_headers_optional(tmp_path, explicit):
+    build, result = _configure_stage(tmp_path, packs=explicit)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (build / "header-state.txt").read_text() == "OFF"
+
+
+@pytest.mark.parametrize("problem", ["missing", "file", *_PACK_HEADERS, "directory"])
+def test_invalid_pack_input_fails_before_losing_coverage(tmp_path, problem):
+    packs = _pack_inputs(tmp_path / "headers")
+    if problem == "missing":
+        packs = tmp_path / "missing"
+    elif problem == "file":
+        packs = packs / _PACK_HEADERS[0]
+    else:
+        header = packs / (_PACK_HEADERS[0] if problem == "directory" else problem)
+        header.unlink()
+        if problem == "directory":
+            header.mkdir()
+    _, result = _configure_stage(tmp_path, packs=packs)
+    assert result.returncode != 0
+    assert "ROCKE_HKP_PACKS_DIR" in result.stdout + result.stderr
 
 
 def test_platform_copyability_guard_is_green():
@@ -192,8 +256,12 @@ def test_platform_copy_configures_without_an_embedding_repository(tmp_path):
     assert not (copied.parent / "library").exists()
 
 
-def test_platform_registers_required_assets_from_explicit_inputs(tmp_path):
+@pytest.mark.parametrize("with_headers", [False, True])
+def test_platform_registers_required_assets_from_explicit_inputs(
+    tmp_path, with_headers
+):
     template, bundles, _ = _inputs(tmp_path / "external")
+    packs = _pack_inputs(tmp_path / "headers") if with_headers else ""
     build = tmp_path / "sdk-build"
     subprocess.run(
         [
@@ -208,6 +276,7 @@ def test_platform_registers_required_assets_from_explicit_inputs(tmp_path):
             f"-DPython3_EXECUTABLE={sys.executable}",
             f"-DROCKE_HIPDNN_SDPA_TEMPLATE={template}",
             f"-DROCKE_HIPDNN_SDPA_BUNDLES_DIR={bundles}",
+            f"-DROCKE_HKP_PACKS_DIR={packs}",
         ],
         check=True,
         capture_output=True,
@@ -223,9 +292,11 @@ def test_platform_registers_required_assets_from_explicit_inputs(tmp_path):
         capture_output=True,
         text=True,
     )
-    entry = next(
-        t
-        for t in json.loads(result.stdout)["tests"]
-        if t["name"] == "rocke_library_sdpa_pytest"
-    )
-    assert "--rocke-require-hipdnn-assets" in entry["command"]
+    tests = json.loads(result.stdout)["tests"]
+    sdpa = next(t for t in tests if t["name"] == "rocke_library_sdpa_pytest")
+    assert "--rocke-require-hipdnn-assets" in sdpa["command"]
+    for test in tests:
+        required = "--rocke-require-hkp-pack-headers" in test.get("command", ())
+        assert required == (
+            with_headers and test["name"] == "rocke_library_attention_cpu_pytest"
+        )

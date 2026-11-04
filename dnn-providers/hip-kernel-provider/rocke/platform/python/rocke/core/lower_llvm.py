@@ -5257,8 +5257,11 @@ class _Lowerer:
             )
         template = _escape_llvm_asm_string(op.attrs["template"])
         constraints = op.attrs["constraints"]
+        sideeffect = op.attrs.get("sideeffect", True)
+        if not isinstance(sideeffect, bool):
+            raise ValueError("LLVM inline asm sideeffect must be a boolean")
         flags = []
-        if op.attrs.get("sideeffect", True):
+        if sideeffect:
             flags.append("sideeffect")
         # NOTE: ``convergent`` is NOT a valid textual keyword on an LLVM
         # inline-asm call expression (comgr rejects ``asm sideeffect

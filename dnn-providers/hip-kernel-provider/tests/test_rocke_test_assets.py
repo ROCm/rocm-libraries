@@ -3,6 +3,7 @@
 """Provider-owned repository discovery supplies portable rocKE test inputs."""
 
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -56,6 +57,44 @@ def test_provider_discovery_preserves_explicit_inputs(tmp_path, inputs, override
         )
     )
     assert actual == expected
+
+
+@pytest.mark.parametrize("headers", ["present", "absent", "partial"])
+@pytest.mark.parametrize("override", [None, "caller", ""])
+@pytest.mark.parametrize("graph_override", [False, True])
+def test_pack_header_discovery_is_independent(
+    tmp_path, headers, override, graph_override
+):
+    provider = tmp_path / "provider"
+    module = provider / "cmake/RockeTestAssets.cmake"
+    module.parent.mkdir(parents=True)
+    shutil.copy2(PROVIDER / "cmake/RockeTestAssets.cmake", module)
+    packs = provider / "src/engines/kernel_ingestor_engine/packs"
+    if headers != "absent":
+        packs.mkdir(parents=True)
+        (packs / "Gfx950AttentionDenseGeometry.hpp").write_text("// fixture\n")
+        if headers == "present":
+            (packs / "Gfx950AttentionUnified3DGeometry.hpp").write_text("// fixture\n")
+    setup = f'set(ROCKE_HKP_PACKS_DIR "{override}")\n' if override is not None else ""
+    if graph_override:
+        setup += 'set(ROCKE_HIPDNN_SDPA_TEMPLATE "caller")\nset(ROCKE_HIPDNN_SDPA_BUNDLES_DIR "caller")\n'
+    script = tmp_path / "discovery.cmake"
+    script.write_text(
+        setup
+        + f'include("{module.as_posix()}")\n'
+        + f'hipkernelprovider_configure_rocke_test_assets("{tmp_path.as_posix()}")\n'
+        + 'file(WRITE "${CMAKE_CURRENT_LIST_DIR}/headers.txt" "${ROCKE_HKP_PACKS_DIR}")\n'
+    )
+    subprocess.run(
+        ["cmake", "-P", str(script)], check=True, capture_output=True, text=True
+    )
+    actual = (tmp_path / "headers.txt").read_text()
+    if override is not None:
+        assert actual == override
+    elif headers == "present":
+        assert Path(actual).resolve() == packs.resolve()
+    else:
+        assert actual == ""
 
 
 def test_provider_wires_discovery_before_the_sdk_subdirectory():
