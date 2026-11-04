@@ -38,19 +38,20 @@ from pathlib import Path
 
 import pytest
 
-from Tensile import LibraryIO
-from Tensile.Common.GlobalParameters import (
+from tensilelite import LibraryIO
+from tensilelite.Common.GlobalParameters import (
     _assertGlobalParametersAreValid,
     _GLOBAL_PARAMETER_IGNORE_KEYS,
     defaultAnalysisParameters,
 )
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Common.ValidParameters import (
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.ValidParameters import (
     checkParametersAreValid,
     validateInternalSupportParams,
     validParameters,
 )
-from Tensile.SolutionStructs.Problem import (
+from tensilelite.SolutionStructs.Problem import (
+    normalizeMXBlockTile,
     validateProblemTypeParameterTypes,
     _defaultProblemType,
 )
@@ -86,6 +87,10 @@ def _validate_problem_type(problem_type_dict, prefix, srcFile):
     # so we don't need to instantiate a ProblemType.
     state = {k: v for k, v in problem_type_dict.items()
              if k in _defaultProblemType}
+    # ProblemType.__init__ splits the [free, k] list form before the type gate.
+    for ab in ("A", "B"):
+        if "MXBlock" + ab in state:
+            normalizeMXBlockTile(state, ab, srcFile)
     validateProblemTypeParameterTypes(state, srcFile=srcFile,
                                       keyPathPrefix=prefix + ".ProblemType")
 
@@ -160,8 +165,8 @@ def _validate_library_logic(yaml_data, srcFile):
     if "LibraryLogic" not in yaml_data:
         return
     cfg = yaml_data["LibraryLogic"] or {}
-    from Tensile.Common.TypeValidationErrors import formatMismatch
-    from Tensile.Common.GlobalParameters import libraryLogicTypeOverrides
+    from tensilelite.Common.TypeValidationErrors import formatMismatch
+    from tensilelite.Common.GlobalParameters import libraryLogicTypeOverrides
     errors = []
     for key, value in cfg.items():
         if key not in defaultAnalysisParameters:

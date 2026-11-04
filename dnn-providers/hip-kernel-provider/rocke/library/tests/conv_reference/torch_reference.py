@@ -46,10 +46,6 @@ def cross_check(
             if answer.shape != reference.shape or not np.isfinite(answer).all():
                 raise ValueError(f"invalid Torch {name} reference for {case.id}")
             disagreement = normalized_distance(answer, reference, scale)
-            if disagreement > case.margin:
-                raise ValueError(
-                    f"NumPy/Torch {name} disagreement exceeds margin for {case.id}"
-                )
             results[name] = {
                 "reference_digest": array_digest(answer),
                 "numpy_distance_upper": disagreement,

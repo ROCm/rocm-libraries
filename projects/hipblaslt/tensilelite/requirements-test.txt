@@ -11,4 +11,4 @@ numpy>=1.26.0
 filelock>=3.0.0
 syrupy
 hip-python; sys_platform != "win32"
-pytest-xdist>=1.32.0
+pytest-xdist>=3.2

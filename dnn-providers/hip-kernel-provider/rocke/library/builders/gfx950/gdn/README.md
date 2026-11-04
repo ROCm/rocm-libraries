@@ -32,18 +32,23 @@ retune either decode mode or the GDN prefill path.
 | File | Purpose |
 |---|---|
 | [`gdn_decode.py`](gdn_decode.py) | Compile a spec, build inputs, launch the shared decode emitter, and compare with the independent fp32 reference |
-| [`tune.py`](tune.py) | Measure legal GDN registry candidates or KDA work-keyed candidates |
+| [`tune.py`](tune.py) | Measure every legal GDN registry tile or KDA tile (base configuration) against the `auto` tile |
 | [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, gate kinds, and GPU mapping |
-| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry candidate and the static dispatcher default |
+| [`CASE_STUDY.md`](CASE_STUDY.md) | Per-tile register, wave and scratch changes of the decode load-first order, per compiler, and the command that regenerates them |
+| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry tile (base configuration) and the dispatcher `auto` configuration (its case's tile and knob stack) |
 | [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the dispatcher; optionally sweep all legal tiles |
-| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default and KDA work-keyed table |
+| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Register every (gate kind, tile) and select the `auto` configuration of each case; the per-case defaults are data in [`axes.py`](../../../dispatch/gdn/axes.py) (`AUTO_DEFAULTS`) |
+| [`library/dispatch/gdn/axes.py`](../../../dispatch/gdn/axes.py), [`rules.py`](../../../dispatch/gdn/rules.py) | Each tile's knob space: the knob axes as data, and their scope and legality |
 | [`library/tests/dispatch/gdn/test_gfx950_registry.py`](../../../tests/dispatch/gdn/test_gfx950_registry.py) | CPU GDN registry count, identity, legality, and selection coverage |
+| [`library/tests/dispatch/gdn/test_tuning_contract.py`](../../../tests/dispatch/gdn/test_tuning_contract.py) | CPU tuning contract: knob space per mode, pins (`tuning_id` / `tuning_knobs`), refusals |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
 | [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, devices, pointer alignment, pool-index range, fused-mode inputs |
 | [`library/tests/test_gdn_decode_fused.py`](../../../tests/test_gdn_decode_fused.py) | CPU contract of the fused conv1d / gated-RMSNorm modes: spec rules, ABI, IR alignment claims, tap-shift barrier, fp32 reference |
 | [`library/tests/test_gdn_decode_fused_gfx950_numeric.py`](../../../tests/test_gdn_decode_fused_gfx950_numeric.py) | On-device fused-mode output, state and conv-state correctness |
 | [`library/tests/test_gdn_decode_gfx950_numeric.py`](../../../tests/test_gdn_decode_gfx950_numeric.py) | On-device GDN output and state correctness |
 | [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness and dispatch-to-launch coverage |
+| [`library/tests/test_gdn_decode_knobs.py`](../../../tests/test_gdn_decode_knobs.py) | CPU contract of the performance knobs: validation, `*_applies` predicates, name injectivity, emitted effect |
+| [`library/tests/test_gdn_decode_knobs_gfx950_numeric.py`](../../../tests/test_gdn_decode_knobs_gfx950_numeric.py) | On-device correctness of every knob on every registered tile (and every `BPV=1` fused tile) it applies to at the default heads, at head dims 64 and 256, `out_lds` at `DV` 256 / 512, and with f16 I/O and an f16 state |
 | [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds (Python lowering) |
 | [`library/tests/test_gdn_decode_ir_cpp_parity.py`](../../../tests/test_gdn_decode_ir_cpp_parity.py) | The C++ engine lowers every golden case to byte-identical LLVM IR |
 | [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
@@ -144,11 +149,56 @@ out_err, state_err = check(spec, batch=8)
 assert max(out_err, state_err) < TOL
 ```
 
+The same modes are reachable through dispatch. `GdnDecodeRequest` takes
+`state_dtype="f32"` and the `fuse_conv` / `fuse_out_norm` flags; `auto` runs
+one measured tile and knob stack per case, gate kind x fused x state width
+([`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
+Launch the result's kernel spec with the builder's inputs, as for any
+dispatched spec:
+
+```python
+from builders.gfx950.gdn.gdn_decode import launcher_for, make_inputs, run_values
+from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+
+result = dispatch_gdn_decode(GdnDecodeRequest(
+    batch=8, arch="gfx950", gate_kind="kda", num_k_heads=16, num_v_heads=16,
+    state_dtype="f32", fuse_conv=True, fuse_out_norm=True))
+spec = result.spec.kernel_spec
+inp = make_inputs(spec, 8)
+values = run_values(spec, inp, launcher_for(spec), 8)
+```
+
+### Performance knobs
+
+Ten spec fields change how the warp-tiled kernel computes, not what it
+computes (the two state hints and `waves_per_eu` also apply on the reference
+path): `state_load_hint`, `state_store_hint`, `dpp_reduce`, `xcd_remap`,
+`stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`, `out_lds` and
+`waves_per_eu`. Every one defaults to the code the kernel emitted before it
+existed, so a default spec keeps its name and its IR. `auto` runs its case's
+knob stack (§4.6); a bare `spec_id` pin runs the tile with every knob at its
+default. Each registered tile's knob space holds them: every (tile x knob)
+configuration is listed by `dispatch_gdn_decode_all` (and each tile's base
+configuration by `dispatch_gdn_decode_bases`) and pinnable by its `spec_id`
+plus `tuning_knobs` and/or `tuning_id`. The sweep levels and pin rules are in
+[`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection); each knob's
+rules and the tiles where it changes code are in
+[§4.10](ALGORITHM.md#410-performance-knobs).
+
+```python
+result = dispatch_gdn_decode(GdnDecodeRequest(
+    batch=8, arch="gfx950", spec_id="nw2_wtk16_bpv8",
+    tuning_knobs={"dpp_reduce": True, "state_load_hint": "streaming"}))
+result.spec.tuning_id  # "nw2_wtk16_bpv8_wpe0@<config_key>", stored with result.spec.knobs
+```
+
 ## Benchmark registered candidates
 
-The GDN benchmark asks the registry for every legal candidate. The default D128
-request admits 54 of 180 configured triples and also reports the static
-dispatcher-default `auto` selection:
+The GDN benchmark asks the registry for every legal tile and times its base
+configuration (`dispatch_gdn_decode_bases`: every knob at its default). The
+default D128 request admits 54 of 180
+configured triples; the benchmark also reports the dispatcher `auto`
+configuration:
 
 ```bash
 python3 library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py \
@@ -157,9 +207,10 @@ python3 library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py \
 
 Each row includes a stable `spec_id`
 `nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`. Dispatcher `auto`
-prefers `(2, 16, 8)` whenever legal; measurements never change that choice.
+runs its case's static default whenever its tile is legal; measurements never
+change that choice.
 
-KDA remains a separate work-keyed benchmark:
+KDA has its own benchmark of the dispatched kernel and its variants:
 
 ```bash
 python3 -m benchmarks.gfx950.gdn.benchmark_kda_decode \
@@ -182,11 +233,13 @@ python3 library/builders/gfx950/gdn/tune.py \
   --gate-kind gdn --batches 1,16,64,256 --top 5
 ```
 
-For every GDN cell, it also reports the static dispatcher default, the fastest
-legal candidate, the default's rank and time ratio, and a manual
-`DEFAULT_TILE` recommendation. Measurements never update the shipped default.
+For every GDN cell, it also reports the `auto` tile at its base configuration,
+the fastest legal candidate, that tile's rank and time ratio, and a note that
+base-configuration timings are no basis for changing `AUTO_DEFAULTS`. Both gate
+kinds time tiles at their base configuration only (every knob off), not the
+`auto` knob stack; measurements never update the shipped default.
 
-Use KDA's work-keyed study across head geometries when retuning KDA:
+The KDA tile study across head geometries:
 
 ```bash
 python3 library/builders/gfx950/gdn/tune.py \
@@ -194,8 +247,12 @@ python3 library/builders/gfx950/gdn/tune.py \
   --batches 1,2,4,8,16,32,64,128 --top 5
 ```
 
-GDN measurements are report-only. KDA's measured winners may justify updating
-its work-keyed bands; rerun dispatch wiring and numeric tests after doing so.
+Both are report-only. Changing an `auto` default needs a cold-memory sweep of
+the case's tiles x knobs, which `tune.py` does not do (an in-tree sweep is a
+follow-up, [`ALGORITHM.md` §8](ALGORITHM.md#8-known-limits-and-follow-ups)). Change the row in
+`AUTO_DEFAULTS`, the literal table in `test_gfx950_wiring.py` and the table in
+[`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection) together,
+then rerun the dispatch wiring, golden and numeric tests.
 
 ## Run tests
 
@@ -205,11 +262,13 @@ CPU-only coverage:
 python3 -m pytest \
   library/tests/test_gdn_decode_spec.py \
   library/tests/test_gdn_decode_fused.py \
+  library/tests/test_gdn_decode_knobs.py \
   library/tests/test_gdn_decode_golden.py \
   library/tests/test_gdn_decode_prepare.py \
   library/tests/test_gdn_decode_ir_cpp_parity.py \
   library/tests/dispatch/gdn/test_gfx950_registry.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
+  library/tests/dispatch/gdn/test_tuning_contract.py \
   library/tests/test_gdn_decode_tune.py \
   -m "not gpu"
 ```
@@ -226,6 +285,7 @@ python3 -m pytest \
   library/tests/test_gdn_decode_gfx950_numeric.py \
   library/tests/test_kda_decode_gfx950_numeric.py \
   library/tests/test_gdn_decode_fused_gfx950_numeric.py \
+  library/tests/test_gdn_decode_knobs_gfx950_numeric.py \
   -m gpu
 ```
 
@@ -291,9 +351,9 @@ For the simple reference path, there is no V split:
 grid = batch * num_v_heads
 ```
 
-For GDN, `auto` always uses the static `(2, 16, 8)` registry priority when it
-is legal; batch changes the grid but not the tile. KDA alone changes its
-work-keyed table choice with `batch * num_v_heads`.
+`auto` runs one static tile and knob stack per case (gate kind x fused x state
+width) whenever the tile is legal; batch and `batch * num_v_heads` change the
+grid but not the configuration.
 
 `out_err` and `state_err` are maximum absolute errors against the fp32 reference
 (except `out_err` of a `fuse_out_norm` spec, relative to `max(1, |ref|)`; see

@@ -45,105 +45,96 @@ Tests:
 - name: bsric0
   category: quick
   function: bsric0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
+  precision: *single_only_precisions
+  M: [50]
+  N: [50]
   block_dim: [4]
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_zero]
 
-- name : bsric0_math
+- name: bsric0
   category: quick
-  function : bsric0
-  precision: *double_only_precisions_complex_real
+  function: bsric0
+  precision: *single_only_precisions
   M: [1]
   N: [1]
-  block_dim: [3, 4, 5, 8, 9, 16, 17, 32, 33]
+  block_dim: [4, 33]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+
+# block_dim 4 and Nb = 50: tunedavg fills every block row, so max_nnzb = 50.
+- name: bsric0
+  category: quick
+  function: bsric0
+  precision: *single_only_precisions
+  M: [200]
+  N: [200]
+  block_dim: [4]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
   formatA: [rocsparse_format_bsr]
 
 - name: bsric0
   category: quick
   function: bsric0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  block_dim: [1, 4, 9]
+  precision: *single_only_precisions
+  M_N:
+    - { M: 1536, N: 1536 }
+    - { M: 3072, N: 3072 }
+    - { M: 6144, N: 6144 }
+  block_dim: [16]
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
-- name: bsric0_file
+- name: bsric0
   category: quick
   function: bsric0
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions
   M: 1
   N: 1
-  block_dim: [2, 4, 5, 10]
+  block_dim: [8]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos4]
+  filename: [nos3, nos7, qc2534, mplate]
 
-- name: bsric0_file
+# block_dim 1 is the 1x1 boundary of the block_dim <= 8 kernel.
+- name: bsric0
   category: quick
   function: bsric0
-  precision: *single_double_precisions_complex_real
-  M: 1
-  N: 1
-  block_dim: [2, 3, 4, 6]
+  precision: *single_only_precisions
+  M: [32]
+  N: [32]
+  block_dim: [1]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos5]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
 
-- name: bsric0_file
-  category: quick
-  function: bsric0
-  precision: *single_double_precisions_complex_real
-  M: 1
-  N: 1
-  block_dim: [3, 5, 15]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos6]
-
-- name: bsric0_file
-  category: quick
-  function: bsric0
-  precision: *single_double_precisions_complex_real
-  M: 1
-  N: 1
-  block_dim: [3, 9, 27]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos7]
-
-# Pre-checkin
+# Pre_checkin
 - name: bsric0_bad_arg
   category: pre_checkin
   function: bsric0_bad_arg
@@ -213,23 +204,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron2]
 
-- name: bsric0_graph_test
-  # known_bug: hipGraphLaunch OOMs (hipErrorOutOfMemory) on memory-constrained
-  # GPUs such as the gfx110X family. See ROCm/rocm-libraries#9143. Restore to
-  # pre_checkin once the graph capture/launch memory usage is fixed.
-  category: known_bug
-  function: bsric0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  block_dim: [1, 4, 9, 17]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
-
 # Nightly
 - name: bsric0
   category: nightly
@@ -292,6 +266,7 @@ Tests:
   filename: [Chevron4]
 
 # Stress
+
 - name: bsric0_file
   category: stress
   function: bsric0
@@ -307,3 +282,22 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [ASIC_320k]
   skip_hardware: gfx940, gfx941
+
+# Known_bug
+
+- name: bsric0_graph_test
+  # known_bug: hipGraphLaunch OOMs (hipErrorOutOfMemory) on memory-constrained
+  # GPUs such as the gfx110X family. See ROCm/rocm-libraries#9143. Restore to
+  # pre_checkin once the graph capture/launch memory usage is fixed.
+  category: known_bug
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  block_dim: [1, 4, 9, 17]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true

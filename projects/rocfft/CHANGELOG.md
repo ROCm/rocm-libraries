@@ -3,7 +3,14 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## (Unreleased) rocFFT 1.0.41
+## (Unreleased) rocFFT 1.0.42
+
+### Resolved issues
+
+* Fixed `rocfft_execute` failures for large batched transforms (for example, 512x512x512 with
+  batch 128) whose kernel launch exceeded 2^32 work items in one grid dimension.
+
+## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added
 
@@ -33,8 +40,6 @@ Documentation for rocFFT is available at
   factors when the output data layout uses a batch distance larger than the transform length.
 * Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
   lengths involving large prime factors when batches are interleaved (unit batch distance).
-* Fixed `rocfft_execute` failures for large batched transforms (for example, 512x512x512 with
-  batch 128) whose kernel launch exceeded 2^32 work items in one grid dimension.
 
 ### Optimized
 

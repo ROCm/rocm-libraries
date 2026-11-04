@@ -1,0 +1,38 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Coverage.py config used ONLY by the native-rocisa joblib/loky worker
+# subprocesses spawned by _native_rocisa_workers (TensileCreateLibrary/Run.py)
+# during the coverage-unit tox lane. coverage.process_startup() (see
+# tensilelite/Tests/_cov_sitecustomize/sitecustomize.py) reads it via the
+# COVERAGE_PROCESS_START env var that Run.py exports to those workers only.
+#
+# The main pytest process and its xdist workers are measured by pytest-cov with
+# pyproject.toml instead; this file only governs the extra worker processes so
+# their emitter execution is counted in the combined dataset. Keep `source` and
+# `omit` in sync with the pytest-cov invocation (--cov=tensilelite --cov=rocisa)
+# and pyproject.toml so the union covers one consistent file set.
+#
+# `parallel = true` makes each worker write its own suffixed data file
+# (.coverage.<host>.<pid>.<rand>) under COVERAGE_FILE's directory instead of
+# clobbering the shared base; pytest-cov's end-of-session combine then folds
+# them into .coverage before the lane moves it to .cov_char / .cov_unit.
+[run]
+branch = true
+parallel = true
+concurrency = multiprocessing
+source =
+    tensilelite
+    rocisa
+omit =
+    */Tests/*
+    */tests/*
+    */test_*.py
+    */__pycache__/*
+    */build_tmp/*
+    */build/*
+    */.tox/*
+    */site-packages/*
+    */conftest.py
+    */setup.py
+    */.eggs/*

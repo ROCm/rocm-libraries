@@ -41,7 +41,7 @@ wall of ``--fixed`` flags::
 has — whose fields the axes then override.
 
 Spec fields are addressed by name, or by **dotted path** when the spec nests
-other dataclasses — ``head_size=64`` for a flat spec like ``WmmaFmhaFwdSpec``,
+other dataclasses — ``head_dim=64`` for a flat spec like ``WmmaFmhaFwdV2Spec``,
 ``tile.tile_m=16`` for a nested one like ``UniversalGemmSpec``. Values are
 converted using the field's declared type, and a nested spec that has no
 required fields of its own is filled in from its defaults, so you only spell out
@@ -62,9 +62,9 @@ Examples::
 
     # triage: which axes are worth rolling?
     python3 -m rocke.portable_ir.drivers.roll_kernel \\
-        --kernel kernels.gfx1151.wmma_fmha_fwd --arch gfx1151 \\
-        --fixed head_size=64 --fixed mask_mode=causal \\
-        --axis num_query_heads=8,16 --axis sliding_window=64,128 --probe
+        --kernel kernels.gfx1151.wmma_fmha_fwd_v2 --arch gfx11-generic \\
+        --fixed dtype=fp16 --fixed mask=causal \\
+        --axis head_dim=64,128 --axis k_pad=8,16 --probe
 
     # a nested spec: only the paths you care about
     python3 -m rocke.portable_ir.drivers.roll_kernel \\
@@ -75,10 +75,9 @@ Examples::
 
     # roll, verify byte-identity, and write a shippable bundle
     python3 -m rocke.portable_ir.drivers.roll_kernel \\
-        --kernel kernels.gfx1151.wmma_fmha_fwd --arch gfx1151 \\
-        --fixed head_size=64 --fixed mask_mode=causal \\
-        --axis num_query_heads=8,16 --holdout num_query_heads=32 \\
-        --verify --hsaco --guard --out /tmp/wmma_fmha.cbor
+        --kernel <module> --arch <arch> --fixed <field>=<value> \\
+        --axis <axis>=<v1>,<v2> --holdout <axis>=<v3> \\
+        --verify --hsaco --guard --out /tmp/<kernel>.cbor
 
 Exit status, so a CI matrix can tell the cases apart. :func:`roll` returns the
 same number as ``RollResult.code``, and raises :class:`UsageError` for the 2s
@@ -269,8 +268,8 @@ def resolve(
 # --------------------------------------------------------------------------
 # spec fields: flat or nested
 # --------------------------------------------------------------------------
-# Specs in this tree come in both shapes. WmmaFmhaFwdSpec is flat, so
-# ``head_size=64`` is the whole story. UniversalGemmSpec nests TileSpec,
+# Specs in this tree come in both shapes. WmmaFmhaFwdV2Spec is flat, so
+# ``head_dim=64`` is the whole story. UniversalGemmSpec nests TileSpec,
 # TraitSpec and DataSpec, so a field is addressed by a dotted path,
 # ``tile.tile_m=16``, and the intermediate dataclasses are built on the way in.
 def _hints(cls: Any) -> Dict[str, Any]:

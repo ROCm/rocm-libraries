@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "8d6e99f0-a31a-424b-9892-e5c1cca8ec4d",
+  "name": "hipkernel:multi_launch_probe",
+  "graph_match": { "native": "hipkernel.test.multi_launch.graph_match" },
+  "metadata": "2f9909df-cc5b-493f-b127-73f9bf75167e"
+}

@@ -30,6 +30,7 @@ import pytest
 import yaml
 
 import tensilelite
+import tensilelite.CustomKernels as ck_mod
 import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
 from tensilelite.resources import custom_kernel_text
 from tensilelite.AddCustomConfig import (
@@ -48,6 +49,7 @@ from tensilelite.Common.ValidParameters import (
     validParameters,
 )
 from tensilelite.CustomKernels import (
+    _readEmbeddedYaml,
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
@@ -106,7 +108,7 @@ def test_validate_external_requires_full_custom_kernel_fields(tmp_path):
 
 
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
-    """Tensile-generated kernels carry only InternalSupportParams.KernArgsVersion;
+    """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""
     write_kernel(tmp_path / "tensile.s", """\
           InternalSupportParams:
@@ -568,7 +570,7 @@ def test_build_config_full_mi_emits_wavetile():
 def test_parse_tensile_yaml_malformed_raises(tmp_path):
     p = tmp_path / "bad.yaml"
     p.write_text("BenchmarkProblems: [\n")
-    with pytest.raises(RuntimeError, match="Failed to parse Tensile YAML"):
+    with pytest.raises(RuntimeError, match="Failed to parse TensileLite YAML"):
         _parse_tensile_yaml(str(p))
 
 
@@ -1084,6 +1086,168 @@ def test_read_custom_kernel_config_non_mapping_raises(tmp_path):
     with pytest.raises(RuntimeError, match="must be a YAML mapping"):
         readCustomKernelConfig("k", str(tmp_path))
 
+def _write_metadata(path, yaml_text):
+    path.write_text(".amdgpu_metadata\n---\n" + dedent(yaml_text) + "...\ns_nop 0\n")
+
+def test_read_custom_kernel_config_parses_only_the_config_section(tmp_path):
+    # The rest of the metadata can be 1 MB of rocRoller kernel graph, so only
+    # custom.config is parsed. A broken amdhsa section is not noticed by this
+    # read; parsing the whole block still reports it.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          InternalSupportParams:
+            KernArgsVersion: 0
+        amdhsa.kernels: [unclosed
+        """)
+    expected = {"InternalSupportParams": {"KernArgsVersion": 0}}
+    assert readCustomKernelConfig("k", str(tmp_path)) == expected
+    with pytest.raises(RuntimeError, match="Failed to parse YAML"):
+        _readEmbeddedYaml("k", str(tmp_path))
+
+def test_read_custom_kernel_config_entry_with_comments_blank_lines_and_neighbours(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        amdhsa.version: [1, 2]
+        custom.config:
+          # a comment
+          A: 1
+
+          B:
+            - x
+            - y
+        # a comment in column 0 does not end the entry
+          C: {d: 2}
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1, "B": ["x", "y"], "C": {"d": 2}}
+
+def test_read_custom_kernel_config_flow_style_entry(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config: {A: 1, B: [2, 3]}
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1, "B": [2, 3]}
+
+def test_read_custom_kernel_config_quoted_key_takes_the_whole_block_path(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        "custom.config":
+          A: 1
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+def test_read_custom_kernel_config_duplicate_entry_takes_the_whole_block_path(tmp_path):
+    # PyYAML keeps the last of two duplicate keys, so slicing on the first one
+    # would return a different config from a whole-block parse.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          A: 1
+        other: 0
+        custom.config:
+          A: 2
+        """)
+    contents = ck_mod.getCustomKernelContents("k", str(tmp_path))
+    assert ck_mod._customConfigYaml(contents) is None
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 2}
+
+def test_read_custom_kernel_config_key_text_inside_a_quoted_scalar_takes_the_whole_block_path(tmp_path):
+    # The first column-0 "custom.config:" line is part of a multi-line quoted
+    # scalar, not a key.
+    _write_metadata(tmp_path / "k.s", """\
+        note: "text
+        custom.config: not a key"
+        custom.config:
+          A: 1
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+@pytest.mark.parametrize("indicator", ["|", ">", "|+"])
+@pytest.mark.parametrize("configIsLast", [False, True])
+def test_read_custom_kernel_config_keeps_the_final_newline_of_a_block_scalar(
+    tmp_path, indicator, configIsLast
+):
+    # A block scalar ending the custom.config entry keeps its final newline,
+    # whether another key follows the entry or the entry ends the block.
+    _write_metadata(tmp_path / "k.s", f"""\
+        custom.config:
+          A: 1
+          B: {indicator}
+            text
+        """ + ("" if configIsLast else "amdhsa.kernels: []\n"))
+    expected = {"A": 1, "B": "text\n"}
+    assert readCustomKernelConfig("k", str(tmp_path)) == expected
+    assert ck_mod._readEmbeddedYaml("k", str(tmp_path))["custom.config"] == expected
+
+def test_read_custom_kernel_config_without_the_entry_still_raises(tmp_path):
+    _write_metadata(tmp_path / "k.s", "amdhsa.kernels: []\n")
+    with pytest.raises(RuntimeError, match="has no custom.config"):
+        readCustomKernelConfig("k", str(tmp_path))
+
+def test_read_custom_kernel_config_error_inside_the_entry_is_reported(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          A: [1
+        """)
+    with pytest.raises(RuntimeError, match="Failed to parse YAML"):
+        readCustomKernelConfig("k", str(tmp_path))
+
+def test_read_custom_kernel_config_flow_mapping_closed_in_column_zero(tmp_path):
+    # Valid YAML, but the closing brace in column 0 ends the slice before the
+    # mapping is closed, so the slice alone does not parse.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config: {
+          A: 1
+        }
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+def test_read_custom_kernel_config_alias_to_an_anchor_outside_the_entry(tmp_path):
+    # The anchor is defined before custom.config, outside the slice.
+    _write_metadata(tmp_path / "k.s", """\
+        shared: &p {A: 1}
+        custom.config:
+          X: *p
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"X": {"A": 1}}
+
+def test_read_custom_kernel_config_matches_a_full_parse_of_shipped_kernels():
+    # Kernels whose file is under 600 KB keep the whole-block comparison cheap.
+    # One rocRoller kernel, about 1 MB of metadata and about 0.5 s to parse in
+    # full, is added so that a rocRoller kernel is compared as well. The other
+    # rocRoller kernels are read through the same slice by validate_all in
+    # test_custom_kernel_cli, but their content is not compared here.
+    paths = [p for p in iterCustomKernelFiles() if os.path.getsize(p) < 600_000]
+    assert paths
+    names = [os.path.basename(p)[:-2] for p in paths] + [_LARGE_METADATA_KERNEL]
+    for name in names:
+        assert readCustomKernelConfig(name) == _readEmbeddedYaml(name)["custom.config"], name
+
+_REAL_ENTRY = "custom.config:\n  A: 1\n"
+
+@pytest.mark.parametrize("before", [
+    pytest.param("", id="plain"),
+    pytest.param("custom.config:x: 1\n", id="key-continues-after-the-colon"),
+    pytest.param("customXconfig:\n  Z: 0\n", id="other-character-for-the-dot"),
+    pytest.param('note: "see custom.config: here"\n', id="text-inside-a-line"),
+    pytest.param("outer:\n  custom.config:\n    Z: 0\n", id="indented"),
+])
+def test_custom_config_yaml_slices_the_real_entry_past_lookalike_lines(before):
+    # readCustomKernelConfig returns the right config even when a lookalike
+    # makes it parse the whole block, so the config alone cannot show that the
+    # slice was used. The whole block of a rocRoller kernel is about 1 MB.
+    contents = ".amdgpu_metadata\n---\n" + before + _REAL_ENTRY + "...\ns_nop 0\n"
+    assert ck_mod._customConfigYaml(contents) == _REAL_ENTRY
+
+def test_custom_config_yaml_is_the_whole_entry_and_nothing_else_for_shipped_kernels():
+    # Every shipped kernel takes the slice, and the slice holds custom.config
+    # and no other top-level key. A scanner that returns None, or one that does
+    # not stop at the end of the entry, would still give the right config
+    # through a whole-block parse, so check the slice itself.
+    names = [os.path.basename(p)[:-2] for p in iterCustomKernelFiles()]
+    assert names
+    for name in names:
+        text = ck_mod._customConfigYaml(ck_mod.getCustomKernelContents(name))
+        assert text is not None, name
+        assert list(yaml.load(text, Loader=ck_mod.SafeLoader)) == ["custom.config"], name
 
 def test_build_from_metadata_non_dict_yaml_raises():
     with pytest.raises(RuntimeError, match="no parseable .amdgpu_metadata"):
@@ -1220,14 +1384,38 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
     assert "CustomKernel" in config
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "wvSpltK_bf16_tn_m1",
-        "wvSpltK_bf16_tn_m2",
-        "wvSpltK_bf16_tn_m4",
-    ],
-)
+# The vLLM wvSplitK kernels, (type, n, tile) with tile = YTILE x UNRL.
+_VLLM_WVSPLITK = [
+    *[("bf16", n, tile) for n in (1, 3, 4) for tile in ("y1u4", "y1u2", "y3u2")],
+    ("bf16", 2, "y1u4"),
+    ("bf16", 2, "y1u2"),
+    ("bf16", 5, "y1u2"),
+    *[("f16", n, tile) for n in (1, 2, 3, 4, 5) for tile in ("y1u4", "y1u2", "y3u2")],
+]
+_VLLM_WVSPLITK_NAMES = [f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}" for dt, n, tile in _VLLM_WVSPLITK]
+
+_SKINNY_TN_ARGS = [
+    "SizeSum",
+    "SizeFree0",
+    "AddressA",
+    "AddressB",
+    "ComputeUnits",
+    "SizeFree1",
+    "StrideA0",
+    "StrideB0",
+    "AddressC",
+    "AddressD",
+    "Alpha",
+    "Beta",
+    "StrideC0",
+    "StrideD0",
+]
+
+
+_WVSPLTK_NAMES = ["wvSpltK_bf16_tn_m1", "wvSpltK_bf16_tn_m2", "wvSpltK_bf16_tn_m4"]
+
+
+@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES])
 def test_wvspltk_code_object_version_matches_library_build(name):
     """Library logic references these kernels, so TensileCreateLibrary links each
     into one code object with Tensile's kernels, which hipBLASLt assembles at its
@@ -1245,11 +1433,37 @@ _UNIT_STRIDE_KEYS = (
 )
 
 
+def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGreaterThan=None):
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata(name, ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig(name, {}, ck_root)
+    pt = config["ProblemType"]
+    assert (pt["DataType"], pt["DestDataType"], pt["ComputeDataType"]) == (dataType, dataType, "s")
+    assert (pt["TransposeA"], pt["TransposeB"]) == (True, False)
+    assert config["AssertSizeEqual"] == sizeEqual
+    if sizeLessThan is None:
+        assert "AssertSizeLessThan" not in config
+    else:
+        assert config["AssertSizeLessThan"] == sizeLessThan
+    # m > 8; the tail fixup underflows below one wave tile.
+    assert config["AssertSizeGreaterThan"] == (sizeGreaterThan or {0: 8})
+    assert config["AssertSummationElementMultiple"] == 8
+    assert config["StaggerU"] == 0
+    for key in _UNIT_STRIDE_KEYS:
+        assert config[key] == {0: 1}, key
+    ck = config["CustomKernel"]
+    assert ck["grid"] == ["ComputeUnits", "One", "One"]
+    assert ck["threads"] == [64, 16, 1]
+    assert [a["semantic"] for a in ck["args"]] == _SKINNY_TN_ARGS
+
+
 @pytest.mark.parametrize(
     "name,sizeEqual,sizeLessThan,sizeGreaterThan",
     [
-        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None, {0: 8}),
-        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None, {0: 8}),
+        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None, None),
+        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None, None),
         ("wvSpltK_bf16_tn_m4", {2: 1}, {1: 5}, {0: 8, 1: 0}),
     ],
 )
@@ -1258,44 +1472,14 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
     m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
     host does not quick-return n == 0). The leading dimensions are kernargs, and
     tokens past the LDS stage are read from global memory, so K has no bound."""
-    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata(name, ck_root)
-    assert valid, msg
+    _check_skinny_tn_config(name, "b", sizeEqual, sizeLessThan, sizeGreaterThan)
 
-    config = getCustomKernelConfig(name, {}, ck_root)
-    pt = config["ProblemType"]
-    assert (pt["DataType"], pt["DestDataType"], pt["ComputeDataType"]) == ("b", "b", "s")
-    assert (pt["TransposeA"], pt["TransposeB"]) == (True, False)
-    assert config["AssertSizeEqual"] == sizeEqual
-    if sizeLessThan is None:
-        assert "AssertSizeLessThan" not in config
-    else:
-        assert config["AssertSizeLessThan"] == sizeLessThan
-    # m > 8; the tail fixup underflows below one wave tile.
-    assert config["AssertSizeGreaterThan"] == sizeGreaterThan
-    assert config["AssertSummationElementMultiple"] == 8
-    assert config["StaggerU"] == 0
-    for key in _UNIT_STRIDE_KEYS:
-        assert config[key] == {0: 1}, key
-    ck = config["CustomKernel"]
-    assert ck["grid"] == ["ComputeUnits", "One", "One"]
-    assert ck["threads"] == [64, 16, 1]
-    assert [a["semantic"] for a in ck["args"]] == [
-        "SizeSum",
-        "SizeFree0",
-        "AddressA",
-        "AddressB",
-        "ComputeUnits",
-        "SizeFree1",
-        "StrideA0",
-        "StrideB0",
-        "AddressC",
-        "AddressD",
-        "Alpha",
-        "Beta",
-        "StrideC0",
-        "StrideD0",
-    ]
+
+@pytest.mark.parametrize("dt,n,tile", _VLLM_WVSPLITK)
+def test_vllm_wvsplitk_shipped_config(dt, n, tile):
+    """Same layout and arguments as wvSpltK, with n fixed per kernel. Tokens that
+    fit LDS are staged once, otherwise K is staged in chunks, so K has no bound."""
+    _check_skinny_tn_config(f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}", {"bf16": "b", "f16": "h"}[dt], {1: n, 2: 1})
 
 
 _LOGIC_ROOT = os.path.normpath(
@@ -1313,29 +1497,44 @@ _LOGIC_ROOT = os.path.normpath(
     )
 )
 
+_PLAIN_BF16_LOGIC = "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml"
+_HALF = 4
+
+
+def _boxes_overlap(a, b):
+    """Range keys [m_min, m_max, n_min, n_max, batch_min, batch_max, K_min, K_max]."""
+    for dim in range(4):
+        loA, hiA, loB, hiB = a[2 * dim], a[2 * dim + 1], b[2 * dim], b[2 * dim + 1]
+        if (hiA != -1 and hiA < loB) or (hiB != -1 and hiB < loA):
+            return False
+    return True
+
 
 @pytest.mark.parametrize(
-    "rel,plainRel,ranges",
+    "rel,dataType,kernels",
     [
         (
             "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
-            "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
-            {
-                "wvSpltK_bf16_tn_m1": [9, -1, 1, 1, 1, 1, 8, 4096],
-                "wvSpltK_bf16_tn_m2": [9, -1, 2, 2, 1, 1, 8, 4096],
-                "wvSpltK_bf16_tn_m4": [9, -1, 3, 4, 1, 1, 8, 4096],
-            },
+            7,
+            set(_WVSPLTK_NAMES) | {name for name in _VLLM_WVSPLITK_NAMES if "_bf16_" in name},
+        ),
+        (
+            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml",
+            _HALF,
+            {name for name in _VLLM_WVSPLITK_NAMES if "_f16_" in name},
         ),
     ],
 )
-def test_wvspltk_range_logic(rel, plainRel, ranges):
-    """hipBLASLt reaches the wvSpltK kernels through these Range files. A custom
+def test_skinny_tn_range_logic(rel, dataType, kernels):
+    """hipBLASLt reaches the skinny TN kernels through these Range files. A custom
     kernel takes the logic file's problem type, and these kernels support no bias,
-    activation or scale vector, so the type must be plain GEMM. The file must
-    match the header and type of the shipped plain-GEMM logic to share its
-    placeholder. Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max,
-    K_min, K_max], -1 unbounded, and each must sit inside its kernel's
-    predicates."""
+    activation or scale vector, so the type must be plain GEMM. The BF16 file
+    must match the header and type of the shipped plain-GEMM logic to share its
+    placeholder; gfx950 ships no plain-GEMM FP16 TN logic, so the FP16 file
+    differs from it only in the data types. Keys are [m_min, m_max, n_min, n_max,
+    batch_min, batch_max, K_min, K_max], -1 unbounded. hipBLASLt takes the first
+    row containing the problem, so the rows must not overlap, and each must sit
+    inside its kernel's predicates."""
     path = os.path.join(_LOGIC_ROOT, rel)
     if not os.path.exists(path):
         pytest.skip(f"tuning logic tree not present: {rel}")
@@ -1348,17 +1547,22 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     for key in ("UseBias", "UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
         assert not pt.get(key), key
 
-    with open(os.path.join(_LOGIC_ROOT, plainRel)) as f:
+    with open(os.path.join(_LOGIC_ROOT, _PLAIN_BF16_LOGIC)) as f:
         plain = yaml.safe_load(f)
     plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
     assert {k: doc[k] for k in plainHeader} == plainHeader
-    assert pt == plain["ProblemType"]
+    typeFields = ("DataType", "DataTypeA", "DataTypeB", "DataTypeE", "DestDataType")
+    assert pt == {**plain["ProblemType"], **{k: dataType for k in typeFields}}
 
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
-    assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
+    rows = [(key, names[index]) for key, (index, _) in doc["ExactLogic"]]
+    assert {name for _, name in rows} == set(names.values()) == kernels
+    for i, (a, nameA) in enumerate(rows):
+        for b, nameB in rows[i + 1 :]:
+            assert not _boxes_overlap(a, b), (a, nameA, b, nameB)
 
     ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
-    for name, key in ranges.items():
+    for key, name in rows:
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):
             lo, hi = key[2 * dim], key[2 * dim + 1]
@@ -1369,3 +1573,64 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
             if dim in config.get("AssertSizeLessThan", {}):
                 assert -1 < hi < config["AssertSizeLessThan"][dim], (name, dim)
         assert key[6] >= config["AssertSummationElementMultiple"], name
+
+
+# ---------------------------------------------------------------------------
+# Embedded metadata parse cost
+# ---------------------------------------------------------------------------
+
+# rocRoller kernels embed their kernel graph in .amdgpu_metadata, about 13k YAML
+# lines against about 175 for other custom kernels, so they are the case where
+# the loader choice matters and where the two loaders have the most to disagree on.
+_LARGE_METADATA_KERNEL = (
+    "RR_GEMM_TN_FP8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2"
+)
+
+
+@pytest.mark.skipif(not hasattr(yaml, "CSafeLoader"), reason="PyYAML is built without libyaml")
+def test_embedded_metadata_is_parsed_with_libyaml(monkeypatch):
+    loaders = []
+    realLoad = yaml.load
+
+    def spy(stream, Loader):
+        loaders.append(Loader)
+        return realLoad(stream, Loader=Loader)
+
+    # yaml.safe_load also routes through yaml.load, so a revert to it is caught.
+    monkeypatch.setattr(ck_mod.yaml, "load", spy)
+    readCustomKernelConfig(_LARGE_METADATA_KERNEL)
+
+    assert loaders == [yaml.CSafeLoader]
+
+
+def test_get_custom_kernel_config_parses_whole_metadata_block_once(tmp_path, monkeypatch):
+    # No CustomKernel block, so the config is inferred from amdhsa.kernels and
+    # the whole block is needed. It is parsed once, after the custom.config slice.
+    write_kernel(tmp_path / "metadata_only.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+    wholeBlockParses = []
+    realRead = ck_mod._readEmbeddedYaml
+
+    def spy(name, directory=None, customConfigOnly=False):
+        if not customConfigOnly:
+            wholeBlockParses.append(name)
+        return realRead(name, directory, customConfigOnly)
+
+    monkeypatch.setattr(ck_mod, "_readEmbeddedYaml", spy)
+    config = getCustomKernelConfig("metadata_only", {}, str(tmp_path))
+
+    assert config["CustomKernel"]["args"][0]["semantic"] == "AddressD"
+    assert wholeBlockParses == ["metadata_only"]
+
+
+def test_metadata_loader_matches_pure_python_safe_loader():
+    lines = custom_kernel_text(_LARGE_METADATA_KERNEL).splitlines()
+    start = lines.index("---") + 1
+    end = lines.index("...", start)
+    expected = yaml.load("\n".join(lines[start:end]), Loader=yaml.SafeLoader)
+
+    assert ck_mod._readEmbeddedYaml(_LARGE_METADATA_KERNEL) == expected

@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from config_harness import emit_kernels_from_config, solutions_from_config
-from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameFull
+from tensilelite.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameFull
 
 pytestmark = pytest.mark.unit
 
@@ -138,7 +138,7 @@ def test_parameter_groups_keep_explicit_selector_provenance_separate(tmp_path):
     ("StreamK", "Hybrid", 5, 0),
 ))
 def test_logic_extraction_regenerates_legacy_and_canonical_identity(tmp_path, strategy, assignment, mode, force):
-    from Tensile.TensileLibLogicToYaml import formForkParams
+    from tensilelite.TensileLibLogicToYaml import formForkParams
 
     canonical = _derive(tmp_path, "source", _config({
         "TileProcessingStrategy": [strategy], "WorkAssignment": [assignment],

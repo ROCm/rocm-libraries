@@ -46,7 +46,7 @@ pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Faithful re-implementation of the derivation (mirrors Solution.py 1828,
-# 1845-1847, 2282-2283, 3850-3869).  Pure; no Tensile import required.
+# 1845-1847, 2282-2283, 3850-3869).  Pure; no TensileLite import required.
 # ---------------------------------------------------------------------------
 
 def _derive_suppress_no_load_loop(
