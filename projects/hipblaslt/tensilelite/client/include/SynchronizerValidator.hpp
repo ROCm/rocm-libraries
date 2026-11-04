@@ -52,8 +52,7 @@ namespace TensileLite
         class SynchronizerValidator : public RunListener
         {
         public:
-            SynchronizerValidator(po::variables_map const&                    args,
-                                  std::vector<std::shared_ptr<DeviceContext>> devices);
+            SynchronizerValidator(po::variables_map const& args);
             virtual ~SynchronizerValidator();
 
             virtual bool needMoreBenchmarkRuns() const override
@@ -156,7 +155,6 @@ namespace TensileLite
 
             bool                m_enabled      = false;
             bool                m_validateAfterEnqueues = false;
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;

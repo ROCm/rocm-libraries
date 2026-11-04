@@ -24,6 +24,22 @@ into one cell holding every combo's pick; ``neutral_fields`` first sets the name
 spec fields, which the manifest author asserts are IR-neutral, to the default
 spec's value. See `cell_spaces`.
 
+One pack may draw kernels from more than one registry candidate: ``enumerate.also`` lists
+further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields``,
+``spec_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
+space are inherited from ``enumerate``, and a section may set its own ``space``). Kernels
+are emitted primary section first, then each ``also`` section in order; a cell listed by
+more than one section keeps the first section's default as its one ``default: true``
+floor. A ``space: full``
+section projects its own varying performance knobs; the catalog's projected knobs are the
+union over sections, in ``reduction.fields.performance`` order.
+
+``launches`` (optional) maps launch name to a ``kernel_source`` launch override and is
+copied onto every kernel: a rocKE builder returning a ``KernelModule`` names its primary
+kernel by ``{}`` and each companion by ``{role: <role>}``. A registry candidate that pairs
+its kernel with a reduce kernel (a ``reduce_spec`` beside the ``kernel_spec``) needs one,
+or the catalog would ship the kernel without the reduce the dispatcher launches after it.
+
 Exit 0 on success; 2 on unusable input. ``--strict`` makes exit 1 mean a gate refusal:
 kernels over ``aot_budget_per_arch`` (``--plan-space``: the current classification) or a
 ``--shapes`` GAP.
@@ -32,7 +48,6 @@ kernels over ``aot_budget_per_arch`` (``--plan-space``: the current classificati
 from __future__ import annotations
 
 import argparse
-import copy
 import dataclasses
 import enum
 import importlib
@@ -61,6 +76,9 @@ from codegen.config_loader import (  # noqa: E402
 
 #: A projected value's Python type -> its KMD field type.
 _KMD_TYPES = {bool: "int", int: "int", float: "float", str: "string"}
+
+#: A launch name, as the generator and the descriptor loader accept it.
+_LAUNCH_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 #: The last ``{field}`` slot of a name template; projected knobs render after it.
 _LAST_SLOT = re.compile(r"(?<!\{)\{[^{}]+\}(?!\})")
@@ -130,43 +148,70 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             f"specialization.{key}",
             "a mapping",
         )
+    launches = manifest.get("launches")
+    _require(
+        launches is None
+        or (
+            isinstance(launches, dict)
+            and len(launches) >= 2
+            and all(isinstance(n, str) and _LAUNCH_NAME.fullmatch(n) for n in launches)
+            and all(isinstance(v, dict) for v in launches.values())
+        ),
+        path,
+        "launches",
+        "a mapping of two or more launch names ([a-z][a-z0-9_]*) to override mappings",
+    )
     decl = manifest["enumerate"]
     _require(isinstance(decl, dict), path, "enumerate", "a mapping")
-    for key in (
-        "free_fields",
-        "spec_fields",
-        "selector_fields",
-        "neutral_fields",
-        "cell_keyed_by",
-    ):
+    also = decl.get("also")
+    _require(
+        also is None
+        or (isinstance(also, list) and all(isinstance(a, dict) for a in also)),
+        path,
+        "enumerate.also",
+        "a list of mappings",
+    )
+    for where, section in [("enumerate", decl)] + [
+        (f"enumerate.also[{i}]", a) for i, a in enumerate(also or [])
+    ]:
+        for key in (
+            "free_fields",
+            "spec_fields",
+            "selector_fields",
+            "neutral_fields",
+            "cell_keyed_by",
+        ):
+            _require(
+                section.get(key) is None or _is_names(section[key]),
+                path,
+                f"{where}.{key}",
+                "a list of field names",
+            )
+        overrides = section.get("spec_overrides")
         _require(
-            decl.get(key) is None or _is_names(decl[key]),
+            overrides is None
+            or (
+                isinstance(overrides, dict)
+                and all(isinstance(k, str) for k in overrides)
+            ),
             path,
-            f"enumerate.{key}",
-            "a list of field names",
+            f"{where}.spec_overrides",
+            "a mapping of spec field names to values",
         )
-    overrides = decl.get("spec_overrides")
-    _require(
-        overrides is None
-        or (isinstance(overrides, dict) and all(isinstance(k, str) for k in overrides)),
-        path,
-        "enumerate.spec_overrides",
-        "a mapping of spec field names to values",
-    )
-    limit = decl.get("max_kernels")
-    _require(
-        limit is None
-        or (isinstance(limit, int) and not isinstance(limit, bool) and limit >= 0),
-        path,
-        "enumerate.max_kernels",
-        "a non-negative integer",
-    )
-    _require(
-        isinstance(decl.get("sweep_level", ""), str),
-        path,
-        "enumerate.sweep_level",
-        "a string",
-    )
+        limit = section.get("max_kernels")
+        _require(
+            limit is None
+            or (isinstance(limit, int) and not isinstance(limit, bool) and limit >= 0),
+            path,
+            f"{where}.max_kernels",
+            "a non-negative integer",
+        )
+        _require(
+            isinstance(section.get("sweep_level", ""), str),
+            path,
+            f"{where}.sweep_level",
+            "a string",
+        )
     _require(
         manifest.get("ground_truth") is None
         or isinstance(manifest["ground_truth"], dict),
@@ -179,14 +224,6 @@ def _validate_manifest(path: str, manifest: dict) -> None:
         path,
         "reduction",
         "a mapping",
-    )
-    # Carried verbatim into every kernel_source; the generator's loader owns the
-    # launch count and name rules (`config_loader._build_launches`).
-    _require(
-        manifest.get("launches") is None or isinstance(manifest["launches"], dict),
-        path,
-        "launches",
-        "a mapping of launch name to override",
     )
 
 
@@ -366,12 +403,20 @@ def check_value_map_cells(groups: list, value_map) -> None:
 class Registry:
     """One manifest's view of the registry: its candidate, request class and cells."""
 
-    def __init__(self, manifest: dict):
-        decl = manifest["enumerate"]
+    #: What an ``enumerate.also`` section takes from ``enumerate`` unless it sets its own.
+    _INHERITED = ("candidates", "request", "sweep_level", "space")
+
+    def __init__(self, manifest: dict, decl: dict | None = None):
+        primary = decl is None
+        decl = manifest["enumerate"] if primary else decl
+        where = "enumerate" if primary else "an enumerate.also section"
         for key in ("candidates", "request", "pin", "cells", "sweep_level"):
             if key not in decl:
-                raise EnumerationError(f"the manifest's enumerate block lacks '{key}'.")
+                raise EnumerationError(f"the manifest's {where} lacks '{key}'.")
         self.decl = decl
+        #: ``(cell_key, kernel spec)`` -> the registry's ``tuning_id`` for it, filled
+        #: by `space`. Absent for a spec the registry hands back unwrapped.
+        self.tuning_ids: dict = {}
         self.space_kind = decl.get("space", "slice")
         if self.space_kind not in ("slice", "full"):
             raise EnumerationError(
@@ -461,6 +506,40 @@ class Registry:
 
         self._sweep_level = walk.sweep_level
 
+        #: Whether the registry paired a kernel with a reduce kernel (``reduce_spec``),
+        #: which the catalog must then launch too (``launches``).
+        self.pairs_reduce = False
+        #: The ``enumerate.also`` sections, each a `Registry` of its own.
+        self.also: list = []
+        if primary and decl.get("also"):
+            for index, extra in enumerate(decl["also"]):
+                merged = {
+                    **{k: decl[k] for k in self._INHERITED if k in decl},
+                    **extra,
+                }
+                section = Registry(manifest, merged)
+                if section.cell_fields != self.cell_fields:
+                    raise EnumerationError(
+                        f"enumerate.also[{index}] crosses {section.cell_fields}, not "
+                        f"{self.cell_fields}: every section's cells are the same "
+                        f"fields, so a shape's coverage is one key."
+                    )
+                for key in ("selector_fields", "cell_keyed_by"):
+                    if getattr(section, key) != getattr(self, key):
+                        raise EnumerationError(
+                            f"enumerate.also[{index}] sets {key} "
+                            f"{getattr(section, key)}, not {getattr(self, key)}: every "
+                            f"section keys a shape's cell the same way."
+                        )
+                self.also.append(section)
+
+    def sections(self) -> list:
+        """This section, then each ``enumerate.also`` section."""
+        return [self, *self.also]
+
+    def cell_key(self, cell: dict) -> tuple:
+        return tuple(cell.get(f) for f in self.cell_fields)
+
     def _parse_groups(self, raw) -> list:
         return [
             (
@@ -544,9 +623,11 @@ class Registry:
                 f"cells promise: {why}"
             )
         try:
-            base = _unwrap(self.candidate.select_spec(request))
+            base_wrapped = self.candidate.select_spec(request)
+            base = _unwrap(base_wrapped)
             with self._sweep_level(self.decl["sweep_level"]):
-                specs = [_unwrap(s) for s in self.candidate.sweep_space(request)]
+                wrapped = list(self.candidate.sweep_space(request))
+            specs = [_unwrap(s) for s in wrapped]
         except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
                 f"the registry rejects cell {_show(cell)}, which the manifest's cells "
@@ -557,7 +638,29 @@ class Registry:
                 f"the registry routes cell {_show(cell)} without a kernel_spec; the "
                 f"pinned candidate must resolve to a kernel."
             )
+        key = self.cell_key(cell)
+        if any(
+            getattr(item, "reduce_spec", None) is not None
+            for item in (base_wrapped, *wrapped)
+        ):
+            self.pairs_reduce = True
+        for item in (base_wrapped, *wrapped):
+            tuning_id = getattr(item, "tuning_id", None)
+            if tuning_id:
+                self.tuning_ids.setdefault((key, _unwrap(item)), str(tuning_id))
         return base, specs
+
+    def provenance(self, cell: dict, spec) -> dict:
+        """The pin's ``spec_id`` and, when the registry names the kernel, its
+        ``tuning_id``: what lets a shipped descriptor be traced back to the
+        registry entry that produced it. Informational; never compared."""
+        out = {}
+        if self.pin.get("spec_id"):
+            out["rocke_spec_id"] = str(self.pin["spec_id"])
+        tuning_id = self.tuning_ids.get((self.cell_key(cell), spec))
+        if tuning_id and tuning_id != "auto":
+            out["rocke_tuning_id"] = tuning_id
+        return out
 
     def slice_of(self, base, specs: list) -> list:
         free = set(self.decl.get("free_fields") or [])
@@ -782,6 +885,8 @@ class Enumeration:
     accessors: dict
     held: list
     classification: Classification
+    #: The `Registry` section that produced each row, parallel to ``rows``.
+    sections: list = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -969,10 +1074,9 @@ def _check_picks(picks: list, kept_per_cell: list) -> None:
                 )
 
 
-def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumeration:
-    registry = registry or Registry(manifest)
+def _section_rows(registry: Registry, classification: Classification) -> tuple:
+    """``(rows, projected, held)`` for one `Registry` section."""
     full = registry.space_kind == "full"
-    classification = Classification.from_manifest(manifest, required=full)
     merged = cell_spaces(registry, classification)
     cells, spaces = merged.cells, merged.spaces
     if full:
@@ -1001,9 +1105,36 @@ def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumera
             f"max_kernels {limit}. Raise it deliberately: every kernel is a comgr "
             f"build in the package."
         )
+    return rows, projected, held
+
+
+def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumeration:
+    registry = registry or Registry(manifest)
+    classification = Classification.from_manifest(
+        manifest,
+        required=any(s.space_kind == "full" for s in registry.sections()),
+    )
+    rows, sections, varied, held_notes = [], [], set(), OrderedDict()
+    floors: set = set()
+    for section in registry.sections():
+        extra, section_projected, section_held = _section_rows(section, classification)
+        # One floor per cell: a later section listing a cell an earlier one already
+        # has keeps its kernels, but not a second `default: true`. A merged cell is
+        # keyed by all its items, the keyed attributes `cell_spaces` adds included.
+        extra = [
+            (cell, ks, is_default and tuple(cell.items()) not in floors)
+            for cell, ks, is_default in extra
+        ]
+        floors.update(tuple(cell.items()) for cell, _, d in extra if d)
+        rows.extend(extra)
+        sections.extend([section] * len(extra))
+        varied.update(section_projected)
+        held_notes.update((h, None) for h in section_held)
     performance = classification.performance
+    projected = [n for n in performance if n in varied]
+    held = list(held_notes)
     accessors = {n: performance[n] for n in projected if performance[n]}
-    return Enumeration(rows, projected, accessors, held, classification)
+    return Enumeration(rows, projected, accessors, held, classification, sections)
 
 
 def _kmd_type(knob: str, values: list) -> str:
@@ -1051,7 +1182,6 @@ def build_config(
     for name, value, why in enumeration.held:
         warn(f"WARN: field {name} held at default {value} ({why})")
 
-    spec_fields = registry.decl.get("spec_fields")
     projected = enumeration.projected
     accessors = enumeration.accessors
     kmd_fields = [dict(f) for f in manifest["kmd_fields"]]
@@ -1084,8 +1214,8 @@ def build_config(
         split = last.end() if last else len(template)
 
     kernels = []
-    for cell, ks, is_default in enumeration.rows:
-        names = list(spec_fields or _spec_fields(ks))
+    for (cell, ks, is_default), section in zip(enumeration.rows, enumeration.sections):
+        names = list(section.decl.get("spec_fields") or _spec_fields(ks))
         names += [n for n in projected if n not in names]
         missing = [n for n in names if not hasattr(ks, n)]
         if missing:
@@ -1098,7 +1228,7 @@ def build_config(
             for n in names
             if not (n in accessors and getattr(ks, n) is None)
         }
-        request = {n: _rendered(v) for n, v in {**registry.fixed, **cell}.items()}
+        request = {n: _rendered(v) for n, v in {**section.fixed, **cell}.items()}
         metadata = _metadata(spec, ks, request, accessors, specialization)
         # Spec wins, then request, then metadata; bools render 1/0 (`c{causal}`).
         fields = {
@@ -1135,21 +1265,45 @@ def build_config(
                 "source": manifest["source"],
                 "builder": manifest["builder"],
                 "spec": spec,
-                **(
-                    {"launches": copy.deepcopy(manifest["launches"])}
-                    if manifest.get("launches") is not None
-                    else {}
-                ),
             },
             "metadata": metadata,
         }
+        if manifest.get("launches"):
+            kernel["kernel_source"]["launches"] = json.loads(
+                json.dumps(manifest["launches"])
+            )
         if is_default:
             kernel["default"] = True
+        provenance = section.provenance(cell, ks)
+        if provenance:
+            kernel["provenance"] = provenance
         kernels.append(kernel)
 
-    merges = registry.selector_fields or registry.neutral_fields
-    if registry.space_kind == "full" or merges:
+    unlaunched = [
+        s.pin.get("spec_id", "enumerate")
+        for s in registry.sections()
+        if s.pairs_reduce and not manifest.get("launches")
+    ]
+    if unlaunched:
+        raise EnumerationError(
+            f"the registry pairs {unlaunched[:3]} with a reduce kernel, but the manifest "
+            f"declares no 'launches': the catalog would ship the kernel without the "
+            f"reduce the dispatcher launches after it. Build both from one module "
+            f"builder and declare its launches."
+        )
+    merges = any(s.selector_fields or s.neutral_fields for s in registry.sections())
+    if (
+        any(s.space_kind == "full" for s in registry.sections())
+        or registry.also
+        or merges
+    ):
         repeated = [n for n, c in Counter(k["name"] for k in kernels).items() if c > 1]
+        if repeated and registry.also:
+            raise EnumerationError(
+                f"{len(repeated)} kernel name(s) repeat across enumerate sections, "
+                f"e.g. {repeated[:3]}: a section's kernels must differ from every "
+                f"other section's in a field the name template renders."
+            )
         if repeated:
             raise EnumerationError(
                 f"space: {registry.space_kind} renders {len(repeated)} duplicated "
@@ -1214,18 +1368,32 @@ def _metadata(spec: dict, ks, request: dict, accessors: dict, specialization) ->
 
 
 def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
-    """Print the full space's varying fields and exact instance counts. With
-    ``strict``, return 1 when the current classification is over budget."""
+    """Print the full space's varying fields and exact instance counts, over every
+    ``enumerate`` section. With ``strict``, return 1 when the current classification
+    is over budget."""
     out = out or sys.stdout
     registry = Registry(manifest)
     classification = Classification.from_manifest(manifest, required=True)
-    merged = cell_spaces(registry, classification)
-    cells, spaces = merged.cells, merged.spaces
+    sections = []
+    for section in registry.sections():
+        merged = cell_spaces(section, classification)
+        sections.append((section, merged.cells, merged.spaces, merged.combos))
+    spaces = [space for _, _, section_spaces, _ in sections for space in section_spaces]
     budget = classification.budget
 
     def count(performance) -> int:
-        selected = select_full(spaces, classification.with_performance(performance))
-        return sum(len(kept) for kept in selected.kept)
+        total = 0
+        for section, _, section_spaces, _ in sections:
+            if section.space_kind == "full":
+                selected = select_full(
+                    section_spaces, classification.with_performance(performance)
+                )
+                total += sum(len(kept) for kept in selected.kept)
+            else:
+                total += sum(
+                    len(section.slice_of(base, specs)) for base, specs in section_spaces
+                )
+        return total
 
     def against(n: int) -> str:
         verdict = "OVER" if n > budget else "within"
@@ -1262,17 +1430,24 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
 
     arch = manifest["arch"]
     print(f"plan space: {manifest['engine']['name']} @ {arch}", file=out)
-    for fields, rows in registry.groups:
-        print(f"  cell group {fields}: {len(rows)} values", file=out)
-    if merged.combos > len(cells):
-        print(
-            f"  cells: {len(cells)} ({merged.combos} request combos merged on "
-            f"selector_fields {registry.selector_fields}, neutral_fields "
-            f"{registry.neutral_fields}, cell_keyed_by {registry.cell_keyed_by})",
-            file=out,
-        )
-    else:
-        print(f"  cells: {len(cells)}", file=out)
+    for section, cells, _, combos in sections:
+        if len(sections) > 1:
+            print(
+                f"  section {section.pin.get('spec_id', 'enumerate')} "
+                f"(space: {section.space_kind}):",
+                file=out,
+            )
+        for fields, rows in section.groups:
+            print(f"  cell group {fields}: {len(rows)} values", file=out)
+        if combos > len(cells):
+            print(
+                f"  cells: {len(cells)} ({combos} request combos merged on "
+                f"selector_fields {section.selector_fields}, neutral_fields "
+                f"{section.neutral_fields}, cell_keyed_by {section.cell_keyed_by})",
+                file=out,
+            )
+        else:
+            print(f"  cells: {len(cells)}", file=out)
     print("  varying spec fields (value set; registry default):", file=out)
     if not values:
         print("    none", file=out)
@@ -1326,7 +1501,10 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
     A shape's cell is keyed without ``enumerate.selector_fields``: they only steer
     the registry's rule, a merged cell carries none of them (`cell_spaces`), and a
     graph need not set them or take a listed value. It is keyed with every
-    ``enumerate.cell_keyed_by`` attribute of the registry's pick, as the cells are."""
+    ``enumerate.cell_keyed_by`` attribute of the registry's pick, as the cells are.
+    Every section declares the same ``selector_fields`` and ``cell_keyed_by``
+    (`Registry`), so one key serves them all."""
+    sections = registry.sections()
     fields = [f for f in registry.cell_fields if f not in registry.selector_fields]
     keyed = registry.cell_keyed_by
 
@@ -1335,8 +1513,9 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
 
     listed = {
         tuple(cell.get(f) for f in fields)
-        + (keyed_values(registry.space(cell)[0]) if keyed else ())
-        for cell in registry.cells()
+        + (keyed_values(s.space(cell)[0]) if keyed else ())
+        for s in sections
+        for cell in s.cells()
     }
     controlled = set(registry.fixed) | set(registry.cell_fields)
     categories = OrderedDict(
@@ -1368,21 +1547,28 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
             # mistyped value raises TypeError or ValueError) is that shape's decline,
             # as it always was; only a missing attribute is the registry itself
             # being unusable.
-            try:
-                request = registry.request_cls(
-                    **{**registry.fixed, **kwargs, **registry.pin}
-                )
-                ok, why = registry.candidate.admits(request)
-            except (TypeError, ValueError) as exc:
-                ok, why = False, f"request rejected: {exc}"
-            except AttributeError as exc:
-                raise EnumerationError(
-                    f"the registry cannot judge shape {shape!r} "
-                    f"(AttributeError): {exc}"
-                ) from exc
+            ok, why, declined, admitting, request = False, "", None, None, None
+            for section in sections:
+                try:
+                    request = section.request_cls(
+                        **{**section.fixed, **kwargs, **section.pin}
+                    )
+                    ok, why = section.candidate.admits(request)
+                except (TypeError, ValueError) as exc:
+                    ok, why = False, f"request rejected: {exc}"
+                except AttributeError as exc:
+                    raise EnumerationError(
+                        f"the registry cannot judge shape {shape!r} "
+                        f"(AttributeError): {exc}"
+                    ) from exc
+                if ok:
+                    admitting = section
+                    break
+                declined = declined or why
+            why = why if ok else declined
             cell_text = _show(dict(zip(fields, key)))
             if ok and keyed:
-                picked = keyed_values(registry.candidate.select_spec(request))
+                picked = keyed_values(admitting.candidate.select_spec(request))
                 key += picked
                 cell_text = _show(
                     {**dict(zip(fields, key)), **dict(zip(keyed, picked))}

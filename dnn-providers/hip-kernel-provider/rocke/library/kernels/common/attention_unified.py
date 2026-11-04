@@ -4088,10 +4088,9 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
 
 def _tiled_3d_reduce_lds_bytes(spec) -> int:
     """The reducer stores one F32 softmax factor per segment in LDS."""
-    from rocke.core.dtypes import dtype_info
+    from .attention_split_kv_reduce import split_kv_reduce_lds_bytes
 
-    size = spec.num_segments * (dtype_info(F32.name).encoded_bits // 8)
-    return (size + 15) & ~15
+    return split_kv_reduce_lds_bytes(spec.num_segments)
 
 
 def _strided_3d_lds_reason(segment, reduce, *, arch: str) -> Optional[str]:

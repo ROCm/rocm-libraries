@@ -411,8 +411,11 @@ private:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
         hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-        ASSERT_NO_FATAL_FAILURE(
-            prepareWorkspace(workspace.get(), static_cast<size_t>(workspaceSize)));
+        if(workspaceSize > 0)
+        {
+            ASSERT_NO_FATAL_FAILURE(
+                prepareWorkspace(workspace.get(), static_cast<size_t>(workspaceSize)));
+        }
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());

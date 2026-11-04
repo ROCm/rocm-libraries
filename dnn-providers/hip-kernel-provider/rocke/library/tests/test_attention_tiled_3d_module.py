@@ -1,329 +1,177 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""CPU tests for the gfx942 3D (split-KV) unified attention module.
 
-Covers ``kernels.gfx942.attention_tiled_3d``'s spec-first support predicates and
-the segment+reduce ``KernelModule`` builder; no GPU required (the one compile
-test needs comgr and skips without it).
+"""``build_unified_attention_3d_tiled_module`` packs the split-KV segment kernel with the
+reduce kernel the dispatcher pairs it with, and its predicate gates both.
+
+hkp_pack compiles the module once and ships the reduce as the ``reduce`` launch beside the
+segment launch. The reduce spec is derived from the segment spec (``reduce_spec_for``), and
+the dispatcher builds its pair through the same derivation
+(``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec``). The round trip below
+pins that the module packs the reduce the dispatcher launches: otherwise it would combine a
+different number of segments, heads or head dims than the segment kernel wrote.
 """
 
-from dataclasses import replace
+from __future__ import annotations
+
+import dataclasses
+import itertools
 
 import pytest
 
-from kernels.common.attention_arch import attention_lds_capacity_bytes
-from kernels.gfx942 import attention_tiled_3d as mod
-from kernels.gfx942.attention_tiled_3d import (
+from dispatch.attention import attention_candidates
+from dispatch.attention.common import AttentionMaskType, AttentionRequest
+from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
-    UnifiedAttentionReduceTiledSpec,
+    build_unified_attention_3d_tiled_module,
+    reduce_spec_for,
+    supports_tiled_3d_spec,
+    supports_unified_attention_3d_tiled_module,
 )
-from rocke.helpers import KernelModule
 
 
-def _spec(head_size=128, hq=32, hkv=8, dtype="fp16", num_segments=16):
-    return UnifiedAttentionReduceTiledSpec(
-        head_size=head_size,
-        num_query_heads=hq,
-        num_kv_heads=hkv,
+def _gfx950_3d_candidates():
+    return [
+        c
+        for c in attention_candidates()
+        if str(getattr(c, "spec_id", "")).startswith("gfx950_u3d_")
+    ]
+
+
+def _request(
+    candidate, *, hq, hkv, d, dtype, mask, batch=2, seqlen_k=4096, emit_lse=False
+):
+    return AttentionRequest(
+        batch=batch,
+        nhead_q=hq,
+        nhead_k=hkv,
+        seqlen_q=1,
+        seqlen_k=seqlen_k,
+        hdim_q=d,
+        hdim_v=d,
+        arch="gfx950",
+        mask_type=mask,
         dtype=dtype,
-        num_segments=num_segments,
+        kv_block_size=16,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+        emit_lse=emit_lse,
     )
 
 
-@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("head_size", [64, 128, 256])
-def test_accepts_supported_cells(head_size, dtype):
-    ok, reason = mod.supports_unified_attention_reduce_tiled(
-        _spec(head_size=head_size, dtype=dtype), arch="gfx942"
-    )
-    assert ok, reason
+def test_every_gfx950_3d_candidate_is_compared():
+    """The parity test below must not pass by finding no candidate."""
+    assert len(_gfx950_3d_candidates()) == 32
 
 
 @pytest.mark.parametrize(
-    "kwargs, field",
-    [
-        (dict(head_size=96), "head_size"),
-        (dict(head_size=0), "head_size"),
-        (dict(dtype="fp32"), "dtype"),
-        (dict(num_segments=1 << 20), "num_segments"),
-    ],
+    "heads, d, dtype, mask, emit_lse",
+    list(
+        itertools.product(
+            [(8, 1), (16, 2), (32, 8)],
+            [64, 128],
+            ["bf16", "fp16"],
+            [AttentionMaskType.TOP_LEFT_CAUSAL, AttentionMaskType.BOTTOM_RIGHT_CAUSAL],
+            [False, True],
+        )
+    ),
+    ids=lambda v: str(v),
 )
-def test_rejects_unsupported_field(kwargs, field):
-    ok, reason = mod.supports_unified_attention_reduce_tiled(_spec(**kwargs))
-    assert not ok
-    assert field in reason
+def test_derived_reduce_is_the_one_the_dispatcher_pairs(
+    heads, d, dtype, mask, emit_lse
+):
+    """For every gfx950 3D tuning candidate, ``reduce_spec_for`` of the segment spec the
+    dispatcher builds (with the request's ``emit_lse``, a problem field) equals the
+    reduce spec it builds beside it."""
+    hq, hkv = heads
+    compared = 0
+    for candidate in _gfx950_3d_candidates():
+        request = _request(
+            candidate, hq=hq, hkv=hkv, d=d, dtype=dtype, mask=mask, emit_lse=emit_lse
+        )
+        tuning = candidate.select_spec(request)
+        if tuning is None:
+            continue
+        assert tuning.reduce_spec is not None, candidate.spec_id
+        assert tuning.reduce_spec.emit_lse is emit_lse, candidate.spec_id
+        assert (
+            reduce_spec_for(tuning.kernel_spec, emit_lse=emit_lse) == tuning.reduce_spec
+        ), candidate.spec_id
+        compared += 1
+    assert compared, "no gfx950 3D candidate admitted the request"
 
 
-def test_rejects_other_arch():
-    ok, reason = mod.supports_unified_attention_reduce_tiled(_spec(), arch="gfx90a")
-    assert not ok
-    assert reason
-
-
-def test_lds_edge_uses_real_cap():
-    cap = attention_lds_capacity_bytes("gfx942")
-    ok, reason = mod.supports_unified_attention_reduce_tiled(
-        _spec(num_segments=cap // 4)
-    )
-    assert ok, reason
-    ok, reason = mod.supports_unified_attention_reduce_tiled(
-        _spec(num_segments=cap // 4 + 1)
-    )
-    assert not ok
-    assert "num_segments" in reason
-
-
-# --- segment + reduce module -------------------------------------------------
-
-
-def _segment(**kw):
-    """A strided decode segment spec as the strided candidate builds it."""
+def _segment(**overrides) -> UnifiedAttention3DTiledSpec:
     base = dict(
         head_size=128,
         block_size=16,
-        num_query_heads=32,
-        num_kv_heads=8,
-        dtype="fp16",
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype="bf16",
         use_sinks=False,
         sliding_window=0,
         has_softcap=False,
         num_segments=16,
-        num_seqs=1,
-        kv_layout="strided",
-        use_decode_grid=True,
-        kv_cache_policy="stream",
+        right_bound=0,
     )
-    base.update(kw)
-    return UnifiedAttention3DTiledSpec(**base)
+    return UnifiedAttention3DTiledSpec(**{**base, **overrides})
 
 
-def _strided_request(head_size, block_size, batch, dtype="fp16", nhead_q=32):
-    from dispatch.attention import AttentionRequest
-
-    return AttentionRequest(
-        batch=batch,
-        nhead_q=nhead_q,
-        nhead_k=8,
-        seqlen_q=1,
-        seqlen_k=4096,
-        hdim_q=head_size,
-        hdim_v=head_size,
-        arch="gfx942",
-        dtype=dtype,
-        kv_layout="strided",
-        kv_block_size=block_size,
+def test_module_predicate_admits_a_spec_both_halves_admit():
+    spec = _segment()
+    assert supports_tiled_3d_spec(spec, arch="gfx950")[0]
+    assert supports_unified_attention_3d_tiled_module(spec, arch="gfx950") == (
+        True,
+        "supported",
     )
 
 
-def _runtime_specs(head_size, block_size, batch, dtype="fp16", nhead_q=32):
-    """``(segment, reduce)`` that rocKE's strided decode candidate selects."""
-    from dispatch.attention.strided_decode import make_candidate
+def test_module_predicate_refuses_what_only_the_reduce_refuses():
+    """A segment count the segment kernel builds but whose reduce cannot cache its
+    per-segment factors in LDS: the segment predicate alone would ship it."""
+    from kernels.gfx950.attention_tiled_3d import reduce_max_segments
 
-    selected = make_candidate().select_spec(
-        _strided_request(head_size, block_size, batch, dtype, nhead_q)
-    )
-    return selected.kernel_spec, selected.reduce_spec
-
-
-_RUNTIME_CELLS = [
-    (d, b, batch) for d in (64, 128, 256) for b in (16, 32, 64) for batch in (1, 4, 64)
-]
+    spec = _segment(num_segments=reduce_max_segments("gfx950") + 1)
+    assert supports_tiled_3d_spec(spec, arch="gfx950")[0]
+    ok, why = supports_unified_attention_3d_tiled_module(spec, arch="gfx950")
+    assert not ok and "LDS" in why
 
 
-def test_reduce_spec_follows_segment():
-    red = mod.reduce_spec_for_segment(
-        _segment(head_size=256, num_segments=24, waves_per_eu=2, dtype="bf16")
-    )
-    assert red == UnifiedAttentionReduceTiledSpec(
-        head_size=256,
-        num_query_heads=32,
-        num_kv_heads=8,
-        dtype="bf16",
-        num_segments=24,
-        waves_per_eu=2,
-    )
+def test_module_predicate_refuses_what_the_segment_refuses():
+    spec = _segment(dtype="fp32")
+    segment = supports_tiled_3d_spec(spec, arch="gfx950")
+    assert not segment[0]
+    assert supports_unified_attention_3d_tiled_module(spec, arch="gfx950") == segment
 
 
-@pytest.mark.parametrize("head_size, block_size, batch", _RUNTIME_CELLS)
-def test_reduce_spec_matches_runtime_selection(head_size, block_size, batch):
-    segment, reduce = _runtime_specs(head_size, block_size, batch)
-    assert mod.reduce_spec_for_segment(segment) == reduce
+def test_module_exports_the_segment_as_primary_and_the_reduce_by_role():
+    spec = _segment()
+    module = build_unified_attention_3d_tiled_module(spec, arch="gfx950")
+    assert set(module.companions) == {"reduce"}
+    assert module.primary.name == spec.kernel_name()
+    assert module.companions["reduce"].name == reduce_spec_for(spec).kernel_name()
 
 
-@pytest.mark.parametrize("head_size, block_size, batch", _RUNTIME_CELLS)
-def test_module_predicate_accepts_runtime_selection(head_size, block_size, batch):
-    segment, _ = _runtime_specs(head_size, block_size, batch)
-    ok, reason = mod.supports_unified_attention_3d_module(segment, arch="gfx942")
-    assert ok, reason
+def test_reduce_spec_follows_every_segment_field_it_reads():
+    """Each field the reduce reads, changed on the segment, changes the derived reduce:
+    a derivation that hard-codes one would pair every variant with the same reduce."""
+    spec = _segment(waves_per_eu=2)
+    base = reduce_spec_for(spec)
+    for field, value in [
+        ("head_size", 64),
+        ("num_query_heads", 16),
+        ("num_kv_heads", 1),
+        ("dtype", "fp16"),
+        ("num_segments", 32),
+        ("waves_per_eu", 4),
+    ]:
+        changed = reduce_spec_for(dataclasses.replace(spec, **{field: value}))
+        assert getattr(changed, field) == value and changed != base, field
 
 
-def test_module_has_segment_primary_and_reduce_companion():
-    seg = _segment()
-    module = mod.build_unified_attention_3d_module(seg, arch="gfx942")
-    assert isinstance(module, KernelModule)
-    assert module.primary.name == seg.kernel_name()
-    assert {r: k.name for r, k in module.companions.items()} == {
-        "reduce": mod.reduce_spec_for_segment(seg).kernel_name()
-    }
-
-
-def test_module_predicate_rejects_segment_lds_overflow():
-    # D256 block64 without the runtime's tile override stages a 64-row K/V
-    # tile: (16*256 + 3*64*256) * 2 B = 106,496 B > 65,536 B on gfx942.
-    seg = _segment(head_size=256, block_size=64, tile_size_override=None)
-    from kernels.common.attention_unified import _tiled_3d_segment_lds_bytes
-
-    assert _tiled_3d_segment_lds_bytes(seg) > attention_lds_capacity_bytes("gfx942")
-    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
-    assert not ok
-    assert "LDS" in reason
-    ok, reason = mod.supports_unified_attention_3d_module(
-        replace(seg, tile_size_override=32), arch="gfx942"
-    )
-    assert ok, reason
-
-
-@pytest.mark.parametrize(
-    "kwargs, needle",
-    [
-        (dict(head_size=96), "head_size"),
-        (dict(block_size=128), "block_size"),
-        # Ratios 1-16 build (a ratio that does not divide the 16-row tile masks its
-        # padding rows); above 16 is refused.
-        (dict(num_query_heads=32, num_kv_heads=1), "num_queries_per_kv"),
-        (dict(num_segments=(1 << 14) + 1), "num_segments"),
-    ],
-)
-def test_module_predicate_rejects_unsupported(kwargs, needle):
-    ok, reason = mod.supports_unified_attention_3d_module(_segment(**kwargs))
-    assert not ok
-    assert needle in reason
-
-
-def test_module_predicate_rejects_other_arch():
-    ok, reason = mod.supports_unified_attention_3d_module(_segment(), arch="gfx90a")
-    assert not ok
-    assert reason
-
-
-@pytest.mark.parametrize("block_size, tile", [(32, 24), (32, 64), (64, 8), (16, 0)])
-def test_module_predicate_refuses_a_tile_the_builder_cannot_walk(block_size, tile):
-    # 24 and 64 do not divide 32 (the builder asserts BS % T == 0); 8 divides 64 but
-    # is not a whole 16-wide MFMA step (T // MFMA_N would be 0); 0 is no tile.
-    seg = _segment(block_size=block_size, tile_size_override=tile)
-    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
-    assert not ok
-    assert "KV tile" in reason
-
-
-@pytest.mark.parametrize("block_size, tile", [(16, None), (32, 16), (64, 32), (64, 16)])
-def test_module_predicate_accepts_only_tiles_the_builder_builds(block_size, tile):
-    seg = _segment(block_size=block_size, tile_size_override=tile)
-    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
-    assert ok, reason
-    module = mod.build_unified_attention_3d_module(seg, arch="gfx942")
-    assert module.primary.name == seg.kernel_name()
-
-
-def test_i64_kv_addr_spec_cannot_be_built():
-    # The gfx942 segment spec refuses >2 GiB addressing at construction, so the
-    # packer can never hand such a spec to the predicate or the builder.
-    with pytest.raises(NotImplementedError, match="use_i64_kv_addr"):
-        _segment(kv_layout="paged", use_i64_kv_addr=True)
-
-
-def _lower(kernel):
-    from rocke.helpers.compile import lower_kernel_for_comgr
-
-    lowered = lower_kernel_for_comgr(kernel, arch="gfx942", backend="python")
-    return lowered.llvm_text, lowered.options
-
-
-@pytest.mark.parametrize("gqa", [1, 4, 16])
-@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("block_size", [16, 32, 64])
-@pytest.mark.parametrize("head_size", [64, 128, 256])
-def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size, dtype, gqa):
-    """The catalog drops ``num_seqs`` (batch) from the kernel axes: the segment IR
-    must not depend on it. Covers every catalog D x block x dtype, with the tile the
-    runtime picks for (D, block), at GQA ratios 1/4/16 (8 KV heads). The reduce
-    comparison is structural only -- the reduce spec has no ``num_seqs``. The
-    control, a different ``num_segments``, shows the comparison can see a change
-    (``num_seqs`` sizes nothing in the IR since the sequence search reads it as a
-    kernarg, ``RUNTIME_SEARCH_ITERS``)."""
-    seg_1, _ = _runtime_specs(head_size, block_size, 1, dtype, nhead_q=8 * gqa)
-    expected_tile = block_size // 2 if head_size >= 128 and block_size >= 32 else None
-    assert seg_1.tile_size_override == expected_tile
-    assert seg_1.num_queries_per_kv == gqa and seg_1.dtype == dtype
-    # Pin num_segments: the runtime picks it from batch, which this test varies.
-    seg_1 = replace(seg_1, num_segments=16)
-    seg_64 = replace(seg_1, num_seqs=64)
-    assert seg_1.use_decode_grid and seg_64.num_seqs == 64
-    mod_1 = mod.build_unified_attention_3d_module(seg_1, arch="gfx942")
-    mod_64 = mod.build_unified_attention_3d_module(seg_64, arch="gfx942")
-    for k_1, k_64 in zip(mod_1.kernels, mod_64.kernels):
-        assert k_1.name == k_64.name
-        assert _lower(k_1) == _lower(k_64)
-    other = mod.build_unified_attention_3d_tiled(
-        replace(seg_1, num_segments=32), arch="gfx942"
-    )
-    assert _lower(other) != _lower(mod_1.primary)
-
-
-@pytest.mark.parametrize("gqa", [1, 4, 16])
-@pytest.mark.parametrize("head_size", [64, 128, 256])
-def test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio(head_size, gqa):
-    """The catalog keeps one kernel per GQA ratio, not per head pair: the segment
-    and reduce read ``num_query_heads`` / ``num_kv_heads`` as kernargs
-    (``RUNTIME_KERNARG_FIELDS``), so head pairs sharing a ratio lower to one IR.
-    The control, the next ratio up, shows the comparison can see a change."""
-    seg, _ = _runtime_specs(head_size, 16, 1, "bf16", nhead_q=8 * gqa)
-    seg = replace(seg, num_segments=16)
-    pairs = [(gqa * h, h) for h in (1, 2, 8)]
-    lowered = []
-    for hq, hkv in pairs:
-        module = mod.build_unified_attention_3d_module(
-            replace(seg, num_query_heads=hq, num_kv_heads=hkv), arch="gfx942"
-        )
-        lowered.append([(k.name, _lower(k)) for k in module.kernels])
-    assert all(x == lowered[0] for x in lowered[1:]), pairs
-    other = mod.build_unified_attention_3d_tiled(
-        replace(seg, num_query_heads=2 * gqa * 8, num_kv_heads=8), arch="gfx942"
-    )
-    assert _lower(other) != lowered[0][0][1]
-    assert {
-        replace(seg, num_query_heads=hq, num_kv_heads=hkv).resolved_num_queries_per_kv()
-        for hq, hkv in pairs
-    } == {gqa}
-
-
-@pytest.mark.parametrize("tile", [None, 16])
-def test_resolved_tile_size_override_is_the_tile_the_kernel_runs(tile):
-    """A catalog records the knob through this accessor; ``None`` is one block."""
-    spec = _segment(block_size=32, tile_size_override=tile)
-    assert spec.resolved_tile_size_override() == spec.tile_size == (tile or 32)
-
-
-def test_module_compiles_to_one_code_object():
-    """Both kernels link into one gfx942 code object (comgr, no GPU). Only a
-    missing comgr, or one without a gfx942 target, skips; a compile error fails."""
-    try:
-        from rocke.runtime.comgr import supported_isas
-
-        isas = supported_isas()
-    except Exception as exc:  # noqa: BLE001 - env-dependent
-        pytest.skip(f"comgr toolchain unavailable: {exc}")
-    if "amdgcn-amd-amdhsa--gfx942" not in isas:
-        pytest.skip("the loaded comgr has no gfx942 target")
-    from rocke.helpers import compile_module
-
-    seg, reduce = _runtime_specs(128, 16, batch=4)
-    artifact = compile_module(
-        mod.build_unified_attention_3d_module(seg, arch="gfx942"),
-        arch="gfx942",
-        backend="python",
-        capture_ir_text=False,
-    )
-    assert artifact.kernel_name == seg.kernel_name()
-    assert artifact.companion_names == {"reduce": reduce.kernel_name()}
-    assert len(artifact.hsaco) > 0
+def test_reduce_spec_takes_emit_lse_from_the_caller_not_the_segment():
+    """``emit_lse`` is a problem field: off unless asked for, and the only difference."""
+    spec = _segment(waves_per_eu=2)
+    assert reduce_spec_for(spec).emit_lse is False
+    with_lse = reduce_spec_for(spec, emit_lse=True)
+    assert with_lse == dataclasses.replace(reduce_spec_for(spec), emit_lse=True)

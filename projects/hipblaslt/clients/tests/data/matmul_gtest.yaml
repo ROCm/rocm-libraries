@@ -1328,6 +1328,35 @@ Tests:
   unit_check: 1
   gpu_arch: '1250'
 
+# AIHPBLAS-5416: on gfx125x a scale vector under 128 bytes (M or N <= 31) was read as a null
+# pointer and replaced by 1.0. Cover both sides of the 32-element boundary for A and B, and the
+# ScaleAlphaVec SRD that now uses the same gfx125x num_records encoding.
+- name: matmul_f8_dst_bf16_scale_ab_vec_small_mn
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 1,    N: 4096, K: 5632 }
+    - { M: 16,   N: 4096, K: 5632 }
+    - { M: 31,   N: 4096, K: 5632 }
+    - { M: 32,   N: 4096, K: 5632 }
+    - { M: 4096, N: 1,    K: 5632 }
+    - { M: 4096, N: 16,   K: 5632 }
+    - { M: 4096, N: 31,   K: 5632 }
+    - { M: 4096, N: 32,   K: 5632 }
+    - { M: 16,   N: 16,   K: 512 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  scaleA: [2]
+  scaleB: [2]
+  scaleAlpha_vector: [0, 1]
+  bias_vector: [0, 1]
+  bias_type: bf16_r
+  unit_check: 1
+  gpu_arch: '1250'
+
 
 - name: matmul_stride_lt_ld
   category: pre_checkin
@@ -5266,6 +5295,32 @@ Tests:
   transB: N
   alpha: 1.0
   beta: 0.0
+  batch_count: [1, 2]
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# Non-TN layouts. K spans several scale blocks so the scale order of the
+# free-dim contiguous operands is checked; M and N stay multiples of 32 as the
+# non-TN kernels require.
+- name: matmul_subtile_fp4_non_tn
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [32, 512]
+  N: [64, 320]
+  K: [64, 1024]
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: N, transB: T }
+    - { transA: T, transB: T }
+  alpha: 1.0
+  beta: [0.0, 1.0]
   batch_count: [1, 2]
   initialization: trig_float
   unit_check: 0

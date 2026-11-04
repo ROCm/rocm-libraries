@@ -102,7 +102,7 @@ def test_the_synthetic_manifest_enumerates(probe):
     assert len({k["name"] for k in kernels}) == len(kernels) > 0
 
 
-_LAUNCHES = {"segment": {}, "reduce": {"role": "reduce"}}
+_SEGMENT_LAUNCHES = {"segment": {}, "reduce": {"role": "reduce"}}
 
 
 def test_manifest_launches_reach_every_generated_kernel_source(probe):
@@ -110,13 +110,13 @@ def test_manifest_launches_reach_every_generated_kernel_source(probe):
     multi-launch descriptor, as the generator's loader reads it."""
     from codegen.config_loader import load_config
 
-    probe.manifest["launches"] = copy.deepcopy(_LAUNCHES)
+    probe.manifest["launches"] = copy.deepcopy(_SEGMENT_LAUNCHES)
     assert _run_probe(probe) == 0
     text = probe.out.read_text()
     # One shared object would dump as a YAML anchor and aliases, not per-kernel copies.
     assert "&id" not in text and "*id" not in text
     raw = yaml.safe_load(text)["packs"][0]["kernels"]
-    assert all(k["kernel_source"]["launches"] == _LAUNCHES for k in raw)
+    assert all(k["kernel_source"]["launches"] == _SEGMENT_LAUNCHES for k in raw)
     kernels = [k for p in load_config(probe.out).packs for k in p.kernels]
     assert len(kernels) == len(raw) > 0
     for kernel in kernels:
@@ -127,7 +127,7 @@ def test_manifest_launches_reach_every_generated_kernel_source(probe):
 
 
 def test_each_generated_kernel_owns_its_launches(probe):
-    probe.manifest["launches"] = copy.deepcopy(_LAUNCHES)
+    probe.manifest["launches"] = copy.deepcopy(_SEGMENT_LAUNCHES)
     config = re_.build_config(probe.manifest, warn=lambda message: None)
     sources = [k["kernel_source"]["launches"] for k in config["packs"][0]["kernels"]]
     owners = [probe.manifest["launches"], *sources]
@@ -139,7 +139,7 @@ def _run_both_ways(tmp: Path, manifest: dict, capsys, *argv) -> list:
     """Run the CLI on ``manifest`` without, then with, `launches`; return each
     run's exit code, stdout and generated config (parsed, or None)."""
     runs = []
-    for launches in (None, _LAUNCHES):
+    for launches in (None, _SEGMENT_LAUNCHES):
         m = copy.deepcopy(manifest)
         if launches:
             m["launches"] = copy.deepcopy(launches)
@@ -157,7 +157,7 @@ def _run_both_ways(tmp: Path, manifest: dict, capsys, *argv) -> list:
 
 def _without_launches(config: dict) -> dict:
     for kernel in config["packs"][0]["kernels"]:
-        assert kernel["kernel_source"].pop("launches") == _LAUNCHES
+        assert kernel["kernel_source"].pop("launches") == _SEGMENT_LAUNCHES
     return config
 
 
@@ -191,29 +191,6 @@ def test_a_manifest_without_launches_emits_no_launches(probe):
     assert all(
         set(k["kernel_source"]) == {"kind", "source", "builder", "spec"} for k in raw
     )
-
-
-def test_manifest_launches_must_be_a_mapping(probe, capsys):
-    probe.manifest["launches"] = ["segment", "reduce"]
-    assert _run_probe(probe) == 2
-    assert "launches" in capsys.readouterr().err
-    assert not probe.out.exists()
-
-
-@pytest.mark.parametrize(
-    "launches",
-    [{"segment": {}}, {"segment": {}, "Reduce": {"role": "reduce"}}],
-    ids=["single-launch", "bad-name"],
-)
-def test_bad_manifest_launches_are_refused_when_the_config_loads(probe, launches):
-    """The enumerator only carries `launches`; the loader owns the one rule for
-    their count and names, and refuses the generated config."""
-    from codegen.config_loader import ConfigError, load_config
-
-    probe.manifest["launches"] = launches
-    assert _run_probe(probe) == 0
-    with pytest.raises(ConfigError, match="launches"):
-        load_config(probe.out)
 
 
 def _declined(m):
@@ -875,3 +852,219 @@ def test_a_bad_cell_keyed_by_is_exit_2_naming_it(gqa, tmp_path, capsys, keyed, w
     assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
     err = capsys.readouterr().err
     assert all(w in err for w in words), err
+
+
+def test_each_kernel_carries_the_pins_spec_id(probe):
+    """`provenance.rocke_spec_id` is the pin's spec_id, so a shipped kernel traces to
+    the registry entry that produced it. The probe candidate hands back unwrapped
+    specs, so there is no tuning id to carry."""
+    assert _run_probe(probe) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert {k["provenance"]["rocke_spec_id"] for k in kernels} == {"grid"}
+    assert not any("rocke_tuning_id" in k["provenance"] for k in kernels)
+
+
+def test_the_dense_registry_names_a_tuning_id_for_every_kernel(manifest, registry):
+    config = re_.build_config(_one_head_config(manifest), registry)
+    kernels = [k for pack in config["packs"] for k in pack["kernels"]]
+    assert kernels
+    pinned = manifest["enumerate"]["pin"]["spec_id"]
+    for kernel in kernels:
+        assert kernel["provenance"]["rocke_spec_id"] == pinned
+        assert kernel["provenance"]["rocke_tuning_id"]
+
+
+# ---------------------------------------------------------------------------
+# enumerate.also: one pack drawn from more than one registry candidate
+# ---------------------------------------------------------------------------
+
+
+def _also(**overrides) -> dict:
+    """A second section over the probe family's `persist`/`a` candidate, on a cell
+    the primary section does not list."""
+    section = {
+        "pin": {"algorithm": "persist", "spec_id": "a"},
+        "fixed": {"arch": synth.ARCH, "dtype": "bf16"},
+        "cells": [
+            {"fields": ["hdim", "heads"], "values": [[128, 16]]},
+            {"fields": ["mask"], "values": ["CAUSAL"]},
+        ],
+        "free_fields": [],
+        "spec_fields": ["dtype", "tile_m", "tile_n", "causal", "order"],
+    }
+    section.update(overrides)
+    return section
+
+
+def _with_also(probe, **overrides) -> dict:
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["also"] = [_also(**overrides)]
+    return manifest
+
+
+def test_an_also_section_adds_its_kernels_after_the_primary_sections(probe):
+    """The pack is one list: primary kernels first, then each section's, each section
+    traced to its own pin."""
+    assert _run_probe(probe) == 0
+    primary = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert _run_probe(probe, _with_also(probe)) == 0
+    both = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert [k["name"] for k in both[: len(primary)]] == [k["name"] for k in primary]
+    extra = both[len(primary) :]
+    assert len(extra) == 1
+    assert extra[0]["provenance"]["rocke_spec_id"] == "a"
+    assert {k["provenance"]["rocke_spec_id"] for k in primary} == {"grid"}
+
+
+def test_an_also_section_projects_only_its_own_spec_fields(probe):
+    """`spec_fields` is per section: the primary's narrower list must not decide what a
+    later section's kernel spec carries, or its kernels would compile at defaults."""
+    manifest = _with_also(probe)
+    manifest["enumerate"]["spec_fields"] = ["dtype", "tile_m", "tile_n", "causal"]
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert "order" not in kernels[0]["kernel_source"]["spec"]
+    assert "order" in kernels[-1]["kernel_source"]["spec"]
+
+
+def test_an_also_section_has_its_own_max_kernels(probe):
+    assert _run_probe(probe, _with_also(probe, max_kernels=1)) == 0
+    assert _run_probe(probe, _with_also(probe, max_kernels=0)) == 2
+
+
+def test_an_also_section_may_not_repeat_a_kernel_name(probe):
+    """Two sections naming one kernel would collide in the descriptor catalog."""
+    manifest = _with_also(
+        probe,
+        cells=[
+            {"fields": ["hdim", "heads"], "values": [[64, 8]]},
+            {"fields": ["mask"], "values": ["CAUSAL"]},
+        ],
+        free_fields=["tile_n"],
+    )
+    assert _run_probe(probe, manifest) == 2
+
+
+def test_an_also_section_must_cross_the_same_cell_fields(probe):
+    manifest = _with_also(probe, cells=[{"fields": ["hdim"], "values": [[128]]}])
+    assert _run_probe(probe, manifest) == 2
+
+
+def _full(manifest: dict) -> dict:
+    """``manifest`` as a full space: ``tile_n`` a performance knob, ``order`` resolved
+    by its accessor, every other varying field held."""
+    manifest = copy.deepcopy(manifest)
+    manifest["enumerate"]["space"] = "full"
+    manifest["enumerate"].pop("free_fields", None)
+    manifest["reduction"] = {
+        "fields": {
+            "feature": ["dtype", "causal", "tile_m"],
+            "performance": [
+                {"name": "tile_n"},
+                {"name": "order", "unset_resolves_by": "resolved_order"},
+            ],
+            "ignored": [],
+        }
+    }
+    return manifest
+
+
+def test_full_also_sections_each_project_their_knobs(probe):
+    """A full primary section and a full ``also`` section: each keeps every
+    performance variant of its own cells, and the catalog's projected knobs are the
+    union, carried by every kernel."""
+    manifest = _full(_with_also(probe))
+    manifest["enumerate"]["also"][0].pop("free_fields")
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    extra = [k for k in kernels if k["provenance"]["rocke_spec_id"] == "a"]
+    # 3 tile_n x 2 resolved orders (an unset order is the "row" binary) for one cell.
+    assert len(extra) == 6
+    assert {k["metadata"]["tile_n"] for k in extra} == {32, 64, 128}
+    assert {k["metadata"]["order"] for k in kernels} == {"row", "col"}
+    assert sum(k.get("default", False) for k in extra) == 1
+
+
+def test_a_full_primary_may_carry_a_slice_also_section(probe):
+    """``space`` is inherited from ``enumerate`` unless a section sets its own."""
+    manifest = _full(_with_also(probe, free_fields=[], space="slice"))
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert len([k for k in kernels if k["provenance"]["rocke_spec_id"] == "a"]) == 1
+
+
+def test_a_cell_two_sections_list_keeps_one_floor(probe):
+    """Two sections over the same cells (two geometries of one cell set): every kernel
+    ships, but each cell keeps exactly one ``default: true``, the primary section's."""
+    manifest = _with_also(
+        probe,
+        cells=copy.deepcopy(probe.manifest["enumerate"]["cells"]),
+        free_fields=["tile_n"],
+        # Same cells, different kernels: the dtype is fixed per section, not a cell.
+        fixed={"arch": synth.ARCH, "dtype": "fp16"},
+    )
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    defaults = [k for k in kernels if k.get("default")]
+    assert len(defaults) == 4  # the primary's two hdim x two mask cells
+    assert {k["provenance"]["rocke_spec_id"] for k in defaults} == {"grid"}
+    assert any(k["provenance"]["rocke_spec_id"] == "a" for k in kernels)
+
+
+def test_plan_space_counts_every_section(probe, capsys):
+    """--plan-space's instance count is the catalog --out writes, ``also`` included."""
+    manifest = _full(_with_also(probe))
+    manifest["enumerate"]["also"][0].pop("free_fields")
+    path = synth.write_manifest(probe.tmp / "m.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 0
+    shown = capsys.readouterr().out
+    assert _run_probe(probe, manifest) == 0
+    count = len(yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"])
+    assert f"instances (current classification): {count} " in shown
+    assert "section a (space: full)" in shown
+
+
+_LAUNCHES = {"main": {}, "reduce": {"role": "reduce"}}
+
+
+def test_launches_are_copied_onto_every_kernel(probe):
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["launches"] = _LAUNCHES
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert kernels and all(k["kernel_source"]["launches"] == _LAUNCHES for k in kernels)
+
+
+@pytest.mark.parametrize(
+    "launches",
+    [{"main": {}}, {"Main": {}, "reduce": {"role": "reduce"}}, {"main": {}, "r": 1}],
+    ids=["one-launch", "bad-name", "non-mapping"],
+)
+def test_a_malformed_launches_block_is_refused(probe, launches):
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["launches"] = launches
+    assert _run_probe(probe, manifest) == 2
+
+
+def test_a_paired_reduce_without_launches_is_refused(probe, capsys):
+    """The registry hands back a kernel paired with a reduce; a catalog that does not
+    launch it would ship the kernel alone."""
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["pin"] = {"algorithm": "split", "spec_id": "s"}
+    assert _run_probe(probe, manifest) == 2
+    assert "declares no 'launches'" in capsys.readouterr().err
+    manifest["launches"] = _LAUNCHES
+    assert _run_probe(probe, manifest) == 0
+
+
+def test_a_shape_only_an_also_section_lists_is_covered(probe, capsys):
+    """Coverage is by every section's cells: a shape the primary declines or leaves a
+    GAP is covered when a later section lists it."""
+    shape = {"hdim": 128, "heads": 16, "dtype": "bf16", "mask": 1}
+    shapes = probe.tmp / "shapes.json"
+    shapes.write_text(json.dumps([shape]))
+    for manifest, gaps in ((probe.manifest, True), (_with_also(probe), False)):
+        assert _run_probe(probe, manifest, "--shapes", str(shapes), "--strict") == (
+            1 if gaps else 0
+        )
+    assert "covered: 1 shapes" in capsys.readouterr().out

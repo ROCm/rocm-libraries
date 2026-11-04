@@ -190,8 +190,12 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setTypeD(hipDataType type); //!< Set the D matrix data type.
         HIPBLASLT_EXPORT void
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute data type.
-        HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A matrix data order.
-        HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
+        //! Set the A matrix data order. setProblem returns HIPBLAS_STATUS_NOT_SUPPORTED for
+        //! HIPBLASLT_ORDER_ROW.
+        HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order);
+        //! Set the B matrix data order. setProblem returns HIPBLAS_STATUS_NOT_SUPPORTED for
+        //! HIPBLASLT_ORDER_ROW.
+        HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order);
         //! Set the int4 encoding of A (C API: HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT).
         //! Throws std::invalid_argument for values outside hipblasLtInt4Encoding_t.
         HIPBLASLT_EXPORT void setInt4EncodingA(hipblasLtInt4Encoding_t encoding);
@@ -1229,6 +1233,7 @@ namespace hipblaslt_ext
      *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. The problem is
      * supported by the algorithm.
      * results. \retval HIPBLAS_STATUS_INVALID_VALUE     The problem is not supported.
+     *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t matmulIsAlgoSupported(hipblasLtHandle_t       handle,
@@ -1257,6 +1262,13 @@ namespace hipblaslt_ext
     HIPBLASLT_EXPORT
     hipblasStatus_t copyMatmul(hipblasLtMatmulDesc_t src, hipblasLtMatmulDesc_t dst);
 
+    /*! \ingroup library_module
+     *  \brief Check whether the problem has a tuned solution in the loaded library.
+     *
+     *  \retval 1  The best solution for the problem matches a tuned size exactly.
+     *  \retval 0  The problem is valid, but no tuned size matches it exactly.
+     *  \retval -1 An argument is null, or A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
+     */
     HIPBLASLT_EXPORT
     int matmulIsTuned(hipblasLtHandle_t       handle,
                       hipblasLtMatmulDesc_t   matmulDesc,
@@ -1293,6 +1305,7 @@ namespace hipblaslt_ext
      *
      *  \retval HIPBLAS_STATUS_SUCCESS If the operation completed successfully.
      *  \retval HIPBLAS_STATUS_INVALID_VALUE If the algorithm is not supported.
+     *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
