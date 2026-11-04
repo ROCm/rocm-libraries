@@ -193,7 +193,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     // Work arrays for cpu_lange, cpu_gerqf, etc.
     // todo: query for optimal size; currently estimate nb=64.
     rocblas_int nb = 64;
-    std::vector<T> hW(std::max(m, n) * nb);
+    std::vector<T> hW(std::max(m * nb, 1));
     std::vector<S> hrwork(std::max(m, n));
 
     // input data initialization
