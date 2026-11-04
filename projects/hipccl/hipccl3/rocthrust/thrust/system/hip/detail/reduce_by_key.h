@@ -110,7 +110,11 @@ THRUST_HIP_RUNTIME_FUNCTION auto invoke_reduce_by_key(
   const hipStream_t stream,
   bool debug_sync) -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
 {
-  return rocprim::reduce_by_key(
+  // Need to overwrite the accumulator type for parity with thrust
+  using value_type = thrust::detail::it_value_t<ValuesInputIt>;
+  return rocprim::detail::reduce_by_key_impl<rocprim::detail::lookback_scan_determinism::default_determinism,
+                                             rocprim::default_config,
+                                             value_type>(
     temporary_storage,
     storage_size,
     keys_input,
@@ -148,19 +152,22 @@ THRUST_HIP_RUNTIME_FUNCTION auto invoke_reduce_by_key(
   const hipStream_t stream,
   bool debug_sync) -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
 {
-  return rocprim::deterministic_reduce_by_key(
-    temporary_storage,
-    storage_size,
-    keys_input,
-    values_input,
-    size,
-    unique_output,
-    aggregates_output,
-    unique_count_output,
-    reduce_op,
-    key_compare_op,
-    stream,
-    debug_sync);
+  // Need to overwrite the accumulator type for parity with thrust
+  using value_type = thrust::detail::it_value_t<ValuesInputIt>;
+  return rocprim::detail::
+    reduce_by_key_impl<rocprim::detail::lookback_scan_determinism::deterministic, rocprim::default_config, value_type>(
+      temporary_storage,
+      storage_size,
+      keys_input,
+      values_input,
+      size,
+      unique_output,
+      aggregates_output,
+      unique_count_output,
+      reduce_op,
+      key_compare_op,
+      stream,
+      debug_sync);
 }
 
 template <typename Derived,

@@ -101,6 +101,7 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
 template<lookback_scan_determinism Determinism,
          typename Config,
          typename Selector,
+         typename AccumulatorType,
          typename KeysInputIterator,
          typename ValuesInputIterator,
          typename UniqueOutputIterator,
@@ -121,8 +122,6 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                                              const hipStream_t         stream,
                                              const bool                debug_synchronous)
 {
-    using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
-
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
     const auto use_atomic_block_id_variant
@@ -142,7 +141,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
             const auto params = get_config<Selector>(Config{}, current_target);
 
             using scan_state_type
-                = reduce_by_key::lookback_scan_state_t<accumulator_type, use_sleepy_scan>;
+                = reduce_by_key::lookback_scan_state_t<AccumulatorType, use_sleepy_scan>;
             const unsigned int block_size      = params.kernel_config.block_size;
             const unsigned int items_per_block = block_size * params.kernel_config.items_per_thread;
 
@@ -162,7 +161,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
             // The number of segment heads in previous launches.
             std::size_t* d_global_head_count = nullptr;
             // The running accumulation across the launch boundary.
-            accumulator_type* d_previous_accumulated = nullptr;
+            AccumulatorType* d_previous_accumulated = nullptr;
 
             detail::temp_storage::layout layout{};
             ROCPRIM_RETURN_ON_ERROR(
@@ -291,6 +290,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
 
 template<lookback_scan_determinism Determinism,
          typename Config,
+         typename AccumulatorType,
          typename KeysInputIterator,
          typename ValuesInputIterator,
          typename UniqueOutputIterator,
@@ -311,23 +311,23 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
                               const hipStream_t         stream,
                               const bool                debug_synchronous)
 {
-    using key_type         = ::rocprim::detail::value_type_t<KeysInputIterator>;
-    using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
-    using Selector = reduce_by_key_config_selector<key_type, accumulator_type, BinaryFunction>;
+    using key_type = ::rocprim::detail::value_type_t<KeysInputIterator>;
+    using Selector = reduce_by_key_config_selector<key_type, AccumulatorType, BinaryFunction>;
 
-    return detail::reduce_by_key_impl_wrapped_config<Determinism, Config, Selector>(
-        temporary_storage,
-        storage_size,
-        keys_input,
-        values_input,
-        size,
-        unique_output,
-        aggregates_output,
-        unique_count_output,
-        reduce_op,
-        key_compare_op,
-        stream,
-        debug_synchronous);
+    return detail::
+        reduce_by_key_impl_wrapped_config<Determinism, Config, Selector, AccumulatorType>(
+            temporary_storage,
+            storage_size,
+            keys_input,
+            values_input,
+            size,
+            unique_output,
+            aggregates_output,
+            unique_count_output,
+            reduce_op,
+            key_compare_op,
+            stream,
+            debug_synchronous);
 }
 
 } // namespace detail
@@ -466,19 +466,22 @@ inline hipError_t reduce_by_key(void*                     temporary_storage,
                                 hipStream_t               stream            = 0,
                                 bool                      debug_synchronous = false)
 {
-    return detail::reduce_by_key_impl<detail::lookback_scan_determinism::default_determinism,
-                                      Config>(temporary_storage,
-                                              storage_size,
-                                              keys_input,
-                                              values_input,
-                                              size,
-                                              unique_output,
-                                              aggregates_output,
-                                              unique_count_output,
-                                              reduce_op,
-                                              key_compare_op,
-                                              stream,
-                                              debug_synchronous);
+    return detail::reduce_by_key_impl<
+        detail::lookback_scan_determinism::default_determinism,
+        Config,
+        detail::reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>>(
+        temporary_storage,
+        storage_size,
+        keys_input,
+        values_input,
+        size,
+        unique_output,
+        aggregates_output,
+        unique_count_output,
+        reduce_op,
+        key_compare_op,
+        stream,
+        debug_synchronous);
 }
 
 /// \brief Bitwise-reproducible parallel reduce-by-key primitive for device level.
@@ -512,7 +515,10 @@ inline hipError_t deterministic_reduce_by_key(void*                     temporar
                                               hipStream_t stream            = 0,
                                               bool        debug_synchronous = false)
 {
-    return detail::reduce_by_key_impl<detail::lookback_scan_determinism::deterministic, Config>(
+    return detail::reduce_by_key_impl<
+        detail::lookback_scan_determinism::deterministic,
+        Config,
+        detail::reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>>(
         temporary_storage,
         storage_size,
         keys_input,

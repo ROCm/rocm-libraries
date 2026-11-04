@@ -248,13 +248,12 @@ TYPED_TEST(ShuffleVariablesTests, TestShuffleIteratorConstructibleFromBijection)
   thrust::shuffle_iterator<uint64_t, decltype(f)> it(f);
 
   g.seed(0xD5);
-  thrust::detail::random_bijection<uint64_t> f2(32, g);
+  thrust::detail::random_bijection<uint64_t> f2(f.size(), g);
   thrust::shuffle_iterator<uint64_t, decltype(f2)> it2(f2);
 
   g.seed(0xD5);
-  thrust::shuffle_iterator<uint64_t> it3(32, g);
+  thrust::shuffle_iterator<uint64_t> it3(f.size(), g);
 
-  ASSERT_EQ(f.size(), f2.size());
   ASSERT_EQ(true, thrust::equal(thrust::device, it, it + f.size(), it2));
   ASSERT_EQ(true, thrust::equal(thrust::device, it, it + f.size(), it3));
 }
