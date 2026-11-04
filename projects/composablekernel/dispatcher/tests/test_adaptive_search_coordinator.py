@@ -1201,6 +1201,7 @@ def test_settings_warm_rules_and_files(tmp_path):
         ({"warm_start": {"pairs_file": "picks.json", "top_k": 0}}, ">= 1"),
         ({"warm_start": {"ranked_csv": "picks.csv", "use_prior": 1}}, "type bool"),
         ({"warm_start": {"ranked_csv": "picks.csv", "use_prior": "yes"}}, "type bool"),
+        ({"host_cache": {"dir": "picks.json"}}, "no such directory"),
     ]
     for change, match in bad:
         (tmp_path / "s.json").write_text(json.dumps({**BASE, **change}))
@@ -1213,12 +1214,16 @@ def test_settings_warm_rules_and_files(tmp_path):
             AS.SearchSettings.from_json(str(tmp_path / "s.json"))
 
 
-def test_settings_defaults_paths_and_round_trip(tmp_path):
+def test_settings_defaults_paths_and_round_trip(tmp_path, monkeypatch):
     (tmp_path / "picks.json").write_text("{}")
-    cfg = {**BASE, "warm_start": {"pairs_file": "picks.json"}}
+    (tmp_path / "cache").mkdir()
+    cfg = {**BASE, "warm_start": {"pairs_file": "picks.json"},
+           "host_cache": {"dir": "cache"}}
     (tmp_path / "search.json").write_text(json.dumps(cfg))
+    monkeypatch.chdir(tmp_path / "cache")  # relative paths: the file's dir
     s = AS.SearchSettings.from_json(tmp_path / "search.json")
     assert s.warm_start.pairs_file == str(tmp_path / "picks.json")
+    assert s.host_cache.dir == str(tmp_path / "cache")
     assert (s.seed, s.seed_policy, s.deadline_s, s.batch_per_problem) == (
         0, "shared", None, 4)
     assert "deadline_s" not in s.to_json() and "build_timeout_s" not in s.to_json()
@@ -1230,9 +1235,9 @@ def test_settings_defaults_paths_and_round_trip(tmp_path):
     assert AS.SearchSettings.from_json(timed.to_json()).build_timeout_s == 240
     assert AS.SearchSettings.from_json(BASE).to_json()["confirm"] == {
         "finalists": 2, "fresh_calls": 3}
-    assert s.host_cache == AS.HostCacheSettings(None, 4.0, None)
-    assert s.to_json()["host_cache"] == {"max_entry_gib": 4.0}
-    (tmp_path / "cache").mkdir()
+    plain = AS.SearchSettings.from_json(BASE)
+    assert plain.host_cache == AS.HostCacheSettings(None, 4.0, None)
+    assert plain.to_json()["host_cache"] == {"max_entry_gib": 4.0}
     cached = AS.SearchSettings.from_json({**BASE, "host_cache": {
         "dir": str(tmp_path / "cache"), "max_total_gib": 0}})
     assert cached.host_cache == AS.HostCacheSettings(str(tmp_path / "cache"), 4.0, 0.0)

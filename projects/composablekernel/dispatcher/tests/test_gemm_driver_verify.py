@@ -270,10 +270,13 @@ def test_host_cache_gives_the_uncached_outcome(gemm_worker, tmp_path, dtype, use
 def test_host_cache_keeps_dtypes_layouts_and_problems_apart(gemm_worker, tmp_path):
     # One entry per (problem, dtype, layout, fp8 format): a crr kernel handed
     # an rcr entry's buffers (or bf16 an fp16 one's) would fail verification.
-    other = {"M": 96, "N": 64, "K": 256}
+    # So does a change of K alone, which leaves C's shape: another K's A and B
+    # have the wrong length for the kernel.
     kernels = [(_runner("bf16", None, lay), PROBLEM) for lay in ("rcr", "crr", "ccr")]
     kernels += [(_runner("fp16", None), PROBLEM), (_runner("fp8", False), PROBLEM),
-                (_runner("fp8", True), PROBLEM), (_runner("bf16", None), other)]
+                (_runner("fp8", True), PROBLEM)]
+    kernels += [(_runner("bf16", None), {**PROBLEM, **o})
+                for o in ({"M": 96, "N": 64}, {"K": 128})]
     with HC.HostCache(tmp_path) as cache:
         first = [gemm_worker(r, p, host_cache=cache.spec) for r, p in kernels]
         again = [gemm_worker(r, p, host_cache=cache.spec) for r, p in kernels]

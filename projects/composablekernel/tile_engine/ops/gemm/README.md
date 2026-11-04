@@ -235,8 +235,8 @@ builds).
 | `measurement_policy` | `full` | the only value |
 | `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache. Both limits count the entries still being written, so they hold with any number of workers. `max_total_gib` `0` turns it off. See "Host cache" below |
 
-Unknown keys are an error; relative warm-start paths are read from the settings
-file's directory.
+Unknown keys are an error; relative warm-start and `host_cache.dir` paths are
+read from the settings file's directory.
 
 Budget: each round, every active problem in turn proposes up to
 `batch_per_problem` trials (re-queued ones first), capped by its trials left
