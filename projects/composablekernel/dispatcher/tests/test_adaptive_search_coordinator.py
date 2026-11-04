@@ -1750,10 +1750,11 @@ def test_host_cache_prepare_stores_an_entry_the_calls_read(tmp_path):
     assert not HC.stored(cache.spec, {"k": 3})
 
 
-# A preparation worker: reads {"out", "sleep", "exit", "log", "pidfile"} and
-# prints ``out`` after ``sleep`` s; ``log`` gets its start and end times.
+# A preparation worker: reads {"out", "sleep", "exit", "log", "pidfile",
+# "sigkill"} and prints ``out`` after ``sleep`` s; ``log`` gets its start and
+# end times; ``sigkill``: it is killed by SIGKILL (as by the OOM killer).
 _PREP_JOB = r"""
-import json, os, sys, time
+import json, os, signal, sys, time
 d = json.loads(sys.stdin.read())
 if "pidfile" in d:
     with open(d["pidfile"] + ".tmp", "w") as f:
@@ -1765,8 +1766,10 @@ if "log" in d:
     with open(d["log"], "w") as f:
         f.write(f"{t0} {time.time()}")
 sys.stderr.write(d.get("err", ""))
-sys.stdout.write(d.get("out", ""))
 sys.stderr.flush()
+if d.get("sigkill"):
+    os.kill(os.getpid(), signal.SIGKILL)
+sys.stdout.write(d.get("out", ""))
 sys.stdout.flush()
 os._exit(d.get("exit", 0))
 """
@@ -1793,11 +1796,14 @@ def test_prepare_host_data_reports_each_workers_outcome(monkeypatch):
         "garbled": {"out": "{"},
         "not_a_dict": {"out": "[]"},
         "hang": {"out": ok, "sleep": 30},
+        "oom_killed": {"sigkill": True, "err": "a line\n"},
+        "memory_error": {"out": json.dumps({"ok": False, "error": "MemoryError: "})},
     }, {"hang": 0.5, **{k: 60 for k in ("stored", "after_noise", "refused", "error",
                                        "no_ok", "crash", "traceback", "garbled",
-                                       "not_a_dict")}})
+                                       "not_a_dict", "oom_killed", "memory_error")}})
     assert list(got) == ["stored", "after_noise", "refused", "error", "no_ok", "crash",
-                         "traceback", "garbled", "not_a_dict", "hang"]
+                         "traceback", "garbled", "not_a_dict", "hang", "oom_killed",
+                         "memory_error"]
     brief = {k: (g["ok"], g["stored"], g["error"]) for k, g in got.items()}
     assert brief == {
         "stored": (True, True, ""), "after_noise": (True, True, ""),
@@ -1808,7 +1814,13 @@ def test_prepare_host_data_reports_each_workers_outcome(monkeypatch):
                       + "x" * 365 + " |   File \"w.py\", line 9 | MemoryError:"),
         "garbled": (False, False, "no result line (exit code 0)"),
         "not_a_dict": (False, False, "no result line (exit code 0)"),
+        # Killed at its limit (by SIGKILL too): not a memory error.
         "hang": (False, False, "no result in 0.5 s"),
+        # Killed by another process, or out of memory: the problem is skipped.
+        "oom_killed": (False, False, "host_memory: its preparation was killed (exit code "
+                       "-9), likely by the out-of-memory killer; stderr: a line"),
+        "memory_error": (False, False, "host_memory: its preparation ran out of memory "
+                         "(MemoryError: )"),
     }
     assert 0.5 <= got["hang"]["seconds"] < 10
     bad = _prep({"k": {}}, argv=[os.devnull + "-missing"])
@@ -1855,6 +1867,25 @@ def test_prepare_host_data_runs_within_the_memory_it_reads(tmp_path):
     assert got["c"]["stored"]
 
 
+def test_prepare_host_data_keeps_the_entries_of_ended_preparations(tmp_path):
+    # b's entry (3 of its 9) stays in RAM on a tmpfs once b ends, and memory
+    # is read again only when none runs: c (10) must then wait for a (30),
+    # since 30 + 10 + 3 > 40 even though 30 + 10 alone would fit. That read
+    # counts b's entry (here: memory stays 40), so d (38) then fits alone.
+    gib = AS.GIB
+    jobs = {k: {"out": json.dumps({"ok": True, "stored": True}), "sleep": s,
+                "log": str(tmp_path / k)}
+            for k, s in (("a", 0.8), ("b", 0.1), ("c", 0.1), ("d", 0.1))}
+    got = AS.prepare_host_data(
+        [sys.executable, "-c", _PREP_JOB], None, {k: json.dumps(v) for k, v in jobs.items()},
+        {k: 60 for k in jobs}, 4, poll_s=0.02, memory=lambda: 40 * gib,
+        needs={"a": 30 * gib, "b": 9 * gib, "c": 10 * gib, "d": 38 * gib},
+        keeps={"a": 0, "b": 3 * gib, "c": 0, "d": 0})
+    assert all(g["stored"] for g in got.values()), got
+    spans = {k: tuple(map(float, (tmp_path / k).read_text().split())) for k in jobs}
+    assert spans["b"][0] < spans["a"][1] <= spans["c"][0] < spans["c"][1] <= spans["d"][0]
+
+
 def _meminfo(tmp_path, total_gib, avail_gib):
     path = tmp_path / "meminfo"
     path.write_text(f"MemTotal:       {total_gib << 20} kB\nMemFree:  1 kB\n"
@@ -1881,6 +1912,22 @@ def test_host_memory_reads_meminfo_and_cgroup_limits(tmp_path):
     cgroup = tmp_path / "cgroup"
     cgroup.write_text("0::/job/step\n")
     got = AS.host_memory(_meminfo(tmp_path, 503, 490), str(cgroup), str(root))
+    assert got == int(3 * gib - margin * (8 * gib))
+    # cgroup v2 memory.high (where reclaim and throttling start) below memory.max.
+    (root / "job" / "step" / "memory.high").write_text(f"{7 * gib}\n")
+    got = AS.host_memory(_meminfo(tmp_path, 503, 490), str(cgroup), str(root))
+    assert got == int(2 * gib - margin * (7 * gib))
+    # cgroup v1: memory.limit_in_bytes under the memory controller's own tree
+    # (an unlimited level reads as a huge number).
+    v1 = tmp_path / "v1"
+    for d, lim in (("job", 8 * gib), ("", 2**63 - 4096)):
+        (v1 / "memory" / d).mkdir(parents=True, exist_ok=True)
+        (v1 / "memory" / d / "memory.limit_in_bytes").write_text(f"{lim}\n")
+        (v1 / "memory" / d / "memory.usage_in_bytes").write_text(f"{6 * gib}\n")
+        (v1 / "memory" / d / "memory.stat").write_text(
+            f"inactive_file 0\ntotal_inactive_file {gib}\n")
+    cgroup.write_text("1:name=systemd:/other\n4:cpu,memory:/job\n")
+    got = AS.host_memory(_meminfo(tmp_path, 503, 490), str(cgroup), str(v1))
     assert got == int(3 * gib - margin * (8 * gib))
 
 
@@ -1912,6 +1959,62 @@ def test_host_lock_keeps_preparations_apart_from_builds_and_each_other(tmp_path,
     first, second = sorted((p1, p2))
     assert max(b1[1], b2[1]) <= first[0] and first[1] <= second[0]
     assert sorted(logs) == ["  [search] waiting for prep1", "  [search] waiting for prep2"]
+
+
+def test_host_lock_opens_another_users_lock_file(tmp_path, monkeypatch):
+    # Where fs.protected_regular is set, O_CREAT on another user's file in a
+    # sticky dir such as /tmp fails (EACCES) although the file exists: an
+    # existing lock file is opened without it, and still locks.
+    import fcntl
+
+    monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
+    lock = tmp_path / AS.HOST_LOCK
+    lock.touch()
+    real, logs = os.open, []
+
+    def protected(path, flags, *a):
+        if flags & os.O_CREAT and os.path.exists(path):
+            raise PermissionError(13, "Permission denied", path)
+        return real(path, flags, *a)
+
+    def held():
+        fd = real(str(lock), os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            return False
+        except OSError:
+            return True
+        finally:
+            os.close(fd)
+
+    monkeypatch.setattr(os, "open", protected)
+    with AS.host_lock(True, logs.append):
+        assert held()
+    assert logs == []
+
+
+def test_host_lock_creates_a_lock_file_every_user_can_open(tmp_path, monkeypatch):
+    monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
+    old = os.umask(0o077)
+    try:
+        with AS.host_lock(False):
+            pass
+    finally:
+        os.umask(old)
+    assert (tmp_path / AS.HOST_LOCK).stat().st_mode & 0o777 == 0o666
+
+
+def test_host_lock_says_once_when_it_cannot_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path / "missing-dir"))
+    monkeypatch.setattr(AS, "_NO_HOST_LOCK", set())
+    logs, ran = [], []
+    for exclusive in (False, True):
+        with AS.host_lock(exclusive, logs.append):
+            ran.append(exclusive)
+    path = tmp_path / "missing-dir" / AS.HOST_LOCK
+    assert ran == [False, True] and len(logs) == 1
+    assert logs[0].startswith(f"  [search] NOTE: cannot open the host lock {path} (")
+    assert logs[0].endswith("not kept apart from other search runs'")
 
 
 def test_prepare_host_data_kills_its_workers_when_interrupted(tmp_path, monkeypatch):

@@ -25,10 +25,10 @@ is here too: ``ArtifactStore`` (the run's own copies of the built kernels),
 ``host_allowance_s`` (a verified call's host time, at the op's rates),
 ``prepare_host_data`` (a problem's host cache entry, stored before its first
 call and outside its timeout), the host memory guard (``host_memory``,
-``host_lock``), ``source_info``, ``check_search_options`` and
-``run_search`` (the driver's search mode, with its exit code). Importing this
-module imports neither ``ck_search`` nor numpy: the search core is loaded when
-a search runs.
+``calls_memory_error``, ``host_lock``), ``source_info``,
+``check_search_options`` and ``run_search`` (the driver's search mode, with
+its exit code). Importing this module imports neither ``ck_search`` nor
+numpy: the search core is loaded when a search runs.
 """
 
 from __future__ import annotations
@@ -1515,10 +1515,11 @@ PREPARE_STDERR_CHARS = 400
 # calls that compute or read it) needs more than ``host_memory()`` gets the
 # outcome HOST_MEMORY instead of a worker that the operating system's
 # out-of-memory killer would end. ``host_memory()`` is the memory available
-# now (MemAvailable in /proc/meminfo, or the room left under memory.max of
-# this process's cgroup v2 and its parents when that is less), less
-# HOST_MEMORY_MARGIN of the total (the least of MemTotal and those
-# memory.max), left to the system and to other processes.
+# now (MemAvailable in /proc/meminfo, or the room left under a memory limit
+# of this process's cgroup and its parents when that is less: memory.max or
+# memory.high in cgroup v2, memory.limit_in_bytes in v1), less
+# HOST_MEMORY_MARGIN of the total (the least of MemTotal and those limits),
+# left to the system and to other processes.
 HOST_MEMORY = "host_memory"
 HOST_MEMORY_MARGIN = 0.1
 GIB = 1 << 30
@@ -1539,29 +1540,46 @@ def host_memory(meminfo="/proc/meminfo", cgroup="/proc/self/cgroup",
     return max(0, int(avail - HOST_MEMORY_MARGIN * total))
 
 
+# Per cgroup version: (its memory controller's line in /proc/self/cgroup, its
+# dir under the cgroup root, its limit files, usage file, inactive_file field).
+CGROUP_MEMORY = (
+    (lambda ctrl: ctrl == "", "", ("memory.max", "memory.high"), "memory.current",
+     "inactive_file"),
+    (lambda ctrl: "memory" in ctrl.split(","), "memory", ("memory.limit_in_bytes",),
+     "memory.usage_in_bytes", "total_inactive_file"),
+)
+
+
 def _cgroup_limits(cgroup, root) -> List[tuple]:
-    """(room, limit) of each cgroup v2 level of this process with a
-    memory.max: the limit less memory.current plus its inactive file pages
-    (page cache it can drop)."""
+    """(room, limit) of each level of this process's memory cgroups (v2, or
+    v1) with a limit (the least of its limit files): the limit less its usage
+    plus its inactive file pages (page cache it can drop)."""
     try:
         with open(cgroup) as f:
-            rel = next(line.strip()[3:] for line in f if line.startswith("0::"))
-    except (OSError, StopIteration):
+            lines = [line.rstrip("\n").split(":", 2) for line in f]
+    except OSError:
         return []
-    out, path = [], Path("/" + rel.lstrip("/"))
-    while True:
-        d = Path(root) / str(path).lstrip("/")
-        try:
-            limit = int((d / "memory.max").read_text())  # "max": no limit
-            stat = dict(line.split()[:2] for line in (d / "memory.stat").read_text()
-                        .splitlines() if len(line.split()) >= 2)
-            used = int((d / "memory.current").read_text())
-            out.append((limit - used + int(stat.get("inactive_file", 0)), limit))
-        except (OSError, ValueError):
-            pass
-        if path == path.parent:
-            return out
-        path = path.parent
+    out = []
+    for is_memory, sub, limits, usage, inactive in CGROUP_MEMORY:
+        rel = next((x[2] for x in lines if len(x) == 3 and is_memory(x[1])), None)
+        path = None if rel is None else Path("/" + rel.lstrip("/"))
+        while path is not None:
+            d = Path(root) / sub / str(path).lstrip("/")
+            found = []
+            for name in limits:  # "max" (v2): no limit
+                with contextlib.suppress(OSError, ValueError):
+                    found.append(int((d / name).read_text()))
+            try:
+                if found:
+                    stat = dict(ln.split()[:2] for ln in (d / "memory.stat")
+                                .read_text().splitlines() if len(ln.split()) >= 2)
+                    used = int((d / usage).read_text())
+                    out.append((min(found) - used + int(stat.get(inactive, 0)),
+                                min(found)))
+            except (OSError, ValueError):
+                pass
+            path = None if path == path.parent else path.parent
+    return out
 
 
 def host_memory_error(need, avail, detail="") -> str:
@@ -1572,29 +1590,75 @@ def host_memory_error(need, avail, detail="") -> str:
             f"{avail / GIB:.1f} GiB available")
 
 
-# The search runs of a host coordinate through HOST_LOCK in HOST_LOCK_DIR
-# (None: the system temp dir): a round's builds hold it shared, its
-# preparations exclusive, so no preparation runs while another run's builds
-# or preparations do (a run's own rounds build, then measure).
+def calls_memory_error(n: int, each: int, stored, avail: Optional[int],
+                       kept: int = 0) -> str:
+    """The diag of a problem whose calls, up to ``n`` at once (one per
+    device) of ``each`` bytes (reading its cache entry when ``stored``, else
+    computing its host data), do not fit in ``avail`` bytes of
+    ``host_memory()`` less ``kept`` (left to cache entries still to come);
+    "" when they fit or ``avail`` is None."""
+    if avail is None or n * each <= avail - kept:
+        return ""
+    how = "reading its entry" if stored else "without a cache entry"
+    detail = (f"{n} calls at once {how}, {each / GIB:.1f} GiB each" if n > 1
+              else f"a call {how}")
+    if kept:
+        detail += f"; {kept / GIB:.1f} GiB kept for the tmpfs cache's entries to come"
+    return host_memory_error(n * each, max(0, avail - kept), detail)
+
+
+# The search runs that share a temp dir (those of one host, or of one
+# container) coordinate through HOST_LOCK in HOST_LOCK_DIR (None: the system
+# temp dir): a round's builds hold it shared, its preparations exclusive, so
+# no preparation runs while another run's builds or preparations do (a run's
+# own rounds build, then measure). A run that cannot open the lock file says
+# so once and goes on without it.
 HOST_LOCK, HOST_LOCK_DIR = "ck_search_host.lock", None
+_NO_HOST_LOCK = set()  # lock files this process reported it cannot open
+
+
+def _open_host_lock(path) -> int:
+    """A read-only descriptor of the lock file ``path``, created (mode 0666,
+    so other users' runs can open it) when missing. An existing file is
+    opened without O_CREAT: where fs.protected_regular is set (the default on
+    most Linux hosts), O_CREAT on another user's file in a sticky directory
+    such as /tmp is refused even though the file exists."""
+    for flags in (os.O_RDONLY, os.O_RDONLY | os.O_CREAT | os.O_EXCL, os.O_RDONLY):
+        try:
+            fd = os.open(path, flags, 0o666)
+        except (FileNotFoundError, FileExistsError) as e:  # missing, or created meanwhile
+            error = e
+            continue
+        if flags & os.O_CREAT:
+            with contextlib.suppress(OSError):
+                os.fchmod(fd, 0o666)  # whatever the umask
+        return fd
+    raise error
 
 
 @contextlib.contextmanager
 def host_lock(exclusive: bool, log=None, what: str = ""):
     """Hold HOST_LOCK: ``exclusive`` for preparations, shared for builds.
     One ``log`` line when it has to wait for another run (``what`` it waits
-    for). Without fcntl, or a lock file it cannot open, it does not lock."""
+    for). Without fcntl it does not lock; with a lock file it cannot open it
+    does not either, and logs that once per process."""
+    path = os.path.join(HOST_LOCK_DIR or tempfile.gettempdir(), HOST_LOCK)
     try:
         import fcntl
 
-        fd = os.open(os.path.join(HOST_LOCK_DIR or tempfile.gettempdir(), HOST_LOCK),
-                     os.O_RDONLY | os.O_CREAT, 0o666)
-    except (ImportError, OSError):
+        fd = _open_host_lock(path)
+    except ImportError:
+        yield
+        return
+    except OSError as e:
+        if log is not None and path not in _NO_HOST_LOCK:
+            _NO_HOST_LOCK.add(path)
+            log(f"  [search] NOTE: cannot open the host lock {path} ({e.strerror or e}); "
+                "this run's builds and preparations are not kept apart from other "
+                "search runs'")
         yield
         return
     try:
-        with contextlib.suppress(OSError):
-            os.fchmod(fd, 0o666)  # other users' runs lock it too
         mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
         try:
             fcntl.flock(fd, mode | fcntl.LOCK_NB)
@@ -1626,29 +1690,32 @@ def call_allowance_s(allowance_s, prepared: Optional[Mapping] = None) -> int:
 def prepare_host_data(argv, env, payloads: Mapping[str, str],
                       limits: Mapping[str, float], width: int,
                       poll_s: float = 0.1, needs: Optional[Mapping[str, int]] = None,
-                      memory: Callable[[], Optional[int]] = host_memory
-                      ) -> Dict[str, dict]:
+                      memory: Callable[[], Optional[int]] = host_memory,
+                      keeps: Optional[Mapping[str, int]] = None) -> Dict[str, dict]:
     """Run the op's worker ``argv`` once per problem key of ``payloads`` (its
     JSON payload on stdin) to store that problem's host cache entry, at most
     ``width`` at a time, each killed after its ``limits`` seconds. With
     ``needs`` (bytes per key), the ones running at once must also fit in
     ``memory()``, read whenever none is running: one that does not fit
-    alone is not started, and its error is ``host_memory_error``'s. The
-    worker prints ``{"ok": true, "stored": <bool>}`` or ``{"ok": false,
-    "error": ...}`` as its last line. Returns ``{key: {"ok", "stored",
-    "seconds", "error"}}`` in the order of ``payloads``; ``ok`` is False for
-    an error, a crash or a kill at the limit, and ``error`` then ends with the
-    tail of the worker's stderr. Workers still running when this raises (an
-    interrupt) are killed."""
-    out, todo, running, budget = {}, list(payloads), {}, None
+    alone is not started, and its error is ``host_memory_error``'s. Of a
+    need, ``keeps`` bytes stay in memory after its worker ends (its entry on a
+    tmpfs): they count until ``memory()`` is read again. The worker prints
+    ``{"ok": true, "stored": <bool>}`` or ``{"ok": false, "error": ...}`` as
+    its last line. Returns ``{key: {"ok", "stored", "seconds", "error"}}`` in
+    the order of ``payloads``; ``ok`` is False for an error, a crash or a kill
+    at the limit, and ``error`` then ends with the tail of the worker's
+    stderr. A worker killed by another process (the out-of-memory killer) or
+    reporting a MemoryError gets a ``host_memory`` error. Workers still
+    running when this raises (an interrupt) are killed."""
+    out, todo, running, budget, kept = {}, list(payloads), {}, None, 0
     try:
         while todo or running:
             while todo and len(running) < max(1, width):
                 key = todo[0]
                 if needs is not None:
                     if not running:
-                        budget = memory()
-                    used = sum(needs[k] for k in running)
+                        budget, kept = memory(), 0
+                    used = kept + sum(needs[k] for k in running)
                     if budget is not None and used + needs[key] > budget:
                         if running:
                             break  # it waits for the running ones to end
@@ -1682,6 +1749,7 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                     proc.kill()
                 proc.wait()
                 del running[key]
+                kept += (keeps or {}).get(key, 0)
                 text, stderr = [_drain(f) for f in files]
                 out[key] = _prepared(proc.returncode, text, took,
                                      f"no result in {limits[key]:g} s" if killed else "",
@@ -1716,6 +1784,11 @@ def _prepared(code, text, took, error, stderr="") -> dict:
             error = f"no result line (exit code {code})"
         elif got.get("ok") is not True:
             error = str(got.get("error") or f"failed (exit code {code})")
+        if error and code == -getattr(signal, "SIGKILL", 9):  # ours: only at the limit
+            error = (f"{HOST_MEMORY}: its preparation was killed (exit code {code}), "
+                     "likely by the out-of-memory killer")
+        elif error.startswith("MemoryError"):
+            error = f"{HOST_MEMORY}: its preparation ran out of memory ({error})"
     tail = " | ".join(stderr.strip()[-PREPARE_STDERR_CHARS:].splitlines())
     if error and tail:
         error += f"; stderr: {tail}"

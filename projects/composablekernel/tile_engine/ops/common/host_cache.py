@@ -27,10 +27,14 @@ its first measure call, in a worker that only does that (``prepare``):
   ``mmap_mode="r"``) instead of copying them: on a tmpfs its pages are the
   entry's own, and on a disk they are page cache, so workers reading one
   entry at once add no copy of it each;
-- an error reading or writing an entry is a miss: the cache never changes a
+- an error opening or writing an entry is a miss: the cache never changes a
   result, only how often it is computed. A writer that fails gives its claim
   back; one that is killed keeps it, and its key is computed on every call
-  for the rest of the run.
+  for the rest of the run. A mapped entry's pages are read when the worker
+  uses them: an I/O error then (a failing disk, never a tmpfs) ends that
+  worker with SIGBUS, and its call is a run_error;
+- ``room`` is what the cache may still store, for a caller that must keep
+  memory for it (a tmpfs holds its entries in RAM).
 
 ``HostCache.close`` (also on interpreter exit) removes the directory. Importing
 this module does not import numpy. Writing needs ``fcntl`` (POSIX); without
@@ -209,6 +213,24 @@ def stored(spec: Optional[Mapping], fields: Mapping) -> bool:
             (path / f"{n}.npy").is_file() for n in meta["arrays"])
     except Exception:  # noqa: BLE001 - no entry, or an unreadable one
         return False
+
+
+def room(spec: Optional[Mapping]) -> int:
+    """Bytes the cache ``spec`` may still store: ``max_total_bytes`` less its
+    reservations, and no more than its filesystem takes while leaving
+    ``MIN_FREE_FRACTION`` free once every reserved entry is written (as
+    ``_claim`` decides); 0 without a cache or with one it cannot read."""
+    if not spec:
+        return 0
+    root = Path(spec["dir"])
+    try:
+        found = claims(root)
+        pending = sum(n for k, n in found.items() if not (root / k).is_dir())
+        disk = shutil.disk_usage(root)
+    except OSError:
+        return 0
+    return max(0, min(spec["max_total_bytes"] - sum(found.values()),
+                      int(disk.free - pending - MIN_FREE_FRACTION * disk.total)))
 
 
 def _entry(spec: Mapping, fields: Mapping) -> Tuple[object, Path]:

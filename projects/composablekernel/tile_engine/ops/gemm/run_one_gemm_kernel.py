@@ -26,7 +26,9 @@ they are computed and stored: the same values, computed once per problem
 instead of once per call. With ``prepare`` (the search, before a problem's
 first measure call) the worker loads no library: it stores the host data of
 ``problem`` for the dtype and layout of ``kernel_name`` in ``host_cache`` and
-prints ``{"ok": true, "stored": <whether the cache holds it now>}``.
+prints ``{"ok": true, "stored": <whether the cache holds it now>}``. With
+``prepare`` or ``search_host_data`` the worker asks to be the first process
+the out-of-memory killer ends (``_first_to_go``).
 
 Output JSON format (one line per kernel):
     {"idx": 0, "ok": true, "ms": 0.123, "tflops": 456.7, "non_zero": 1, "kernel": "..."}
@@ -66,6 +68,7 @@ INPUT_SEED, INPUT_SCALE = 42, 0.1  # the random host inputs: randn * scale
 # generator, made, encoded and compared BLOCK elements at a time.
 SEARCH_INPUTS = "PCG64 float32"
 BLOCK = 1 << 20
+OOM_SCORE_ADJ = "/proc/self/oom_score_adj"
 _COMMON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
                            "common")
 
@@ -128,7 +131,11 @@ def _search_host_data(runner, problem):
     gen = np.random.Generator(np.random.PCG64(INPUT_SEED))
     a, qa = _search_operand(gen, (m, k) if la == "r" else (k, m), dtype, runner._use_ocp)
     b, qb = _search_operand(gen, (k, n) if lb == "r" else (n, k), dtype, runner._use_ocp)
-    ref = (qa if la == "r" else qa.T) @ (qb if lb == "r" else qb.T)
+    if la == lb == "c":  # of the stored arrays: 7x faster than two transposed
+        # views with a reference BLAS (numpy without an optimized one)
+        ref = np.ascontiguousarray((qb @ qa).T)
+    else:
+        ref = (qa if la == "r" else qa.T) @ (qb if lb == "r" else qb.T)
     del qa, qb
     peak = max(float(np.max(ref)), -float(np.min(ref)))
     return {"a": a, "b": b, "ref": ref, "denom": np.float64(peak or 1.0)}
@@ -178,6 +185,18 @@ def _prepare(prob_dict, kernel_name, spec):
     except Exception as e:  # the type too: str(MemoryError()) is empty
         out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     print(json.dumps(out), flush=True)
+
+
+def _first_to_go():
+    """A search worker's out-of-memory score adjustment: 1000 (the most, which
+    any process may set for itself) in OOM_SCORE_ADJ, so that a host that runs
+    out of memory despite the search's guard ends this worker before other
+    processes; nothing where it cannot be written (not Linux)."""
+    try:
+        with open(OOM_SCORE_ADJ, "w") as f:
+            f.write("1000")
+    except OSError:
+        pass
 
 
 def _check(out, output, ref, denom, verify_tol, rows=None):
@@ -342,6 +361,8 @@ def main():
         )
         sys.exit(1)
 
+    if d.get("prepare") or d.get("search_host_data"):
+        _first_to_go()
     if d.get("prepare"):
         _prepare(d.get("problem"), d.get("kernel_name"), d.get("host_cache"))
         return

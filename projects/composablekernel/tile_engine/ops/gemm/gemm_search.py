@@ -374,7 +374,10 @@ class GemmSearchAdapter:
                                 "reading_bytes": f"{HOST_OUTPUT_BYTES - 4}*M*N + "
                                 f"{HOST_FIXED_BYTES}",
                                 "available": "MemAvailable (or a cgroup's room) less "
-                                f"{adaptive_search.HOST_MEMORY_MARGIN:.0%} of the total"},
+                                f"{adaptive_search.HOST_MEMORY_MARGIN:.0%} of the total",
+                                "tmpfs_entries": None if not self.tmpfs else (
+                                    "a preparation's own entry, and for the calls "
+                                    "the entries still to come")},
                             "prepare": None if not self.host_cache else (
                                 "before a problem's first call, outside its timeout, "
                                 f"limit {adaptive_search.PREPARE_FACTOR} x the host "
@@ -448,9 +451,11 @@ class GemmSearchAdapter:
         its entry outside the call's timeout, under the host lock and within
         the memory available (``host_compute_bytes``, plus the entry on a
         tmpfs). Then up to one call per device at once reads the entry, or
-        computes it all when none was stored: a problem that does not fit is
-        skipped (``host_memory``, one console line). Returns the
-        preparations' records, for that call's JSON file."""
+        computes it all when none was stored, within the memory available
+        less, on a tmpfs, the entries still to come: a problem that does not
+        fit, or whose preparation ran out of memory, is skipped
+        (``host_memory``, one console line). Returns the preparations'
+        records, for that call's JSON file."""
         first: Dict[str, str] = {}
         for r in reqs:  # one dtype and layout per run: any kernel of it will do
             if r.problem_key not in self.checked:
@@ -462,9 +467,11 @@ class GemmSearchAdapter:
         if self.host_cache:
             limits = {k: adaptive_search.prepare_limit_s(
                 verify_allowance_s(self.problems[k], dtype)) for k in first}
-            needs = {k: host_compute_bytes(self.problems[k], dtype) + (
-                host_entry_bytes(self.problems[k], dtype) if self.tmpfs else 0)
-                for k in first}
+            # On a tmpfs an entry stays in RAM: its preparation needs it too.
+            keeps = {k: host_entry_bytes(self.problems[k], dtype) if self.tmpfs else 0
+                     for k in first}
+            needs = {k: host_compute_bytes(self.problems[k], dtype) + keeps[k]
+                     for k in first}
             print(f"  [search] {name}: preparing the host data of {len(first)} "
                   f"problem(s) (limit {max(limits.values())} s)", flush=True)
             with adaptive_search.host_lock(True, _log,
@@ -474,7 +481,7 @@ class GemmSearchAdapter:
                     {k: json.dumps({"prepare": True, "host_cache": self.host_cache,
                                     "problem": self.problems[k], "kernel_name": n})
                      for k, n in first.items()}, limits, len(self.devices),
-                    needs=needs, memory=self.memory)
+                    needs=needs, memory=self.memory, keeps=keeps)
             self.prepared.update(got)
             print(f"  [search] {name}: {sum(g['stored'] for g in got.values())} of "
                   f"{len(got)} stored, {max(g['seconds'] for g in got.values()):.0f} s",
@@ -487,18 +494,20 @@ class GemmSearchAdapter:
                           "its calls compute their own", flush=True)
             records = [{"problem": k, "kernel": first[k], "limit_s": limits[k], **got[k]}
                        for k in first]
-        budget, n = self.memory(), len(self.devices)
+        budget, kept = self.memory(), 0
+        if self.tmpfs:  # the entries still to come will hold RAM during the calls
+            cap = self.host_cache["max_entry_bytes"]
+            kept = min(host_cache.room(self.host_cache), sum(
+                size for k, p in self.problems.items()
+                if k not in self.skipped and not self.prepared.get(k, {}).get("stored")
+                for size in [host_entry_bytes(p, dtype)] if size <= cap))
         for k in first:
-            if k in self.skipped or budget is None:
-                continue
             stored = self.prepared.get(k, {}).get("stored")
-            each = (host_read_bytes(self.problems[k]) if stored
-                    else host_compute_bytes(self.problems[k], dtype))
-            if n * each > budget:
-                how = "reading its entry" if stored else "without a cache entry"
-                self._skip(k, adaptive_search.host_memory_error(n * each, budget, (
-                    f"{n} calls at once {how}, {each / adaptive_search.GIB:.1f} GiB each"
-                    if n > 1 else f"a call {how}")))
+            why = k not in self.skipped and adaptive_search.calls_memory_error(
+                len(self.devices), host_read_bytes(self.problems[k]) if stored
+                else host_compute_bytes(self.problems[k], dtype), stored, budget, kept)
+            if why:
+                self._skip(k, why)
         return records
 
     def _skip(self, key, diag) -> None:

@@ -167,11 +167,13 @@ class Toolchain:
             out.append(lib)
         return out
 
-    def prepare(self, argv, env, payloads, limits, width, needs=None, memory=None):
+    def prepare(self, argv, env, payloads, limits, width, needs=None, memory=None,
+                keeps=None):
         """``prepare_host_data`` with each worker run in-process, one at a
         time, each within ``memory()`` when ``needs`` are given."""
         self.prepares.append({"payloads": {k: json.loads(p) for k, p in payloads.items()},
-                              "limits": dict(limits), "width": width, "needs": needs})
+                              "limits": dict(limits), "width": width, "needs": needs,
+                              "keeps": keeps})
         out = {}
         for k, p in payloads.items():
             budget = None if needs is None else memory()
@@ -190,8 +192,10 @@ class Toolchain:
 
 @pytest.fixture(autouse=True)
 def _own_host_lock(tmp_path, monkeypatch):
-    """Each test's search runs take the host lock in its own temp dir."""
+    """Each test's search runs take the host lock in its own temp dir, and
+    its in-process workers leave the test process's oom_score_adj alone."""
     monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
+    monkeypatch.setattr(worker, "OOM_SCORE_ADJ", str(tmp_path / "oom_score_adj"))
 
 
 def _memory(tmp_path, total_gib, avail_gib):
@@ -633,11 +637,15 @@ def _between(n):
     return n * (p1 + big) / 2 / AS.GIB + AS.HOST_MEMORY_MARGIN * 8
 
 
+KILLED = AS._prepared(-9, "", 197.0, "")  # by another process: the OOM killer
+
+
 @pytest.mark.parametrize("case, devices, avail, cached", [
     ("preparation", 1, _between(1), True),
     ("calls without an entry", 2, _between(2), "refused"),
     ("cache off", 2, _between(2), False),
     ("cache off, one device", 1, _between(2), False),
+    ("preparation killed", 1, _between(2), "killed"),
 ])
 def test_host_memory_guard_skips_a_problem_that_does_not_fit(
         tmp_path, monkeypatch, capsys, case, devices, avail, cached):
@@ -646,13 +654,15 @@ def test_host_memory_guard_skips_a_problem_that_does_not_fit(
     # per device at once (reading the entry, or computing it all without
     # one), must fit; a problem that does not is never prepared nor
     # measured: its requests get host_memory and one console line names it.
-    # BIG fits on one device in the last case.
+    # BIG fits on one device in the last two cases; in the last, its
+    # preparation was killed from outside (exit code -9): its calls, which
+    # would compute the same data, are not started either.
     monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "ext4")
     tc = Toolchain(tmp_path, monkeypatch)
-    if cached == "refused":
+    if cached in ("refused", "killed"):
+        refused = AS._prepared(0, json.dumps({"ok": True, "stored": False}), 1.0, "")
         monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a, **kw: {
-            k: AS._prepared(0, json.dumps({"ok": True, "stored": False}), 1.0, "")
-            for k in jobs})
+            k: KILLED if cached == "killed" and k == KBIG else refused for k in jobs})
     seen = []
     with HC.HostCache(tmp_path) as cache:
         ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.extend(a[0]),
@@ -667,7 +677,10 @@ def test_host_memory_guard_skips_a_problem_that_does_not_fit(
     two = AS.host_memory_error(2 * each, budget, (
         f"2 calls at once without a cache entry, {each / AS.GIB:.1f} GiB each"))
     want = {"preparation": AS.host_memory_error(each, budget),
-            "calls without an entry": two, "cache off": two}.get(case)
+            "calls without an entry": two, "cache off": two,
+            "preparation killed": KILLED["error"]}.get(case)
+    assert KILLED["error"] == ("host_memory: its preparation was killed (exit code -9), "
+                               "likely by the out-of-memory killer")
     if want is None:  # it fits
         assert [o.status for o in out] == ["unattempted"] * 4 and seen == [P1, BIG, BIG, BIG]
         return
@@ -700,12 +713,45 @@ def test_preparation_on_a_tmpfs_also_needs_its_entry(tmp_path, monkeypatch, fs):
         ad.measure_pairs([_req(K1, A, 1)])
     entry = GS.host_entry_bytes(P1, "bf16") if fs == "tmpfs" else 0
     assert tc.prepares[0]["needs"] == {K1: GS.host_compute_bytes(P1, "bf16") + entry}
+    assert tc.prepares[0]["keeps"] == {K1: entry}  # it stays once the worker ends
     # bf16 BIG: 2 B per input element and 4 B per output element stored, plus
     # 4 B per input element while the reference is computed and 12 B per
     # output element for C and its comparison.
     assert GS.host_entry_bytes(BIG, "bf16") == 2 * 2048 * 65536 + 4 * 2**20
     assert GS.host_compute_bytes(BIG, "bf16") == (
         6 * 2048 * 65536 + 16 * 2**20 + GS.HOST_FIXED_BYTES)
+
+
+@pytest.mark.parametrize("fs", ["tmpfs", "ext4"])
+@pytest.mark.parametrize("max_total", [1 << 30, 1 << 20])
+def test_calls_keep_memory_for_the_tmpfs_entries_to_come(tmp_path, monkeypatch, fs,
+                                                         max_total):
+    # P1's calls compute its host data (the cache refused its entry). On a
+    # tmpfs, the entries still to come (P1's and BIG's, within the cache's
+    # room) will hold RAM while P1's calls run in later rounds, so the calls
+    # check keeps them: P1 fits without them, not with them.
+    monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: fs)
+    tc = Toolchain(tmp_path, monkeypatch)
+    monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a, **kw: {
+        k: AS._prepared(0, json.dumps({"ok": True, "stored": False}), 1.0, "")
+        for k in jobs})
+    seen = []
+    with HC.HostCache(tmp_path, max_total_bytes=max_total) as cache:
+        kept = min(HC.room(cache.spec), sum(GS.host_entry_bytes(p, "fp8") for p in (P1, BIG)))
+        need = GS.host_compute_bytes(P1, "fp8")
+        ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.extend(a[0]),
+                      problems=(P1, BIG), dtype="fp8", cache=cache)
+        ad.memory = lambda: need + kept // 2
+        ad.build_missing([ad.cands[A]])
+        out = ad.measure_pairs([_req(K1, A, 1)])
+    assert 0 < kept <= max_total
+    if fs == "ext4":
+        assert seen == [P1] and not ad.skipped
+        return
+    want = AS.host_memory_error(need, need + kept // 2 - kept, (
+        f"a call without a cache entry; {kept / AS.GIB:.1f} GiB kept for the tmpfs "
+        "cache's entries to come"))
+    assert seen == [] and [(o.status, o.diag) for o in out] == [("host_memory", want)]
 
 
 def test_preparations_never_overlap_builds(tmp_path, monkeypatch):

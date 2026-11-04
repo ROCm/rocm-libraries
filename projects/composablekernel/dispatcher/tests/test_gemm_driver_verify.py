@@ -88,8 +88,8 @@ class _ExactKernelLib:
     """Stands in for the plain or batched ctypes lib: computes C from the host
     buffers it is given in the kernel's layout, as an exact kernel would."""
 
-    def __init__(self, dtype, layout, use_ocp):
-        self.dtype, self.layout, self.use_ocp = dtype, layout, use_ocp
+    def __init__(self, dtype, layout, use_ocp, bias=0.0):
+        self.dtype, self.layout, self.use_ocp, self.bias = dtype, layout, use_ocp, bias
 
     def run(self, A_h, B_h, C_h, *dims, **kw):
         def mat(X, lay):
@@ -98,17 +98,18 @@ class _ExactKernelLib:
         dec = DEVICE_DECODE[self.dtype]
         A = mat(dec(A_h, self.use_ocp), self.layout[0])
         B = mat(dec(B_h, self.use_ocp), self.layout[1])
-        C = mat(A @ B, self.layout[2])
+        C = mat(A @ B + self.bias if self.bias else A @ B, self.layout[2])
         # bf16 C is a uint16 bit pattern; fp8/bf8 store fp16.
         C_h[...] = _fp32_to_bf16_u16(C) if self.dtype == "bf16" else C
         return 0, 1.0
 
 
-def _runner(dtype, use_ocp, layout="rcr", cls=GpuGemmRunner):
+def _runner(dtype, use_ocp, layout="rcr", cls=GpuGemmRunner, bias=0.0):
+    """A runner of an exact kernel, or of one off by ``bias`` everywhere."""
     r = object.__new__(cls)
     r._kernel_name = f"gemm_{dtype}_{layout}_compv3_cshuffle_intrawave_128x128x64"
     r._use_ocp = use_ocp
-    r.lib = _ExactKernelLib(dtype, layout, use_ocp)
+    r.lib = _ExactKernelLib(dtype, layout, use_ocp, bias)
     return r
 
 
@@ -400,21 +401,101 @@ def test_search_calls_compare_a_block_of_rows_at_a_time(gemm_worker, monkeypatch
     assert seen == [(run_one_gemm_kernel.BLOCK // PROBLEM["N"],), ()]
 
 
+@pytest.mark.parametrize("bias", [-0.5, 0.5])
+@pytest.mark.parametrize("dtype,use_ocp", CASES)
+def test_search_calls_refuse_a_kernel_off_in_either_direction(gemm_worker, dtype,
+                                                              use_ocp, bias):
+    # The metric is max|C - ref| / max|ref|: a kernel whose every output is
+    # too small fails as one whose outputs are too large.
+    out = json.loads(gemm_worker(_runner(dtype, use_ocp, bias=bias), search_host_data=True))
+    assert out["verified"] is False and out["max_rel"] > 0.1, out
+
+
+@pytest.mark.parametrize("sign", [1, -1])
+def test_search_denominator_is_the_largest_magnitude_of_the_reference(monkeypatch,
+                                                                      sign):
+    # B negated negates the reference: in one of the two runs its largest
+    # magnitude is a negative entry, and the denominator is still that magnitude.
+    operand, made = run_one_gemm_kernel._search_operand, []
+
+    def signed(*a):
+        enc, vals = operand(*a)
+        made.append(vals)
+        if len(made) == 2:  # B: the reference reads its fp32 values
+            vals *= sign
+        return enc, vals
+
+    monkeypatch.setattr(run_one_gemm_kernel, "_search_operand", signed)
+    host = run_one_gemm_kernel._search_host_data(_runner("fp16", None),
+                                                 GemmProblem.from_dict(PROBLEM))
+    ref = host["ref"]
+    assert float(np.max(ref)) != -float(np.min(ref))
+    assert float(host["denom"]) == float(np.max(np.abs(ref)))
+
+
+def test_legacy_inputs_are_unchanged():
+    # A run without the search keys measures with these inputs, as before.
+    got = run_one_gemm_kernel._inputs(GemmProblem.from_dict(PROBLEM))
+    for a, b in zip(got, _inputs()):
+        assert a.dtype == b.dtype and a.tobytes() == b.tobytes()
+
+
+def test_search_workers_ask_to_be_ended_first_when_memory_runs_out(monkeypatch,
+                                                                   tmp_path):
+    # A search worker (a preparation, or a call with search_host_data) sets its
+    # oom_score_adj to 1000; a plain run's worker leaves it alone.
+    import io
+
+    adj = tmp_path / "oom_score_adj"
+    monkeypatch.setattr(run_one_gemm_kernel, "OOM_SCORE_ADJ", str(adj))
+    monkeypatch.setattr(run_one_gemm_kernel, "_run_one", lambda *a, **kw: None)
+    monkeypatch.setattr(run_one_gemm_kernel, "_prepare", lambda *a: None)
+    plain = {"so_path": "x.so", "problem": PROBLEM, "kernel_name": "k", "verify": True}
+    for payload, first in ((plain, False), ({**plain, "check_identity": True}, False),
+                           ({**plain, "search_host_data": True}, True),
+                           ({"prepare": True, "problem": PROBLEM}, True)):
+        if adj.exists():
+            adj.unlink()
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(
+            json.dumps(payload).encode())))
+        run_one_gemm_kernel.main()
+        assert (adj.read_text() if adj.exists() else None) == ("1000" if first else None)
+    monkeypatch.setattr(run_one_gemm_kernel, "OOM_SCORE_ADJ", str(tmp_path / "no" / "f"))
+    run_one_gemm_kernel._first_to_go()  # cannot be written: nothing happens
+
+
 _RSS_JOB = r"""
 import json, sys
 sys.path[:0] = json.loads(sys.argv[1])
+import gemm_utils
 import run_one_gemm_kernel as w
-from gemm_utils import GemmProblem
 
-class Codec:
-    kernel_name, _use_ocp = sys.argv[2], False
+name, mode = sys.argv[2], sys.argv[4]
+
+
+class Lib:  # a kernel that writes every element of C
+    def run(self, A, B, C, *dims):
+        C[...] = 1
+        return 0, 1.0
+
+
+runner = object.__new__(gemm_utils.GpuGemmRunner)
+runner._kernel_name, runner._use_ocp, runner.lib = name, False, Lib()
+w.GpuGemmRunner = lambda lib_path: runner
+
+
+def run(problem):  # _search_host_data alone, or a whole search call without an entry
+    if mode == "data":
+        return w._search_host_data(runner, gemm_utils.GemmProblem.from_dict(problem))
+    w._run_one(0, "x.so", problem, name, verify=True, search_host_data=True)
+
 
 def status(field):
     with open("/proc/self/status") as f:
         return next(int(ln.split()[1]) * 1024 for ln in f if ln.startswith(field + ":"))
 
-problem = GemmProblem.from_dict(json.loads(sys.argv[3]))
-w._search_host_data(Codec(), GemmProblem.from_dict({"M": 64, "N": 64, "K": 4096}))
+
+run({"M": 64, "N": 64, "K": 4096})
 try:
     with open("/proc/self/clear_refs", "w") as f:
         f.write("5")  # the peak (VmHWM) restarts at the current RSS
@@ -422,9 +503,27 @@ except OSError:
     print("skip")
     sys.exit()
 base = status("VmRSS")
-host = w._search_host_data(Codec(), problem)
+host = run(json.loads(sys.argv[3]))
 print(status("VmHWM") - base)
 """
+
+
+def _peak_rss(dtype, problem, mode):
+    """Peak RSS (bytes, imports excluded) of ``mode``: "data" for
+    ``_search_host_data``, "call" for a whole search call without an entry
+    (a kernel that writes C, then the comparison). Its bound is the guard's
+    estimate without the fixed part (the GPU runtime, the interpreter) plus
+    128 MiB (numpy's and the fp8 encoder's temporaries of one block)."""
+    paths = [str(DISPATCHER_DIR / "python"), str(GEMM_TE_DIR), str(GEMM_TE_DIR.parent /
+                                                                   "common")]
+    got = subprocess.run([sys.executable, "-c", _RSS_JOB, json.dumps(paths),
+                          f"gemm_{dtype}_rcr_x", json.dumps(problem), mode],
+                         capture_output=True, text=True, check=True).stdout.split()
+    if got == ["skip"]:
+        pytest.skip("/proc/self/clear_refs is not writable")
+    bound = GS.host_compute_bytes(problem, dtype) - GS.HOST_FIXED_BYTES + (128 << 20)
+    assert int(got[-1]) <= bound, (problem, int(got[-1]), bound)
+    return int(got[-1])
 
 
 @pytest.mark.skipif(not os.path.exists("/proc/self/clear_refs"), reason="Linux only")
@@ -435,22 +534,24 @@ def test_search_host_data_needs_its_encoded_inputs_plus_4_bytes_each(dtype):
     # 6 B in bf16, against about 58 and 16.5 B for the inputs, encoding and
     # reference a search made before (float64 normals, the fp8 encoder on
     # whole arrays, transposed copies, the inputs encoded twice). The guard's
-    # estimate covers the peak.
-    paths = [str(DISPATCHER_DIR / "python"), str(GEMM_TE_DIR), str(GEMM_TE_DIR.parent /
-                                                                   "common")]
-
-    def peak(k):
-        problem = {"M": 256, "N": 768, "K": k}
-        got = subprocess.run([sys.executable, "-c", _RSS_JOB, json.dumps(paths),
-                              f"gemm_{dtype}_rcr_x", json.dumps(problem)],
-                             capture_output=True, text=True, check=True).stdout.split()
-        if got == ["skip"]:
-            pytest.skip("/proc/self/clear_refs is not writable")
-        assert int(got[-1]) <= GS.host_compute_bytes(problem, dtype)
-        return int(got[-1])
-
-    per = (peak(36864) - peak(4096)) / ((256 + 768) * (36864 - 4096))
+    # estimate, less its fixed part, covers the peak.
+    per = (_peak_rss(dtype, {"M": 256, "N": 768, "K": 36864}, "data")
+           - _peak_rss(dtype, {"M": 256, "N": 768, "K": 4096}, "data")) / (
+        (256 + 768) * (36864 - 4096))
     assert 0 < per <= GS.HOST_INPUT_BYTES[dtype] + 4 + 0.25, per
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/clear_refs"), reason="Linux only")
+@pytest.mark.parametrize("dtype", ["fp8", "bf16"])
+def test_search_call_needs_at_most_16_bytes_per_output_element(dtype):
+    # A whole search call without an entry on output-heavy shapes: each more
+    # output element costs the fp32 reference, C (bf16: also decoded to fp32)
+    # and its comparison, within HOST_OUTPUT_BYTES.
+    small, large = ({"M": n, "N": n, "K": 64} for n in (1024, 3072))
+    inputs = (2 * 3072 - 2 * 1024) * 64 * (GS.HOST_INPUT_BYTES[dtype] + 4)
+    per = (_peak_rss(dtype, large, "call") - _peak_rss(dtype, small, "call")
+           - inputs) / (3072 ** 2 - 1024 ** 2)
+    assert 4 < per <= GS.HOST_OUTPUT_BYTES, per
 
 
 def test_host_cache_over_its_cap_computes_as_without_it(gemm_worker, tmp_path):

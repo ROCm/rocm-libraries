@@ -313,7 +313,8 @@ Option rules:
   records the run's formula. A problem without an entry pays the host side in
   full inside every call. When the cache is on but did not store the entry
   (over its caps), its preparation measured that cost on this host, and its
-  calls get at least twice that. When the cache is off (or the preparation
+  calls get at least twice that (so a problem over `max_entry_gib` is still
+  prepared once). When the cache is off (or the preparation
   failed), they get the allowance alone. Its rates leave about 2x headroom
   over the host they were measured on for fp8 and bf8 (177-213 ns per element
   measured, 400 ns allowed) and 1.3-2.3x for the others (33-60 ns, 75 ns): on
@@ -474,84 +475,120 @@ an entry past either cap is not stored, and its problem computes on every call.
 A tmpfs is faster but holds the entries in RAM, so keep `max_total_gib` within
 the memory the build workers leave free.
 
-Host verification memory: a search makes each problem's inputs in the
-kernel's memory order (a column-major operand is never transposed), as
-float32 normals of numpy's seeded PCG64 generator, and encodes, decodes and
-compares them a block of 2^20 elements at a time (`_search_host_data` in
+Host verification memory: a search makes each problem's inputs in the kernel's
+memory order (a column-major operand is never transposed), as float32 normals
+of numpy's seeded PCG64 generator, and encodes, decodes and compares them a
+block of 2^20 elements at a time (`_search_host_data` in
 `run_one_gemm_kernel.py`); a worker that reads a cache entry maps it instead
 of copying it. A worker that computes a problem's host data (its preparation,
 or a call without an entry) then holds the encoded A and B, their fp32 values
 and the fp32 reference at most. Peak RSS per input element, measured through
-the real worker (`256x768xK`, `rcr`, K = 16384 to 131072, the same at `rrr`,
-`crr` and `ccr`; a plain run's worker is unchanged):
+the real worker (`256x768xK`, `rcr`, K = 16384 to 874159, the same at `rrr`,
+`crr` and `ccr`; a plain run's worker is unchanged). A worker now needs a set
+number of bytes per input element plus a fixed part, so its bytes per element
+fall as K grows: for fp8, 10.0 B at K = 16384, 5.6 B at 131072 and 5.1 B at
+874159.
 
 | dtype | search, before | search, now | per element, now |
 |---|---|---|---|
-| fp8, bf8 | 58 B | 5.0-5.6 B | its byte and its fp32 value |
-| bf16 | 16.5 B | 6.0-6.1 B | 2 bytes and its fp32 value |
-| fp16 | 11.5 B | 6.0-6.1 B | 2 bytes and its fp32 value |
+| fp8, bf8 | 58 B | 5.0 B plus about 0.08 GB | its byte and its fp32 value |
+| bf16 | 16.5 B | 6.0 B plus about 0.02 GB | 2 bytes and its fp32 value |
+| fp16 | 11.5 B | 6.0 B plus about 0.02 GB | 2 bytes and its fp32 value |
 
 Before, float64 normals took 10 B per element alone, and the fp8 and bf8
 encoder held about 48 B more per element in whole-array temporaries (and ran
 twice: once for the kernel's buffers, once for the reference). On a 16-core
-host a search's host data now also takes about half the time: 74-79 ns per
-fp8 or bf8 input element and 15 ns per fp16 or bf16 one, against 145-156 and
-29-31 ns. Per output element a worker needs at most 16 B more: the fp32
-reference, C and its comparison. So an fp8 256x768x874159 problem
-(895M input elements), whose preparation was killed at 47.6 GB of RSS on a
-62 GB host, now needs about 4.5 GB.
+host with numpy's pip wheels (an optimized BLAS, as in the GPU container) a
+search's host data now also takes about half the time: 74-79 ns per fp8 or bf8
+input element and 15 ns per fp16 or bf16 one, against 145-156 and 29-31 ns.
+With a reference BLAS (a distribution's own numpy), where a product with a
+transposed operand is slower, it is slower than before in `rcr` and `crr`,
+whose reference reads one operand transposed: bf16 at 134M input elements took
+22.8 s in `rcr` and 16.0 s in `crr` against 12.3 s, and 10.2-10.6 s in `rrr`
+and `ccr`. The preparation runs outside the call timeout, so with the cache on
+this only lengthens a round. Per output element a worker needs at most 16 B
+more: the fp32 reference, C and its comparison. So an fp8 256x768x874159
+problem (895M input elements), whose preparation was killed at 47.6 GB of RSS
+on a 62 GB host, now needs about 4.6 GB (the guard below plans 5.6 GB, plus
+its 0.9 GB entry when the cache is on a tmpfs). A call that reads an entry
+adds little memory of its own; its RSS still shows the entry's pages it maps
+(about 1 B per fp8 input element, 2 B per bf16 one), which are shared, not
+copies.
 
-The host memory guard: before a problem's first call, the search estimates
-the bytes a worker needs for its host data, `(M+N)*K*(e+4) + 16*M*N + 1 GiB`
-to compute it (`e` the encoded element size: 1 for fp8 and bf8, 2 for fp16
-and bf16, 4 otherwise; `host_compute_bytes` in `gemm_search.py`), plus the
-entry itself when the cache is on a tmpfs, and `12*M*N + 1 GiB` to read an
-entry (`host_read_bytes`). The 1 GiB covers the interpreter, one block's
-temporaries and the GPU runtime: a measure worker on an MI350X (gfx950) held
-about 0.9 GB besides its host data. It compares that with the memory available:
-`MemAvailable` from `/proc/meminfo` (or the room left under the `memory.max`
-of the run's cgroup, when that is less), less 10% of the total. The problem's
-preparation must fit, and then one call per device at once, reading its
-entry or, when none was stored (the cache off or over its caps), computing it
-all. A problem that does not fit is never prepared nor measured: its
-requests get the status `host_memory`, which is not a kernel failure, so no
-strategy is told anything; the problem stops, the console prints one line
-(`<problem>: skipped, host_memory: needs X GiB, Y GiB available`), the run
-goes on with the other problems and ends `partial`, with the reason under
-`unresolved` in `summary.json` and `host_memory` in its counts. The decision
-is taken once per problem, when it is first measured and after that round's
-builds: memory freed later does not bring it back, so one run never retries
-a problem that may exhaust the host's memory; re-run its problems on a host
-with more memory, with fewer devices, or with a cache that has room for the
-entry. Preparations run under a host-wide lock in the temp directory
-(`ck_search_host.lock`): a round's builds hold it shared and its
-preparations exclusive, so no preparation runs while any search run sharing
-that directory (as the runs of one host do) builds or prepares; a run whose
-builds or preparation wait for another run prints one `waiting for` line. Within one run the preparations running
-at once must fit together. The measure calls of other runs are not counted
-until they show in `MemAvailable`.
+The host memory guard: before a problem's first call, the search estimates the
+bytes a worker needs for its host data, `(M+N)*K*(e+4) + 16*M*N + 1 GiB` to
+compute it (`e` the encoded element size: 1 for fp8 and bf8, 2 for fp16 and
+bf16, 4 otherwise; `host_compute_bytes` in `gemm_search.py`), plus the entry
+itself when the cache is on a tmpfs, and `12*M*N + 1 GiB` to read an entry
+(`host_read_bytes`). The 1 GiB covers the interpreter, one block's temporaries
+and the GPU runtime: a measure worker on an MI350X (gfx950) held about 0.9 GB
+besides its host data. It compares that with the memory available:
+`MemAvailable` from `/proc/meminfo` (or the room left under a memory limit of
+the run's cgroup and its parents, when that is less: `memory.max` or
+`memory.high` in cgroup v2, `memory.limit_in_bytes` in v1), less 10% of the
+total. The problem's preparation must fit, and then one call per device at
+once, reading its entry or, when none was stored (the cache off or over its
+caps), computing it all. With the cache on a tmpfs, the calls check also keeps
+room for the entries still to come (those of the run's problems not stored
+yet, up to the cache's free room), which will hold RAM while later rounds'
+calls of this problem run. A problem that does not fit is never prepared nor
+measured, and one whose preparation was killed from outside (exit code -9, the
+out-of-memory killer) or ran out of memory (`MemoryError`) is not measured
+either: its calls would compute the same data. A preparation stopped at its
+time limit is not a memory failure: its calls compute their own data. A
+skipped problem's requests get the status `host_memory`, which is not a kernel
+failure, so no strategy is told anything; the problem stops, the console
+prints one line (`<problem>: skipped, host_memory: needs X GiB, Y GiB
+available`), the run goes on with the other problems and ends `partial` (or
+`no_winner` when no problem has a winner), exit status 1, with the reason
+under `unresolved` in `summary.json` and `host_memory` in its counts. The
+decision is taken once per problem, when it is first measured and after that
+round's builds: memory freed later does not bring it back, so one run never
+retries a problem that may exhaust the host's memory; re-run its problems on a
+host with more memory, with fewer devices, or with a cache that has room for
+the entry. Should the host still run out of memory, a search's workers have
+asked to go first: each sets its `oom_score_adj` to 1000 (a plain run's worker
+does not). Preparations run under a lock in the temp directory
+(`ck_search_host.lock`): a round's builds hold it shared and its preparations
+exclusive, so no preparation runs while any search run sharing that directory
+(the runs of one host, or of one container) builds or prepares; a run whose
+builds or preparation wait for another run prints one `waiting for` line. A
+run that cannot open the lock file prints one `NOTE: cannot open the host
+lock` line and goes on without it. Within one run the preparations running at
+once must fit together, with the tmpfs entries of those that ended. Not
+counted: the measure calls of other runs until they show in `MemAvailable`,
+and other runs' builds (tens of GB with many build workers), which can start
+while this run's calls compute their host data: calls take no lock.
 
 Sizing: a preparation never runs during builds, so it shares the memory only
-with the system, other processes and a tmpfs cache's entries: on a 62 GB host
-with a 16 GiB tmpfs cache, the guard admits preparations of about 35 GB, that
-is about 6G input elements (5-6 bytes each). Keep `max_total_gib` plus the
-build workers' memory within RAM, as above; a disk cache costs no RAM beyond
-the page cache.
+with the system, other processes and a tmpfs cache's entries. On a tmpfs a
+preparation also needs its entry, so it needs `2e+4` bytes per input element
+(6 for fp8 and bf8, 8 for fp16 and bf16) plus the fixed 1 GiB, and the largest
+problem the guard admits has about `(MemAvailable - 10% of MemTotal - 1 GiB) /
+(2e+4)` input elements, where `MemAvailable` already lacks the tmpfs entries
+(for large-K shapes, whose M*N terms are small). On the 62 GB MI350X (gfx950)
+host of the field failure, with 47-51 GB available when idle and a full 16 GiB
+tmpfs cache, the guard's budget is about 24-28 GB: a preparation of about
+3.7-4.4G fp8 input elements or 2.8-3.3G bf16 ones. With the cache on a disk, a
+preparation needs `e+4` bytes per element (5 for fp8, 6 for bf16) and no tmpfs
+entries take RAM. Keep `max_total_gib` plus the build workers' memory within
+RAM, as above; a disk cache costs no RAM beyond the page cache.
 
-Console: builds print as in a full run; the search prints a line per build
-and per round (`[search] round N: ...`: proposals, admissions, builds against
-the cap, measurements, active problems, elapsed time and deadline) and one
-title line per measure call, named like its `rounds/` file, after two lines
-for the preparation of the call's new problems (how many, their limit, then
-how many were stored and the time taken), and one more per problem not stored
+Console: builds print as in a full run; the search prints a line per build and
+per round (`[search] round N: ...`: proposals, admissions, builds against the
+cap, measurements, active problems, elapsed time and deadline) and one title
+line per measure call, named like its `rounds/` file, after two lines for the
+preparation of the call's new problems (how many, their limit, then how many
+were stored and the time taken), and one more per problem not stored
 (`<problem>: not stored (<why>); its calls compute their own`, ending with the
 tail of the worker's stderr when the preparation failed) or skipped
 (`<problem>: skipped, host_memory: ...`, see "Host verification memory"). A
 build or preparation that waits for another search run on the host prints
-`[search] waiting for ...` first. A host cache whose
-filesystem is already under 10% free (see "Host cache space") prints a
-`Host cache: WARNING` line before the first round, and one on NFS a
-`Host cache: NOTE` line.
+`[search] waiting for ...` first, and a run that cannot open the host lock
+prints one `[search] NOTE: cannot open the host lock ...` line. A host cache
+whose filesystem is already under 10% free (see "Host cache space") prints a
+`Host cache: WARNING` line before the first round, and one on NFS a `Host
+cache: NOTE` line.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 `summary.json` and the failing calls in `trials.jsonl`; a problem stopped by
