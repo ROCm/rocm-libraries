@@ -396,8 +396,8 @@ def test_gfx942_reduce_tiled_builder_resolves_its_own_predicate():
     name, fn = _resolve_support_predicate(
         module, "build_unified_attention_reduce_tiled"
     )
-    assert name == "supports_unified_attention_reduce_tiled"
-    assert fn is module.supports_unified_attention_reduce_tiled
+    assert name == "supports_tiled_reduce_spec"
+    assert fn is module.supports_tiled_reduce_spec
 
 
 @pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
@@ -406,10 +406,10 @@ def test_gfx942_3d_module_builder_resolves_and_runs_its_own_predicate():
     spec-first predicate by the derived name, and the packer's check accepts a
     strided decode spec and refuses one whose segment overflows LDS."""
     module = import_module("kernels.gfx942.attention_tiled_3d")
-    builder = "build_unified_attention_3d_module"
+    builder = "build_unified_attention_3d_tiled_module"
     name, fn = _resolve_support_predicate(module, builder)
-    assert name == "supports_unified_attention_3d_module"
-    assert fn is module.supports_unified_attention_3d_module
+    assert name == "supports_unified_attention_3d_tiled_module"
+    assert fn is module.supports_unified_attention_3d_tiled_module
     spec_class = _resolve_spec_class(module, getattr(module, builder))
     assert spec_class is module.UnifiedAttention3DTiledSpec
     fields = {

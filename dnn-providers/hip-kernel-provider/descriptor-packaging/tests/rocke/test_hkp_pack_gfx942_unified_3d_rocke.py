@@ -1,6 +1,6 @@
 """The gfx942 split-KV decode module (segment + reduce), packed with the real compiler.
 
-One rocKE `KernelModule` from `build_unified_attention_3d_module` carries the
+One rocKE `KernelModule` from `build_unified_attention_3d_tiled_module` carries the
 segment kernel as its primary and the reduce kernel as its `reduce` companion. A
 UKD reaches both through `sources`: `segment` takes the primary, `reduce` names the
 companion by role. The spec is the one rocKE's strided decode candidate selects, so
@@ -29,8 +29,8 @@ from pack_helpers import _run_cli, read_shipped, run_pipeline
 ARCH = "gfx942"
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "multi_launch_decode_merge"
 SOURCE = "kernels/gfx942/attention_tiled_3d.py"
-BUILDER = "build_unified_attention_3d_module"
-PREDICATE = "supports_unified_attention_3d_module"
+BUILDER = "build_unified_attention_3d_tiled_module"
+PREDICATE = "supports_unified_attention_3d_tiled_module"
 
 
 def _selected_specs():
@@ -43,7 +43,7 @@ def _selected_specs():
     manifest's `spec_overrides`), so what is packed here is what hipDNN ships.
     The reduce spec is the runtime's own pairing
     (`_strided_3d_specs_from_problem`), built apart from the module builder's
-    `reduce_spec_for_segment`, so it can referee that helper. Metadata only:
+    `reduce_spec_for`, so it can referee that helper. Metadata only:
     no GPU tensors.
     """
     from dispatch.attention import AttentionRequest, dispatch_attention
@@ -122,7 +122,7 @@ def _expected_signature(kernel):
 def test_the_split_kv_module_packs_both_launches_from_one_object(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    from kernels.gfx942.attention_tiled_3d import build_unified_attention_3d_module
+    from kernels.gfx942.attention_tiled_3d import build_unified_attention_3d_tiled_module
 
     spec, runtime_reduce = _selected_specs()
     out = _pack(
@@ -148,7 +148,7 @@ def test_the_split_kv_module_packs_both_launches_from_one_object(
 
     # Each signature is read off the object for its own symbol, and matches the
     # params of the kernel the builder emitted for that launch.
-    module = build_unified_attention_3d_module(spec, arch=ARCH)
+    module = build_unified_attention_3d_tiled_module(spec, arch=ARCH)
     kpack, _comp = load_kpack(rocm_kpack_dir)
     archive = kpack.PackedKernelArchive.read(out / ARCH / segment["library"])
     blob = bytes(archive.get_kernel(segment["toc_key"], ARCH))
@@ -170,14 +170,14 @@ def test_the_split_kv_module_packs_both_launches_from_one_object(
 def test_a_module_the_predicate_refuses_is_refused_at_pack_time(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    from kernels.gfx942.attention_tiled_3d import supports_unified_attention_3d_module
+    from kernels.gfx942.attention_tiled_3d import supports_unified_attention_3d_tiled_module
 
     # D256 with 64-token blocks and no tile override: the segment's Q/K/V tiles
     # overflow gfx942's 64 KiB LDS.
     spec = dataclasses.replace(
         _selected_specs()[0], head_size=256, block_size=64, tile_size_override=None
     )
-    ok, reason = supports_unified_attention_3d_module(spec, arch=ARCH)
+    ok, reason = supports_unified_attention_3d_tiled_module(spec, arch=ARCH)
     assert not ok and "LDS" in reason
 
     with pytest.raises(HkpPackError) as excinfo:

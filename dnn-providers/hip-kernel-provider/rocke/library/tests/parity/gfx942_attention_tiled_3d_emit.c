@@ -14,7 +14,7 @@
  *      rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm, with a
  *      rocke_unified_attention_reduce_tiled_spec_t derived from the same config
  *      (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
- *      waves_per_eu, as the Python reduce_spec_for_segment; configs 20-21 also
+ *      waves_per_eu, as the Python reduce_spec_for; configs 20-21 also
  *      set emit_lse, as _REDUCE_LSE does)
  * (arch gfx942, flavor AUTO), printing the .ll to stdout for byte comparison.
  */
@@ -449,7 +449,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
 }
 
 /* Derive the reduce spec from the segment spec, exactly as the Python
- * reduce_spec_for_segment (head_size / num_query_heads / num_kv_heads / dtype /
+ * reduce_spec_for (head_size / num_query_heads / num_kv_heads / dtype /
  * num_segments / waves_per_eu); configs 20-21 also set emit_lse, as
  * _REDUCE_LSE does. */
 static void make_reduce_spec(int idx,

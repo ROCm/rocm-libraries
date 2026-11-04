@@ -1,7 +1,7 @@
 # gfx942_attention_unified_3d
 
 Single-token (seqlen_q 1) split-KV attention decode for gfx942, built by rocKE
-(`kernels/gfx942/attention_tiled_3d.py`, builder `build_unified_attention_3d_module`).
+(`kernels/gfx942/attention_tiled_3d.py`, builder `build_unified_attention_3d_tiled_module`).
 Engine: `hipkernel:Gfx942AttentionUnified3d`.
 
 Every variant is one rocKE module with two launches: `segment` writes per-segment

@@ -33,7 +33,7 @@ def _spec(head_size=128, hq=32, hkv=8, dtype="fp16", num_segments=16):
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("head_size", [64, 128, 256])
 def test_accepts_supported_cells(head_size, dtype):
-    ok, reason = mod.supports_unified_attention_reduce_tiled(
+    ok, reason = mod.supports_tiled_reduce_spec(
         _spec(head_size=head_size, dtype=dtype), arch="gfx942"
     )
     assert ok, reason
@@ -44,29 +44,29 @@ def test_accepts_supported_cells(head_size, dtype):
     [
         (dict(head_size=96), "head_size"),
         (dict(head_size=0), "head_size"),
-        (dict(dtype="fp32"), "dtype"),
+        (dict(dtype="fp32"), "fp16/bf16"),
         (dict(num_segments=1 << 20), "num_segments"),
     ],
 )
 def test_rejects_unsupported_field(kwargs, field):
-    ok, reason = mod.supports_unified_attention_reduce_tiled(_spec(**kwargs))
+    ok, reason = mod.supports_tiled_reduce_spec(_spec(**kwargs))
     assert not ok
     assert field in reason
 
 
 def test_rejects_other_arch():
-    ok, reason = mod.supports_unified_attention_reduce_tiled(_spec(), arch="gfx90a")
+    ok, reason = mod.supports_tiled_reduce_spec(_spec(), arch="gfx90a")
     assert not ok
     assert reason
 
 
 def test_lds_edge_uses_real_cap():
     cap = attention_lds_capacity_bytes("gfx942")
-    ok, reason = mod.supports_unified_attention_reduce_tiled(
+    ok, reason = mod.supports_tiled_reduce_spec(
         _spec(num_segments=cap // 4)
     )
     assert ok, reason
-    ok, reason = mod.supports_unified_attention_reduce_tiled(
+    ok, reason = mod.supports_tiled_reduce_spec(
         _spec(num_segments=cap // 4 + 1)
     )
     assert not ok
@@ -131,7 +131,7 @@ _RUNTIME_CELLS = [
 
 
 def test_reduce_spec_follows_segment():
-    red = mod.reduce_spec_for_segment(
+    red = mod.reduce_spec_for(
         _segment(head_size=256, num_segments=24, waves_per_eu=2, dtype="bf16")
     )
     assert red == UnifiedAttentionReduceTiledSpec(
@@ -147,23 +147,23 @@ def test_reduce_spec_follows_segment():
 @pytest.mark.parametrize("head_size, block_size, batch", _RUNTIME_CELLS)
 def test_reduce_spec_matches_runtime_selection(head_size, block_size, batch):
     segment, reduce = _runtime_specs(head_size, block_size, batch)
-    assert mod.reduce_spec_for_segment(segment) == reduce
+    assert mod.reduce_spec_for(segment) == reduce
 
 
 @pytest.mark.parametrize("head_size, block_size, batch", _RUNTIME_CELLS)
 def test_module_predicate_accepts_runtime_selection(head_size, block_size, batch):
     segment, _ = _runtime_specs(head_size, block_size, batch)
-    ok, reason = mod.supports_unified_attention_3d_module(segment, arch="gfx942")
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(segment, arch="gfx942")
     assert ok, reason
 
 
 def test_module_has_segment_primary_and_reduce_companion():
     seg = _segment()
-    module = mod.build_unified_attention_3d_module(seg, arch="gfx942")
+    module = mod.build_unified_attention_3d_tiled_module(seg, arch="gfx942")
     assert isinstance(module, KernelModule)
     assert module.primary.name == seg.kernel_name()
     assert {r: k.name for r, k in module.companions.items()} == {
-        "reduce": mod.reduce_spec_for_segment(seg).kernel_name()
+        "reduce": mod.reduce_spec_for(seg).kernel_name()
     }
 
 
@@ -174,10 +174,10 @@ def test_module_predicate_rejects_segment_lds_overflow():
     from kernels.common.attention_unified import _tiled_3d_segment_lds_bytes
 
     assert _tiled_3d_segment_lds_bytes(seg) > attention_lds_capacity_bytes("gfx942")
-    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(seg, arch="gfx942")
     assert not ok
     assert "LDS" in reason
-    ok, reason = mod.supports_unified_attention_3d_module(
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(
         replace(seg, tile_size_override=32), arch="gfx942"
     )
     assert ok, reason
@@ -195,13 +195,13 @@ def test_module_predicate_rejects_segment_lds_overflow():
     ],
 )
 def test_module_predicate_rejects_unsupported(kwargs, needle):
-    ok, reason = mod.supports_unified_attention_3d_module(_segment(**kwargs))
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(_segment(**kwargs))
     assert not ok
     assert needle in reason
 
 
 def test_module_predicate_rejects_other_arch():
-    ok, reason = mod.supports_unified_attention_3d_module(_segment(), arch="gfx90a")
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(_segment(), arch="gfx90a")
     assert not ok
     assert reason
 
@@ -211,7 +211,7 @@ def test_module_predicate_refuses_a_tile_the_builder_cannot_walk(block_size, til
     # 24 and 64 do not divide 32 (the builder asserts BS % T == 0); 8 divides 64 but
     # is not a whole 16-wide MFMA step (T // MFMA_N would be 0); 0 is no tile.
     seg = _segment(block_size=block_size, tile_size_override=tile)
-    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(seg, arch="gfx942")
     assert not ok
     assert "KV tile" in reason
 
@@ -219,9 +219,9 @@ def test_module_predicate_refuses_a_tile_the_builder_cannot_walk(block_size, til
 @pytest.mark.parametrize("block_size, tile", [(16, None), (32, 16), (64, 32), (64, 16)])
 def test_module_predicate_accepts_only_tiles_the_builder_builds(block_size, tile):
     seg = _segment(block_size=block_size, tile_size_override=tile)
-    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(seg, arch="gfx942")
     assert ok, reason
-    module = mod.build_unified_attention_3d_module(seg, arch="gfx942")
+    module = mod.build_unified_attention_3d_tiled_module(seg, arch="gfx942")
     assert module.primary.name == seg.kernel_name()
 
 
@@ -259,8 +259,8 @@ def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size, dtype,
     seg_1 = replace(seg_1, num_segments=16)
     seg_64 = replace(seg_1, num_seqs=64)
     assert seg_1.use_decode_grid and seg_64.num_seqs == 64
-    mod_1 = mod.build_unified_attention_3d_module(seg_1, arch="gfx942")
-    mod_64 = mod.build_unified_attention_3d_module(seg_64, arch="gfx942")
+    mod_1 = mod.build_unified_attention_3d_tiled_module(seg_1, arch="gfx942")
+    mod_64 = mod.build_unified_attention_3d_tiled_module(seg_64, arch="gfx942")
     for k_1, k_64 in zip(mod_1.kernels, mod_64.kernels):
         assert k_1.name == k_64.name
         assert _lower(k_1) == _lower(k_64)
@@ -282,7 +282,7 @@ def test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio(head_size, gqa):
     pairs = [(gqa * h, h) for h in (1, 2, 8)]
     lowered = []
     for hq, hkv in pairs:
-        module = mod.build_unified_attention_3d_module(
+        module = mod.build_unified_attention_3d_tiled_module(
             replace(seg, num_query_heads=hq, num_kv_heads=hkv), arch="gfx942"
         )
         lowered.append([(k.name, _lower(k)) for k in module.kernels])
@@ -319,7 +319,7 @@ def test_module_compiles_to_one_code_object():
 
     seg, reduce = _runtime_specs(128, 16, batch=4)
     artifact = compile_module(
-        mod.build_unified_attention_3d_module(seg, arch="gfx942"),
+        mod.build_unified_attention_3d_tiled_module(seg, arch="gfx942"),
         arch="gfx942",
         backend="python",
         capture_ir_text=False,

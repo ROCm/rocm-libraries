@@ -40,6 +40,10 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common.attention_split_kv_reduce import (
+    split_kv_reduce_spec,
+    tiled_reduce_unsupported_reason,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -1540,40 +1544,20 @@ def build_unified_attention_reduce_tiled(
     return b.kernel
 
 
-def supports_unified_attention_reduce_tiled(
+def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx942"
 ) -> Tuple[bool, str]:
     """Spec-first predicate for the split-KV reduce kernel (functional limits only).
 
-    Mirrors what ``build_unified_attention_reduce_tiled`` can actually emit:
-    one wave64 splits ``head_size`` evenly over its 64 lanes, and the per-segment
-    rescale factors (fp32, ``num_segments`` of them) live in LDS
-    (``_tiled_3d_reduce_lds_bytes``, the one formula the strided runtime checks too).
+    Applies the one copy of the reduce rules in
+    ``kernels.common.attention_split_kv_reduce.tiled_reduce_unsupported_reason``
+    (wave64 arch, fp16/bf16, ``head_size`` a positive multiple of 64, segment-factor
+    cache fits LDS); the gfx950 module adds a head-grouping check on top, this one
+    has none. Typed with this module's reduce spec class, which ``hkp_pack`` matches
+    predicates by.
     """
-    from ..common.attention_arch import (
-        attention_lds_capacity_bytes,
-        validate_tiled_attention_arch,
-    )
-    from ..common.attention_unified import _tiled_3d_reduce_lds_bytes
-
-    arch_ok, arch_reason = validate_tiled_attention_arch(arch)
-    if not arch_ok:
-        return False, arch_reason
-    if spec.dtype not in ("fp16", "bf16"):
-        return False, f"dtype={spec.dtype!r} unsupported (reduce writes fp16/bf16)"
-    if spec.head_size <= 0 or spec.head_size % 64 != 0:
-        return False, (
-            f"head_size={spec.head_size} must be a positive multiple of 64 "
-            f"(the reduce splits head_size over 64 lanes)"
-        )
-    lds_bytes = _tiled_3d_reduce_lds_bytes(spec)
-    cap = attention_lds_capacity_bytes(arch)
-    if lds_bytes > cap:
-        return False, (
-            f"num_segments={spec.num_segments} needs {lds_bytes} B of LDS, "
-            f"over the {cap} B limit"
-        )
-    return True, "supported"
+    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
+    return (False, reason) if reason is not None else (True, "supported")
 
 
 def supports_tiled_3d_spec(
@@ -1601,35 +1585,32 @@ def supports_tiled_3d_spec(
     )
 
 
-def reduce_spec_for_segment(
-    spec: UnifiedAttention3DTiledSpec,
+def reduce_spec_for(
+    spec: UnifiedAttention3DTiledSpec, *, emit_lse: bool = False
 ) -> UnifiedAttentionReduceTiledSpec:
     """The reduce kernel that consumes ``spec``'s per-segment workspace.
 
     Mirrors the reduce spec the runtime pairs with a segment
     (``_strided_3d_specs_from_problem`` and ``_get_3d_pipeline`` in
     ``kernels.common.attention_unified``): the segment's head shape, dtype,
-    ``num_segments`` and ``waves_per_eu``. ``emit_lse`` stays off, as on the
-    strided decode path; it is a property of the request, not of the segment.
+    ``num_segments`` and ``waves_per_eu``, derived through
+    ``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec`` like the
+    gfx950 module's ``reduce_spec_for``. ``emit_lse`` comes from the request, not
+    the segment spec: it defaults off, as on the strided decode path.
     """
-    return UnifiedAttentionReduceTiledSpec(
-        head_size=spec.head_size,
-        num_query_heads=spec.num_query_heads,
-        num_kv_heads=spec.num_kv_heads,
-        dtype=spec.dtype,
-        num_segments=spec.num_segments,
-        waves_per_eu=spec.waves_per_eu,
+    return split_kv_reduce_spec(
+        UnifiedAttentionReduceTiledSpec, spec, emit_lse=emit_lse
     )
 
 
-def supports_unified_attention_3d_module(
+def supports_unified_attention_3d_tiled_module(
     spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
 ) -> Tuple[bool, str]:
-    """Spec-first predicate for :func:`build_unified_attention_3d_module`.
+    """Spec-first predicate for :func:`build_unified_attention_3d_tiled_module`.
 
     Functional limits only: the segment kernel's shape gate, its KV tile, its Q/K/V
     tiles fitting LDS (the same bound the strided runtime enforces), and the reduce
-    kernel derived by :func:`reduce_spec_for_segment`.
+    kernel derived by :func:`reduce_spec_for`.
 
     The KV tile (``spec.tile_size``: ``tile_size_override``, else ``block_size``) must
     be a positive multiple of ``MFMA_N`` that divides ``block_size``: the builder walks
@@ -1649,23 +1630,23 @@ def supports_unified_attention_3d_module(
             f"dividing block_size {spec.block_size} (tile_size_override "
             f"{spec.tile_size_override})",
         )
-    reduce = reduce_spec_for_segment(spec)
-    ok, reason = supports_unified_attention_reduce_tiled(reduce, arch=arch)
+    reduce = reduce_spec_for(spec)
+    ok, reason = supports_tiled_reduce_spec(reduce, arch=arch)
     if not ok:
         return False, reason
     reason = _strided_3d_lds_reason(spec, reduce, arch=arch)
     return (False, reason) if reason is not None else (True, "supported")
 
 
-def build_unified_attention_3d_module(
+def build_unified_attention_3d_tiled_module(
     spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
 ):
     """The split-KV segment kernel with its reduce kernel as one code object.
 
     Returns ``rocke.helpers.KernelModule(primary=<segment>, companions={"reduce":
-    <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack. The reduce
-    follows the segment spec (:func:`reduce_spec_for_segment`), so every packed
-    segment variant carries the reduce that matches its ``num_segments``.
+    <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack. The reduce is
+    :func:`reduce_spec_for` ``(spec)``, so every packed segment variant carries the
+    reduce that matches its ``num_segments``.
     """
     from rocke.helpers import KernelModule
 
@@ -1673,7 +1654,7 @@ def build_unified_attention_3d_module(
         primary=build_unified_attention_3d_tiled(spec, arch=arch),
         companions={
             "reduce": build_unified_attention_reduce_tiled(
-                reduce_spec_for_segment(spec), arch=arch
+                reduce_spec_for(spec), arch=arch
             )
         },
     )

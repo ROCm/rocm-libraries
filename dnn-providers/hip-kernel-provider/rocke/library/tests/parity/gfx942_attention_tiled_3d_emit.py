@@ -12,8 +12,8 @@
 #   2. the REDUCE kernel via
 #      build_unified_attention_reduce_tiled(reduce_spec, arch="gfx942")
 # whose UnifiedAttentionReduceTiledSpec is derived from the same config by
-# reduce_spec_for_segment (head_size / num_query_heads / num_kv_heads / dtype /
-# num_segments / waves_per_eu), as build_unified_attention_3d_module does.
+# reduce_spec_for (head_size / num_query_heads / num_kv_heads / dtype /
+# num_segments / waves_per_eu), as build_unified_attention_3d_tiled_module does.
 #
 # Each kernel is lowered with _native_lower(kernel, arch="gfx942") and the two
 # .ll texts are concatenated (segment first, then reduce) to stdout so they can
@@ -28,7 +28,7 @@ from kernels.gfx942.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     build_unified_attention_3d_tiled,
     build_unified_attention_reduce_tiled,
-    reduce_spec_for_segment,
+    reduce_spec_for,
 )
 
 try:
@@ -430,7 +430,7 @@ def _kernels(idx: int):
     cfg = _CONFIGS[idx]
     spec = UnifiedAttention3DTiledSpec(**cfg)
     seg_kernel = build_unified_attention_3d_tiled(spec, arch="gfx942")
-    red_spec = reduce_spec_for_segment(spec)
+    red_spec = reduce_spec_for(spec)
     if idx in _REDUCE_LSE:
         red_spec = dataclasses.replace(red_spec, emit_lse=True)
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx942")

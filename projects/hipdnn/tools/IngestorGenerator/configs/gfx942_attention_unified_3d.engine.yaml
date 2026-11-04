@@ -11,7 +11,7 @@
 # Every kernel is one rocKE KernelModule with two launches: the split-KV segment
 # kernel (`segment`) writes per-segment partials into the workspace, and the reduce
 # kernel (`reduce`, the module's companion) combines them. The reduce spec is
-# derived from the segment spec inside build_unified_attention_3d_module, so the
+# derived from the segment spec inside build_unified_attention_3d_tiled_module, so the
 # one segment spec below fully identifies both kernels.
 #
 # Scope (v1): dense (strided) KV, seqlen_q == 1, head size 64/128/256, GQA ratio
@@ -130,7 +130,7 @@ pack: gfx942_attention_unified_3d
 arch: gfx942
 provider_root: dnn-providers/hip-kernel-provider
 source: kernels/gfx942/attention_tiled_3d.py
-builder: build_unified_attention_3d_module
+builder: build_unified_attention_3d_tiled_module
 launches:
   segment: {}
   reduce: {role: reduce}

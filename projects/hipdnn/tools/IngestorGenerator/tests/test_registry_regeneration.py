@@ -569,7 +569,7 @@ _PREDICATE_DECLINES = {
     "build_unified_attention_3d_tiled": {"head_size": 96},
     "build_unified_attention_3d_tiled_module": {"head_size": 96},
     # The gfx942 split-KV module (segment + reduce) is built for head_size 64, 128, 256.
-    "build_unified_attention_3d_module": {"head_size": 96},
+    "build_unified_attention_3d_tiled_module": {"head_size": 96},
 }
 
 

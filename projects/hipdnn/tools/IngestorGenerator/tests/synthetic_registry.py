@@ -219,7 +219,7 @@ def split_rule(batch: int, seqlen: int) -> int:
     return max(1, 8 // batch) if seqlen >= 256 else 1
 
 
-class RuleSplitProbeCandidate:
+class SplitRuleProbeCandidate:
     name, algorithm, spec_id = "split_probe", "split", "rule"
 
     def admits(self, request: SplitProbeRequest):
@@ -238,7 +238,7 @@ class RuleSplitProbeCandidate:
 
 
 def split_probe_candidates():
-    return [RuleSplitProbeCandidate()]
+    return [SplitRuleProbeCandidate()]
 
 
 def probe_manifest(provider_root, **enumerate_overrides) -> dict:

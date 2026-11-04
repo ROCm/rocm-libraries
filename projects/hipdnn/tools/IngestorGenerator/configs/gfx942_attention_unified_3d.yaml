@@ -101,7 +101,7 @@ packs:
   kernel_defaults:
     kind: rocke
     source: kernels/gfx942/attention_tiled_3d.py
-    builder: build_unified_attention_3d_module
+    builder: build_unified_attention_3d_tiled_module
     launches:
       segment: {}
       reduce:
