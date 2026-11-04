@@ -5,8 +5,8 @@
 ### Added
 
 * Generated Fortran bindings, as a single `hipsolver` module: `use hipsolver`, link
-  `roc::hipsolver_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (ON on Linux, OFF on Windows and
-  on the CUDA backend), `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by
+  `roc::hipsolver_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (ON on Linux, OFF on Windows),
+  `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by
   default; `none` or `assumed-rank`). Found with `find_package(hipsolver-fortran)`; the archive and
   the `.mod` files install per compiler, under `<libdir>/fortran/<compiler>` and
   `<includedir>/fortran/<compiler>`.
