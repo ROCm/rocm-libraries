@@ -39,6 +39,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
 #endif
 
 #define MEM_MAX_GUARD_PAD 8192
@@ -101,13 +103,14 @@ public:
     size_t get_available_host_memory()
     {
 #ifdef __linux__
-        std::optional<size_t> available = available_host_memory_bytes();
-        if(!available)
-        {
-            hipblaslt_cerr << "Error getting available host memory" << std::endl;
-            return 0;
-        }
-        return *available;
+        if(std::optional<size_t> available = available_host_memory_bytes())
+            return *available;
+        // Without /proc/meminfo or a container limit, the free memory the kernel reports.
+        struct sysinfo info;
+        if(sysinfo(&info) == 0)
+            return size_t(info.freeram) * info.mem_unit;
+        hipblaslt_cerr << "Error getting available host memory" << std::endl;
+        return 0;
 #elif defined(_WIN32)
         MEMORYSTATUSEX memStatus = {};
         memStatus.dwLength = sizeof(memStatus);
