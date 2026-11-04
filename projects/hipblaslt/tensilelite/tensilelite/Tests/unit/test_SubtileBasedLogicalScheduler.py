@@ -5006,3 +5006,78 @@ class TestFirstConsumerRank:
         placement = _rank_placement(cfg, "A", 0, 0, 0)
         meta = emitter._local_read_group_metadata(["r0", "r1"], placement, 0)
         assert meta == [(0, 2), (0, 2)]
+
+
+class TestPartitionZeroIssueOrder:
+    """Partition-zero issue order follows the first-consumer rank.
+
+    The helpers leave a path alone when the rank is missing, which is how
+    schedules outside the dual-period epoch stay in their original order.
+    """
+
+    @staticmethod
+    def _read(comment):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(
+            dst=vgpr(8, 4), src=vgpr(1),
+            ds=DSModifiers(offset=0), comment=comment)
+
+    def test_local_reads_issue_in_consumer_order(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderLocalReadsByFirstConsumer,
+            _splitAfterFirstConsumerCohort,
+        )
+        late = self._read("late")
+        early = self._read("early")
+        same = self._read("same")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[late], instructionMetadata=[(5, 1)]),
+            EmittedModule(moduleId=1, instructions=[early, same],
+                          instructionMetadata=[(1, 2), (1, 2)]),
+        ]
+        ordered = _orderLocalReadsByFirstConsumer(
+            [(0, late), (1, early), (1, same)], modules)
+        assert [inst.comment for _, inst in ordered] == ["early", "same", "late"]
+        first, rest = _splitAfterFirstConsumerCohort(ordered, modules)
+        assert [inst.comment for _, inst in first] == ["early", "same"]
+        assert [inst.comment for _, inst in rest] == ["late"]
+
+    def test_missing_rank_keeps_the_original_read_order(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderLocalReadsByFirstConsumer,
+        )
+        read = self._read("unread")
+        modules = [EmittedModule(moduleId=0, instructions=[read], instructionMetadata=[])]
+        assert _orderLocalReadsByFirstConsumer([(0, read)], modules) is None
+
+    def test_global_read_bundles_sort_and_keep_their_tail(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderGlobalReadBundlesByFirstConsumer,
+        )
+        late = [self._read("late-m0"), self._read("late-load")]
+        early = [self._read("early-m0"), self._read("early-load")]
+        tail = self._read("srd")
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=late,
+                instructionMetadata=[(4, 2), (4, 2)],
+                source=GRPlacement(
+                    tensor="A", mtIteration=1, tiles=MFMATileRange(0, 1, 0, 1),
+                    subIterK_slot=0)),
+            EmittedModule(
+                moduleId=1, instructions=early,
+                instructionMetadata=[(1, 2), (1, 2)],
+                source=GRPlacement(
+                    tensor="B", mtIteration=1, tiles=MFMATileRange(0, 1, 0, 1),
+                    subIterK_slot=0)),
+            EmittedModule(
+                moduleId=2, instructions=[tail],
+                source=type("Inc", (), {"kind": "gr_inc"})()),
+        ]
+        ordered = _orderGlobalReadBundlesByFirstConsumer(
+            [[(0, late[0]), (0, late[1])],
+             [(1, early[0]), (1, early[1]), (2, tail)]],
+            modules)
+        assert [inst.comment for _, inst in ordered] == [
+            "early-m0", "early-load", "late-m0", "late-load", "srd"]
