@@ -60,9 +60,9 @@ def _llvm(spec: MxFp4GemmSpec) -> str:
     )
 
 
-def _valid_geometries():
+def _valid_geometries(mma: str = "32x16"):
     for tm, tn, tk, wg in itertools.product(TILE_MN, TILE_MN, TILE_K, WAVE_GROUPS):
-        spec = _spec(tile_m=tm, tile_n=tn, tile_k=tk, wave_group=wg)
+        spec = _spec(tile_m=tm, tile_n=tn, tile_k=tk, wave_group=wg, mma=mma)
         if validate(spec) is None:
             yield spec
 
@@ -86,9 +86,13 @@ class MxFp4GemmSpecTest(unittest.TestCase):
         self.assertIsNone(validate(_spec(*_BENCH, cluster_order="aid")))
         self.assertIsNone(validate(_spec(cluster_dim=(1, 1, 1), out_dtype="bf16")))
         self.assertIsNone(validate(_spec(half_plr="none", local_prefetch=0)))
-        self.assertEqual(len(list(_valid_geometries())), 36)
+        self.assertEqual(len(list(_valid_geometries())), 75)
+        self.assertEqual(len(list(_valid_geometries("16x16"))), 102)
+        self.assertIsNone(validate(_spec(tile_m=32, mma="16x16")))
         bad = {
-            "tile_m": {"tile_m": 64},
+            "tile_m": {"tile_m": 48},
+            "mma": {"mma": "16x32"},
+            "atom fit": {"tile_m": 32},
             "tile_k": {"tile_k": 64},
             "wave_group": {"wave_group": (1, 2)},
             "short K": {"tile_k": 512, "wave_group": (2, 2)},
@@ -168,10 +172,17 @@ class MxFp4GemmSpecTest(unittest.TestCase):
     def test_partial_tile_stores_cover_d_once(self):
         """Every D element is stored by exactly one lane vector, none outside:
         the epilogue's row and column map with its masks and store width."""
-        for (m, n), out_dtype, (tm, tn, wg) in itertools.product(
-            ((300, 300), (256, 201), (300, 512), (512, 512)),
+        for (m, n), out_dtype, (tm, tn, wg, mma) in itertools.product(
+            ((300, 300), (256, 201), (300, 512), (512, 512), (300, 16)),
             OUT_DTYPES,
-            ((128, 128, (2, 2)), (256, 128, (1, 4)), (128, 256, (4, 1))),
+            (
+                (128, 128, (2, 2), "32x16"),
+                (256, 128, (1, 4), "32x16"),
+                (128, 256, (4, 1), "32x16"),
+                (128, 16, (4, 1), "32x16"),
+                (128, 128, (2, 2), "16x16"),
+                (64, 16, (4, 1), "16x16"),
+            ),
         ):
             spec = _spec(
                 m,
@@ -182,10 +193,14 @@ class MxFp4GemmSpecTest(unittest.TestCase):
                 wave_group=wg,
                 out_dtype=out_dtype,
                 cluster_dim=(1, 1, 1),
+                half_plr="b" if tn // wg[1] % 32 == 0 else "none",
+                mma=mma,
             )
-            with self.subTest(m=m, n=n, out_dtype=out_dtype, tile=(tm, tn, wg)):
+            tile = (tm, tn, wg, mma)
+            with self.subTest(m=m, n=n, out_dtype=out_dtype, tile=tile):
                 self.assertIsNone(validate(spec))
                 rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
+                atom_m, slots = spec.atom.m, spec.atom.c_frag_len
                 width = spec.store_width
                 self.assertEqual(n % width, 0)
                 hits = np.zeros((m, n), dtype=np.int64)
@@ -195,9 +210,14 @@ class MxFp4GemmSpecTest(unittest.TestCase):
                 ):
                     wave_m, wave_n = divmod(wave, spec.warp_n)
                     col = bx * tn + wave_n * rn_count * 16 + (lane % 16) * rn_count
-                    for rm, slot in itertools.product(range(rm_count), range(16)):
+                    for rm, slot in itertools.product(range(rm_count), range(slots)):
                         m_local = slot // 8 * 16 + slot % 8 + lane // 16 * 8
-                        row = by * tm + wave_m * rm_count * 32 + m_local * rm_count + rm
+                        row = (
+                            by * tm
+                            + wave_m * rm_count * atom_m
+                            + m_local * rm_count
+                            + rm
+                        )
                         for begin in range(0, rn_count, width):
                             c = col + begin
                             if row < m and c < n:
@@ -263,16 +283,20 @@ class MxFp4GemmLayoutTest(unittest.TestCase):
     def test_reads_land_where_tdm_writes(self):
         """Row and scale offsets agree with the TDM's padded writes, every
         lane read is contiguous, and the regions are disjoint and in bounds."""
-        specs = list(_valid_geometries()) + [
-            _spec(a_lds_pad=LdsPad(), b_lds_pad=LdsPad()),
-            _spec(a_lds_pad=LdsPad(32, 2048), b_scale_lds_pad=LdsPad()),
-            _spec(
-                tile_m=256,
-                tile_n=128,
-                wave_group=(1, 4),
-                a_scale_lds_pad=LdsPad(16, 512),
-            ),
-        ]
+        specs = (
+            list(_valid_geometries())
+            + list(_valid_geometries("16x16"))
+            + [
+                _spec(a_lds_pad=LdsPad(), b_lds_pad=LdsPad()),
+                _spec(a_lds_pad=LdsPad(32, 2048), b_scale_lds_pad=LdsPad()),
+                _spec(
+                    tile_m=256,
+                    tile_n=128,
+                    wave_group=(1, 4),
+                    a_scale_lds_pad=LdsPad(16, 512),
+                ),
+            ]
+        )
         ops = IntOps()
         for spec in specs:
             layout = spec.lds_layout
@@ -354,6 +378,47 @@ class MxFp4GemmIrTest(unittest.TestCase):
             _comgr_options_for_kernel(old_kernel)
             + ["-mllvm", "-greedy-regclass-priority-trumps-globalness"],
         )
+
+    def test_16x16_atom(self):
+        """``mma`` 16x16 issues the 16x16x128 FP4 WMMA (formats 4, padded
+        16-word operands, 8 accumulators), twice the 32x16 atoms of a tile;
+        a 16-wide tile with one N-repeat stores single elements."""
+        wmma_32 = "@llvm.amdgcn.wmma.scale.f32.32x16x128.f4.v16f32.v16i32.v8i32"
+        wmma_16 = "@llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
+        default = _llvm(_spec())
+        self.assertNotIn(wmma_16, default)
+        spec = _spec(mma="16x16")
+        self.assertTrue(spec.kernel_name().endswith("_mma16"))
+        self.assertEqual((spec.wave_repeat_m, spec.wave_repeat_n), (8, 8))
+        self.assertEqual((spec.a_scale_reads, spec.reads_per_step), (2, 36))
+        llvm = _llvm(spec)
+        self.assertIn('"s_wait_dscnt 36"', llvm)
+        self.assertNotIn(wmma_32, llvm)
+        calls = re.findall(_WMMA + r"[^\n]*", llvm)
+        self.assertEqual(len(calls), 2 * len(re.findall(_WMMA, default)))
+        for call in calls:
+            self.assertIn(f"<8 x float> {wmma_16}(i32 4, <16 x i32> %", call)
+            self.assertIn(", i32 4, <16 x i32> %", call)
+        narrow = _spec(
+            1024,
+            16,
+            2048,
+            tile_m=256,
+            tile_n=16,
+            wave_group=(4, 1),
+            half_plr="none",
+            cluster_dim=(1, 2, 1),
+            cluster_order="aid",
+            mma="16x16",
+        )
+        self.assertIsNone(validate(narrow))
+        self.assertEqual((narrow.wave_repeat_m, narrow.wave_repeat_n), (4, 1))
+        self.assertEqual(narrow.reads_per_step, 12)
+        self.assertEqual(narrow.store_width, 1)
+        llvm = _llvm(narrow)
+        self.assertIn('"s_wait_dscnt 12"', llvm)
+        self.assertRegex(llvm, r"\bstore i8 [^\n]*addrspace\(1\)")
+        self.assertNotRegex(llvm, r"\bstore <[^\n]*addrspace\(1\)")
 
     def test_partial_n_tile_walks_only_the_rows_left(self):
         """B data is in TDM iterate mode (8 rows a walk). With a partial N
@@ -666,6 +731,40 @@ class MxFp4GemmHostBuildTest(unittest.TestCase):
             _spec(1000, 1000, 2048),
             _spec(1024, 1024, 2048 + 96, tile_m=128, tile_n=128),
             _spec(1024, 1001, 2048, tile_m=128, tile_n=128, out_dtype="bf16"),
+            _spec(mma="16x16"),
+            _spec(
+                1024,
+                16,
+                2048,
+                tile_m=256,
+                tile_n=16,
+                wave_group=(4, 1),
+                half_plr="none",
+                cluster_dim=(1, 2, 1),
+                cluster_order="aid",
+                mma="16x16",
+            ),
+            _spec(
+                1024,
+                16,
+                2048,
+                tile_m=64,
+                tile_n=16,
+                wave_group=(4, 1),
+                half_plr="none",
+                cluster_dim=(1, 1, 1),
+                mma="16x16",
+            ),
+            _spec(
+                1024,
+                16,
+                2048,
+                tile_m=128,
+                tile_n=16,
+                wave_group=(4, 1),
+                half_plr="none",
+                cluster_dim=(1, 2, 1),
+            ),
         ):
             with self.subTest(spec.kernel_name()):
                 artifact = compile_kernel(
@@ -685,15 +784,30 @@ class MxFp4GemmDeviceTest(unittest.TestCase):
     def test_matches_reference_on_gfx1250(self):
         if get_device_arch(0) != "gfx1250":
             self.skipTest("visible HIP device 0 is not gfx1250")
-        for spec in list(_valid_geometries()) + [
-            _spec(out_dtype="fp16"),
-            _spec(out_dtype="bf16"),
-            _spec(cluster_dim=(1, 1, 1)),
-            _spec(half_plr="none"),
-            _spec(half_plr="none", local_prefetch=0),
-            _spec(cluster_signal="drained"),
-            _spec(init_c_peel=False),
-        ]:
+        for spec in (
+            list(_valid_geometries())
+            + list(_valid_geometries("16x16"))
+            + [
+                _spec(
+                    1000,
+                    16,
+                    2048,
+                    tile_m=64,
+                    tile_n=16,
+                    wave_group=(4, 1),
+                    half_plr="none",
+                    cluster_dim=(1, 1, 1),
+                    mma="16x16",
+                ),
+                _spec(out_dtype="fp16"),
+                _spec(out_dtype="bf16"),
+                _spec(cluster_dim=(1, 1, 1)),
+                _spec(half_plr="none"),
+                _spec(half_plr="none", local_prefetch=0),
+                _spec(cluster_signal="drained"),
+                _spec(init_c_peel=False),
+            ]
+        ):
             with self.subTest(spec.kernel_name()):
                 run_case(spec)
 

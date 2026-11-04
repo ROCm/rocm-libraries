@@ -492,6 +492,7 @@ _AXES = {
     "cluster_order": ("cluster_order", str, "hw"),
     "local_prefetch": ("local_prefetch", int, "1"),
     "half_plr": ("half_plr", str, "b"),
+    "mma": ("mma", str, "32x16"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),

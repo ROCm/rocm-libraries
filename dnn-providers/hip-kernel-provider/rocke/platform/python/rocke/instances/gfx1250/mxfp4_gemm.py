@@ -55,16 +55,37 @@ __all__ = [
     "validate",
 ]
 
-_ATOM_M = 32
-_ATOM_N = 16
 _ATOM_K = 128
 _WAVE = 32
 _WAVES = 4
-_ACCUMULATORS_PER_ATOM = 16
-_OP_ID = "wmma_scale_f32_32x16x128_f4"
 _SCALE_GROUPS_PER_STEP = _ATOM_K // 32
 
-TILE_MN = (128, 256)
+
+@dataclass(frozen=True)
+class _MmaAtom:
+    """One scaled FP4 WMMA of ``m`` x ``n`` x 128. A lane holds ``a_rows``
+    A rows (lane % 16, then + 16) and B row lane % 16, each row as two 16 B
+    K chunks (8 words) zero-padded to ``frag_words`` (16x16x128 takes 16-word
+    operands). ``c_frag_len`` FP32 accumulators per lane."""
+
+    m: int
+    n: int
+    op_id: str
+    c_frag_len: int
+    a_rows: int
+    frag_words: int
+    c_dtype: str = "fp32"
+
+
+_ATOMS = {
+    "32x16": _MmaAtom(32, 16, "wmma_scale_f32_32x16x128_f4", 16, 2, 8),
+    "16x16": _MmaAtom(
+        16, 16, "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k32", 8, 1, 16
+    ),
+}
+MMA_SHAPES = tuple(_ATOMS)
+
+TILE_MN = (16, 32, 64, 128, 256)
 TILE_K = (128, 256, 512)
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
@@ -125,12 +146,6 @@ _CLUSTERS_PER_AID_GROUP = 8
 _XCCS_PER_AID = 4
 
 
-class _WmmaScaleF4Atom:
-    op_id = _OP_ID
-    c_frag_len = _ACCUMULATORS_PER_ATOM
-    c_dtype = "fp32"
-
-
 def _is_pow2(value: int) -> bool:
     return value > 0 and value & (value - 1) == 0
 
@@ -189,7 +204,12 @@ class MxFp4GemmSpec:
     cluster_order: str = "hw"
     local_prefetch: int = 1
     half_plr: str = "b"
+    mma: str = "32x16"
     block_k: int = field(default=32, init=False)
+
+    @property
+    def atom(self) -> _MmaAtom:
+        return _ATOMS[self.mma]
 
     @property
     def warp_m(self) -> int:
@@ -201,11 +221,11 @@ class MxFp4GemmSpec:
 
     @property
     def wave_repeat_m(self) -> int:
-        return self.tile_m // (self.warp_m * _ATOM_M)
+        return self.tile_m // (self.warp_m * self.atom.m)
 
     @property
     def wave_repeat_n(self) -> int:
-        return self.tile_n // (self.warp_n * _ATOM_N)
+        return self.tile_n // (self.warp_n * self.atom.n)
 
     @property
     def block_size(self) -> int:
@@ -305,11 +325,11 @@ class MxFp4GemmSpec:
 
     @property
     def reads_per_step(self) -> int:
-        """LDS reads of one K-step: scales, four per A and two per B fragment."""
+        """LDS reads of one K-step: scales, two per A row and two per B fragment."""
         return (
             self.a_scale_reads
             + self.b_scale_reads
-            + 4 * self.wave_repeat_m
+            + 2 * self.atom.a_rows * self.wave_repeat_m
             + 2 * self.wave_repeat_n
         )
 
@@ -355,6 +375,7 @@ class MxFp4GemmSpec:
                 "aid": self.cluster_order == "aid",
                 "lp0": self.local_prefetch == 0,
                 "hplrnone": self.half_plr == "none",
+                "mma16": self.mma == "16x16",
             },
         )
 
@@ -569,8 +590,11 @@ def validate(spec: MxFp4GemmSpec, arch: str = "gfx1250") -> str | None:
         return f"tile_k must be in {TILE_K}"
     if tuple(spec.wave_group) not in WAVE_GROUPS:
         return f"wave_group must be one of {WAVE_GROUPS} (4 waves)"
-    if spec.tile_m % (spec.warp_m * _ATOM_M) or spec.tile_n % (spec.warp_n * _ATOM_N):
-        return "the tile must hold whole 32x16 WMMA atoms per wave"
+    if spec.mma not in _ATOMS:
+        return f"mma must be one of {MMA_SHAPES}"
+    atom = spec.atom
+    if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
+        return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
     rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
     # A, B and D offsets switch to i64 past 2^31 (wide_*); the scales' stay
     # i32. A partial last tile's rows reach the next whole tile.
@@ -636,7 +660,7 @@ def validate(spec: MxFp4GemmSpec, arch: str = "gfx1250") -> str | None:
             f"{spec.reads_per_step} LDS reads per K-step exceed the s_wait_dscnt range"
         )
     target = ArchTarget.from_gfx("gfx1250")
-    accumulators = rm * rn * _ACCUMULATORS_PER_ATOM
+    accumulators = rm * rn * atom.c_frag_len
     if accumulators > target.limits.vgprs:
         return (
             f"{accumulators} accumulators per lane exceed {target.limits.vgprs} VGPRs"
@@ -785,12 +809,12 @@ class RowMaps:
 
     def m_row(self, rm, m_local):
         ops, rm_count = self.k.ops, self.k.spec.wave_repeat_m
-        base = ops.mul(self.k.wave_m, rm_count * _ATOM_M)
+        base = ops.mul(self.k.wave_m, rm_count * self.k.spec.atom.m)
         return ops.add(base, ops.add(ops.mul(m_local, rm_count), rm))
 
     def n_row(self, rn, n_local):
         ops, rn_count = self.k.ops, self.k.spec.wave_repeat_n
-        base = ops.mul(self.k.wave_n, rn_count * _ATOM_N)
+        base = ops.mul(self.k.wave_n, rn_count * self.k.spec.atom.n)
         return ops.add(base, ops.add(ops.mul(n_local, rn_count), rn))
 
 
@@ -1039,8 +1063,12 @@ class Gl2Prefetcher:
         if not data_lines and ahead_parity == 0:
             data_lines = 1
         if spec.has_cluster:
-            cluster_m0 = b.sub(k.block_m, ops.v(ops.mul(k.cluster_wy, spec.tile_m)))
-            cluster_n0 = b.sub(k.block_n, ops.v(ops.mul(k.cluster_wx, spec.tile_n)))
+            cluster_m0 = b.sub(
+                ops.v(k.block_m), ops.v(ops.mul(k.cluster_wy, spec.tile_m))
+            )
+            cluster_n0 = b.sub(
+                ops.v(k.block_n), ops.v(ops.mul(k.cluster_wx, spec.tile_n))
+            )
         else:
             cluster_m0, cluster_n0 = k.block_m, k.block_n
 
@@ -1103,17 +1131,18 @@ class Gl2Prefetcher:
                     data_line(p["B"], cluster_n0, p["N"], spec.edge_n, spec.wide_b),
                 ),
             ]
+        # Scales are prefetched only for an operand whose cluster scale row
+        # is whole lines.
         if (cluster_x * spec.tile_n * 4) % _GL2_LINE_BYTES == 0:
             b_scale_address, b_scale_lines = scale_line(
                 p["B_scale"], p["N"], cluster_n0, cluster_x * spec.tile_n, spec.edge_n
             )
+            categories.append((b_scale_lines, b_scale_address))
+        if (cluster_y * spec.tile_m * 4) % _GL2_LINE_BYTES == 0:
             a_scale_address, a_scale_lines = scale_line(
                 p["A_scale"], p["M"], cluster_m0, cluster_y * spec.tile_m, spec.edge_m
             )
-            categories += [
-                (b_scale_lines, b_scale_address),
-                (a_scale_lines, a_scale_address),
-            ]
+            categories.append((a_scale_lines, a_scale_address))
         starts = []
         total = 0
         for count, _ in categories:
@@ -1168,49 +1197,46 @@ class LdsReader:
             self.k.shared, self.k.ops.v(offset), dtype=I32, n=n
         )
 
-    def a_fragment(self, buffer, rm, step):
+    def _lane_k(self, step):
         ops = self.k.ops
-        lane_k = ops.add(step * (_ATOM_K // 2), ops.mul(self.k.lane_half, 16))
-        frags = []
-        for m_local in (self.k.lane_col, ops.add(self.k.lane_col, 16)):
-            base = ops.add(
-                ops.add(
-                    buffer,
-                    self.k.layout.row_offset(ops, "a", self.rows.m_row(rm, m_local)),
-                ),
-                lane_k,
+        return ops.add(step * (_ATOM_K // 2), ops.mul(self.k.lane_half, 16))
+
+    def _row_fragment(self, buffer, operand: str, row, lane_k):
+        k, ops = self.k, self.k.ops
+        base = ops.add(ops.add(buffer, k.layout.row_offset(ops, operand, row)), lane_k)
+        frag = k.b.vec_concat(self.load_i32(base), self.load_i32(ops.add(base, 32)))
+        padding = k.spec.atom.frag_words - 8
+        if padding:
+            frag = k.b.vec_concat(frag, k.b.vector_splat(k.b.const_i32(0), padding))
+        return frag
+
+    def a_fragment(self, buffer, rm, step):
+        k = self.k
+        lane_k = self._lane_k(step)
+        if k.spec.atom.a_rows == 1:
+            return self._row_fragment(
+                buffer, "a", self.rows.m_row(rm, k.lane_col), lane_k
             )
-            frags.append(
-                self.k.b.vec_concat(
-                    self.load_i32(base), self.load_i32(ops.add(base, 32))
-                )
-            )
-        return self.k.b.vec_concat(frags[0], frags[1])
+        frags = [
+            self._row_fragment(buffer, "a", self.rows.m_row(rm, m_local), lane_k)
+            for m_local in (k.lane_col, k.ops.add(k.lane_col, 16))
+        ]
+        return k.b.vec_concat(frags[0], frags[1])
 
     def b_fragment(self, buffer, rn, step):
-        ops = self.k.ops
-        lane_k = ops.add(step * (_ATOM_K // 2), ops.mul(self.k.lane_half, 16))
-        base = ops.add(
-            ops.add(
-                buffer,
-                self.k.layout.row_offset(
-                    ops, "b", self.rows.n_row(rn, self.k.lane_col)
-                ),
-            ),
-            lane_k,
-        )
-        return self.k.b.vec_concat(
-            self.load_i32(base), self.load_i32(ops.add(base, 32))
-        )
+        lane_k = self._lane_k(step)
+        row = self.rows.n_row(rn, self.k.lane_col)
+        return self._row_fragment(buffer, "b", row, lane_k)
 
     def scales(self, buffer, step):
         """Per-lane E8M0 words of one K-step: one per M- and per N-repeat."""
         k = self.k
         b, ops, spec = k.b, k.ops, k.spec
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
+        a_lane = k.lane if spec.atom.a_rows == 2 else k.lane_col
         a_base = ops.add(
             buffer,
-            k.layout.scale_offset(ops, "a_scale", step, self.rows.m_row(0, k.lane)),
+            k.layout.scale_offset(ops, "a_scale", step, self.rows.m_row(0, a_lane)),
         )
         a_scales = []
         if rm_count >= 4:
@@ -1271,14 +1297,13 @@ class TileCompute:
     def _mma_fn(self, out, seed_zero):
         k = self.k
         rn_count = k.spec.wave_repeat_n
-        zero = k.b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) if seed_zero else None
+        atom = k.spec.atom
+        zero = k.b.zero_vec_f32(atom.c_frag_len) if seed_zero else None
 
         def mma(rm, rn, a_frag, b_frag, a_scale, b_scale, first_step):
             index = rm * rn_count + rn
             c_in = zero if (seed_zero and first_step) else out[index]
-            out[index] = k.b.mma(
-                _WmmaScaleF4Atom(), a_frag, b_frag, c_in, a_scale, b_scale
-            )
+            out[index] = k.b.mma(atom, a_frag, b_frag, c_in, a_scale, b_scale)
 
         return mma
 
@@ -1588,12 +1613,10 @@ class Pipeline:
         peel = spec.init_c_peel
         if peel or read_ahead:
             self.wait_next_tile()
-        undef = [b.undef_vec(F32, _ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
+        undef = [b.undef_vec(F32, spec.atom.c_frag_len) for _ in range(n_acc)]
         first_head = tile.first_head(c0) if read_ahead else None
         if not peel:
-            accumulators = [
-                b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) for _ in range(n_acc)
-            ]
+            accumulators = [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
             head_values = tile.flatten(first_head) if read_ahead else []
             start, start_parity = c0, 0
         else:
@@ -1714,7 +1737,7 @@ class Epilogue:
         fp8 = spec.out_dtype == "fp8e4m3"
         col = ops.add(k.block_n, self.rows.n_row(0, k.lane_col))
         for rm in range(rm_count):
-            for slot in range(_ACCUMULATORS_PER_ATOM):
+            for slot in range(spec.atom.c_frag_len):
                 m_local = ops.add((slot // 8) * 16 + slot % 8, ops.mul(k.lane_half, 8))
                 row = ops.add(k.block_m, self.rows.m_row(rm, m_local))
                 c_ptr, d_ptr = p["C"], p["D"]
@@ -1738,18 +1761,30 @@ class Epilogue:
                 ]
                 if read_c:
                     c_words = [
-                        b.global_load_vN(
-                            c_ptr,
-                            ops.v(ops.add(index, begin)),
-                            out_type,
-                            width,
-                            align=width * out_bytes,
+                        (
+                            b.global_load(
+                                c_ptr,
+                                ops.v(ops.add(index, begin)),
+                                out_type,
+                                align=out_bytes,
+                            )
+                            if width == 1
+                            else b.global_load_vN(
+                                c_ptr,
+                                ops.v(ops.add(index, begin)),
+                                out_type,
+                                width,
+                                align=width * out_bytes,
+                            )
                         )
                         for begin in chunks
                     ]
 
                     def c_value(i, words=c_words):
-                        c = b.vec_extract(words[i // width], i % width)
+                        if width == 1:
+                            c = words[i]
+                        else:
+                            c = b.vec_extract(words[i // width], i % width)
                         return b.cvt_fp8_to_f32(c) if fp8 else b.cast_to_f32(c)
 
                     values = [
@@ -1768,6 +1803,14 @@ class Epilogue:
                         packed = b.vec_pack(
                             [b.trunc_f32_to_bf16(v) for v in part], BF16
                         )
+                    if width == 1:
+                        b.global_store(
+                            d_ptr,
+                            ops.v(ops.add(index, begin)),
+                            b.vec_extract(packed, 0),
+                            align=out_bytes,
+                        )
+                        continue
                     b.global_store_vN(
                         d_ptr,
                         ops.v(ops.add(index, begin)),
