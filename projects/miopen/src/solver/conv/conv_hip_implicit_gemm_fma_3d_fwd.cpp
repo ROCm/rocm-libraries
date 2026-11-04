@@ -45,11 +45,10 @@ namespace conv {
 namespace {
 
 // Must match MIOpenConv3dFwdFmaHip.cpp.
-constexpr std::size_t kTileM     = 64;
-constexpr std::size_t kTileN     = 64;
+constexpr std::size_t kTileM     = 128;
 constexpr std::size_t kBlockSize = 256;
-// Grouped convolutions with fewer output channels per group leave most of the 64-wide channel
-// tile idle; on gfx1151 a depthwise 3x3x3 case ran 30x slower than ConvDirectNaiveConvFwd.
+// Grouped convolutions with fewer output channels per group leave most of the (at least 32-wide)
+// channel tile idle; on gfx1151 a depthwise 3x3x3 case ran 30x slower than ConvDirectNaiveConvFwd.
 // Ungrouped convolutions are kept at any channel count.
 constexpr std::size_t kMinOutChannelsPerGroup = 16;
 // Workgroups for the weight transpose; it loops over the remaining elements.
@@ -64,11 +63,21 @@ std::size_t GemmM(const miopen::conv::ProblemDescription& problem)
            problem.GetOutWidth();
 }
 
+// Output channels per workgroup. Narrower tiles for few output channels: on gfx1151 the 128-wide
+// tile was 1.5x slower than the 64-wide one at K = 64, and the 32-wide one was 1.3x faster than
+// the 64-wide one at K = 32.
+std::size_t TileN(const miopen::conv::ProblemDescription& problem)
+{
+    const std::size_t k_per_g = problem.GetOutChannels() / problem.GetGroupCount();
+    return k_per_g <= 32 ? 32 : (k_per_g <= 64 ? 64 : 128);
+}
+
 std::size_t GemmNBlocks(const miopen::conv::ProblemDescription& problem)
 {
     const std::size_t groups  = problem.GetGroupCount();
     const std::size_t k_per_g = problem.GetOutChannels() / groups;
-    return groups * ((k_per_g + kTileN - 1) / kTileN);
+    const std::size_t tile_n  = TileN(problem);
+    return groups * ((k_per_g + tile_n - 1) / tile_n);
 }
 
 std::size_t FilterTaps(const miopen::conv::ProblemDescription& problem)
@@ -148,8 +157,9 @@ ConvHipImplicitGemmFma3dFwd::GetSolution(const ExecutionContext& ctx,
     kernel.l_wk = {kBlockSize, 1, 1};
     kernel.g_wk = {((GemmM(problem) + kTileM - 1) / kTileM) * kBlockSize, GemmNBlocks(problem), 1};
 
-    kernel.comp_options =
-        " -DCONV3D_DTYPE=" + std::to_string(dtype) + " -DCONV3D_NDHWC=" + std::to_string(ndhwc);
+    kernel.comp_options = " -DCONV3D_DTYPE=" + std::to_string(dtype) +
+                          " -DCONV3D_NDHWC=" + std::to_string(ndhwc) +
+                          " -DTILE_N=" + std::to_string(TileN(problem));
 
     const int n       = static_cast<int>(problem.GetBatchSize());
     const int c       = static_cast<int>(problem.GetInChannels());
@@ -192,7 +202,7 @@ ConvHipImplicitGemmFma3dFwd::GetSolution(const ExecutionContext& ctx,
     }
 
     // The grids above and these arguments all come from the problem; the binaries only depend on
-    // the compile options (data type, layout).
+    // the compile options (data type, layout, channel tile width).
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
             const auto& params  = primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
