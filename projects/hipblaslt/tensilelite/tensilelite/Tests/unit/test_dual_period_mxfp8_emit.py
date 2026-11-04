@@ -139,17 +139,18 @@ def dual_src():
 
 def test_six_scale_reads_per_epoch(dual_src):
     body = _mainloop_lines(dual_src)
-    reads = [ln for ln in body if re.search(r"scaleMXS.*load 4B", ln)]
+    reads = [ln for ln in body if "ds_read" in ln and re.search(r"// S[AB] MT=", ln)]
     assert len(reads) == 6, (
         "expected exactly six scale ds_reads per 256-K epoch, got %d:\n%s"
         % (len(reads), "\n".join(reads)))
-    # 4 SA groups (group0..3) + 2 SB groups (group0..1).
-    sa = sorted(re.search(r"group(\d+)", r).group(1)
-                for r in reads if "MXSA" in r)
-    sb = sorted(re.search(r"group(\d+)", r).group(1)
-                for r in reads if "MXSB" in r)
-    assert sa == ["0", "1", "2", "3"], "scale-A groups: %s" % sa
-    assert sb == ["0", "1"], "scale-B groups: %s" % sb
+    # 4 SA tiles + 2 SB tiles, each carrying its macro-tile epoch.
+    sa = sorted(int(re.search(r"tile=(\d+)", r).group(1))
+                for r in reads if "// SA " in r)
+    sb = sorted(int(re.search(r"tile=(\d+)", r).group(1))
+                for r in reads if "// SB " in r)
+    assert sa == [0, 2, 4, 6], "scale-A tiles: %s" % sa
+    assert sb == [0, 2], "scale-B tiles: %s" % sb
+    assert all("MT=" in r for r in reads)
 
 
 def test_both_scale_phases_consumed(dual_src):
@@ -174,7 +175,11 @@ def test_scale_cadence_once_per_epoch(dual_src):
     # One SRD advance, one DTL load, one GR write-half swap and one LR read-half
     # swap for EACH of the two scale tensors (MXSA, MXSB) per 256-K epoch.
     assert body.count("Scale SRD update") == 2
-    assert body.count("DTL b128 load") == 2
+    scale_dtl = [
+        ln for ln in body.splitlines()
+        if "buffer_load" in ln and re.search(r"// S[AB] MT=", ln)
+    ]
+    assert len(scale_dtl) == 2, "scale DTL loads: %s" % scale_dtl
     assert len(re.findall(r"swap MXS\w+ GR m0", body)) == 2
     assert len(re.findall(r"swap MXS\w+ LR vgpr", body)) == 2
 
@@ -234,8 +239,22 @@ def test_no_scale_local_read_in_preloop(dual_src):
             break
         preloop.append(ln)
 
-    scale_lr = [l for l in preloop if "ds_read" in l and "scaleMXS" in l]
+    scale_lr = [l for l in preloop if "ds_read" in l and re.search(r"// S[AB] MT=", l)]
     assert not scale_lr, "pre-loop re-reads scales the mainloop reloads: %s" % scale_lr
 
-    data_lr = [l for l in preloop if "ds_read" in l and "Subtile" in l]
+    data_lr = [l for l in preloop if "ds_read" in l and re.search(r"// [AB] MT=", l)]
     assert data_lr, "pre-loop lost its data operand prefetch"
+
+
+def test_loads_name_their_macro_tile(dual_src):
+    """A, B, and scale loads name the macro-tile epoch they fill.
+
+    PGR2 issues the current tile, the next tile, and the tile two ahead.
+    The comment is the identity later physical passes use to tell those
+    loads apart.  Opcodes and addresses are unchanged.
+    """
+    src = dual_src
+    assert re.search(r"// A MT=n ", src)
+    assert re.search(r"// B MT=n ", src)
+    assert re.search(r"// A MT=n\+1 ", src) or re.search(r"// B MT=n\+1 ", src)
+    assert "MT=n+2" in src

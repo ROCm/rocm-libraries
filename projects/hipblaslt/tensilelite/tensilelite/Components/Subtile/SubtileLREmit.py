@@ -740,7 +740,24 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
+def _mt_suffix(mt):
+  if mt is None:
+    return ""
+  return " MT=n" if int(mt) == 0 else " MT=n+%d" % int(mt)
+
+
+def _ds_read_comment(tc, sId0, sId1, subIterK, readIdx, mt, k_index, transposed):
+  """Keep the historical comment unless the scheduler passed an identity."""
+  if mt is None and k_index is None:
+    kind = "TrSubtile" if transposed else "Subtile"
+    return "%s%s[%u, %u] subIterK=%u read=%u" % (
+        kind, tc, sId0, sId1, subIterK, readIdx)
+  k_label = subIterK if k_index is None else k_index
+  return "%s%s tile=%u K=%s read=%u" % (
+      tc, _mt_suffix(mt), sId0, k_label, readIdx)
+
+
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True, mt=None, k_index=None):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -806,7 +823,8 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
           dst=vgpr(dstVgpr + readIdx * REGS_PER_TR, REGS_PER_TR),
           src=vgpr(addrVgpr),
           ds=DSModifiers(offset=offset),
-          comment="TrSubtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
+          comment=_ds_read_comment(
+              tileInfo.tc, sId0, sId1, subIterK, readIdx, mt, k_index, True)))
     return module
 
   if swizzled:
@@ -839,7 +857,8 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
         dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
         src=vgpr(addrVgpr),
         ds=DSModifiers(offset=offset),
-        comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
+        comment=_ds_read_comment(
+            tileInfo.tc, sId0, sId1, subIterK, readIdx, mt, k_index, False)))
   return module
 
 
