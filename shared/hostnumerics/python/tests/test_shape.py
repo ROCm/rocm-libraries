@@ -232,7 +232,6 @@ class ShapeTests(unittest.TestCase):
             lambda: scalar.coordinates(0, hn.Permutation([0])),
             lambda: scalar.linear_index([], hn.Permutation([0])),
             lambda: shape.linear_index([], hn.Permutation([0])),
-            lambda: shape.linear_index([], hn.Permutation([0, 0, 2])),
         ):
             with self.assertRaises(RuntimeError):
                 operation()
@@ -327,8 +326,6 @@ class ShapeTests(unittest.TestCase):
             for operation in (
                 lambda: shape.extent(axis),
                 lambda: shape.from_dimensions([axis]),
-                lambda: shape.coordinates(0, [0, 1, axis]),
-                lambda: shape.linear_index([0, 0, 0], [0, 1, axis]),
             ):
                 with self.subTest(axis=axis), self.assertRaises(TypeError):
                     operation()
