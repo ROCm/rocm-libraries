@@ -24,9 +24,9 @@ from geko.config_generator.load_input_config import (
 )
 from geko.schemas import GemmConfig, GemmType
 
-_F4 = GemmType.from_tensile("T", "N", "F4", "B", "S")
-_F8 = GemmType.from_tensile("T", "N", "F8", "B", "S")
-_B = GemmType.from_tensile("T", "N", "B", "B", "S")
+_F4 = GemmType.from_tensilelite("T", "N", "F4", "B", "S")
+_F8 = GemmType.from_tensilelite("T", "N", "F8", "B", "S")
+_B = GemmType.from_tensilelite("T", "N", "B", "B", "S")
 _SIZES = [[256, 256, 1, 256]]
 
 
