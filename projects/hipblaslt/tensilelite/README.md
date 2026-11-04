@@ -47,6 +47,10 @@ Runs only Python unit tests.
 Prefer locking dependencies to the minimum versions declared in `pyproject.toml`
 so our tests verify compatibility with those versions.
 
+Tox constrains its `deps` with the generated `requirements-tox-constraints.txt`.
+The file selects versions from `uv.lock` without adding packages to an environment.
+Local packages are installed by the existing tox commands.
+
 After editing dependency declarations in `pyproject.toml`, run from this directory:
 
 ```bash
