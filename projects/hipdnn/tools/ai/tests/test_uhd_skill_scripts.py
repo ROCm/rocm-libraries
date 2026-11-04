@@ -905,11 +905,22 @@ def test_the_l1_run_and_its_verdict_end_to_end(tmp_path):
 
 
 def test_an_isolated_run_reads_only_the_tree_it_names(engine_run, tmp_path):
-    # The caller's roots, cache and log file are not inherited, and nothing autotunes.
+    # The caller's roots, cache and log file are not inherited, nothing autotunes, and an
+    # inherited MIOpen find mode cannot change which solution a run measures.
     build = engine_run.isolated_env(
-        base=dict(LEAKY_ENV, HIPDNN_LOG_FILE="/user/log", HIPDNN_FORCE_BENCHMARKING="1")
+        base=dict(
+            LEAKY_ENV,
+            HIPDNN_LOG_FILE="/user/log",
+            HIPDNN_FORCE_BENCHMARKING="1",
+            MIOPEN_FIND_MODE="NORMAL",
+            MIOPEN_FIND_ENFORCE="SEARCH",
+        )
     )
-    assert build == {"HIPDNN_FORCE_BENCHMARKING": "0"}
+    assert build == {
+        "HIPDNN_FORCE_BENCHMARKING": "0",
+        "MIOPEN_FIND_MODE": "FAST",
+        "MIOPEN_FIND_ENFORCE": "NONE",
+    }
     named = engine_run.isolated_env(tmp_path, base=LEAKY_ENV)
     assert named["HIPDNN_DESCRIPTOR_DIR"] == str(tmp_path)
     assert not {"HIPDNN_DESCRIPTOR_RUNTIME_DIR", "HIPDNN_DESCRIPTOR_PATH"} & set(named)
