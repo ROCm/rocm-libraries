@@ -1128,6 +1128,23 @@ _CONFIGS = {
         use_mfma_32x32=True,
         use_transposed_qk_32x32=True,
     ),
+    # cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
+    # prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
+    # of tokens and the bf16 loaders must keep the paged-KV descriptor.
+    71: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=4,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=32,
+    ),
 }
 
 # --- idx64-67: emit_lse (trailing lse_ptr + FP32 LSE store), one per epilogue

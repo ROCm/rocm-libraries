@@ -205,6 +205,17 @@ _CASES = (
             0,
         ),
     ),
+    # D192 short prefill takes the one-warp 2D kernel, whose 512-half K/V copy
+    # ends mid-row: the loaders must keep the paged-KV descriptor.
+    (
+        "gfx950",
+        "2d-bf16-d192-one-warp",
+        "2d",
+        None,
+        (192, 16, "bf16"),
+        _shape([64, 48], [256, 192], 16, 2, 0),
+        _shape([64, 60, 50, 40, 56], [256, 192, 320, 200, 280], 32, 4, 0),
+    ),
     ("gfx950", "3d-decode", "3d", None, (128, 16, "bf16"), *_DECODE),
     ("gfx950", "3d-two-token", "3d", None, (128, 16, "bf16"), *_TWO_TOKEN),
 )
@@ -263,6 +274,15 @@ def test_pair_shares_one_binary(arch, path, route, geometry, first, second):
         # The decode grid indexes sequences directly and emits no search.
         assert au._binary_search_iters(a) != au._binary_search_iters(b)
     assert _key(a, path, arch) == _key(b, path, arch)
+
+
+def test_d192_pair_takes_the_one_warp_kernel():
+    """The D192 pair must stay on the one-warp spec: that is the geometry whose
+    K/V copy ends mid-row, which the numeric pair is there to cover."""
+    case = next(c for c in _CASES if c[1] == "2d-bf16-d192-one-warp")
+    for shape in case[5:]:
+        spec = au._tiled_spec_from_problem(_problem("gfx950", case[4], shape), "gfx950")
+        assert spec.head_size == 192 and spec.num_warps == 1, spec
 
 
 def _encode(x, dtype):

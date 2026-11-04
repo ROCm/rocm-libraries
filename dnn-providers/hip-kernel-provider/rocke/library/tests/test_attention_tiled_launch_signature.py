@@ -207,7 +207,7 @@ def test_tuning_candidate_signature_matches_its_kernel(codepath):
             # The signature is the segment's; _get_3d_pipeline launches the
             # reduce with the production 3D pair.
             kernel, reduce = kernel
-            assert "_dg" not in kernel.name.split("_"), kernel.name
+            assert "dg" not in kernel.name.split("_"), kernel.name
             _, red_sig = au._tiled_3d_signatures(
                 "gfx942",
                 spec.kernel_spec.dtype,

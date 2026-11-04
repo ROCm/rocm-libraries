@@ -1184,6 +1184,25 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma_32x32 = true;
         s->use_transposed_qk_32x32 = true;
         break;
+    /* cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
+     * prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
+     * of tokens and the bf16 loaders must keep the paged-KV descriptor. */
+    case 71:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        break;
 
     default:
         return -1;

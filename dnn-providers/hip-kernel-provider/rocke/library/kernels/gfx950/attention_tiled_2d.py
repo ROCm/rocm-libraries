@@ -2159,13 +2159,18 @@ def build_unified_attention_2d_tiled(
     # return ``0`` (a guaranteed-valid block id). Downstream causal /
     # in_prefix masks already discard the bogus tokens.
     block_table_max_idx = b.to_sgpr_u32(b.mul(num_seqs_p, bt_stride_p))
-    # A copy covers COPY_TOKENS whole tokens (KV_HALVES_PER_CALL is a multiple
-    # of HD). When they fit in one page the bf16/fp16 loaders build the page
-    # base, the in-page token offset and the lane part separately (see
-    # ``_paged_copy``); otherwise each wave's share still sits in one page and
-    # the loaders keep the paged-KV descriptor.
+    # When a copy covers COPY_TOKENS whole tokens and they fit in one page, the
+    # bf16/fp16 loaders build the page base, the in-page token offset and the
+    # lane part separately (see ``_paged_copy``). A copy that ends mid-row
+    # (head_size 192 with one warp: 512 halves are 2 2/3 rows) or spans pages
+    # keeps the paged-KV descriptor, which addresses each lane's own row.
     COPY_TOKENS = KV_HALVES_PER_CALL // HD
-    PAGE_COPIES = not FAST_PAGED_KV_DESC and not KV_FP8 and BS % COPY_TOKENS == 0
+    PAGE_COPIES = (
+        not FAST_PAGED_KV_DESC
+        and not KV_FP8
+        and KV_HALVES_PER_CALL % HD == 0
+        and BS % COPY_TOKENS == 0
+    )
     # With page copies, the loop carries the page ids of the current and the
     # next tile and reads the ids of the tile after next one iteration ahead,
     # so no copy waits on a table read issued just before it. The schedules

@@ -183,11 +183,11 @@ static rocke_value_t* rocke__wave_lds_offset_i64(rocke_gfx950_attn2d_build_ctx_t
     return ctx->wave_lds_off_i64_v;
 }
 
-/* A copy covers copy_tokens whole tokens (KV_HALVES_PER_CALL is a multiple of
- * HD). When they fit in one page the bf16/fp16 loaders address a copy as its
- * page's base, its first token's offset in the page and the lane's own part;
- * otherwise each wave's share still sits in one page and the loaders keep the
- * paged-KV descriptor. The token stride is a kernarg, so the lane part and the
+/* When a copy covers copy_tokens whole tokens and they fit in one page, the
+ * bf16/fp16 loaders address a copy as its page's base, its first token's
+ * offset in the page and the lane's own part. A copy that ends mid-row
+ * (head_size 192 with one warp: 512 halves are 2 2/3 rows) or spans pages
+ * keeps the paged-KV descriptor, which addresses each lane's own row. The token stride is a kernarg, so the lane part and the
  * per-copy token offsets are built once, after the paged-KV descriptor, rather
  * than multiplying the token index in every copy. */
 static int rocke__copy_tokens(const rocke_gfx950_attn2d_build_ctx_t* ctx)
@@ -197,7 +197,8 @@ static int rocke__copy_tokens(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 
 static bool rocke__page_copies(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return !ctx->FAST_PAGED_KV_DESC && !ctx->KV_FP8 && ctx->BS % rocke__copy_tokens(ctx) == 0;
+    return !ctx->FAST_PAGED_KV_DESC && !ctx->KV_FP8 && rocke__kv_halves_per_call(ctx) % ctx->HD == 0
+           && ctx->BS % rocke__copy_tokens(ctx) == 0;
 }
 
 /* A zeroed table of `n` IR values on the builder arena, sized from the spec

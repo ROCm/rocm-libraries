@@ -732,7 +732,8 @@ if(ROCKE_INSTALL_TESTS)
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
     # bound against the compiled code object, the tiled C++ entries' head-count
-    # and arch refusals, and the backward-test memo bound in tests/conftest.py.
+    # and arch refusals, the dense segment-combine launch ABI, and the
+    # backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -745,6 +746,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_tiled_launch_signature.py"
         "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
+        "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_module.py"
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
