@@ -2314,6 +2314,7 @@ def _decode_side(b, s: AttnBwdSpec, a: dict, bz, side: str):
             has_len=a["has_len"],
             len_stride=a["len_stride"],
             ws_seg=a["ws_seg"],
+            tok_rows=a.get(f"ws_rows_{side}"),
         )
     return decode_batched(
         b,

@@ -453,7 +453,8 @@ static rocke_attn_bwd_seq_info_t seq_decode(rocke_ir_builder_t* b,
                                             rocke_value_t* seq_ptr,
                                             rocke_value_t* off_ptr,
                                             const char* mult,
-                                            const char* div)
+                                            const char* div,
+                                            const char* rows)
 {
     rocke_attn_bwd_decode_args_t d = rocke_attn_bwd_decode_args_default();
     d.s_max = V(s_max);
@@ -467,6 +468,7 @@ static rocke_attn_bwd_seq_info_t seq_decode(rocke_ir_builder_t* b,
         d.mult = V(A(b, mult));
         d.div = V(A(b, div));
         d.ws_seg = V(A(b, "ws_seg"));
+        d.tok_rows = A(b, rows);
         return rocke_attn_bwd_decode_thd(b, seq_guards, batch, &d);
     }
     return rocke_attn_bwd_decode_batched(b, seq_guards, batch, &d);
@@ -640,8 +642,16 @@ static void prep_q_role(rocke_ir_builder_t* b,
     c.ln = ln;
     c.h = h;
     c.io = io;
-    c.seq = seq_decode(
-        b, seq_guards, spec, z, A(b, "S_q_max"), A(b, "SEQ_Q"), A(b, "OFF_Q"), "q_mult", "q_div");
+    c.seq = seq_decode(b,
+                       seq_guards,
+                       spec,
+                       z,
+                       A(b, "S_q_max"),
+                       A(b, "SEQ_Q"),
+                       A(b, "OFF_Q"),
+                       "q_mult",
+                       "q_div",
+                       "ws_rows_q");
     rocke_attn_bwd_iv_t nh_v = V(A(b, "h_q"));
     const rocke_attn_bwd_iv_t* nh = ws_layout(spec) == ROCKE_ATTN_BWD_WS_TOKEN_MAJOR ? &nh_v : NULL;
     c.lse2_ws = prep_ws(&c, A(b, "WS_LSE2"), 1, nh);
@@ -708,7 +718,8 @@ static void prep_kv_role(rocke_ir_builder_t* b,
                                                A(b, "SEQ_KV"),
                                                A(b, "OFF_KV"),
                                                "kv_mult",
-                                               "kv_div");
+                                               "kv_div",
+                                               "ws_rows_kv");
     rocke_value_t* h_k = A(b, "h_k");
     rocke_value_t* h_v = A(b, "h_v");
     rocke_value_t* y2 = rocke_b_sub(b, y, A(b, "h_q"));
@@ -752,9 +763,9 @@ static void wl_weight(rocke_ir_builder_t* b,
                       rocke_value_t** key,
                       rocke_value_t** tiles)
 {
-    static const char* const SIDES[2][5] = {
-        {"S_q_max", "OFF_Q", "SEQ_Q", "q_mult", "q_div"},
-        {"S_kv_max", "OFF_KV", "SEQ_KV", "kv_mult", "kv_div"},
+    static const char* const SIDES[2][6] = {
+        {"S_q_max", "OFF_Q", "SEQ_Q", "q_mult", "q_div", "ws_rows_q"},
+        {"S_kv_max", "OFF_KV", "SEQ_KV", "kv_mult", "kv_div", "ws_rows_kv"},
     };
     rocke_value_t* lens[2];
     for(int side = 0; side < 2; ++side)
@@ -768,7 +779,12 @@ static void wl_weight(rocke_ir_builder_t* b,
         d.seq_ptr = A(b, SIDES[side][2]);
         d.has_len = V(A(b, "has_len"));
         d.len_stride = V(A(b, "len_stride"));
-        lens[side] = rocke_attn_bwd_decode_thd(b, seq_guards, s, &d).length;
+        rocke_attn_bwd_seq_info_t info = rocke_attn_bwd_decode_thd(b, seq_guards, s, &d);
+        rocke_value_t* tok0 = info.tok0;
+        rocke_value_t* length = info.length;
+        rocke_attn_bwd_thd_token_guard(
+            b, &tok0, &length, V(A(b, SIDES[side][5])), V(A(b, "ws_seg")));
+        lens[side] = length;
     }
     *key = lens[0];
     *tiles = rocke_attn_bwd_worklist_tiles(b, lens[1], A(b, "wl_kn0"));
@@ -1090,8 +1106,16 @@ static rocke_kernel_def_t* build_convert(rocke_ir_builder_t* b,
     lanes_t ln = make_lanes(b, spec, rows);
     rocke_value_t* h = rocke_b_block_id_y(b);
     rocke_value_t* z = rocke_b_block_id_z(b);
-    rocke_attn_bwd_seq_info_t seq = seq_decode(
-        b, &seq_guards, spec, z, A(b, "S_max"), A(b, "SEQ"), A(b, "OFF"), "tok_mult", "tok_div");
+    rocke_attn_bwd_seq_info_t seq = seq_decode(b,
+                                               &seq_guards,
+                                               spec,
+                                               z,
+                                               A(b, "S_max"),
+                                               A(b, "SEQ"),
+                                               A(b, "OFF"),
+                                               "tok_mult",
+                                               "tok_div",
+                                               "ws_rows");
 
     convert_ctx_t c;
     memset(&c, 0, sizeof(c));

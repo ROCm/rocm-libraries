@@ -163,6 +163,10 @@ cache or table smaller than the request.
 
 Device data that reaches a kernel without the check has a defined behaviour:
 
+* a `cu_seqlens_q` sequence that starts below 0 or ends past `total_q` (the
+  `ws_rows_q` kernarg) is decoded as empty at token 0, in the main kernel, the
+  q-side prep and the dQ convert alike, so none of its Q / O / dO / LSE rows
+  is read and none of its dQ rows is written (`decode_thd(tok_rows=)`);
 * a kv length is clamped into `[0, max_seqlen_kv]`;
 * `page_zero` and `page_convert` range-check every block id they read: a bad
   id addresses block 0, its workspace slot moves past the workspace (to

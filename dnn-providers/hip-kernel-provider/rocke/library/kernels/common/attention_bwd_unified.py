@@ -495,9 +495,13 @@ def _emit_main(spec, arch: str, *, sentinel: bool = True):
     )  # fmt: skip
     s_idx = work.batch
     # q side: THD rows by token (cu_seqlens_q, int32 token offsets; the
-    # workspace rows are the tokens, ws_rows_q = total_q); kv side: the
-    # sequence's kv length, clamped to [0, max_seqlen_kv].
-    seq_q = decode_thd(b, s_idx, s_max=a["max_seqlen_q"], off_ptr=a["CU_SEQLENS_Q"])
+    # workspace rows are the tokens, ws_rows_q = total_q, which also bounds
+    # the token base: a sequence outside [0, total_q) decodes as empty); kv
+    # side: the sequence's kv length, clamped to [0, max_seqlen_kv].
+    seq_q = decode_thd(
+        b, s_idx, s_max=a["max_seqlen_q"], off_ptr=a["CU_SEQLENS_Q"],
+        tok_rows=a["ws_rows_q"],
+    )  # fmt: skip
     seq_kv = decode_batched(
         b, s_idx, s_max=a["max_seqlen_kv"], seq_ptr=a["SEQ_LENS_KV"], has_len=1
     )

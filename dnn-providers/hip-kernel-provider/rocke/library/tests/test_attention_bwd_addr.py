@@ -118,6 +118,49 @@ def test_thd_decode_slot_rows(flag):
         assert info.ws_row0.v == want and info.ws_row0.ty == "i64"
 
 
+@pytest.mark.parametrize("seg", [0, "runtime0", "runtime1", 1])
+def test_thd_token_guard(seg):
+    """``tok_rows`` given: a sequence outside ``[0, tok_rows)`` (negative
+    start, or end past the bound, also when the offsets decrease) decodes as
+    empty at token 0 under ``ws_seg = 0``; a sequence that fits, and every
+    sequence under ``ws_seg != 0`` (no token bound), is unchanged."""
+    b = IntEvalBuilder()
+    rows = 100
+    # seq 0 fits [0, 40); 1 ends exactly at 100; 2 ends past 100; 3
+    # decreases (len 0, start past the bound); 4 starts negative; 5 is
+    # clamped to S_max = 64 tokens and fits
+    offs = np.array([0, 40, 100, 130, -5, 3, 200], np.int32)
+    p = b.add_buffer("OFF", offs)
+    flag = {0: 0, 1: 1, "runtime0": b.const_i32(0), "runtime1": b.const_i32(1)}
+    guarded = seg in (0, "runtime0")
+    bad = {2, 3, 4} if guarded else set()
+    for s in range(6):
+        info = A.decode_thd(
+            b, b.const_i32(s), s_max=b.const_i32(64), off_ptr=p,
+            ws_seg=flag[seg], tok_rows=b.const_i32(rows),
+        )  # fmt: skip
+        raw_tok = int(offs[s])
+        raw_len = min(max(int(offs[s + 1]) - raw_tok, 0), 64)
+        if guarded and (raw_tok < 0 or raw_tok + raw_len > rows):
+            assert s in bad, s
+            assert (info.tok0.v, info.length.v, info.last.v) == (0, 0, 0)
+        else:
+            assert s not in bad
+            assert (info.tok0.v, info.length.v) == (raw_tok, raw_len)
+        if guarded:
+            assert 0 <= info.tok0.v and info.tok0.v + info.length.v <= rows
+
+
+def test_thd_token_guard_off_without_rows():
+    """No ``tok_rows``: the decode is unchanged (no guard op emitted)."""
+    b = IntEvalBuilder()
+    p = b.add_buffer("OFF", np.array([-5, 3], np.int32))
+    info = A.decode_thd(b, b.const_i32(0), s_max=64, off_ptr=p)
+    assert (info.tok0.v, info.length.v) == (-5, 8)
+    t0, n = A.thd_token_guard(b, info.tok0, info.length, tok_rows=100, ws_seg=1)
+    assert t0 is info.tok0 and n is info.length
+
+
 def _storage(lens, *, lead, gap, tail):
     """Offsets of ``lens`` sequences in a storage with ``lead`` tokens before
     the first, ``gap`` tokens after every one and ``tail`` after the last."""

@@ -823,6 +823,8 @@ rocke_attn_bwd_seq_info_t
         args.mult = ivv(a[q ? "q_mult" : "kv_mult"]);
         args.div = ivv(a[q ? "q_div" : "kv_div"]);
         args.ws_seg = ivv(a["ws_seg"]);
+        /* the dq ABI carries ws_rows_q only: no kv-side token guard */
+        args.tok_rows = q ? a["ws_rows_q"] : NULL;
         out = rocke_attn_bwd_decode_thd(b, seq_guards, bz, &args);
     }
     else

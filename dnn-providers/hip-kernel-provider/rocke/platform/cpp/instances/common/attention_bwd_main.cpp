@@ -284,6 +284,7 @@ rocke_attn_bwd_seq_info_t decode_side(Main& m, const Kargs& a, V bz, bool q)
         args.mult = ivv(a[q ? "q_mult" : "kv_mult"]);
         args.div = ivv(a[q ? "q_div" : "kv_div"]);
         args.ws_seg = ivv(a["ws_seg"]);
+        args.tok_rows = a[q ? "ws_rows_q" : "ws_rows_kv"];
         out = rocke_attn_bwd_decode_thd(b, &m.seq_guards, bz, &args);
     }
     else
