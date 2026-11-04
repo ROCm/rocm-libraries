@@ -24,10 +24,12 @@
 #   10 -- conv_fwd_problem_block()
 #   11 -- conv_fwd_problem_block(is_3d)
 #   12 -- deep_fused_conv_pool_signature(2-D spec)
-#   13 -- conv_arg_names("fwd", two_stage)       (rejected)
+#   13 -- conv_arg_names("fwd", two_stage)       (the split-K forward)
 #   14 -- conv_arg_names("bwd")                  (rejected)
 #   15 -- conv_direct_arg_names("wgrad")
 #   16 -- conv_direct_arg_names("bwd")           (rejected)
+#   17 -- conv_arg_names("fwd", is_3d, two_stage)
+#   18 -- conv_arg_names("dgrad", two_stage)     (rejected)
 import sys
 
 from kernels.common.conv_abi import (
@@ -67,6 +69,8 @@ _CONFIGS = {
     14: lambda: conv_arg_names(direction="bwd"),
     15: lambda: conv_direct_arg_names(direction="wgrad"),
     16: lambda: conv_direct_arg_names(direction="bwd"),
+    17: lambda: conv_arg_names(direction="fwd", is_3d=True, two_stage=True),
+    18: lambda: conv_arg_names(direction="dgrad", two_stage=True),
 }
 
 
