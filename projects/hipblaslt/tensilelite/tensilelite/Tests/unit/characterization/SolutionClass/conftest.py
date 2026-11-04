@@ -41,8 +41,7 @@ from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Capabilities import makeIsaInfoMap
 from tensilelite.Common.DataType import DataType
 from tensilelite.SolutionStructs.Problem import ProblemType
-from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from tensilelite.Toolchain.Validators import validateToolchain
 import tensilelite.LibraryIO as LibraryIO
 
 # Reuse the LibraryIO suite's committed, vendored logic fixture (read-only).
@@ -57,12 +56,6 @@ def cxx_compiler():
 @pytest.fixture(scope="session")
 def isa_info_map(cxx_compiler):
     return makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler)
-
-
-@pytest.fixture(scope="session")
-def assembler(cxx_compiler):
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx_compiler, bundler, "default").assembler
 
 
 @pytest.fixture(scope="session")

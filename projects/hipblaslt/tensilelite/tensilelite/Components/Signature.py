@@ -70,7 +70,7 @@ def _fusedA2AAlignLine(nbytes):
 
 
 # Counter-block region offsets, twinned with kCounter*Offset in
-# client/src/FusedA2ARunner.cpp; the flag-block offset and the
+# client/src/DeviceContext.cpp; the flag-block offset and the
 # FusedDrain bits with their namesakes in client/include/FusedA2AKernArg.hpp.
 # The three leading counter regions are sized by FUSED_A2A_MAX_RANKS rather than
 # the runtime W. Each region starts on a 64-byte line; the trailing
