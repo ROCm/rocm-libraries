@@ -897,6 +897,16 @@ def isExtractableIndex(ks, index, tc='x'):
 ################################################################################
 _stinkyTuneAnnounced = set()  # print the StinkyTofuParameters notice once per distinct value
 
+def _usesFp8LdsConfig(dtype, state):
+    """True when the LDS pad / block config of an 8-bit tensor follows the fp8 rules.
+
+    Sparse int8 kernels read LDS through the same LDS-transpose and TDM path as
+    fp8, so they share its pad and block sizes. Dense int8 keeps its existing
+    path: this module is shared with hipBLASLt, whose int8 kernels must not move.
+    """
+    return dtype.is8bitFloat() or (bool(state["ProblemType"]["Sparse"]) and dtype.isInt8())
+
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -4532,7 +4542,7 @@ class Solution(collections.abc.Mapping):
                       mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
                       tdmComponentBytes=tdmComponentBytes,
                       tdmNumComponents=tdmNumComponents)
-                elif macDtype.is8bitFloat() and ldstr:
+                elif _usesFp8LdsConfig(macDtype, state) and ldstr:
                   ldsPad = get_fp8_mt_config(
                       mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
                       tdmComponentBytes=tdmComponentBytes,
@@ -4783,7 +4793,7 @@ class Solution(collections.abc.Mapping):
                                             state.get(f"enableTDM{tc}", False),
                                             tdmComponentBytes=tdmComponentBytes,
                                             tdmNumComponents=tdmNumComponents)
-                  elif tmpBpe == 1 and ldsType.is8bitFloat() and state.get("enableLDSTr%s"%tc, False):
+                  elif tmpBpe == 1 and _usesFp8LdsConfig(ldsType, state) and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp8_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
                                             state.get(f"enableTDM{tc}", False),
                                             tdmComponentBytes=tdmComponentBytes,
@@ -6437,7 +6447,7 @@ class Solution(collections.abc.Mapping):
             mt, miwt, miwg, k, tdm,
             tdmComponentBytes=tdmComponentBytes,
             tdmNumComponents=tdmNumComponents)
-      if dtype.numBytes() == 1 and dtype.is8bitFloat() and ldstr:
+      if dtype.numBytes() == 1 and _usesFp8LdsConfig(dtype, state) and ldstr:
         return get_fp8_valid_blocks(
             mt, miwt, miwg, k, tdm,
             tdmComponentBytes=tdmComponentBytes,
