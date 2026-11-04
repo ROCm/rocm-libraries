@@ -526,8 +526,8 @@ def test_shared_indexed_writer_rejects_incomplete_master_state(tmp_path, payload
 def test_shared_metadata_utilities_work_without_generator_imports(tmp_path):
     """Use both utilities in a fresh interpreter with generator imports forbidden."""
     # A fresh interpreter keeps pytest's already-imported generator modules from
-    # hiding dependencies from the import guard. As in test_namespace_bridge.py,
-    # pass a self-contained script to Python's -c option.
+    # hiding dependencies from the import guard. Pass a self-contained script to
+    # Python's -c option.
     script = """
 import importlib.abc
 import sys
