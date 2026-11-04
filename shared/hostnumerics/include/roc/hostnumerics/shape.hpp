@@ -7,8 +7,8 @@
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
-#include <numeric>
 #include <optional>
+#include <roc/hostnumerics/permutation.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -105,21 +105,19 @@ class Shape {
     //   etc.
     //
     // The linear index is the inner product of `indices` and the logical strides.
-    size_t linearIndex(std::span<const size_t> indices, std::span<const size_t> order) const {
+    size_t linearIndex(std::span<const size_t> indices, const Permutation& order) const {
         validateLinearIndex(indices, order);
         return computeLinearIndex(indices, order);
     }
 
     size_t linearIndex(std::span<const size_t> indices) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return linearIndex(indices, order);
+        return linearIndex(indices, Permutation::identity(rank()));
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
     // original axis order: Shape{2, 3, 5}.coordinates(27, (1, 2, 0)) is (1, 2, 3).
     // The index must lie in [0, elementCount()).
-    std::vector<size_t> coordinates(size_t index, std::span<const size_t> order) const {
+    std::vector<size_t> coordinates(size_t index, const Permutation& order) const {
         validateCoordinates(index, order);
         std::vector<size_t> result(rank());
         computeCoordinates(index, order, result);
@@ -127,9 +125,7 @@ class Shape {
     }
 
     std::vector<size_t> coordinates(size_t index) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return coordinates(index, order);
+        return coordinates(index, Permutation::identity(rank()));
     }
 
     bool operator==(const Shape& other) const noexcept {
@@ -147,21 +143,13 @@ class Shape {
         for (size_t axis : axes) validateDimension(axis);
     }
 
-    void validateOrder(std::span<const size_t> order) const {
+    void validateOrder(const Permutation& order) const {
         if (order.size() != rank())
             throw std::runtime_error("Tensor index order rank " + std::to_string(order.size()) +
                                      " does not match shape rank " + std::to_string(rank()) + ".");
-
-        std::vector<bool> seen(rank(), false);
-        for (size_t axis : order) {
-            if (axis >= rank() || seen[axis])
-                throw std::runtime_error("Tensor index order must be a permutation of [0, " +
-                                         std::to_string(rank()) + ").");
-            seen[axis] = true;
-        }
     }
 
-    void validateLinearIndex(std::span<const size_t> indices, std::span<const size_t> order) const {
+    void validateLinearIndex(std::span<const size_t> indices, const Permutation& order) const {
         validateOrder(order);
         if (indices.size() != rank())
             throw std::runtime_error("Tensor coordinate rank " + std::to_string(indices.size()) +
@@ -174,7 +162,7 @@ class Shape {
                                          ").");
     }
 
-    void validateCoordinates(size_t index, std::span<const size_t> order) const {
+    void validateCoordinates(size_t index, const Permutation& order) const {
         validateOrder(order);
         if (index >= elementCount())
             throw std::runtime_error("Tensor logical index " + std::to_string(index) +
@@ -182,7 +170,7 @@ class Shape {
     }
 
     size_t computeLinearIndex(std::span<const size_t> indices,
-                              std::span<const size_t> order) const noexcept {
+                              const Permutation& order) const noexcept {
         size_t result = 0;
         for (size_t position = 0; position < rank(); ++position) {
             const size_t axis = order[position];
@@ -191,7 +179,7 @@ class Shape {
         return result;
     }
 
-    void computeCoordinates(size_t index, std::span<const size_t> order,
+    void computeCoordinates(size_t index, const Permutation& order,
                             std::span<size_t> result) const noexcept {
         for (size_t position = rank(); position > 0; --position) {
             const size_t axis = order[position - 1];
