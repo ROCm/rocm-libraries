@@ -514,23 +514,47 @@ def test_requeued_trial_runs_again_after_the_build_cap(tmp_path):
 def test_proposal_needing_a_build_past_the_cap_is_told_invalid(tmp_path):
     # Round 1: P1 plans the whole cap (A, B); P2 may still ask for kernels that
     # need no build: A runs, E would need a third build and is told invalid at
-    # once, without a trial. Round 2: the cap is spent, but P2 re-uses B.
+    # once, without a trial, and its slot goes to B, which needs no new build.
     ad = FakeAdapter({"P1": ABCD, "P2": list("ABCE")})
-    s, made, co = run(tmp_path, ad, {"P1": [["A", "B"]], "P2": [["A", "E"], ["B"]]},
+    s, made, co = run(tmp_path, ad, {"P1": [["A", "B"]], "P2": [["A", "E"], ["C"]]},
                       trials_per_problem=2, new_builds_per_run=2)
-    assert ad.builds == [["A", "B"]] and made["P2"].asks == [2, 1]
+    assert ad.builds == [["A", "B"]] and made["P2"].asks == [2]
     assert sorted(pairs(ad.measured)) == [("P1", "A"), ("P1", "B"), ("P2", "A"),
                                           ("P2", "B")]
     assert not events(tmp_path / "out", "cancel") and s.counts["cancelled"] == 0
-    (past,) = [e for e in events(tmp_path / "out", "trial")
-               if e["admission"] == "past_build_cap"]
-    assert (past["kernel"], past["trial_uid"]) == ("E", "P2:2")
+    trials = {e["trial_uid"]: e for e in events(tmp_path / "out", "trial")
+              if e["problem"] == "P2"}
+    assert {u: (e["kernel"], e["admission"]) for u, e in trials.items()} == {
+        "P2:1": ("A", "admitted"), "P2:2": ("E", "past_build_cap"),
+        "refill:1": ("B", "refilled")}
+    assert trials["refill:1"]["origin"] == "refill"
     told = {ob.trial.uid: ob for ob in made["P2"].told}
     assert told["P2:2"].status == "invalid" and told["P2:2"].key is not None
     assert "new_builds_per_run" in told["P2:2"].detail
-    assert s.counts["past_build_cap"] == 1 and co.ledger.trials["P2"] == 2
-    assert not made["P2"].pending
+    assert told["refill:1"].ok and told["refill:1"].value == 1.0
+    assert (s.counts["past_build_cap"], s.counts["refilled"]) == (1, 1)
+    assert co.ledger.trials["P2"] == 2 and not made["P2"].pending
     assert s.status == "complete"
+
+
+def test_past_the_cap_a_refill_keeps_the_run_from_stalling(tmp_path):
+    # P1 spends the cap on A, B, C in round 1. In round 2 P2's strategy proposes
+    # only kernels that need a build (D, E): each is told invalid, and its slot
+    # goes to a built kernel P2 has not tried, the fastest on P1 first (C, B).
+    # Without the refill round 2 has no new result: the run stops stalled with
+    # P2 at 1 of its 3 trials and A, its slowest kernel, as its winner.
+    lat = {("P1", "A"): 3.0, ("P1", "B"): 2.0, ("P1", "C"): 1.0,
+           ("P2", "A"): 3.0, ("P2", "B"): 2.0, ("P2", "C"): 1.0}
+    ad = FakeAdapter({"P1": list("ABCDE"), "P2": list("ABCDE")}, lat=lat)
+    s, made, co = run(tmp_path, ad, {"P1": [["A", "B", "C"]], "P2": [["A"], ["D", "E"]]},
+                      trials_per_problem=3, new_builds_per_run=3, batch_per_problem=3,
+                      max_stall_rounds=1)
+    assert pairs(ad.measured) == [("P1", "A"), ("P1", "B"), ("P1", "C"), ("P2", "A"),
+                                  ("P2", "C"), ("P2", "B")]
+    assert (s.stop_reason, s.winners) == ("searched", {"P1": "C", "P2": "C"})
+    assert (s.counts["past_build_cap"], s.counts["refilled"]) == (2, 2)
+    assert co.ledger.trials["P2"] == 3 and not made["P2"].pending
+    assert [ob.trial.origin for ob in made["P2"].told] == ["", "", "", "refill", "refill"]
 
 
 def _cap_grid():
@@ -589,12 +613,12 @@ def test_progress_lines_per_round_and_build(tmp_path):
     assert lines == [
         "  [search] round 1: building 3 kernel(s) (0/20 builds); 0/600 s",
         "  [search] round 1: 4 proposed, 4 admitted, 0 cached, 0 known failed, 0 past"
-        " the build cap; 2 built, 1 failed (3/20 builds); 3 measured, 3 ok; 1/2"
-        " problems active; 0/600 s",
+        " the build cap, 0 refilled; 2 built, 1 failed (3/20 builds); 3 measured,"
+        " 3 ok; 1/2 problems active; 0/600 s",
         "  [search] round 2: building 1 kernel(s) (3/20 builds); 0/600 s",
         "  [search] round 2: 1 proposed, 1 admitted, 0 cached, 0 known failed, 0 past"
-        " the build cap; 1 built, 0 failed (4/20 builds); 1 measured, 1 ok; 0/2"
-        " problems active; 0/600 s",
+        " the build cap, 0 refilled; 1 built, 0 failed (4/20 builds); 1 measured,"
+        " 1 ok; 0/2 problems active; 0/600 s",
         "  [search] confirming 4 finalist(s) of 2 problem(s), 3 fresh call(s) each",
     ]
 

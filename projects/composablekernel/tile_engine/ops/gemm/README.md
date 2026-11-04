@@ -210,8 +210,15 @@ costs no further build, so problems that share kernels leave room for others,
 and such reuse goes on after the cap is spent. A proposal that would need a
 build past the cap is told `invalid` at once, without a trial (it cannot be
 built in this run), so a round never plans more builds than
-`new_builds_per_run` allows and the strategy moves on to other kernels; the
-run stops at the cap once no problem has an untried candidate that is built.
+`new_builds_per_run` allows and the strategy moves on to other kernels. Past
+the cap a strategy reaches a built kernel only by proposing it, and most of its
+proposals then need a build, so the slot of each one told `invalid` goes to
+the problem's best untried kernel that needs no build (`refilled` in the round
+line): the one closest to the best on another problem that measured it, in
+latency relative to that best. Its result is told to the strategy like any
+other. A cap-bound run therefore spends its trial budgets on the kernels it
+built, and stops at the cap once no problem has an untried candidate that is
+built; without the refill the stall guard would end it first.
 A proposal of a kernel whose build already failed, for any problem, is told
 that `compile_error` again without a trial.
 

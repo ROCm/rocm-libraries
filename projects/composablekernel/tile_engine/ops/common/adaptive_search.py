@@ -649,10 +649,15 @@ class SearchCoordinator:
     cached result, and one that needs a build once this round's builds spend
     the cap is ``invalid`` (it cannot be built in this run), so a round never
     plans more builds than the cap allows and no strategy waits for such a
-    proposal. Every trial is told before the strategy is asked again; a
-    problem stops at its trial budget, or when its strategy is done or asks
-    nothing while waiting for no result (or only for trials the adapter
-    cancelled, which are never told). The run stops when no problem is
+    proposal. Its slot goes to the problem's best untried candidate that needs
+    no build (``_refill``), told as a trial the strategy did not ask: past the
+    cap a strategy reaches a built kernel only by proposing it, and most of
+    its proposals then need a build, so without the refill the stall guard
+    would end problems with trials and built kernels left. Every trial is
+    told before the strategy is asked again; a problem stops at its trial
+    budget, or when its strategy is done or asks nothing while waiting for no
+    result (or only for trials the adapter cancelled, which are never told).
+    The run stops when no problem is
     active, at the deadline (checked before every ask), at the build cap once
     no active problem has an untried candidate that is built or planned, or
     after ``max_stall_rounds`` rounds in a row without a new result. Any error
@@ -695,8 +700,8 @@ class SearchCoordinator:
         self.problems: List[_Problem] = []
         self.counts: Dict[str, Any] = dict.fromkeys(
             ("rounds", "proposed", "admitted", "cached", "invalid", "known_failed",
-             "past_build_cap", "built", "build_failed", "measured", "ok", "requeued",
-             "cancelled", "confirm_calls"), 0
+             "past_build_cap", "refilled", "built", "build_failed", "measured", "ok",
+             "requeued", "cancelled", "confirm_calls"), 0
         )
         self.counts["failed_by_status"] = {}
         self.unresolved: Dict[str, str] = {}
@@ -900,15 +905,42 @@ class SearchCoordinator:
         """Admitting ``c`` costs a new build: no result yet, none planned."""
         return c.canonical_key not in planned and self.registry.get(c.canonical_key) is None
 
-    def _build_free(self, p: _Problem, planned=()) -> int:
-        """``p``'s candidates without a result that are built, or planned this
-        round, already: work that needs no new build. A failed build is not
-        work: proposing it is answered from its result."""
+    def _build_free_rows(self, p: _Problem, planned=(), inflight=()) -> List[int]:
+        """``p``'s candidates (rows) without a result, nor in flight this round,
+        that are built, or planned this round, already: work that needs no new
+        build. A failed build is not work: proposing it is answered from its
+        result."""
         def ready(c):
             res = self.registry.get(c.canonical_key)
             return c.canonical_key in planned or (res is not None and res.path is not None)
 
-        return sum(1 for k, i in p.members.items() if k not in p.seen and ready(p.cands[i]))
+        return [i for k, i in p.members.items()
+                if k not in p.seen and (p.key, k) not in inflight and ready(p.cands[i])]
+
+    def _build_free(self, p: _Problem, planned=()) -> int:
+        return len(self._build_free_rows(p, planned))
+
+    def _refill(self, p: _Problem, n: int, planned, inflight) -> List[Candidate]:
+        """At most ``n`` of ``p``'s build-free candidates (``_build_free_rows``),
+        best first: by the lowest latency relative to the best of another
+        problem that measured it; unmeasured ones last, in candidate order.
+        Past the build cap a strategy reaches a built kernel only by proposing
+        it, so each of its proposals told past the cap leaves its slot to one
+        of these, and a cap-bound run spends its trial budgets on the kernels
+        it built instead of stalling."""
+        if n <= 0:
+            return []
+        floor = {q.key: min(v[0] for v in q.best.values())
+                 for q in self.problems if q is not p and q.best}
+
+        def rank(i):
+            ck = p.cands[i].canonical_key
+            rel = [q.best[ck][0] / floor[q.key] for q in self.problems
+                   if q.key in floor and ck in q.best]
+            return (min(rel, default=math.inf), i)
+
+        rows = sorted(self._build_free_rows(p, planned, inflight), key=rank)
+        return [p.cands[i] for i in rows[:n]]
 
     def _search(self) -> str:
         stall = 0
@@ -942,7 +974,8 @@ class SearchCoordinator:
         self._progress(
             f"{d['proposed']} proposed, {d['admitted']} admitted, {d['cached']} cached, "
             f"{d['known_failed']} known failed, {d['past_build_cap']} past the build "
-            f"cap; {d['built']} built, {d['build_failed']} failed ({self.ledger.builds}/"
+            f"cap, {d['refilled']} refilled; {d['built']} built, {d['build_failed']} "
+            f"failed ({self.ledger.builds}/"
             f"{self.ledger.new_builds_per_run} builds); {d['measured']} measured, "
             f"{d['ok']} ok; {sum(not p.finished for p in self.problems)}/"
             f"{len(self.problems)} problems active")
@@ -1029,8 +1062,16 @@ class SearchCoordinator:
             # An empty ask means done only when every trial was told before it;
             # a trial re-admitted just above is still pending in the strategy.
             p.asked_empty = not trials and room == batch
+            past = self.counts["past_build_cap"]
             for t in trials:
                 place(p, t, "admitted")
+            # Its result is told to the strategy as a trial it did not ask.
+            for c in self._refill(p, self.counts["past_build_cap"] - past, planned,
+                                  inflight):
+                self.counts["refilled"] += 1
+                uid = f"refill:{self.counts['refilled']}"
+                place(p, self._ck.Trial(genome=p.space.encode(dict(c.record)), uid=uid,
+                                        origin="refill"), "refilled")
 
         progress = False
         missing = self.registry.missing([c for _, _, _, c in admitted])
