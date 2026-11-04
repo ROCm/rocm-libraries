@@ -98,8 +98,8 @@ def test_helper_compile_runs_while_assembly_kernels_are_generated(tmp_path, buil
 
 def test_helper_compile_takes_one_slot_of_the_pool_budget(tmp_path, builders):
     _write(tmp_path)
-    # Codegen, the invalid-kernel check and assembly.
-    assert builders.poolProcs == [7, 7, 7]
+    # Codegen and assembly (the invalid-kernel check runs in the parent).
+    assert builders.poolProcs == [7, 7]
 
 
 @pytest.mark.parametrize(
@@ -166,7 +166,7 @@ def test_helper_compile_gets_one_chunk_per_compile_job(tmp_path, builders):
     _write(tmp_path, srcToolchain=_chunkingToolchain(), kernelHelperObjs=HELPERS)
 
     assert seen == [{f"Kernels_chunk{i}.cpp": True for i in range(4)}]
-    assert builders.poolProcs == [20, 20, 20]
+    assert builders.poolProcs == [20, 20]
 
 
 @pytest.mark.parametrize(
@@ -203,10 +203,9 @@ def test_budget_of_one_compiles_before_codegen(tmp_path, builders):
     assert builders.events == [
         "helper compile",
         "Generating assembly kernels",
-        "check invalid kernels and results",
         "Writing assembly kernels",
     ]
-    assert builders.poolProcs == [1, 1, 1]
+    assert builders.poolProcs == [1, 1]
 
 
 def test_generated_sources_are_dropped_once_written(tmp_path, builders):
@@ -228,7 +227,7 @@ def test_generated_sources_are_dropped_once_written(tmp_path, builders):
 def test_generate_sources_and_exit_does_not_compile(tmp_path, builders):
     _write(tmp_path, generateSourcesAndExit=True)
     assert "helper compile" not in builders.events
-    assert builders.poolProcs == [8, 8, 8]
+    assert builders.poolProcs == [8, 8]
     assert (tmp_path / "Kernels.cpp").is_file()
 
 

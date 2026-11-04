@@ -695,10 +695,14 @@ def _checkInvalidSolutions(splitGSU, removeKernelNames, solutions):
         invalids.append(False)
     return invalids
 
-def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool, procs=None):
-    removeKernelsAndResultsFlag = ParallelMap2(functools.partial(_checkInvalidSolutionsAndKernels, errorTolerant),
-                                               zip(results, kernels), "check invalid kernels and results", return_as="list",
-                                               procs=procs)
+def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool):
+    # In the parent: the check is one attribute test per kernel. In a process pool each task
+    # pickled the codegen result and the kernel's state to a worker and back, and the pool had to
+    # be restarted or shrunk to the number of kernels and grown again for the next step.
+    removeKernelsAndResultsFlag = [
+        _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel)
+        for result, kernel in zip(results, kernels)
+    ]
 
     if any(removeKernelsAndResultsFlag) and not errorTolerant:
         printExit("** kernel generation failure **")
@@ -1248,7 +1252,6 @@ def finishSolutionsAndKernels(build: BenchmarkKernelBuild):
     with timing_context("python_kernel_validate"):
         removeInvalidSolutionsAndKernels(
             asmResults, asmKernels, solutions, build.errorTolerant, getVerbosity(), splitGSU,
-            procs=poolSize,
         )
         validKeys = {
             getKernelCompileKey(kernel, splitGSU) for kernel in asmKernels
