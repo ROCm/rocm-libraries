@@ -41,6 +41,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/AttentionDenseCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
  * @file AttentionDenseNative.cpp
@@ -80,102 +81,29 @@ constexpr std::string_view RAGGED_FIELD = "ragged";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
 
-/// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout.
-constexpr uint32_t BATCH_AXIS = 0;
-constexpr uint32_t HEAD_AXIS = 1;
-constexpr uint32_t SEQ_AXIS = 2;
-constexpr uint32_t HEAD_SIZE_AXIS = 3;
-constexpr uint32_t SDPA_RANK = 4;
-
-// ---------------------------------------------------------------------------
-// Matching helpers
-// ---------------------------------------------------------------------------
-
-const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
-
-/// The node the matchers read, or nullptr if the graph is not a single SDPA-forward node.
-const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
-{
-    if(context.graph.nodeCount() != 1)
-    {
-        return nullptr;
-    }
-
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::SdpaAttributes)
-    {
-        return nullptr;
-    }
-
-    return &node.attributesAs<data_objects::SdpaAttributes>();
-}
+// The graph-reading helpers every single-node SDPA-forward pack shares.
+using sdpa_graph::BATCH_AXIS;
+using sdpa_graph::describeOperand;
+using sdpa_graph::findTensor;
+using sdpa_graph::hasBshdStrides;
+using sdpa_graph::hasSdpaForwardNode;
+using sdpa_graph::HEAD_AXIS;
+using sdpa_graph::HEAD_SIZE_AXIS;
+using sdpa_graph::SDPA_RANK;
+using sdpa_graph::sdpaNode;
+using sdpa_graph::SEQ_AXIS;
 
 // Every product of graph-controlled extents goes through this: an unchecked product is
 // signed overflow. Every factor here is an extent isWellFormedOperand already held positive.
 using pack_features::checkedProduct;
 
-/// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
-/// checked before anything indexes an axis.
+/// sdpa_graph::isWellFormedOperand, and no ragged offset tensor: a ragged tensor packs the
+/// sequences back to back, and the dense kernels index the buffer as (B, S, H, D), so they
+/// would read and write past each sequence. The dense packs' own check.
 bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
 {
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
-       || strides->size() != SDPA_RANK)
-    {
-        return false;
-    }
-
-    for(const auto dim : *dims)
-    {
-        if(dim <= 0)
-        {
-            return false;
-        }
-    }
-
-    // A ragged offset tensor packs the sequences back to back; the kernel indexes the buffer
-    // as dense (B, S, H, D) and would read and write past each sequence.
-    return !tensor.virtual_() && !tensor.ragged_offset_tensor_uid().has_value()
-           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
-}
-
-/**
- * @brief Is this tensor's memory BSHD -- token-major, head varying fastest?
- *
- * The kernel bakes this layout and there are no stride kernargs -- the builder computes
- * strides from `Hq * D` and `Hkv * D` -- so a differently-strided tensor is read as if it
- * were this one.
- *
- * Unit-extent axes are exempt: a stride multiplies an index that is always 0 when the
- * extent is 1. A single-head tensor is byte-identically BSHD and BHSD while the two
- * spellings disagree on strides[H], so a strict compare would decline a graph the kernel
- * serves perfectly.
- *
- * An expected stride too large for int64_t is one no stride can equal, so that axis
- * fails unless it is unit-extent.
- */
-bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-
-    const int64_t heads = dims->Get(HEAD_AXIS);
-    const int64_t sequence = dims->Get(SEQ_AXIS);
-    const int64_t headSize = dims->Get(HEAD_SIZE_AXIS);
-
-    const auto axisOk = [&](uint32_t axis, std::optional<int64_t> expected) {
-        return dims->Get(axis) == 1 || (expected.has_value() && strides->Get(axis) == *expected);
-    };
-
-    return axisOk(BATCH_AXIS, checkedProduct({sequence, heads, headSize}))
-           && axisOk(HEAD_AXIS, headSize) && axisOk(SEQ_AXIS, checkedProduct({heads, headSize}))
-           && axisOk(HEAD_SIZE_AXIS, 1);
+    return sdpa_graph::isWellFormedOperand(tensor)
+           && !tensor.ragged_offset_tensor_uid().has_value();
 }
 
 // ---------------------------------------------------------------------------
@@ -188,51 +116,11 @@ bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
 // nothing below is called and no message is built.
 // ---------------------------------------------------------------------------
 
-/// The head of a decline line: "<engine> declined the graph [<cause>]: ". The cause is a
-/// stable key per check, for log filters and tests; the text after it is for people.
-struct Declined
-{
-    std::string_view engineName;
-    std::string_view cause;
-};
-
-std::ostream& operator<<(std::ostream& out, const Declined& declined)
-{
-    return out << declined.engineName << " declined the graph [" << declined.cause << "]: ";
-}
-
 /// The decline head of @p arch's engine for @p cause. A function rather than a braced
-/// Declined, so the logging macro does not split its argument at the comma.
-Declined declined(const AttentionDenseArch& arch, std::string_view cause)
+/// DeclinedBy, so the logging macro does not split its argument at the comma.
+sdpa_graph::DeclinedBy declined(const AttentionDenseArch& arch, std::string_view cause)
 {
-    return Declined{arch.engineName, cause};
-}
-
-/// Whether any node of the graph is an SDPA-forward node. Only such a graph hears why it
-/// was declined: graph_match sees every graph the catalog misses on, and a line for each
-/// convolution or normalization graph would bury the attention ones.
-bool hasSdpaForwardNode(const MatchContext& context)
-{
-    for(const auto& node : context.graph.nodeWrappers())
-    {
-        if(node->attributesType() == data_objects::NodeAttributes::SdpaAttributes)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-/// "Q (uid 1): dims [..], strides [..]". Null dims or strides print as [].
-std::string describeOperand(std::string_view role, const data_objects::TensorAttributes& tensor)
-{
-    using hipdnn_data_sdk::utilities::vecToString;
-    using hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector;
-    std::ostringstream out;
-    out << role << " (uid " << tensor.uid() << "): dims "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.dims())) << ", strides "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.strides()));
-    return out.str();
+    return sdpa_graph::DeclinedBy{arch.engineName, cause};
 }
 
 /// Why @p tensor is not one the kernel can address, with the strides the kernel bakes for
@@ -566,7 +454,7 @@ std::optional<int64_t> statsFor(const MatchContext& context,
 } // namespace
 
 /**
- * Each decline of a graph with an SDPA-forward node logs its cause at INFO (see Declined);
+ * Each decline of a graph with an SDPA-forward node logs its cause at INFO (see sdpa_graph::DeclinedBy);
  * any other graph declines silently. The message is built inside the logging macro, so
  * with INFO off a decline costs the check and nothing more. Both arches run the same
  * checks in the same order, so a graph with several problems reports the same first
