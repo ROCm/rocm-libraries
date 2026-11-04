@@ -95,13 +95,16 @@ RUN_STATUS = {
     "-3": "the kernel does not support the problem",
 }
 # A verified one-kernel worker also pays the host side of verification (random
-# inputs, the fp32 numpy reference GEMM, the comparison), which a batched
-# --verify run pays once per batch. With the host cache only the comparison is
-# left once the problem has an entry, but a problem's first call, or one over
-# the cache's caps, pays it all. Each call's timeout is --kernel-timeout plus
-# that time, budgeted at 50 GFLOP/s for the reference: a rate the host keeps
-# with several device workers sharing its cores.
+# inputs, their encoding, the fp32 numpy reference GEMM, the comparison), which
+# a batched --verify run pays once per batch. With the host cache only the
+# comparison is left once the problem has an entry, but a problem's first
+# calls, or one over the cache's caps, pay it all. Each call's timeout is
+# --kernel-timeout plus that time: 50 GFLOP/s for the reference, a rate the
+# host keeps with several device workers sharing its cores, and 75 ns per
+# input element, twice the single-threaded 37 ns measured for generating and
+# encoding them (they dominate skinny large-K shapes: 34 s at 256x768x874159).
 VERIFY_HOST_FLOPS = 5e10
+VERIFY_HOST_S_PER_INPUT = 75e-9
 BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # A search round measures once all its builds end, so a kernel that never
 # builds holds the round for its whole limit (a full run keeps the build
@@ -116,7 +119,9 @@ SEARCH_BUILD_TIMEOUT_S = 180
 
 def verify_allowance_s(problem) -> int:
     """Seconds added to ``--kernel-timeout`` for a verified call on ``problem``."""
-    return math.ceil(2 * problem["M"] * problem["N"] * problem["K"] / VERIFY_HOST_FLOPS)
+    m, n, k = problem["M"], problem["N"], problem["K"]
+    return math.ceil(2 * m * n * k / VERIFY_HOST_FLOPS
+                     + (m + n) * k * VERIFY_HOST_S_PER_INPUT)
 
 
 @dataclass(frozen=True)
@@ -293,7 +298,8 @@ class GemmSearchAdapter:
             "measurement": {"verify": True, "verify_tol": a.verify_tol,
                             "batch_size": 1, "kernel_timeout": a.kernel_timeout,
                             "timeout_s": "kernel_timeout + ceil(2*M*N*K / "
-                                         f"{VERIFY_HOST_FLOPS:g}) per call",
+                                         f"{VERIFY_HOST_FLOPS:g} + (M+N)*K * "
+                                         f"{VERIFY_HOST_S_PER_INPUT:g}) per call",
                             "check_identity": True, "host_cache": self.host_cache},
             "build": {"workers": a.workers,
                       "build_timeout": self.build_timeout or SEARCH_BUILD_TIMEOUT_S,

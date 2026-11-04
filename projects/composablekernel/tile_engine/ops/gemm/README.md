@@ -267,10 +267,12 @@ Option rules:
 - Every measurement is verified and runs one kernel per worker, whatever
   `--verify` and `--batch-size` say, so a failure always names one kernel.
   The host side of verification (random inputs, an fp32 numpy reference
-  GEMM) comes from the run's host cache (see below) after a problem's first
-  call; that call, or every call of a problem the cache cannot hold, pays it
-  in full, so a call's timeout is `--kernel-timeout` plus
-  `ceil(2*M*N*K / 5e10)` s.
+  GEMM) comes from the run's host cache (see below) once a problem's first
+  call has stored it; that call, the calls that run beside it on other
+  devices, and every call of a problem the cache cannot hold pay it in full,
+  so a call's timeout is `--kernel-timeout` plus
+  `ceil(2*M*N*K / 5e10 + (M+N)*K * 75e-9)` s (the reference at 50 GFLOP/s,
+  the inputs at 75 ns per element).
   `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
   usual. Discovery measurements spread over the devices; each problem's
   confirmation calls run on one device (problem `i` on device `i mod n`), so

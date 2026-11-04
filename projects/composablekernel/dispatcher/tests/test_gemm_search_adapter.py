@@ -503,7 +503,9 @@ def test_workers_share_the_host_cache_with_unchanged_outcomes(tmp_path, monkeypa
 
 def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):
     # --kernel-timeout covers the kernel; a verified one-kernel call also builds
-    # the inputs and the fp32 reference on the host: 8192^3 gets 22 s more.
+    # the inputs and the fp32 reference on the host: 8192^3 gets 33 s more
+    # (22 s of reference, 10 s of inputs), and a skinny large-K shape, whose
+    # 34 s of inputs dwarf its 7 s of reference, 75 s.
     big = {"M": 8192, "N": 8192, "K": 8192}
     seen = []
 
@@ -515,8 +517,9 @@ def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):
     ad.build_missing([ad.cands[A]])
     ad.measure_pairs([_req(K1, A, 1)])
     ad.measure_pairs([_req(K1, A, 2), _req("8192x8192x8192", A, 3)])
-    assert seen == [31, 52] and ad.args.kernel_timeout == 30
-    assert [GS.verify_allowance_s(p) for p in (P1, big)] == [1, 22]
+    assert seen == [31, 63] and ad.args.kernel_timeout == 30
+    skinny = {"M": 256, "N": 768, "K": 874159}
+    assert [GS.verify_allowance_s(p) for p in (P1, big, skinny)] == [1, 33, 75]
 
 
 def test_confirmation_runs_each_problem_on_one_device(tmp_path, monkeypatch):
