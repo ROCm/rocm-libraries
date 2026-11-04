@@ -567,10 +567,11 @@ def test_first_calls_find_their_problem_prepared(tmp_path, monkeypatch):
 ])
 def test_unprepared_problems_keep_at_least_the_per_dtype_allowance(
         tmp_path, monkeypatch, capsys, case, record, want):
-    # fp8 256x768x874159 has a 365 s host allowance; on a host about 2x slower
-    # than the one its rates come from, its host data took 339 s. Prepared,
-    # those 339 s are spent before the call, which keeps 30 + 365 s for loading
-    # the entry and running the kernel. Without an entry (the cache off, or
+    # fp8 256x768x874159 has a 365 s host allowance, at rates with about 2x
+    # headroom over the host they were measured on; on a host about 2x slower
+    # than that one, its host data took 339 s. Prepared, those 339 s are spent
+    # before the call, which keeps 30 + 365 s for loading the entry and running
+    # the kernel. Without an entry (the cache off, or
     # over its caps) every call computes it all: the allowance stays, or is
     # twice what the preparation took on this host when that is more. A
     # problem is prepared once, whatever the outcome.

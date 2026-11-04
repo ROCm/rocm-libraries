@@ -1742,7 +1742,9 @@ time.sleep(d.get("sleep", 0))
 if "log" in d:
     with open(d["log"], "w") as f:
         f.write(f"{t0} {time.time()}")
+sys.stderr.write(d.get("err", ""))
 sys.stdout.write(d.get("out", ""))
+sys.stderr.flush()
 sys.stdout.flush()
 os._exit(d.get("exit", 0))
 """
@@ -1755,28 +1757,33 @@ def _prep(jobs, limits=None, width=4, argv=None):
                                 poll_s=0.02)
 
 
-def test_prepare_host_data_reports_each_workers_outcome():
+def test_prepare_host_data_reports_each_workers_outcome(monkeypatch):
     ok = json.dumps({"ok": True, "stored": True})
     got = _prep({
         "stored": {"out": ok},
-        "after_noise": {"out": "a warning\n" + ok + "\n"},
+        "after_noise": {"out": "a warning\n" + ok + "\n", "err": "a warning\n"},
         "refused": {"out": json.dumps({"ok": True, "stored": False})},
         "error": {"out": json.dumps({"ok": False, "error": "boom"}), "exit": 0},
         "no_ok": {"out": json.dumps({"ok": 1, "stored": True})},
         "crash": {"exit": 3},
+        "traceback": {"exit": 1, "err": "x" * 1000 + "\n  File \"w.py\", line 9\n"
+                      "MemoryError: \n"},
         "garbled": {"out": "{"},
         "not_a_dict": {"out": "[]"},
         "hang": {"out": ok, "sleep": 30},
     }, {"hang": 0.5, **{k: 60 for k in ("stored", "after_noise", "refused", "error",
-                                       "no_ok", "crash", "garbled", "not_a_dict")}})
+                                       "no_ok", "crash", "traceback", "garbled",
+                                       "not_a_dict")}})
     assert list(got) == ["stored", "after_noise", "refused", "error", "no_ok", "crash",
-                         "garbled", "not_a_dict", "hang"]
+                         "traceback", "garbled", "not_a_dict", "hang"]
     brief = {k: (g["ok"], g["stored"], g["error"]) for k, g in got.items()}
     assert brief == {
         "stored": (True, True, ""), "after_noise": (True, True, ""),
         "refused": (True, False, ""), "error": (False, False, "boom"),
         "no_ok": (False, False, "failed (exit code 0)"),
         "crash": (False, False, "no result line (exit code 3)"),
+        "traceback": (False, False, "no result line (exit code 1); stderr: "  # last 400
+                      + "x" * 365 + " |   File \"w.py\", line 9 | MemoryError:"),
         "garbled": (False, False, "no result line (exit code 0)"),
         "not_a_dict": (False, False, "no result line (exit code 0)"),
         "hang": (False, False, "no result in 0.5 s"),
@@ -1784,6 +1791,12 @@ def test_prepare_host_data_reports_each_workers_outcome():
     assert 0.5 <= got["hang"]["seconds"] < 10
     bad = _prep({"k": {}}, argv=[os.devnull + "-missing"])
     assert not bad["k"]["ok"] and bad["k"]["error"].startswith("could not start")
+
+    def no_tmp():
+        raise OSError("no temp dir")
+
+    monkeypatch.setattr(AS.tempfile, "TemporaryFile", no_tmp)
+    assert _prep({"k": {}})["k"]["error"] == "could not start: no temp dir"
 
 
 def test_prepare_host_data_runs_at_most_width_workers_at_once(tmp_path):

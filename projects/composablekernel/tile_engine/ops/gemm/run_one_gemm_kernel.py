@@ -134,8 +134,8 @@ def _prepare(prob_dict, kernel_name, spec):
         problem = GemmProblem.from_dict(prob_dict)
         out = {"ok": True, "stored": _host_data(_HostCodec(kernel_name), problem, spec,
                                                 prepare=True)}
-    except Exception as e:
-        out = {"ok": False, "error": str(e)}
+    except Exception as e:  # the type too: str(MemoryError()) is empty
+        out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     print(json.dumps(out), flush=True)
 
 

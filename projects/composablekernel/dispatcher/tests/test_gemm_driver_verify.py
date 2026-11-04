@@ -301,6 +301,7 @@ def test_preparation_reports_what_it_could_not_store(capsys, tmp_path):
         run_one_gemm_kernel._prepare(*args)
         out = json.loads(capsys.readouterr().out)
         assert {k: out[k] for k in want} == want
+    assert out["error"].startswith("TypeError: ")  # the type, not only its text
 
 
 def test_host_cache_keeps_dtypes_layouts_and_problems_apart(gemm_worker, tmp_path):

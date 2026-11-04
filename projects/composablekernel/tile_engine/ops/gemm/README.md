@@ -251,7 +251,7 @@ build their own fixed-width variants, about 80).
 | `trials_per_problem` | required | measured trials per problem, failures and warm starts included |
 | `new_builds_per_run` | required | distinct kernels the run may build (failed builds count); at least `trials_per_problem` |
 | `seed`, `seed_policy` | `0`, `shared` | `per_problem` gives problem `i` the seed `seed + i` |
-| `deadline_s` | none | seconds after which no trial is admitted; the round in flight and the confirmation still finish. Without it the trial and build budgets bound the run |
+| `deadline_s` | none | seconds after which no trial is admitted; the round in flight and the confirmation still finish, so the run can end past the deadline by their time, the round's preparations included (each up to its limit, see below). Without it the trial and build budgets bound the run |
 | `batch_per_problem` | `4` | trials a problem may propose per round |
 | `max_stall_rounds` | `8` | rounds in a row without a new result before the run stops |
 | `build_timeout_s` | `180`, native kernels only | limit for each codegen, compile and link step of a kernel's build in the search; when given, it applies to every kernel. Without it, a round that builds a fixed-vector-width kernel keeps the build function's limits, as a full run does (300 s per step, 1200 s to compile a fixed-width kernel). A kernel whose step times out is a `compile_error`. See "Build timeout" below |
@@ -311,15 +311,20 @@ Option rules:
   full inside every call. When the cache is on but did not store the entry
   (over its caps), its preparation measured that cost on this host, and its
   calls get at least twice that. When the cache is off (or the preparation
-  failed), they get the allowance alone, which assumes a host about as fast
-  per element as the one the rates come from: on an MI350X (gfx950) host about
-  2x slower per element, the host side of a first fp8 256x768x874159 call took
-  339 s of its 395 s timeout. There, keep the cache on or raise
-  `--kernel-timeout`.
-  These host times assume the workers get the node's CPUs: inside a CPU
-  allocation smaller than the node, set `OPENBLAS_NUM_THREADS` (or
+  failed), they get the allowance alone. Its rates leave about 2x headroom
+  over the host they were measured on for fp8 and bf8 (177-213 ns per element
+  measured, 400 ns allowed) and 1.3-2.3x for the others (33-60 ns, 75 ns): on
+  an MI350X (gfx950) host about 2x slower per element, the host side of a
+  first fp8 256x768x874159 call used 339 s of its 395 s timeout. On a slower
+  host, keep the cache on (the preparation then runs outside the call
+  timeout) or raise `--kernel-timeout`.
+  These host times assume the workers get the node's CPUs, and twice the
+  preparation's time assumes a call sees no more CPU contention than the
+  preparation, which may have run alone, while several devices may measure
+  its problem at once. Inside a CPU allocation smaller than the node, or for
+  problems the cache does not store, set `OPENBLAS_NUM_THREADS` (or
   `OMP_NUM_THREADS`) to about the CPUs per device, or raise
-  `--kernel-timeout`.
+  `--kernel-timeout`; a cache with room for the entry avoids the second case.
   `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
   usual. Discovery measurements spread over the devices; each problem's
   confirmation calls run on one device (problem `i` on device `i mod n`), so
@@ -469,8 +474,10 @@ and per round (`[search] round N: ...`: proposals, admissions, builds against
 the cap, measurements, active problems, elapsed time and deadline) and one
 title line per measure call, named like its `rounds/` file, after two lines
 for the preparation of the call's new problems (how many, their limit, then
-how many were stored and the time taken). A host cache whose filesystem is
-already under 10% free (see "Host cache space") prints a
+how many were stored and the time taken), and one more per problem not stored
+(`<problem>: not stored (<why>); its calls compute their own`, ending with the
+tail of the worker's stderr when the preparation failed). A host cache whose
+filesystem is already under 10% free (see "Host cache space") prints a
 `Host cache: WARNING` line before the first round, and one on NFS a
 `Host cache: NOTE` line.
 

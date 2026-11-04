@@ -24,9 +24,10 @@ is here too: ``ArtifactStore`` (the run's own copies of the built kernels),
 ``CallFiles`` (per-call files under rounds/), ``measure_built``,
 ``host_allowance_s`` (a verified call's host time, at the op's rates),
 ``prepare_host_data`` (a problem's host cache entry, stored before its first
-call and outside its timeout), ``source_info``, ``check_search_options`` and ``run_search`` (the driver's
-search mode, with its exit code). Importing this module imports neither
-``ck_search`` nor numpy: the search core is loaded when a search runs.
+call and outside its timeout), ``source_info``, ``check_search_options`` and
+``run_search`` (the driver's search mode, with its exit code). Importing this
+module imports neither ``ck_search`` nor numpy: the search core is loaded when
+a search runs.
 """
 
 from __future__ import annotations
@@ -1489,8 +1490,11 @@ def host_allowance_s(flops, inputs, s_per_input) -> int:
 # PREPARE_FACTOR times the problem's host allowance, plus PREPARE_START_S for
 # the worker's start. A preparation that finishes without storing the entry
 # (the cache's caps) leaves calls that compute it all: their allowance is at
-# least PREPARE_MARGIN times what it took on this host.
+# least PREPARE_MARGIN times what it took on this host (where it shared the
+# CPUs only with other preparations). A failed preparation's
+# error ends with the last PREPARE_STDERR_CHARS characters of its stderr.
 PREPARE_FACTOR, PREPARE_START_S, PREPARE_MARGIN = 10, 60, 2
+PREPARE_STDERR_CHARS = 400
 
 
 def prepare_limit_s(allowance_s) -> int:
@@ -1518,27 +1522,31 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
     prints ``{"ok": true, "stored": <bool>}`` or ``{"ok": false, "error":
     ...}`` as its last line. Returns ``{key: {"ok", "stored", "seconds",
     "error"}}`` in the order of ``payloads``; ``ok`` is False for an error, a
-    crash or a kill at the limit. Workers still running when this raises (an
-    interrupt) are killed."""
+    crash or a kill at the limit, and ``error`` then ends with the tail of the
+    worker's stderr. Workers still running when this raises (an interrupt) are
+    killed."""
     out, todo, running = {}, list(payloads), {}
     try:
         while todo or running:
             while todo and len(running) < max(1, width):
                 key = todo.pop(0)
-                stdout = tempfile.TemporaryFile()
+                files = []  # the worker's stdout and stderr
                 try:
+                    while len(files) < 2:
+                        files.append(tempfile.TemporaryFile())
                     with tempfile.TemporaryFile() as stdin:
                         stdin.write(payloads[key].encode())
                         stdin.seek(0)
-                        proc = subprocess.Popen(argv, stdin=stdin, stdout=stdout,
-                                                stderr=subprocess.DEVNULL, env=env)
+                        proc = subprocess.Popen(argv, stdin=stdin, stdout=files[0],
+                                                stderr=files[1], env=env)
                 except OSError as e:
-                    stdout.close()
+                    for f in files:
+                        f.close()
                     out[key] = _prepared(None, "", 0.0, f"could not start: {e}")
                     continue
-                running[key] = (proc, stdout, time.monotonic())
+                running[key] = (proc, files, time.monotonic())
             time.sleep(poll_s)
-            for key, (proc, stdout, t0) in list(running.items()):
+            for key, (proc, files, t0) in list(running.items()):
                 took = time.monotonic() - t0
                 if proc.poll() is None and took < limits[key]:
                     continue
@@ -1547,22 +1555,30 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                     proc.kill()
                 proc.wait()
                 del running[key]
-                stdout.seek(0)
-                text = stdout.read().decode(errors="replace")
-                stdout.close()
+                text, stderr = [_drain(f) for f in files]
                 out[key] = _prepared(proc.returncode, text, took,
-                                     f"no result in {limits[key]:g} s" if killed else "")
+                                     f"no result in {limits[key]:g} s" if killed else "",
+                                     stderr)
     finally:
-        for proc, stdout, _ in running.values():
+        for proc, files, _ in running.values():
             proc.kill()
             proc.wait()
-            stdout.close()
+            for f in files:
+                f.close()
     return {key: out[key] for key in payloads}
 
 
-def _prepared(code, text, took, error) -> dict:
+def _drain(f) -> str:
+    """The text written to the temp file ``f``, which is then closed."""
+    with f:
+        f.seek(0)
+        return f.read().decode(errors="replace")
+
+
+def _prepared(code, text, took, error, stderr="") -> dict:
     """A preparation's record from its exit ``code``, output ``text`` and
-    ``took`` seconds; ``error`` set when it never got to report."""
+    ``took`` seconds; ``error`` set when it never got to report. A failure's
+    error ends with the tail of its ``stderr``."""
     got = None
     if not error:
         try:
@@ -1573,6 +1589,9 @@ def _prepared(code, text, took, error) -> dict:
             error = f"no result line (exit code {code})"
         elif got.get("ok") is not True:
             error = str(got.get("error") or f"failed (exit code {code})")
+    tail = " | ".join(stderr.strip()[-PREPARE_STDERR_CHARS:].splitlines())
+    if error and tail:
+        error += f"; stderr: {tail}"
     return {"ok": not error, "stored": not error and got.get("stored") is True,
             "seconds": round(took, 1), "error": error}
 

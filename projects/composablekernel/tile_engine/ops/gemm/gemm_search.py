@@ -327,7 +327,7 @@ class GemmSearchAdapter:
                                 "before a problem's first call, outside its timeout, "
                                 f"limit {adaptive_search.PREPARE_FACTOR} x the host "
                                 f"allowance + {adaptive_search.PREPARE_START_S} s; a "
-                                "problem it leaves without an entry gets at least "
+                                "problem it prepared but could not store gets at least "
                                 f"{adaptive_search.PREPARE_MARGIN} x its time per call")},
             "build": {"workers": a.workers,
                       "build_timeout": self.build_timeout or SEARCH_BUILD_TIMEOUT_S,
