@@ -95,8 +95,11 @@ void initializeMiopenSettings(
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Revision of what this provider asks MIOpen for (find/tuning mode, selection call, DB
-/// policy). Bump it when that changes, so models measured under the old request stop matching.
-constexpr const char* MIOPEN_SELECTOR_POLICY_REVISION = "untuned-v1";
+/// policy) and of how its models are measured. Bump it when either changes, so models
+/// measured the old way stop matching and their rows are never pooled with new ones.
+/// v2: collection runs with MIOPEN_FIND_MODE=FAST (uhd_gen's bench_env), so a model's
+/// estimate is FAST-mode throughput, which tends to under-estimate the default mode's.
+constexpr const char* MIOPEN_SELECTOR_POLICY_REVISION = "untuned-v2";
 
 /// RFC 0019 §4.1 `trained_against.selector_revision` for @p engineName:
 /// `miopen-provider/<major.minor.patch>/<engine>-<policy revision>/miopen-<x.y.z>`.

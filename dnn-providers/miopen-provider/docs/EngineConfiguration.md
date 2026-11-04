@@ -17,6 +17,12 @@ untuned execution with `global.benchmarking=0`, not a separate cache-bypassing
 selection mode. Existing tuning results may still be reused, and the process-wide
 benchmarking override retains its normal precedence over the knob.
 
+Models are measured with `MIOPEN_FIND_MODE=FAST`, which `uhd_gen` pins for every collection
+run: MIOpen uses its installed find database and, on a miss, its immediate-mode choice
+without benchmarking candidates. Under the default mode (`DYNAMIC_HYBRID`), a find-database
+miss benchmarks the dynamic solvers instead and usually picks a faster one, so an estimate
+tends to under-estimate default-mode TFLOPS on shapes the find database does not cover.
+
 Missing or incompatible models leave ordinary engine execution available.
 The selector revision a model must record is
 `miopen-provider/<major.minor.patch>/<engine>-<policy revision>/miopen-<x.y.z>`: the
