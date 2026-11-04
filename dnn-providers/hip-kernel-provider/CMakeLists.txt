@@ -529,6 +529,8 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PYTHON_TESTS ON)
     set(ROCKE_INSTALL_PLATFORM_PYTEST ON)
 
+    include(RockeTestAssets)
+    hipkernelprovider_configure_rocke_test_assets("${ROCM_LIBRARIES_ROOT}")
     add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")
