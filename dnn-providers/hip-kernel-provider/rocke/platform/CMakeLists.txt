@@ -697,8 +697,9 @@ if(ROCKE_INSTALL_TESTS)
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
     # gfx950 additive-bias route and cohort-knob pins, the host-side SDPA
-    # sequence-length and padding-mask adapters/specs, and the fmha_mfma
-    # free-stride ABI and layout contracts.
+    # sequence-length and padding-mask adapters/specs, the fmha_mfma
+    # free-stride ABI and layout contracts, and the backward-test memo bound
+    # in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -714,7 +715,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_sdpa_seqlen.py"
         "tests/library/tests/test_sdpa_padding_mask.py"
         "tests/library/tests/test_fmha_mfma_free_stride.py"
-        "tests/library/tests/test_sdpa_free_stride_layouts.py")
+        "tests/library/tests/test_sdpa_free_stride_layouts.py"
+        "tests/library/tests/test_bwd_memo_bound.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS

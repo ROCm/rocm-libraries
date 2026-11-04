@@ -3039,3 +3039,22 @@ def test_gpu_skipped_exit_status(stats, exitstatus, expected):
     from reference_common.pytest_support import gpu_skipped_exit_status
 
     assert gpu_skipped_exit_status(stats, exitstatus) == expected
+
+
+@pytest.mark.parametrize(
+    ("target_id", "processor"),
+    [
+        ("gfx942:sramecc+:xnack-", "gfx942"),
+        ("gfx1250-strict", "gfx1250"),
+        ("gfx1100:xnack-", "gfx1100"),
+        ("gfx1154", "gfx1154"),
+        (None, None),
+    ],
+)
+def test_processor_from_target_id_keeps_the_physical_processor(target_id, processor):
+    """Reference cohorts are keyed by the physical processor: the profile and
+    the features go, and a generic member such as gfx1154 is never replaced by
+    its generic target."""
+    from reference_common.targets import processor_from_target_id
+
+    assert processor_from_target_id(target_id) == processor

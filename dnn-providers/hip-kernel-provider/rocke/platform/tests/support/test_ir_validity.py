@@ -11,8 +11,11 @@ usable clang skips, which is the helper's own contract.
 from __future__ import annotations
 
 import pytest
-
-from rocke.tests.ir_validity import arbiter_verdict, assert_target_accepts
+from rocke.tests.ir_validity import (
+    arbiter_verdict,
+    assert_target_accepts,
+    target_mnemonics,
+)
 
 _VALID = """\
 target triple = "amdgcn-amd-amdhsa"
@@ -72,9 +75,10 @@ def test_a_call_to_a_nonexistent_intrinsic_is_rejected_at_link():
 
 
 def test_a_target_the_host_clang_does_not_know_cannot_be_judged():
+    # Only a host that can judge a known target can say why it cannot judge an
+    # unknown one; any other host skips with its own reason.
+    _verdict_or_skip(_VALID, "gfx90a")
     verdict, text = arbiter_verdict(_VALID, "gfx9999")
-    if verdict == "cannot_judge" and "no host clang" in text:
-        pytest.skip(text)
     assert (verdict, text) == ("cannot_judge", "host clang cannot target gfx9999")
 
 
@@ -98,3 +102,16 @@ def test_a_clang_that_cannot_run_its_linker_is_not_a_verdict_on_the_module():
     assert not _toolchain_incomplete(
         "module.ll:4:64: error: '%a' defined with type '<1 x float>' but expected 'float'"
     )
+
+
+def test_target_mnemonics_disassembles_the_code_object():
+    _verdict_or_skip(_VALID, "gfx90a")
+    mnemonics = target_mnemonics(_VALID, "gfx90a")
+    assert "s_endpgm" in mnemonics
+    assert any(m.startswith("global_store") for m in mnemonics)
+
+
+def test_target_mnemonics_fails_on_a_rejected_module():
+    _verdict_or_skip(_WRONG_OPERAND_TYPE, "gfx90a")
+    with pytest.raises(AssertionError, match="LLVM rejected the lowered IR for gfx90a"):
+        target_mnemonics(_WRONG_OPERAND_TYPE, "gfx90a")
