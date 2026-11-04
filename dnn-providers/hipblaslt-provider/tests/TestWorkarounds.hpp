@@ -43,6 +43,8 @@
 
 #include <gtest/gtest.h>
 
+#include "engines/plans/MxArchSupport.hpp"
+
 #ifdef _WIN32
 #define SKIP_IF_WORKAROUND_ISSUE_9962(handle)                                      \
     do                                                                             \
@@ -62,14 +64,13 @@
     } while(0)
 #endif
 
-#define SKIP_IF_WORKAROUND_ISSUE_13715()                                                       \
-    do                                                                                         \
-    {                                                                                          \
-        if(::hipdnn_plugin_sdk::archMatches(::hipdnn_test_sdk::utilities::currentDeviceArch(), \
-                                            "gfx1250",                                         \
-                                            ::hipdnn_plugin_sdk::ArchMatchMode::PREFIX))       \
-        {                                                                                      \
-            GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for transA=N, "          \
-                            "transB=T on gfx1250";                                             \
-        }                                                                                      \
+#define SKIP_IF_WORKAROUND_ISSUE_13715()                                              \
+    do                                                                                \
+    {                                                                                 \
+        if(::hipblaslt_plugin_test::isGfx1250Target(                                  \
+               ::hipdnn_test_sdk::utilities::currentDeviceArch()))                    \
+        {                                                                             \
+            GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for transA=N, " \
+                            "transB=T on gfx1250";                                    \
+        }                                                                             \
     } while(0)

@@ -12,13 +12,20 @@
 namespace test_mx_matmul_common
 {
 
+inline bool isGfx1250Target(std::string_view archName)
+{
+    using hipdnn_test_sdk::utilities::archMatches;
+    using hipdnn_test_sdk::utilities::ArchMatchMode;
+    return archMatches(archName, "gfx1250", ArchMatchMode::PREFIX)
+           || archMatches(archName, "gfx1250-strict", ArchMatchMode::PREFIX);
+}
+
 // hipBLASLt only ships VEC32_UE8M0 MX GEMM kernels for gfx950 and gfx1250.
 inline bool isMxSupportedArch(std::string_view archName)
 {
     using hipdnn_test_sdk::utilities::archMatches;
     using hipdnn_test_sdk::utilities::ArchMatchMode;
-    return archMatches(archName, "gfx950", ArchMatchMode::PREFIX)
-           || archMatches(archName, "gfx1250", ArchMatchMode::PREFIX);
+    return archMatches(archName, "gfx950", ArchMatchMode::PREFIX) || isGfx1250Target(archName);
 }
 
 } // namespace test_mx_matmul_common

@@ -160,9 +160,7 @@ TEST_F(IntegrationGpuMxMatmulSupported, AcceptsSupportedConfig)
 {
     // WORKAROUND_ISSUE_13715 (see tests/TestWorkarounds.hpp): on gfx1250 hipBLASLt
     // has MX kernels only for transA=T, transB=N, so this layout is declined there.
-    if(hipdnn_test_sdk::utilities::archMatches(hipdnn_test_sdk::utilities::currentDeviceArch(),
-                                               "gfx1250",
-                                               hipdnn_test_sdk::utilities::ArchMatchMode::PREFIX))
+    if(isGfx1250Target(hipdnn_test_sdk::utilities::currentDeviceArch()))
     {
         GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for transA=N, transB=T "
                         "on gfx1250";

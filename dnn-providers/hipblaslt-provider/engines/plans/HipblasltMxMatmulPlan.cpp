@@ -186,14 +186,21 @@ std::optional<MxOrder> packedMxOrder(
     return std::nullopt;
 }
 
-MxScaleFormat selectMxScaleFormat(const HipdnnEnginePluginHandle& handle)
+MxScaleFormat mxScaleFormatForArch(std::string_view arch)
 {
-    const auto arch = hipdnn_plugin_sdk::getDeviceArch(handle.getStream());
-    if(hipdnn_plugin_sdk::archMatches(arch, "gfx1250", hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
+    using hipdnn_plugin_sdk::archMatches;
+    using hipdnn_plugin_sdk::ArchMatchMode;
+    if(archMatches(arch, "gfx1250", ArchMatchMode::PREFIX)
+       || archMatches(arch, "gfx1250-strict", ArchMatchMode::PREFIX))
     {
         return MxScaleFormat::SWIZZLED_GFX1250;
     }
     return MxScaleFormat::NATURAL;
+}
+
+MxScaleFormat selectMxScaleFormat(const HipdnnEnginePluginHandle& handle)
+{
+    return mxScaleFormatForArch(hipdnn_plugin_sdk::getDeviceArch(handle.getStream()));
 }
 
 MxMatmulParams::MxMatmulParams(

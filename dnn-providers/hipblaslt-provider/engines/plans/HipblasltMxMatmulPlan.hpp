@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
@@ -55,6 +56,7 @@ std::optional<MxScaleFormat>
 // on gfx950). SWIZZLED_GFX950 is never selected here; createMxMatmulPlan()
 // accepts it.
 MxScaleFormat selectMxScaleFormat(const HipdnnEnginePluginHandle& handle);
+MxScaleFormat mxScaleFormatForArch(std::string_view arch);
 
 // One hipBLAS scale operand: which tensor feeds it and how it must be prepared.
 struct MxScaleOperand

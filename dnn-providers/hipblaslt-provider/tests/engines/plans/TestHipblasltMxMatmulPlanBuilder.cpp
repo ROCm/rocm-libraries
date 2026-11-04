@@ -293,6 +293,11 @@ bool onArch(const char* arch)
         hipdnn_test_sdk::utilities::currentDeviceArch(), arch, ArchMatchMode::PREFIX);
 }
 
+bool onGfx1250()
+{
+    return hipblaslt_plugin_test::isGfx1250Target(hipdnn_test_sdk::utilities::currentDeviceArch());
+}
+
 // (A type, B type, output type) triples with a gfx1250 Tensile MX kernel in the
 // hipBLASLt this was written against. The gfx1250 A0 nightly pin lacks some of
 // them (no E5M2, no FP16 output), so only these four are asserted there.
@@ -354,7 +359,7 @@ TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicable)
 // gfx1250 only has Tensile kernels for some pairs.
 TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicableKContiguous)
 {
-    if(onArch("gfx1250")
+    if(onGfx1250()
        && !hasGfx1250TensileKernel(TypeParam::X_TYPE, TypeParam::X_TYPE, TypeParam::OUT_TYPE))
     {
         GTEST_SKIP() << "no gfx1250 Tensile MX kernel asserted for this pair";
@@ -722,7 +727,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx9
 // are accepted with either scale order, every other layout is declined.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsOnlyKContiguousOnGfx1250)
 {
-    if(!onArch("gfx1250"))
+    if(!onGfx1250())
     {
         GTEST_SKIP() << "gfx1250-only check";
     }
@@ -901,7 +906,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousFp8AWi
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOnGfx1250)
 {
     const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
-    if(!archMatches(archName, "gfx1250", ArchMatchMode::PREFIX))
+    if(!hipblaslt_plugin_test::isGfx1250Target(archName))
     {
         GTEST_SKIP() << "gfx1250-only check, running on " << archName;
     }

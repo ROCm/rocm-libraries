@@ -363,6 +363,13 @@ TEST(TestMxMatmulParams, KernelScaleFormatGuard)
 }
 #endif
 
+TEST(TestMxMatmulParams, ScaleFormatForArch)
+{
+    EXPECT_EQ(mxScaleFormatForArch("gfx1250"), MxScaleFormat::SWIZZLED_GFX1250);
+    EXPECT_EQ(mxScaleFormatForArch("gfx1250-strict"), MxScaleFormat::SWIZZLED_GFX1250);
+    EXPECT_EQ(mxScaleFormatForArch("gfx950"), MxScaleFormat::NATURAL);
+}
+
 TEST(TestMxMatmulParams, PackedMxOrderRejectsPaddedMatrix)
 {
     auto fb = createValidMxMatmulGraph(
