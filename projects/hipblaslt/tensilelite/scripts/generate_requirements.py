@@ -41,6 +41,11 @@ profiles = {
         "Full Python requirements for core builds, tests, and contributor tasks.",
         ["--group", "dev", "--no-editable"],
     ),
+    # Omit local path requirements so this profile can also be used as pip constraints.
+    "requirements-dev-common.txt": (
+        "Full Python development requirements excluding local packages.",
+        ["--group", "dev", "--no-emit-local"],
+    ),
     # Excludes the project's runtime dependencies; tox installs those per environment.
     "requirements-tox.txt": (
         "Minimal Python requirements to launch tox.",
