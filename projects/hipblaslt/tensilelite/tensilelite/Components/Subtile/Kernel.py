@@ -10,7 +10,7 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from .LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity, GRPlacementStrategy)
+      ReadGranularity, GRPlacementStrategy, VgprTileUnrollLimitError)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, ceilDivide, plsinBlockSchedTile, isMxf4SubtilePath
@@ -1484,6 +1484,7 @@ def mainLoop(writer, kernel):
       tailPartitionSizeM = 0
   if wider and not tailOwnTiles:
       candidates = wider
+  scheduler = None
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
       grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
@@ -1518,12 +1519,19 @@ def mainLoop(writer, kernel):
           tailPartitionSizeM=tailPartitionSizeM,
       )
 
-      scheduler = LogicalScheduler(cfg)
-      scheduler.build()
+      candidate = LogicalScheduler(cfg)
+      try:
+          candidate.build()
+      except VgprTileUnrollLimitError:
+          # An uneven split rotates the VGPR tiles too slowly to unroll; a finer split may not.
+          continue
+      scheduler = candidate
 
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
+  if scheduler is None:
+      raise VgprTileUnrollLimitError("no subtile partition candidate fits the unroll limit")
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo
