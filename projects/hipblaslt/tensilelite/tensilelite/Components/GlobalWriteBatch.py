@@ -1980,6 +1980,8 @@ class GlobalWriteBatchWriter:
         module.add(tdm.issueStore(g0, g1, tensor=kw.tdmStoreModifiers(self.kernel)))
         module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store"))
         module.add(skipStore)
+    if isPersistent(self.kernel):
+      module.add(kw._syncThreads(self.kernel, "every TDM store is done with the staged tile before the next tile writes LDS"))
     return module
 
   def _emitNonatomicAdd(self, module: Module):

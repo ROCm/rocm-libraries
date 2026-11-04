@@ -57,6 +57,9 @@ def _state(**overrides):
     "BufferStore": True,
     "GlobalSplitU": 1,
     "TileProcessingStrategy": "None",
+    "WorkAssignment": "StaticGrid",
+    "PrefetchAcrossPersistent": 0,
+    "ReuseAcrossPersistent": 0,
     "UseSubtileImpl": False,
     "StoreRemapVectorWidth": 0,
     "CompactLoopStore": False,
@@ -75,6 +78,10 @@ def test_accepts_bf16_and_fp16(dest):
   assert validateTDMStore(_state(DestDataType=DataType(dest)), False)
 
 
+def test_accepts_non_atomic_streamk3():
+  assert validateTDMStore(_state(TileProcessingStrategy="StreamK", GlobalSplitU=0), False)
+
+
 def test_disabled_is_not_validated():
   assert validateTDMStore(_state(TDMStore=0, ISA=(9, 5, 0), GlobalSplitU=4), False)
 
@@ -86,7 +93,12 @@ def test_disabled_is_not_validated():
   {"BufferStore": False},
   {"GlobalSplitU": 2},
   {"GlobalSplitU": -1},
-  {"TileProcessingStrategy": "StreamK"},
+  {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0},
+  {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0, "WorkAssignment": "DynamicWorkQueue"},
+  {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0, "StreamKAtomic": 1},
+  {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0, "PrefetchAcrossPersistent": 1},
+  {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0, "ReuseAcrossPersistent": 1},
+  {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0, "ClusterDim": [2, 1]},
   {"UseSubtileImpl": True},
   {"StoreRemapVectorWidth": 4},
   {"CompactLoopStore": True},

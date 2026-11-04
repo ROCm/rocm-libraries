@@ -22,7 +22,8 @@
 #
 ################################################################################
 
-from ...ExecutionPolicy import isPersistent
+from ...ExecutionPolicy import hasStaticAssignment, isPersistent, isStreamKSpatialCluster, \
+  requiresPartialReduction
 from ..Utilities import reject
 
 
@@ -31,8 +32,10 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
 
   The TDM store block stages the converted D tile in LDS over the main-loop buffers and
   stores it once, after the last store batch, with one tensor_store_from_lds per wave.
-  That needs a 16-bit HPA output written directly to D by a non-persistent kernel, a store
-  epilogue that uses no LDS of its own, and MacroTile1 split evenly across the waves.
+  That needs a 16-bit HPA output written directly to D, by a GlobalSplitU=1 kernel or as the
+  final store of a non-atomic StreamK=3 tile, no LDS data kept from one persistent tile to the
+  next, a store epilogue that uses no LDS of its own, and MacroTile1 split evenly across the
+  waves.
   """
   if not state["TDMStore"]:
     return True
@@ -46,10 +49,12 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
     reason = "TDMStore requires HighPrecisionAccumulate with a single-precision ComputeDataType"
   elif not state["BufferStore"]:
     reason = "TDMStore requires BufferStore"
-  elif state["GlobalSplitU"] != 1:
+  elif isPersistent(state) and not (requiresPartialReduction(state) and hasStaticAssignment(state)):
+    reason = "TDMStore supports persistent kernels only as non-atomic StreamK=3"
+  elif state["PrefetchAcrossPersistent"] or state["ReuseAcrossPersistent"] or isStreamKSpatialCluster(state):
+    reason = "TDMStore does not support PrefetchAcrossPersistent, ReuseAcrossPersistent or StreamK spatial clusters"
+  elif not isPersistent(state) and state["GlobalSplitU"] != 1:
     reason = "TDMStore requires GlobalSplitU=1"
-  elif isPersistent(state):
-    reason = "TDMStore does not support persistent kernels or StreamK"
   elif state["UseSubtileImpl"]:
     reason = "TDMStore does not support UseSubtileImpl"
   elif state["StoreRemapVectorWidth"]:
