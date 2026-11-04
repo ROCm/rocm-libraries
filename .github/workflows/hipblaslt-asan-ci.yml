@@ -128,6 +128,7 @@ jobs:
             -DTHEROCK_ENABLE_ALL=OFF
             -DTHEROCK_ENABLE_BLAS=ON
             -DTHEROCK_ENABLE_SPARSE=ON
+            -DTHEROCK_FLAG_BUILD_HIPCCL=OFF
             -DTHEROCK_SANITIZER=HOST_ASAN
             -Damd-llvm_BUILD_TYPE=Release
             -Dtherock-host-blas_BUILD_TYPE=Release
