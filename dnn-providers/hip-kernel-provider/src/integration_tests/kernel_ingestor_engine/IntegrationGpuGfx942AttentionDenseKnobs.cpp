@@ -453,7 +453,8 @@ std::vector<KnobCase> knobCases()
                      COLD,
                      Tile{64, 64}});
     // Shape breadth on a forced tile: B > 1, Sq != Skv, both alignments at equal lengths,
-    // the deprecated causal flag, a top-left window at unequal lengths.
+    // the deprecated causal flag, top-left windows at unequal lengths: Sq > Skv by less
+    // than W, so the last 64 rows keep only part of their window, then Skv > Sq.
     cases.push_back({"Shape_Batch3CrossLength",
                      makeShape(FP16, 128, 16, 2, Mask::NO_MASK, 0, 3, 256, 768),
                      FORCED,
@@ -468,6 +469,10 @@ std::vector<KnobCase> knobCases()
                      Tile{256, 32}});
     cases.push_back({"Shape_WindowBottomRightEqualLengths",
                      makeShape(BF16, 128, 4, 2, Mask::WINDOW_BOTTOM_RIGHT, 128, 1, 512, 512),
+                     FORCED,
+                     Tile{256, 64}});
+    cases.push_back({"Shape_WindowTopLeftQueriesPastKeys",
+                     makeShape(BF16, 128, 8, 2, Mask::WINDOW_TOP_LEFT, 128, 2, 512, 448),
                      FORCED,
                      Tile{256, 64}});
     cases.push_back({"Shape_WindowTopLeftCrossLength",
