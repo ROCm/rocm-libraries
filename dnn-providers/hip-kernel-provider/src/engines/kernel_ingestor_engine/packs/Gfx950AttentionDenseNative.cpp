@@ -84,10 +84,6 @@ constexpr std::string_view RAGGED_FIELD = "ragged";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
 
-/// The tile every legacy record completes to, and the one cold selection prefers.
-constexpr int64_t BASELINE_BLOCK_M = 256;
-constexpr int64_t BASELINE_BLOCK_N = 64;
-
 constexpr std::string_view Q_TOKEN = "gfx950_attention_dense.q.uid";
 constexpr std::string_view K_TOKEN = "gfx950_attention_dense.k.uid";
 constexpr std::string_view V_TOKEN = "gfx950_attention_dense.v.uid";
@@ -892,10 +888,11 @@ bool kernelMatches(const MatchContext& context,
     return tileDivides(*tile, problem);
 }
 
-/// Scores for the cold ranking. Every alternative scores `ALTERNATIVE_CEILING - key /
-/// KEY_SPAN`, which lies strictly between zero and ALTERNATIVE_CEILING, so the baseline
-/// sits strictly above the whole alternative band.
-constexpr double BASELINE_TILE_SCORE = 2.0;
+/// Scores for the ranking. A tile earns one bonus per axis it matches the measured
+/// preference on, plus a lexicographic remainder strictly inside (0, ALTERNATIVE_CEILING)
+/// so two distinct tiles can never score equal.
+constexpr double BLOCK_M_MATCH_BONUS = 2.0;
+constexpr double BLOCK_N_MATCH_BONUS = 1.0;
 constexpr double ALTERNATIVE_CEILING = 1.0;
 /// Weight of block_m in the lexicographic key; exceeds every legal block_n (block_n
 /// divides block_m, so it is at most 256).
@@ -906,18 +903,56 @@ constexpr double KEY_SPAN = 262144.0; // 2^18
 /// Below every legal candidate: only a tile kernelMatches already declined gets it.
 constexpr double UNSUPPORTED_TILE_SCORE = 0.0;
 
+/// seqlen_q at or above which block_m 256 measured faster than 128, per cohort.
+///
+/// From the gfx950 tile sweep: 282 shapes (the LLM suite's 102 servable shapes plus a
+/// 192-shape coverage grid), every legal tile timed against a torch SDPA reference, three
+/// alternating rounds, median per configuration. Each threshold sits on a plateau rather
+/// than a fitted edge -- for D128 causal every value in (2048, 4096] scores identically --
+/// so these are round numbers inside a wide band, not tuned constants.
+///
+/// Non-causal does the full seqlen_q x seqlen_kv work with no triangular saving, so a
+/// given length is a larger problem than the causal case and wants the fat tile sooner.
+/// At D128 that is every measured length.
+constexpr int64_t BLOCK_M_256_FROM_D64_CAUSAL = 8192;
+constexpr int64_t BLOCK_M_256_FROM_D64_NONCAUSAL = 1024;
+constexpr int64_t BLOCK_M_256_FROM_D128_CAUSAL = 4096;
+constexpr int64_t BLOCK_M_256_FROM_D128_NONCAUSAL = 0;
+
+/// block_n 64 won only for D128 causal; 128 won in all three other cohorts.
+constexpr int64_t PREFERRED_BLOCK_N_D128_CAUSAL = 64;
+constexpr int64_t PREFERRED_BLOCK_N_OTHERWISE = 128;
+
+/// The tile the sweep measured fastest for this cohort at this query length.
+///
+/// Cohort is (head_size, causal) only. dtype was measured and makes no difference:
+/// splitting the fit on it changes nothing. Batch and the GQA ratio do carry some signal
+/// but are deliberately left out, since the rule is already inside its target and there is
+/// no held-out set left to tell a real effect from a fitted one.
+AttentionDenseTile preferredTile(int64_t headSize, bool causal, int64_t seqLenQ)
+{
+    const bool d128 = headSize == 128;
+    const int64_t fatFrom
+        = d128 ? (causal ? BLOCK_M_256_FROM_D128_CAUSAL : BLOCK_M_256_FROM_D128_NONCAUSAL)
+               : (causal ? BLOCK_M_256_FROM_D64_CAUSAL : BLOCK_M_256_FROM_D64_NONCAUSAL);
+    return AttentionDenseTile{seqLenQ >= fatFrom ? 256 : 128,
+                              d128 && causal ? PREFERRED_BLOCK_N_D128_CAUSAL
+                                             : PREFERRED_BLOCK_N_OTHERWISE};
+}
+
 /**
- * @brief Preference among tiles that can serve this problem. Higher wins, range [0, 1).
+ * @brief Preference among tiles that can serve this problem. Higher wins.
  *
- * PLACEHOLDER. This reproduces the shape-blind cold order described on @ref scoreKernel
- * and ignores @p problem and @p cuCount. It is the seam the measured rule replaces: the
- * gfx950 tile sweep records the fastest tile per shape, and the fit goes here. Until it
- * does, selection is the historical one and the order is unchanged.
+ * Scores how close a candidate is to @ref preferredTile: a bonus per matching axis, with
+ * block_m weighted above block_n, then the historical ascending (block_m, block_n) order
+ * as the remainder. The preferred tile is often not in the catalog for a given shape --
+ * kernelMatches drops every tile that does not divide both lengths -- so the ranking has
+ * to degrade sensibly rather than name one winner.
  *
- * Whatever replaces this body must keep two properties the selector depends on, both
- * asserted by ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight: every score is
- * positive and finite, and two distinct tiles never score equal, or the descriptor-id
- * tie-break silently decides between them.
+ * Two properties the selector depends on, both asserted by
+ * ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight: every score is positive and
+ * finite, and two distinct tiles never score equal, or the descriptor-id tie-break
+ * silently decides between them. The remainder is what guarantees the second.
  *
  * Divisibility is not this function's problem. kernelMatches rejects a tile that does not
  * divide both lengths (@ref tileDivides) before anything is scored, so every tile here can
@@ -925,34 +960,30 @@ constexpr double UNSUPPORTED_TILE_SCORE = 0.0;
  */
 double tilePreference(const AttentionDenseTile& tile,
                       const AttentionDenseProblem& problem,
-                      int cuCount)
+                      bool causal)
 {
-    static_cast<void>(problem); // the measured rule reads both; the placeholder does not
-    static_cast<void>(cuCount);
-
-    if(tile.blockM == BASELINE_BLOCK_M && tile.blockN == BASELINE_BLOCK_N)
-    {
-        return BASELINE_TILE_SCORE;
-    }
+    const auto want = preferredTile(problem.headSize, causal, problem.seqLenQ);
+    const double match = (tile.blockM == want.blockM ? BLOCK_M_MATCH_BONUS : 0.0)
+                         + (tile.blockN == want.blockN ? BLOCK_N_MATCH_BONUS : 0.0);
     const int64_t key = tile.blockM * BLOCK_M_KEY_WEIGHT + tile.blockN;
-    return ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
+    return match + ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
 }
 
 /**
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
- * A stable fallback order for cold selection, not yet a performance model:
+ * Orders by closeness to the tile the gfx950 sweep measured fastest for this shape; see
+ * @ref preferredTile for the rule and @ref tilePreference for how a catalog without that
+ * exact tile degrades. Every distinct tile gets a distinct score, so the selector's
+ * descriptor-id tie-break never decides between two tiles.
  *
- *  1. The baseline 256/64 tile -- every legacy record's -- above every alternative.
- *  2. The alternatives in ascending lexicographic (block_m, block_n) order.
+ * `causal` is read from the candidate's own metadata rather than the bound tokens:
+ * kernelMatches has already required the two to agree, so for anything scored here they
+ * are the same value and the metadata needs no graph lookup.
  *
- * Every distinct tile gets a distinct score, so the selector's descriptor-id tie-break
- * never decides between two tiles.
- *
- * The shape and the device reach @ref tilePreference so a measured rule can read them.
- * A graph this scorer cannot read the shape from falls back to the tile-only order rather
- * than refusing: applicability is kernelMatches' job, and anything scored here already
- * passed it.
+ * A graph this scorer cannot read the shape from scores every tile as a zero-length
+ * problem, which is the historical ascending order, rather than refusing: applicability
+ * is kernelMatches' job and anything reaching here already passed it.
  */
 double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -974,7 +1005,8 @@ double scoreKernel(const MatchContext& context,
             problem = problemFor(*q, *k);
         }
     }
-    return tilePreference(*tile, problem, context.deviceProperties.multiProcessorCount);
+    const auto causal = integerMetadata(kernel, CAUSAL_FIELD);
+    return tilePreference(*tile, problem, causal.value_or(0) != 0);
 }
 
 // ---------------------------------------------------------------------------

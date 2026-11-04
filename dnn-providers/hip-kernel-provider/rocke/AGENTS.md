@@ -139,6 +139,7 @@ the matching doc first.
 | Bisect a perf regression | [bisect-perf-regression.md](platform/dsl_docs/optimization/utilities/skills/bisect-perf-regression.md) |
 | Real bug signatures + measured wins | [empirical-case-studies.md](platform/dsl_docs/optimization/utilities/skills/empirical-case-studies.md) |
 | Attention decode on gfx942/gfx950 (3D split-KV): defaults, per-lever outcomes, replay | [attention_3d_decode/CASE_STUDY.md](library/builders/common/attention_3d_decode/CASE_STUDY.md) |
+| gfx950 dense attention tile selection: the rule, the sweep behind it, what it does not cover | [prefill/TILE_HEURISTIC.md](library/builders/gfx950/attention/prefill/TILE_HEURISTIC.md) |
 | Per-arch facts (MFMA atoms, LDS banks, occupancy caps, sched intrinsics) | [arch/gfx942.md](platform/dsl_docs/optimization/arch/gfx942.md), [arch/gfx950.md](platform/dsl_docs/optimization/arch/gfx950.md) |
 
 Hard rule from the runbook: **never report speed without correctness** — run the

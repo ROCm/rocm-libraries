@@ -2693,15 +2693,12 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
 
 /// One shape and the tile order the scorer must produce for it.
 ///
-/// PHASE 2 SEAM. The orders below are the shipped shape-blind ranking: baseline
-/// 256/64 first, then ascending (block_m, block_n). When the gfx950 tile sweep
-/// fits a measured rule into `tilePreference`, these expectations become the
-/// measured winner order and new rows are added for the shapes that distinguish
-/// the rule -- in particular either side of the grid-fill boundary, where a rule
-/// that reads the CU count must differ from one that does not.
+/// The orders are the measured rule's: closeness to `preferredTile` for the shape's
+/// cohort, block_m weighted above block_n, then ascending (block_m, block_n) as the
+/// remainder. Both cohorts here carry `causal = 0`, so both take the non-causal
+/// thresholds.
 ///
-/// Keeping the cases in a table rather than one test each is what makes that a
-/// data edit instead of a rewrite under time pressure.
+/// A table rather than one test each, so adding a case is a data edit.
 struct ColdOrderCase
 {
     const char* name;
@@ -2713,17 +2710,26 @@ struct ColdOrderCase
 std::vector<ColdOrderCase> coldOrderCases()
 {
     return {
-        // All seven D64 tiles are legal at S1024, so this pins the full order.
-        {"d64 s1024, every tile legal",
+        // All seven D64 tiles are legal at S1024, so this pins the full order. D64
+        // non-causal takes block_m 256 from 1024, and block_n 128 everywhere outside
+        // D128 causal, so 256/128 leads and the rest fall back lexicographically.
+        {"d64 s1024 non-causal, every tile legal",
          d64H32Noncausal(1024, 1024),
          d64H32Cohort(),
-         {{256, 64}, {128, 32}, {128, 64}, {128, 128}, {256, 32}, {256, 128}, {256, 256}}},
-        // Sq 384 rules out every block_m 256 tile, the baseline included, so the
-        // order starts from the best remaining alternative.
-        {"d128 sq384, baseline cannot serve",
+         {{256, 128}, {256, 32}, {256, 64}, {256, 256}, {128, 128}, {128, 32}, {128, 64}}},
+        // Sq 384 rules out every block_m 256 tile, the preferred one included, so only
+        // the block_n bonus separates what is left: 128/128 leads on that alone.
+        {"d128 sq384 non-causal, preferred block_m cannot serve",
          d128H9Noncausal(1, 384, 512),
          d128H9Cohort(),
-         {{128, 32}, {128, 64}, {128, 128}}},
+         {{128, 128}, {128, 32}, {128, 64}}},
+        // The causal cohort, which is the one the rule treats differently: D128 causal is
+        // the only cohort preferring block_n 64, and below its 4096 threshold it wants the
+        // narrow query tile too. Both halves of the preference show here as 128/64 first.
+        {"d128 s256 causal, both preferences differ from the non-causal cohorts",
+         GraphSpec{},
+         cohortOf(canonicalAligned(), d128Tiles()),
+         {{128, 64}, {128, 32}, {128, 128}, {256, 64}, {256, 32}, {256, 128}}},
     };
 }
 
