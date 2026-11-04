@@ -251,6 +251,22 @@ class TestTuningCandidates(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "gfx942/gfx950-only"):
             _bias_fields(problem, "gfx1201")
 
+    def test_explicit_gfx942_4warp_spec_refuses_bias(self):
+        # gfx942's supports_tiled_2d refuses bias on the 4-warp GQA geometry, so
+        # an explicit spec is rejected up front, not by build_gfx942_4warp_gqa at
+        # build time. The same config without bias is accepted.
+        problem = _problem(_req(arch="gfx942", hdim_q=256, hdim_v=256, nhead_k=2))
+        config = ExplicitAttention2DConfig(
+            num_warps=1,
+            block_m_per_warp=32,
+            tile_policy="64",
+            builder_kind="gfx942_4warp_gqa",
+        )
+        plain = replace(problem, use_additive_bias=False)
+        make_explicit_attention_2d_spec(plain, config, arch="gfx942")
+        with self.assertRaisesRegex(ValueError, "not the 4-warp GQA kernel"):
+            make_explicit_attention_2d_spec(problem, config, arch="gfx942")
+
     def test_declared_bias_support_matches_the_kernel(self):
         # _variant_features (gfx950_unified.py) declares "every gfx950
         # geometry except wide32 takes a bias" as a fact about the kernel,

@@ -310,7 +310,8 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem, arch: str):
     if _enable_k_single_buffer(problem, arch):
         _schedule_fields["use_k_single_buffer"] = True
     # Shared base fields + the gfx950-only schedule tail (disjoint keys).
-    # Additive bias is gfx950-only for now, so it lives in the tail too.
+    # gfx950's tail passes additive bias directly; gfx942 sets it in
+    # _spec_generic_2d_non_gfx950.
     _spec = UnifiedAttention2DTiledSpec(
         **_base_2d_generic_fields(problem, arch),
         **_schedule_fields,

@@ -34,8 +34,8 @@ the bottom need torch for real CPU tensors (``_validate_additive_bias`` checks
 a torch-specific dtype string), so they are gated with ``requires_torch`` and
 skip, rather than erroring the whole module, on an image with no torch (e.g.
 TheRock's gfx94X CI). The installed CTest tree has no torch either, so this
-file skips there; ``test_attention_additive_bias_gfx950_device_numeric.py``
-runs one case per path in it without torch, on a gfx950 device. Run
+file skips there; ``test_attention_additive_bias_device_numeric.py``
+runs one case per path in it without torch, on a gfx942 or gfx950 device. Run
 standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_numeric.py

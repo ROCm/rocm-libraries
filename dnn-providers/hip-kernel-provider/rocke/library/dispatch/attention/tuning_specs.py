@@ -278,10 +278,10 @@ def make_explicit_attention_2d_spec(
         support_kwargs.update(
             ring_depth=int(getattr(spec, "ring_depth", 3)),
             k_slice_hd=int(getattr(spec, "k_slice_hd", 32)),
+            # gfx942's gate refuses bias off the narrow path (x8, 4-warp GQA);
+            # gfx950's declares the kwarg but never reads it.
+            use_additive_bias=problem.use_additive_bias,
         )
-    # Not passed: supports_tiled_2d declares use_additive_bias but never reads
-    # it (_bias_fields already raises outside gfx942/gfx950, so this kwarg would
-    # only be a second, redundant copy of that rule).
     ok, why = supports(**support_kwargs)
     if not ok:
         raise ValueError(f"unsupported explicit 2D attention config: {why}")

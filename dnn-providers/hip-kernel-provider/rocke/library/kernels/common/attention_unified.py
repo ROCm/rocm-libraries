@@ -708,6 +708,7 @@ def supports_native_unified_attention_tiled(
             use_transposed_qk_32x32=True,
             use_k_single_buffer=single_k,
             use_conflict_free_v_store=use_cfvst,
+            use_additive_bias=problem.use_additive_bias,
             # This branch reaches gfx942's gate too, so it needs the same ring
             # parameters as the general path below, or the estimate here sizes a
             # different kernel than _tiled_spec_from_problem builds. Reachable

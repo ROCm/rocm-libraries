@@ -75,6 +75,21 @@ class TiledSpecWrappers(unittest.TestCase):
         self.assertTrue(gfx942_2d.supports_gfx942_4warp_gqa_spec(spec)[0])
         self.assertFalse(gfx942_2d.supports_tiled_2d_spec(spec)[0])
 
+    def test_gfx942_4warp_gqa_wrapper_refuses_additive_bias(self):
+        # The wrapper forwards use_additive_bias, so the 4-warp GQA gate refuses a
+        # biased spec instead of leaving it to build_gfx942_4warp_gqa.
+        spec = gfx942_2d.UnifiedAttention2DTiledSpec(
+            head_size=256,
+            **dict(_PROBLEM, num_query_heads=16, num_kv_heads=2),
+            num_warps=1,
+            block_m_per_warp=32,
+            tile_size=32,
+            use_additive_bias=True,
+        )
+        ok, why = gfx942_2d.supports_gfx942_4warp_gqa_spec(spec)
+        self.assertFalse(ok)
+        self.assertIn("supports only the narrow 16x16 path", why)
+
     def test_every_wrapper_judges_head_size(self):
         seg = {"num_segments": 16}
         cases = ((gfx950_2d, "2d", {}), (gfx942_3d, "3d", seg), (gfx950_3d, "3d", seg))

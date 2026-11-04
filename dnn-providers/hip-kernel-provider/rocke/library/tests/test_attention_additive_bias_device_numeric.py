@@ -1,14 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Additive attention bias on gfx950, one case per path, without torch.
+"""Additive attention bias on gfx942 and gfx950, one case per path, without torch.
 
 ``test_attention_additive_bias_numeric.py`` is the full numeric lane, but
 it needs ROCm torch, which the installed CTest tree does not have, so it skips
-there. This file runs one bf16 case on each path without torch: the 2D 16x16 and
-transposed 32x32 score paths, the 3D split-KV path, and 3D with the LSE output.
-Both run in ``rocke_library_attention_bias_gpu_pytest``. This one needs a
-gfx950 device and skips every case on any other.
+there. This file runs one bf16 case on each path without torch: short and long
+2D prefill, the 3D split-KV path, and 3D with the LSE output. On gfx950 the
+long case takes the transposed 32x32 score path; gfx942 serves both 2D cases on
+its narrow 16x16 path. Both files run in
+``rocke_library_attention_bias_gpu_pytest``. This one needs a gfx942 or gfx950
+device and skips every case on any other.
 
 The 2D cases go through ``run_unified_attention_torch`` on ``rocke.runtime``
 device buffers (``DeviceArray``). The 3D path allocates its workspace with
@@ -36,16 +38,25 @@ from ._attention_device_array import DeviceArray
 _ARCH = get_device_arch()
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.skipif(_ARCH != "gfx950", reason=f"needs gfx950, found {_ARCH}"),
+    pytest.mark.skipif(
+        _ARCH not in ("gfx942", "gfx950"), reason=f"needs gfx942/gfx950, found {_ARCH}"
+    ),
 ]
 
 _HQ, _HKV, _HEAD_SIZE, _BLOCK_SIZE = 8, 2, 128, 16
 _TOL = 4e-2  # bf16, as in the torch lane
 
-# case -> (path, [(query_len, kv_len) per sequence], emit_lse, 2D score path).
+# case -> (path, [(query_len, kv_len) per sequence], emit_lse,
+# {arch: 2D score path}).
+_NARROW = {"gfx942": "16x16", "gfx950": "16x16"}
 _CASES = {
-    "2d_16x16": ("2d", [(37, 101), (64, 64), (5, 130)], False, "16x16"),
-    "2d_transposed32": ("2d", [(384, 640)], False, "transposed32"),
+    "2d_short": ("2d", [(37, 101), (64, 64), (5, 130)], False, _NARROW),
+    "2d_long": (
+        "2d",
+        [(384, 640)],
+        False,
+        {"gfx942": "16x16", "gfx950": "transposed32"},
+    ),
     "3d": ("3d", [(1, 300), (3, 517), (1, 64)], False, None),
     "3d_lse": ("3d", [(1, 300), (3, 517), (1, 64)], True, None),
 }
@@ -171,7 +182,7 @@ def _run_2d(rt, problem, q, k, v, block_table, seq_lens, scale, bias):
 
 
 def _run_3d(rt, problem, q, k, v, block_table, seq_lens, scale, bias):
-    arch = "gfx950"
+    arch = _ARCH
     ok, why = au._explicit_path_supported(problem, None, "3d", arch)
     assert ok, why
     num_segments = au._num_segments(problem, arch)
@@ -230,13 +241,15 @@ def _run_3d(rt, problem, q, k, v, block_table, seq_lens, scale, bias):
 
 @pytest.mark.parametrize("case", list(_CASES))
 def test_additive_bias_matches_reference_without_torch(rt, case):
-    path, seq_lens, emit_lse, score_path = _CASES[case]
+    path, seq_lens, emit_lse, score_paths = _CASES[case]
     q, k, v, block_table, bias = _inputs(seq_lens)
     problem = _problem(seq_lens, k.shape[0], emit_lse)
     if path == "2d":
-        spec = au._tiled_spec_from_problem(problem, "gfx950")
-        transposed = spec.use_mfma_32x32 and spec.use_transposed_qk_32x32
-        assert ("transposed32" if transposed else "16x16") == score_path
+        spec = au._tiled_spec_from_problem(problem, _ARCH)
+        transposed = getattr(spec, "use_mfma_32x32", False) and (
+            spec.use_transposed_qk_32x32
+        )
+        assert ("transposed32" if transposed else "16x16") == score_paths[_ARCH]
     scale = 1.0 / math.sqrt(_HEAD_SIZE)
     run = _run_2d if path == "2d" else _run_3d
     out, lse = run(rt, problem, q, k, v, block_table, seq_lens, scale, bias)

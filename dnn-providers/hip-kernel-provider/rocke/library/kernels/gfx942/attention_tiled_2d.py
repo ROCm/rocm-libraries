@@ -1124,6 +1124,17 @@ def supports_tiled_2d(
     arch_ok, arch_reason = validate_tiled_attention_arch(arch)
     if not arch_ok:
         return False, arch_reason
+    # Only the narrow 16x16 score site adds the bias. Refusing the other
+    # geometries here keeps this gate the single source of truth, rather than
+    # leaving the 4-warp GQA builder's refusal to fire at build time.
+    if use_additive_bias and (use_d256_fast or use_mfma_32x32x8):
+        return (
+            False,
+            (
+                "use_additive_bias on gfx942 supports only the narrow 16x16 path, "
+                "not the 4-warp GQA kernel or use_mfma_32x32x8"
+            ),
+        )
     # The fp8 K/V cache path needs ds_read_tr_b8 (gfx950-only); the gfx942
     # variant supports only the bf16/fp16 default path.
     if kv_storage_dtype is not None:
@@ -6804,6 +6815,7 @@ def _supports_tiled_2d_spec(
         use_qq_bias=spec.use_qq_bias,
         use_fp8=use_fp8,
         q_dtype=spec.dtype,
+        use_additive_bias=spec.use_additive_bias,
         num_warps=spec.num_warps,
         block_m_per_warp=spec.block_m_per_warp,
         kv_storage_dtype=spec.kv_storage_dtype,

@@ -66,7 +66,7 @@ All remaining shapes.  Key knob decisions:
 | `use_k_single_buffer` | `_enable_k_single_buffer`: d128 small-tile cohort + env opt-in (gfx950 spec only) |
 | `use_fp8_mfma_qk` | `_enable_fp8_mfma_qk`: decode fp8 path only |
 | `use_i64_kv_addr` | cache size > 2 GiB (see gfx950 README "Paged-cache size" section) |
-| `use_additive_bias` | `problem.use_additive_bias` (gfx950 spec only; passed directly by `_spec_gfx950_generic`) |
+| `use_additive_bias` | `problem.use_additive_bias` (gfx942 and gfx950 specs; gfx950's tail passes it directly in `_spec_gfx950_generic`, gfx942 sets it in `_spec_generic_2d_non_gfx950`) |
 
 ### Tiled-3D dispatch cases
 
@@ -214,7 +214,9 @@ the plain transposed 32x32 path: `__post_init__` rejects it together with
 knobs off when `problem.use_additive_bias` is set.  On gfx942 the selectors route
 every score-bias problem to the narrow 16x16 2D path, so that is the only 2D path
 that emits it: `__post_init__` rejects it with `use_mfma_32x32x8` and
-`use_register_pv`, and the 4-warp GQA builder refuses it.  The gfx942 3D split-KV
+`use_register_pv`, `supports_tiled_2d` refuses it on the x8 and 4-warp GQA
+geometries (so `supports_gfx942_4warp_gqa_spec` and an explicit 4-warp tuning
+spec reject a biased spec up front), and the 4-warp GQA builder refuses it.  The gfx942 3D split-KV
 kernel emits it on every load variant except strided KV.
 Enabled by `UnifiedAttentionProblem.use_additive_bias`; the tensor and strides
 are passed to `run_unified_attention_torch(additive_bias=...,
