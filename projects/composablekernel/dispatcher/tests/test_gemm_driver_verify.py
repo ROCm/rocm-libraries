@@ -318,6 +318,30 @@ def test_worker_inputs_are_the_seed_42_draws(monkeypatch, capsys, kind):
         assert X.shape == want.shape and X.tobytes() == want.tobytes()
 
 
+@pytest.mark.parametrize("kind", WORKERS)
+def test_worker_inputs_follow_every_problem_dimension(monkeypatch, capsys, kind):
+    # Each step changes ONE problem dimension, so a sweep-input key that missed
+    # any of them (batch, M, N or K) would hand the kernel the previous shape's
+    # A or B.
+    worker, cls, problem = WORKERS[kind]
+    runner = _runner("fp8", False, cls=cls)
+    seen = []
+    run = runner.run
+    runner.run = lambda A, B, p, **kw: seen.append((A, B)) or run(A, B, p, **kw)
+    monkeypatch.setattr(worker, cls.__name__, lambda **kw: runner)
+    probs = [problem]
+    for dim in [d for d in ("batch_count", "M", "N", "K") if d in problem]:
+        probs.append({**probs[-1], dim: probs[-1][dim] // 2})
+    for idx, prob in enumerate(probs):
+        worker._run_one(idx, "fake.so", prob, runner.kernel_name, verify=True)
+    outs = _outputs(capsys)
+    assert all(o["ok"] and o["verified"] for o in outs), outs
+    assert len(outs) == len(seen) == len(probs)
+    for (A, B), prob in zip(seen, probs):
+        for X, want in zip((A, B), _inputs(prob)):
+            assert X.shape == want.shape and X.tobytes() == want.tobytes(), prob
+
+
 @pytest.mark.parametrize("change", ["shape", "dtype"])
 @pytest.mark.parametrize("kind", WORKERS)
 def test_worker_frees_old_operands_before_building_new_ones(
@@ -430,6 +454,57 @@ def test_runner_sees_input_changes_between_runs(kind, how):
     out2 = runner.run(A, B, prob).output
     assert not np.allclose(out1, out2)
     assert _max_rel(out2, runner.reference(A, B)) < _c_eps("fp8")
+
+
+@pytest.mark.parametrize("swept", ["A", "B"])
+@pytest.mark.parametrize("kind", RUNNERS)
+def test_runner_encodes_a_sweep_operand_paired_with_a_callers_afresh(kind, swept):
+    # Only the (A, B) pair _sweep_inputs returned is cached: either of its arrays
+    # paired with a caller's own array, which may change between runs, is
+    # encoded fresh on every run.
+    cls, problem_cls, problem = RUNNERS[kind]
+    runner = _runner("fp8", False, cls=cls)
+    prob = problem_cls.from_dict(problem)
+    lead = (problem["batch_count"],) if "batch_count" in problem else ()
+    M, N, K = problem["M"], problem["N"], problem["K"]
+    ops = dict(zip("AB", gemm_utils._sweep_inputs((*lead, M, K), (*lead, K, N))))
+    mine = "B" if swept == "A" else "A"
+    ops[mine] = _inputs(problem)["AB".index(mine)]
+    out1 = runner.run(ops["A"], ops["B"], prob).output.copy()
+    ops[mine] *= 2.0
+    out2 = runner.run(ops["A"], ops["B"], prob).output
+    assert not np.allclose(out1, out2)
+    assert _max_rel(out2, runner.reference(ops["A"], ops["B"])) < _c_eps("fp8")
+
+
+@pytest.mark.parametrize("kind", RUNNERS)
+def test_runner_leaves_callers_arrays_writeable(kind):
+    # Only the buffers the cache keeps are frozen. A caller's own arrays stay
+    # writeable after a run, including when a row-major fp32 operand is handed
+    # to the kernel as-is.
+    cls, problem_cls, problem = RUNNERS[kind]
+    prob = problem_cls.from_dict(problem)
+    for dtype in ("fp32", "fp16", "bf16", "fp8"):
+        for layout in ("rrr", "ccr"):
+            A, B = _inputs(problem)
+            _runner(dtype, False, layout, cls).run(A, B, prob)
+            assert A.flags.writeable and B.flags.writeable, (dtype, layout)
+
+
+@pytest.mark.parametrize("dtype,use_ocp", CASES)
+def test_sweep_metric_equals_the_per_kernel_metric(dtype, use_ocp):
+    # Reusing the reference must not move any verify verdict: for every kernel
+    # the metric is bit-identical to max|out - ref| / max|ref| computed for that
+    # kernel alone, as the workers did before.
+    M, N, K = PROBLEM["M"], PROBLEM["N"], PROBLEM["K"]
+    A, B = gemm_utils._sweep_inputs((M, K), (K, N))
+    for layout in ("rcr", "crr"):
+        runner = _runner(dtype, use_ocp, layout)
+        out = runner.run(A, B, GemmProblem.from_dict(PROBLEM)).output
+        ref = runner.reference(A, B)
+        denom = float(np.max(np.abs(ref))) or 1.0
+        want = float(np.max(np.abs(out.astype(np.float32) - ref)) / denom)
+        assert gemm_utils._sweep_max_rel(runner, A, B, out) == want, layout
 
 
 def _dtype_of(runner):

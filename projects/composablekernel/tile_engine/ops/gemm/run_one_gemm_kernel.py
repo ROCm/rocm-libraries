@@ -95,8 +95,8 @@ def _run_one(
             result = runner.run(problem, verify=verify, verify_tol=verify_tol)
             A = B = None
         else:
-            # Generated, encoded and verified against once per shape, not per
-            # kernel (gemm_utils._sweep_inputs).
+            # Drawn once per shape; kernels of the shape reuse their encoding and
+            # verify reference (gemm_utils._sweep_inputs).
             A, B = _sweep_inputs((problem.M, problem.K), (problem.K, problem.N))
 
             # CRITICAL: load the library ONLY inside this subprocess.

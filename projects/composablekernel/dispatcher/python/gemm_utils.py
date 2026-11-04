@@ -1137,9 +1137,10 @@ def _fp8_encode_ladder(
     """Reference fp32 -> 8-bit float encoder: float64 nearest-even ladder.
 
     Per-element ``searchsorted`` over the sorted finite magnitudes; too slow for
-    benchmark-sized operands, so :func:`_fp8_encode` only runs it over the
-    65,536 float32 top-16-bit buckets (see :func:`_fp8_encode_tables`). Also the
-    bit-exactness oracle in ``test_gemm_utils``.
+    benchmark-sized operands, so :func:`_fp8_encode` only runs it once per codec
+    over the 65,536 float32 top-16-bit buckets, at zero and at non-zero low 16
+    bits (see :func:`_fp8_encode_tables`). Also the bit-exactness oracle in
+    ``test_gemm_utils``.
     """
     table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
     sign_byte = np.uint8(1 << (exp_bits + mant_bits))  # 0x80
@@ -1297,16 +1298,6 @@ def _use_ocp_fp8():
 # int32, everything else stores in its own dtype.
 _OUTPUT_DTYPE = {"fp8": "fp16", "bf8": "fp16", "int8": "int32"}
 
-# A/B dtypes whose host buffers are plain numpy arrays (no bit-level encoding).
-_NATIVE_NP = {
-    "fp16": np.float16,
-    "fp32": np.float32,
-    "int8": np.int8,
-}
-# C host buffer dtypes. int32 is an accumulator/output type only (int8 GEMMs),
-# so it is kept out of the A/B allow-list above.
-_C_NP = {**_NATIVE_NP, "int32": np.int32, "bf16": np.uint16}
-
 
 def _output_dtype(dtype: str) -> str:
     return _OUTPUT_DTYPE.get(dtype, dtype)
@@ -1352,10 +1343,11 @@ def _encode_operand(x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None) -
 # Operands of the one shape a tile_engine sweep worker (run_one_gemm_kernel.py,
 # run_one_streamk_gemm_kernel.py, run_one_batched_gemm_kernel.py) is measuring:
 # "ab" its seeded fp32 inputs, "enc" their host buffers for the last kernel
-# dtype/layout, "ref" the verify reference for the last encoding. Every kernel
-# of the shape reuses them; the next shape frees them before drawing its own, so
-# one shape's operands are alive at a time. Only these (A, B) are cached: arrays
-# from any other caller may change between runs and are encoded fresh each time.
+# dtype/layout, "ref" the verify reference and max|ref| for the last encoding.
+# Every kernel of the shape reuses them; the next shape frees them before drawing
+# its own, so one shape's operands are alive at a time. Only these (A, B) are
+# cached: arrays from any other caller may change between runs and are encoded
+# fresh each time. Not locked: each worker process is single-threaded.
 _SWEEP_CACHE: Dict[str, Any] = {}
 
 
@@ -1434,12 +1426,17 @@ def _sweep_max_rel(runner, A: np.ndarray, B: np.ndarray, output: np.ndarray) -> 
     """Verify metric ``max|output - ref| / max|ref|``, ``ref = runner.reference(A, B)``.
 
     The reference depends only on the inputs and their encoding, not on the
-    kernel or its layouts, so a sweep computes it once per shape and encoding.
+    kernel or its layouts, so a sweep computes it and ``max|ref|`` once per shape
+    and encoding (keyed for runners that share ``GpuGemmRunner.reference``).
     """
+
+    def build():
+        ref = runner.reference(A, B)
+        return ref, np.array(float(np.max(np.abs(ref))) or 1.0)
+
     key = _encoding(_dtype_from_kernel_name(runner.kernel_name), runner._use_ocp)
-    (ref,) = _sweep_cached(A, B, "ref", key, lambda: (runner.reference(A, B),))
-    denom = float(np.max(np.abs(ref))) or 1.0
-    return float(np.max(np.abs(output.astype(np.float32) - ref)) / denom)
+    ref, denom = _sweep_cached(A, B, "ref", key, build)
+    return float(np.max(np.abs(output.astype(np.float32) - ref)) / float(denom))
 
 
 def _c_numpy_dtype(dtype: str):
@@ -1538,8 +1535,8 @@ class GpuGemmRunner:
         la, lb, lc = _layout_from_kernel_name(self._kernel_name)
         C_shape = (M, N) if lc == "r" else (N, M)
 
-        # A/B host buffers in the kernel's element dtype and layout; a sweep
-        # worker's inputs are encoded once per shape, not per kernel.
+        # A/B host buffers in the kernel's element dtype and layout; the kernels
+        # of a sweep worker's shape reuse them (see _sweep_inputs).
         A_h, B_h = _encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )

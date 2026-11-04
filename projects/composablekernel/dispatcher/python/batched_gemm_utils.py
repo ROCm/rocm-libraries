@@ -461,8 +461,8 @@ class GpuBatchedGemmRunner:
         la, lb, lc = _gu._layout_from_kernel_name(self._kernel_name)
         C_shape = (batch, M, N) if lc == "r" else (batch, N, M)
 
-        # A/B host buffers in the kernel's element dtype and per-batch layout; a
-        # sweep worker's inputs are encoded once per shape, not per kernel.
+        # A/B host buffers in the kernel's element dtype and per-batch layout; the
+        # kernels of a sweep worker's shape reuse them (see _gu._sweep_inputs).
         A_h, B_h = _gu._encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )

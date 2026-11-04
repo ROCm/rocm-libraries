@@ -55,8 +55,8 @@ def _run_one(
     try:
         problem = BatchedGemmProblem.from_dict(prob_dict)
 
-        # Generated, encoded and verified against once per shape, not per kernel
-        # (gemm_utils._sweep_inputs).
+        # Drawn once per shape; kernels of the shape reuse their encoding and
+        # verify reference (gemm_utils._sweep_inputs).
         b, M, N, K = problem.batch_count, problem.M, problem.N, problem.K
         A, B = _sweep_inputs((b, M, K), (b, K, N))
 

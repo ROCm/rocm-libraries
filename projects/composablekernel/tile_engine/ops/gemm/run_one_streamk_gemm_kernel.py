@@ -59,8 +59,8 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
     try:
         problem = GemmProblem.from_dict(prob_dict)
 
-        # Generated, encoded and verified against once per shape, not per kernel
-        # (gemm_utils._sweep_inputs).
+        # Drawn once per shape; kernels of the shape reuse their encoding and
+        # verify reference (gemm_utils._sweep_inputs).
         A, B = _sweep_inputs((problem.M, problem.K), (problem.K, problem.N))
 
         # CRITICAL: load the library ONLY inside this subprocess. The runner reads
