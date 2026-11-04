@@ -17,15 +17,18 @@ namespace
 static const ckc::rocke_ll_emission_profile_t ROCKE_LL_PROFILE_LLVM20
     = {ckc::ROCKE_LL_DATALAYOUT_PROFILE_LLVM20, ckc::ROCKE_LL_DECLARATION_ABI_LLVM20, 0};
 static const ckc::rocke_ll_emission_profile_t ROCKE_LL_PROFILE_LLVM22
-    = {ckc::ROCKE_LL_DATALAYOUT_PROFILE_LLVM22, ckc::ROCKE_LL_DECLARATION_ABI_LLVM22, 0};
+    = {ckc::ROCKE_LL_DATALAYOUT_PROFILE_LLVM22,
+       ckc::ROCKE_LL_DECLARATION_ABI_LLVM22,
+       ckc::ROCKE_LL_CAP_GFX1250_WMMA};
 static const ckc::rocke_ll_emission_profile_t ROCKE_LL_PROFILE_LLVM23
     = {ckc::ROCKE_LL_DATALAYOUT_PROFILE_LLVM23,
        ckc::ROCKE_LL_DECLARATION_ABI_LLVM23,
-       ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS};
+       ckc::ROCKE_LL_CAP_GFX1250_WMMA | ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS};
 static const ckc::rocke_ll_emission_profile_t ROCKE_LL_PROFILE_LLVM24
     = {ckc::ROCKE_LL_DATALAYOUT_PROFILE_LLVM23,
        ckc::ROCKE_LL_DECLARATION_ABI_LLVM24,
-       ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS | ckc::ROCKE_LL_CAP_NAMED_BARRIER_AS15};
+       ckc::ROCKE_LL_CAP_GFX1250_WMMA | ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS
+           | ckc::ROCKE_LL_CAP_NAMED_BARRIER_AS15};
 
 static const struct
 {

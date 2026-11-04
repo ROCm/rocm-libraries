@@ -12,13 +12,10 @@ from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
-from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
+from rocke.core.ir import F16, F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import (
-    _INTRINSIC_DECLS,
-    _INTRINSIC_MIN_FLAVOR,
-    _decls_for_flavor,
     _Lowerer,
     _lower_kernel_to_llvm_python,
     lower_kernel_to_llvm,
@@ -400,49 +397,50 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     lower_kernel_to_hip(kernel, arch="gfx1250")
 
 
+def _build_f16_wmma():
+    b = IRBuilder("gfx1250_f16_wmma")
+    matrix = b.param("matrix", PtrType(F16, "global"), readonly=True)
+    accum = b.param("accum", PtrType(F32, "global"))
+    lane = b.thread_id_x()
+    fragment = b.global_load_vN(matrix, lane, F16, 16)
+    c = b.global_load_vN(accum, lane, F32, 8)
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma",
+        a_dtype="fp16",
+        b_dtype="fp16",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=32,
+    )
+    d = b.mma(atom, fragment, fragment, c)
+    b.global_store(accum, lane, b.vec_extract(d, 0))
+    return b.kernel
+
+
 class IntrinsicDeclaredOnFlavorTest(unittest.TestCase):
     """A demand for a key the flavor cannot declare is refused, not emitted."""
 
-    def _lowerer(self, flavor):
-        return _Lowerer(IRBuilder("k").kernel, arch="gfx1250", llvm_flavor=flavor)
-
-    def test_a_key_that_a_newer_flavor_adds_names_that_flavor(self):
-        for flavor, key, newer in (
-            ("llvm20", "wmma.gfx1250.f32.16x16x32.f16", "llvm22"),
-            (
-                "llvm22",
-                "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-                "llvm23",
-            ),
+    def test_the_unscaled_wmma_requires_llvm22(self):
+        kernel = _build_f16_wmma()
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "intrinsic 'wmma.gfx1250.f32.16x16x32.f16' requires llvm22, got llvm20",
         ):
-            with (
-                self.subTest(flavor=flavor, key=key),
-                self.assertRaisesRegex(NotImplementedError, f"requires {newer}"),
-            ):
-                self._lowerer(flavor)._need(key)
-
-    def test_a_key_in_the_flavor_table_is_accepted(self):
-        self._lowerer("llvm22")._need("wmma.gfx1250.f32.16x16x32.f16")
-        self._lowerer("llvm23")._need("wmma.gfx1250.f32.16x16x32.f16")
-
-    def test_a_flavor_table_keeps_the_base_table_emit_order(self):
-        """A flavor that declares a key declares it where the base table does."""
-        for flavor in ("llvm20", "llvm22", "llvm23", "llvm24"):
+            _lower_kernel_to_llvm_python(kernel, arch="gfx1250", llvm_flavor="llvm20")
+        for flavor in ("llvm22", "llvm23", "llvm24"):
             with self.subTest(flavor=flavor):
-                base_order = [
-                    k for k in _INTRINSIC_DECLS if k in _decls_for_flavor(flavor)
-                ]
-                self.assertEqual(
-                    base_order,
-                    [k for k in _decls_for_flavor(flavor) if k in _INTRINSIC_DECLS],
+                ir = _lower_kernel_to_llvm_python(
+                    kernel, arch="gfx1250", llvm_flavor=flavor
+                )
+                self.assertIn(
+                    "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16", ir
                 )
 
-    def test_every_minimum_flavor_key_is_in_the_base_table(self):
-        self.assertLessEqual(set(_INTRINSIC_MIN_FLAVOR), set(_INTRINSIC_DECLS))
-
     def test_a_key_in_no_table_is_a_defect(self):
+        lowerer = _Lowerer(IRBuilder("k").kernel, arch="gfx1250", llvm_flavor="llvm23")
         with self.assertRaises(KeyError):
-            self._lowerer("llvm23")._need("no.such.intrinsic")
+            lowerer._need("no.such.intrinsic")
 
 
 if __name__ == "__main__":

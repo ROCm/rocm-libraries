@@ -42,13 +42,14 @@ TARGET_OP_PROFILE_FAMILIES = (
     "conv_dgrad_smallc_wmma",
     "conv_direct_dgrad_wmma",
     "conv_direct_fwd_wmma",
+    "conv_direct_fwd_gstream_wmma",
+    "conv_direct_fwd_tapouter_wmma",
     "conv_fwd_small_wmma",
 )
 # Families whose every config uses gfx1250 WMMA. Flavors below llvm22 do not
 # declare it, so both engines reject all of them there. Flavors from llvm22 on
 # compare them in the default lane.
-GFX1250_WMMA_FAMILIES = ("conv_winograd_fused_1d_wmma",)
-GFX1250_WMMA_MIN_FLAVOR = "llvm22"
+GFX1250_WMMA_FAMILIES = ("conv_winograd_fused_1d_wmma", "conv_direct_dw_fwd_wmma")
 
 
 def _selected_profile_supports_target_ops() -> bool:
@@ -65,14 +66,14 @@ def _selected_profile_supports_target_ops() -> bool:
 
 
 def _selected_flavor_declares_gfx1250_wmma() -> bool:
-    """True when the selected lane is llvm22 or newer."""
+    """True when the selected lane declares the unscaled gfx1250 WMMA."""
     python_root = ROCKE / "python"
     if str(python_root) not in sys.path:
         sys.path.insert(0, str(python_root))
-    from rocke.core.llvm_profile import _flavor_at_least
+    from rocke.core.llvm_profile import _supports_gfx1250_wmma
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
-    return _flavor_at_least(_resolve_llvm_flavor(), GFX1250_WMMA_MIN_FLAVOR)
+    return _supports_gfx1250_wmma(_resolve_llvm_flavor())
 
 
 def _cxx() -> str | None:

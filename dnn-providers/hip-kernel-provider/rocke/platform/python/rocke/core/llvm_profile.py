@@ -186,6 +186,7 @@ class _LlvmDeclarationAbi(enum.Enum):
 class _LlvmEmissionCapability(enum.Enum):
     """Structural operations admitted by an emission profile."""
 
+    GFX1250_WMMA = "gfx1250_wmma"
     LLVM23_TARGET_OPS = "llvm23_target_ops"
     NAMED_BARRIER_AS15 = "named_barrier_as15"
 
@@ -212,12 +213,18 @@ _PROFILE_LLVM22 = _LlvmEmissionProfile(
     _DATALAYOUT_LLVM22,
     LlvmDatalayoutKind.P8_INDEXED,
     _LlvmDeclarationAbi.LLVM22,
+    frozenset({_LlvmEmissionCapability.GFX1250_WMMA}),
 )
 _PROFILE_LLVM23 = _LlvmEmissionProfile(
     _DATALAYOUT_LLVM23,
     LlvmDatalayoutKind.P8_INDEXED,
     _LlvmDeclarationAbi.LLVM23,
-    frozenset({_LlvmEmissionCapability.LLVM23_TARGET_OPS}),
+    frozenset(
+        {
+            _LlvmEmissionCapability.GFX1250_WMMA,
+            _LlvmEmissionCapability.LLVM23_TARGET_OPS,
+        }
+    ),
 )
 _PROFILE_LLVM24 = _LlvmEmissionProfile(
     _DATALAYOUT_LLVM23,
@@ -225,6 +232,7 @@ _PROFILE_LLVM24 = _LlvmEmissionProfile(
     _LlvmDeclarationAbi.LLVM24,
     frozenset(
         {
+            _LlvmEmissionCapability.GFX1250_WMMA,
             _LlvmEmissionCapability.LLVM23_TARGET_OPS,
             _LlvmEmissionCapability.NAMED_BARRIER_AS15,
         }
@@ -255,6 +263,11 @@ def _emission_profile(flavor: str) -> _LlvmEmissionProfile:
         raise ValueError(
             f"unknown LLVM flavor {flavor!r}; expected one of {LLVM_FLAVORS}"
         ) from exc
+
+
+def _supports_gfx1250_wmma(flavor: str) -> bool:
+    """Whether ``flavor`` declares the unscaled gfx1250 WMMA intrinsics."""
+    return _emission_profile(flavor).has(_LlvmEmissionCapability.GFX1250_WMMA)
 
 
 def _supports_llvm23_target_ops(flavor: str) -> bool:
@@ -323,15 +336,28 @@ def _datalayout_for_flavor(flavor: str) -> str:
     return _emission_profile(flavor).datalayout
 
 
-def _flavor_for_llvm(major: int) -> str:
-    """Map a compiler major to a qualified lane, failing beyond the frontier."""
-    latest_major, latest_flavor = _LLVM_FLAVOR_LADDER[-1]
+def measured_flavor_for_llvm(major: int) -> str | None:
+    """The qualified lane of a compiler of LLVM major ``major``, else ``None``.
+
+    ``None`` means the compiler is newer than the latest lane, so nothing about
+    it was measured. A major older than the first lane's takes the oldest lane,
+    as the lowering does.
+    """
+    latest_major, _ = _LLVM_FLAVOR_LADDER[-1]
     if major > latest_major:
-        raise ValueError(
-            f"LLVM compiler major {major} is newer than the latest qualified "
-            f"lane {latest_flavor}"
-        )
+        return None
     for minimum, flavor in reversed(_LLVM_FLAVOR_LADDER):
         if major >= minimum:
             return flavor
     return LLVM_FLAVORS[0]
+
+
+def _flavor_for_llvm(major: int) -> str:
+    """Map a compiler major to a qualified lane, failing beyond the frontier."""
+    flavor = measured_flavor_for_llvm(major)
+    if flavor is None:
+        raise ValueError(
+            f"LLVM compiler major {major} is newer than the latest qualified "
+            f"lane {LLVM_FLAVORS[-1]}"
+        )
+    return flavor
