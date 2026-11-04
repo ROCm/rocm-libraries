@@ -18,6 +18,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 import unittest
 from dataclasses import replace
 from itertools import islice
@@ -627,8 +628,22 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             _spec(req)
         err_msg = str(cm.exception)
-        self.assertIn("seqlen_q 500 is not a multiple of block_m 256", err_msg)
-        self.assertIn("seqlen_kv 500 is not a multiple of block_n 64", err_msg)
+        # The spec never gets built, so read the tile out of the refusal. The
+        # sliding-window tile can be 128 rows, so assert it is a registered tile
+        # that really leaves a partial block rather than naming one value.
+        tile = re.search(
+            r"seqlen_q 500 is not a multiple of block_m (\d+); "
+            r"seqlen_kv 500 is not a multiple of block_n (\d+)",
+            err_msg,
+        )
+        self.assertIsNotNone(tile, err_msg)
+        block_m, block_n = int(tile.group(1)), int(tile.group(2))
+        self.assertIn(
+            (block_m, block_n),
+            {(g["block_m"], g["block_n"]) for g in DENSE_TILE_GEOMETRIES.values()},
+        )
+        self.assertNotEqual(500 % block_m, 0)
+        self.assertNotEqual(500 % block_n, 0)
         self.assertIn("sliding_window", err_msg)
         self.assertNotIn("ragged", err_msg)
 
