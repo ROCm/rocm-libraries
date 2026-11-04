@@ -6354,6 +6354,22 @@ def build_gfx942_4warp_gqa(
     # stored, so only the addresses change.
     k_last_page = b.lshr(b.sub(klen, b.const_i32(1)), b.const_i32(BS_LOG2))
     q_last = b.sub(cu_q_stop, b.const_i32(1))
+    # This lane's clamped Q row is loop-invariant, so it is computed once here
+    # rather than per KV tile (measured: the per-tile form cost up to 4% at bs64).
+    if _FOLD:
+        # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS,
+        # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
+        # geometry); head BASE strides by GQAG (the GQA group).
+        _m = b.add(wq, ld.n_in_atom)
+        q_row = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+        q_row = b.select(b.cmp_lt(q_row, q_last), q_row, q_last)
+        q_row_head = b.add(
+            b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
+        )
+    else:
+        q_row = b.add(b.add(qstart, wq), ld.n_in_atom)
+        q_row = b.select(b.cmp_lt(q_row, q_last), q_row, q_last)
+        q_row_head = qhead
 
     def phys_key(kv, keytile):
         page = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
@@ -6540,21 +6556,7 @@ def build_gfx942_4warp_gqa(
             koff = b.add(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
-            if _FOLD:
-                # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS,
-                # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
-                # geometry); head BASE strides by GQAG (the GQA group).
-                _m = b.add(wq, ld.n_in_atom)
-                _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
-                _tok = b.select(b.cmp_lt(_tok, q_last), _tok, q_last)
-                _hd = b.add(
-                    b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
-                )
-                q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
-            else:
-                q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-                q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
-                q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
+            q_off, _ = q_desc.offset(b, token=q_row, head=q_row_head, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
                 if HD128_PIPE:
