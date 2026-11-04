@@ -54,6 +54,11 @@ set(FORTRAN_ARRAY_INTERFACES "assumed-shape" CACHE STRING
 set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS
              none assumed-shape assumed-rank)
 
+# An installed rocSPARSE does not record that it was built with
+# BUILD_ROCSPARSE_ILP64, so the bindings cannot detect it.
+option(ROCSPARSE_ILP64
+       "The installed rocSPARSE was built with BUILD_ROCSPARSE_ILP64" OFF)
+
 # Standalone, PARENT_SCOPE at top level fails under -Werror=dev.
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(ROCSPARSE_HAVE_FORTRAN_BINDINGS FALSE PARENT_SCOPE)
@@ -63,13 +68,11 @@ if(NOT BUILD_FORTRAN_BINDINGS)
   return()
 endif()
 
-# ILP64 makes rocsparse_int 64-bit but the module binds it as integer(c_int), so
-# skip rather than build a silently ABI-incompatible binding.
-if(BUILD_ROCSPARSE_ILP64)
+if(ROCSPARSE_ILP64)
   message(STATUS
-    "rocSPARSE: BUILD_ROCSPARSE_ILP64 widens rocsparse_int to int64_t, which "
-    "the generated module binds as integer(c_int); skipping the Fortran "
-    "bindings rather than building one that is silently ABI-incompatible.")
+    "rocSPARSE: ROCSPARSE_ILP64 widens rocsparse_int to int64_t, which the "
+    "generated module binds as integer(c_int); skipping the Fortran bindings "
+    "rather than building one that is silently ABI-incompatible.")
   return()
 endif()
 
