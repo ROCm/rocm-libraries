@@ -701,22 +701,31 @@ namespace
         rocblas_cerr << std::endl << msg << std::endl;
     }
 
-    // Generated from ROCBLAS_TENSILE_ARCH_SKIPLIST. Only the part before the first
-    // ':' is compared, so every target-ID feature variant of an entry is skipped
-    // (gfx90a and gfx90a:xnack+ both skip gfx90a, gfx90a:xnack-, ...).
+    // Generated from ROCBLAS_TENSILE_ARCH_SKIPLIST. An entry matches when its part
+    // before the first ':' equals the arch's part before the first ':', so gfx90a
+    // and gfx90a:xnack+ both match gfx90a, gfx90a:xnack- and gfx90a:xnack+.
     bool rocblas_internal_tensile_arch_skipped(const std::string& arch)
     {
         static constexpr const char* const patterns[]
             = {ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS nullptr};
 
-        const std::string_view arch_base = std::string_view(arch).substr(0, arch.find(':'));
-        for(const char* const* p = patterns; *p != nullptr; ++p)
+        try
         {
-            const std::string_view pat(*p);
-            if(!pat.empty() && pat.substr(0, pat.find(':')) == arch_base)
+            const std::string_view arch_base
+                = std::string_view(arch).substr(0, arch.find(':'));
+            if(arch_base.empty())
+                return false;
+            for(const char* const* p = patterns; *p != nullptr; ++p)
             {
-                return true;
+                const std::string_view pat(*p);
+                if(pat.substr(0, pat.find(':')) == arch_base)
+                {
+                    return true;
+                }
             }
+        }
+        catch(...)
+        {
         }
         return false;
     }
@@ -922,17 +931,6 @@ namespace
             // The name of the current GPU platform
             std::string processor = rocblas_internal_get_arch_name(deviceId);
 
-            if(rocblas_internal_tensile_arch_skipped(processor))
-            {
-                rocblas_internal_ostream msg;
-                print_if_verbose(msg << "Tensile skipped for GPU architecture '" << processor
-                                     << "' (ROCBLAS_TENSILE_ARCH_SKIPLIST); GEMM will use "
-                                        "hipBLASLt or source kernels.");
-
-                std::lock_guard<std::mutex> lock(m_libraryMapMutex);
-                return m_libraryMap[processor];
-            }
-
             static std::string base_path;
             static int         determined_path{determine_tensile_base_path(base_path)};
 
@@ -991,9 +989,21 @@ namespace
 #endif
                     if(!TestPath(tensileLibraryPath))
                     {
-                        // A missing library is not fatal: the target may be absent from the
-                        // skiplist under a different name (gfx1250-strict reports gfx1250) or
-                        // rocBLAS may be built for a generic target such as amdgcnspirv.
+                        // A missing library is not fatal: rocBLAS may be built for a generic
+                        // target such as amdgcnspirv, or Tensile skipped this architecture.
+                        if(rocblas_internal_tensile_arch_skipped(processor)
+                           || rocblas_internal_tensile_arch_skipped(catalog_key))
+                        {
+                            rocblas_internal_ostream msg;
+                            print_if_verbose(msg << "Tensile skipped for GPU architecture '"
+                                                 << processor
+                                                 << "' (ROCBLAS_TENSILE_ARCH_SKIPLIST); GEMM "
+                                                    "will use hipBLASLt or source kernels.");
+
+                            std::lock_guard<std::mutex> lock(m_libraryMapMutex);
+                            return m_libraryMap[processor];
+                        }
+
                         rocblas_internal_ostream msg;
                         msg << "rocBLAS warning: Cannot read " << tensileLibraryPath << ": "
                             << strerror(errno);
