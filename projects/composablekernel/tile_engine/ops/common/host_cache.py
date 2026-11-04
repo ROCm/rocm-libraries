@@ -10,21 +10,26 @@ a miss (``cached``, in the worker):
 
 - an entry is a directory ``<dir>/<key>`` of ``.npy`` files and a
   ``meta.json``, written under a temp name and renamed into place, so a reader
-  sees a complete entry or none. Workers that miss together each compute (as
-  without the cache) and the first rename wins;
+  sees a complete entry or none;
 - ``key`` hashes the fields the op says decide the data (problem, dtype,
   layout, input seed, ...); ``meta.json`` repeats them, and a mismatch is a
   miss;
-- an entry larger than ``max_entry_bytes``, or one that would take the
-  directory past ``max_total_bytes`` or leave its filesystem less than
-  ``MIN_FREE_FRACTION`` free, is not written: the worker uses what it
-  computed, as without the cache. Concurrent writers can pass the total check
-  together, so the directory may exceed it by one entry per writer;
+- a key has one writer per run: under the directory's lock, a worker that
+  missed claims the key and reserves the bytes of its entry, or does not
+  write it. Workers that miss while another writes the key use what they
+  computed, as without the cache;
+- an entry larger than ``max_entry_bytes`` is not written, nor one whose
+  reservation would take the run's reservations past ``max_total_bytes`` or
+  leave the filesystem less than ``MIN_FREE_FRACTION`` free once every
+  reserved entry is written. The caps hold with any number of workers;
 - an error reading or writing an entry is a miss: the cache never changes a
-  result, only how often it is computed.
+  result, only how often it is computed. A writer that fails gives its claim
+  back; one that is killed keeps it, and its key is computed on every call
+  for the rest of the run.
 
 ``HostCache.close`` (also on interpreter exit) removes the directory. Importing
-this module does not import numpy.
+this module does not import numpy. Writing needs ``fcntl`` (POSIX); without
+it nothing is stored.
 """
 
 from __future__ import annotations
@@ -44,6 +49,8 @@ FORMAT = 1  # part of every key: a change of the entry layout misses old entries
 MIN_FREE_FRACTION = 0.1  # of the filesystem, left free by every write
 GIB = 1 << 30
 PREFIX = "ck_search_host_cache-"
+CLAIM = ".w-"  # ".w-<key>-<bytes reserved>": a key's writer, kept once written
+NPY_HEADER_BYTES = 4096  # reserved per .npy file (its header is 128 bytes here)
 
 
 def entry_key(fields: Mapping) -> str:
@@ -139,23 +146,59 @@ def cached(spec: Optional[Mapping], fields: Mapping,
     return data
 
 
+def claims(root) -> Dict[str, int]:
+    """{key: bytes reserved} of every writer that claimed a key under ``root``."""
+    found = {}
+    for name in os.listdir(root):
+        if name.startswith(CLAIM):
+            key, size = name[len(CLAIM):].rsplit("-", 1)
+            found[key] = int(size)
+    return found
+
+
+def _claim(root: Path, key: str, size: int, max_total: int) -> Optional[Path]:
+    """Under the lock of ``root``: claim ``key`` with ``size`` bytes reserved,
+    unless it has a writer already or the caps refuse it."""
+    import fcntl
+
+    with open(root / ".lock", "a") as lock:  # fails once the run removed root
+        fcntl.flock(lock, fcntl.LOCK_EX)  # released when the file closes
+        found = claims(root)
+        if key in found:
+            return None
+        # Bytes reserved but not on disk yet: entries still being written.
+        pending = sum(n for k, n in found.items() if not (root / k).is_dir())
+        disk = shutil.disk_usage(root)
+        if (sum(found.values()) + size > max_total
+                or disk.free - pending - size < MIN_FREE_FRACTION * disk.total):
+            return None
+        claim = root / f"{CLAIM}{key}-{size}"
+        claim.touch()
+        return claim
+
+
 def _publish(spec: Mapping, path: Path, fields, data: Mapping) -> None:
     import numpy as np
 
-    size = sum(a.nbytes for a in data.values())
-    root = path.parent
-    if size > spec["max_entry_bytes"] or usage(root)[1] + size > spec["max_total_bytes"]:
+    if sum(a.nbytes for a in data.values()) > spec["max_entry_bytes"]:
         return
-    disk = shutil.disk_usage(root)
-    if disk.free - size < MIN_FREE_FRACTION * disk.total:
+    meta = json.dumps({"fields": fields, "arrays": sorted(data)})
+    size = len(meta) + sum(a.nbytes + NPY_HEADER_BYTES for a in data.values())
+    root = path.parent
+    claim = _claim(root, path.name, size, spec["max_total_bytes"])
+    if claim is None:
         return
     tmp = root / f".tmp-{path.name}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-    os.mkdir(tmp)  # fails once the run removed its directory
+    written = False
     try:
+        os.mkdir(tmp)
         for name, a in data.items():
             np.save(tmp / f"{name}.npy", a, allow_pickle=False)
-        (tmp / "meta.json").write_text(json.dumps({"fields": fields,
-                                                   "arrays": sorted(data)}))
-        os.rename(tmp, path)  # atomic; fails when another worker was first
+        (tmp / "meta.json").write_text(meta)
+        os.rename(tmp, path)  # atomic
+        written = True
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)  # gone after a rename
+        shutil.rmtree(tmp, ignore_errors=True)  # gone after the rename
+        if not written:
+            with contextlib.suppress(OSError):
+                claim.unlink()  # a later call may write the key

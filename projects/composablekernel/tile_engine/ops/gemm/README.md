@@ -233,7 +233,7 @@ builds).
 | `warm_start.ranked_csv`, `use_prior` | none, `false` | `select_kernels.py --out_ranked` predictions as a prior (`tpe`, `gp`, `portfolio` only); give both or neither |
 | `confirm.finalists`, `confirm.fresh_calls` | `2`, `3` | the winner is the lowest median among the finalists whose fresh calls all verified |
 | `measurement_policy` | `full` | the only value |
-| `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache. `max_total_gib` `0` turns it off. See "Host cache" below |
+| `host_cache.dir`, `max_entry_gib`, `max_total_gib` | system temp dir, `4`, a quarter of its free space | the run's cache of verification inputs and references, in a new directory under `dir` that is removed when the run ends. An entry larger than `max_entry_gib`, one past `max_total_gib` in all, or one that would leave the filesystem less than 10% free is not stored, and its calls compute as without the cache. Both limits count the entries still being written, so they hold with any number of workers. `max_total_gib` `0` turns it off. See "Host cache" below |
 
 Unknown keys are an error; relative warm-start paths are read from the settings
 file's directory.
@@ -371,12 +371,18 @@ and B, the reference and its maximum as `.npy` files: one entry per key (the
 problem, dtype, layout, fp8 format and input seed), written under a temp name
 and renamed into place, so concurrent workers on any device read a complete
 entry or none. Later calls only load them and compare: 0.37 s and 0.06 s for
-the two shapes above. An entry holds what each worker would compute itself,
-so verification results are the same with or without it. The directory goes
-when the run ends (the run prints its entries and size), also on an error,
-Ctrl-C or SIGTERM; a run killed with SIGKILL leaves its
-`ck_search_host_cache-*` directory behind. A tmpfs such as `/dev/shm` is
-faster but holds the entries in RAM.
+the two shapes above. A key has one writer: workers that miss it while another
+writes it (a problem's first round on several devices) compute their own copy
+and do not store it, and each writer reserves its entry's size under a lock
+before writing, so the caps and the 10%-free guard hold however many workers
+miss at once. A worker killed while it writes (its call timed out) keeps its
+reservation, and that problem computes on every call for the rest of the run.
+An entry holds what each worker would compute itself, so verification results
+are the same with or without it. The directory goes when the run ends (the
+run prints its entries and size), also on an error, Ctrl-C or SIGTERM; a run
+killed with SIGKILL leaves its `ck_search_host_cache-*` directory behind. A
+tmpfs such as `/dev/shm` is faster but holds the entries in RAM. Storing
+needs POSIX file locks (`fcntl`); without them every call computes.
 
 Console: builds print as in a full run; the search prints a line per build
 and per round (`[search] round N: ...`: proposals, admissions, builds against

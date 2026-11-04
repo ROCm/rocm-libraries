@@ -1495,22 +1495,36 @@ def test_host_cache_caps_fall_back_to_computing(tmp_path, monkeypatch):
     small = HC.HostCache(tmp_path, max_entry_bytes=55)
     assert [_cache_calls(small.spec, {"k": 1})[1] for _ in range(2)] == [1, 1]
     assert _entries(small) == 0
-    # The total counts what the directory holds already (files on disk).
+    # The total counts every writer's reservation, the new entry's included,
+    # and an entry takes no more than it reserved.
     full = HC.HostCache(tmp_path)
     assert _cache_calls(full.spec, {"k": 1})[1] == 1
-    spec = {**full.spec, "max_total_bytes": HC.usage(full.dir)[1] + 56}
+    (one,) = HC.claims(full.dir).values()
+    assert 56 < HC.usage(full.dir)[1] <= one
+    spec = {**full.spec, "max_total_bytes": 2 * one - 1}
+    got, ran = _cache_calls(spec, {"k": 2}, 2.0)
+    assert ran == 1 and (got["x"] == 2.0).all() and _entries(full) == 1
+    spec["max_total_bytes"] = 2 * one
     assert _cache_calls(spec, {"k": 2})[1] == 1 and _entries(full) == 2
-    got, ran = _cache_calls(spec, {"k": 3}, 3.0)
-    assert ran == 1 and (got["x"] == 3.0).all() and _entries(full) == 2
-    assert _cache_calls(spec, {"k": 3})[1] == 1
-    # A write that would leave the filesystem less than 10% free is skipped.
+    assert _cache_calls(spec, {"k": 2})[1] == 0
+    # 10% of the filesystem stays free once every reserved entry is written:
+    # the new one, and one still being written (a claim without its entry).
     disk = HC.shutil.disk_usage(tmp_path)
-    low = disk._replace(free=int(disk.total * HC.MIN_FREE_FRACTION))
-    monkeypatch.setattr(HC.shutil, "disk_usage", lambda p: low)
+    floor = math.ceil(disk.total * HC.MIN_FREE_FRACTION)
+
+    def free(n):
+        monkeypatch.setattr(HC.shutil, "disk_usage", lambda p: disk._replace(free=floor + n))
+
+    free(one // 2)
     assert _cache_calls(full.spec, {"k": 4})[1] == 1 and _entries(full) == 2
+    (full.dir / f"{HC.CLAIM}{'0' * 32}-{one}").touch()
+    free(one + one // 2)
+    assert _cache_calls(full.spec, {"k": 4})[1] == 1 and _entries(full) == 2
+    free(2 * one)
+    assert _cache_calls(full.spec, {"k": 4})[1] == 1 and _entries(full) == 3
     # The default total: a quarter of the free space at the start.
     default = HC.HostCache(tmp_path)
-    assert default.spec["max_total_bytes"] == low.free // 4
+    assert default.spec["max_total_bytes"] == (floor + 2 * one) // 4
     for cache in (small, full, default):
         cache.close()
 
@@ -1555,15 +1569,88 @@ def test_host_cache_concurrent_writers_publish_one_entry(tmp_path):
         t.join()
     assert len(out) == 8 and all((x == out[0]).all() for x in out)
     path = cache.dir / HC.entry_key({"k": "same"})
-    assert list(cache.dir.iterdir()) == [path]
+    assert [p for p in cache.dir.iterdir() if p.is_dir()] == [path]
+    assert list(HC.claims(cache.dir)) == [path.name]
     assert _cache_calls(cache.spec, {"k": "same"})[1] == 0
-    # A published entry is never replaced: a later writer's rename fails.
+    # A published entry is never replaced: its key keeps its writer's claim,
+    # and without the claim the rename onto the entry fails.
     inode = (path / "meta.json").stat().st_ino
+    HC._publish(cache.spec, path, {"k": "same"}, {"x": out[0]})
+    next(cache.dir.glob(HC.CLAIM + "*")).unlink()
     with pytest.raises(OSError):
         HC._publish(cache.spec, path, {"k": "same"}, {"x": out[0]})
     assert (path / "meta.json").stat().st_ino == inode
-    assert list(cache.dir.iterdir()) == [path]
+    assert [p for p in cache.dir.iterdir() if p.is_dir()] == [path]
+    assert HC.claims(cache.dir) == {}  # a failed writer gives its claim back
     cache.close()
+
+
+# A worker process of the concurrency test below: misses key argv[3] of the
+# cache spec argv[2] when the file "go" appears, then publishes. The host
+# checks (disk_usage) and the writes (np.save) are slowed down, so the checks
+# of all workers overlap, and all of them run before any write lands. argv[5]
+# > 0 replaces the filesystem's free bytes.
+_RACER = """
+import json, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import numpy as np
+import host_cache as HC
+spec, key, log, free = json.loads(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), int(sys.argv[5])
+disk, save = HC.shutil.disk_usage(spec["dir"]), np.save
+
+def disk_usage(path):
+    time.sleep(0.02)
+    return disk._replace(free=free) if free else disk
+
+def slow_save(file, a, **kw):
+    (log / Path(file).parent.name).touch()  # one name per writer
+    time.sleep(0.6)  # longer than all 8 checks
+    save(file, a, **kw)
+
+HC.shutil.disk_usage, np.save = disk_usage, slow_save
+(log.parent / ("ready-" + key + "-" + sys.argv[6])).touch()
+while not (log.parent / "go").exists():
+    time.sleep(0.002)
+HC.cached(spec, {"k": key}, lambda: {"x": np.ones(4096, np.float32)})
+"""
+
+
+def test_host_cache_concurrent_misses_hold_the_caps(tmp_path):
+    # A problem's first round on several devices: its worker processes miss
+    # together, then each publishes while the others are still writing. One
+    # of them writes the key, and the total cap and the free-space guard count
+    # every reservation, so they hold however many workers write at once.
+    log = tmp_path / "writers"
+    log.mkdir()
+
+    def race(cache, keys, free=0):
+        runs = [subprocess.Popen([sys.executable, "-c", _RACER, str(COMMON_DIR),
+                                  json.dumps(cache.spec), k, str(log), str(free), str(i)])
+                for i, k in enumerate(keys)]
+        deadline = time.monotonic() + 60
+        while (len(list(tmp_path.glob("ready-*"))) < len(keys)
+               and time.monotonic() < deadline):
+            time.sleep(0.01)
+        (tmp_path / "go").touch()
+        assert [r.wait(60) for r in runs] == [0] * len(keys)
+        writers = len(list(log.iterdir()))
+        for f in [*log.iterdir(), *tmp_path.glob("ready-*"), tmp_path / "go"]:
+            f.unlink()
+        return writers, _entries(cache), HC.usage(cache.dir)[1]
+
+    keys = [f"k{i}" for i in range(8)]
+    with HC.HostCache(tmp_path) as cache:
+        assert race(cache, ["k0"] * 8)[:2] == (1, 1)
+        (one,) = HC.claims(cache.dir).values()
+    cap = 2 * one + one // 2
+    with HC.HostCache(tmp_path, max_total_bytes=cap) as cache:
+        writers, entries, size = race(cache, keys)
+        assert (writers, entries) == (2, 2) and size <= cap
+    disk = HC.shutil.disk_usage(tmp_path)  # constant: as if no write landed
+    free = math.ceil(disk.total * HC.MIN_FREE_FRACTION) + cap
+    with HC.HostCache(tmp_path, max_total_bytes=10 * cap) as cache:
+        assert race(cache, keys, free)[:2] == (2, 2)
 
 
 def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path):
