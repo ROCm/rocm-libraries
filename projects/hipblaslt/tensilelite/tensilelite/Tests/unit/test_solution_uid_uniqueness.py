@@ -16,11 +16,10 @@ import pytest
 
 
 def _load_solution_id_gen() -> ModuleType:
-    """Load SolutionIdGen without importing ``tensilelite.Common``.
+    """Load SolutionIdGen by file path.
 
-    This keeps the test runnable on a bare Python with only pytest, without
-    tensilelite or rocisa installed. ``from tensilelite.Common.SolutionIdGen
-    import ...`` would execute ``tensilelite.Common.__init__``, which imports rocisa.
+    This keeps the corpus test runnable on a bare Python with only pytest,
+    without tensilelite or rocisa installed, as ``logic_corpus.py`` requires.
 
     Args:
         None.
@@ -32,7 +31,7 @@ def _load_solution_id_gen() -> ModuleType:
         FileNotFoundError: If ``SolutionIdGen.py`` is missing.
         ImportError: If the module spec or loader cannot be created.
     """
-    module_path = Path(__file__).resolve().parents[2] / "Common" / "SolutionIdGen.py"
+    module_path = Path(__file__).resolve().parents[2] / "SolutionIdGen.py"
     if not module_path.is_file():
         raise FileNotFoundError(f"SolutionIdGen.py not found: {module_path}")
     spec = importlib.util.spec_from_file_location("tensile_solution_id_gen", module_path)

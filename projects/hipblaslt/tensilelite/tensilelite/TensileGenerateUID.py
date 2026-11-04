@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import LibraryIO
-from .Common.SolutionIdGen import encode_solution_uid, regenerate_solution_uid
+from .SolutionIdGen import encode_solution_uid, regenerate_solution_uid
 
 
 def find_solution_by_index(
