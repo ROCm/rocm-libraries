@@ -3844,3 +3844,617 @@ def test_gfx1250v0_assembles_and_compiles_for_gfx1250_with_strict_features(monke
     assert "--offload-arch=gfx1250" in v0Cc and _features(v0Cc, "-Xclang") == expected
     assert "--offload-arch=gfx1250-strict" in strictCc and not _features(strictCc, "-Xclang")
     assert not any(GFX1250V0 in a for a in v0Asm + v0Cc)
+
+
+# ``Architecture:`` beside a detected name. The enumerator reads the hardware,
+# and gfx1250 and gfx1250:xnack- are one chip under two driver configurations,
+# so it reports the bare name for both -- the config is the only place the mode
+# can be said. It may qualify what was detected, and nothing else.
+
+
+def _fromConfig(configArchitecture, isaList, archNames):
+    from tensilelite.Tensile import archNamesFromConfig
+
+    return archNamesFromConfig(configArchitecture, isaList, list(archNames))
+
+
+@pytest.mark.parametrize(
+    "detected,configured",
+    [
+        (GFX1250, f"{GFX1250}:xnack-"),
+        (GFX1250, f"{GFX1250}:xnack+"),
+        (GFX1250_STRICT, f"{GFX1250_STRICT}:xnack-"),
+        ("gfx942", "gfx942:xnack-"),
+    ],
+)
+def test_config_may_qualify_the_detected_architecture(detected, configured):
+    """Without this the qualifier is unsayable: detection cannot report it, and
+    the only other way to be heard is ``ISA:``, which skips detection entirely
+    and with it the guard against tuning one stepping on the other's hardware."""
+    assert _fromConfig(configured, [gfxToIsa(detected)], [detected]) == [configured]
+
+
+@pytest.mark.parametrize(
+    "detected,configured",
+    [
+        (GFX1250, GFX1250_STRICT),          # a stepping of the detected ISA
+        (GFX1250_STRICT, GFX1250),          # ... and the other way round
+        (GFX1250, f"{GFX1250_STRICT}:xnack-"),
+        (GFX1250, "gfx942:xnack-"),         # a different architecture entirely
+    ],
+)
+def test_config_cannot_replace_the_detected_architecture(detected, configured):
+    """Only a qualifier on the detected name is taken. Anything else is passed
+    over, so the config cannot tune one stepping on the other's hardware."""
+    assert _fromConfig(configured, [gfxToIsa(detected)], [detected]) == [detected]
+
+
+def test_config_qualifier_is_taken_from_the_entry_that_matches():
+    """``Architecture:`` is a list, and only the entry naming what was detected
+    has anything to say about it."""
+    configured = f"gfx942:xnack-;{GFX1250}:xnack-;{GFX1250_STRICT}"
+    assert _fromConfig(configured, [ISA_GFX1250], [GFX1250]) == [f"{GFX1250}:xnack-"]
+
+
+def test_config_architecture_is_still_validated_beside_a_detected_name():
+    """Passed over is not unread: a typo is reported rather than ignored."""
+    with pytest.raises(ValueError, match="Unrecognized Architecture in config"):
+        _fromConfig("gfx1250v1", [ISA_GFX1250], [GFX1250])
+
+
+def test_config_architecture_without_detection_is_unchanged():
+    """The ``ISA:`` path hands in no name, so entries are appended as before."""
+    assert _fromConfig(f"{GFX1250}:xnack-", [ISA_GFX1250], []) == [f"{GFX1250}:xnack-"]
+    assert _fromConfig(GFX1250_STRICT, [ISA_GFX1250], []) == [GFX1250_STRICT]
+
+
+# The xnack- entries are keyed on the qualified name, a second override layer on
+# top of whatever the bare name declares. Nothing above reaches that layer, so
+# these pin it directly: revert applyArchCapOverrides to a base-name-only lookup
+# and every drain comes back with the rest of the suite still green.
+
+CAP_XNACK_REPLAY = "EnableXnackReplay"
+
+
+def _iim_with_replay_on():
+    """An ISA map as probed for gfx1250: replay on, the stepping caps absent."""
+    return {ISA_GFX1250: IsaInfo({"SupportedISA": True}, {CAP_XNACK_REPLAY: True}, {}, {})}
+
+
+@pytest.mark.parametrize("spec", ["gfx1250:xnack-", "gfx1250-strict:xnack-", "gfx1250v0:xnack-"])
+def test_xnack_minus_clears_replay(spec):
+    iim = _iim_with_replay_on()
+    applyArchCapOverrides(iim, [spec])
+    assert iim[ISA_GFX1250].archCaps[CAP_XNACK_REPLAY] is False
+
+
+def test_xnack_minus_layers_on_top_of_the_stepping_deltas():
+    """Both layers land: the stepping's own caps and the xnack mode."""
+    iim = _iim_with_replay_on()
+    applyArchCapOverrides(iim, ["gfx1250v0:xnack-"])
+    caps = iim[ISA_GFX1250]
+    assert caps.archCaps[CAP_XNACK_REPLAY] is False
+    assert caps.archCaps[CAP_MULTICAST] is False
+    assert caps.asmCaps[CAP_FP4_32X16] is False
+
+
+def test_predicate_does_not_hide_the_qualified_override():
+    """A predicate selects hardware, not capabilities, so it cannot change which
+    override applies -- the lookup drops it before matching."""
+    iim = _iim_with_replay_on()
+    applyArchCapOverrides(iim, ["gfx1250:xnack-[cu=64]"])
+    assert iim[ISA_GFX1250].archCaps[CAP_XNACK_REPLAY] is False
+
+
+def test_bare_and_xnack_minus_together_are_refused():
+    """One ISA entry cannot describe both xnack modes, so the qualified spec
+    would silently disarm the bare one. Refuse the pairing instead."""
+    with pytest.raises(ValueError, match="different"):
+        applyArchCapOverrides(_iim_with_replay_on(), [GFX1250, "gfx1250:xnack-"])
+
+
+@pytest.mark.parametrize(
+    "specs",
+    [
+        [GFX1250],
+        ["gfx1250:xnack-"],
+        [GFX1250, "gfx1250[cu=64]"],          # same caps, predicate only
+        ["gfx942:xnack+", "gfx942:xnack-"],   # no overrides on either side
+    ],
+)
+def test_combinations_with_one_capability_set_are_allowed(specs):
+    applyArchCapOverrides(_iim_with_replay_on(), specs)
+
+
+# compilerTargetOf asks the compiler rather than consulting a table, so that the
+# stripping is a compatibility measure and not a permanent property of the
+# architecture: the day a toolchain accepts the qualified target, the spec must
+# reach it intact and behave exactly like gfx942:xnack- does today. These pin
+# that contract from both sides by standing in for the answer.
+
+
+def _withProbeAnswering(monkeypatch, accepted):
+    """Make the target-ID probe return `accepted(targetId)` without a compiler.
+
+    Returns the stand-in compiler path and the function under test, which this
+    module does not import at the top level.
+    """
+    import tensilelite.Common.Architectures as Arch
+
+    monkeypatch.setattr(Arch, "_targetIdAccepted", lambda compiler, targetId: accepted(targetId))
+    return "/stand-in/amdclang++", Arch.compilerTargetOf
+
+
+@pytest.mark.parametrize(
+    "spec", ["gfx1250:xnack-", f"{GFX1250_STRICT}:xnack-", "gfx942:xnack-"]
+)
+def test_a_toolchain_that_takes_the_qualified_target_keeps_it(monkeypatch, spec):
+    """Nothing in the tree has to change when the compiler gains the target."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: True)
+    assert compilerTargetOf(spec, compiler) == spec
+
+
+@pytest.mark.parametrize(
+    "spec,expected",
+    [
+        ("gfx1250:xnack-", GFX1250),
+        (f"{GFX1250_STRICT}:xnack-", GFX1250_STRICT),
+        ("gfx1250:sramecc+:xnack-", "gfx1250:sramecc+"),  # only the xnack token goes
+    ],
+)
+def test_a_toolchain_that_refuses_it_drops_only_the_xnack_token(monkeypatch, spec, expected):
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: "xnack" not in t)
+    assert compilerTargetOf(spec, compiler) == expected
+
+
+def test_a_target_refused_for_another_reason_stays_refused(monkeypatch):
+    """Dropping xnack has to be what makes it acceptable, or the spec is left as
+    given so the real compile reports the real error."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: False)
+    assert compilerTargetOf("gfx9999:xnack-", compiler) == "gfx9999:xnack-"
+
+
+def test_an_unqualified_build_alias_never_consults_the_compiler(monkeypatch):
+    """An unqualified alias names its own compiler target outright, so there is
+    nothing to ask about."""
+
+    def refuse_everything(compiler, targetId):
+        raise AssertionError("the probe should not run for an unqualified alias")
+
+    import tensilelite.Common.Architectures as Arch
+
+    monkeypatch.setattr(Arch, "_targetIdAccepted", refuse_everything)
+    assert Arch.compilerTargetOf(GFX1250V0, "/stand-in/amdclang++") == GFX1250
+
+
+def test_a_build_alias_carries_the_qualifier_it_was_asked_with(monkeypatch):
+    """Only the base name is the alias's to replace. A qualifier names a driver
+    configuration, which the alias says nothing about, so it has to reach the
+    target the alias names -- and is then put to the compiler like any other."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: True)
+    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == f"{GFX1250}:xnack-"
+
+
+def test_a_build_alias_falls_back_to_the_bare_target(monkeypatch):
+    """Where the qualified form is refused, the alias lands on its bare target,
+    which is what it resolves to on a toolchain without the qualified target."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: "xnack" not in t)
+    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == GFX1250
+
+
+# Capabilities come from a per-ISA cache, and some backends hand back the live
+# dicts rather than copies. Per-build overrides are applied to what makeIsaInfoMap
+# returns, so if that is the cache, one build's overrides outlive it: a
+# gfx1250:xnack- run would leave EnableXnackReplay=False behind for an
+# unqualified run after it, in the same process, with nothing reporting it.
+
+
+class _SharedCacheIsa:
+    """A backend that hands back its live cap dicts, as the StinkyTofu adaptor does."""
+
+    def __init__(self):
+        self.archCaps = {"EnableXnackReplay": True, CAP_MULTICAST: True}
+        self.asmCaps = {"SupportedISA": True, CAP_FP4_32X16: True}
+        self.regCaps = {}
+        self.asmBugs = {}
+
+    # Both spellings: makeIsaInfoMap probes the ISAs concurrently through
+    # initMany, and a stub answering only init would fail for that reason
+    # rather than for the aliasing these tests are about.
+    def init(self, *_args, **_kwargs):
+        pass
+
+    def initMany(self, *_args, **_kwargs):
+        pass
+
+    def getIsaInfo(self, _isa):
+        return self  # same object, same dicts, every call
+
+
+def _withSharedCacheBackend(monkeypatch):
+    import tensilelite.Common.Capabilities as Caps
+
+    backend = _SharedCacheIsa()
+    monkeypatch.setattr(Caps.rocisa, "rocIsa", type("_", (), {"getInstance": lambda: backend}))
+    return backend
+
+
+def test_the_capability_map_does_not_alias_the_backend_cache(monkeypatch):
+    backend = _withSharedCacheBackend(monkeypatch)
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+
+    iim = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
+    assert iim[ISA_GFX1250].archCaps is not backend.archCaps
+    assert iim[ISA_GFX1250].asmCaps is not backend.asmCaps
+
+
+def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch):
+    backend = _withSharedCacheBackend(monkeypatch)
+    from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+
+    first = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
+    applyArchCapOverrides(first, ["gfx1250:xnack-"])
+    assert first[ISA_GFX1250].archCaps["EnableXnackReplay"] is False
+
+    # A second build in the same process must see the probed values again.
+    second = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
+    assert second[ISA_GFX1250].archCaps["EnableXnackReplay"] is True
+    assert second[ISA_GFX1250].archCaps[CAP_MULTICAST] is True
+    assert second[ISA_GFX1250].asmCaps[CAP_FP4_32X16] is True
+
+
+# ---------------------------------------------------------------------------
+# The xnack qualifier on the three paths that carry a build's identity onward:
+# the rename map read against logic files, the argument handed to the re-spawned
+# TensileCreateLibrary, and the benchmark cache key. Each drops the qualifier
+# somewhere it matters, and each drops it silently -- the bare name is a valid
+# name, so nothing downstream can tell it was meant to say more.
+# ---------------------------------------------------------------------------
+
+
+def _archRenames(archs):
+    from tensilelite.TensileCreateLibrary.Run import archRenamesOf
+
+    # No compiler: compilerTargetOf then resolves aliases and leaves every
+    # qualifier alone, which is the future a toolchain that accepts
+    # gfx1250:xnack- brings, and the case the keying has to be right for.
+    return archRenamesOf(archs, None)
+
+
+def test_arch_renames_are_keyed_by_the_name_logic_files_carry():
+    # gfx1250v0 is built as gfx1250 but tuned as gfx1250-strict, so its logic
+    # files say gfx1250-strict and that is what the key has to be.
+    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
+
+
+def test_arch_renames_stay_bare_on_both_sides():
+    # The alias carries its request's qualifier to the compiler, but neither
+    # side of this map may show it: the key is matched against a logic file's
+    # declared name, and the value becomes a runtime hardware predicate that
+    # only a bare processor name can satisfy.
+    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
+    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
+
+
+def test_arch_renames_qualifier_alone_is_not_a_rename():
+    # gfx1250:xnack- is tuned and built as the same architecture; only the
+    # driver configuration differs, and that is not a rename.
+    assert _archRenames([GFX1250 + ":xnack-"]) == {}
+    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
+
+
+def test_arch_renames_mutation_keying_on_the_requested_spec():
+    """The pre-fix map: both sides as requested, so neither side is usable."""
+    from tensilelite.Common.Architectures import compilerTargetOf, tuningArchOf
+
+    def mutated(archs):
+        return {
+            tuningArchOf(a): compilerTargetOf(a, None)
+            for a in archs
+            if tuningArchOf(a) != compilerTargetOf(a, None)
+        }
+
+    # A key no logic file can equal, so the rename never fires...
+    assert mutated([GFX1250_STRICT + ":xnack-"]) == {}
+    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
+    # ...and for the alias, a value no runtime predicate can match.
+    assert mutated([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250 + ":xnack-"}
+    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
+
+
+def test_rebuild_target_restores_the_qualifier_for_the_respawned_build():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    # gfxName is bare, because it names the directory the rebuild fills; the
+    # argument that tells the rebuild what to be must not be.
+    assert rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-"]) == GFX1250 + ":xnack-"
+    assert (
+        rebuildTargetGfx(GFX1250_STRICT, [GFX1250_STRICT + ":xnack-"])
+        == GFX1250_STRICT + ":xnack-"
+    )
+
+
+def test_rebuild_target_drops_the_predicate_but_not_the_qualifier():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    # A predicate selects hardware and says nothing about capabilities, so it is
+    # not this process's to forward; the qualifier selects capabilities and is.
+    assert (
+        rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-[cu=64]"]) == GFX1250 + ":xnack-"
+    )
+
+
+def test_rebuild_target_leaves_an_unqualified_request_alone():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    assert rebuildTargetGfx(GFX1250, [GFX1250]) == GFX1250
+    assert rebuildTargetGfx(GFX1250, None) == GFX1250
+    # A request naming a different architecture must not qualify this one.
+    assert rebuildTargetGfx(GFX1250, [GFX1250_STRICT + ":xnack-"]) == GFX1250
+
+
+def _cacheKey(archNames):
+    from tensilelite.BenchmarkProblems import _computeCacheKey, _CACHE_FIELDS
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    # cmdLineArchs is what archNamesByIsa produced: bare for both requests,
+    # which is exactly why it cannot tell them apart on its own.
+    return _computeCacheKey(step, [GFX1250], archNames)
+
+
+def test_benchmark_cache_separates_the_two_xnack_modes():
+    # Same benchmark parameters, same compiler target, different code objects:
+    # without this the second run executes the first's kernels, and an
+    # unqualified run can end up on kernels built without the drains it needs.
+    assert _cacheKey([GFX1250]) != _cacheKey([GFX1250 + ":xnack-"])
+
+
+def test_benchmark_cache_shares_an_entry_across_predicates():
+    # A predicate picks which card to run on; it changes nothing in a code
+    # object, so splitting the entry would only lose cache hits.
+    assert _cacheKey([GFX1250 + ":xnack-"]) == _cacheKey([GFX1250 + ":xnack-[cu=64]"])
+
+
+def test_benchmark_cache_key_is_unchanged_without_a_qualifier():
+    """An unqualified build must keep the key it had before this field existed.
+
+    The field is absent, not empty: a dict that never gains the key hashes as it
+    always did, so every existing cache survives. An empty value would move the
+    key for builds that never mention xnack, to distinguish nothing.
+    """
+    import hashlib
+    import json
+    from tensilelite.BenchmarkProblems import (
+        _CACHE_FIELDS,
+        _CACHE_KEY_LEN,
+        _KERNEL_NAMING_VERSION,
+        _computeCacheKey,
+    )
+
+    def keyBeforeThisField(cmdLineArchs):
+        fields = {f: () for f in _CACHE_FIELDS}
+        fields["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
+        fields["_Architectures"] = ",".join(sorted(cmdLineArchs))
+        canonical = json.dumps(fields, sort_keys=True, default=str)
+        return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    for cmdLineArchs, requested in (
+        (["gfx942:xnack+", "gfx942:xnack-"], ["gfx942"]),  # gfxToVariants expansion
+        ([GFX1250], [GFX1250]),
+        ([GFX1250_STRICT], [GFX1250_STRICT]),
+    ):
+        assert _computeCacheKey(step, cmdLineArchs, requested) == keyBeforeThisField(
+            cmdLineArchs
+        )
+
+
+def test_benchmark_cache_key_mutation_without_the_requested_names():
+    """Dropping the requested names collapses the two modes onto one entry."""
+    from tensilelite.BenchmarkProblems import _computeCacheKey, _CACHE_FIELDS
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    # The pre-fix call: cmdLineArchs only, which archNamesByIsa had made bare.
+    # Both modes reach it spelled alike, so it cannot tell them apart.
+    preFix = _computeCacheKey(step, [GFX1250])
+    assert preFix == _computeCacheKey(step, [GFX1250])
+    # The bare run still hashes that way -- its caches are untouched -- while
+    # the qualified one no longer lands on the same entry.
+    assert _cacheKey([GFX1250]) == preFix
+    assert _cacheKey([GFX1250 + ":xnack-"]) != preFix
+
+
+# ---------------------------------------------------------------------------
+# A hand-written qualifier is the one spec nothing else has already validated,
+# and the base name stays valid however the suffix is misspelled -- so a typo
+# reaches the capability lookup, misses, and leaves the build in the mode the
+# config asked it to leave.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [GFX1250, GFX1250 + ":xnack-", GFX1250 + ":xnack+", GFX1250 + ":xnack-[cu=64]",
+     GFX1250 + ":xnack-:sramecc+", GFX1250_STRICT + ":xnack-"],
+)
+def test_target_id_qualifiers_accepts_every_well_formed_spec(spec):
+    from tensilelite.Common.Architectures import verifyTargetIdQualifiers
+
+    verifyTargetIdQualifiers(spec)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "spec, match",
+    [
+        (GFX1250 + ":xnack--", "Unknown target ID qualifier"),
+        (GFX1250 + ":xnack", "Unknown target ID qualifier"),
+        (GFX1250 + ":xnck-", "Unknown target ID qualifier"),
+        (GFX1250 + ":XNACK-", "Unknown target ID qualifier"),
+        (GFX1250 + ":xnack-:xnack+", "Repeated xnack qualifier"),
+        (GFX1250 + ":xnack-:xnack-", "Repeated xnack qualifier"),
+        (GFX1250 + ":sramecc+:sramecc-", "Repeated sramecc qualifier"),
+    ],
+)
+def test_target_id_qualifiers_rejects_a_misspelling_or_a_repeat(spec, match):
+    from tensilelite.Common.Architectures import verifyTargetIdQualifiers
+
+    with pytest.raises(ValueError, match=match):
+        verifyTargetIdQualifiers(spec)
+
+
+def test_config_architecture_rejects_a_misspelled_qualifier():
+    """The config is where this matters: nothing downstream can catch it."""
+    from tensilelite.Common.Architectures import ARCH_CAP_OVERRIDES
+    from tensilelite.Tensile import archNamesFromConfig
+
+    isaList = [ISA_GFX1250]
+    assert archNamesFromConfig(GFX1250 + ":xnack-", isaList, []) == [GFX1250 + ":xnack-"]
+
+    with pytest.raises(ValueError, match="Unknown target ID qualifier"):
+        archNamesFromConfig(GFX1250 + ":xnack--", isaList, [])
+
+    # Why it has to be caught here: the typo names no override, so the build
+    # would have run with replay left on -- the opposite of what was asked.
+    assert GFX1250 + ":xnack-" in ARCH_CAP_OVERRIDES
+    assert GFX1250 + ":xnack--" not in ARCH_CAP_OVERRIDES
+
+
+def test_xnack_is_stripped_by_exact_match_not_by_prefix(monkeypatch):
+    """A misspelled qualifier must survive to be refused, not be stripped.
+
+    compilerTargetOf drops the xnack token only to reach a target the compiler
+    will take. A prefix match also eats ``xnack-typo``, so the spec comes back
+    as bare gfx1250 -- which the compiler accepts, leaving the build on the
+    default replay mode with nothing to report. Checked against a toolchain that
+    refuses every xnack-qualified id, which is the one that makes the fallback
+    run at all.
+    """
+    import tensilelite.Common.Architectures as Arch
+
+    monkeypatch.setattr(Arch, "_targetIdAccepted", lambda compiler, target: ":xnack" not in target)
+
+    assert Arch._withoutXnack(GFX1250 + ":xnack-") == GFX1250
+    assert Arch._withoutXnack(GFX1250 + ":xnack+") == GFX1250
+    assert Arch._withoutXnack(GFX1250 + ":xnack-:sramecc+") == GFX1250 + ":sramecc+"
+    for typo in (":xnack-typo", ":xnackfoo", ":xnack"):
+        assert Arch._withoutXnack(GFX1250 + typo) == GFX1250 + typo
+        # ... and so the spec reaches the compiler untouched rather than
+        # degrading to a name that happens to be valid.
+        assert Arch.compilerTargetOf(GFX1250 + typo, "cc") == GFX1250 + typo
+    assert Arch.compilerTargetOf(GFX1250 + ":xnack-", "cc") == GFX1250
+
+
+# ---------------------------------------------------------------------------
+# A qualifier is worth forwarding only where it selects an override. One that
+# selects nothing still reaches the compiler, and there it costs the
+# xnack-agnostic code object without buying any capability.
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_target_drops_a_qualifier_that_selects_no_override():
+    from tensilelite.ClientWriter import rebuildTargetGfx
+
+    # gfx942 has no entry in ARCH_CAP_OVERRIDES, so :xnack+ changes nothing in
+    # the re-spawned build -- while --offload-arch would pin the source kernels
+    # to xnack+, which the bare name leaves loadable under either mode.
+    assert rebuildTargetGfx("gfx942", ["gfx942:xnack+"]) == "gfx942"
+    assert rebuildTargetGfx("gfx942", ["gfx942:xnack-"]) == "gfx942"
+    # gfx1250:xnack- does select one, so it still goes.
+    assert rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-"]) == GFX1250 + ":xnack-"
+    assert rebuildTargetGfx(GFX1250, [GFX1250 + ":xnack-[cu=64]"]) == GFX1250 + ":xnack-"
+
+
+def test_benchmark_cache_key_ignores_a_qualifier_that_selects_no_override():
+    from tensilelite.BenchmarkProblems import _computeCacheKey, _CACHE_FIELDS
+
+    step = type("Step", (), {attr: () for attr in _CACHE_FIELDS.values()})()
+    bare = _computeCacheKey(step, ["gfx942"], ["gfx942"])
+    # Same objects either way, so the entry stays shared rather than being
+    # retired for a configuration whose caches are still good.
+    assert _computeCacheKey(step, ["gfx942"], ["gfx942:xnack+"]) == bare
+    assert _computeCacheKey(step, ["gfx942"], ["gfx942:xnack-"]) == bare
+    # A bare stepping is in the override table too, but it is an architecture --
+    # _Architectures already tells those apart, so it must not move the key.
+    strictBare = _computeCacheKey(step, [GFX1250_STRICT], [GFX1250_STRICT])
+    assert strictBare == _computeCacheKey(step, [GFX1250_STRICT])
+
+
+def test_cap_override_key_ignores_everything_but_the_xnack_mode():
+    from tensilelite.Common.Architectures import ARCH_CAP_OVERRIDES, capOverrideKeyOf
+
+    key = GFX1250 + ":xnack-"
+    assert key in ARCH_CAP_OVERRIDES
+    # Order, an unrelated qualifier and a predicate each say nothing about the
+    # xnack mode, so none of them may decide whether the override is found.
+    for spelling in (key, key + ":sramecc+", GFX1250 + ":sramecc+:xnack-", key + "[cu=64]"):
+        assert capOverrideKeyOf(spelling) == key
+    assert capOverrideKeyOf(GFX1250) == GFX1250
+    assert capOverrideKeyOf(GFX1250_STRICT) == GFX1250_STRICT
+
+
+def test_cap_overrides_reach_a_spec_with_a_second_qualifier():
+    from tensilelite.Common.Capabilities import applyArchCapOverrides
+    from tensilelite.Common.Types import IsaInfo
+
+    for spec in (GFX1250 + ":xnack-", GFX1250 + ":xnack-:sramecc+",
+                 GFX1250 + ":sramecc+:xnack-"):
+        iim = {ISA_GFX1250: IsaInfo({}, {"EnableXnackReplay": True}, {}, {})}
+        applyArchCapOverrides(iim, [spec])
+        assert iim[ISA_GFX1250].archCaps["EnableXnackReplay"] is False, spec
+
+
+def test_config_rejects_two_entries_settling_the_detected_arch_differently():
+    from tensilelite.Tensile import archNamesFromConfig
+
+    isaList = [ISA_GFX1250]
+    # Order decided the mode before: one spelling tuned with replay on, the
+    # reverse with it off, and neither said so.
+    for cfg in (f"{GFX1250}:xnack-;{GFX1250}", f"{GFX1250};{GFX1250}:xnack-"):
+        with pytest.raises(ValueError, match="different xnack modes"):
+            archNamesFromConfig(cfg, isaList, [GFX1250])
+    # Two spellings of one mode are not a conflict; a predicate is not a mode.
+    assert archNamesFromConfig(
+        f"{GFX1250}:xnack-;{GFX1250}:xnack-[cu=64]", isaList, [GFX1250]
+    ) == [GFX1250 + ":xnack-[cu=64]"]
+
+
+def test_all_absorbs_a_qualifier_that_changes_nothing():
+    """`all` already covers the architecture; a mode it does not alter is noise."""
+    base = expandAllArchitectures(["all"])
+    for spec in ("gfx942:xnack+", "gfx942:xnack-", GFX1250_STRICT):
+        assert expandAllArchitectures(["all", spec]) == base, spec
+
+
+def test_all_keeps_a_qualifier_that_selects_an_override():
+    """...and one that does alter it is a different build, not a spelling.
+
+    Absorbed, `all;gfx1250:xnack-` quietly built gfx1250 with replay on -- the
+    opposite of what the second entry asked for. Kept, it reaches the guard that
+    refuses one architecture under two capability sets.
+    """
+    expanded = expandAllArchitectures(["all", GFX1250 + ":xnack-"])
+    assert GFX1250 + ":xnack-" in expanded
+    assert GFX1250 in expanded
+
+    iim = {ISA_GFX1250: IsaInfo({}, {"EnableXnackReplay": True}, {}, {})}
+    with pytest.raises(ValueError, match="share ISA"):
+        applyArchCapOverrides(iim, [a for a in expanded if a.startswith(GFX1250)])
+
+
+def test_config_allows_two_entries_with_the_same_effective_capabilities():
+    """Only a differing xnack *mode* is a conflict, not a differing spelling.
+
+    gfx942:xnack+ and gfx942:xnack- select no capability override at all, so a
+    capability comparison would call them equivalent -- but the compiler takes
+    them as distinct target IDs and the helper kernels differ, so picking one by
+    position is the thing being refused.
+    """
+    from tensilelite.Tensile import archNamesFromConfig
+
+    isa942 = [gfxToIsa("gfx942")]
+    with pytest.raises(ValueError, match="different xnack modes"):
+        archNamesFromConfig("gfx942:xnack+;gfx942:xnack-", isa942, ["gfx942"])
+    # One mode named twice is not a conflict, however it is spelled.
+    assert archNamesFromConfig(
+        "gfx942:xnack+;gfx942:xnack+[cu=64]", isa942, ["gfx942"]
+    ) == ["gfx942:xnack+[cu=64]"]

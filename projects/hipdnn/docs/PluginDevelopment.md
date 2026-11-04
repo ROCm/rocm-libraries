@@ -91,7 +91,7 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
-- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
+- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. hipDNN never asks a plugin to serialize an execution context that it created from saved bytes, so a plugin need not support saving a restored context. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
 
 ## Engine IDs
 

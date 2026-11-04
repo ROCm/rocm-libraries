@@ -15,23 +15,19 @@ from .target import (
 )
 from ..dtypes import dtype_info
 from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
+from .mfma_scale import MATRIX_FORMATS, matrix_operand_layout
 
 
 def scaled_matrix_layout(dtype: str, abi_words: int) -> MatrixFragmentLayout:
     """gfx1250 scaled operand layout, independent of atom availability.
 
-    Matrix formats share storage mechanics but retain their atom-selected layout.
+    The f8f6f4 operand layout of ``dtype`` in ``abi_words`` words over two
+    groups of 16 lanes (:func:`~rocke.core.arch.mfma_scale.matrix_operand_layout`).
     """
     info = dtype_info(dtype)
-    chunks = {"fp8e4m3": 16, "bf8e5m2": 16, "fp6e2m3": 32, "fp6e3m2": 32, "fp4e2m1": 32}
-    if info.name not in chunks:
+    if info.name not in MATRIX_FORMATS:
         raise ValueError(f"unsupported scaled matrix layout {dtype!r}")
-    return MatrixFragmentLayout(
-        FragmentPacking(BitPacking(info.encoded_bits), 64, 32, abi_words),
-        chunks[info.name],
-        2,
-        16,
-    )
+    return matrix_operand_layout(info.name, abi_words, 2, 16)
 
 
 @dataclass(frozen=True)
@@ -112,7 +108,6 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     if _op_id_family().get(op_id) != "wmma_scaled":
         return None
     atom = _mma_op_by_id(op_id)
-    formats = {"fp8e4m3": 0, "bf8e5m2": 1, "fp6e2m3": 2, "fp6e3m2": 3, "fp4e2m1": 4}
     scale_selectors = {
         MmaScaleDType.E8M0: 0,
         MmaScaleDType.E5M3: 1,
@@ -121,8 +116,8 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     # Matrix and scale formats are independent selectors for each operand.
     # Validate the backend contract independently of the catalog query model.
     if (
-        atom.a_dtype not in formats
-        or atom.b_dtype not in formats
+        atom.a_dtype not in MATRIX_FORMATS
+        or atom.b_dtype not in MATRIX_FORMATS
         or atom.a_scale_dtype not in scale_selectors
         or atom.b_scale_dtype not in scale_selectors
         or atom.scale_block_k not in (16, 32)
@@ -139,7 +134,7 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         raise ValueError(f"unsupported scaled WMMA scale fragment lengths: {counts}")
     return ScaledWmmaOp(
         atom=atom,
-        matrix_formats=(formats[atom.a_dtype], formats[atom.b_dtype]),
+        matrix_formats=(MATRIX_FORMATS[atom.a_dtype], MATRIX_FORMATS[atom.b_dtype]),
         scale_formats=(
             scale_selectors[atom.a_scale_dtype],
             scale_selectors[atom.b_scale_dtype],
