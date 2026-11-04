@@ -1943,4 +1943,97 @@ TEST_F(TestBundleDiscoveryFixture, RegistrationDoesNotCountAnExpectedRejectionCa
     EXPECT_EQ(supportClaimCoverage().graphsWithClaims - before.graphsWithClaims, 1u);
 }
 
+// An unknown fill kind is an authoring error, not a random fill: the bundle registers
+// a failing test that names the input and the kind.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnknownFillKind)
+{
+    auto dir = _tempDir / "op" / "unknownkind";
+    createMinimalBundle(dir, "unknownkind");
+    std::ofstream(dir / "unknownkind.meta.json")
+        << R"({"format_version": 1, "inputs": {"3": {"kind": "vaules", "values": [1]}}})";
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    const auto& message = std::get<detail::FailedLoad>(outcome).message;
+    EXPECT_NE(message.find("input 3"), std::string::npos) << message;
+    EXPECT_NE(message.find("vaules"), std::string::npos) << message;
+}
+
+TEST_F(TestBundleDiscoveryFixture, ClassifySweepCaseReturnsFailedLoadForUnknownFillKind)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"unknown_kind_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0]["metadata"]["inputs"] = {{"3", {{"kind", "vaules"}}}};
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    const auto& message = std::get<detail::FailedLoad>(outcome).message;
+    EXPECT_NE(message.find("input 3"), std::string::npos) << message;
+    EXPECT_NE(message.find("vaules"), std::string::npos) << message;
+}
+
+// A harness that knows format_version 2 refuses a VALUES fill in version 1 metadata,
+// so a case cannot rely on a fill that an older harness would read as random.
+TEST_F(TestBundleDiscoveryFixture, ClassifySweepCaseReturnsFailedLoadForValuesInFormatVersion1)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"values_v1_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    auto& metadata = sweepJson["cases"][0]["metadata"];
+    metadata["format_version"] = 1;
+    metadata["inputs"] = {{"3", {{"kind", "values"}, {"values", {1, 2}}}}};
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    const auto& message = std::get<detail::FailedLoad>(outcome).message;
+    EXPECT_NE(message.find("kind values needs format_version 2"), std::string::npos) << message;
+
+    metadata["format_version"] = 2;
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+    const auto rediscovered = discoverBundles(_tempDir);
+    ASSERT_EQ(rediscovered.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(rediscovered.front())));
+}
+
 // NOLINTEND(readability-identifier-naming)

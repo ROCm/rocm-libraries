@@ -7,11 +7,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
+#include <variant>
+#include <vector>
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/types.hpp>
@@ -53,12 +58,160 @@ FillRecipe symmetricFullRange()
     return FillRecipe::free(-max, max);
 }
 
+// ── VALUES fill ─────────────────────────────────────────────────────────────
+
+bool holdsSubByteElements(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+    return dataType == DataType::FP4_E2M1 || dataType == DataType::FP6_E2M3
+           || dataType == DataType::FP6_E3M2 || dataType == DataType::INT4;
+}
+
+// Integer element types take only exact integers in their range; BOOLEAN takes 0 or 1.
+// Floating-point element types take any number, rounded to the element type.
+template <typename T, typename V>
+std::optional<std::string> toElement([[maybe_unused]] V number, [[maybe_unused]] T& element)
+{
+    if constexpr(std::is_integral_v<T> && std::is_floating_point_v<V>)
+    {
+        return std::string("the list holds a non-integer number, so it cannot fill an "
+                           "integer tensor");
+    }
+    else if constexpr(std::is_integral_v<T>)
+    {
+        bool inRange = false;
+        if constexpr(std::is_same_v<T, bool>)
+        {
+            inRange = number == 0 || number == 1;
+        }
+        else if constexpr(std::is_same_v<T, int64_t>)
+        {
+            inRange = true;
+        }
+        else
+        {
+            inRange = number >= static_cast<int64_t>(std::numeric_limits<T>::min())
+                      && number <= static_cast<int64_t>(std::numeric_limits<T>::max());
+        }
+        if(!inRange)
+        {
+            return std::to_string(number) + " is out of range for the tensor's data type";
+        }
+        element = static_cast<T>(number);
+        return std::nullopt;
+    }
+    else
+    {
+        element = static_cast<T>(number);
+        return std::nullopt;
+    }
+}
+
+template <typename T, typename V>
+std::optional<std::string> writeValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
+                                       const std::vector<V>& numbers,
+                                       bool repeat)
+{
+    const std::size_t count = tensor.elementCount();
+    if(!repeat && numbers.size() != count)
+    {
+        return "repeat false needs one value per element: " + std::to_string(numbers.size())
+               + " values for " + std::to_string(count) + " elements";
+    }
+    if(numbers.size() > count)
+    {
+        return "the list is longer than the tensor: " + std::to_string(numbers.size())
+               + " values for " + std::to_string(count) + " elements";
+    }
+
+    std::vector<T> elements(numbers.size());
+    for(std::size_t i = 0; i < numbers.size(); ++i)
+    {
+        T element{};
+        if(auto why = toElement(numbers[i], element))
+        {
+            return "values[" + std::to_string(i) + "]: " + *why;
+        }
+        elements[i] = element;
+    }
+
+    std::size_t i = 0;
+    for(auto it = tensor.begin(); it != tensor.end(); ++it, ++i)
+    {
+        *static_cast<T*>(*it) = elements[i % elements.size()];
+    }
+    tensor.markHostModified();
+    return std::nullopt;
+}
+
+// Fills `tensor` when its element type is T; nullopt when it is not.
+template <typename T>
+std::optional<FillResult> fillValuesAs(hipdnn_data_sdk::utilities::ITensor& tensor,
+                                       const FillRecipe& recipe)
+{
+    auto* typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>*>(&tensor);
+    if(typed == nullptr)
+    {
+        return std::nullopt;
+    }
+    const auto why = std::visit(
+        [&](const auto& numbers) { return writeValues(*typed, numbers, recipe.repeat); },
+        *recipe.list);
+    return why.has_value() ? FillResult::invalid(*why) : FillResult::ok();
+}
+
+template <typename... Ts>
+FillResult fillValuesAsAnyOf(hipdnn_data_sdk::utilities::ITensor& tensor, const FillRecipe& recipe)
+{
+    std::optional<FillResult> result;
+    static_cast<void>((... || (result = fillValuesAs<Ts>(tensor, recipe)).has_value()));
+    return result.has_value() ? *result
+                              : FillResult::invalid("kind values cannot fill this element type");
+}
+
+FillResult fillValues(hipdnn_data_sdk::utilities::ITensor& tensor,
+                      const FillRecipe& recipe,
+                      std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dataType)
+{
+    if(recipe.list == nullptr)
+    {
+        return FillResult::invalid("kind values has no list");
+    }
+    // INT4 tensors hold uint8_t elements, so only the data type tells them apart.
+    if(!dataType.has_value())
+    {
+        return FillResult::invalid("kind values needs the tensor's data type");
+    }
+    if(holdsSubByteElements(*dataType))
+    {
+        return FillResult::invalid(std::string("kind values cannot fill a ")
+                                   + EnumNameDataType(*dataType) + " tensor");
+    }
+
+    namespace types = hipdnn_data_sdk::types;
+    return fillValuesAsAnyOf<float,
+                             double,
+                             types::half,
+                             types::bfloat16,
+                             types::fp8_e4m3,
+                             types::fp8_e5m2,
+                             types::fp8_e4m3_fnuz,
+                             types::fp8_e5m2_fnuz,
+                             types::fp8_e8m0,
+                             int8_t,
+                             uint8_t,
+                             int32_t,
+                             int64_t,
+                             bool>(tensor, recipe);
+}
+
 // ── Fill dispatch ───────────────────────────────────────────────────────────
 
 FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
                 const FillRecipe& recipe,
                 unsigned int seed,
-                DeviceInputFiller* device)
+                DeviceInputFiller* device,
+                std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dataType)
 {
     switch(recipe.kind)
     {
@@ -72,6 +225,8 @@ FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
     case FillRecipe::Kind::FIXED:
         tensor.fillTensorWithValue(recipe.value);
         return FillResult::ok();
+    case FillRecipe::Kind::VALUES:
+        return fillValues(tensor, recipe, dataType);
     default:
         return FillResult::unsupported("unknown FillRecipe kind");
     }
@@ -193,6 +348,19 @@ float recipeMagnitude(const FillRecipe& recipe)
     if(recipe.kind == FillRecipe::Kind::FIXED)
     {
         return std::fabs(recipe.value);
+    }
+    if(recipe.kind == FillRecipe::Kind::VALUES && recipe.list != nullptr)
+    {
+        return std::visit(
+            [](const auto& numbers) {
+                float magnitude = 0.0f;
+                for(const auto number : numbers)
+                {
+                    magnitude = std::max(magnitude, std::fabs(static_cast<float>(number)));
+                }
+                return magnitude;
+            },
+            *recipe.list);
     }
     return std::max(std::fabs(recipe.lo), std::fabs(recipe.hi));
 }
@@ -384,6 +552,7 @@ bool DeviceInputFiller::isSupported()
 #endif
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static): uses _impl with rocRAND
 bool DeviceInputFiller::tryFill([[maybe_unused]] hipdnn_data_sdk::utilities::ITensor& tensor,
                                 [[maybe_unused]] const FillRecipe& recipe,
                                 [[maybe_unused]] unsigned int seed)
@@ -571,10 +740,19 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     {
         const unsigned int seed
             = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
-        auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed, device);
+        const auto dataType = dataTypes.find(uid);
+        auto fillResult
+            = fill(*inputs.at(uid),
+                   recipes.fill(uid),
+                   seed,
+                   device,
+                   dataType != dataTypes.end() ? std::optional(dataType->second) : std::nullopt);
         if(!fillResult.filled)
         {
-            return FillResult::unsupported("uid " + std::to_string(uid) + ": " + fillResult.reason);
+            auto reason = "uid " + std::to_string(uid) + ": " + fillResult.reason;
+            return fillResult.status == FillResult::Status::INVALID
+                       ? FillResult::invalid(std::move(reason))
+                       : FillResult::unsupported(std::move(reason));
         }
         deviceFilled += fillResult.deviceFilled;
     }

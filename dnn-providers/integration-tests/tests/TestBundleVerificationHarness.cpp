@@ -164,6 +164,39 @@ std::shared_ptr<IntegrationTestBundle>
     return bundle;
 }
 
+// uids: x=1 (input), z=2 (output). The GDN node has no input fills registered, so the
+// harness cannot fill the bundle's inputs.
+std::shared_ptr<IntegrationTestBundle> makeUnfillableBundle()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {2, 3};
+    const std::vector<int64_t> strides = {3, 1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 2, "z", DataType::FLOAT, &strides, &dims));
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "gdn",
+                                     DataType::FLOAT,
+                                     NodeAttributes::GdnAttributes,
+                                     flatbuffers::Offset<void>()));
+
+    const auto graph = CreateGraphDirect(
+        builder, "unfillable", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    builder.Finish(graph);
+
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->graphBuffer = builder.Release();
+    bundle->outputTensorUids = {2};
+    return bundle;
+}
+
 // Runs a graph-only bundle through the harness on the host. The outputs stay
 // sentinels, so the verdict is not what the caller is testing.
 void fillOnHost(IntegrationBundleVerificationHarness& harness,
@@ -713,6 +746,111 @@ TEST_F(TestGoldenHarnessFixture, RaggedSdpaMatchingOutputYieldsPass)
 
     EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
     EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// A VALUES recipe that cannot fill its tensor is an error in the bundle. The test fails
+// before the engine runs and does not skip.
+TEST_F(TestGoldenHarnessFixture, InvalidValuesFillFailsTheTest)
+{
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    // An accepted claim for the engine under test makes the run publish a verdict
+    // whose detail names the failure origin.
+    const std::string engineName = "ENGINE_UNDER_TEST";
+    SupportResult accepted;
+    accepted.verdict = SupportVerdict::CLAIM_ACCEPTED;
+    accepted.bundlePath = "invalid-values-fill";
+    accepted.engineName = engineName;
+    accepted.arch = "gfx942";
+    accepted.platform = "linux";
+    ON_CALL(mocks.claimObserver,
+            observe(::testing::_, ::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(SupportObservation{SidecarState::CHECKED, {accepted}}));
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(mocks.reporter, verdicts);
+
+    const auto sidecar = _tempDir / "invalid-values-fill.support.json";
+    std::ofstream(sidecar) << R"({"version": 1, "claims": {}})";
+    SupportClaimLocator locator;
+    locator.sidecarPath = sidecar;
+    locator.diagnosticPath = "invalid-values-fill";
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)),
+        LoadedEngine{11, engineName});
+    harness.setBundle(makeRuntimePbvFillBundle(), "invalid-values-fill", locator);
+    // x has 6 elements; an exact list of 7 cannot fill it.
+    harness.inputFillRecipes().set(
+        1, FillRecipe::values(std::vector<int64_t>{1, 2, 3, 4, 5, 6, 7}, /*repeat=*/false));
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("input fill failed: uid 1: "), std::string::npos) << messages;
+    EXPECT_NE(messages.find("invalid-values-fill"), std::string::npos) << messages;
+
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_EQ(verdicts.front().reachedDepth, VerificationDepth::NOT_REACHED);
+    const std::string origin
+        = std::string("failed outside the engine (") + toString(FailureOrigin::HARNESS) + ")";
+    EXPECT_NE(verdicts.front().detail.find(origin), std::string::npos) << verdicts.front().detail;
+}
+
+TEST_F(TestGoldenHarnessFixture, UnsupportedFillStaysUnverifiable)
+{
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(makeUnfillableBundle(), "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("no input fill registered"),
+              std::string::npos)
+        << testing_support::allMessages(results);
+}
+
+// A sub-byte graph is filled twice, unpacked and packed. A VALUES fill of one of its
+// other tensors gives the same contents in both sets.
+TEST_F(TestGoldenHarnessFixture, ValuesFillOfASubByteGraphMatchesInBothInputSets)
+{
+    testing_support::HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    harness.setBundle(makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1),
+                      "unit-test-bundle");
+    harness.inputFillRecipes().set(2, FillRecipe::values(std::vector<int64_t>{1, 2}));
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    ASSERT_EQ(harness.inputs().count(2), 1u);
+    ASSERT_EQ(harness.packedInputs().count(2), 1u);
+    auto& unpacked = *harness.inputs().at(2);
+    auto& packed = *harness.packedInputs().at(2);
+
+    std::vector<float> scales;
+    for(auto* element : unpacked)
+    {
+        scales.push_back(
+            static_cast<float>(*static_cast<hipdnn_data_sdk::types::fp8_e8m0*>(element)));
+    }
+    ASSERT_GE(scales.size(), 2u);
+    EXPECT_EQ(scales[0], 1.0f);
+    EXPECT_EQ(scales[1], 2.0f);
+    EXPECT_EQ(std::memcmp(unpacked.rawHostData(),
+                          packed.rawHostData(),
+                          unpacked.elementSpace() * unpacked.elementSize()),
+              0);
 }
 
 // NOLINTEND(readability-identifier-naming)

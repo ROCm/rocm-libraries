@@ -24,18 +24,33 @@ using InputTensorMap
 
 struct FillResult
 {
+    enum class Status
+    {
+        OK,
+        /// The harness cannot fill this graph's inputs.
+        UNSUPPORTED,
+        /// A recipe cannot fill its tensor as written, for example a VALUES list
+        /// with a value out of range for the tensor's data type.
+        INVALID,
+    };
+
     bool filled = false;
     std::string reason;
     /// How many tensors were generated on the device rather than the host.
     std::size_t deviceFilled = 0;
+    Status status = Status::UNSUPPORTED;
 
     static FillResult ok(std::size_t deviceFilled = 0)
     {
-        return {true, {}, deviceFilled};
+        return {true, {}, deviceFilled, Status::OK};
     }
     static FillResult unsupported(std::string why)
     {
-        return {false, std::move(why), 0};
+        return {false, std::move(why), 0, Status::UNSUPPORTED};
+    }
+    static FillResult invalid(std::string why)
+    {
+        return {false, std::move(why), 0, Status::INVALID};
     }
 };
 
@@ -110,6 +125,9 @@ private:
 /// they have no device, everything is filled on the host. All device fills have
 /// finished by the time this returns or throws. Throws DeviceInputError when a device
 /// fill fails.
+///
+/// A VALUES recipe is always filled on the host. A recipe that cannot fill its tensor
+/// as written makes the result invalid, with the uid and the reason.
 ///
 /// After the fill, the O and stats inputs of each SDPA backward node are replaced by
 /// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever

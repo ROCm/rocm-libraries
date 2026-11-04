@@ -906,6 +906,19 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     DeviceInputFiller* const device
         = _deps.policy.useDevice() && !anySubByte ? _deps.deviceFiller.get() : nullptr;
 
+    // A recipe that cannot fill its tensor is an error in the bundle's metadata, not a
+    // limit of the harness, so it fails the test.
+    const auto fillFailure = [this](const FillResult& result) {
+        if(result.status == FillResult::Status::INVALID)
+        {
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               "input fill failed: " + result.reason + " ("
+                                                   + _bundlePath.string() + ")");
+        }
+        return unverifiable(result.reason);
+    };
+
     FillResult fillResult;
     try
     {
@@ -924,7 +937,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
     if(!fillResult.filled)
     {
-        return unverifiable(fillResult.reason);
+        return fillFailure(fillResult);
     }
     _deviceFilledInputs = fillResult.deviceFilled;
 
@@ -941,7 +954,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
             wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, device);
         if(!packedFill.filled)
         {
-            return unverifiable(packedFill.reason);
+            return fillFailure(packedFill);
         }
         _packedInputs = std::move(packed);
     }
