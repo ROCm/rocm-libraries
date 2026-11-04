@@ -6140,12 +6140,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // the GSU reduction area, which is far larger and stays shared. The two
         // never coincide in one kernel, so a single pointer serves both and the
         // choice is made here, where the solution is finally known.
-        {
-            auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
-            if(picked)
-                data->inputs.Synchronizer
-                    = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
-        }
+        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        if(solution)
+            data->inputs.Synchronizer
+                = synchronizerForSolution(*solution, prob.streamKFlags, prob.Synchronizer);
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
            || rocblaslt::Debug::Instance().printLogAsMarker()
@@ -6193,7 +6191,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   false);
         }
 
-        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
