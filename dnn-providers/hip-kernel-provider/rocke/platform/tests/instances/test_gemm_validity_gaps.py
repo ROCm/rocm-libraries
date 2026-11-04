@@ -368,6 +368,58 @@ class TestFp8IsGfx1250Only(unittest.TestCase):
                 self.assertTrue(ok, why)
 
 
+class TestAtomWithoutLaneMapIsRejected(unittest.TestCase):
+    """An atom the catalog lists but whose A/B lane maps are not verified.
+
+    develop lists a 16x16x128 bf8 WMMA row with no operand maps. The validator
+    accepted it and the build then failed on the missing map; it is rejected
+    up front now, with the same reason as the C++ engine.
+    """
+
+    @staticmethod
+    def _spec(dtype: str, warp_tile_k: int):
+        base = _fp8_spec(epilogue="default")
+        return replace(
+            base,
+            tile=replace(base.tile, warp_tile_k=warp_tile_k),
+            data=replace(base.data, dtype_a=dtype, dtype_b=dtype),
+        )
+
+    def test_bf8_16x16x128_rejected(self):
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        ok, why = is_valid_spec(self._spec("bf8e5m2", 128), ARCH)
+        self.assertFalse(ok)
+        self.assertEqual(
+            why,
+            "no verified A/B lane map for bf8e5m2 warp_tile (16, 16, 128) on gfx1250",
+        )
+
+    def test_the_map_is_the_only_reason(self):
+        # Counterfactual: fp8 on the same atom and bf8 on 16x16x64 are valid.
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for dtype, k in (("fp8e4m3", 128), ("bf8e5m2", 64)):
+            with self.subTest(dtype=dtype, k=k):
+                ok, why = is_valid_spec(self._spec(dtype, k), ARCH)
+                self.assertTrue(ok, why)
+
+    def test_every_admitted_gfx1250_atom_has_maps(self):
+        # What the validator now guarantees: an admitted atom always builds its
+        # A/B fragments, so the builder never meets the missing-map error.
+        from rocke.instances.common.gemm_universal import (
+            _resolve_mma_op,
+            is_valid_spec,
+        )
+
+        for dtype in ("fp8e4m3", "bf8e5m2"):
+            for k in (64, 128):
+                spec = self._spec(dtype, k)
+                if is_valid_spec(spec, ARCH)[0]:
+                    with self.subTest(dtype=dtype, k=k):
+                        self.assertTrue(_resolve_mma_op(spec, ARCH).has_ab_layouts())
+
+
 def _bf16_spec(arch_tile, *, epilogue="default", **trait_kw):
     """A bf16 universal GEMM with the given (tile, warps, warp tile) geometry."""
     from rocke.instances.common.gemm_universal import (

@@ -374,7 +374,7 @@ class TestConfigDerivation(unittest.TestCase):
 
 
 class TestFinalistSelection(unittest.TestCase):
-    """The cut sat at a 0.9% margin while stage 2 reorders by up to 12pp."""
+    """A fixed top-N cut can sit at a smaller margin than stage 2 reorders by."""
 
     @staticmethod
     def _ranked(times):

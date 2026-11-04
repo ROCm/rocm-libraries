@@ -816,6 +816,22 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             "unsupported %s warp_tile (%d, %d, %d) on %s", a_name, atom_m, atom_n, atom_k, arch);
     }
 
+    /* The catalog can list an atom whose operand lane maps are not verified
+     * yet (develop's 16x16x128 bf8 row): the build would then fail on the
+     * missing map, so reject it here with one reason in both engines. */
+    {
+        const rocke_mmaop_t* op = ck_gemm_resolve_mma_op(spec, target);
+        if(op == NULL || op->a_layout == NULL || op->b_layout == NULL)
+        {
+            CK_GEMM_REJECT("no verified A/B lane map for %s warp_tile (%d, %d, %d) on %s",
+                           a_name,
+                           atom_m,
+                           atom_n,
+                           atom_k,
+                           arch);
+        }
+    }
+
     /* spec wave size must match the target's. */
     if(spec->wave_size != target->wave_size)
     {

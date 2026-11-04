@@ -1203,27 +1203,35 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.batch_off_a = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ctx.batch_idx, ctx.stride_a));
         ctx.batch_off_b = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ctx.batch_idx, ctx.stride_b));
         ctx.batch_off_c = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, ctx.batch_idx, ctx.stride_c));
-        ctx.tdm_batch_a = ctx.batch_off_a;
-        ctx.tdm_batch_b = ctx.batch_off_b;
-        if(spec->trait.tdm)
-        {
-            /* The TDM fills address in i64 (rocke_gemm_tdm_issue); an i32 batch
-             * offset would wrap first once a batch passes 2^31 elements. Every
-             * term is non-negative, so each widens with zext. Python's order. */
-            rocke_value_t* batch64 = rocke_b_zext(b, ctx.batch_idx, rocke_i64());
-            rocke_value_t* stride_a64 = rocke_b_zext(b, ctx.stride_a, rocke_i64());
-            ctx.tdm_batch_a = rocke_b_mul(b, batch64, stride_a64);
-            rocke_value_t* stride_b64 = rocke_b_zext(b, ctx.stride_b, rocke_i64());
-            ctx.tdm_batch_b = rocke_b_mul(b, batch64, stride_b64);
-        }
     }
     else
     {
         ctx.batch_off_a = ctx.c0;
         ctx.batch_off_b = ctx.c0;
         ctx.batch_off_c = ctx.c0;
-        ctx.tdm_batch_a = ctx.c0;
-        ctx.tdm_batch_b = ctx.c0;
+    }
+    /* The TDM fills' batch offsets, decided once here and only here: one i64
+     * per operand, which rocke_gemm_tdm_issue adds as it is. The fills address
+     * in i64, and an i32 batch offset would wrap first once a batch passes
+     * 2^31 elements. Every term is non-negative, so each widens with zext.
+     * Python's order. */
+    ctx.tdm_batch_a = NULL;
+    ctx.tdm_batch_b = NULL;
+    if(spec->trait.tdm)
+    {
+        if(spec->batched)
+        {
+            rocke_value_t* batch64 = rocke_b_zext(b, ctx.batch_idx, rocke_i64());
+            rocke_value_t* stride_a64 = rocke_b_zext(b, ctx.stride_a, rocke_i64());
+            ctx.tdm_batch_a = rocke_b_mul(b, batch64, stride_a64);
+            rocke_value_t* stride_b64 = rocke_b_zext(b, ctx.stride_b, rocke_i64());
+            ctx.tdm_batch_b = rocke_b_mul(b, batch64, stride_b64);
+        }
+        else
+        {
+            ctx.tdm_batch_a = rocke_b_const_i64(b, 0);
+            ctx.tdm_batch_b = ctx.tdm_batch_a;
+        }
     }
 
     /* ---- per-CTA tile origins (SGPR-pinned) -- */

@@ -39,11 +39,13 @@ from rocke.examples.common.universal_gemm_verify import (
     _pick_atom,
     build_manifest,
 )
-from rocke.instances.common.manifest_runner.gemm import (
-    _F8_ENCODERS,
-    _bf8e5m2_decode_table,
+from rocke.numeric.fp8 import (
+    bf8e5m2_decode_table,
     bf8e5m2_encode,
     fp8e4m3_encode,
+)
+from rocke.instances.common.manifest_runner.gemm import (
+    _F8_ENCODERS,
     _gemm_f8_dtype,
     _gemm_is_bf16,
 )
@@ -256,7 +258,7 @@ class TestEightBitEncoders(unittest.TestCase):
     def test_e5m2_table_matches_the_format(self):
         import numpy as np
 
-        t = _bf8e5m2_decode_table(np)
+        t = bf8e5m2_decode_table()
         for code, want in (
             (0x3C, 1.0),
             (0xBC, -1.0),
@@ -274,9 +276,9 @@ class TestEightBitEncoders(unittest.TestCase):
     def test_e5m2_encode_round_trips_every_finite_code(self):
         import numpy as np
 
-        t = _bf8e5m2_decode_table(np)
+        t = bf8e5m2_decode_table()
         finite = np.flatnonzero(np.isfinite(t) & (np.arange(256) != 0x80))
-        codes = bf8e5m2_encode(np, t[finite])
+        codes = bf8e5m2_encode(t[finite])
         self.assertTrue(np.array_equal(codes, finite.astype(np.uint8)))
 
     def test_encoders_reject_what_their_format_cannot_hold(self):
@@ -284,9 +286,9 @@ class TestEightBitEncoders(unittest.TestCase):
 
         # 1.125 needs three significand bits: exact in e4m3, not in e5m2.
         x = np.array([1.125], dtype=np.float32)
-        self.assertEqual(int(fp8e4m3_encode(np, x)[0]), 0x39)
+        self.assertEqual(int(fp8e4m3_encode(x)[0]), 0x39)
         with self.assertRaisesRegex(ValueError, "bf8e5m2"):
-            bf8e5m2_encode(np, x)
+            bf8e5m2_encode(x)
 
     def test_test_inputs_are_exact_in_both_formats(self):
         import numpy as np
@@ -294,7 +296,7 @@ class TestEightBitEncoders(unittest.TestCase):
         x = np.arange(-5, 6, dtype=np.float32)
         for dtype, encode in _F8_ENCODERS.items():
             with self.subTest(dtype=dtype):
-                encode(np, x)  # raises if any input is inexact
+                encode(x)  # raises if any input is inexact
 
     def test_runner_picks_the_encoder_from_the_manifest(self):
         for dtype in ("fp8e4m3", "bf8e5m2"):
@@ -312,7 +314,7 @@ class TestEightBitEncoders(unittest.TestCase):
         one = np.array([1.0], dtype=np.float32)
         for dtype, code in (("fp8e4m3", 0x38), ("bf8e5m2", 0x3C)):
             with self.subTest(dtype=dtype):
-                self.assertEqual(int(_F8_ENCODERS[dtype](np, one)[0]), code)
+                self.assertEqual(int(_F8_ENCODERS[dtype](one)[0]), code)
 
 
 if __name__ == "__main__":

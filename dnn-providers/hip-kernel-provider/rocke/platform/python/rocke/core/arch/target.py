@@ -563,6 +563,15 @@ class MmaOp:
     def acc_layout(self) -> LayoutMap:
         return self.c_layout()
 
+    def has_ab_layouts(self) -> bool:
+        """Whether both operand maps are registered, so a kernel can load A and B.
+
+        A catalog row can name an instruction before its lane maps are verified;
+        a validator that admits such an atom hands the builder an op it cannot
+        consume.
+        """
+        return self._a_layout is not None and self._b_layout is not None
+
     def _require_layout(self, layout: Optional[LayoutMap], role: str) -> LayoutMap:
         if layout is None:
             raise NotImplementedError(

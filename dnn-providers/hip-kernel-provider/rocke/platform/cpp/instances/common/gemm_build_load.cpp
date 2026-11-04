@@ -129,10 +129,9 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     /* The element offset in i64: an operand past 2^31 elements (e.g.
      * M = K = 131072) wraps an i32 one, and the GEP would sign-extend it to an
      * address before the tensor. Every term is non-negative, so each widens
-     * with zext. One value per statement, in the Python engine's order. */
-    rocke_value_t* batch64 = rocke_type_eq(batch_off->type, rocke_i64())
-                                 ? batch_off
-                                 : rocke_b_zext(b, batch_off, rocke_i64());
+     * with zext; batch_off is already i64 (ctx->tdm_batch_a / _b). One value
+     * per statement, in the Python engine's order. */
+    rocke_value_t* batch64 = batch_off;
     rocke_value_t* row_off64 = rocke_b_zext(b, row_off, rocke_i64());
     rocke_value_t* k64 = rocke_b_zext(b, ctx->K, rocke_i64());
     rocke_value_t* row64 = rocke_b_mul(b, row_off64, k64);

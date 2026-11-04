@@ -706,6 +706,15 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         k=t.warp_tile_k,
     ):
         return False, f"unsupported {a_name} warp_tile {atom} on {arch}"
+    # The catalog can list an atom whose operand lane maps are not verified yet
+    # (develop's 16x16x128 bf8 row): the build would then fail on the missing
+    # map, so reject it here with one reason in both engines.
+    op = _resolve_mma_op(spec, arch)
+    if op is None or not op.has_ab_layouts():
+        return (
+            False,
+            f"no verified A/B lane map for {a_name} warp_tile {atom} on {arch}",
+        )
 
     # The spec's wave size must match the target's. ``spec.wave_size`` is baked
     # into ``block_size`` at construction, so a wave64 spec cannot launch on a
@@ -1458,23 +1467,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         batch_off_a = b.to_sgpr_u32(b.mul(batch_idx, stride_a))
         batch_off_b = b.to_sgpr_u32(b.mul(batch_idx, stride_b))
         batch_off_c = b.to_sgpr_u32(b.mul(batch_idx, stride_c))
-        if spec.trait.tdm:
-            # The TDM fills address in i64 (see ``_issue``); an i32 batch offset
-            # would wrap first once a batch passes 2^31 elements. Every term is
-            # non-negative, so each widens with zext. Elsewhere the TDM fills
-            # take the i32 offsets, which ``_issue`` widens.
-            from ...core.ir import I64 as _I64b
-
-            _batch64 = b.zext(batch_idx, _I64b)
-            tdm_batch_a = b.mul(_batch64, b.zext(stride_a, _I64b))
-            tdm_batch_b = b.mul(_batch64, b.zext(stride_b, _I64b))
-        else:
-            tdm_batch_a, tdm_batch_b = batch_off_a, batch_off_b
     else:
         batch_off_a = c0
         batch_off_b = c0
         batch_off_c = c0
-        tdm_batch_a, tdm_batch_b = batch_off_a, batch_off_b
+    # The TDM fills' batch offsets, decided once here and only here: one i64
+    # per operand, which ``_issue`` adds as it is. The fills address in i64, and
+    # an i32 batch offset would wrap first once a batch passes 2^31 elements.
+    # Every term is non-negative, so each widens with zext.
+    tdm_batch_a = tdm_batch_b = None
+    if spec.trait.tdm:
+        from ...core.ir import I64 as _I64b
+
+        if spec.batched:
+            _batch64 = b.zext(batch_idx, _I64b)
+            tdm_batch_a = b.mul(_batch64, b.zext(stride_a, _I64b))
+            tdm_batch_b = b.mul(_batch64, b.zext(stride_b, _I64b))
+        else:
+            tdm_batch_a = tdm_batch_b = b.const_i64(0)
 
     # Tile-index assignment. By default ``block_id_x`` maps to the
     # N-tile and ``block_id_y`` to the M-tile (the host launcher uses
@@ -1769,14 +1779,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
             k_remaining = b.smax(b.sub(K, k_off), zero)
 
-            def _issue(ptr, row_off, rows, extent, lds_base, batch_off):
+            def _issue(ptr, row_off, rows, extent, lds_base, batch64):
                 # The element offset in i64: an operand past 2^31 elements
                 # (e.g. M = K = 131072) wraps an i32 one, and the GEP would
                 # sign-extend it to an address before the tensor. Every term is
-                # non-negative, so each widens with zext.
-                batch64 = (
-                    batch_off if batch_off.type is _I64 else b.zext(batch_off, _I64)
-                )
+                # non-negative, so each widens with zext; ``batch64`` is already
+                # i64 (``tdm_batch_a`` / ``tdm_batch_b``).
                 row64 = b.mul(b.zext(row_off, _I64), b.zext(K, _I64))
                 origin = b.add(batch64, b.add(row64, b.zext(k_off, _I64)))
                 groups = b.tdm_descriptor_2d(

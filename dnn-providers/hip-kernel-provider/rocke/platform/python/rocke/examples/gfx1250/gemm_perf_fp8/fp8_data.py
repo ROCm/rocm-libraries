@@ -20,10 +20,7 @@ out separately, so there is one definition of the wire format.
 
 from __future__ import annotations
 
-from rocke.instances.common.manifest_runner.gemm import (
-    _fp8e4m3_decode_table,
-    fp8e4m3_encode,
-)
+from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_encode
 
 #: Largest finite e4m3 magnitude; rounding saturates here (the format has no
 #: infinity, and the NaN codes are never produced).
@@ -36,7 +33,7 @@ RAND_SEED = 42
 
 def e4m3_decode(np, codes):
     """e4m3 bytes -> f32 values."""
-    return _fp8e4m3_decode_table(np)[np.asarray(codes, dtype=np.uint8)]
+    return fp8e4m3_decode_table()[np.asarray(codes, dtype=np.uint8)]
 
 
 def e4m3_round(np, x):
@@ -48,7 +45,7 @@ def e4m3_round(np, x):
     xf = np.ascontiguousarray(x, dtype=np.float32)
     if np.isnan(xf).any():
         raise ValueError("e4m3_round: NaN input")
-    table = _fp8e4m3_decode_table(np)
+    table = fp8e4m3_decode_table()
     codes = np.arange(256, dtype=np.uint8)
     # Every finite value once, keeping +0 (code 0x00) for zero.
     keep = np.isfinite(table) & (codes != 0x80)
@@ -71,7 +68,7 @@ def int_operands(np, m: int, n: int, k: int) -> tuple[object, object, object, ob
     rng = np.random.default_rng(INT_SEED)
     a = rng.integers(-5, 6, size=(m, k), dtype=np.int16).astype(np.float32)
     b = rng.integers(-5, 6, size=(n, k), dtype=np.int16).astype(np.float32)
-    return fp8e4m3_encode(np, a), fp8e4m3_encode(np, b), a, b
+    return fp8e4m3_encode(a), fp8e4m3_encode(b), a, b
 
 
 def rand_operands(np, m: int, n: int, k: int) -> tuple[object, object, object, object]:

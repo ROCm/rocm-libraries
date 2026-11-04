@@ -1,0 +1,104 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Torch-free OCP fp8 host codecs: e4m3 (``fn``) and e5m2, carried as ``uint8``.
+
+The decode tables are derived from the formats rather than typed in, and the
+encoders accept only values the format holds exactly: the verify harnesses
+that use them compare a kernel against a reference computed on exactly the
+numbers the device sees, and a silent round here would demote that to a
+tolerance check. Sibling of :mod:`rocke.numeric.bf16`; harnesses import the
+codec from here instead of growing a second copy.
+"""
+
+from __future__ import annotations
+
+__all__ = [
+    "bf8e5m2_decode_table",
+    "bf8e5m2_encode",
+    "fp8e4m3_decode_table",
+    "fp8e4m3_encode",
+]
+
+
+def fp8e4m3_decode_table():
+    """All 256 OCP e4m3 (``fn``) codes decoded to f32, built from the format.
+
+    ``s.eeee.mmm``, bias 7. ``e == 0`` is subnormal — ``(-1)^s * 2^-6 * m/8``;
+    otherwise ``(-1)^s * 2^(e-7) * (1 + m/8)``. The format carries no
+    infinities, and ``e == 0xF, m == 0x7`` (``0x7f`` / ``0xff``) is NaN, so the
+    largest finite magnitude is 448.
+
+    Derived rather than tabulated on purpose: a hand-typed table is a second
+    definition of the wire format that can drift from the hardware's.
+    """
+    import numpy as np
+
+    code = np.arange(256, dtype=np.uint32)
+    sign = np.where((code >> 7) & 1, np.float32(-1.0), np.float32(1.0))
+    exp = ((code >> 3) & 0xF).astype(np.int32)
+    man = (code & 0x7).astype(np.float32)
+    sub = np.float32(2.0**-6) * (man / np.float32(8.0))
+    nor = np.ldexp(np.float32(1.0) + man / np.float32(8.0), exp - 7)
+    val = (sign * np.where(exp == 0, sub, nor)).astype(np.float32)
+    val[(exp == 0xF) & ((code & 0x7) == 0x7)] = np.float32("nan")
+    return val
+
+
+def bf8e5m2_decode_table():
+    """All 256 OCP e5m2 codes decoded to f32, built from the format.
+
+    ``s.eeeee.mm``, bias 15. ``e == 0`` is subnormal — ``(-1)^s * 2^-14 * m/4``;
+    otherwise ``(-1)^s * 2^(e-15) * (1 + m/4)``. Unlike e4m3 the format is
+    IEEE-like: ``e == 0x1F`` holds the infinities (``m == 0``) and NaNs, so the
+    largest finite magnitude is 57344. Those codes decode to NaN here, which
+    keeps them out of the encoder's table.
+    """
+    import numpy as np
+
+    code = np.arange(256, dtype=np.uint32)
+    sign = np.where((code >> 7) & 1, np.float32(-1.0), np.float32(1.0))
+    exp = ((code >> 2) & 0x1F).astype(np.int32)
+    man = (code & 0x3).astype(np.float32)
+    sub = np.float32(2.0**-14) * (man / np.float32(4.0))
+    nor = np.ldexp(np.float32(1.0) + man / np.float32(4.0), exp - 15)
+    val = (sign * np.where(exp == 0, sub, nor)).astype(np.float32)
+    val[exp == 0x1F] = np.float32("nan")
+    return val
+
+
+def fp8e4m3_encode(x):
+    """Encode f32 values to OCP e4m3 bytes, rejecting anything inexact."""
+    return _encode_exact(x, fp8e4m3_decode_table(), "fp8e4m3")
+
+
+def bf8e5m2_encode(x):
+    """Encode f32 values to OCP e5m2 bytes, rejecting anything inexact."""
+    return _encode_exact(x, bf8e5m2_decode_table(), "bf8e5m2")
+
+
+def _encode_exact(x, table, name):
+    """Encode f32 values to the 8-bit codes of ``table``, rejecting anything
+    inexact.
+
+    This runner's verification argument rests on the device seeing exactly the
+    numbers the reference multiplies, so a silent round here would quietly
+    demote the gate to a tolerance check. Vectorised via the inverted decode
+    table — a Python loop over a 4096x8192 operand is not viable.
+    """
+    import numpy as np
+
+    keep = np.isfinite(table)
+    vals = table[keep]
+    codes = np.arange(256, dtype=np.uint8)[keep]
+    order = np.argsort(vals, kind="stable")
+    vals, codes = vals[order], codes[order]
+    # -0.0 and +0.0 compare equal; np.unique folds them and return_index keeps
+    # the first occurrence, which the stable sort left as +0.0 (code 0x00).
+    uniq, first = np.unique(vals, return_index=True)
+    uniq_codes = codes[first]
+    xf = np.ascontiguousarray(x, dtype=np.float32).ravel()
+    idx = np.minimum(np.searchsorted(uniq, xf), uniq.size - 1)
+    if not np.array_equal(uniq[idx], xf):
+        raise ValueError(f"{name} encode: value not exactly representable in {name}")
+    return uniq_codes[idx].reshape(np.shape(x))

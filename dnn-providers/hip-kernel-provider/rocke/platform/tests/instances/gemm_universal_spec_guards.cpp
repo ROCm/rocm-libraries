@@ -129,6 +129,22 @@ int main()
          "gfx1250",
          [](Spec& s) { s.data.dtype_b = "bf8e5m2"; },
          "fp8/bf8 GEMM requires matching A/B dtypes; got A=fp8e4m3, B=bf8e5m2"},
+        {"fp8 16x16x128 atom", "gfx1250", [](Spec& s) { s.tile.warp_tile_k = 128; }, nullptr},
+        {"bf8 16x16x64 atom",
+         "gfx1250",
+         [](Spec& s) {
+             s.data.dtype_a = "bf8e5m2";
+             s.data.dtype_b = "bf8e5m2";
+         },
+         nullptr},
+        {"bf8 16x16x128 atom: listed, no A/B lane map",
+         "gfx1250",
+         [](Spec& s) {
+             s.data.dtype_a = "bf8e5m2";
+             s.data.dtype_b = "bf8e5m2";
+             s.tile.warp_tile_k = 128;
+         },
+         "no verified A/B lane map for bf8e5m2 warp_tile (16, 16, 128) on gfx1250"},
         {"fp8 with fp32 C",
          "gfx1250",
          [](Spec& s) { s.data.dtype_c = "fp32"; },

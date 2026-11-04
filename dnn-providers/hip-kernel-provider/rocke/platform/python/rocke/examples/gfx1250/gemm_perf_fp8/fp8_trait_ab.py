@@ -179,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     import numpy as np
 
-    from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
+    from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
     from rocke.runtime.hip_module import Runtime
     from rocke.sweep import build_all_instances
 
@@ -207,7 +207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"[ab] preparing {m}x{n}x{k} inputs and host references ...", flush=True)
     inputs: dict[str, Any] = {}
     a8, b8, a32, b32 = int_operands(np, m, n, k)
-    ref_int = f32_from_bf16(np, bf16_from_f32(np, a32 @ b32.T))
+    ref_int = bf16_to_f32(f32_to_bf16(a32 @ b32.T))
     inputs["int"] = (a8, b8)
     a8r, b8r, a32r, b32r = rand_operands(np, m, n, k)
     ref_rand = a32r @ b32r.T
@@ -255,7 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         rt.launch(a["fn"], a["grid"], a["block"], kargs)
         rt.wait_stream(0)
         rt.memcpy_d2h(_as_u8_buffer(c_host), c_dev, c_host.nbytes)
-        return f32_from_bf16(np, c_host)
+        return bf16_to_f32(c_host)
 
     # ---- verify every arm before timing any ---------------------------------
     verdicts: dict[str, dict[str, Any]] = {}

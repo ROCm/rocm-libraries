@@ -559,7 +559,7 @@ def _kernel_fingerprint(spec: UniversalGemmSpec, arch: str) -> str:
 
     The kernel is renamed first because several traits are spelled into the
     kernel name, which would otherwise make every variant differ by name bytes
-    alone. Costs about 0.1s per call.
+    alone. Each call is one full compile, so call it on finalists, not the pool.
     """
     import hashlib
 
@@ -870,11 +870,11 @@ class PreparedProblem:
 
         reference = None
         if with_reference:
-            from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
+            from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
             # The reference reproduces the kernel's final RNE to bf16; every
             # step before it is exact, so this is an equality, not a bound.
-            reference = f32_from_bf16(np, bf16_from_f32(np, a_f32 @ b_f32.T))
+            reference = bf16_to_f32(f32_to_bf16(a_f32 @ b_f32.T))
 
         rt = Runtime()
         a_dev = rt.alloc(a.nbytes)
@@ -1034,7 +1034,7 @@ def verify_record(
     """Exact compare.  See the module docstring for why this is not a tolerance."""
     import numpy as np
 
-    from rocke.dispatch.gemm.binding import f32_from_bf16
+    from rocke.numeric.bf16 import bf16_to_f32
 
     if problem.reference is None or not record.ok:
         return False
@@ -1049,7 +1049,7 @@ def verify_record(
         problem.rt.memcpy_d2h(
             _as_u8_buffer(problem.c_host), problem.c_dev, problem.c_host.nbytes
         )
-        actual = f32_from_bf16(np, problem.c_host)
+        actual = bf16_to_f32(problem.c_host)
         error = np.abs(actual - problem.reference)
         incorrect = count_incorrect(np, actual, problem.reference)
         result.update(

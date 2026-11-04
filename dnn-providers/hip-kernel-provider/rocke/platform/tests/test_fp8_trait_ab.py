@@ -19,7 +19,7 @@ from unittest import mock
 import numpy as np
 from rocke.examples.gfx1250.gemm_perf_fp8 import fp8_data, fp8_trait_ab
 from rocke.examples.gfx1250.gemm_perf_fp8 import wmma_roofline_probe as probe
-from rocke.instances.common.manifest_runner.gemm import _fp8e4m3_decode_table
+from rocke.numeric.fp8 import fp8e4m3_decode_table
 
 
 def _smi_listing(stdout: str):
@@ -75,15 +75,15 @@ class TestSweepExactSet(unittest.TestCase):
         b_padded[:n] = b8
         self.assertEqual(prob.rt.copies[prob.a_dev], a8.tobytes())
         self.assertEqual(prob.rt.copies[prob.b_dev], b_padded.tobytes())
-        from rocke.dispatch.gemm.binding import bf16_from_f32, f32_from_bf16
+        from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
-        ref = f32_from_bf16(np, bf16_from_f32(np, a32 @ b32.T))
+        ref = bf16_to_f32(f32_to_bf16(a32 @ b32.T))
         self.assertTrue(np.array_equal(prob.reference, ref))
 
 
 class TestE4m3Round(unittest.TestCase):
     def test_every_finite_value_round_trips(self):
-        table = _fp8e4m3_decode_table(np)
+        table = fp8e4m3_decode_table()
         codes = np.flatnonzero(np.isfinite(table) & (np.arange(256) != 0x80))
         self.assertTrue(
             np.array_equal(
