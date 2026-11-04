@@ -119,12 +119,22 @@ class TestRoundTrip:
                 _kernel(
                     "attn.bf16_sq512_bm128_eu1",
                     {"dtype": "bf16", "seqlen_q": 512, "block_m": 128},
-                    {"dtype": "BF16", "seqlen_q": 512, "block_m": 128, "use_exp2_fast": 1},
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 128,
+                        "use_exp2_fast": 1,
+                    },
                 ),
                 _kernel(
                     "attn.bf16_sq512_bm256_eu0",
                     {"dtype": "bf16", "seqlen_q": 512, "block_m": 256},
-                    {"dtype": "BF16", "seqlen_q": 512, "block_m": 256, "use_exp2_fast": 0},
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": 0,
+                    },
                 ),
                 _kernel(
                     "attn.bf16_sq512_bm256_e1",
@@ -134,7 +144,12 @@ class TestRoundTrip:
                         "block_m": 256,
                         "use_exp2_fast": True,
                     },
-                    {"dtype": "BF16", "seqlen_q": 512, "block_m": 256, "use_exp2_fast": 1},
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": 1,
+                    },
                 ),
             ]
         )

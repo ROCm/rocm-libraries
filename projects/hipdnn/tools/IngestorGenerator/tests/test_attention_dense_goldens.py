@@ -20,17 +20,26 @@ _REPO = Path(__file__).resolve().parents[5]
 _PROVIDER = _REPO / "dnn-providers" / "hip-kernel-provider"
 _ROCKE = _PROVIDER / "rocke"
 _PACKS = _PROVIDER / "src/tests/engines/kernel_ingestor_engine/packs"
+_KNOBS = _PROVIDER / "src/integration_tests/kernel_ingestor_engine"
 
-# (generator, table): the persistent grid / fast-division goldens (shared with gfx950)
-# and the gfx942 cold-score policy goldens over the full enumeration.
+# (directory, generator, table): the persistent grid / fast-division goldens (shared with
+# gfx950), the gfx942 cold-score policy goldens over the full enumeration, and the gfx942
+# knob suite's per-kernel rows from the shipped selection.
 _GOLDENS = (
     (
+        _PACKS,
         "gen_attention_dense_persistent_goldens.py",
         "TestAttentionDensePersistentGoldens.inc",
     ),
     (
+        _PACKS,
         "gen_gfx942_attention_dense_score_goldens.py",
         "TestGfx942AttentionDenseScoreGoldens.inc",
+    ),
+    (
+        _KNOBS,
+        "gen_gfx942_attention_dense_knob_classes.py",
+        "IntegrationGpuGfx942AttentionDenseKnobClasses.inc",
     ),
 )
 
@@ -48,12 +57,16 @@ def _load(generator: Path):
     return module
 
 
-@pytest.mark.parametrize("generator,table", _GOLDENS, ids=[g for g, _ in _GOLDENS])
-def test_the_checked_in_golden_table_is_what_its_generator_renders(generator, table):
+@pytest.mark.parametrize(
+    "directory,generator,table", _GOLDENS, ids=[g for _, g, _ in _GOLDENS]
+)
+def test_the_checked_in_golden_table_is_what_its_generator_renders(
+    directory, generator, table
+):
     if not (_ROCKE / "library").is_dir():
         pytest.skip(f"rocKE library not in this checkout: {_ROCKE / 'library'}")
-    module = _load(_PACKS / generator)
-    assert module.OUT == _PACKS / table
-    assert module.render() == (_PACKS / table).read_text(
+    module = _load(directory / generator)
+    assert module.OUT == directory / table
+    assert module.render() == (directory / table).read_text(
         encoding="utf-8"
     ), f"{table} is stale: rerun {generator} (see its docstring) and commit the table"
