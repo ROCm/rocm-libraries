@@ -461,9 +461,8 @@ class GpuBatchedGemmRunner:
         la, lb, lc = _gu._layout_from_kernel_name(self._kernel_name)
         C_shape = (batch, M, N) if lc == "r" else (batch, N, M)
 
-        # Build (or reuse cached) A/B host buffers in the kernel's element dtype
-        # and per-batch layout, paired with the (A, B) shape cache in
-        # tile_engine/ops/gemm/run_one_batched_gemm_kernel.py.
+        # A/B host buffers in the kernel's element dtype and per-batch layout; a
+        # sweep worker's inputs are encoded once per shape, not per kernel.
         A_h, B_h = _gu._encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )

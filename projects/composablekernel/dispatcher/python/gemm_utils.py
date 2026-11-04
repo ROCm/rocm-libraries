@@ -1349,16 +1349,55 @@ def _encode_operand(x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None) -
     return _input_codec(dtype)[0](x, use_ocp)
 
 
-# One-entry FIFO cache of encoded (A_h, B_h) host buffers, keyed by the identity
-# of the logical (A, B) numpy arrays and the kernel's (dtype, la, lb, use_ocp).
-# In batch benchmark sweeps (e.g. tile_engine/ops/gemm/run_one_gemm_kernel.py),
-# every kernel in a worker batch shares the same cached fp32 (A, B) matrices,
-# dtype, and layout; caching the encoded bytes avoids re-encoding A and B per
-# kernel while bounding the memory overhead to a single shape at a time.
-_ENCODED_AB_CACHE: Dict[
-    Tuple[int, int, str, str, str, bool],
-    Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-] = {}
+# Operands of the one shape a tile_engine sweep worker (run_one_gemm_kernel.py,
+# run_one_streamk_gemm_kernel.py, run_one_batched_gemm_kernel.py) is measuring:
+# "ab" its seeded fp32 inputs, "enc" their host buffers for the last kernel
+# dtype/layout, "ref" the verify reference for the last encoding. Every kernel
+# of the shape reuses them; the next shape frees them before drawing its own, so
+# one shape's operands are alive at a time. Only these (A, B) are cached: arrays
+# from any other caller may change between runs and are encoded fresh each time.
+_SWEEP_CACHE: Dict[str, Any] = {}
+
+
+def _sweep_inputs(a_shape, b_shape) -> Tuple[np.ndarray, np.ndarray]:
+    """Seeded fp32 ``(A, B)`` a sweep worker feeds every kernel of a shape.
+
+    Drawn once per shape from ``RandomState(42)``, A before B, as ``randn * 0.1``
+    cast to float32. Shared by all kernels of the shape, hence read-only.
+    """
+    shapes = (tuple(a_shape), tuple(b_shape))
+    if _SWEEP_CACHE.get("shapes") != shapes:
+        _SWEEP_CACHE.clear()  # free the previous shape before drawing this one
+        rng = np.random.RandomState(42)
+        A, B = ((rng.randn(*s) * 0.1).astype(np.float32) for s in shapes)
+        A.flags.writeable = False
+        B.flags.writeable = False
+        _SWEEP_CACHE.update(shapes=shapes, ab=(A, B))
+    return _SWEEP_CACHE["ab"]
+
+
+def _sweep_cached(A, B, slot: str, key, build) -> Tuple[np.ndarray, ...]:
+    """Return ``build()`` (a tuple of arrays), reused for the sweep inputs.
+
+    For the current :func:`_sweep_inputs` ``(A, B)`` the slot keeps the value of
+    the last ``key`` and frees it before building another; any other ``(A, B)``
+    is built fresh on every call.
+    """
+    ab = _SWEEP_CACHE.get("ab")
+    if ab is None or ab[0] is not A or ab[1] is not B:
+        return build()
+    if _SWEEP_CACHE.get(slot, (None,))[0] != key:
+        _SWEEP_CACHE.pop(slot, None)
+        value = build()
+        for arr in value:
+            arr.flags.writeable = False  # shared by every kernel of the shape
+        _SWEEP_CACHE[slot] = (key, value)
+    return _SWEEP_CACHE[slot][1]
+
+
+def _encoding(dtype: str, use_ocp: Optional[bool]) -> Tuple[str, bool]:
+    """``(dtype, fp8 format)``: what the host encoding of an A/B operand depends on."""
+    return dtype, (_resolve_use_ocp(use_ocp) if dtype in ("fp8", "bf8") else False)
 
 
 def _encode_ab_cached(
@@ -1370,42 +1409,37 @@ def _encode_ab_cached(
     use_ocp: Optional[bool],
     kernel_name: str = "",
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Return layout-arranged, dtype-encoded ``(A_h, B_h)`` for ``(A, B)``.
+    """Return ``(A_h, B_h)``: A and B in the kernel's layouts and element dtype.
 
-    Reuses the previous encoded buffers when called repeatedly on the same
-    read-only ``A`` and ``B`` array instances with the same
-    ``(dtype, la, lb, use_ocp)`` (see the paired fp32 operand cache in
-    ``tile_engine/ops/gemm/run_one_gemm_kernel.py``). Writeable arrays passed by
-    ad-hoc callers are encoded fresh so in-place caller mutations are respected
-    without scanning or copying the inputs on every call.
+    A 'c' operand is stored as its (per-batch) transpose, so the contiguous
+    buffer is in column-major order. For the sweep inputs the buffers are built
+    once per ``(dtype, fp8 format, la, lb)`` (see :func:`_sweep_inputs`).
     """
     if dtype not in _INPUT_CODEC:
         raise ValueError(
             f"unsupported A/B dtype {dtype!r} in kernel {kernel_name!r}; "
             "add it to _NATIVE_IN_NP or _INPUT_CODEC"
         )
-    resolved_ocp = _resolve_use_ocp(use_ocp) if dtype in ("fp8", "bf8") else False
-    cacheable = (
-        isinstance(A, np.ndarray)
-        and isinstance(B, np.ndarray)
-        and not A.flags.writeable
-        and not B.flags.writeable
-    )
-    key = (id(A), id(B), dtype, la, lb, resolved_ocp)
-    if cacheable:
-        cached = _ENCODED_AB_CACHE.get(key)
-        if cached is not None and cached[0] is A and cached[1] is B:
-            return cached[2], cached[3]
 
-    transpose = (lambda X: X.T) if A.ndim == 2 else (lambda X: np.transpose(X, (0, 2, 1)))
-    A_lay = A if la == "r" else transpose(A)
-    B_lay = B if lb == "r" else transpose(B)
-    A_h = _encode_operand(A_lay, dtype, use_ocp)
-    B_h = _encode_operand(B_lay, dtype, use_ocp)
-    if cacheable:
-        _ENCODED_AB_CACHE.clear()
-        _ENCODED_AB_CACHE[key] = (A, B, A_h, B_h)
-    return A_h, B_h
+    def build():
+        return tuple(
+            _encode_operand(X if lay == "r" else np.swapaxes(X, -1, -2), dtype, use_ocp)
+            for X, lay in ((A, la), (B, lb))
+        )
+
+    return _sweep_cached(A, B, "enc", (*_encoding(dtype, use_ocp), la, lb), build)
+
+
+def _sweep_max_rel(runner, A: np.ndarray, B: np.ndarray, output: np.ndarray) -> float:
+    """Verify metric ``max|output - ref| / max|ref|``, ``ref = runner.reference(A, B)``.
+
+    The reference depends only on the inputs and their encoding, not on the
+    kernel or its layouts, so a sweep computes it once per shape and encoding.
+    """
+    key = _encoding(_dtype_from_kernel_name(runner.kernel_name), runner._use_ocp)
+    (ref,) = _sweep_cached(A, B, "ref", key, lambda: (runner.reference(A, B),))
+    denom = float(np.max(np.abs(ref))) or 1.0
+    return float(np.max(np.abs(output.astype(np.float32) - ref)) / denom)
 
 
 def _c_numpy_dtype(dtype: str):
@@ -1504,10 +1538,8 @@ class GpuGemmRunner:
         la, lb, lc = _layout_from_kernel_name(self._kernel_name)
         C_shape = (M, N) if lc == "r" else (N, M)
 
-        # Build (or reuse cached) A/B host buffers in the kernel's element dtype
-        # and layout. Paired with the fp32 (A, B) shape cache in
-        # tile_engine/ops/gemm/run_one_gemm_kernel.py so batch sweeps encode once
-        # per (shape, dtype, layout) rather than once per kernel.
+        # A/B host buffers in the kernel's element dtype and layout; a sweep
+        # worker's inputs are encoded once per shape, not per kernel.
         A_h, B_h = _encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )

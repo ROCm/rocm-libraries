@@ -18,6 +18,7 @@ No GPU is touched -- all functions under test are pure host-side logic.
 Run: python3 -m pytest tests/test_gemm_utils.py -v
 """
 
+import hashlib
 import sys
 import unittest
 from pathlib import Path
@@ -394,6 +395,29 @@ class TestFp8EncodeMatchesMlDtypes(unittest.TestCase):
                 expected = _fp8_encode_ladder(x, exp_bits, mant_bits, use_ocp)
                 got = _fp8_encode(x, exp_bits, mant_bits, use_ocp=use_ocp)
                 np.testing.assert_array_equal(got, expected)
+
+
+class TestFp8EncodeGoldenBytes(unittest.TestCase):
+    """Pins the encoded bytes independently of the in-repo float64 ladder."""
+
+    # sha256 of the bytes of the searchsorted-ladder _fp8_encode (before the
+    # lookup tables) over every float32 top-16-bit bucket at lo16 == 0 and
+    # lo16 == 1; those two inputs per bucket determine the output for all 2^32
+    # inputs (see _fp8_encode_tables).
+    _GOLDEN = {
+        (4, 3, False): "3c94f573a75f08d7a3318ac0f4842b9b9e6922d9d4c99bf6c815beef0206f108",
+        (4, 3, True): "f4c21e5daf2446dcf62ff9ebac214b18e114eaa8a75a79189bb41915cf5eb32f",
+        (5, 2, False): "e92f6b14ffcf15ae2cbc95cfc8c84038fba64b3c71514309735ecad8086ca1f4",
+        (5, 2, True): "d558aeff7e2c0262e84da05a223d8bf8e622980601d4c80bc04db7506a080f52",
+    }
+
+    def test_bytes_match_the_ladder_encoder(self):
+        top = np.arange(65536, dtype=np.uint32) << np.uint32(16)
+        x = np.concatenate([top, top | np.uint32(1)]).view(np.float32)
+        for (exp_bits, mant_bits, use_ocp), digest in self._GOLDEN.items():
+            with self.subTest(bits=(exp_bits, mant_bits), ocp=use_ocp):
+                got = _fp8_encode(x, exp_bits, mant_bits, use_ocp=use_ocp)
+                self.assertEqual(hashlib.sha256(got.tobytes()).hexdigest(), digest)
 
 
 class TestOutputDtype(unittest.TestCase):

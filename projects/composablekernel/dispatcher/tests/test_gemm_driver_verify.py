@@ -9,14 +9,20 @@
   the default tolerance and every kernel was reported as MISMATCH.
 * ``GpuBatchedGemmRunner`` shares it, and the GEMM, stream-K and batched
   workers use it.
+* The workers generate, encode and verify against their inputs once per
+  shape, keep one shape's operands alive at a time, and no other caller's
+  inputs are ever served stale encoded bytes.
 * A sweep with failed measurements exits 1.
 
 The ctypes lib is replaced by a host model of an exact kernel.
 """
 
 import ast
+import gc
+import itertools
 import json
 import sys
+import weakref
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +34,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(GEMM_TE_DIR))
 
 import gemm_full_benchmark as drv  # noqa: E402
+import gemm_utils  # noqa: E402
 import run_one_batched_gemm_kernel  # noqa: E402
 import run_one_gemm_kernel  # noqa: E402
 import run_one_streamk_gemm_kernel  # noqa: E402
@@ -115,6 +122,18 @@ def _max_rel(got, ref):
     return float(np.max(np.abs(got.astype(np.float32) - ref)) / np.max(np.abs(ref)))
 
 
+def _outputs(capsys):
+    return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+
+
+@pytest.fixture(autouse=True)
+def _cold_sweep_cache():
+    # Each test starts and ends without cached sweep inputs, buffers or reference.
+    gemm_utils._SWEEP_CACHE.clear()
+    yield
+    gemm_utils._SWEEP_CACHE.clear()
+
+
 RUNNERS = {
     "gemm": (GpuGemmRunner, GemmProblem, PROBLEM),
     "batched": (GpuBatchedGemmRunner, BatchedGemmProblem, BATCHED_PROBLEM),
@@ -165,9 +184,6 @@ def test_worker_verifies_an_exact_kernel(monkeypatch, capsys, kind, dtype, use_o
     worker, cls, problem = WORKERS[kind]
     runner = _runner(dtype, use_ocp, cls=cls)
     monkeypatch.setattr(worker, cls.__name__, lambda **kw: runner)
-    for cache in ("_ab_cache", "_ref_cache"):
-        if hasattr(worker._run_one, cache):
-            monkeypatch.delattr(worker._run_one, cache)
     worker._run_one(0, "fake.so", problem, runner.kernel_name, verify=True)
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["ok"] and out["verified"], out
@@ -178,11 +194,8 @@ def test_gemm_worker_reuses_the_reference_per_shape_and_encoding(monkeypatch, ca
     # The host matmul depends only on the shape's inputs and their encoding
     # (dtype, fp8 format), never on the kernel, so a sweep computes it once per
     # shape. Kernels with another layout reuse it; the batch below also mixes
-    # encodings, which a real sweep never does, to show those are kept apart.
+    # encodings and returns to an earlier shape, which a real sweep never does.
     worker = run_one_gemm_kernel
-    for cache in ("_ab_cache", "_ref_cache"):
-        if hasattr(worker._run_one, cache):
-            monkeypatch.delattr(worker._run_one, cache)
     calls = []
     reference = GpuGemmRunner.reference
     monkeypatch.setattr(
@@ -202,92 +215,219 @@ def test_gemm_worker_reuses_the_reference_per_shape_and_encoding(monkeypatch, ca
     for idx, (runner, problem) in enumerate(items):
         monkeypatch.setattr(worker, "GpuGemmRunner", lambda **kw: runner)
         worker._run_one(idx, "fake.so", problem, runner.kernel_name, verify=True)
-    outs = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    outs = _outputs(capsys)
     assert len(outs) == len(items)
     for out, (runner, _) in zip(outs, items):
         assert out["ok"] and out["verified"], out
         assert out["max_rel"] < _c_eps(_dtype_of(runner)), out
-    # bf16 on PROBLEM, fp8 FNUZ, fp8 OCP, bf16 on the other shape
-    assert len(calls) == 4, calls
+    # bf16 on PROBLEM, fp8 FNUZ, fp8 OCP, bf16 on the other shape, and bf16 on
+    # PROBLEM again: only the current shape's operands are kept.
+    assert len(calls) == 5, calls
+
+
+def _spy_encodes(monkeypatch):
+    """Record the (shape, dtype) of every operand encoded for a kernel."""
+    calls = []
+    encode = gemm_utils._encode_operand
+
+    def spy(x, dtype, use_ocp=None):
+        calls.append((x.shape, dtype))
+        return encode(x, dtype, use_ocp)
+
+    monkeypatch.setattr(gemm_utils, "_encode_operand", spy)
+    return calls
 
 
 def test_gemm_worker_reuses_encoded_operands_and_isolates_shapes_dtypes_layouts(
     monkeypatch, capsys
 ):
-    # Kernels sharing (shape, dtype, layout, use_ocp) reuse the encoded (A_h, B_h)
-    # byte buffers without re-encoding; changing shape, dtype, layout, or OCP
-    # format invalidates the cache and produces the exact buffers for the new key.
-    import gemm_utils
-
+    # Kernels sharing (shape, dtype, layout, fp8 format) reuse the encoded
+    # (A_h, B_h); a change in any one of them alone re-encodes, and every kernel
+    # verifies against its own encoding.
     worker = run_one_gemm_kernel
-    for cache in ("_ab_cache", "_ref_cache"):
-        if hasattr(worker._run_one, cache):
-            monkeypatch.delattr(worker._run_one, cache)
-    gemm_utils._ENCODED_AB_CACHE.clear()
-
-    encode_calls = []
-    orig_encode = gemm_utils._encode_operand
-
-    def spy_encode(x, dtype, use_ocp=None):
-        encode_calls.append((x.shape, dtype, use_ocp))
-        return orig_encode(x, dtype, use_ocp)
-
-    monkeypatch.setattr(gemm_utils, "_encode_operand", spy_encode)
-
+    encodes = _spy_encodes(monkeypatch)
     other = {"M": 32, "N": 64, "K": 128}
     items = [
-        # 3 fp8 FNUZ rcr kernels on PROBLEM -> 1 encode pair (2 _encode_operand calls)
+        # 3 fp8 FNUZ rcr kernels on PROBLEM -> one encode of (A, B)
         (_runner("fp8", False, layout="rcr"), PROBLEM),
         (_runner("fp8", False, layout="rcr"), PROBLEM),
         (_runner("fp8", False, layout="rcr"), PROBLEM),
-        # layout change (rrr) on same shape/dtype -> 1 new encode pair
+        # layout only (rrr) -> one more
         (_runner("fp8", False, layout="rrr"), PROBLEM),
         (_runner("fp8", False, layout="rrr"), PROBLEM),
-        # OCP format change on same shape/layout -> 1 new encode pair
+        # fp8 format only (OCP) -> one more
         (_runner("fp8", True, layout="rrr"), PROBLEM),
         (_runner("fp8", True, layout="rrr"), PROBLEM),
-        # dtype change (bf16) on same shape/layout -> 1 new encode pair
-        (_runner("bf16", None, layout="rrr"), PROBLEM),
-        (_runner("bf16", None, layout="rrr"), PROBLEM),
-        # shape change (other) -> 1 new encode pair, and single-entry cache evicts PROBLEM
-        (_runner("fp8", False, layout="rcr"), other),
-        (_runner("fp8", False, layout="rcr"), other),
+        # dtype only (bf8, still OCP) -> one more
+        (_runner("bf8", True, layout="rrr"), PROBLEM),
+        (_runner("bf8", True, layout="rrr"), PROBLEM),
+        # shape only -> one more
+        (_runner("bf8", True, layout="rrr"), other),
+        (_runner("bf8", True, layout="rrr"), other),
     ]
     for idx, (runner, problem) in enumerate(items):
         monkeypatch.setattr(worker, "GpuGemmRunner", lambda **kw: runner)
         worker._run_one(idx, "fake.so", problem, runner.kernel_name, verify=True)
-
-    outs = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    outs = _outputs(capsys)
     assert len(outs) == len(items)
     for out, (runner, _) in zip(outs, items):
         assert out["ok"] and out["verified"], out
         assert out["max_rel"] < _c_eps(_dtype_of(runner)), out
-
-    # 5 distinct (shape, dtype, layout, use_ocp) runs * 2 operands + 4 reference()
-    # calls (reference() calls encode(A) and encode(B) once per unique ref_key).
-    # What matters for Problem B: repeating the same (shape, dtype, layout) kernel
-    # does NOT add any _encode_operand calls, and both caches stay bounded to 1 entry.
-    count_before = len(encode_calls)
-    runner = _runner("fp8", False, layout="rcr")
-    monkeypatch.setattr(worker, "GpuGemmRunner", lambda **kw: runner)
-    worker._run_one(len(items), "fake.so", other, runner.kernel_name, verify=False)
-    assert len(encode_calls) == count_before
-    assert len(getattr(worker._run_one, "_ab_cache", {})) == 1
-    assert len(gemm_utils._ENCODED_AB_CACHE) == 1
+    # 5 distinct keys x (A, B); reference() encodes on its own, not through here.
+    assert len(encodes) == 10, encodes
 
 
-def test_encoded_ab_cache_handles_in_place_input_mutation():
-    # Direct callers that mutate A or B in place and re- call runner.run(A, B, problem)
-    # must not silently reuse stale encoded bytes from the same array id().
-    import gemm_utils
+@pytest.mark.parametrize("kind", WORKERS)
+def test_every_worker_encodes_and_verifies_once_per_shape(monkeypatch, capsys, kind):
+    # Problem B in all three sweep workers: kernels of one shape reuse the
+    # encoded (A, B) and the verify reference; a new shape builds each once.
+    worker, cls, problem = WORKERS[kind]
+    encodes = _spy_encodes(monkeypatch)
+    refs = []
+    reference = cls.reference
+    monkeypatch.setattr(
+        cls, "reference", lambda self, A, B: refs.append(1) or reference(self, A, B)
+    )
+    runner = _runner("fp8", False, cls=cls)
+    monkeypatch.setattr(worker, cls.__name__, lambda **kw: runner)
+    other = {**problem, "M": 32, "N": 64, "K": 128}
+    for idx, prob in enumerate([problem] * 3 + [other] * 2):
+        worker._run_one(idx, "fake.so", prob, runner.kernel_name, verify=True)
+    outs = _outputs(capsys)
+    assert len(outs) == 5 and all(o["ok"] and o["verified"] for o in outs), outs
+    assert (len(encodes), len(refs)) == (4, 2), encodes
 
-    gemm_utils._ENCODED_AB_CACHE.clear()
-    runner = _runner("fp8", False, layout="rcr")
-    problem = GemmProblem.from_dict(PROBLEM)
-    A, B = _inputs(PROBLEM)
-    out1 = runner.run(A, B, problem).output.copy()
-    A *= 2.0
-    out2 = runner.run(A, B, problem).output.copy()
+
+@pytest.mark.parametrize("kind", WORKERS)
+def test_worker_inputs_are_the_seed_42_draws(monkeypatch, capsys, kind):
+    # Caching must not change what is measured: every kernel is fed the
+    # RandomState(42) draws the workers used before (stream-K seeded the global
+    # RNG with 42, the same stream), generated once per shape and read-only.
+    worker, cls, problem = WORKERS[kind]
+    runner = _runner("bf16", None, cls=cls)
+    seen = []
+    run = runner.run
+    runner.run = lambda A, B, p, **kw: seen.append((A, B)) or run(A, B, p, **kw)
+    monkeypatch.setattr(worker, cls.__name__, lambda **kw: runner)
+    for idx in range(2):
+        worker._run_one(idx, "fake.so", problem, runner.kernel_name)
+    assert all(o["ok"] for o in _outputs(capsys))
+    assert len(seen) == 2 and all(x is y for x, y in zip(*seen))
+    for X, want in zip(seen[0], _inputs(problem)):
+        assert X.dtype == np.float32 and not X.flags.writeable
+        assert X.shape == want.shape and X.tobytes() == want.tobytes()
+
+
+@pytest.mark.parametrize("change", ["shape", "dtype"])
+@pytest.mark.parametrize("kind", WORKERS)
+def test_worker_frees_old_operands_before_building_new_ones(
+    monkeypatch, capsys, kind, change
+):
+    # A new shape frees the old fp32 (A, B), encoded buffers and reference
+    # before its inputs are drawn and encoded; a new encoding of the same shape
+    # frees the old encoded buffers before encoding. So the peak is one shape's
+    # operands in one encoding, not two.
+    worker, cls, problem = WORKERS[kind]
+    runner = _runner("fp8", False, cls=cls)
+    monkeypatch.setattr(worker, cls.__name__, lambda **kw: runner)
+    worker._run_one(0, "fake.so", problem, runner.kernel_name, verify=True)
+    cache = gemm_utils._SWEEP_CACHE
+    olds = cache["enc"][1]
+    if change == "shape":
+        olds += cache["ab"] + cache["ref"][1]
+    old = [weakref.ref(x) for x in olds]
+    del olds
+    alive = []
+
+    def probe(real):
+        def wrapped(*args, **kw):
+            gc.collect()
+            alive.append(sum(r() is not None for r in old))
+            return real(*args, **kw)
+
+        return wrapped
+
+    monkeypatch.setattr(np.random, "RandomState", probe(np.random.RandomState))
+    monkeypatch.setattr(
+        gemm_utils, "_encode_operand", probe(gemm_utils._encode_operand)
+    )
+    if change == "shape":
+        problem = {**problem, "M": 32, "N": 64, "K": 128}
+    else:
+        runner = _runner("bf16", None, cls=cls)
+    worker._run_one(1, "fake.so", problem, runner.kernel_name, verify=True)
+    assert all(o["ok"] and o["verified"] for o in _outputs(capsys))
+    # RandomState (new shape only), then one encode each of A and B
+    assert alive == [0] * (3 if change == "shape" else 2), alive
+
+
+_NEXT_DTYPE = {
+    "fp8": "bf8",
+    "bf8": "bf16",
+    "bf16": "fp16",
+    "fp16": "fp32",
+    "fp32": "int8",
+    "int8": "fp8",
+}
+_FLIP = {"r": "c", "c": "r"}
+
+
+@pytest.mark.parametrize("kind", RUNNERS)
+def test_encoded_operand_cache_key_separates_each_field(kind):
+    # One encoding is kept, so a key field that is not compared only shows when
+    # two consecutive calls differ in that field alone: follow every
+    # (dtype, la, lb, fp8 format) with each of its one-field neighbours and
+    # check every call against a fresh encode of the layout-arranged operand.
+    problem = RUNNERS[kind][2]
+    lead = (problem["batch_count"],) if "batch_count" in problem else ()
+    M, N, K = problem["M"], problem["N"], problem["K"]
+    A, B = gemm_utils._sweep_inputs((*lead, M, K), (*lead, K, N))
+    for key in itertools.product(_NEXT_DTYPE, "rc", "rc", (False, True)):
+        d, la, lb, ocp = key
+        for nxt in (
+            (_NEXT_DTYPE[d], la, lb, ocp),
+            (d, _FLIP[la], lb, ocp),
+            (d, la, _FLIP[lb], ocp),
+            (d, la, lb, not ocp),
+        ):
+            for d2, la2, lb2, ocp2 in (key, nxt):
+                got = gemm_utils._encode_ab_cached(A, B, d2, la2, lb2, ocp2)
+                for X, lay, X_h in zip((A, B), (la2, lb2), got):
+                    want = gemm_utils._encode_operand(
+                        X if lay == "r" else np.swapaxes(X, -1, -2), d2, ocp2
+                    )
+                    assert X_h.dtype == want.dtype and X_h.flags.c_contiguous
+                    np.testing.assert_array_equal(X_h, want, err_msg=str((key, nxt)))
+
+
+def test_cached_operand_buffers_are_read_only():
+    # Every kernel of a shape is handed the same buffers, so an in-place write by
+    # one consumer would silently change the inputs of the kernels after it.
+    A, B = gemm_utils._sweep_inputs((64, 256), (256, 96))
+    for dtype in ("fp8", "bf8", "bf16", "fp16", "fp32", "int8"):
+        for la in "rc":
+            for X_h in gemm_utils._encode_ab_cached(A, B, dtype, la, "c", False):
+                assert not X_h.flags.writeable, (dtype, la)
+
+
+@pytest.mark.parametrize("how", ["writeable", "read_only_view", "refrozen"])
+@pytest.mark.parametrize("kind", RUNNERS)
+def test_runner_sees_input_changes_between_runs(kind, how):
+    # Only the sweep inputs are cached. Any other caller's A may change between
+    # two runs -- in place, through the writeable base of a read-only view, or
+    # by its owner unfreezing it -- and the second run must use the new values.
+    cls, problem_cls, problem = RUNNERS[kind]
+    runner = _runner("fp8", False, cls=cls)
+    prob = problem_cls.from_dict(problem)
+    data, B = _inputs(problem)
+    A = data.view() if how == "read_only_view" else data
+    A.flags.writeable = how == "writeable"
+    B.flags.writeable = False
+    out1 = runner.run(A, B, prob).output.copy()
+    data.flags.writeable = True
+    data *= 2.0
+    A.flags.writeable = how == "writeable"
+    out2 = runner.run(A, B, prob).output
     assert not np.allclose(out1, out2)
     assert _max_rel(out2, runner.reference(A, B)) < _c_eps("fp8")
 

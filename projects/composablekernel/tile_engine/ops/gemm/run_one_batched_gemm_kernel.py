@@ -38,6 +38,7 @@ from batched_gemm_utils import (  # noqa: E402
     BatchedGemmProblem,
     GpuBatchedGemmRunner,
 )
+from gemm_utils import _sweep_inputs, _sweep_max_rel  # noqa: E402
 import numpy as np  # noqa: E402
 
 
@@ -54,26 +55,10 @@ def _run_one(
     try:
         problem = BatchedGemmProblem.from_dict(prob_dict)
 
-        # Cache host tensors per (batch, M, N, K) so batch mode doesn't
-        # regenerate large inputs per kernel; paired with _encode_ab_cached in
-        # dispatcher/python/gemm_utils.py so encoded (A_h, B_h) buffers are
-        # reused across kernels sharing (shape, dtype, layout).
-        cache = getattr(_run_one, "_ab_cache", {})
-        key = (problem.batch_count, problem.M, problem.N, problem.K)
-        if key not in cache:
-            rng = np.random.RandomState(42)
-            A_in = (
-                rng.randn(problem.batch_count, problem.M, problem.K) * 0.1
-            ).astype(np.float32)
-            B_in = (
-                rng.randn(problem.batch_count, problem.K, problem.N) * 0.1
-            ).astype(np.float32)
-            A_in.flags.writeable = False
-            B_in.flags.writeable = False
-            cache.clear()
-            cache[key] = (A_in, B_in)
-            _run_one._ab_cache = cache
-        A, B = cache[key]
+        # Generated, encoded and verified against once per shape, not per kernel
+        # (gemm_utils._sweep_inputs).
+        b, M, N, K = problem.batch_count, problem.M, problem.N, problem.K
+        A, B = _sweep_inputs((b, M, K), (b, K, N))
 
         # CRITICAL: load the library ONLY inside this subprocess.
         runner = GpuBatchedGemmRunner(lib_path=so_path, arch=arch)
@@ -94,10 +79,7 @@ def _run_one(
                 "kernel": kernel_name,
             }
             if verify:
-                ref = runner.reference(A, B)
-                got = result.output.astype(np.float32)
-                denom = float(np.max(np.abs(ref))) or 1.0
-                max_rel = float(np.max(np.abs(got - ref)) / denom)
+                max_rel = _sweep_max_rel(runner, A, B, result.output)
                 out["max_rel"] = max_rel
                 out["verified"] = bool(max_rel <= verify_tol)
             print(json.dumps(out), flush=True)
