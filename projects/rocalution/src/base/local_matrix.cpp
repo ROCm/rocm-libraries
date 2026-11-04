@@ -2012,10 +2012,9 @@ namespace rocalution
                                      "*** info: LocalMatrix::MoveToHostAsync() accelerator to host "
                                      "transfer (synced)");
                 }
-
                 // MoveToAcceleratorAsync();
-                if((_rocalution_available_accelerator() == true)
-                   && (this->matrix_ == this->matrix_host_))
+                else if((_rocalution_available_accelerator() == true)
+                        && (this->matrix_ == this->matrix_host_))
                 {
                     _rocalution_sync();
 

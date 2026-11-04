@@ -376,6 +376,9 @@ class KernelSpec:
     arch: list[str] = field(default_factory=list)
     #: The cell's declared default variant; never emitted into a descriptor.
     default: bool = False
+    #: Informational ``provenance`` keys (string values) emitted verbatim on the
+    #: kernel descriptor, e.g. ``rocke_spec_id``. Nothing selects on them.
+    provenance: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -439,6 +442,10 @@ class EngineSpec:
     #: RFC 0021 §6: the bound token holding the shared workspace region's size;
     #: only a slotted engine has one. Empty omits ``shared_workspace``.
     shared_workspace: str = ""
+    #: Optional descriptor directory / file stem / native-symbol namespace. The derived
+    #: slug splits before every capital, so a local name ending in a digit-capital pair
+    #: (``Unified2D``) would come out as ``unified2_d``.
+    slug_override: str | None = None
 
     @property
     def namespace(self) -> str:
@@ -450,7 +457,10 @@ class EngineSpec:
 
     @property
     def slug(self) -> str:
-        """The bundle's directory name: snake_case of the local name."""
+        """The bundle's directory name: ``slug_override`` if set, else snake_case of
+        the local name."""
+        if self.slug_override is not None:
+            return self.slug_override
         s = re.sub(r"(?<!^)(?=[A-Z])", "_", self.local_name)
         return s.lower()
 
@@ -636,10 +646,16 @@ class IngestorConfig:
         """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
         becomes ``hipkernel.conv_fwd``. An engine naming ``native_symbols_from``
         takes that engine's namespace instead of its own."""
-        name = self.engine.native_symbols_from or self.engine.name
-        namespace, local_name = name.split(":", 1)
-        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
-        return f"{namespace}.{local_snake}"
+        if self.engine.native_symbols_from:
+            namespace, local_name = self.engine.native_symbols_from.split(":", 1)
+            local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+            return f"{namespace}.{local_snake}"
+        local_snake = self.engine.slug.replace("-", "_")
+        if self.engine.slug_override is None:
+            local_snake = re.sub(
+                r"(?<!^)(?=[A-Z])", "_", self.engine.local_name
+            ).lower()
+        return f"{self.engine.namespace}.{local_snake}"
 
     @property
     def graph_match_symbol(self) -> str:

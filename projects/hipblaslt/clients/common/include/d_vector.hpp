@@ -243,6 +243,17 @@ public:
         Instance().m_pool_managed.clear();
     }
 
+    // Bytes held by idle buffers, i.e. what ReleaseCached would free.
+    static size_t CachedBytes()
+    {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
+        size_t                      bytes = 0;
+        for(const auto* pool : {&Instance().m_pool, &Instance().m_pool_managed})
+            for(const M& m : *pool)
+                bytes += m.capacity();
+        return bytes;
+    }
+
 private:
     std::vector<M> m_pool, m_pool_managed;
     std::mutex m_mutex;
