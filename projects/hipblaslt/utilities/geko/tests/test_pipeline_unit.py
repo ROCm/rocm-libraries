@@ -705,6 +705,71 @@ def test_run_optimize_raises_for_no_completed(monkeypatch: pytest.MonkeyPatch, t
         pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0])
 
 
+def test_run_optimize_rewrites_generated_uids_before_merge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Only this run's 3_LibraryLogic files are made unique, and before the merge.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the rewrite misses a generated file, reads another
+            file, or runs after the merge.
+    """
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workdir = tmp_path / "w"
+    generated = []
+    for build in ("build_b", "build_a"):
+        ldir = workdir / "optimizations" / build / "3_LibraryLogic"
+        ldir.mkdir(parents=True)
+        generated.append(ldir / "x.yaml")
+        generated[-1].write_text("[]\n")
+    (workdir / "optimizations" / "build_a" / "notes.yaml").write_text("[]\n")
+
+    state = RunState.create(_make_workload(tmp_path / "wkld.yaml"))
+    state.configured = True
+    state.dump(workdir / "run_state.json")
+
+    monkeypatch.setattr(
+        pipeline.optim.utils,
+        "check_progress",
+        MagicMock(side_effect=[(1, 1, 0), (1, 1, 0)]),
+    )
+    monkeypatch.setattr(pipeline.optim, "run", lambda *_a, **_k: None)
+    calls = []
+
+    class _FakeLibs(list):
+        def dump(self, out_dir):
+            Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        pipeline,
+        "uniquify_generated_logic",
+        lambda paths: calls.append(("uniquify", paths)) or 0,
+    )
+    monkeypatch.setattr(
+        pipeline.library,
+        "merge_solutions",
+        lambda *_a, **_k: calls.append(("merge", None)) or _FakeLibs(),
+    )
+    monkeypatch.setattr(
+        pipeline.optim,
+        "analyze",
+        lambda *_a, **_k: (None, pd.DataFrame([{"winner": "reference", "lib": "lib.yaml"}])),
+    )
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", lambda *_a, **_k: _FakeLibs())
+
+    pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0])
+
+    assert calls == [("uniquify", sorted(generated)), ("merge", None)]
+
+
 def test_run_optimize_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
