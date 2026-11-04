@@ -51,6 +51,9 @@ struct DeterministicSplitKTestConfig
     std::vector<size_t> stride;
     std::vector<size_t> dilation;
     bool is_3d;
+    bool nhwc; // NHWC (2D) or NDHWC (3D) instead of NCHW or NCDHW
+    double alpha;
+    double beta;
 
     friend std::ostream& operator<<(std::ostream& os, const DeterministicSplitKTestConfig& tc)
     {
@@ -65,6 +68,7 @@ struct DeterministicSplitKTestConfig
             os << " H:" << tc.img[0] << " W:" << tc.img[1];
             os << " y:" << tc.filter[0] << " x:" << tc.filter[1];
         }
+        os << (tc.nhwc ? " NHWC" : " NCHW") << " alpha:" << tc.alpha << " beta:" << tc.beta;
         return os;
     }
 };
@@ -72,9 +76,9 @@ struct DeterministicSplitKTestConfig
 // Test configurations - small sizes for fast execution
 std::vector<DeterministicSplitKTestConfig> GetDeterministicTestConfigs2D()
 {
-    return {// G  N  C   K   img     filter  pad   stride dilation 3d
-            {8, 1, 16, 16, {14, 14}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false},
-            {4, 2, 8, 8, {16, 16}, {2, 2}, {1, 1}, {1, 1}, {1, 1}, false}};
+    return {// G  N  C   K   img     filter  pad   stride dilation 3d  nhwc  alpha beta
+            {8, 1, 16, 16, {14, 14}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false, false, 1.0, 0.0},
+            {4, 2, 8, 8, {16, 16}, {2, 2}, {1, 1}, {1, 1}, {1, 1}, false, false, 1.0, 0.0}};
 }
 
 std::vector<DeterministicSplitKTestConfig> GetDeterministicFwdTestConfigs2D()
@@ -87,9 +91,79 @@ std::vector<DeterministicSplitKTestConfig> GetDeterministicFwdTestConfigs2D()
 
 std::vector<DeterministicSplitKTestConfig> GetDeterministicTestConfigs3D()
 {
-    return {// G  N  C  K  img        filter    pad       stride    dilation  3d
-            {4, 1, 8, 8, {8, 14, 14}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true},
-            {2, 2, 4, 4, {6, 12, 12}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, true}};
+    return {// G  N  C  K  img        filter    pad       stride    dilation  3d  nhwc  alpha beta
+            {4,
+             1,
+             8,
+             8,
+             {8, 14, 14},
+             {3, 3, 3},
+             {1, 1, 1},
+             {1, 1, 1},
+             {1, 1, 1},
+             true,
+             false,
+             1.0,
+             0.0},
+            {2,
+             2,
+             4,
+             4,
+             {6, 12, 12},
+             {2, 2, 2},
+             {1, 1, 1},
+             {1, 1, 1},
+             {1, 1, 1},
+             true,
+             false,
+             1.0,
+             0.0}};
+}
+
+// ConvDirectNaiveConvWrw tiles the FP32 reduction when N*Do*Ho*Wo > 262144. These
+// configurations are above that threshold.
+std::vector<DeterministicSplitKTestConfig> GetDeterministicNaiveWrwTestConfigs2D()
+{
+    return {// G  N  C  K  img         filter  pad     stride  dilation 3d  nhwc  alpha beta
+            {1, 2, 4, 4, {368, 368}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false, false, 1.0, 0.0},
+            {2, 2, 4, 4, {368, 368}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false, false, 1.0, 0.0},
+            // N*Ho*Wo = 541696: 2048 tiles (the limit) of 265 positions; tiles 2045-2047 are
+            // empty.
+            {1, 4, 4, 4, {368, 368}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false, false, 1.0, 0.0},
+            {1, 2, 4, 4, {368, 368}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false, true, 1.0, 0.0},
+            {1, 2, 4, 4, {368, 368}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, false, false, 0.5, 0.75}};
+}
+
+std::vector<DeterministicSplitKTestConfig> GetDeterministicNaiveWrwTestConfigs3D()
+{
+    return {// G  N  C  K  img            filter     pad        stride     dilation   3d  nhwc alpha
+            // beta
+            {1,
+             1,
+             4,
+             4,
+             {8, 184, 184},
+             {3, 3, 3},
+             {1, 1, 1},
+             {1, 1, 1},
+             {1, 1, 1},
+             true,
+             false,
+             1.0,
+             0.0},
+            {1,
+             1,
+             4,
+             4,
+             {8, 184, 184},
+             {3, 3, 3},
+             {1, 1, 1},
+             {1, 1, 1},
+             {1, 1, 1},
+             true,
+             true,
+             1.0,
+             0.0}};
 }
 
 template <typename T, Direction CONV_DIR, typename SolverType, bool IS_3D>
@@ -109,7 +183,8 @@ protected:
         auto& handle = get_handle();
 
         // Create tensors with appropriate layout
-        miopenTensorLayout_t layout = IS_3D ? miopenTensorNCDHW : miopenTensorNCHW;
+        miopenTensorLayout_t layout = IS_3D ? (config.nhwc ? miopenTensorNDHWC : miopenTensorNCDHW)
+                                            : (config.nhwc ? miopenTensorNHWC : miopenTensorNCHW);
 
         std::vector<size_t> input_dims  = {config.N, config.C};
         std::vector<size_t> weight_dims = {config.K, config.C / config.G};
@@ -164,8 +239,13 @@ protected:
             output.generate([](auto...) {
                 return prng::gen_A_to_B(static_cast<T>(-0.01), static_cast<T>(0.1));
             });
-            std::fill(weights.begin(), weights.end(), T{0});
+            // With beta != 0 the result also depends on the initial weights.
+            if(config.beta != 0.0)
+                weights.generate(gen_value);
+            else
+                std::fill(weights.begin(), weights.end(), T{0});
         }
+        const std::vector<T> wei_init = weights.data;
 
         auto in_dev  = handle.Write(input.data);
         auto wei_dev = handle.Write(weights.data);
@@ -198,12 +278,19 @@ protected:
             wspace.resize(solv.GetWorkspaceSize(ctx, problem));
         }
 
-        auto perf_config = solv.GetDefaultPerformanceConfig(ctx, problem);
-        auto sol         = solv.GetSolution(ctx, problem, perf_config);
+        miopen::solver::ConvSolution sol;
+        if constexpr(miopen::solver::IsTunable<SolverType>::value)
+        {
+            auto perf_config = solv.GetDefaultPerformanceConfig(ctx, problem);
+            std::cout << "Performance config: " << perf_config << std::endl;
+            sol = solv.GetSolution(ctx, problem, perf_config);
+        }
+        else
+        {
+            sol = solv.GetSolution(ctx, problem);
+        }
         ASSERT_TRUE(sol.Succeeded());
         ASSERT_TRUE(sol.invoker_factory);
-
-        std::cout << "Performance config: " << perf_config << std::endl;
 
         const auto invoker = handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
 
@@ -226,8 +313,8 @@ protected:
             }
             else
             {
-                std::fill(weights.begin(), weights.end(), T(0));
-                wei_dev = handle.Write(weights.data);
+                weights.data = wei_init;
+                wei_dev      = handle.Write(weights.data);
             }
 
             // Execute kernel
@@ -270,7 +357,9 @@ protected:
                                                                          wei_dev.get()},
                                                   wspace.ptr(),
                                                   wspace.size(),
-                                                  false};
+                                                  false,
+                                                  miopen::Scalar(config.alpha),
+                                                  miopen::Scalar(config.beta)};
                 (invoker)(handle, invoke_params);
             }
 
@@ -320,6 +409,24 @@ protected:
 
         std::cout << "✓ All " << NUM_ITERATIONS << " iterations produced bit-exact results"
                   << std::endl;
+
+        // The deterministic naive WRW path adds tile sums from a workspace. A wrong slice or
+        // a missing tile is reproducible, so also compare with the reference.
+        if constexpr(std::is_same_v<SolverType, miopen::solver::conv::ConvDirectNaiveConvWrw>)
+        {
+            // ref_conv_wrw ignores the initial weights, so add the alpha and beta terms here.
+            auto ref = ref_conv_wrw(input, weights, output, conv_desc);
+            for(size_t j = 0; j < ref.data.size(); ++j)
+                ref.data[j] =
+                    static_cast<T>(config.alpha * ref.data[j] + config.beta * wei_init[j]);
+            ASSERT_FALSE(miopen::range_zero(weights)) << "GPU data is all zeros";
+            // 80 * eps is the limit of the WRW solver tests (solver_wrw.hpp). The sum here is two
+            // fixed fp32 chains (at most 2048 tile sums of at most 265 terms). Its random rounding
+            // error grows as about sqrt(2048 + 265) * eps = 48 * eps, which is less than 80 * eps.
+            const double threshold = std::numeric_limits<T>::epsilon() * 80;
+            const auto error       = miopen::rms_range(ref, weights);
+            EXPECT_LT(error, threshold) << "Error beyond tolerance";
+        }
     }
 };
 
@@ -427,6 +534,18 @@ using GPU_GroupConv3D_Deterministic_WRW_BFP16 =
                                      miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops,
                                      true>;
 
+// Naive WRW (FP32 only: the solver does not tile other data types)
+using GPU_GroupConv2D_Deterministic_NaiveWRW_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvDirectNaiveConvWrw,
+                                     false>;
+using GPU_GroupConv3D_Deterministic_NaiveWRW_FP32 =
+    GPU_GroupConvDeterministicSplitK<float,
+                                     Direction::BackwardWeights,
+                                     miopen::solver::conv::ConvDirectNaiveConvWrw,
+                                     true>;
+
 // Test definitions
 TEST_P(GPU_GroupConv2D_Deterministic_FWD_FP32, DeterministicTest) { this->RunTest(); };
 TEST_P(GPU_GroupConv2D_Deterministic_FWD_FP16, DeterministicTest) { this->RunTest(); };
@@ -446,6 +565,8 @@ TEST_P(GPU_GroupConv2D_Deterministic_WRW_BFP16, DeterministicTest) { this->RunTe
 TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP32, DeterministicTest) { this->RunTest(); };
 TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP16, DeterministicTest) { this->RunTest(); };
 TEST_P(GPU_GroupConv3D_Deterministic_WRW_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_NaiveWRW_FP32, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_NaiveWRW_FP32, DeterministicTest) { this->RunTest(); };
 
 // Test instantiations
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -507,3 +628,10 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_GroupConv3D_Deterministic_WRW_BFP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv2D_Deterministic_NaiveWRW_FP32,
+                         testing::ValuesIn(GetDeterministicNaiveWrwTestConfigs2D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_GroupConv3D_Deterministic_NaiveWRW_FP32,
+                         testing::ValuesIn(GetDeterministicNaiveWrwTestConfigs3D()));

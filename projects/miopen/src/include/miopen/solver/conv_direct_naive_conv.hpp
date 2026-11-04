@@ -62,6 +62,9 @@ bool IsOutputFp16(const miopen::conv::ProblemDescription&);
 bool IsOutputBfp16(const miopen::conv::ProblemDescription&);
 bool IsOutputInt8(const miopen::conv::ProblemDescription&);
 bool IsOutputInt32(const miopen::conv::ProblemDescription&);
+/// Workspace for ConvDirectNaiveConvWrw. Not zero only in deterministic mode with spatial tiling.
+std::size_t ConvDirectNaiveConvWrwWorkspaceSize(const ExecutionContext&,
+                                                const miopen::conv::ProblemDescription&);
 
 namespace conv_internal {
 

@@ -80,6 +80,12 @@ bool ConvDirectNaiveConvWrw::IsApplicable(const ExecutionContext& ctx,
     return true;
 }
 
+size_t ConvDirectNaiveConvWrw::GetWorkspaceSize(const ExecutionContext& ctx,
+                                                const ProblemDescription& problem) const
+{
+    return ConvDirectNaiveConvWrwWorkspaceSize(ctx, problem);
+}
+
 ConvSolution ConvDirectNaiveConvWrw::GetSolution(const ExecutionContext& ctx,
                                                  const ProblemDescription& problem) const
 {

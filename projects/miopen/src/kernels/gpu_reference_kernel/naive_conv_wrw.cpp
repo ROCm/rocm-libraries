@@ -2,6 +2,20 @@
 // SPDX-License-Identifier:  MIT
 #include "naive_conv.hpp"
 
+// Adds a tile sum into the weights (cross-block tiling, gridDim.y > 1).
+// Default: atomic add into the weight buffer. The order of the adds is not fixed.
+// MIOPEN_NAIVE_WRW_TILE_WS=1 (deterministic mode): p_wei is the workspace slice of this tile,
+// so a plain store is sufficient. naive_conv_wrw_tile_reduce_float adds the slices in order.
+template <typename T>
+inline __device__ void naive_wrw_tile_add(T* address, T val)
+{
+#ifdef MIOPEN_NAIVE_WRW_TILE_WS
+    *address = val;
+#else
+    naive_atomic_add(address, val);
+#endif
+}
+
 template <bool ASSUME_PACKED,
           typename src_data_t,
           typename acc_data_t,
@@ -77,8 +91,17 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+#ifdef MIOPEN_NAIVE_WRW_TILE_WS
+    // Deterministic tiling: tiles of equal length, and each tile writes to its own
+    // workspace slice. naive_conv_wrw_tile_reduce_float adds the slices.
+    int num_tiles = static_cast<int>(gridDim.y);
+    int tile_len  = (spatial_length + num_tiles - 1) / num_tiles;
+    p_wei += static_cast<size_t>(blockIdx.y) * group * k_per_group * c_per_group * fy * fx;
+#else
+    int tile_len = bdx;
+#endif
+    int tile_start = static_cast<int>(blockIdx.y) * tile_len;
+    int tile_end   = min(tile_start + tile_len, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -206,7 +229,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -224,7 +247,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -354,7 +377,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -372,7 +395,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -467,8 +490,17 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+#ifdef MIOPEN_NAIVE_WRW_TILE_WS
+    // Deterministic tiling: tiles of equal length, and each tile writes to its own
+    // workspace slice. naive_conv_wrw_tile_reduce_float adds the slices.
+    int num_tiles = static_cast<int>(gridDim.y);
+    int tile_len  = (spatial_length + num_tiles - 1) / num_tiles;
+    p_wei += static_cast<size_t>(blockIdx.y) * group * k_per_group * c_per_group * fz * fy * fx;
+#else
+    int tile_len = bdx;
+#endif
+    int tile_start = static_cast<int>(blockIdx.y) * tile_len;
+    int tile_end   = min(tile_start + tile_len, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -611,7 +643,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -630,7 +662,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -780,7 +812,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -799,7 +831,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -887,8 +919,17 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+#ifdef MIOPEN_NAIVE_WRW_TILE_WS
+    // Deterministic tiling: tiles of equal length, and each tile writes to its own
+    // workspace slice. naive_conv_wrw_tile_reduce_float adds the slices.
+    int num_tiles = static_cast<int>(gridDim.y);
+    int tile_len  = (spatial_length + num_tiles - 1) / num_tiles;
+    p_wei += static_cast<size_t>(blockIdx.y) * group * k_per_group * c_per_group * fy * fx;
+#else
+    int tile_len = bdx;
+#endif
+    int tile_start = static_cast<int>(blockIdx.y) * tile_len;
+    int tile_end   = min(tile_start + tile_len, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -1015,7 +1056,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1033,7 +1074,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1163,7 +1204,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -1181,7 +1222,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -1275,8 +1316,17 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
     bool use_atomic = (gridDim.y > 1);
 
     // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+#ifdef MIOPEN_NAIVE_WRW_TILE_WS
+    // Deterministic tiling: tiles of equal length, and each tile writes to its own
+    // workspace slice. naive_conv_wrw_tile_reduce_float adds the slices.
+    int num_tiles = static_cast<int>(gridDim.y);
+    int tile_len  = (spatial_length + num_tiles - 1) / num_tiles;
+    p_wei += static_cast<size_t>(blockIdx.y) * group * k_per_group * c_per_group * fz * fy * fx;
+#else
+    int tile_len = bdx;
+#endif
+    int tile_start = static_cast<int>(blockIdx.y) * tile_len;
+    int tile_end   = min(tile_start + tile_len, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -1419,7 +1469,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1438,7 +1488,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(sum));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, sum, alpha, beta, f_idx);
@@ -1588,7 +1638,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -1607,7 +1657,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_wrw_tile_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
                             p_wei, value, alpha, beta, f_idx);
@@ -1664,3 +1714,22 @@ DEFINE_3D_NAIVE_CONV_KERNEL(wrw, ndhwc, float, float, float, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(wrw, ndhwc, float, float, float, 1)
 DEFINE_3D_NAIVE_CONV_KERNEL(wrw, ndhwc, half, float, half, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(wrw, ndhwc, hip_bfloat16, float, hip_bfloat16, 0)
+
+// Deterministic WRW tiling: adds the fp32 workspace slices of all tiles in tile order, then
+// applies alpha and beta. Slice t holds the sums of tile t, in the layout of the weights.
+extern "C" __global__ void naive_conv_wrw_tile_reduce_float(const float* __restrict__ p_ws,
+                                                            float* __restrict__ p_wei,
+                                                            size_t slice,
+                                                            int tiles,
+                                                            double alpha,
+                                                            double beta)
+{
+    for(size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < slice;
+        i += static_cast<size_t>(gridDim.x) * blockDim.x)
+    {
+        float sum = 0;
+        for(int t = 0; t < tiles; t++)
+            sum += p_ws[static_cast<size_t>(t) * slice + i];
+        applyalphaBetaUpdate<float, float>(p_wei, sum, alpha, beta, i);
+    }
+}
