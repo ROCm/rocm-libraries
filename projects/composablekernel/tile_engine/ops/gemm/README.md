@@ -313,22 +313,20 @@ Option rules:
   records the run's formula. A problem without an entry pays the host side in
   full inside every call. When the cache is on but did not store the entry
   (over its caps), its preparation measured that cost on this host, and its
-  calls get at least twice that (so a problem over `max_entry_gib` is still
-  prepared once). When the cache is off (or the preparation
-  failed), they get the allowance alone. Its rates leave about 2x headroom
-  over the host they were measured on for fp8 and bf8 (177-213 ns per element
-  measured, 400 ns allowed) and 1.3-2.3x for the others (33-60 ns, 75 ns): on
-  an MI350X (gfx950) host about 2x slower per element, the host side of a
-  first fp8 256x768x874159 call used 339 s of its 395 s timeout. On a slower
-  host, keep the cache on (the preparation then runs outside the call
-  timeout) or raise `--kernel-timeout`.
-  These host times assume the workers get the node's CPUs, and twice the
-  preparation's time assumes a call sees no more CPU contention than the
-  preparation, which may have run alone, while several devices may measure
-  its problem at once. Inside a CPU allocation smaller than the node, or for
-  problems the cache does not store, set `OPENBLAS_NUM_THREADS` (or
+  calls get at least twice that times the number of devices, whose calls may
+  then share the CPUs the preparation had alone (so a problem over
+  `max_entry_gib` is still prepared once). When the cache is off (or the
+  preparation failed), they get the allowance alone. Its rates leave about 2x
+  headroom over the host they were measured on for fp8 and bf8 (177-213 ns per
+  element measured, 400 ns allowed) and 1.3-2.3x for the others (33-60 ns,
+  75 ns): on an MI350X (gfx950) host about 2x slower per element, the host
+  side of a first fp8 256x768x874159 call used 339 s of its 395 s timeout. On
+  a slower host, keep the cache on (the preparation then runs outside the
+  call timeout) or raise `--kernel-timeout`.
+  These host times assume the workers get the node's CPUs. Inside a CPU
+  allocation smaller than the node, set `OPENBLAS_NUM_THREADS` (or
   `OMP_NUM_THREADS`) to about the CPUs per device, or raise
-  `--kernel-timeout`; a cache with room for the entry avoids the second case.
+  `--kernel-timeout`.
   `--verify-tol`, `--kernel-timeout`, `--workers` and `--devices` apply as
   usual. Discovery measurements spread over the devices; each problem's
   confirmation calls run on one device (problem `i` on device `i mod n`), so
@@ -505,21 +503,25 @@ With a reference BLAS (a distribution's own numpy), where a product with a
 transposed operand is slower, it is slower than before in `rcr` and `crr`,
 whose reference reads one operand transposed: bf16 at 134M input elements took
 22.8 s in `rcr` and 16.0 s in `crr` against 12.3 s, and 10.2-10.6 s in `rrr`
-and `ccr`. The preparation runs outside the call timeout, so with the cache on
-this only lengthens a round. Per output element a worker needs at most 16 B
-more: the fp32 reference, C and its comparison. So an fp8 256x768x874159
-problem (895M input elements), whose preparation was killed at 47.6 GB of RSS
-on a 62 GB host, now needs about 4.6 GB (the guard below plans 5.6 GB, plus
-its 0.9 GB entry when the cache is on a tmpfs). A call that reads an entry
-adds little memory of its own; its RSS still shows the entry's pages it maps
-(about 1 B per fp8 input element, 2 B per bf16 one), which are shared, not
-copies.
+and `ccr`. Output-heavy problems spend their time in the reference instead:
+bf16 `ccr` 16384x16384x64 takes 0.8 s with the pip wheels and 7.8 s with a
+reference BLAS (`rcr`: 0.4 and 13.5 s), and 16384x32768x64 2.1 and 17.2 s
+(`ccr` makes its reference a block of rows at a time). The preparation runs
+outside the call timeout, so with the cache on this only lengthens a round.
+Per output element a worker needs at most 16 B more: the fp32 reference, C and
+its comparison. So an fp8 256x768x874159 problem (895M input elements), whose
+preparation was killed at 47.6 GB of RSS on a 62 GB host, now needs about
+4.6 GB (the guard below plans 5.6 GB, plus its 0.9 GB entry when the cache is
+on a tmpfs). A call that reads an entry adds little memory of its own; its RSS
+still shows the entry's pages it maps (about 1 B per fp8 input element, 2 B
+per bf16 one), which are shared, not copies.
 
 The host memory guard: before a problem's first call, the search estimates the
 bytes a worker needs for its host data, `(M+N)*K*(e+4) + 16*M*N + 1 GiB` to
 compute it (`e` the encoded element size: 1 for fp8 and bf8, 2 for fp16 and
 bf16, 4 otherwise; `host_compute_bytes` in `gemm_search.py`), plus the entry
-itself when the cache is on a tmpfs, and `12*M*N + 1 GiB` to read an entry
+itself when the cache is on a tmpfs and has room for it (within
+`max_entry_gib`), and `12*M*N + 1 GiB` to read an entry
 (`host_read_bytes`). The 1 GiB covers the interpreter, one block's temporaries
 and the GPU runtime: a measure worker on an MI350X (gfx950) held about 0.9 GB
 besides its host data. It compares that with the memory available:
@@ -529,26 +531,34 @@ the run's cgroup and its parents, when that is less: `memory.max` or
 total. The problem's preparation must fit, and then one call per device at
 once, reading its entry or, when none was stored (the cache off or over its
 caps), computing it all. With the cache on a tmpfs, the calls check also keeps
-room for the entries still to come (those of the run's problems not stored
-yet, up to the cache's free room), which will hold RAM while later rounds'
-calls of this problem run. A problem that does not fit is never prepared nor
-measured, and one whose preparation was killed from outside (exit code -9, the
-out-of-memory killer) or ran out of memory (`MemoryError`) is not measured
-either: its calls would compute the same data. A preparation stopped at its
-time limit is not a memory failure: its calls compute their own data. A
-skipped problem's requests get the status `host_memory`, which is not a kernel
-failure, so no strategy is told anything; the problem stops, the console
-prints one line (`<problem>: skipped, host_memory: needs X GiB, Y GiB
-available`), the run goes on with the other problems and ends `partial` (or
-`no_winner` when no problem has a winner), exit status 1, with the reason
-under `unresolved` in `summary.json` and `host_memory` in its counts. The
-decision is taken once per problem, when it is first measured and after that
-round's builds: memory freed later does not bring it back, so one run never
-retries a problem that may exhaust the host's memory; re-run its problems on a
-host with more memory, with fewer devices, or with a cache that has room for
-the entry. Should the host still run out of memory, a search's workers have
-asked to go first: each sets its `oom_score_adj` to 1000 (a plain run's worker
-does not). Preparations run under a lock in the temp directory
+room for the entries still to come (those of the run's problems neither
+stored nor skipped, each within the cache's caps, up to its free room), which
+will hold RAM while later rounds' calls of this problem run. A problem that
+does not fit is never measured (nor prepared, when its preparation is what
+does not fit; when only its calls do not, the entry its preparation stored is
+removed), and one whose preparation was killed from outside (exit code -9, the
+out-of-memory killer) or ran out of memory (`MemoryError`, or numpy or its
+BLAS refusing memory as it starts) is not measured either: its calls would
+compute the same data. A preparation stopped at its time limit is not a
+memory failure: its calls compute their own data. A skipped problem's
+requests get the status `host_memory`, which is not a kernel failure, so no
+strategy is told anything; the problem stops, the console prints one line
+(`<problem>: skipped, host_memory: needs X GiB, Y GiB available`), the run
+goes on with the other problems and ends `partial` (or `no_winner` when no
+problem has a winner), exit status 1, with the reason under `unresolved` in
+`summary.json` and `host_memory` in its counts. The decision is taken once per
+problem, when it is first measured and after that round's builds: memory freed
+later does not bring it back, so one run never retries a problem that may
+exhaust the host's memory; re-run its problems on a host with more memory,
+with fewer devices, or with a cache that has room for the entry. Should the
+host still run out of memory, a search's workers have asked to go first: each
+sets its `oom_score_adj` to 1000 (a plain run's worker does not). A measure
+call whose worker is then killed from outside (exit code -9: the driver kills
+one only at its timeout, which it reports as `timeout`) or raises
+`MemoryError` gets `host_memory` too, with the reason (`its call's worker was
+killed ...`): no kernel is blamed and its problem stops, but the problem is
+not skipped, so its best kernels so far are still confirmed and it can still
+get a winner. Preparations run under a lock in the temp directory
 (`ck_search_host.lock`): a round's builds hold it shared and its preparations
 exclusive, so no preparation runs while any search run sharing that directory
 (the runs of one host, or of one container) builds or prepares; a run whose
@@ -561,16 +571,19 @@ and other runs' builds (tens of GB with many build workers), which can start
 while this run's calls compute their host data: calls take no lock.
 
 Sizing: a preparation never runs during builds, so it shares the memory only
-with the system, other processes and a tmpfs cache's entries. On a tmpfs a
-preparation also needs its entry, so it needs `2e+4` bytes per input element
-(6 for fp8 and bf8, 8 for fp16 and bf16) plus the fixed 1 GiB, and the largest
-problem the guard admits has about `(MemAvailable - 10% of MemTotal - 1 GiB) /
-(2e+4)` input elements, where `MemAvailable` already lacks the tmpfs entries
-(for large-K shapes, whose M*N terms are small). On the 62 GB MI350X (gfx950)
-host of the field failure, with 47-51 GB available when idle and a full 16 GiB
-tmpfs cache, the guard's budget is about 24-28 GB: a preparation of about
-3.7-4.4G fp8 input elements or 2.8-3.3G bf16 ones. With the cache on a disk, a
-preparation needs `e+4` bytes per element (5 for fp8, 6 for bf16) and no tmpfs
+with the system, other processes and a tmpfs cache's entries. On a tmpfs with
+room for its entry a preparation also needs that entry, so it needs `2e+4`
+bytes per input element (6 for fp8 and bf8, 8 for fp16 and bf16) plus the
+fixed 1 GiB, and the largest problem the guard admits has about
+`(MemAvailable - 10% of MemTotal - 1 GiB) / (2e+4)` input elements, where
+`MemAvailable` already lacks the tmpfs entries (for large-K shapes, whose M*N
+terms are small). On the 62 GB MI350X (gfx950) host of the field failure, with
+47-51 GB available when idle and 16 GiB of entries already on the tmpfs, the
+guard's budget is about 24-28 GB: a preparation of about 3.7-4.4G fp8 input
+elements or 2.8-3.3G bf16 ones when the cache still has room for its entry.
+When it has none, a preparation needs `e+4` bytes per element (5 for fp8, 6
+for bf16): about 4.5-5.3G fp8 or 3.7-4.4G bf16 input elements there. With the
+cache on a disk, a preparation needs `e+4` bytes per element and no tmpfs
 entries take RAM. Keep `max_total_gib` plus the build workers' memory within
 RAM, as above; a disk cache costs no RAM beyond the page cache.
 
@@ -592,9 +605,10 @@ cache: NOTE` line.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 `summary.json` and the failing calls in `trials.jsonl`; a problem stopped by
-`host_memory` was never measured (see "Host verification memory"). If nearly every
-candidate gets built, the problems are choosing different kernels: lower
-`new_builds_per_run` or keep the default `shared` seed policy.
+`host_memory` was never measured, or stopped when a call ran out of host
+memory (see "Host verification memory"). If nearly every candidate gets
+built, the problems are choosing different kernels: lower `new_builds_per_run`
+or keep the default `shared` seed policy.
 
 ### Multi-GPU parallelism
 

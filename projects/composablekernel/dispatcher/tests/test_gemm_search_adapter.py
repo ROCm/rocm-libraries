@@ -64,9 +64,10 @@ class _Runner:
     """GpuGemmRunner stand-in: an exact kernel, one whose output is wrong for
     the problems ``wrong(problem)`` names, or one returning ``status``."""
 
-    def __init__(self, name, ms, wrong=lambda problem: False, status=0):
+    def __init__(self, name, ms, wrong=lambda problem: False, status=0,
+                 oom=lambda problem: False):
         self.kernel_name, self._ms, self._wrong, self._use_ocp = name, ms, wrong, None
-        self._status = status
+        self._status, self._oom = status, oom
 
     def run(self, A, B, problem):
         if self._status:
@@ -82,6 +83,8 @@ class _Runner:
         return A, B
 
     def run_encoded(self, A_h, B_h, problem):
+        if self._oom(problem):
+            raise MemoryError()
         # The search's host data is in the kernel's memory order (a "c"
         # operand transposed) and dtype; the legacy path's is logical fp32.
         la, lb, _ = self.kernel_name.split("_")[2]
@@ -115,7 +118,12 @@ class _InProcess:
         self.tc = tc
 
     def communicate(self, input=None, timeout=None):
-        self.tc.payloads.append(json.loads(input))
+        payload = json.loads(input)
+        self.tc.payloads.append(payload)
+        if any(self.tc.hit(self.tc.killed, it["kernel_name"], it["problem"]["M"])
+               for it in payload["items"]):
+            self.returncode = -9  # the out-of-memory killer ended it: no output
+            return b"", b""
         out = _worker(input)
         self.tc.outputs.extend(json.loads(ln) for ln in out.splitlines())
         return out.encode(), b""
@@ -130,16 +138,19 @@ class _InProcess:
 class Toolchain:
     """Fake build + GPU. ``fail``: names whose build fails; ``mislabel``: name
     -> the name its library reports; ``lat``: name -> ms; ``wrong``: names, or
-    (name, M) pairs, whose output is wrong (for every problem, or for M).
-    Preparations run the real worker in-process too, on the stand-in's codec;
-    ``prepares`` holds each call's payloads, limits and width."""
+    (name, M) pairs, whose output is wrong (for every problem, or for M);
+    ``killed`` and ``oom`` likewise, whose worker the out-of-memory killer
+    ends (exit code -9) or raises MemoryError. Preparations run the real
+    worker in-process too, on the stand-in's codec; ``prepares`` holds each
+    call's payloads, limits and width."""
 
     def __init__(self, tmp_path, monkeypatch, fail=(), mislabel=None, lat=None,
-                 wrong=()):
+                 wrong=(), killed=(), oom=()):
         self.lib_dir = tmp_path / "examples"
         self.lib_dir.mkdir()
         self.fail, self.mislabel = set(fail), dict(mislabel or {})
         self.lat, self.wrong = dict(lat or {}), set(wrong)
+        self.killed, self.oom = set(killed), set(oom)
         self.builds, self.payloads, self.outputs, self.loaded = [], [], [], []
         self.prepares = []
         monkeypatch.setattr(worker, "GpuGemmRunner", self.runner)
@@ -183,11 +194,17 @@ class Toolchain:
                 out[k] = AS._prepared(0, _worker(p.encode()), 0.0, "")
         return out
 
+    @staticmethod
+    def hit(which, name, m) -> bool:
+        """Whether ``which`` (names, or (name, M) pairs) names this pair."""
+        return bool({name, (name, m)} & which)
+
     def runner(self, lib_path):
         self.loaded.append(Path(lib_path))
         name = Path(lib_path).read_text()
         return _Runner(name, self.lat.get(name, 1.0),
-                       lambda prob: bool({name, (name, prob.M)} & self.wrong))
+                       lambda prob: self.hit(self.wrong, name, prob.M),
+                       oom=lambda prob: self.hit(self.oom, name, prob.M))
 
 
 @pytest.fixture(autouse=True)
@@ -300,6 +317,33 @@ def test_reconcile_normalizes_rows_and_failures(rows, fails, status):
     got = GS.reconcile(_req(K1, A, 1), P1, rows, fails)
     assert got[0] == status
     assert (got[1] == 1.5) if status == "ok" else got[1] is None
+
+
+KILLED_CALL = ("host_memory: its call's worker was killed (exit code -9), likely by "
+               "the out-of-memory killer")
+
+
+@pytest.mark.parametrize("rows, fails, want", [
+    ([], [_fail("missing", "worker exited with code -9")], KILLED_CALL),
+    ([_row()], [_fail("worker-exit", "worker exited with code -9", kernel="")], KILLED_CALL),
+    ([], [_fail("error", "MemoryError: "), _fail("missing", "worker exited with code 1")],
+     "host_memory: its call's worker ran out of memory (MemoryError: )"),
+    ([], [_fail("missing", "worker exited with code -11")], "run_error"),
+    ([], [_fail("missing", "worker exited with code 9")], "run_error"),
+    ([], [_fail("error", "RuntimeError: no MemoryError")], "run_error"),
+    ([], [_fail("timeout", "batch of 1 exceeded 30 s")], "timeout"),
+])
+def test_reconcile_tells_a_worker_out_of_host_memory_from_a_failed_kernel(rows, fails,
+                                                                          want):
+    # The driver kills a worker only at its timeout ("timeout"): one that
+    # exited by SIGKILL (-9) was killed from outside, on a host short of
+    # memory by the out-of-memory killer. That, or a MemoryError, is the
+    # host's: host_memory. A crash (-11) or a plain exit stays a run_error.
+    status, lat, diag = GS.reconcile(_req(K1, A, 1), P1, rows, fails)
+    if want.startswith("host_memory"):
+        assert (status, lat, diag) == ("host_memory", None, want)
+    else:
+        assert (status, lat) == (want, None)
 
 
 @pytest.mark.parametrize("code, why", [("-2", "no kernel selected"),
@@ -596,6 +640,8 @@ def test_first_calls_find_their_problem_prepared(tmp_path, monkeypatch):
     ("cache off", None, 365),
     ("stored", {"ok": True, "stored": True, "seconds": 339.0, "error": ""}, 365),
     ("over the caps", {"ok": True, "stored": False, "seconds": 339.0, "error": ""}, 678),
+    ("over the caps, 2 devices", {"ok": True, "stored": False, "seconds": 339.0,
+                                  "error": ""}, 1356),
     ("failed", {"ok": False, "stored": False, "seconds": 3710.0,
                 "error": "no result in 3710 s"}, 365),
 ])
@@ -607,8 +653,9 @@ def test_unprepared_problems_keep_at_least_the_per_dtype_allowance(
     # before the call, which keeps 30 + 365 s for loading the entry and running
     # the kernel. Without an entry (the cache off, or
     # over its caps) every call computes it all: the allowance stays, or is
-    # twice what the preparation took on this host when that is more. A
-    # problem is prepared once, whatever the outcome.
+    # twice what the preparation took on this host, times the devices whose
+    # calls then share the CPUs, when that is more. A problem is prepared
+    # once, whatever the outcome.
     seen, preps = [], []
     tc = Toolchain(tmp_path, monkeypatch)
     monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, payloads, lim, w, **kw: (
@@ -616,14 +663,16 @@ def test_unprepared_problems_keep_at_least_the_per_dtype_allowance(
     with HC.HostCache(tmp_path) as cache:
         ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.append(a[4].kernel_timeout),
                       problems=(P1, SKINNY), dtype="fp8",
-                      cache=None if case == "cache off" else cache)
+                      cache=None if case == "cache off" else cache,
+                      devices=("0", "1") if "2 devices" in case else ("0",))
+        ad.memory = lambda: None  # no guard: only the timeouts are checked here
         ad.build_missing([ad.cands[A]])
         for n in (1, 2):
             ad.measure_pairs([_req("256x768x874159", A, n)])
     assert seen == [30 + want] * 2
     assert preps == ([] if case == "cache off" else [{"256x768x874159": 3710}])
     out = capsys.readouterr().out
-    assert ("not stored" in out) == (case in ("over the caps", "failed"))
+    assert ("not stored" in out) == case.startswith(("over the caps", "failed"))
 
 
 BIG = {"M": 1024, "N": 1024, "K": 65536}  # fp8: 0.6 GiB of host data and 1 GiB fixed
@@ -723,28 +772,28 @@ def test_preparation_on_a_tmpfs_also_needs_its_entry(tmp_path, monkeypatch, fs):
 
 
 @pytest.mark.parametrize("fs", ["tmpfs", "ext4"])
-@pytest.mark.parametrize("max_total", [1 << 30, 1 << 20])
-def test_calls_keep_memory_for_the_tmpfs_entries_to_come(tmp_path, monkeypatch, fs,
-                                                         max_total):
+def test_calls_keep_memory_for_the_tmpfs_entries_to_come(tmp_path, monkeypatch, fs):
     # P1's calls compute its host data (the cache refused its entry). On a
     # tmpfs, the entries still to come (P1's and BIG's, within the cache's
     # room) will hold RAM while P1's calls run in later rounds, so the calls
-    # check keeps them: P1 fits without them, not with them.
+    # check keeps them: P1 fits without them, not with them (the next test
+    # checks what is kept).
     monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: fs)
+    monkeypatch.setattr(HC.shutil, "disk_usage", lambda p: SimpleNamespace(
+        total=1 << 50, used=0, free=1 << 50))
     tc = Toolchain(tmp_path, monkeypatch)
     monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a, **kw: {
         k: AS._prepared(0, json.dumps({"ok": True, "stored": False}), 1.0, "")
         for k in jobs})
     seen = []
-    with HC.HostCache(tmp_path, max_total_bytes=max_total) as cache:
-        kept = min(HC.room(cache.spec), sum(GS.host_entry_bytes(p, "fp8") for p in (P1, BIG)))
+    with HC.HostCache(tmp_path, max_total_bytes=1 << 30) as cache:
+        kept = sum(GS.host_entry_bytes(p, "fp8") for p in (P1, BIG))
         need = GS.host_compute_bytes(P1, "fp8")
         ad = _adapter(tmp_path, tc.build, lambda *a, **kw: seen.extend(a[0]),
                       problems=(P1, BIG), dtype="fp8", cache=cache)
         ad.memory = lambda: need + kept // 2
         ad.build_missing([ad.cands[A]])
         out = ad.measure_pairs([_req(K1, A, 1)])
-    assert 0 < kept <= max_total
     if fs == "ext4":
         assert seen == [P1] and not ad.skipped
         return
@@ -752,6 +801,73 @@ def test_calls_keep_memory_for_the_tmpfs_entries_to_come(tmp_path, monkeypatch, 
         f"a call without a cache entry; {kept / AS.GIB:.1f} GiB kept for the tmpfs "
         "cache's entries to come"))
     assert seen == [] and [(o.status, o.diag) for o in out] == [("host_memory", want)]
+
+
+P3, P4 = {"M": 48, "N": 32, "K": 16}, {"M": 16, "N": 16, "K": 16}
+K3, K4 = "48x32x16", "16x16x16"
+
+
+@pytest.mark.parametrize("max_total, kept, keep", [
+    (1 << 30, 9728 + 7424, 9728),  # P1's and P3's entries
+    (12000, 12000, 9728),  # no more than the room
+    (9000, 7424, 0),  # P1's entry does not fit in the room: P3's alone
+])
+def test_calls_keep_the_entries_to_come_by_value(tmp_path, monkeypatch, max_total,
+                                                 kept, keep):
+    # On a tmpfs, a preparation needs its entry when the cache may store it
+    # (within max_entry_bytes and the room), and the calls check keeps the
+    # entries still to come: those of the problems neither stored nor
+    # skipped, each within the cap and the room, and no more than the room.
+    # fp8 entries: P1 and P2 9728 B, P3 7424, P4 1536, BIG 132 MiB (over the
+    # 1 MiB cap). P2 is stored (MemAvailable lacks it already), P4 skipped.
+    monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "tmpfs")
+    monkeypatch.setattr(HC.shutil, "disk_usage", lambda p: SimpleNamespace(
+        total=1 << 50, used=0, free=1 << 50))
+    tc = Toolchain(tmp_path, monkeypatch)
+    keeps, seen = [], []
+    monkeypatch.setattr(AS, "prepare_host_data", lambda argv, env, jobs, *a, **kw: (
+        keeps.append(kw["keeps"]) or {
+            k: AS._prepared(0, json.dumps({"ok": True, "stored": False}), 1.0, "")
+            for k in jobs}))
+    check = AS.calls_memory_error
+    monkeypatch.setattr(AS, "calls_memory_error", lambda *a: seen.append(a[4]) or check(*a))
+    with HC.HostCache(tmp_path, max_entry_bytes=1 << 20, max_total_bytes=max_total) as cache:
+        ad = _adapter(tmp_path, tc.build, lambda *a, **kw: None,
+                      problems=(P1, P2, P3, P4, BIG), dtype="fp8", cache=cache)
+        ad.memory = lambda: 1 << 40
+        ad.prepared[K2] = {"ok": True, "stored": True, "seconds": 0.0, "error": ""}
+        ad.skipped[K4] = "host_memory: (a test)"
+        ad.checked.update((K2, K4))
+        ad.build_missing([ad.cands[A]])
+        ad.measure_pairs([_req(K1, A, 1)])
+    assert [GS.host_entry_bytes(p, "fp8") for p in (P1, P2, P3, P4)] == [9728, 9728,
+                                                                         7424, 1536]
+    assert keeps == [{K1: keep}] and seen == [kept]
+
+
+def test_a_stored_entry_whose_calls_do_not_fit_is_dropped(tmp_path, monkeypatch,
+                                                          capsys):
+    # P2's entry is stored and its calls fit. Later the host has less memory:
+    # P1's preparation stores its entry, then its 4 calls at once do not fit
+    # (1 GiB each), so P1 is skipped and its entry, which no call will read,
+    # is removed (on a tmpfs it would hold RAM for the rest of the run).
+    monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "tmpfs")
+    tc = Toolchain(tmp_path, monkeypatch)
+    with HC.HostCache(tmp_path) as cache:
+        ad = _adapter(tmp_path, tc.build, lambda *a, **kw: None, problems=(P1, P2),
+                      devices=[str(d) for d in range(4)], cache=cache)
+        ad.build_missing([ad.cands[A]])
+        ad.memory = lambda: 8 * AS.GIB
+        assert ad.measure_pairs([_req(K2, A, 1)])[0].status == "unattempted"
+        ad.memory = lambda: 2 * AS.GIB
+        (out,) = ad.measure_pairs([_req(K1, A, 2)])
+        assert [ad.prepared[k]["stored"] for k in (K2, K1)] == [True, True]
+        assert out.status == "host_memory" and "4 calls at once reading its entry" in out.diag
+        assert list(ad.skipped) == [K1] and HC.usage(cache.dir)[0] == 1
+        (entry,) = [p for p in cache.dir.iterdir() if p.is_dir()]
+        assert json.loads((entry / "meta.json").read_text())["fields"]["problem"] == P2
+        assert list(HC.claims(cache.dir)) == [entry.name]
+    assert capsys.readouterr().out.count(f"    {K1}: skipped, host_memory: ") == 1
 
 
 def test_preparations_never_overlap_builds(tmp_path, monkeypatch):
@@ -826,6 +942,43 @@ def test_search_skips_a_problem_whose_host_data_does_not_fit(tmp_path, monkeypat
     assert len([r for r in rows if r["event"] == "host_memory"]) == 3
     assert [p["items"][0]["problem"]["M"] for p in tc.payloads] == [64] * 9  # BIG: never
     assert capsys.readouterr().out.count(f"{KBIG}: skipped, {why}") == 1
+
+
+@pytest.mark.parametrize("how", ["killed", "oom"])
+def test_a_call_out_of_host_memory_stops_its_problem_and_blames_no_kernel(
+        tmp_path, monkeypatch, capsys, how):
+    # The guard let P1's calls run, then its call of B ran out of host memory:
+    # its worker was killed from outside (exit code -9: the driver kills one
+    # only at its timeout) or raised MemoryError. That is the host's failure,
+    # not B's: P1's strategy is told nothing of B and P1 stops (C is never
+    # measured), but A, measured before, is still confirmed and wins. P1 is
+    # not skipped, and P2 runs on to its winner.
+    monkeypatch.setattr(GS.host_cache, "fs_type", lambda path: "ext4")
+    tc = Toolchain(tmp_path, monkeypatch, **{how: {(B, P1["M"])}})
+    out = tmp_path / "out"
+    settings = AS.SearchSettings.from_json({
+        "schema_version": 1, "strategy": "exhaustive", "trials_per_problem": 3,
+        "new_builds_per_run": 3, "batch_per_problem": 1,
+        "host_cache": {"dir": str(tmp_path)}})
+    rc = GS.run_gemm_search(
+        _args(search_output_dir=str(out)), settings, _hooks(tc.build),
+        problems=[P1, P2], configs=CFGS, eligible=[[A, B, C]] * 2, devices=["0"],
+        worker=(Path("w.py"), {}), context={"arch": "gfx950"})
+    why = KILLED_CALL if how == "killed" else (
+        "host_memory: its call's worker ran out of memory (MemoryError: )")
+    summary = json.loads((out / "summary.json").read_text())
+    assert (rc, summary["status"], sorted(summary["winners"])) == (0, "complete", [K2, K1])
+    assert summary["winners"][K1]["kernel"] == A
+    assert summary["problems"][K1]["finished"] == why
+    assert summary["counts"]["host_memory"] == 1
+    assert summary["counts"]["failed_by_status"] == {}
+    rows = [json.loads(ln) for ln in (out / "trials.jsonl").read_text().splitlines()]
+    assert [r["kernel"] for r in rows if r["event"] == "result" and r["problem"] == K1] == [A]
+    assert [(r["kernel"], r["diag"]) for r in rows if r["event"] == "host_memory"] == [
+        (B, why)]
+    ran = [(it["kernel_name"], it["problem"]["M"]) for p in tc.payloads for it in p["items"]]
+    assert (C, P1["M"]) not in ran and ran.count((A, P1["M"])) > 1  # A confirmed
+    assert "skipped" not in capsys.readouterr().out
 
 
 def test_verified_calls_get_time_for_the_host_reference(tmp_path, monkeypatch):

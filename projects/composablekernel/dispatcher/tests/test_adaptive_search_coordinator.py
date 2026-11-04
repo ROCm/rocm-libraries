@@ -382,6 +382,24 @@ def test_host_memory_stops_the_problem_and_is_never_told(tmp_path):
     assert (s.status, s.exit_code, s.winners) == ("partial", 1, {"P1": "A"})
 
 
+def test_host_memory_after_measurements_keeps_the_problems_best_kernels(tmp_path):
+    # P1's call of B ran out of host memory (its worker was killed from
+    # outside) after A was measured: B is told nothing, P1 stops, and its best
+    # kernel so far (A) is still confirmed and wins. P2 runs on as before.
+    ad = FakeAdapter({"P1": ABCD, "P2": ABCD}, script={("P1", "B"): ["host_memory"]})
+    s, made, co = run(tmp_path, ad, {"P1": [["A"], ["B"], ["C"]], "P2": [["A"], ["B"]]},
+                      batch_per_problem=1)
+    assert [ob.trial.uid for ob in made["P1"].told] == ["P1:1"]  # A only
+    assert [r.kernel_name for r in ad.measured if r.problem_key == "P1"] == ["A", "B"]
+    assert co.ledger.trials == {"P1": 1, "P2": 2}  # B refunded
+    assert s.counts["host_memory"] == 1 and s.counts["failed_by_status"] == {}
+    assert [r.kernel_name for c in ad.confirmed for r in c if r.problem_key == "P1"] == [
+        "A"] * co.settings.confirm.fresh_calls
+    summary = strict(tmp_path / "out" / "summary.json")
+    assert summary["problems"]["P1"]["finished"] == "fake host_memory"
+    assert (s.status, s.exit_code, s.winners) == ("complete", 0, {"P1": "A", "P2": "A"})
+
+
 def test_unattempted_twice_is_run_error_and_cancel_is_dropped(tmp_path):
     ad = FakeAdapter({"P1": ABCD}, script={("P1", "B"): ["unattempted", "unattempted"],
                                            ("P1", "C"): ["cancelled"]})
@@ -1557,6 +1575,51 @@ def test_host_cache_caps_fall_back_to_computing(tmp_path, monkeypatch):
         cache.close()
 
 
+def test_host_cache_room_is_its_cap_or_its_filesystem_less_reservations(tmp_path,
+                                                                        monkeypatch):
+    # room(): max_total_bytes less every reservation (written or not), and no
+    # more than the filesystem's free space less the reservations not written
+    # yet and 10% of its size; 0 when either is used up, or without a cache.
+    gib = AS.GIB
+    cache = HC.HostCache(tmp_path, max_total_bytes=10 * gib)
+    (cache.dir / f"{HC.CLAIM}{'a' * 32}-{gib}").touch()  # written: its entry is there
+    (cache.dir / ("a" * 32)).mkdir()
+    (cache.dir / f"{HC.CLAIM}{'b' * 32}-{2 * gib}").touch()  # still being written
+
+    def disk(total, free):
+        monkeypatch.setattr(HC.shutil, "disk_usage", lambda p: argparse.Namespace(
+            total=total * gib, used=(total - free) * gib, free=free * gib))
+
+    disk(1000, 500)  # the cap is less: 10 - 1 - 2
+    assert HC.room(cache.spec) == 7 * gib
+    disk(100, 16)  # the filesystem is less: 16 - 2 - 10
+    assert HC.room(cache.spec) == 4 * gib
+    disk(100, 11)
+    assert HC.room(cache.spec) == 0
+    assert HC.room({**cache.spec, "max_total_bytes": 2 * gib}) == 0
+    assert HC.room(None) == 0
+    cache.close()
+    assert HC.room(cache.spec) == 0  # unreadable
+
+
+def test_host_cache_drops_the_entries_it_is_told_to(tmp_path):
+    # An entry no call will read (its problem was skipped) is removed with its
+    # writer's claim, so the room it held is free again; the others stay.
+    cache = HC.HostCache(tmp_path)
+    for k in (1, 2):
+        assert _cache_calls(cache.spec, {"k": k})[1] == 1
+    room = HC.room(cache.spec)
+    (one,) = {n for key, n in HC.claims(cache.dir).items()}
+    assert HC.drop(cache.spec, lambda fields: fields == {"k": 1}) == 1
+    assert not HC.stored(cache.spec, {"k": 1}) and HC.stored(cache.spec, {"k": 2})
+    assert list(HC.claims(cache.dir)) == [HC.entry_key({"k": 2})]
+    assert HC.room(cache.spec) == room + one
+    assert HC.drop(cache.spec, lambda fields: True) == 1 and _entries(cache) == 0
+    assert HC.drop(None, lambda fields: True) == 0
+    cache.close()
+    assert HC.drop(cache.spec, lambda fields: True) == 0
+
+
 def test_host_cache_bad_entries_are_misses(tmp_path):
     cache = HC.HostCache(tmp_path)
     fields = {"k": 1}
@@ -1792,18 +1855,23 @@ def test_prepare_host_data_reports_each_workers_outcome(monkeypatch):
         "no_ok": {"out": json.dumps({"ok": 1, "stored": True})},
         "crash": {"exit": 3},
         "traceback": {"exit": 1, "err": "x" * 1000 + "\n  File \"w.py\", line 9\n"
-                      "MemoryError: \n"},
+                      "ValueError: \n"},
         "garbled": {"out": "{"},
         "not_a_dict": {"out": "[]"},
         "hang": {"out": ok, "sleep": 30},
         "oom_killed": {"sigkill": True, "err": "a line\n"},
         "memory_error": {"out": json.dumps({"ok": False, "error": "MemoryError: "})},
+        "import_oom": {"exit": 1, "err": "OpenBLAS error: Memory allocation still "
+                       "failed after 10 retries, giving up.\n"},
+        "noted": {"out": json.dumps({"ok": False, "error": "boom"}),
+                  "err": "MemoryError: a warning\n"},
     }, {"hang": 0.5, **{k: 60 for k in ("stored", "after_noise", "refused", "error",
                                        "no_ok", "crash", "traceback", "garbled",
-                                       "not_a_dict", "oom_killed", "memory_error")}})
+                                       "not_a_dict", "oom_killed", "memory_error",
+                                       "import_oom", "noted")}})
     assert list(got) == ["stored", "after_noise", "refused", "error", "no_ok", "crash",
                          "traceback", "garbled", "not_a_dict", "hang", "oom_killed",
-                         "memory_error"]
+                         "memory_error", "import_oom", "noted"]
     brief = {k: (g["ok"], g["stored"], g["error"]) for k, g in got.items()}
     assert brief == {
         "stored": (True, True, ""), "after_noise": (True, True, ""),
@@ -1811,7 +1879,7 @@ def test_prepare_host_data_reports_each_workers_outcome(monkeypatch):
         "no_ok": (False, False, "failed (exit code 0)"),
         "crash": (False, False, "no result line (exit code 3)"),
         "traceback": (False, False, "no result line (exit code 1); stderr: "  # last 400
-                      + "x" * 365 + " |   File \"w.py\", line 9 | MemoryError:"),
+                      + "x" * 366 + " |   File \"w.py\", line 9 | ValueError:"),
         "garbled": (False, False, "no result line (exit code 0)"),
         "not_a_dict": (False, False, "no result line (exit code 0)"),
         # Killed at its limit (by SIGKILL too): not a memory error.
@@ -1821,6 +1889,12 @@ def test_prepare_host_data_reports_each_workers_outcome(monkeypatch):
                        "-9), likely by the out-of-memory killer; stderr: a line"),
         "memory_error": (False, False, "host_memory: its preparation ran out of memory "
                          "(MemoryError: )"),
+        # numpy or its BLAS could not allocate at import, as its stderr says.
+        "import_oom": (False, False, "host_memory: its preparation ran out of memory "
+                       "(exit code 1); stderr: OpenBLAS error: Memory allocation still "
+                       "failed after 10 retries, giving up."),
+        # It reported its own failure (exit code 0): stderr is only a note.
+        "noted": (False, False, "boom; stderr: MemoryError: a warning"),
     }
     assert 0.5 <= got["hang"]["seconds"] < 10
     bad = _prep({"k": {}}, argv=[os.devnull + "-missing"])
@@ -1867,23 +1941,26 @@ def test_prepare_host_data_runs_within_the_memory_it_reads(tmp_path):
     assert got["c"]["stored"]
 
 
-def test_prepare_host_data_keeps_the_entries_of_ended_preparations(tmp_path):
-    # b's entry (3 of its 9) stays in RAM on a tmpfs once b ends, and memory
-    # is read again only when none runs: c (10) must then wait for a (30),
-    # since 30 + 10 + 3 > 40 even though 30 + 10 alone would fit. That read
-    # counts b's entry (here: memory stays 40), so d (38) then fits alone.
+@pytest.mark.parametrize("b_stored", [True, False])
+def test_prepare_host_data_keeps_the_entries_of_ended_preparations(tmp_path, b_stored):
+    # b's entry (3 of its 9) stays in RAM on a tmpfs once b stored it, and
+    # memory is read again only when none runs: c (10) must then wait for a
+    # (30), since 30 + 10 + 3 > 40 even though 30 + 10 alone would fit. That
+    # read counts b's entry (here: memory stays 40), so d (38) then fits
+    # alone. An entry the cache did not store keeps nothing: c runs beside a.
     gib = AS.GIB
-    jobs = {k: {"out": json.dumps({"ok": True, "stored": True}), "sleep": s,
-                "log": str(tmp_path / k)}
+    jobs = {k: {"out": json.dumps({"ok": True, "stored": b_stored or k != "b"}),
+                "sleep": s, "log": str(tmp_path / k)}
             for k, s in (("a", 0.8), ("b", 0.1), ("c", 0.1), ("d", 0.1))}
     got = AS.prepare_host_data(
         [sys.executable, "-c", _PREP_JOB], None, {k: json.dumps(v) for k, v in jobs.items()},
         {k: 60 for k in jobs}, 4, poll_s=0.02, memory=lambda: 40 * gib,
         needs={"a": 30 * gib, "b": 9 * gib, "c": 10 * gib, "d": 38 * gib},
         keeps={"a": 0, "b": 3 * gib, "c": 0, "d": 0})
-    assert all(g["stored"] for g in got.values()), got
+    assert [g["stored"] for g in got.values()] == [True, b_stored, True, True], got
     spans = {k: tuple(map(float, (tmp_path / k).read_text().split())) for k in jobs}
-    assert spans["b"][0] < spans["a"][1] <= spans["c"][0] < spans["c"][1] <= spans["d"][0]
+    assert spans["b"][0] < spans["a"][1] and spans["c"][1] <= spans["d"][0]
+    assert (spans["a"][1] <= spans["c"][0]) == b_stored
 
 
 def _meminfo(tmp_path, total_gib, avail_gib):
@@ -1917,6 +1994,12 @@ def test_host_memory_reads_meminfo_and_cgroup_limits(tmp_path):
     (root / "job" / "step" / "memory.high").write_text(f"{7 * gib}\n")
     got = AS.host_memory(_meminfo(tmp_path, 503, 490), str(cgroup), str(root))
     assert got == int(2 * gib - margin * (7 * gib))
+    # Both finite at one level: the lesser, either way round.
+    (root / "job" / "step" / "memory.high").unlink()
+    for high, least in ((7.5, 7.5), (9, 8)):
+        (root / "job" / "memory.high").write_text(f"{int(high * gib)}\n")
+        got = AS.host_memory(_meminfo(tmp_path, 503, 490), str(cgroup), str(root))
+        assert got == int((least - 5) * gib - margin * (least * gib)), high
     # cgroup v1: memory.limit_in_bytes under the memory controller's own tree
     # (an unlimited level reads as a huge number).
     v1 = tmp_path / "v1"
@@ -1993,6 +2076,32 @@ def test_host_lock_opens_another_users_lock_file(tmp_path, monkeypatch):
     assert logs == []
 
 
+def test_host_lock_opens_the_file_another_run_created_meanwhile(tmp_path, monkeypatch):
+    # Missing at the first open, created by another run before ours (O_EXCL
+    # refuses): the run opens that file and locks it, and does not say it
+    # could not.
+    import fcntl
+
+    monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
+    lock, real, logs, opens = tmp_path / AS.HOST_LOCK, os.open, [], []
+
+    def racing(path, flags, *a):
+        opens.append(flags)
+        if len(opens) == 1:
+            os.close(real(path, os.O_WRONLY | os.O_CREAT, 0o644))  # the other run's
+            raise FileNotFoundError(2, "No such file or directory", path)
+        return real(path, flags, *a)
+
+    monkeypatch.setattr(os, "open", racing)
+    with AS.host_lock(True, logs.append):
+        fd = real(str(lock), os.O_RDONLY)
+        with pytest.raises(OSError):
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        os.close(fd)
+    assert opens == [os.O_RDONLY, os.O_RDONLY | os.O_CREAT | os.O_EXCL, os.O_RDONLY]
+    assert logs == []
+
+
 def test_host_lock_creates_a_lock_file_every_user_can_open(tmp_path, monkeypatch):
     monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
     old = os.umask(0o077)
@@ -2036,18 +2145,22 @@ def test_prepare_host_data_kills_its_workers_when_interrupted(tmp_path, monkeypa
         os.kill(int(pidfile.read_text()), 0)
 
 
-@pytest.mark.parametrize("record, want", [
-    (None, 365),
-    ({"ok": True, "stored": True, "seconds": 339.0}, 365),
-    ({"ok": True, "stored": False, "seconds": 339.0}, 678),
-    ({"ok": True, "stored": False, "seconds": 100.4}, 365),
-    ({"ok": False, "stored": False, "seconds": 3710.0}, 365),
+@pytest.mark.parametrize("record, calls, want", [
+    (None, 4, 365),
+    ({"ok": True, "stored": True, "seconds": 339.0}, 4, 365),
+    ({"ok": True, "stored": False, "seconds": 339.0}, 1, 678),
+    ({"ok": True, "stored": False, "seconds": 339.0}, 4, 2712),
+    ({"ok": True, "stored": False, "seconds": 100.4}, 1, 365),
+    ({"ok": True, "stored": False, "seconds": 100.4}, 2, 402),
+    ({"ok": False, "stored": False, "seconds": 3710.0}, 4, 365),
 ])
-def test_call_allowance_is_never_below_the_ops_allowance(record, want):
+def test_call_allowance_is_never_below_the_ops_allowance(record, calls, want):
     # A preparation that stored its entry took its time outside the calls; one
-    # that finished without storing it measured what each call will compute:
-    # the calls get twice that when it is more. A failed one measured nothing.
-    assert AS.call_allowance_s(365, record) == want
+    # that finished without storing it measured what each call will compute,
+    # perhaps alone on the CPUs that up to one call per device then shares:
+    # the calls get twice that times the calls at once when it is more. A
+    # failed one measured nothing.
+    assert AS.call_allowance_s(365, record, calls) == want
     assert AS.prepare_limit_s(365) == 10 * 365 + 60
 
 

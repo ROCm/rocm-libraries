@@ -34,7 +34,8 @@ its first measure call, in a worker that only does that (``prepare``):
   uses them: an I/O error then (a failing disk, never a tmpfs) ends that
   worker with SIGBUS, and its call is a run_error;
 - ``room`` is what the cache may still store, for a caller that must keep
-  memory for it (a tmpfs holds its entries in RAM).
+  memory for it (a tmpfs holds its entries in RAM), and ``drop`` removes the
+  entries no call will read.
 
 ``HostCache.close`` (also on interpreter exit) removes the directory. Importing
 this module does not import numpy. Writing needs ``fcntl`` (POSIX); without
@@ -231,6 +232,27 @@ def room(spec: Optional[Mapping]) -> int:
         return 0
     return max(0, min(spec["max_total_bytes"] - sum(found.values()),
                       int(disk.free - pending - MIN_FREE_FRACTION * disk.total)))
+
+
+def drop(spec: Optional[Mapping], match: Callable[[Mapping], bool]) -> int:
+    """Remove the entries of the cache ``spec`` whose fields ``match``, and
+    their writers' claims (a later call may write them again); returns how
+    many were removed."""
+    if not spec:
+        return 0
+    root, removed = Path(spec["dir"]), 0
+    with contextlib.suppress(OSError):
+        for key, size in claims(root).items():
+            try:
+                if not match(json.loads((root / key / "meta.json").read_text())["fields"]):
+                    continue
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            shutil.rmtree(root / key, ignore_errors=True)
+            with contextlib.suppress(OSError):
+                (root / f"{CLAIM}{key}-{size}").unlink()
+            removed += 1
+    return removed
 
 
 def _entry(spec: Mapping, fields: Mapping) -> Tuple[object, Path]:

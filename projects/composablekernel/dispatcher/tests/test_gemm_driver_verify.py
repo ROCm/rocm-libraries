@@ -376,6 +376,27 @@ def test_search_inputs_do_not_depend_on_the_block_size(monkeypatch):
     assert whole["a"].shape == (PROBLEM["K"], PROBLEM["M"])  # a "c" A, as stored
 
 
+@pytest.mark.parametrize("most", [1, 2, 3, 4, 7, 8, 64])
+def test_ccr_reference_blocks_cover_the_rows_in_odd_counts(most):
+    # A block's transposed copy is slow when its row count is a power of two.
+    for m in range(1, 70):
+        blocks = list(run_one_gemm_kernel._odd_blocks(m, most))
+        assert [i for i, _ in blocks] == [sum(r for _, r in blocks[:j])
+                                          for j in range(len(blocks))]
+        assert sum(r for _, r in blocks) == m
+        assert all(r % 2 == 1 and r <= most for _, r in blocks), (m, blocks)
+
+
+@pytest.mark.parametrize("rows", [1, 4, 64])
+def test_ccr_reference_in_blocks_is_the_product(monkeypatch, rows):
+    # Blocks of 1, 3 (of 4) and 63 + 1 rows (all 64): the reference is A @ B.
+    monkeypatch.setattr(run_one_gemm_kernel, "REF_BLOCK", rows * PROBLEM["N"])
+    host = run_one_gemm_kernel._search_host_data(_runner("bf16", None, "ccr"),
+                                                 GemmProblem.from_dict(PROBLEM))
+    a, b = (_bf16_u16_to_fp32(host[x]).T for x in "ab")  # stored K x M, N x K
+    np.testing.assert_allclose(host["ref"], a @ b, rtol=1e-5, atol=1e-6)
+
+
 @pytest.mark.parametrize("rows", [1, 5, 64, 1000])
 def test_comparison_in_blocks_of_rows_gives_the_same_values(rows):
     rng = np.random.RandomState(1)
@@ -431,6 +452,25 @@ def test_search_denominator_is_the_largest_magnitude_of_the_reference(monkeypatc
     ref = host["ref"]
     assert float(np.max(ref)) != -float(np.min(ref))
     assert float(host["denom"]) == float(np.max(np.abs(ref)))
+
+
+@pytest.mark.parametrize("make", [MemoryError, lambda: np.empty(1 << 50, np.uint8)])
+def test_search_errors_name_their_type(gemm_worker, monkeypatch, make):
+    # A search call's error starts with its type, so the search tells a
+    # MemoryError (whose text can be empty) from a kernel's failure. A plain
+    # run's error is its text alone, as before.
+    runner = _runner("bf16", None)
+
+    def fail(*a):
+        raise make()  # numpy's raises while it allocates
+
+    monkeypatch.setattr(runner, "run_encoded", fail)
+    monkeypatch.setattr(runner, "run", fail)
+    search = json.loads(gemm_worker(runner, search_host_data=True))
+    plain = json.loads(gemm_worker(runner))
+    assert not search["ok"] and not plain["ok"]
+    assert search["error"] == "MemoryError: " + plain["error"], (search, plain)
+    assert bool(plain["error"]) == (make is not MemoryError)
 
 
 def test_legacy_inputs_are_unchanged():

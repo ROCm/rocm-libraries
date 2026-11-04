@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import json
 import math
 import re
@@ -83,7 +84,11 @@ CONFLICTS = (
 )
 REQUIRED = (("--variant", "variant", "gemm_universal"),)  # the one searched
 # Driver failure kind (--failures-csv) -> outcome status. The first kind in
-# this order that a request has decides its outcome.
+# this order that a request has decides its outcome, unless its worker ran out
+# of host memory (``adaptive_search.memory_failure``): ended by SIGKILL, which
+# the driver sends only at a call's timeout (a "timeout" record), or reporting
+# a MemoryError. That request gets ``host_memory``: its problem stops, no
+# kernel is blamed, and its best kernels so far are still confirmed.
 FAILURE_STATUS = {
     "timeout": "timeout",
     "batch-error": "run_error",
@@ -216,11 +221,27 @@ def _failure_diag(fail) -> str:
     return f"{kind}: {err}" + (f" ({why})" if why else "")
 
 
+def _memory_failure(fails: Sequence[dict]) -> str:
+    """The ``host_memory`` diag of a request whose worker ran out of host
+    memory, from its failure records; else ""."""
+    for f in fails:
+        err = str(f.get("error", ""))
+        code = re.fullmatch(r"worker exited with code (-?\d+)", err)
+        why = adaptive_search.memory_failure(
+            "its call's worker", code and int(code.group(1)), err)
+        if why:
+            return why
+    return ""
+
+
 def reconcile(req: PairRequest, problem: dict, rows: Sequence[dict],
               fails: Sequence[dict]):
     """(status, latency_ms, diag) of one request from its measured rows and
     failure records. Only a verified row of the requested kernel and problem
     with a finite positive latency, and no failure record, is ``ok``."""
+    why = _memory_failure(fails)
+    if why:
+        return adaptive_search.HOST_MEMORY, None, why
     if fails:
         kinds = [f.get("kind") for f in fails]
         kind = next((k for k in FAILURE_STATUS if k in kinds), kinds[0])
@@ -383,7 +404,8 @@ class GemmSearchAdapter:
                                 f"limit {adaptive_search.PREPARE_FACTOR} x the host "
                                 f"allowance + {adaptive_search.PREPARE_START_S} s; a "
                                 "problem it prepared but could not store gets at least "
-                                f"{adaptive_search.PREPARE_MARGIN} x its time per call")},
+                                f"{adaptive_search.PREPARE_MARGIN} x its time x "
+                                f"{len(self.devices)} (the devices) per call")},
             "build": {"workers": a.workers,
                       "build_timeout": self.build_timeout or SEARCH_BUILD_TIMEOUT_S,
                       "build_timeout_applies_to": "every kernel" if self.build_timeout
@@ -443,7 +465,8 @@ class GemmSearchAdapter:
     def _allowance_s(self, key) -> int:
         """Host seconds a call's timeout adds for problem ``key``."""
         return adaptive_search.call_allowance_s(
-            verify_allowance_s(self.problems[key], self.args.dtype), self.prepared.get(key))
+            verify_allowance_s(self.problems[key], self.args.dtype), self.prepared.get(key),
+            len(self.devices))
 
     def _prepare(self, reqs, name) -> List[dict]:
         """Before the call ``name``, guard the host memory of each problem of
@@ -454,8 +477,8 @@ class GemmSearchAdapter:
         computes it all when none was stored, within the memory available
         less, on a tmpfs, the entries still to come: a problem that does not
         fit, or whose preparation ran out of memory, is skipped
-        (``host_memory``, one console line). Returns the preparations'
-        records, for that call's JSON file."""
+        (``host_memory``, one console line, its entry dropped). Returns the
+        preparations' records, for that call's JSON file."""
         first: Dict[str, str] = {}
         for r in reqs:  # one dtype and layout per run: any kernel of it will do
             if r.problem_key not in self.checked:
@@ -464,12 +487,14 @@ class GemmSearchAdapter:
             return []
         self.checked.update(first)
         dtype, records = self.args.dtype, []
+        to_come = functools.partial(adaptive_search.entries_to_come, self.host_cache,
+                                    entry_bytes=lambda p: host_entry_bytes(p, dtype))
         if self.host_cache:
             limits = {k: adaptive_search.prepare_limit_s(
                 verify_allowance_s(self.problems[k], dtype)) for k in first}
-            # On a tmpfs an entry stays in RAM: its preparation needs it too.
-            keeps = {k: host_entry_bytes(self.problems[k], dtype) if self.tmpfs else 0
-                     for k in first}
+            # On a tmpfs an entry the cache may store stays in RAM: its
+            # preparation needs it too.
+            keeps = {k: to_come({k: self.problems[k]}) if self.tmpfs else 0 for k in first}
             needs = {k: host_compute_bytes(self.problems[k], dtype) + keeps[k]
                      for k in first}
             print(f"  [search] {name}: preparing the host data of {len(first)} "
@@ -496,11 +521,8 @@ class GemmSearchAdapter:
                        for k in first]
         budget, kept = self.memory(), 0
         if self.tmpfs:  # the entries still to come will hold RAM during the calls
-            cap = self.host_cache["max_entry_bytes"]
-            kept = min(host_cache.room(self.host_cache), sum(
-                size for k, p in self.problems.items()
-                if k not in self.skipped and not self.prepared.get(k, {}).get("stored")
-                for size in [host_entry_bytes(p, dtype)] if size <= cap))
+            kept = to_come({k: p for k, p in self.problems.items() if k not in self.skipped
+                            and not self.prepared.get(k, {}).get("stored")})
         for k in first:
             stored = self.prepared.get(k, {}).get("stored")
             why = k not in self.skipped and adaptive_search.calls_memory_error(
@@ -508,6 +530,9 @@ class GemmSearchAdapter:
                 else host_compute_bytes(self.problems[k], dtype), stored, budget, kept)
             if why:
                 self._skip(k, why)
+                if stored:  # no call will read it
+                    host_cache.drop(self.host_cache, lambda fields, p=self.problems[k]:
+                                    fields.get("problem") == p)
         return records
 
     def _skip(self, key, diag) -> None:

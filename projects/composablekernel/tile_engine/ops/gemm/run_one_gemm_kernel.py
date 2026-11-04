@@ -28,7 +28,8 @@ first measure call) the worker loads no library: it stores the host data of
 ``problem`` for the dtype and layout of ``kernel_name`` in ``host_cache`` and
 prints ``{"ok": true, "stored": <whether the cache holds it now>}``. With
 ``prepare`` or ``search_host_data`` the worker asks to be the first process
-the out-of-memory killer ends (``_first_to_go``).
+the out-of-memory killer ends (``_first_to_go``), and an error starts with its
+exception's type (the search tells a MemoryError from a kernel's failure).
 
 Output JSON format (one line per kernel):
     {"idx": 0, "ok": true, "ms": 0.123, "tflops": 456.7, "non_zero": 1, "kernel": "..."}
@@ -68,6 +69,7 @@ INPUT_SEED, INPUT_SCALE = 42, 0.1  # the random host inputs: randn * scale
 # generator, made, encoded and compared BLOCK elements at a time.
 SEARCH_INPUTS = "PCG64 float32"
 BLOCK = 1 << 20
+REF_BLOCK = 1 << 22  # about the most fp32 of a ccr reference made at once
 OOM_SCORE_ADJ = "/proc/self/oom_score_adj"
 _COMMON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
                            "common")
@@ -114,6 +116,20 @@ def _search_operand(gen, shape, dtype, use_ocp):
     return enc, vals
 
 
+def _odd_blocks(m, most):
+    """(first row, rows) of consecutive blocks of ``m`` rows, each of an odd
+    number of rows and at most ``most``: a transposed copy whose source rows
+    are a power of two of fp32 apart puts them in the same cache sets, and
+    numpy then copies at about 0.07 GB/s."""
+    i = 0
+    while i < m:
+        rows = min(most, m - i)
+        if rows % 2 == 0:
+            rows -= 1  # even, so at least 2
+        yield i, rows
+        i += rows
+
+
 def _search_host_data(runner, problem):
     """A search's host data for ``runner``'s kernel on ``problem`` (see
     ``_host_data``). A and B are made in the memory order the kernel reads
@@ -131,9 +147,13 @@ def _search_host_data(runner, problem):
     gen = np.random.Generator(np.random.PCG64(INPUT_SEED))
     a, qa = _search_operand(gen, (m, k) if la == "r" else (k, m), dtype, runner._use_ocp)
     b, qb = _search_operand(gen, (k, n) if lb == "r" else (n, k), dtype, runner._use_ocp)
-    if la == lb == "c":  # of the stored arrays: 7x faster than two transposed
-        # views with a reference BLAS (numpy without an optimized one)
-        ref = np.ascontiguousarray((qb @ qa).T)
+    if la == lb == "c":  # of the stored arrays, a block of rows at a time: about
+        # 8x faster than two transposed views with a reference BLAS (numpy
+        # without an optimized one), and each block's transposed copy is
+        # small and of an odd row count (see _odd_blocks)
+        ref = np.empty((m, n), np.float32)
+        for i, rows in _odd_blocks(m, max(1, REF_BLOCK // n)):
+            ref[i:i + rows] = (qb @ qa[:, i:i + rows]).T
     else:
         ref = (qa if la == "r" else qa.T) @ (qb if lb == "r" else qb.T)
     del qa, qb
@@ -342,9 +362,12 @@ def _run_one(
             )
 
     except Exception as e:
+        error = str(e)
+        if search_host_data or host_cache is not None:  # str(MemoryError()) is ""
+            error = f"{type(e).__name__}: {error}"
         print(
             json.dumps(
-                {"idx": idx, "ok": False, "error": str(e), "kernel": kernel_name}
+                {"idx": idx, "ok": False, "error": error, "kernel": kernel_name}
             ),
             flush=True,
         )

@@ -25,7 +25,8 @@ is here too: ``ArtifactStore`` (the run's own copies of the built kernels),
 ``host_allowance_s`` (a verified call's host time, at the op's rates),
 ``prepare_host_data`` (a problem's host cache entry, stored before its first
 call and outside its timeout), the host memory guard (``host_memory``,
-``calls_memory_error``, ``host_lock``), ``source_info``,
+``calls_memory_error``, ``entries_to_come``, ``memory_failure``,
+``host_lock``), ``source_info``,
 ``check_search_options`` and ``run_search`` (the driver's search mode, with
 its exit code). Importing this module imports neither ``ck_search`` nor
 numpy: the search core is loaded when a search runs.
@@ -51,6 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence
 
+import host_cache  # this directory's: imports no numpy
+
 SCHEMA_VERSION = 1
 STATUSES = (
     "ok",
@@ -68,7 +71,8 @@ STATUSES = (
 # (then it is a run_error), ``cancelled`` is dropped (it stays pending in its
 # strategy, so a strategy that waits for it ends that problem's search) and
 # ``host_memory`` (the problem's host data does not fit in this host's memory,
-# see ``host_memory``) stops the problem: no kernel failed.
+# see ``host_memory``, or a worker ran out of it, see ``memory_failure``)
+# stops the problem: no kernel failed.
 TELLABLE = {
     "ok": "OK",
     "compile_error": "COMPILE_ERROR",
@@ -161,8 +165,8 @@ class OperationAdapter(Protocol):
 
     def measure_pairs(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
         """Exactly one outcome per request; ``host_memory`` (its diag says
-        how much it needs and how much is available) for a request whose
-        problem the host cannot hold, measured or not: the problem stops."""
+        why) for a request whose problem the host cannot hold, measured or
+        not, or whose worker ran out of host memory: the problem stops."""
 
     def confirm(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
         """Fresh verified calls, exactly one outcome per request. The
@@ -1504,9 +1508,10 @@ def host_allowance_s(flops, inputs, s_per_input) -> int:
 # PREPARE_FACTOR times the problem's host allowance, plus PREPARE_START_S for
 # the worker's start. A preparation that finishes without storing the entry
 # (the cache's caps) leaves calls that compute it all: their allowance is at
-# least PREPARE_MARGIN times what it took on this host (where it shared the
-# CPUs only with other preparations). A failed preparation's
-# error ends with the last PREPARE_STDERR_CHARS characters of its stderr.
+# least PREPARE_MARGIN times what it took on this host, times the calls that
+# may compute at once (one per device), which share the CPUs it may have had
+# alone. A failed preparation's error ends with the last PREPARE_STDERR_CHARS
+# characters of its stderr.
 PREPARE_FACTOR, PREPARE_START_S, PREPARE_MARGIN = 10, 60, 2
 PREPARE_STDERR_CHARS = 400
 
@@ -1590,6 +1595,32 @@ def host_memory_error(need, avail, detail="") -> str:
             f"{avail / GIB:.1f} GiB available")
 
 
+# A search's worker ended by SIGKILL was killed by another process: the search
+# kills one only at its limit (a preparation's, or a call's timeout), and
+# reports that as such. On a host short of memory that is the out-of-memory
+# killer, which the search's workers ask to end first. Such a worker, one that
+# reports a MemoryError, or one that fails at start with one of OUT_OF_MEMORY
+# as the last line of its stderr (numpy or its BLAS refused memory at import)
+# ran out of host memory: its problem gets HOST_MEMORY, and no kernel failed.
+SIGKILLED = -getattr(signal, "SIGKILL", 9)  # the exit code of a SIGKILLed worker
+OUT_OF_MEMORY = ("MemoryError", "Memory allocation", "Cannot allocate memory")
+
+
+def memory_failure(what: str, code: Optional[int], error: str, stderr: str = "") -> str:
+    """The ``host_memory`` diag of a failed worker (``what``: "its
+    preparation", ...) that exited with ``code`` (None: unknown) and reported
+    ``error``, when it ran out of host memory (see above); else ""."""
+    last = (stderr.strip().splitlines() or [""])[-1]
+    if code == SIGKILLED:
+        return (f"{HOST_MEMORY}: {what} was killed (exit code {code}), "
+                "likely by the out-of-memory killer")
+    if error.startswith("MemoryError"):
+        return f"{HOST_MEMORY}: {what} ran out of memory ({error})"
+    if code and any(t in last for t in OUT_OF_MEMORY):
+        return f"{HOST_MEMORY}: {what} ran out of memory (exit code {code})"
+    return ""
+
+
 def calls_memory_error(n: int, each: int, stored, avail: Optional[int],
                        kept: int = 0) -> str:
     """The diag of a problem whose calls, up to ``n`` at once (one per
@@ -1605,6 +1636,19 @@ def calls_memory_error(n: int, each: int, stored, avail: Optional[int],
     if kept:
         detail += f"; {kept / GIB:.1f} GiB kept for the tmpfs cache's entries to come"
     return host_memory_error(n * each, max(0, avail - kept), detail)
+
+
+def entries_to_come(spec: Optional[Mapping], problems: Mapping[str, Any],
+                    entry_bytes: Callable[[Any], int]) -> int:
+    """Bytes the host cache ``spec`` may still store for ``problems`` (key ->
+    problem, whose entry has ``entry_bytes(problem)`` bytes): their entries
+    within its ``max_entry_bytes`` and its ``host_cache.room``, and no more
+    than that room; 0 without a cache. On a tmpfs these bytes will hold RAM."""
+    if not spec:
+        return 0
+    room = host_cache.room(spec)
+    most = min(room, spec["max_entry_bytes"])
+    return min(room, sum(n for n in map(entry_bytes, problems.values()) if n <= most))
 
 
 # The search runs that share a temp dir (those of one host, or of one
@@ -1677,14 +1721,16 @@ def prepare_limit_s(allowance_s) -> int:
     return PREPARE_FACTOR * allowance_s + PREPARE_START_S
 
 
-def call_allowance_s(allowance_s, prepared: Optional[Mapping] = None) -> int:
+def call_allowance_s(allowance_s, prepared: Optional[Mapping] = None,
+                     calls: int = 1) -> int:
     """The host seconds a call's timeout adds for a problem whose host
     allowance is ``allowance_s`` and whose preparation record (one value of
-    ``prepare_host_data``) is ``prepared``: never less than ``allowance_s``."""
+    ``prepare_host_data``) is ``prepared``, with up to ``calls`` calls at
+    once: never less than ``allowance_s``."""
     took = 0.0
     if prepared and prepared["ok"] and not prepared["stored"]:
         took = prepared["seconds"]
-    return max(allowance_s, math.ceil(PREPARE_MARGIN * took))
+    return max(allowance_s, math.ceil(PREPARE_MARGIN * took * max(1, calls)))
 
 
 def prepare_host_data(argv, env, payloads: Mapping[str, str],
@@ -1698,15 +1744,15 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
     ``needs`` (bytes per key), the ones running at once must also fit in
     ``memory()``, read whenever none is running: one that does not fit
     alone is not started, and its error is ``host_memory_error``'s. Of a
-    need, ``keeps`` bytes stay in memory after its worker ends (its entry on a
-    tmpfs): they count until ``memory()`` is read again. The worker prints
+    need, ``keeps`` bytes stay in memory once its worker stored its entry (on
+    a tmpfs): they count until ``memory()`` is read again. The worker prints
     ``{"ok": true, "stored": <bool>}`` or ``{"ok": false, "error": ...}`` as
     its last line. Returns ``{key: {"ok", "stored", "seconds", "error"}}`` in
     the order of ``payloads``; ``ok`` is False for an error, a crash or a kill
     at the limit, and ``error`` then ends with the tail of the worker's
-    stderr. A worker killed by another process (the out-of-memory killer) or
-    reporting a MemoryError gets a ``host_memory`` error. Workers still
-    running when this raises (an interrupt) are killed."""
+    stderr. A worker that ran out of memory (``memory_failure``) gets a
+    ``host_memory`` error. Workers still running when this raises (an
+    interrupt) are killed."""
     out, todo, running, budget, kept = {}, list(payloads), {}, None, 0
     try:
         while todo or running:
@@ -1749,11 +1795,12 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                     proc.kill()
                 proc.wait()
                 del running[key]
-                kept += (keeps or {}).get(key, 0)
                 text, stderr = [_drain(f) for f in files]
                 out[key] = _prepared(proc.returncode, text, took,
                                      f"no result in {limits[key]:g} s" if killed else "",
                                      stderr)
+                if out[key]["stored"]:
+                    kept += (keeps or {}).get(key, 0)
     finally:
         for proc, files, _ in running.values():
             proc.kill()
@@ -1784,11 +1831,8 @@ def _prepared(code, text, took, error, stderr="") -> dict:
             error = f"no result line (exit code {code})"
         elif got.get("ok") is not True:
             error = str(got.get("error") or f"failed (exit code {code})")
-        if error and code == -getattr(signal, "SIGKILL", 9):  # ours: only at the limit
-            error = (f"{HOST_MEMORY}: its preparation was killed (exit code {code}), "
-                     "likely by the out-of-memory killer")
-        elif error.startswith("MemoryError"):
-            error = f"{HOST_MEMORY}: its preparation ran out of memory ({error})"
+        if error:  # (one killed at its limit has its error already)
+            error = memory_failure("its preparation", code, error, stderr) or error
     tail = " | ".join(stderr.strip()[-PREPARE_STDERR_CHARS:].splitlines())
     if error and tail:
         error += f"; stderr: {tail}"
