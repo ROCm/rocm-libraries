@@ -14,6 +14,8 @@ run once end to end at the bottom.
 No GPU or compiler needed. Run: python3 -m pytest -q tests/test_adaptive_search_coordinator.py
 """
 
+import hashlib
+import itertools
 import json
 import math
 import subprocess
@@ -302,11 +304,43 @@ def test_compile_failure_shared_by_problems_is_one_build(tmp_path):
     assert ad.builds == [["B", "A", "C", "D"]]  # round 2 re-asks B: no rebuild
     assert (s.counts["built"], s.counts["build_failed"], co.ledger.builds) == (3, 1, 4)
     assert "B" not in [r.kernel_name for r in ad.measured]
-    errs = [(p, ob.trial.uid) for p in made for ob in made[p].told
-            if ob.status == "compile_error"]
-    assert len(errs) == 3 and s.counts["failed_by_status"] == {"compile_error": 3}
+    errs = {p: [ob.cached for ob in made[p].told if ob.status == "compile_error"]
+            for p in made}
+    # P1 and P2 asked for B in the round that built it, each with a trial; P3
+    # asks once its build is known to have failed: told that result, no trial.
+    assert errs == {"P1": [False], "P2": [False], "P3": [True]}
+    assert s.counts["failed_by_status"] == {"compile_error": 2}
+    assert s.counts["known_failed"] == 1 and co.ledger.trials["P3"] == 1
+    assert made["P3"].told[-1].detail == "fake compile error"
     build = events(tmp_path / "out", "build")
     assert [b["waiting"] for b in build if b["kernel"] == "B"] == [["P1", "P2"]]
+    (known,) = [e for e in events(tmp_path / "out", "trial")
+                if e["admission"] == "known_failed"]
+    assert (known["problem"], known["kernel"]) == ("P3", "B")
+
+
+def test_known_build_failures_cost_no_trial(tmp_path):
+    # P1's builds of A..D all fail. P2 then proposes A..D: each is told its
+    # compile_error from the registry, so P2's trials go to G, E and F only.
+    ad = FakeAdapter({"P1": ABCD, "P2": list("ABCDEFG")}, fail_build=set(ABCD))
+    s, made, co = run(tmp_path, ad, {"P1": [ABCD], "P2": [["G"], ABCD, ["E", "F"]]},
+                      trials_per_problem=6, batch_per_problem=4, max_stall_rounds=2)
+    assert ad.builds == [list("ABCDG"), ["E", "F"]]
+    assert sorted(pairs(ad.measured)) == [("P2", n) for n in "EFG"]
+    assert co.ledger.trials == {"P1": 4, "P2": 3} and s.counts["known_failed"] == 4
+    assert all(ob.cached for ob in made["P2"].told if ob.status == "compile_error")
+    assert s.winners == {"P2": "E"} and s.stop_reason == "searched"
+
+
+def test_failed_builds_are_no_work_after_the_cap(tmp_path):
+    # Round 1 spends the cap on A..D, which all fail. P2's untried candidates
+    # are then failed builds and E, which needs a build: nothing is left to
+    # run, so the search stops at the cap instead of asking again.
+    ad = FakeAdapter({"P1": ABCD, "P2": list("ABCDE")}, fail_build=set(ABCD))
+    s, made, co = run(tmp_path, ad, {"P1": [ABCD], "P2": [["A"], ["E"]]},
+                      new_builds_per_run=4, batch_per_problem=4)
+    assert s.stop_reason == "build_cap" and s.counts["rounds"] == 1
+    assert len(made["P2"].asks) == 1 and co.ledger.builds == 4
 
 
 def test_unattempted_is_requeued_once(tmp_path):
@@ -473,22 +507,71 @@ def test_requeued_trial_runs_again_after_the_build_cap(tmp_path):
     assert co.ledger.trials["P1"] == 2 and co.ledger.builds == 2
 
 
-def test_proposal_needing_a_build_past_the_cap_is_cancelled(tmp_path):
+def test_proposal_needing_a_build_past_the_cap_is_told_invalid(tmp_path):
     # Round 1: P1 plans the whole cap (A, B); P2 may still ask for kernels that
-    # need no build: A runs, E would need a third build and is cancelled. Round
-    # 2: the cap is spent, but P2 can still re-use B.
+    # need no build: A runs, E would need a third build and is told invalid at
+    # once, without a trial. Round 2: the cap is spent, but P2 re-uses B.
     ad = FakeAdapter({"P1": ABCD, "P2": list("ABCE")})
     s, made, co = run(tmp_path, ad, {"P1": [["A", "B"]], "P2": [["A", "E"], ["B"]]},
                       trials_per_problem=2, new_builds_per_run=2)
     assert ad.builds == [["A", "B"]] and made["P2"].asks == [2, 1]
     assert sorted(pairs(ad.measured)) == [("P1", "A"), ("P1", "B"), ("P2", "A"),
                                           ("P2", "B")]
-    (cancel,) = events(tmp_path / "out", "cancel")
-    assert (cancel["kernel"], cancel["trial_uid"]) == ("E", "P2:2")
-    assert "new_builds_per_run" in cancel["diag"]
-    assert s.counts["cancelled"] == 1 and co.ledger.trials["P2"] == 2
-    assert "P2:2" in made["P2"].pending  # never told, like any cancelled trial
+    assert not events(tmp_path / "out", "cancel") and s.counts["cancelled"] == 0
+    (past,) = [e for e in events(tmp_path / "out", "trial")
+               if e["admission"] == "past_build_cap"]
+    assert (past["kernel"], past["trial_uid"]) == ("E", "P2:2")
+    told = {ob.trial.uid: ob for ob in made["P2"].told}
+    assert told["P2:2"].status == "invalid" and told["P2:2"].key is not None
+    assert "new_builds_per_run" in told["P2:2"].detail
+    assert s.counts["past_build_cap"] == 1 and co.ledger.trials["P2"] == 2
+    assert not made["P2"].pending
     assert s.status == "complete"
+
+
+def _cap_grid():
+    """144 kernels, the same list for every problem."""
+    shapes = itertools.product((32, 64, 128, 256), (32, 64, 128, 256), (32, 64, 128),
+                               ("mem", "compv3", "compv4"))
+    return {f"k{i:03d}": {"tile_m": m, "tile_n": n, "tile_k": k, "pipeline": pl}
+            for i, (m, n, k, pl) in enumerate(shapes)}
+
+
+class CapAdapter(FakeAdapter):
+    """``_cap_grid`` for every problem; a fixed pseudo-random latency per pair."""
+
+    def __init__(self, problems):
+        super().__init__({p: [] for p in problems})
+        self.grid = _cap_grid()
+
+    def enumerate_eligible(self):
+        return {p: [AS.Candidate(n, n, r, None) for n, r in self.grid.items()]
+                for p in self.problems}
+
+    def _lat(self, r):
+        h = hashlib.sha256((r.problem_key + r.kernel_name).encode()).hexdigest()
+        return 1.0 + int(h[:6], 16) % 997 / 100
+
+
+@pytest.mark.parametrize("name", ["de", "hill", "gp", "portfolio"])
+def test_binding_build_cap_strands_no_strategy(tmp_path, name):
+    # Three problems on one 144-kernel list, 32 trials each, 40 builds. Past the
+    # cap, proposals that need a build are told invalid at once: no strategy
+    # waits for them (DE for its generation, hill for its stage, the portfolio
+    # for its members), GP keeps no lie for them, and each problem goes on
+    # with the kernels already built (before: DE 72 and hill 57 of the 96
+    # trials, GP and the portfolio about 100 and 60 pending trials a problem).
+    ad = CapAdapter(["P1", "P2", "P3"])
+    co = AS.SearchCoordinator(
+        ad, settings(strategy=name, trials_per_problem=32, new_builds_per_run=40,
+                     batch_per_problem=4),
+        tmp_path / "out", clock=FakeClock())
+    s = co.run()
+    assert co.ledger.builds == 40 and s.counts["past_build_cap"] > 0
+    assert s.counts["cancelled"] == 0
+    for p in co.problems:
+        assert not p.strategy.pending and "waits" not in p.finished, p.finished
+    assert sum(co.ledger.trials.values()) >= 90, co.ledger.trials
 
 
 def test_build_cap_rotates_the_first_problem(tmp_path):

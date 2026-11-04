@@ -208,9 +208,12 @@ and by the build capacity left once the distinct new kernels the round already
 needs are subtracted. A kernel that is already built, or planned this round,
 costs no further build, so problems that share kernels leave room for others,
 and such reuse goes on after the cap is spent. A proposal that would need a
-build past the cap is cancelled, so a round never plans more builds than
-`new_builds_per_run` allows; the run stops at the cap once no problem has an
-untried candidate that needs no build.
+build past the cap is told `invalid` at once, without a trial (it cannot be
+built in this run), so a round never plans more builds than
+`new_builds_per_run` allows and the strategy moves on to other kernels; the
+run stops at the cap once no problem has an untried candidate that is built.
+A proposal of a kernel whose build already failed, for any problem, is told
+that `compile_error` again without a trial.
 
 Option rules:
 
@@ -253,8 +256,9 @@ Only a verified row of the requested kernel and problem with a finite positive
 latency counts as a result. A verification failure is `numeric_fail`; a blank
 `verified`, a bad latency or unreadable worker output is `invalid_measurement`;
 a worker error, crash or wrong kernel identity is `run_error`; a failed build is
-`compile_error` for every problem that wanted the kernel (one build charged); a
-kernel the worker never reached is retried once. Nothing falls back to an
+`compile_error` for every problem that asked for the kernel in the round that
+built it (one build charged, a trial each) and for any later proposal of it
+(no trial); a kernel the worker never reached is retried once. Nothing falls back to an
 unconfirmed result. A search run asks the worker to check each library's
 identity (`check_identity`): a library whose own name
 (`GpuGemmRunner.kernel_name`, the codegen `KERNEL_NAME` that

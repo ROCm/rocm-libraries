@@ -598,17 +598,21 @@ class SearchCoordinator:
     re-queued trials, then asks its strategy for at most ``batch_per_problem``
     trials in total, capped by its trials left and by the new-build capacity
     left once the distinct new builds this round already needs are subtracted,
-    plus its untried candidates that need no build (built, failed or planned
-    already). A proposal that needs a build once this round's builds spend the
-    cap is cancelled, so a round never plans more builds than the cap allows.
-    Every trial is told before the strategy is asked again; a problem stops at
-    its trial budget, or when its strategy is done or asks nothing while waiting
-    for no result (or only for cancelled trials, which are never told). The run
-    stops when no problem is active, at the deadline (checked before every
-    ask), at the build cap once no active problem has an untried candidate that
-    needs no build, or after ``max_stall_rounds`` rounds in a row without a new
-    result. Any error ends the search; the finalists measured
-    so far are still confirmed, unless the adapter broke its contract.
+    plus its untried candidates that need no build (built or planned already).
+    Two kinds of proposal are told at once, without a trial: a kernel whose
+    build failed already (for any problem) gets that ``compile_error`` as a
+    cached result, and one that needs a build once this round's builds spend
+    the cap is ``invalid`` (it cannot be built in this run), so a round never
+    plans more builds than the cap allows and no strategy waits for such a
+    proposal. Every trial is told before the strategy is asked again; a
+    problem stops at its trial budget, or when its strategy is done or asks
+    nothing while waiting for no result (or only for trials the adapter
+    cancelled, which are never told). The run stops when no problem is
+    active, at the deadline (checked before every ask), at the build cap once
+    no active problem has an untried candidate that is built or planned, or
+    after ``max_stall_rounds`` rounds in a row without a new result. Any error
+    ends the search; the finalists measured so far are still confirmed, unless
+    the adapter broke its contract.
     """
 
     def __init__(
@@ -643,9 +647,9 @@ class SearchCoordinator:
         self.registry = ArtifactRegistry()
         self.problems: List[_Problem] = []
         self.counts: Dict[str, Any] = dict.fromkeys(
-            ("rounds", "proposed", "admitted", "cached", "invalid", "built",
-             "build_failed", "measured", "ok", "requeued", "cancelled",
-             "confirm_calls"), 0
+            ("rounds", "proposed", "admitted", "cached", "invalid", "known_failed",
+             "past_build_cap", "built", "build_failed", "measured", "ok", "requeued",
+             "cancelled", "confirm_calls"), 0
         )
         self.counts["failed_by_status"] = {}
         self.unresolved: Dict[str, str] = {}
@@ -822,9 +826,14 @@ class SearchCoordinator:
         return c.canonical_key not in planned and self.registry.get(c.canonical_key) is None
 
     def _build_free(self, p: _Problem, planned=()) -> int:
-        """``p``'s candidates without a result that need no new build."""
-        return sum(1 for k, i in p.members.items()
-                   if k not in p.seen and not self._needs_build(p.cands[i], planned))
+        """``p``'s candidates without a result that are built, or planned this
+        round, already: work that needs no new build. A failed build is not
+        work: proposing it is answered from its result."""
+        def ready(c):
+            res = self.registry.get(c.canonical_key)
+            return c.canonical_key in planned or (res is not None and res.path is not None)
+
+        return sum(1 for k, i in p.members.items() if k not in p.seen and ready(p.cands[i]))
 
     def _search(self) -> str:
         stall = 0
@@ -851,32 +860,47 @@ class SearchCoordinator:
         told: Dict[str, list] = {p.key: [] for p in active}
         batch = self.settings.batch_per_problem
 
+        def answer(p, t, key, admission, status, detail, **kw):
+            """Tell ``t`` at once, without a trial; ``key`` keeps the answer."""
+            ob = self._ck.Observation(trial=t, key=key, status=status, detail=detail, **kw)
+            told[p.key].append(ob)
+            if key is not None:
+                p.seen[key] = ob
+            self.counts[admission] += 1
+            kernel = {} if key is None else {"kernel": p.cand(key).kernel_name}
+            self._event("trial", admission=admission, problem=p.key, trial_uid=t.uid,
+                        origin=t.origin, **kernel)
+
         def place(p, t, kind):
             """Admit ``t`` (charged), or answer it without spending: a config the
-            space refuses, or one this problem already has a result for (cached).
-            A second trial of a key in flight waits for that result (deferred)."""
+            space refuses, one this problem already has a result for (cached), a
+            kernel whose build failed already (its compile_error, cached), or one
+            that needs a build once this round's builds spend the cap (invalid:
+            it cannot be built in this run). A second trial of a key in flight
+            waits for that result (deferred)."""
             key = p.space.key(t.genome)
             ev = dict(problem=p.key, trial_uid=t.uid, origin=t.origin)
             if key is None:
-                self.counts["invalid"] += 1
-                told[p.key].append(self._ck.Observation(
-                    trial=t, key=None, status=self._ck.Status.INVALID,
-                    detail="refused by the space"))
-                self._event("trial", admission="invalid", **ev)
+                answer(p, t, None, "invalid", self._ck.Status.INVALID,
+                       "refused by the space")
                 return
             c = p.cand(key)
+            res = self.registry.get(c.canonical_key)
             if key in p.seen:
                 self.counts["cached"] += 1
                 told[p.key].append(p.seen[key].replace_trial(t, cached=True))
                 self._event("trial", kernel=c.kernel_name, admission="cached", **ev)
             elif (p.key, key) in inflight:
                 p.deferred.append(t)
+            elif res is not None and res.path is None:
+                # Known like upstream's cache of structural failures: no trial.
+                answer(p, t, key, "known_failed", self._ck.Status.COMPILE_ERROR,
+                       res.reason or "build failed", cached=True)
             elif self._needs_build(c, planned) and len(planned) >= self.ledger.builds_left():
-                # This round's builds spend the cap, so it could never run: like a
-                # cancelled trial it is not charged and stays pending.
-                self.counts["cancelled"] += 1
-                self._event("cancel", kernel=c.kernel_name,
-                            diag="needs a build past new_builds_per_run", **ev)
+                # This round's builds spend the cap: it can never be built in
+                # this run. Told now, so no strategy waits for it.
+                answer(p, t, key, "past_build_cap", self._ck.Status.INVALID,
+                       "needs a build past new_builds_per_run")
             else:
                 self.ledger.admit(p.key)
                 self.counts["admitted"] += 1
@@ -952,8 +976,9 @@ class SearchCoordinator:
                 elif p.strategy.done:
                     p.finished = "strategy done"
                 elif p.asked_empty:
-                    # Every trial is told by now except cancelled ones, which
-                    # never are: a strategy waiting for one asks nothing more.
+                    # Every trial is told by now except those the adapter
+                    # cancelled, which never are: a strategy waiting for one
+                    # asks nothing more.
                     waiting = len(getattr(p.strategy, "pending", None) or ())
                     p.finished = (f"strategy waits for {waiting} cancelled trial(s)"
                                   if waiting else "strategy done")
