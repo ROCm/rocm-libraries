@@ -41,6 +41,9 @@ enum Uid : int64_t
     DROPOUT_MASK = 40,
     DROPOUT_SCALE = 41,
     BLOCK_MASK = 50,
+    SEED = 60,
+    OFFSET = 61,
+    RNG_DUMP = 62,
 };
 
 // Q [1, 2, 4, 8] in fp8Type with bf16 (or oType) O and `descales` scalar Q/K/V descales (K's dims
@@ -49,6 +52,8 @@ enum Uid : int64_t
 // pagedK pages K through a [1, 1, 2, 1] table over [2, 2, 4, 8] blocks with seq_len tensors (V
 // dense at the 8-key extent). dropout adds an explicit dropout mask and scale. blockMaskType adds a
 // block mask of that dtype and blockMaskDims (cuDNN's shape for these graphs is [1, 2, 1, 1]).
+// dropoutProbability adds Philox dropout at that probability with an INT64 [1] seed and offset;
+// rngDump adds its FLOAT [1, 2, 4, Skv] rng_dump output.
 struct SdpaGraphSpec
 {
     DataType fp8Type = DataType::FP8_E4M3;
@@ -66,6 +71,8 @@ struct SdpaGraphSpec
     std::vector<int64_t> scalingDims = {1, 1, 1, 1};
     bool pagedK = false;
     bool dropout = false;
+    std::optional<float> dropoutProbability;
+    bool rngDump = false;
     std::optional<DataType> blockMaskType;
     std::vector<int64_t> blockMaskDims = {1, 2, 1, 1};
 
@@ -158,6 +165,19 @@ inline flatbuffers::FlatBufferBuilder makeSdpaGraph(const SdpaGraphSpec& spec)
         add(DROPOUT_SCALE, "DropoutScale", DataType::FLOAT, scalarDims);
         attrs.dropout_mask_tensor_uid = DROPOUT_MASK;
         attrs.dropout_scale_tensor_uid = DROPOUT_SCALE;
+    }
+    if(spec.dropoutProbability.has_value())
+    {
+        add(SEED, "Seed", DataType::INT64, scalarDims);
+        add(OFFSET, "Offset", DataType::INT64, scalarDims);
+        attrs.dropout_probability = spec.dropoutProbability.value();
+        attrs.seed_tensor_uid = SEED;
+        attrs.offset_tensor_uid = OFFSET;
+    }
+    if(spec.rngDump)
+    {
+        add(RNG_DUMP, "RngDump", DataType::FLOAT, dropoutDims);
+        attrs.rng_dump_tensor_uid = RNG_DUMP;
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);

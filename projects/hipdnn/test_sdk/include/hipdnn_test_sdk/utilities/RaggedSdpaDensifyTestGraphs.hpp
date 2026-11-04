@@ -94,12 +94,14 @@ inline std::vector<int64_t> denseStrides(int64_t s)
 }
 
 // One-node ragged SDPA graph: forward (Q, K, V -> O, packed LSE) or backward (Q, K, V, O, dO,
-// packed LSE -> dQ, dK, dV), optionally with a FLOAT bias [1, 1, SQ, SKV].
-inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = true)
+// packed LSE -> dQ, dK, dV), optionally with a FLOAT bias [1, 1, SQ, SKV]. dataType is the type
+// of the Q/K/V/O (and dO/dQ/dK/dV) tensors; the LSE and the bias stay FLOAT.
+inline std::vector<uint8_t>
+    raggedGraph(bool backward, bool bias, bool ragged = true, DataType dataType = DataType::FLOAT)
 {
     GraphT graph;
     graph.name = "ragged";
-    graph.io_data_type = DataType::FLOAT;
+    graph.io_data_type = dataType;
     graph.compute_data_type = DataType::FLOAT;
     graph.intermediate_data_type = DataType::FLOAT;
     const auto qOff = ragged ? std::optional<int64_t>(Q_OFFSETS) : std::nullopt;
@@ -109,10 +111,10 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
     const std::vector<int64_t> lseStrides
         = ragged ? std::vector<int64_t>{SQ * H, 1, H, 1} : std::vector<int64_t>{H * SQ, SQ, 1, 1};
     auto& t = graph.tensors;
-    t.push_back(tensor(Q, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
-    t.push_back(tensor(K, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
-    t.push_back(tensor(V, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
-    t.push_back(tensor(O, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
+    t.push_back(tensor(Q, dataType, {B, H, SQ, D}, qs, qOff));
+    t.push_back(tensor(K, dataType, {B, H, SKV, D}, ks, kvOff));
+    t.push_back(tensor(V, dataType, {B, H, SKV, D}, ks, kvOff));
+    t.push_back(tensor(O, dataType, {B, H, SQ, D}, qs, qOff));
     t.push_back(tensor(STATS, DataType::FLOAT, {B, H, SQ, 1}, lseStrides, qOff));
     if(ragged)
     {
@@ -133,10 +135,10 @@ inline std::vector<uint8_t> raggedGraph(bool backward, bool bias, bool ragged = 
     node->compute_data_type = DataType::FLOAT;
     if(backward)
     {
-        t.push_back(tensor(DO, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
-        t.push_back(tensor(DQ, DataType::FLOAT, {B, H, SQ, D}, qs, qOff));
-        t.push_back(tensor(DK, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
-        t.push_back(tensor(DV, DataType::FLOAT, {B, H, SKV, D}, ks, kvOff));
+        t.push_back(tensor(DO, dataType, {B, H, SQ, D}, qs, qOff));
+        t.push_back(tensor(DQ, dataType, {B, H, SQ, D}, qs, qOff));
+        t.push_back(tensor(DK, dataType, {B, H, SKV, D}, ks, kvOff));
+        t.push_back(tensor(DV, dataType, {B, H, SKV, D}, ks, kvOff));
         SdpaBackwardAttributesT attrs;
         attrs.q_tensor_uid = Q;
         attrs.k_tensor_uid = K;

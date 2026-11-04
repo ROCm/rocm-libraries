@@ -74,7 +74,18 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
     // kernel needs is a runtime argument. A missing class would decline silently -- the graph
     // would simply plan on another engine -- and a duplicate would make the choice
     // between two objects for one class an accident of descriptor ids.
-    std::set<std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> classes;
+    // The pair tiers (v_mask) are classes of their own: they serve only graphs whose Q/K and V
+    // head dims differ.
+    std::set<std::tuple<std::string,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t,
+                        int64_t>>
+        classes;
     size_t kernels = 0;
     // (dtype, head_dim, head_dim_v, causal) of every object whose V is narrower (MLA).
     std::set<std::tuple<std::string, int64_t, int64_t, int64_t>> mla;
@@ -103,7 +114,21 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
             const auto* hasSink
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HAS_SINK_FIELD);
             ASSERT_NE(hasSink, nullptr) << kernel.name;
-            classes.emplace(*dtype, *headDim, *causal, *hasBias, *biasQ, *headDimMax, *hasSink);
+            const auto* hasDropout
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_AIW_HAS_DROPOUT_FIELD);
+            ASSERT_NE(hasDropout, nullptr) << kernel.name;
+            const auto* vMask
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_V_MASK_FIELD);
+            ASSERT_NE(vMask, nullptr) << kernel.name;
+            classes.emplace(*dtype,
+                            *headDim,
+                            *causal,
+                            *hasBias,
+                            *biasQ,
+                            *headDimMax,
+                            *hasSink,
+                            *hasDropout,
+                            *vMask);
             const auto* headDimV
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD);
             ASSERT_NE(headDimV, nullptr) << kernel.name;
@@ -130,6 +155,12 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
         for(const int64_t causal : {0, 1})
         {
             EXPECT_EQ(mla.count({dtype, 192, 128, causal}), 1U) << dtype << " causal=" << causal;
+            // With a bias, f32 and in the query's dtype (N2).
+            for(const int64_t biasQ : {0, 1})
+            {
+                EXPECT_EQ(classes.count({dtype, 192, causal, 1, biasQ, 192, 0, 0, 0}), 1U)
+                    << dtype << " MLA bias causal=" << causal << " bias_q=" << biasQ;
+            }
         }
     }
     for(const char* dtype : {"bf16", "f16"})
@@ -142,32 +173,138 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
                 for(const auto& [hasBias, biasQ] :
                     {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
                 {
-                    EXPECT_EQ(classes.count({dtype, headDim, causal, hasBias, biasQ, headDim, 0}),
-                              1U)
+                    EXPECT_EQ(
+                        classes.count({dtype, headDim, causal, hasBias, biasQ, headDim, 0, 0, 0}),
+                        1U)
                         << dtype << " head_dim=" << headDim << " causal=" << causal
                         << " has_bias=" << hasBias << " bias_q=" << biasQ;
                 }
             }
         }
-        // The generic tiers: head_dim read at runtime, no bias, each up to its largest head.
+        // The generic tiers: head_dim read at runtime, each up to its largest head, without a
+        // bias, with an f32 one and with one in the query's dtype, as the specialized ones.
         for(const int64_t headDimMax : {64, 96, 128, 160, 224, 256})
         {
             for(const int64_t causal : {0, 1})
             {
-                EXPECT_EQ(classes.count({dtype, 0, causal, 0, 0, headDimMax, 0}), 1U)
-                    << dtype << " generic head_dim up to " << headDimMax << " causal=" << causal;
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(
+                        classes.count({dtype, 0, causal, hasBias, biasQ, headDimMax, 0, 0, 0}), 1U)
+                        << dtype << " generic head_dim up to " << headDimMax << " causal=" << causal
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
+                }
             }
         }
-        // Attention sinks: gpt-oss's head dims, no bias.
+        // Attention sinks: gpt-oss's head dims, alone and with a bias in f32 or the query's
+        // dtype (N1).
         for(const int64_t headDim : {64, 128})
         {
             for(const int64_t causal : {0, 1})
             {
-                EXPECT_EQ(classes.count({dtype, headDim, causal, 0, 0, headDim, 1}), 1U)
-                    << dtype << " sink head_dim=" << headDim << " causal=" << causal;
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(
+                        classes.count({dtype, headDim, causal, hasBias, biasQ, headDim, 1, 0, 0}),
+                        1U)
+                        << dtype << " sink head_dim=" << headDim << " causal=" << causal
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
+                }
+            }
+        }
+        // Dropout twins (kernel modification 27), on gfx11 only: the specialized head dims, no
+        // bias, no sink. On gfx12 the aiw objects serve dropout (decision Q3).
+        // The census checks one arch's shard; its packs name the arch.
+        const bool gfx11 = std::any_of(set.packs.begin(), set.packs.end(), [](const auto& pack) {
+            return std::any_of(pack.arch.begin(), pack.arch.end(), [](const std::string& arch) {
+                return arch.rfind("gfx11", 0) == 0;
+            });
+        });
+        for(const int64_t headDim : {64, 96, 128, 256})
+        {
+            for(const int64_t causal : {0, 1})
+            {
+                // Without a bias, with an f32 one and with one in the query's dtype (R2).
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(
+                        classes.count({dtype, headDim, causal, hasBias, biasQ, headDim, 0, 1, 0}),
+                        gfx11 ? 1U : 0U)
+                        << dtype << " dropout head_dim=" << headDim << " causal=" << causal
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
+                }
+            }
+        }
+        // Dropout on the generic tiers (AOTriton's dropout widths), gfx11 only: up to 64, 96,
+        // 160 and 256, without a bias, with an f32 one and with one in the query's dtype.
+        for(const int64_t headDimMax : {64, 96, 160, 256})
+        {
+            for(const int64_t causal : {0, 1})
+            {
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
+                {
+                    EXPECT_EQ(
+                        classes.count({dtype, 0, causal, hasBias, biasQ, headDimMax, 0, 1, 0}),
+                        gfx11 ? 1U : 0U)
+                        << dtype << " generic dropout up to " << headDimMax << " causal=" << causal
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
+                }
+            }
+        }
+        // The pair tiers (kernel modification 32): any Q/K and V head dims that differ, up to
+        // 64, 128 and 256, no sink or dropout, on both targets; with a bias (f32 or the query's
+        // dtype, the parity gaps' E5) on gfx11, where no aiw object serves a pair with a mask.
+        for(const int64_t headDimMax : {64, 128, 256})
+        {
+            for(const int64_t causal : {0, 1})
+            {
+                EXPECT_EQ(classes.count({dtype, 0, causal, 0, 0, headDimMax, 0, 0, 1}), 1U)
+                    << dtype << " pair tier up to " << headDimMax << " causal=" << causal;
+                for(const int64_t biasQ : {0, 1})
+                {
+                    EXPECT_EQ(classes.count({dtype, 0, causal, 1, biasQ, headDimMax, 0, 0, 1}),
+                              gfx11 ? 1U : 0U)
+                        << dtype << " pair tier with a bias up to " << headDimMax
+                        << " causal=" << causal << " bias_q=" << biasQ;
+                }
             }
         }
     }
+    const bool gfx11Shard = std::any_of(set.packs.begin(), set.packs.end(), [](const auto& pack) {
+        return std::any_of(pack.arch.begin(), pack.arch.end(), [](const std::string& arch) {
+            return arch.rfind("gfx11", 0) == 0;
+        });
+    });
+    const auto pairs = std::count_if(
+        classes.begin(), classes.end(), [](const auto& c) { return std::get<8>(c) == 1; });
+    EXPECT_EQ(pairs, gfx11Shard ? 36 : 12);
+    // Exact f32 (kernel modification 34), on both targets: generic tiers up to 64, 128 and
+    // 256, causal or not, without and with an f32 bias, without and with dropout; no sink, no
+    // pair tier, no bias in another dtype.
+    for(const int64_t headDimMax : {64, 128, 256})
+    {
+        for(const int64_t causal : {0, 1})
+        {
+            for(const int64_t hasBias : {0, 1})
+            {
+                for(const int64_t hasDropout : {0, 1})
+                {
+                    EXPECT_EQ(
+                        classes.count({"f32", 0, causal, hasBias, 0, headDimMax, 0, hasDropout, 0}),
+                        1U)
+                        << "f32 up to " << headDimMax << " causal=" << causal
+                        << " has_bias=" << hasBias << " has_dropout=" << hasDropout;
+                }
+            }
+        }
+    }
+    const auto f32Classes = std::count_if(
+        classes.begin(), classes.end(), [](const auto& c) { return std::get<0>(c) == "f32"; });
+    EXPECT_EQ(f32Classes, 24);
 }
 
 TEST(TestFlydslSdpaRdnaPacks, RanksTheNarrowestServingObjectFirst)
@@ -185,7 +322,12 @@ TEST(TestFlydslSdpaRdnaPacks, RanksTheNarrowestServingObjectFirst)
         int64_t headDimMax;
         int64_t priority;
     };
-    std::map<std::tuple<std::string, int64_t, bool>, std::vector<Ranked>> families;
+    // A pair tier (v_mask) is its own family: it serves only graphs whose two head dims
+    // differ, which no other object here serves, so it ranks only against other pair tiers.
+    // So is a dropout object (has_dropout): it serves only graphs that drop.
+    std::map<std::tuple<std::string, int64_t, bool, int64_t, int64_t, int64_t, int64_t>,
+             std::vector<Ranked>>
+        families;
     size_t checked = 0;
     for(const auto& pack : set.packs)
     {
@@ -199,11 +341,20 @@ TEST(TestFlydslSdpaRdnaPacks, RanksTheNarrowestServingObjectFirst)
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_CAUSAL_FIELD);
             const auto* headDimMax = tryGetMetadataField<int64_t>(
                 kernel.metadata, FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD);
+            const auto* hasBias
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD);
+            const auto* biasQ
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_BIAS_Q_FIELD);
+            const auto* vMask
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_V_MASK_FIELD);
+            const auto* hasDropout
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_AIW_HAS_DROPOUT_FIELD);
             ASSERT_TRUE(dtype != nullptr && headDim != nullptr && causal != nullptr
-                        && headDimMax != nullptr)
+                        && headDimMax != nullptr && hasBias != nullptr && biasQ != nullptr
+                        && vMask != nullptr && hasDropout != nullptr)
                 << kernel.name;
-            families[{*dtype, *causal, *headDim == 0}].push_back(
-                {*headDimMax, static_cast<int64_t>(kernel.priority)});
+            families[{*dtype, *causal, *headDim == 0, *hasBias, *biasQ, *vMask, *hasDropout}]
+                .push_back({*headDimMax, static_cast<int64_t>(kernel.priority)});
             ++checked;
         }
     }
@@ -227,7 +378,7 @@ TEST(TestFlydslSdpaRdnaPacks, RanksTheNarrowestServingObjectFirst)
     };
     for(const auto& [key, ranked] : families)
     {
-        const auto& [dtype, causal, generic] = key;
+        const auto& [dtype, causal, generic, hasBias, biasQ, vMask, hasDropout] = key;
         if(generic)
         {
             auto tiers = ranked;
@@ -241,29 +392,48 @@ TEST(TestFlydslSdpaRdnaPacks, RanksTheNarrowestServingObjectFirst)
                     << tiers[i - 1].headDimMax << " must outrank the one up to "
                     << tiers[i].headDimMax;
             }
-            const auto exact = families.find({dtype, causal, false});
+            // The f32 objects (kernel modification 34) are generic tiers only.
+            if(dtype == "f32")
+            {
+                EXPECT_EQ(families.count({dtype, causal, false, hasBias, biasQ, 0, hasDropout}),
+                          0U);
+                continue;
+            }
+            const auto exact = families.find({dtype, causal, false, hasBias, biasQ, 0, hasDropout});
             ASSERT_NE(exact, families.end());
             EXPECT_GT(lowest(exact->second), highest(ranked))
                 << dtype << " causal=" << causal
                 << ": an exact head_dim object must outrank every generic tier";
+            if(vMask == 1)
+            {
+                const auto equal
+                    = families.find({dtype, causal, true, hasBias, biasQ, 0, hasDropout});
+                ASSERT_NE(equal, families.end());
+                EXPECT_GT(lowest(equal->second), highest(ranked))
+                    << dtype << " causal=" << causal
+                    << ": every generic tier must outrank every pair tier";
+            }
         }
     }
 }
 
-TEST(TestFlydslSdpaRdnaPacks, EveryKernelDeclaresTheThirtyEightSlotSignature)
+TEST(TestFlydslSdpaRdnaPacks, EveryKernelDeclaresTheFortySevenSlotSignature)
 {
     const auto& set = loadedSet(FLYDSL_SDPA_RDNA.engineName);
 
     // Q, K, V, O, LSE pointers; eight i32 (seq_len_q, seq_len_kv, num_heads, kv_group,
-    // right_bound, left_bound, align_bottom_right, lse_on); the f32 scale; fifteen i64
+    // right_bound, left_bound, align_bottom_right, flags); the f32 scale; fifteen i64
     // strides from offset 80; then the bias pointer at 200 and its four i64 strides from
     // 208, then the runtime head_dim (i32) at 240, the query heads per V head (i32) at 244,
-    // and the sink pointer at 248 and its i64 head stride at 256 -- each appended so every
-    // earlier slot kept its offset. Most slots share a size
+    // the sink pointer at 248 and its i64 head stride at 256; the per-batch length and
+    // packed-sequence offset pointers and the dropout seed and offset1 pointers from 264,
+    // dropout offset2 (i64) at 312, the threshold (i32) at 320 and the scale (f32) at 324
+    // (kernel modification 26) -- each appended so every earlier slot kept its offset.
+    // Most slots share a size
     // with a neighbour, so a permutation is invisible to the loader's kind-and-size check --
     // the semantic names in the manifest are the only record of which is which, and this
     // table is what a regenerated layout has to agree with.
-    constexpr size_t SLOTS = 38;
+    constexpr size_t SLOTS = 47;
     size_t checked = 0;
     for(const auto& pack : set.packs)
     {
@@ -305,10 +475,24 @@ TEST(TestFlydslSdpaRdnaPacks, EveryKernelDeclaresTheThirtyEightSlotSignature)
                     size = 4;
                     offset = static_cast<uint32_t>(240 + 4 * (slot - 34));
                 }
-                else
+                else if(slot < 38)
                 {
                     kind = slot == 36 ? "global_buffer" : "by_value";
                     offset = static_cast<uint32_t>(248 + 8 * (slot - 36));
+                }
+                else if(slot < 44)
+                {
+                    kind = "global_buffer";
+                    offset = static_cast<uint32_t>(264 + 8 * (slot - 38));
+                }
+                else if(slot == 44)
+                {
+                    offset = 312;
+                }
+                else
+                {
+                    size = 4;
+                    offset = static_cast<uint32_t>(320 + 4 * (slot - 45));
                 }
                 EXPECT_EQ(argument.kind, kind) << kernel.name << " slot " << slot;
                 EXPECT_EQ(argument.size, size) << kernel.name << " slot " << slot;
