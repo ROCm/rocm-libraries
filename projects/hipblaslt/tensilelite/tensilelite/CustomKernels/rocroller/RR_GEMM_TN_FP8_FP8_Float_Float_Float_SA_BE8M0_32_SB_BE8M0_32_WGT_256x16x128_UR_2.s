@@ -2395,6 +2395,7 @@ custom.config:
     macrotile: [256, 16, 128]
     threads: [128, 1, 1]
     grid: [TilesX, TilesY, Batch]
+    uniformSummationOrder: true
   MatrixInstruction: [16, 16, 128, 1]
   StaggerU: 0
   EnableMatrixInstruction: True

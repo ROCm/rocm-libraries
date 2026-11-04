@@ -3876,6 +3876,7 @@ custom.config:
     macrotile: [32, 32, 128]
     threads: [256, 1, 1]
     grid: [TilesXY, One, Batch]
+    uniformSummationOrder: true
   MatrixInstruction: [16, 16, 128, 1]
   EnableMatrixInstruction: True
   MIWaveTile: [1, 1]

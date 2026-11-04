@@ -312,6 +312,7 @@ Solutions:
     macrotile: [32, 32, 64]
     name: RR_GEMM_TN_FP8_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2
     threads: [64, 1, 1]
+    uniformSummationOrder: true
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -383,6 +384,7 @@ Solutions:
     macrotile: [16, 16, 128]
     name: RR_GEMM_TN_FP8_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2
     threads: [64, 1, 1]
+    uniformSummationOrder: true
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeGreaterThan, index: 1, value: 15}
@@ -469,6 +471,7 @@ Solutions:
     macrotile: [16, 16, 128]
     name: RR_GEMM_TN_FP8_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2_WGM_
     threads: [64, 1, 1]
+    uniformSummationOrder: true
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeGreaterThan, index: 3, value: 127}
@@ -543,6 +546,7 @@ Solutions:
     macrotile: [256, 256, 128]
     name: RR_GEMM_TN_FP8_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2
     threads: [256, 1, 1]
+    uniformSummationOrder: true
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -625,6 +629,7 @@ Solutions:
     macrotile: [256, 256, 128]
     name: RR_GEMM_TN_FP8_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_
     threads: [256, 1, 1]
+    uniformSummationOrder: true
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 255}
   - {tag: SizeGreaterThan, index: 3, value: 127}
@@ -699,6 +704,7 @@ Solutions:
     macrotile: [32, 128, 128]
     name: RR_GEMM_TN_FP8_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2
     threads: [256, 1, 1]
+    uniformSummationOrder: true
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 31}
   - {tag: SizeGreaterThan, index: 3, value: 127}
@@ -773,6 +779,7 @@ Solutions:
     macrotile: [32, 64, 128]
     name: RR_GEMM_TN_FP8_BF6_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2
     threads: [256, 1, 1]
+    uniformSummationOrder: true
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 31}
   - {tag: SizeGreaterThan, index: 3, value: 127}
