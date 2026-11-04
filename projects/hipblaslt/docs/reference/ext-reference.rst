@@ -44,11 +44,12 @@ GemmInputs
     :protected-members:
     :private-members:
 
-For ``Gemm`` and ``GroupedGemm``, ``setScaleAlphaScalar(deviceAlpha)`` selects a single
-device-resident FP32 alpha. It replaces the host value supplied to ``setAlpha()``;
-no host alpha pointer is required. Beta remains host-resident. The device value
-is read during execution, so the allocation must remain valid until the operation
-completes. Algorithm selection requires a kernel with device scalar alpha support.
+For ``Gemm`` and ``GroupedGemm``, ``setScaleAlphaScalar(deviceAlpha)`` uses
+the FP32 value pointed to by ``deviceAlpha`` in device memory as alpha.
+In this mode, the host alpha pointer supplied to ``setAlpha()`` is ignored.
+Beta remains host-resident. The device value is read during execution,
+so the allocation must remain valid until the operation completes.
+Algorithm selection requires a kernel with device scalar alpha support.
 
 .. code-block:: c++
 
