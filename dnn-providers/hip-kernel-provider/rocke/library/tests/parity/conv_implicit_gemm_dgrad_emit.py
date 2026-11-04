@@ -1775,6 +1775,15 @@ _GFX942_3D_XH[112] = dict(_GFX942_3D_XH[77], xh_b_kpad=0)
 _GFX942_3D_XH[113] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True)
 _GFX942_3D_XH[114] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True, xh_epi_lin=False)
 _GFX942_3D_XH[115] = dict(_GFX942_3D_XH[81], xh_dx_wmask=True)
+# 118-121: the direct x-halo epilogues on 77's loop: xh_epi 2 (8-byte
+# stores; no xh_stride_m), xh_epi 3 (16-byte stores through the xor-16 lane
+# exchange), and both with xh_dx_wmask.
+_GFX942_3D_XH[118] = dict(
+    _GFX942_3D_XH[77], xh_epi=2, xh_epi_lin=False, xh_stride_m=False
+)
+_GFX942_3D_XH[119] = dict(_GFX942_3D_XH[77], xh_epi=3, xh_epi_lin=False)
+_GFX942_3D_XH[120] = dict(_GFX942_3D_XH[118], xh_dx_wmask=True)
+_GFX942_3D_XH[121] = dict(_GFX942_3D_XH[119], xh_dx_wmask=True)
 
 
 def _gfx942_3d_xh_spec(idx: int):

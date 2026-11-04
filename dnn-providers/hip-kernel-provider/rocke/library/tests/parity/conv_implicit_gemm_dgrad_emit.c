@@ -510,6 +510,17 @@ static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** 
             spec->xh_epi_lin = false;
         return r;
     }
+    if(idx >= 118 && idx <= 121)
+    {
+        /* xh_epi 2 (no xh_stride_m) / 3 on 77's loop, 120-121 with xh_dx_wmask */
+        const int r = make_cfg_3d_xh(77, spec, arch);
+        spec->xh_epi = (idx % 2 == 0) ? 2 : 3;
+        spec->xh_epi_lin = false;
+        if(spec->xh_epi == 2)
+            spec->xh_stride_m = false;
+        spec->xh_dx_wmask = idx >= 120;
+        return r;
+    }
     if(idx == 116 || idx == 117)
     {
         /* pp_boxes 8 (pp_boxes 7's binary) on 105 and 76 */

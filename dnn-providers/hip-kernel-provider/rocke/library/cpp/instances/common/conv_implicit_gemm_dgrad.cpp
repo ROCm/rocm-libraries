@@ -785,6 +785,31 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             return false;
         }
     }
+    /* _xhalo_knob_conflict: xh_epi (Python checks it after xh_fast_a / xh_persist). */
+    {
+        const int xe = s->xh_epi;
+        const int mc_ = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
+        const int mpw_ = rocke_dgrad_conv_spec_mfmas_per_warp_m(s);
+        const int npw_ = rocke_dgrad_conv_spec_mfmas_per_warp_n(s);
+        const bool atom16 = s->warp_tile_m == 16 && s->warp_tile_n == 16;
+        const bool atom32 = s->warp_tile_m == 32 && s->warp_tile_n == 32;
+        const long slab = (long)(s->tile_m / mc_) * s->tile_n;
+        if(xe < 0 || xe > 3 || (xe == 3 && !(atom16 && npw_ % 2 == 0))
+           || (xe
+               && !(s->tapk_xhalo && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0
+                    && s->split_k == 1 && s->dtype_d && strcmp(s->dtype_d, "bf16") == 0
+                    && s->dtype_a && strcmp(s->dtype_a, "bf16") == 0 && s->wave_size == 64
+                    && !s->lds_k_outer && (atom16 || atom32) && mpw_ % mc_ == 0
+                    && slab % (8L * rocke_dgrad_conv_spec_block_size(s)) == 0)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "xh_epi is 0..3 and needs tapk_xhalo, the cshuffle epilogue, split_k 1, bf16, "
+                     "16x16 / 32x32 atoms and a C slab of whole 8-wide vectors per thread "
+                     "(3: 16x16 atoms and an even number of MFMAs per wave along N)");
+            return false;
+        }
+    }
     /* _xhalo_knob_conflict: xh_order, xh_stride_m and xh_tap_rsrc. */
     {
         const bool tpf13 = s->tapk_prefetch == 1 || s->tapk_prefetch == 3;
@@ -926,6 +951,22 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                  "xh_dx_wmask needs the 3-D x-halo loop with its cshuffle epilogue (xh_epi >= 1)");
         return false;
     }
+    /* _xhalo_knob_conflict: xh_epi_lin (after the xh_dx_wmask rule). */
+    {
+        const bool cshuffle = s->epilogue && strcmp(s->epilogue, "cshuffle") == 0;
+        const bool pp_dense = s->tapk_pp_epi && s->tapk_pingpong && cshuffle && s->split_k == 1
+                              && !s->tapk_xhalo && !s->pp_boxes && !s->pp_streamk
+                              && !s->tapk_pp_persist && !s->async_dma;
+        if(s->xh_epi_lin
+           && !((s->tapk_xhalo && s->xh_epi == 1 && s->split_k == 1 && cshuffle) || pp_dense))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "xh_epi_lin needs the x-halo cshuffle epilogue (xh_epi 1) or the dense "
+                     "tapk_pp_epi one, split_k 1");
+            return false;
+        }
+    }
     if(s->xh_a_k4
        && !(s->tapk_xhalo && s->lds_xor && (s->tile_k == 16 || s->tile_k == 32 || s->tile_k == 64)
             && s->warp_tile_m * s->warp_tile_k / s->wave_size == 4
@@ -954,7 +995,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
        || s->tapk_pp_persist || s->tapk_pp_xhalo || (s->tapk_ztrim && !xh_ok && !s->tapk_pingpong)
        || (s->tapk_pp_bslab && !s->tapk_pingpong) || (s->xh_a_k4 && !xh_ok)
        || (s->xh_order && !xh_ok) || (s->xh_defer && !xh_ok) || (s->xh_fast_a && !xh_ok)
-       || (s->xh_epi && !xh_ok) || s->xh_epi > 1 || s->xh_persist || s->pp_streamk || s->pp_sk_mode
+       || (s->xh_epi && !xh_ok) || s->xh_persist || s->pp_streamk || s->pp_sk_mode
        || (s->pp_boxes && !s->tapk_pingpong)
        || (s->pp_box_det
            && !((s->pp_box_det == 1 || s->pp_box_det == 2) && s->pp_boxes && s->split_k > 1))
@@ -3299,6 +3340,155 @@ static void _emit_xh_cshuffle_epilogue(rocke_ir_builder_t* b,
         wm_hw = rocke_b_const_i32(b, (spec->problem.X - 1) / 2);
         wm_hi = rocke_b_sub(b, params->p_Wi, wm_hw);
     }
+    /* dx_addr (wrapped by _xh_wmask_wrap under xh_dx_wmask). */
+    auto dx_addr = [&](rocke_value_t* m_val, rocke_value_t* n_val, rocke_value_t** valid_out) {
+        rocke_value_t* valid = NULL;
+        rocke_value_t* off = _dgrad_dx_addr_fn(b, m_val, n_val, &valid, &addr_ctx);
+        if(wmask)
+        {
+            rocke_value_t *q_, *wi;
+            _magic_divmod(b, m_val, &md_w, &q_, &wi);
+            (void)q_;
+            rocke_value_t* ge = rocke_b_cmp_ge(b, wi, wm_hw);
+            rocke_value_t* lt = rocke_b_cmp_lt(b, wi, wm_hi);
+            rocke_value_t* okw = rocke_b_land(b, ge, lt);
+            valid = valid == NULL ? okw : rocke_b_land(b, valid, okw);
+        }
+        *valid_out = valid;
+        return off;
+    };
+    /* The direct stores (no LDS staging) of xh_epi 2 and 3. */
+    auto direct_store = [&](rocke_value_t* m_val,
+                            rocke_value_t* n_val,
+                            int vec_n,
+                            rocke_value_t* c_eb2,
+                            rocke_value_t* oob2,
+                            rocke_value_t* v,
+                            int n_words) {
+        rocke_value_t* ok
+            = rocke_direct_epilogue_bounds_check(b, m_val, n_val, bound_m, bound_n, vec_n);
+        rocke_value_t* valid = NULL;
+        rocke_value_t* off_elems = dx_addr(m_val, n_val, &valid);
+        if(valid != NULL)
+            ok = ok == NULL ? valid : rocke_b_land(b, ok, valid);
+        rocke_value_t* off_b = rocke_b_mul(b, off_elems, c_eb2);
+        rocke_value_t* safe = ok != NULL ? rocke_b_select(b, ok, off_b, oob2) : off_b;
+        rocke_b_buffer_store_vN_bf16(b, dx_rsrc, safe, rocke_b_const_i32(b, 0), v, n_words);
+    };
+    if(spec->xh_epi == 3)
+    {
+        /* Direct 16-byte stores: lanes l and l ^ 16 exchange each pair of N
+         * fragments (ds_swizzle xor 16) so each lane holds 8 consecutive
+         * channels of one fragment. */
+        const int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
+        const int mfmas_n = rocke_dgrad_conv_spec_mfmas_per_warp_n(spec);
+        rocke_value_t* lane = grid->lane;
+        rocke_value_t* r_l = rocke_b_land(b, lane, rocke_b_const_i32(b, 15));
+        rocke_value_t* g_v = rocke_b_lshr(b, lane, rocke_b_const_i32(b, 4));
+        rocke_value_t* odd_v = rocke_b_land(b, g_v, rocke_b_const_i32(b, 1));
+        rocke_value_t* is_odd = rocke_b_cmp_ne(b, odd_v, rocke_b_const_i32(b, 0));
+        rocke_value_t* o4 = rocke_b_shl(b, odd_v, rocke_b_const_i32(b, 4));
+        rocke_value_t* g2 = rocke_b_land(b, g_v, rocke_b_const_i32(b, 2));
+        rocke_value_t* g22 = rocke_b_shl(b, g2, rocke_b_const_i32(b, 2));
+        rocke_value_t* n_l = rocke_b_add(b, o4, g22);
+        rocke_value_t* wm = rocke_warp_grid_warp_m_off(b, grid);
+        rocke_value_t* wn = rocke_warp_grid_warp_n_off(b, grid);
+        rocke_value_t* wnl = rocke_b_add(b, wn, n_l);
+        rocke_value_t* n_base = rocke_b_add(b, grid->block_n_off, wnl);
+        rocke_value_t* c_eb2 = rocke_b_const_i32(b, 2);
+        rocke_value_t* oob2 = rocke_b_const_i32(b, 2147483647);
+        rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+        rocke_value_t* bias = rocke_b_const_i32(b, 0x7FFF);
+        auto words = [&](rocke_value_t* acc, rocke_value_t** out) {
+            rocke_value_t* his[4];
+            for(int j = 0; j < 4; ++j)
+            {
+                rocke_value_t* e = rocke_b_vec_extract(b, acc, j);
+                rocke_value_t* xi = rocke_b_bitcast(b, e, rocke_i32());
+                rocke_value_t* xs = rocke_b_lshr(b, xi, c16);
+                rocke_value_t* lsb = rocke_b_land(b, xs, c1);
+                rocke_value_t* xb = rocke_b_add(b, xi, bias);
+                rocke_value_t* xl = rocke_b_add(b, xb, lsb);
+                his[j] = rocke_b_lshr(b, xl, c16);
+            }
+            for(int k = 0; k < 2; ++k)
+            {
+                rocke_value_t* hi = rocke_b_shl(b, his[2 * k + 1], c16);
+                out[k] = rocke_b_lor(b, his[2 * k], hi);
+            }
+        };
+        for(int mi = 0; mi < mfmas_m; ++mi)
+        {
+            rocke_value_t* row;
+            if(spec->xh_stride_m)
+            {
+                rocke_value_t* rs = rocke_b_mul(b, r_l, rocke_b_const_i32(b, mfmas_m));
+                row = rocke_b_add(b, rs, rocke_b_const_i32(b, mi));
+            }
+            else
+                row = rocke_b_add(b, rocke_b_const_i32(b, mi * 16), r_l);
+            rocke_value_t* wr = rocke_b_add(b, wm, row);
+            rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, wr);
+            for(int jp = 0; jp < mfmas_n / 2; ++jp)
+            {
+                rocke_value_t *w0[2], *w1[2], *rc[2], *outw[4];
+                words(accs[mi * mfmas_n + 2 * jp], w0);
+                words(accs[mi * mfmas_n + 2 * jp + 1], w1);
+                for(int k = 0; k < 2; ++k)
+                {
+                    rocke_value_t* sel = rocke_b_select(b, is_odd, w0[k], w1[k]);
+                    rc[k] = rocke_b_ds_swizzle_xor(b, sel, 16);
+                }
+                for(int k = 0; k < 2; ++k)
+                    outw[k] = rocke_b_select(b, is_odd, rc[k], w0[k]);
+                for(int k = 0; k < 2; ++k)
+                    outw[2 + k] = rocke_b_select(b, is_odd, w1[k], rc[k]);
+                rocke_value_t* pk = rocke_b_vec_pack(b, outw, 4, rocke_i32());
+                rocke_value_t* v
+                    = rocke_b_vec_bitcast(b, pk, rocke_vector_type(b, rocke_bf16(), 8));
+                rocke_value_t* n_val = rocke_b_add(b, n_base, rocke_b_const_i32(b, 32 * jp));
+                direct_store(m_val, n_val, 8, c_eb2, oob2, v, 4);
+            }
+        }
+        return;
+    }
+    if(spec->xh_epi == 2)
+    {
+        /* Direct: each 4-channel group is 8 contiguous bytes of one pixel. */
+        const int am_ = spec->warp_tile_m, an_ = spec->warp_tile_n;
+        const int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
+        const int mfmas_n = rocke_dgrad_conv_spec_mfmas_per_warp_n(spec);
+        rocke_value_t* r_l = rocke_b_land(b, grid->lane, rocke_b_const_i32(b, am_ - 1));
+        rocke_value_t* l4 = rocke_b_lshr(b, grid->lane, rocke_b_const_i32(b, am_ == 16 ? 4 : 5));
+        rocke_value_t* nb = rocke_b_shl(b, l4, rocke_b_const_i32(b, 2));
+        rocke_value_t* wm = rocke_warp_grid_warp_m_off(b, grid);
+        rocke_value_t* wn = rocke_warp_grid_warp_n_off(b, grid);
+        rocke_value_t* c_eb2 = rocke_b_const_i32(b, 2);
+        rocke_value_t* oob2 = rocke_b_const_i32(b, 2147483647);
+        for(int mi = 0; mi < mfmas_m; ++mi)
+        {
+            rocke_value_t* rr = rocke_b_add(b, rocke_b_const_i32(b, mi * am_), r_l);
+            rocke_value_t* wr = rocke_b_add(b, wm, rr);
+            rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, wr);
+            for(int ni = 0; ni < mfmas_n; ++ni)
+            {
+                rocke_value_t* acc = accs[mi * mfmas_n + ni];
+                for(int g = 0; g < atom->c_per_lane / 4; ++g)
+                {
+                    rocke_value_t* xs[4];
+                    for(int j = 0; j < 4; ++j)
+                        xs[j] = rocke_b_vec_extract(b, acc, 4 * g + j);
+                    rocke_value_t* v = _xh_f32x4_to_bf16(b, xs, false);
+                    rocke_value_t* cn = rocke_b_add(b, rocke_b_const_i32(b, ni * an_ + 8 * g), nb);
+                    rocke_value_t* wcn = rocke_b_add(b, wn, cn);
+                    rocke_value_t* n_val = rocke_b_add(b, grid->block_n_off, wcn);
+                    direct_store(m_val, n_val, 4, c_eb2, oob2, v, 2);
+                }
+            }
+        }
+        return;
+    }
     const int mc = spec->cshuffle_m_chunks > 1 ? spec->cshuffle_m_chunks : 1;
     const int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
     const int mfmas_n = rocke_dgrad_conv_spec_mfmas_per_warp_n(spec);
@@ -5402,7 +5592,7 @@ static rocke_kernel_def_t*
                                                &ctx,
                                                c_group_base);
                 }
-                else if(use_cshuffle_ && spec->xh_epi == 1)
+                else if(use_cshuffle_ && spec->xh_epi >= 1)
                     _emit_xh_cshuffle_epilogue(b,
                                                spec,
                                                &ctx,
