@@ -76,7 +76,9 @@ __all__ = [
 Engine = Literal["python", "cpp"]
 ENGINES: tuple[Engine, ...] = ("python", "cpp")
 
-# The rocke_status_t (rocke/ir.h) each Python exception type maps to.
+# The rocke_status_t (rocke/ir.h is the source of truth) each Python exception
+# type maps to. Matched by exact type: ArchDomainError (status 6) is left out, as
+# no refusal checked here raises it.
 _NATIVE_STATUS: dict[type[Exception], int] = {
     ValueError: 1,
     TypeError: 2,
@@ -87,7 +89,11 @@ _NATIVE_STATUS: dict[type[Exception], int] = {
 
 def available_engines() -> tuple[Engine, ...]:
     """:data:`ENGINES` when the ``rocke_engine`` binding is importable, else
-    ``("python",)``."""
+    ``("python",)``.
+
+    For a test that loops over the engines itself; a ``pytest`` test
+    parametrizes over :data:`ENGINES` instead.
+    """
     if importlib.util.find_spec("rocke_engine") is None:
         return ("python",)
     return ENGINES
@@ -104,17 +110,19 @@ def _require_native_engine() -> ModuleType:
     return pytest.importorskip("rocke_engine")
 
 
-def _require_engine_name(engine: Engine) -> None:
+def _require_engine(engine: Engine) -> None:
+    """Validate ``engine``; for ``"cpp"``, skip the calling test when the
+    binding is not built, before any engine runs."""
     if engine not in ENGINES:
-        raise ValueError(f"engine must be one of {ENGINES}, got {engine!r}")
+        raise ValueError(f"engine={engine!r}, expected one of {ENGINES}")
+    if engine == "cpp":
+        _require_native_engine()
 
 
 def _native_status(error_type: type[Exception]) -> int:
     if error_type not in _NATIVE_STATUS:
         names = sorted(t.__name__ for t in _NATIVE_STATUS)
-        raise ValueError(
-            f"error_type must be one of {names}, got {error_type.__name__}"
-        )
+        raise ValueError(f"error_type={error_type.__name__}, expected one of {names}")
     return _NATIVE_STATUS[error_type]
 
 
@@ -155,7 +163,7 @@ def lower_with_engine(
     kernel: KernelDef, arch: str, *, engine: Engine, llvm_flavor: str | None = None
 ) -> str:
     """Lower ``kernel`` for ``arch`` with ``engine``; return its LLVM IR text."""
-    _require_engine_name(engine)
+    _require_engine(engine)
     python_ir = _python_llvm(kernel, arch, llvm_flavor)
     if engine == "python":
         return python_ir
@@ -182,7 +190,7 @@ def assert_engine_rejects(
     C++ engine must fail with ``error_type``'s status and the same message
     after its binding prefix.
     """
-    _require_engine_name(engine)
+    _require_engine(engine)
     if engine == "python":
         _assert_python_rejects(
             lambda: _python_llvm(kernel, arch, llvm_flavor), error_type, message
@@ -201,7 +209,7 @@ def lower_hip_with_engine(kernel: KernelDef, arch: str, *, engine: Engine) -> st
     For ``"cpp"`` it also asserts that the text is identical to the Python
     engine's.
     """
-    _require_engine_name(engine)
+    _require_engine(engine)
     python_hip = lower_kernel_to_hip(kernel, arch=arch)
     if engine == "python":
         return python_hip
@@ -225,7 +233,7 @@ def assert_engine_rejects_hip(
 
     Same contract as :func:`assert_engine_rejects`, for the HIP source.
     """
-    _require_engine_name(engine)
+    _require_engine(engine)
     if engine == "python":
         _assert_python_rejects(
             lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
@@ -240,7 +248,6 @@ def lower_with_both_engines(
     kernel: KernelDef, arch: str, llvm_flavor: str | None = None
 ) -> str:
     """Lower ``kernel`` for ``arch`` with each engine; return the shared IR text."""
-    _require_native_engine()
     return lower_with_engine(kernel, arch, engine="cpp", llvm_flavor=llvm_flavor)
 
 
@@ -267,7 +274,6 @@ def assert_both_engines_reject(
 def lower_hip_with_both_engines(kernel: KernelDef, arch: str) -> str:
     """Lower ``kernel`` to HIP source for ``arch`` with each engine; return the
     shared text."""
-    _require_native_engine()
     return lower_hip_with_engine(kernel, arch, engine="cpp")
 
 
