@@ -21,7 +21,9 @@ that the ``ir`` mode rejects it with the same error, so a failure of the
 target-ir path cannot pass as a rejection, and it fails any config that exits
 non-zero after printing output.
 
-The family test needs the ``rocke_engine`` extension and is skipped without it.
+The C++ lowering runs through the ``rocke_engine`` extension, or where it is not
+built -- the installed test tree -- through the ``rocke_ir_lower_cli`` program
+``ROCKE_IR_LOWER_CLI`` names; the family test is skipped without either.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from rocke.tests.engines import (
     REFUSAL_ERROR_TYPES,
     HipRefusal,
     hip_outcomes_of_both_engines,
+    skip_without_native_hip_lowering,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -50,9 +53,11 @@ NO_KERNEL_FAMILIES = {
     "conv_abi": "prints kernel argument lists, not a kernel",
 }
 
-# One family's emitter run: every config, one process. The slowest families
-# (the library attention emitters) take seconds; this bounds a hung emitter.
-EMITTER_TIMEOUT_S = 900
+# One family's emitter run: every config, one process. The slowest family takes
+# about 25 s on a developer host. This bounds a hung emitter below the 120 s
+# per-test limit of the rocke_hip_source_identity CTest, so the hang is reported
+# here rather than as a pytest-timeout kill.
+EMITTER_TIMEOUT_S = 100
 
 # How a builder refusing a config ends: the exception line of one of these.
 _REFUSAL_TYPE_NAMES = frozenset(
@@ -249,7 +254,7 @@ def test_only_builder_refusals_and_the_end_of_the_list_pass(tmp_path: Path) -> N
     ("name", "src_dir"), FAMILIES, ids=[name for name, _ in FAMILIES]
 )
 def test_both_engines_emit_the_same_hip_source(name: str, src_dir: Path) -> None:
-    pytest.importorskip("rocke_engine")
+    skip_without_native_hip_lowering()
     runs = _emitter_runs(
         name, src_dir, "target-ir", list(range(run_diff.config_limit(name)))
     )
