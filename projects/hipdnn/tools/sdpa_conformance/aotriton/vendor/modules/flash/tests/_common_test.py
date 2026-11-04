@@ -586,6 +586,9 @@ class SdpaContext(object):
         seqlen_k = k.shape[2]
         return seqlen_k
 
+    def _has_unit_seqlen(self):
+        return min(self.seqlen_q, self.seqlen_k) == 1
+
     @property
     def ref_device(self):
         return self.ref_tensors[0].device
@@ -650,6 +653,11 @@ class SdpaContext(object):
                 # every bf16 case is sound and far too slow; catching the quiet ones
                 # needs _validate to reject a nan REFERENCE, which it does not yet.
                 # ROCm-gated so it retires itself.
+                return 'cpu'
+            if ref_device_policy == 'default' and self._has_unit_seqlen():
+                # On a GPU, torch runs a bmm whose inner dimension is 1 (seqlen 1 in
+                # the reference) as a Triton kernel (torch._native). The UTs must not
+                # depend on Triton, and these shapes are tiny.
                 return 'cpu'
             if ref_device_policy == 'default' and TORCH_GE_2_7:
                 return self._real_device  # Known softmax issues have been fixed in 2.7
@@ -1060,6 +1068,10 @@ class VarlenSdpaContext(SdpaContext):
     @property
     def seqlen_k(self):
         return np.max(self._seqlens_k)
+
+    # Per sequence: the reference runs one sequence at a time.
+    def _has_unit_seqlen(self):
+        return min(np.min(self._seqlens_q), np.min(self._seqlens_k)) == 1
 
     def create_ctx_tensors(self):
         q, k, v, b = self.dev_tensors

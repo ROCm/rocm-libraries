@@ -367,7 +367,10 @@ if FOR_RELEASE >= 0:
 
     @pytest.mark.parametrize('BATCH', [1])
     @pytest.mark.parametrize('N_HEADS', [4])
-    @pytest.mark.parametrize('D_HEAD', [64, 256, 512], ids=fmt_hdim)
+    # Only head dims the shared lists keep (e.g. no 512 on gfx1250).
+    @pytest.mark.parametrize('D_HEAD',
+                             [d for d in [64, 256, 512] if d in ALL_INT_HEADDIMS],
+                             ids=fmt_hdim)
     @pytest.mark.parametrize('seqlen_q,seqlen_k,causal',
                              [(289, 289, False), (289, 400, True)],
                              ids=['289x289-CausalOff', '289x400-CausalOn'])

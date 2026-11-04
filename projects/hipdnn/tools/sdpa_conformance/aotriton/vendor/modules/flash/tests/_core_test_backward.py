@@ -155,6 +155,18 @@ PRIME_SEQLEN_K = [13, 31, 41, 71, 223, 337, 571, 1063, 2081, 5237]
 PRIME_SEQLEN_Q_1K = [11, 17, 37, 67, 157, 257, 523]
 PRIME_SEQLEN_K_1K = [13, 31, 41, 71, 223, 337, 571]
 
+# gfx1250 is unreleased; only its tuning table's actual entries {64, 256, 2048}
+# need correctness coverage, one prime per gap. 1024 is an interior non-entry,
+# checking that binning picks the 256 bucket instead of failing.
+AOTRITON_UT_ARCH = os.getenv('AOTRITON_UT_ARCH', default='generic')
+if AOTRITON_UT_ARCH in ('gfx1250', 'gfx1250-strict'):
+    REGULAR_SEQLEN = [64, 256, 1024, 2048]
+    REGULAR_SEQLEN_2K = [64, 256, 1024, 2048]
+    PRIME_SEQLEN_Q = [11, 67, 257, 1033]      # gaps (0,64) (64,256) (256,1024) (1024,2048)
+    PRIME_SEQLEN_K = [13, 71, 337, 1063]      # gaps (0,64) (64,256) (256,1024) (1024,2048)
+    PRIME_SEQLEN_Q_1K = [11, 67, 257]
+    PRIME_SEQLEN_K_1K = [13, 71, 337]
+
 SMALL_HEADDIM_ONLY = bool(int(os.getenv('SMALL_HEADDIM_ONLY', default='0')))
 LARGE_HEADDIM_ONLY = bool(int(os.getenv('LARGE_HEADDIM_ONLY', default='0')))
 
@@ -185,6 +197,14 @@ if LARGE_HEADDIM_ONLY:
     NPOT_HEADDIMS = remove_not_larger_than(NPOT_HEADDIMS, 192)
     PRIME_HEADDIMS = remove_not_larger_than(PRIME_HEADDIMS, 192)
     M8_HEADDIMS = remove_not_larger_than(M8_HEADDIMS, 192)
+
+# gfx1250 is in preview, and its kernels are not built for hdim > 256 to avoid
+# hitting compiler bugs; there is nothing to test above 256.
+if AOTRITON_UT_ARCH in ('gfx1250', 'gfx1250-strict'):
+    POT_HEADDIMS = remove_larger_than(POT_HEADDIMS, 256)
+    NPOT_HEADDIMS = remove_larger_than(NPOT_HEADDIMS, 256)
+    PRIME_HEADDIMS = remove_larger_than(PRIME_HEADDIMS, 256)
+    M8_HEADDIMS = remove_larger_than(M8_HEADDIMS, 256)
 
 ALL_INT_HEADDIMS = POT_HEADDIMS + NPOT_HEADDIMS + M8_HEADDIMS
 ALL_INT_HEADDIMS = sorted(list(set(ALL_INT_HEADDIMS)))
@@ -873,11 +893,6 @@ def core_test_large_bf16_nan_values(hdim):
     k = torch.full((1, 1, 1, hdim), 133120.0, dtype=torch.bfloat16, device=real_device)
     v = torch.full((1, 1, 1, hdim), 133120.0, dtype=torch.bfloat16, device=real_device)
     b = None
-    from torch.nn.functional import scaled_dot_product_attention
-    from torch.nn.attention import sdpa_kernel, SDPBackend
-    with sdpa_kernel(SDPBackend.MATH):
-        out = scaled_dot_product_attention(q, k, v)
-    print(out)
 
     causal = False
     sm_scale = 0.125
