@@ -48,6 +48,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <atomic>
+#include <cstdint>
 
 // Return the value category for a value, as a double precision value, such
 // such as whether it's 0, 1, -1 or some other value. Tensile uses a double
@@ -138,6 +139,8 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
 
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle             handle,
                                          const rocblaslt_matmul_algo& algo);
+
+uint64_t getSolutionUidFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo);
 
 // In-device MX scale layout the algo's kernel expects (0 = canonical, 1 = gfx950 host
 // pre-swizzled, 2 = in-memory swizzled), or -1 if the algo is not a Tensile solution.
