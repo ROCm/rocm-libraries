@@ -8,7 +8,8 @@ allowed-tools: Bash, Read, Grep, Glob
 # hipDNN Ingestor Impact
 
 Use this skill when the user asks whether a change can break the kernel ingestor at run time, and
-suggest it for any change under `dnn-providers/hip-kernel-provider/`, the SDK ingestor headers,
+suggest it for any change under `dnn-providers/hip-kernel-provider/`, any plugin SDK header
+(`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/`, `projects/hipdnn/plugin_sdk/cmake/GpuGenericTargets*`),
 `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json` or `projects/hipdnn/tools/IngestorGenerator/`.
 [reference.md](reference.md) holds the contracts, row statuses, emitter rules and known gaps; read
 it before judging rows.

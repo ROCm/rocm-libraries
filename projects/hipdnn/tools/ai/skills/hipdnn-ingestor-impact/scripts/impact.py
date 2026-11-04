@@ -2780,17 +2780,28 @@ def symbol_rows(ctx: Ctx) -> list:
 
 
 def binds_elsewhere(
-    tree: Tree, known: list, path: str, defining: str, name: str
+    tree: Tree, known: list, path: str, module, defining: str, name: str
 ) -> bool:
-    """Whether the class `name` that `path` reads is another module's than `defining`'s: its own
-    class of that name, or one imported from elsewhere, followed through package `__init__`
-    re-exports (`from rocke.dispatch.tuning import X` reaches the module defining X). Its
-    `.member` reads are then not of `defining`'s class. A name that does not resolve (the class
-    was removed, or comes from outside the repository) is not elsewhere."""
+    """Whether the class `name` that `path` (parsed as `module`) reads is another than
+    `defining`'s. When the name resolves to a repository class, followed through package
+    `__init__` re-exports (`from rocke.dispatch.tuning import X` reaches the module defining X),
+    that class decides. Otherwise the file binds it elsewhere when it imports it from another
+    module (an external package included) or defines a def or class of that name anywhere,
+    nested ones included. Its `.member` reads are then not of `defining`'s class."""
     if path == defining:
         return False
     found = resolve_class(tree, known, path, name)
-    return found is not None and found[0] != defining
+    if found is not None:
+        return found[0] != defining
+    imports = [
+        (stem, imp) for b, stem, imp, _ in iter_imports(path, module) if b == name
+    ]
+    if any(imp is not None and in_module(defining, stem) for stem, imp in imports):
+        return False
+    return bool(imports) or any(
+        isinstance(n, (*DEFINITION_FUNCS, ast.ClassDef)) and n.name == name
+        for n in ast.walk(module)
+    )
 
 
 def reader_rows(ctx: Ctx, cands: list) -> list:
@@ -2839,7 +2850,7 @@ def reader_rows(ctx: Ctx, cands: list) -> list:
                 ]
             else:
                 if is_method and binds_elsewhere(
-                    ctx.after, known, path, ch.path, qual.split(".")[0]
+                    ctx.after, known, path, tree, ch.path, qual.split(".")[0]
                 ):
                     # The file's class of that name comes from another module (a moved class
                     # keeps its name), so its `.name` reads are not reads of this one.

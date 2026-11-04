@@ -20,8 +20,10 @@ Variants come from every `*.kdp.json` under the shipped descriptor root whose
 `kernelDescriptors[].kernel_source` names a rocKE `source` + `builder`. A UKD with
 `sources` (several launches) yields one variant per distinct (source, builder, spec,
 target) of its launches, as hkp_pack compiles them: the UKD `name` when there is one, else
-`<name>@<launch>[+<launch>...]` with the group's launch names sorted. A `sources` UKD
-or entry that cannot be read (not rocke, no source or builder, both `kernel_source` and
+`<name>@<launch>[+<launch>...]` with the group's launch names sorted. A UKD whose launches all
+share one other packer kind (hip, hsaco, kpack, embedded_source) has no rocKE build: it gives no
+variant and is not listed, as a single hip launch is not. A UKD that cannot be read (launches that
+mix kinds, no source or builder, a field that is not a string, both `kernel_source` and
 `sources`) is listed under `not_inspected`. A KDP held by
 DVC (`artifacts.dvc`, no `.kdp.json`) is regenerated with that side's
 `IngestorGenerator/tools/registry_enumerator.py`; when neither works the KDP is listed
@@ -339,8 +341,8 @@ def _ukd_variants(d, arches, kdp, origin):
     spec, target); each group is one variant, named by the descriptor when there is one group,
     else `<name>@<launch>[+<launch>...]` with the launch names sorted. A `sources` UKD whose
     launches all share one other packer kind (hip, hsaco) has no rocKE build and gives none,
-    as a single hip launch does. REASON, set when the descriptor cannot be read, is for
-    `not_inspected` and the variants are then empty.
+    as a single hip launch does. REASON, set when the descriptor cannot be read (a field that is
+    not of its JSON type included), is for `not_inspected` and the variants are then empty.
     """
     has_ks, has_sources = "kernel_source" in d, "sources" in d
     name = d.get("name") or d.get("id") or "?"
@@ -351,7 +353,8 @@ def _ukd_variants(d, arches, kdp, origin):
         if not isinstance(entries, dict) or not entries:
             return [], f"{name}: `sources` is not a non-empty object"
         kinds = {
-            ks.get("kind") if isinstance(ks, dict) else None for ks in entries.values()
+            ks.get("kind") if isinstance(ks, dict) and _is_str(ks.get("kind")) else None
+            for ks in entries.values()
         }
         if len(kinds) == 1 and kinds & _OTHER_KINDS:
             return [], None
@@ -369,6 +372,13 @@ def _ukd_variants(d, arches, kdp, origin):
                     [],
                     f"{name}: sources entry `{launch}` lacks `source` or `builder`",
                 )
+            if not all(
+                _is_str(ks.get(k, "native")) for k in ("source", "builder", "target")
+            ):
+                return (
+                    [],
+                    f"{name}: sources entry `{launch}` has a `source`, `builder` or `target` that is not a string",
+                )
             key = (
                 ks["source"],
                 ks["builder"],
@@ -381,10 +391,23 @@ def _ukd_variants(d, arches, kdp, origin):
             vname = name if len(groups) == 1 else f"{name}@{'+'.join(sorted(launches))}"
             out.append(_variant(vname, arches, ks, kdp, origin))
         return out, None
-    ks = d.get("kernel_source") or {}
+    ks = d.get("kernel_source")
+    if ks is None:
+        return [], None
+    if not isinstance(ks, dict):
+        return [], f"{name}: `kernel_source` is not an object"
     if not (ks.get("source") and ks.get("builder")):
         return [], None
+    if not all(_is_str(ks.get(k, "native")) for k in ("source", "builder", "target")):
+        return (
+            [],
+            f"{name}: `kernel_source` has a `source`, `builder` or `target` that is not a string",
+        )
     return [_variant(d["name"], arches, ks, kdp, origin)], None
+
+
+def _is_str(value) -> bool:
+    return isinstance(value, str)
 
 
 def _variant(name, arches, ks, kdp, origin):

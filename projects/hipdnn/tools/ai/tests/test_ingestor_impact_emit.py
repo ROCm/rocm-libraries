@@ -1122,6 +1122,10 @@ def test_sources_spec_key_order_does_not_split_a_variant(emit, tmp_path):
         {"a": "not-an-object"},
         {},
         ["a"],
+        {"a": {**KS, "kind": ["rocke"]}},
+        {"a": {**KS, "source": ["s.py"]}},
+        {"a": {**KS, "builder": {"name": "build_x"}}},
+        {"a": {**KS, "target": ["generic"]}},
     ],
     ids=[
         "no-builder",
@@ -1130,12 +1134,18 @@ def test_sources_spec_key_order_does_not_split_a_variant(emit, tmp_path):
         "entry-not-object",
         "empty",
         "not-object",
+        "kind-list",
+        "source-list",
+        "builder-object",
+        "target-list",
     ],
 )
 def test_unreadable_sources_ukd_is_not_inspected_and_yields_no_variant(
     emit, tmp_path, sources
 ):
-    # catches: a `sources` UKD or entry the emitter cannot read dropped silently
+    # catches: a `sources` UKD or entry the emitter cannot read dropped silently, or one whose
+    # kind, source, builder or target is not a string crashing the child (unhashable key)
+    # instead of being listed
     good = {"name": "ok", "kernel_source": KS}
     variants, skipped = discover(
         emit, tmp_path, [{"name": "bad", "sources": sources}, good]
@@ -1163,6 +1173,24 @@ def test_single_kernel_source_without_source_and_builder_is_still_skipped_silent
         [{"name": "hip", "kernel_source": {"kind": "hip", "file": "k.hip"}}],
     )
     assert variants == [] and skipped == []
+
+
+@pytest.mark.parametrize(
+    "kernel_source",
+    [{**KS, "source": ["s.py"]}, {**KS, "builder": {"name": "build_x"}},
+     {**KS, "target": ["generic"]}, ["not", "an", "object"]],
+    ids=["source-list", "builder-object", "target-list", "not-object"],
+)  # fmt: skip
+def test_malformed_single_kernel_source_is_not_inspected(emit, tmp_path, kernel_source):
+    # catches: a single launch whose source, builder or target is not a string, or a
+    # kernel_source that is not an object, crashing the child (the family key is unhashable)
+    # instead of being listed under not_inspected
+    good = {"name": "ok", "kernel_source": KS}
+    variants, skipped = discover(
+        emit, tmp_path, [{"name": "bad", "kernel_source": kernel_source}, good]
+    )
+    assert [v["name"] for v in variants] == ["ok"]
+    assert [s["reason"].split(":")[0] for s in skipped] == ["bad"]
 
 
 @pytest.mark.parametrize("kind", ["hip", "hsaco"])

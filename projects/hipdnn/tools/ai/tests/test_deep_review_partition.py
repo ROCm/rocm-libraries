@@ -476,7 +476,7 @@ def test_packets_drift_lane_follows_the_trigger(part, tmp_path):
     assert "drift.txt" in (rd / "packets" / "DRIFT.md").read_text()
 
 
-def test_impact_scope_is_the_ingestor_path_only(part):
+def test_impact_scope_is_the_ingestor_paths_and_plugin_sdk_headers(part):
     inside = (
         "dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/attention_dense.py",
         "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp",

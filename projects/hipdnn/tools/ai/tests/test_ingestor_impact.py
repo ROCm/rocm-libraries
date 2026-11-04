@@ -1784,19 +1784,27 @@ def test_only_a_rocke_catalog_ships_the_rocke_kernels_of_its_arch(
     assert row["status"] == status
 
 
+MERGE_HELPER = ROCKE_PY + "helpers/w.py"
+
+
 @needs_merge_tree
+@pytest.mark.parametrize(
+    "target",
+    [{MERGE_HELPER: "W = 64\n"},
+     {KDP: KDP_JSON.replace('"name": "v"', '"name": "v2"')}],
+    ids=["imported-module", "descriptor"],
+)  # fmt: skip
 def test_merged_view_does_not_fold_when_the_target_moved_what_the_change_imports(
-    mod, capsys, tmp_path
+    mod, capsys, tmp_path, target
 ):
     # catches: a merged-view row folded because its own file equals the head's, although the
-    # target changed a module that file imports, so the emitter's base-vs-head proof says
-    # nothing about the merged program
-    helper = ROCKE_PY + "helpers/w.py"
+    # target changed a module that file imports, or a descriptor (the variant set the emitter
+    # built), so the emitter's base-vs-head proof says nothing about the merged program
     use = "from rocke.helpers.w import W\n"
-    files = {BUILDER: use + BUILD, KDP: KDP_JSON, helper: "W = 32\n"}
+    files = {BUILDER: use + BUILD, KDP: KDP_JSON, MERGE_HELPER: "W = 32\n"}
     repo, base = make_repo(tmp_path, files)
     head = branch_commit(repo, base, {BUILDER: use + BODY_EDIT}, "feature")
-    tip = branch_commit(repo, base, {helper: "W = 64\n"}, "target")
+    tip = branch_commit(repo, base, target, "target")
     emit = write_emit(tmp_path / "eq.json", repo, base, head)
     data = report(mod, capsys, repo, base, head, "--target-tip", tip, "--emit", emit)
     assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
@@ -1852,30 +1860,71 @@ def test_grid_surface_reaching_a_module_alias_is_not_folded_by_equal_ir(
     assert (row["name"], row["status"]) == ("grid:attn_grid", "changed")
 
 
+@pytest.mark.parametrize(
+    "include, included",
+    [('#include "adapters/B.hpp"\n', "heuristics/uhd/adapters/B.hpp"),
+     ('#include "hipdnn_plugin_sdk/ArchMatch.hpp"\n', "ArchMatch.hpp")],
+    ids=["beside-the-header", "from-the-sdk-root"],
+)  # fmt: skip
 def test_sdk_header_a_loader_header_includes_by_quoted_path_is_on_the_surface(
-    mod, capsys, tmp_path
+    mod, capsys, tmp_path, include, included
 ):
     # catches: only `<hipdnn_plugin_sdk/...>` includes followed, so a header a loader header
-    # pulls in by a quoted path beside it (`#include "IUhdAdapter.hpp"`) reads N/A
+    # pulls in by a quoted path beside it (`#include "IUhdAdapter.hpp"`) reads N/A; or a quoted
+    # include that is not beside the header no longer resolved from the SDK's include root
     uhd = SDK_INC + "heuristics/uhd/"
     body = "inline int f() {{ return {}; }}\n"
     files = {SDK_INC + "ingestor/DescriptorLoader.hpp": "#include <hipdnn_plugin_sdk/heuristics/uhd/A.hpp>\n",
-             uhd + "A.hpp": '#include "adapters/B.hpp"\n', uhd + "adapters/B.hpp": body.format(1)}  # fmt: skip
+             uhd + "A.hpp": include, SDK_INC + included: body.format(1)}  # fmt: skip
     repo, base = make_repo(tmp_path, files)
-    head = commit(repo, {uhd + "adapters/B.hpp": body.format(2)})
+    head = commit(repo, {SDK_INC + included: body.format(2)})
     data = report(mod, capsys, repo, base, head)
     assert [r["status"] for r in rows_of(data, "file")] == ["changed"]
 
 
+@pytest.mark.parametrize(
+    "members, arch",
+    [(["gfx1151", "gfx1100"], "gfx1100, gfx1151"), (None, "gfx11-generic"),
+     ([], "gfx11-generic"), (["gfx1100", 3], "gfx11-generic")],
+    ids=["members", "no-members", "empty-members", "non-string-member"],
+)  # fmt: skip
 def test_emit_row_of_a_generic_target_family_names_its_member_archs(
-    mod, capsys, tmp_path
+    mod, capsys, tmp_path, members, arch
 ):
     # catches: an emit row naming the generic compile target (gfx11-generic), which is no
-    # device a NEEDS-DEVICE run can be asked for
+    # device a NEEDS-DEVICE run can be asked for, on any emit row kind; or a family whose
+    # `members` is missing or malformed losing its arch instead of keeping the generic one
     repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
     head = commit(repo, {BUILDER: BODY_EDIT})
-    fam = family(arch="gfx11-generic", members=["gfx1151", "gfx1100"], ir_changed=["v"])
+    fields = dict(arch="gfx11-generic", ir_changed=["v"], comgr_changed=["v"],
+                  failures={"base": {}, "head": {"v": "boom"}})  # fmt: skip
+    if members is not None:
+        fields["members"] = members
     data = report(mod, capsys, repo, base, head, "--emit",
-                  write_emit(tmp_path / "g.json", repo, base, head, families=[fam]))  # fmt: skip
-    (row,) = [r for r in rows_of(data, "kernargs") if r["name"].startswith("emit-ir:")]
-    assert row["arch"] == "gfx1100, gfx1151"
+                  write_emit(tmp_path / "g.json", repo, base, head, families=[family(**fields)]))  # fmt: skip
+    rows = {r["name"].split(":")[0]: r["arch"] for r in rows_of(data, "kernargs")}
+    assert rows == {"emit-ir": arch, "emit-comgr": arch, "emit-fail": arch}
+
+
+@pytest.mark.parametrize(
+    "reader",
+    ["from external_pkg import Space\n\n\ndef f():\n    return Space().probe_knob()\n",
+     "def f():\n    class Space:\n        def probe_knob(self):\n            return 2\n\n    return Space().probe_knob()\n",
+     "def Space():\n    return object()\n\n\ndef f():\n    return Space().probe_knob()\n",
+     "class Space:\n    def probe_knob(self):\n        return 2\n\n\ndef f():\n    return Space().probe_knob()\n"],
+    ids=["external-import", "nested-class", "same-named-def", "own-class"],
+)  # fmt: skip
+def test_member_read_of_another_class_of_the_same_name_is_not_a_removal_reader(
+    mod, capsys, tmp_path, reader
+):
+    # catches: only a repository class the import chain resolves to counted as "another
+    # class", so a reader whose `Space` comes from an external package, a nested class or a
+    # same-named def reads `Space.probe_knob is removed but still referenced` (false BREAKS)
+    cls = "class Space:\n    def keep(self):\n        return 0\n\n    def probe_knob(self):\n        return 1\n"
+    files = {HKP_PACK + "tuning.py": cls, HKP_PACK + "user.py": reader}
+    repo, base = make_repo(tmp_path, files)
+    head = commit(
+        repo, {HKP_PACK + "tuning.py": cls.split("\n\n    def probe_knob")[0] + "\n"}
+    )
+    rows = rows_of(report(mod, capsys, repo, base, head), "symbols", "mismatch")
+    assert not [r for r in rows if r["name"] == "Space.probe_knob"]
