@@ -537,8 +537,10 @@ namespace
         std::exit(failures == 0 ? 0 : 1);
     }
 
-    // With HIPBLASLT_TENSILE_LIBPATH set, the current device lists GEMM algorithms.
-    void exitAfterListingGemmAlgos()
+    // With HIPBLASLT_TENSILE_LIBPATH set, the current device finds a Tensile
+    // library. A library built with a logic filter may hold no fp16 GEMMs, so
+    // listing succeeds with no algorithms; without a library it fails.
+    void exitIfTensileLibraryLoads()
     {
         hipblasLtHandle_t handle = nullptr;
         if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
@@ -555,7 +557,7 @@ namespace
                                                        HIPBLAS_COMPUTE_32F,
                                                        algos);
         hipblasLtDestroy(handle);
-        std::exit(status == HIPBLAS_STATUS_SUCCESS && !algos.empty() ? 0 : 2);
+        std::exit(status == HIPBLAS_STATUS_SUCCESS ? 0 : 2);
     }
 
     // Whether dir holds a Tensile library, lazy-loading or not, for processor.
@@ -597,15 +599,13 @@ namespace
         ASSERT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
         const std::string arch      = prop.gcnArchName;
         const std::string processor = arch.substr(0, arch.find(':'));
-        // An A0 gfx1250 part loads a revisioned sub-directory, which this test
-        // does not look for.
         if(!hasTensileLibrary(root / processor, processor) || hasTensileLibrary(root, processor))
             GTEST_SKIP() << root << " has no " << processor
                          << " sub-directory with a Tensile library";
 
         GTEST_FLAG_SET(death_test_style, "threadsafe");
         ScopedEnv libPath("HIPBLASLT_TENSILE_LIBPATH", root.string().c_str());
-        EXPECT_EXIT(exitAfterListingGemmAlgos(), ::testing::ExitedWithCode(0), "");
+        EXPECT_EXIT(exitIfTensileLibraryLoads(), ::testing::ExitedWithCode(0), "");
 #endif
     }
 
