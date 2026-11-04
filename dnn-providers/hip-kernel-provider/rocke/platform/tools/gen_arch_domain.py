@@ -1021,42 +1021,237 @@ def _decl_table(flavor: str) -> dict[str, str]:
     return L._decls_for_flavor(flavor)
 
 
-def _drift(committed: str, fresh: str) -> str | None:
-    """Describe how a committed column differs from a fresh run, or None.
+class _SupportComparison(NamedTuple):
+    failures: list[str]
+    changes: dict[str, list[str]]
 
-    ``toolchain.clang`` records provenance, not an expected measurement: another
-    compiler build must still be compared against the baseline. Every other
-    field remains part of the comparison. In particular, ``generator``,
-    ``probe_cflags`` and ``probe_timeout_s`` say how the question was asked, and
-    changing any of them means the committed answers were obtained by a method
-    we no longer use. ``probe_cflags`` is the concrete example -- the same clang
-    reports ``ok`` or hangs for the same key depending on whether it carries
-    ``-O0``.
+
+# Rows are recorded states; columns are freshly measured states. Unknown
+# answers are not ordered support levels: resolving one to unavailable improves
+# measurement, while losing a definite negative does not lose working support.
+_CELL_TRANSITIONS: dict[str, dict[str, str]] = {
+    STATUS_OK: {
+        STATUS_OK: "unchanged",
+        STATUS_ARCH_ABSENT: "loss",
+        STATUS_NAME_ABSENT: "loss",
+        STATUS_TARGET_UNSUPPORTED: "loss",
+        STATUS_TOOLCHAIN_CRASH: "loss",
+        STATUS_TOOLCHAIN_TIMEOUT: "loss",
+        STATUS_PROBE_ERROR: "invalid",
+    },
+    STATUS_ARCH_ABSENT: {
+        STATUS_OK: "gain",
+        STATUS_ARCH_ABSENT: "unchanged",
+        STATUS_NAME_ABSENT: "unavailable_changed",
+        STATUS_TARGET_UNSUPPORTED: "degraded",
+        STATUS_TOOLCHAIN_CRASH: "degraded",
+        STATUS_TOOLCHAIN_TIMEOUT: "degraded",
+        STATUS_PROBE_ERROR: "invalid",
+    },
+    STATUS_NAME_ABSENT: {
+        STATUS_OK: "gain",
+        STATUS_ARCH_ABSENT: "unavailable_changed",
+        STATUS_NAME_ABSENT: "unchanged",
+        STATUS_TARGET_UNSUPPORTED: "degraded",
+        STATUS_TOOLCHAIN_CRASH: "degraded",
+        STATUS_TOOLCHAIN_TIMEOUT: "degraded",
+        STATUS_PROBE_ERROR: "invalid",
+    },
+    STATUS_TARGET_UNSUPPORTED: {
+        STATUS_OK: "gain",
+        STATUS_ARCH_ABSENT: "improved",
+        STATUS_NAME_ABSENT: "improved",
+        STATUS_TARGET_UNSUPPORTED: "unchanged",
+        STATUS_TOOLCHAIN_CRASH: "unknown_changed",
+        STATUS_TOOLCHAIN_TIMEOUT: "unknown_changed",
+        STATUS_PROBE_ERROR: "invalid",
+    },
+    STATUS_TOOLCHAIN_CRASH: {
+        STATUS_OK: "gain",
+        STATUS_ARCH_ABSENT: "improved",
+        STATUS_NAME_ABSENT: "improved",
+        STATUS_TARGET_UNSUPPORTED: "unknown_changed",
+        STATUS_TOOLCHAIN_CRASH: "unchanged",
+        STATUS_TOOLCHAIN_TIMEOUT: "unknown_changed",
+        STATUS_PROBE_ERROR: "invalid",
+    },
+    STATUS_TOOLCHAIN_TIMEOUT: {
+        STATUS_OK: "gain",
+        STATUS_ARCH_ABSENT: "improved",
+        STATUS_NAME_ABSENT: "improved",
+        STATUS_TARGET_UNSUPPORTED: "unknown_changed",
+        STATUS_TOOLCHAIN_CRASH: "unknown_changed",
+        STATUS_TOOLCHAIN_TIMEOUT: "unchanged",
+        STATUS_PROBE_ERROR: "invalid",
+    },
+    STATUS_PROBE_ERROR: {
+        STATUS_OK: "invalid",
+        STATUS_ARCH_ABSENT: "invalid",
+        STATUS_NAME_ABSENT: "invalid",
+        STATUS_TARGET_UNSUPPORTED: "invalid",
+        STATUS_TOOLCHAIN_CRASH: "invalid",
+        STATUS_TOOLCHAIN_TIMEOUT: "invalid",
+        STATUS_PROBE_ERROR: "invalid",
+    },
+}
+
+
+def _cell_transition(before: str, after: str) -> str:
+    """Look up an explicit transition, rejecting malformed or unknown states."""
+    if not isinstance(before, str) or not isinstance(after, str):
+        return "invalid"
+    return _CELL_TRANSITIONS.get(before, {}).get(after, "invalid")
+
+
+def _compare_support(committed: str, fresh: str) -> _SupportComparison:
+    """Compare the support floor, retaining scope and probe-method guards.
+
+    Compiler identity, canonical names and diagnostic wording are observations,
+    not capability requirements. Missing cells and invalid probes still fail,
+    including when the missing answer used to be a definite negative.
     """
+    result = _SupportComparison(
+        [],
+        {
+            name: []
+            for name in (
+                "gain",
+                "improved",
+                "degraded",
+                "unknown_changed",
+                "unavailable_changed",
+                "unvalidated",
+            )
+        },
+    )
     try:
         a, b = json.loads(committed), json.loads(fresh)
     except json.JSONDecodeError as exc:
-        return f"committed column is not valid JSON: {exc}"
+        result.failures.append(f"comparison input is not valid JSON: {exc}")
+        return result
 
-    for doc in (a, b):
-        doc.get("toolchain", {}).pop("clang", None)
+    for label, doc in (("baseline", a), ("current", b)):
+        if not isinstance(doc, dict):
+            result.failures.append(f"{label} column is not a JSON object")
+            continue
+        if doc.get("schema") != SCHEMA:
+            result.failures.append(f"{label} schema must be {SCHEMA!r}")
+        for field in ("toolchain", "keys", "canonical"):
+            if not isinstance(doc.get(field), dict):
+                result.failures.append(f"{label} {field} is not a mapping")
+        if not isinstance(doc.get("processors", {}), dict):
+            result.failures.append(f"{label} processors is not a mapping")
+    if result.failures:
+        return result
 
-    if a.get("keys") != b.get("keys"):
-        changed = [
-            f"{k}/{arch}: {a['keys'][k][arch]['status']} -> {cell['status']}"
-            for k, row in b.get("keys", {}).items()
-            for arch, cell in row.items()
-            if arch in a.get("keys", {}).get(k, {})
-            and a["keys"][k][arch]["status"] != cell["status"]
-        ]
-        head = "; ".join(changed[:5]) or "cell evidence or coverage differs"
-        more = f" (+{len(changed) - 5} more)" if len(changed) > 5 else ""
-        return f"measurements changed -- {head}{more}"
+    method_fields = ("flavor", "arches", "generator", "probe_cflags", "probe_timeout_s")
+    for label, doc in (("baseline", a), ("current", b)):
+        for field in method_fields:
+            if field not in doc["toolchain"]:
+                result.failures.append(f"{label} toolchain has no {field}")
+        arches = doc["toolchain"].get("arches")
+        if not isinstance(arches, list) or not all(
+            isinstance(arch, str) for arch in arches
+        ):
+            result.failures.append(f"{label} toolchain arches must be a list of names")
+    a_method, b_method = dict(a["toolchain"]), dict(b["toolchain"])
+    a_method.pop("clang", None)
+    b_method.pop("clang", None)
+    if a_method != b_method:
+        result.failures.append("toolchain scope or probe method changed")
+    excluded = {"keys", "canonical", "processors", "toolchain", "_comment"}
+    a_other = {key: value for key, value in a.items() if key not in excluded}
+    b_other = {key: value for key, value in b.items() if key not in excluded}
+    if a_other != b_other:
+        result.failures.append("artifact metadata changed")
+    if result.failures:
+        return result
 
-    if a != b:
-        fields = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
-        return f"differs in {', '.join(fields)}, not in the measurements"
-    return None
+    expected_arches = set(a_method["arches"])
+    for label, doc in (("baseline", a), ("current", b)):
+        outside = set(doc.get("processors", {})) - expected_arches
+        if outside:
+            result.failures.append(
+                f"{label} processors outside probe scope: {sorted(outside)}"
+            )
+    if result.failures:
+        return result
+
+    a_keys, b_keys = a["keys"], b["keys"]
+    if set(a_keys) != set(b_keys):
+        result.failures.append(
+            f"intrinsic coverage changed: missing {sorted(set(a_keys) - set(b_keys))}, "
+            f"new {sorted(set(b_keys) - set(a_keys))}"
+        )
+    for key in sorted(set(a_keys) & set(b_keys)):
+        before_row, after_row = a_keys[key], b_keys[key]
+        if not isinstance(before_row, dict) or not isinstance(after_row, dict):
+            result.failures.append(f"{key}: architecture row is not a mapping")
+            continue
+        if set(before_row) != expected_arches or set(after_row) != expected_arches:
+            result.failures.append(
+                f"{key}: architecture coverage does not match probe scope"
+            )
+        for arch in sorted(set(before_row) - set(after_row)):
+            result.failures.append(f"missing current cell {key}/{arch}")
+        for arch in sorted(set(after_row) - set(before_row)):
+            result.failures.append(f"new current cell {key}/{arch}: scope changed")
+        for arch in sorted(set(before_row) & set(after_row)):
+            before_cell, after_cell = before_row[arch], after_row[arch]
+            if not isinstance(before_cell, dict) or not isinstance(after_cell, dict):
+                result.failures.append(f"{key}/{arch}: cell is not a mapping")
+                continue
+            before, after = before_cell.get("status"), after_cell.get("status")
+            transition = _cell_transition(before, after)
+            change = f"{key}/{arch}: {before} -> {after}"
+            if transition in ("invalid", "loss"):
+                result.failures.append(f"{transition} -- {change}")
+            elif transition != "unchanged":
+                result.changes[transition].append(change)
+            if after in (
+                STATUS_TARGET_UNSUPPORTED,
+                STATUS_TOOLCHAIN_CRASH,
+                STATUS_TOOLCHAIN_TIMEOUT,
+            ):
+                result.changes["unvalidated"].append(f"{key}/{arch}: {after}")
+            for label, cell in (("baseline", before_cell), ("current", after_cell)):
+                if cell.get("verified_on", a_method["flavor"]) != a_method["flavor"]:
+                    result.failures.append(f"{key}/{arch}: {label} verified_on changed")
+            if before == after == STATUS_OK and (
+                before_cell.get("probe_imm") != after_cell.get("probe_imm")
+            ):
+                result.failures.append(f"{key}/{arch}: probe witness changed")
+
+    before_processors, after_processors = a.get("processors", {}), b.get(
+        "processors", {}
+    )
+    for arch in sorted(set(before_processors) - set(after_processors)):
+        result.failures.append(f"missing current processor {arch}")
+    for arch in sorted(set(before_processors) | set(after_processors)):
+        before = before_processors.get(arch)
+        after = after_processors.get(arch)
+        if arch not in after_processors:
+            continue
+        if (
+            not isinstance(after, dict)
+            or not isinstance(after.get("accepted"), bool)
+            or (
+                arch in before_processors
+                and (
+                    not isinstance(before, dict)
+                    or not isinstance(before.get("accepted"), bool)
+                )
+            )
+        ):
+            result.failures.append(f"processor {arch}: accepted must be boolean")
+            continue
+        if before is not None and before["accepted"] and not after["accepted"]:
+            result.failures.append(f"processor {arch}: accepted -> unsupported")
+        elif after["accepted"] and (before is None or not before["accepted"]):
+            result.changes["gain"].append(
+                f"processor {arch}: unsupported/unmeasured -> accepted"
+            )
+    return result
 
 
 def _prune() -> int:
@@ -1485,7 +1680,7 @@ def main() -> int:
         if blessed_identity and blessed_identity != identity:
             print(
                 f"\nNOTE: {out.name} was measured with a different "
-                "compiler build; comparing its measurements against the baseline.\n"
+                "compiler build; checking the baseline support floor.\n"
                 f"      blessed by: {blessed_identity}\n"
                 f"      this host : {identity}"
             )
@@ -1853,18 +2048,25 @@ def main() -> int:
                 f"({out.name}); nothing to check. Run without --check to add one."
             )
             return _unvalidated_exit(args.unvalidated_exit_code, 0)
-        committed = out.read_text()
-        if committed == text:
-            print(f"\nOK: {out.name} is up to date.")
-            return 0
-        why = _drift(committed, text)
-        if why is None:
-            print(f"\nOK: {out.name} is semantically unchanged.")
+        comparison = _compare_support(out.read_text(), text)
+        for kind, label in (
+            ("gain", "SUPPORT GAIN"),
+            ("improved", "MEASUREMENT IMPROVED"),
+            ("degraded", "MEASUREMENT DEGRADED"),
+            ("unavailable_changed", "UNAVAILABLE CHANGED"),
+            ("unknown_changed", "NO-DATA CHANGED"),
+            ("unvalidated", "NO-DATA (not qualified)"),
+        ):
+            changes = comparison.changes[kind]
+            if changes:
+                print(f"\n{label}: {len(changes)} -- " + "; ".join(changes[:5]))
+        if not comparison.failures:
+            print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
             return 0
         print(
-            f"\nFAIL: {out} is stale -- regenerating changed it.\n"
-            f"      {why}\n"
-            "      Re-run without --check and commit the result."
+            f"\nFAIL: {out} lost support or could not be compared safely.\n"
+            "      " + "; ".join(comparison.failures[:5]) + "\n"
+            "      Investigate losses and validation errors; do not re-bless a regression."
         )
         return 1
 

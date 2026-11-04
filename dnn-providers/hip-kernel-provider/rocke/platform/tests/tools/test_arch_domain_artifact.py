@@ -17,12 +17,13 @@ Two gates fail for different reasons and run under different schedulers:
   removed while the artifact still looks authoritative.
 
 * **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
-  With a matching LLVM flavor, it re-probes the toolchain and compares the
-  committed measurements cell-for-cell, even when the compiler build differs.
-  Compiler identity is diagnostic provenance, not a reason to skip or fail the
-  comparison. It is the only check that can catch a wrong measurement rather
-  than a missing one. Its external compiler processes, timeout, resource policy,
-  and skip result do not belong in the unit-test pool.
+  With a matching LLVM flavor, it re-probes the toolchain and checks monotonic
+  support: every formerly working cell must still work. Gains and improved
+  classification pass and are reported. Degraded negative measurements and
+  remaining no-data cells are reported without claiming their qualification.
+  Compiler identity and diagnostic wording are provenance, not reasons to skip
+  or fail the comparison. Its external compiler processes, timeout, resource
+  policy, and environmental skip result do not belong in the unit-test pool.
 
 A host can only ever measure its own LLVM, so a flavor with no matching
 toolchain is skipped, never failed — "we did not get an answer" must not be
@@ -348,10 +349,10 @@ class AvailableCpusTest(unittest.TestCase):
             G._nonnegative_jobs("-1")
 
 
-class DriftTest(unittest.TestCase):
-    """Every artifact field except compiler identity remains load-bearing."""
+class SupportComparisonTest(unittest.TestCase):
+    """Supported capabilities are a floor; observations retain their states."""
 
-    def _doc(self, **toolchain) -> str:
+    def _doc(self, status=G.STATUS_OK, **toolchain) -> str:
         tc = {
             "flavor": "llvm22",
             "clang": "AMD clang version 22.0.0git (... roc-7.2.4 26084 abc)",
@@ -365,26 +366,117 @@ class DriftTest(unittest.TestCase):
             {
                 "schema": G.SCHEMA,
                 "toolchain": tc,
-                "keys": {"a.b": {"gfx942": {"status": G.STATUS_OK}}},
+                "keys": {
+                    "a.b": {
+                        "gfx942": {
+                            "status": status,
+                            "evidence": (
+                                "" if status == G.STATUS_OK else "probe diagnostic"
+                            ),
+                        }
+                    }
+                },
                 "canonical": {},
             }
         )
 
-    def test_a_different_compiler_build_is_not_drift(self):
-        other = "AMD clang version 22.0.0git (... roc-7.2.0 26014 def)"
-        self.assertIsNone(G._drift(self._doc(), self._doc(clang=other)))
+    def test_transition_matrix_covers_every_known_pair(self):
+        self.assertEqual(set(G._CELL_TRANSITIONS), _STATUSES)
+        actions = {
+            "unchanged",
+            "loss",
+            "gain",
+            "improved",
+            "degraded",
+            "invalid",
+            "unknown_changed",
+            "unavailable_changed",
+        }
+        for before, row in G._CELL_TRANSITIONS.items():
+            with self.subTest(before=before):
+                self.assertEqual(set(row), _STATUSES)
+                self.assertLessEqual(set(row.values()), actions)
+        for before, after in (
+            (None, G.STATUS_OK),
+            (G.STATUS_OK, {}),
+            ("unknown", G.STATUS_OK),
+        ):
+            with self.subTest(before=before, after=after):
+                self.assertEqual(G._cell_transition(before, after), "invalid")
 
-    def test_a_changed_measurement_is_drift_and_says_which(self):
-        fresh = json.loads(self._doc(clang="AMD clang version 22.0.0git (other)"))
-        fresh["keys"]["a.b"]["gfx942"]["status"] = G.STATUS_ARCH_ABSENT
-        why = G._drift(self._doc(), json.dumps(fresh))
-        self.assertIsNotNone(why)
-        self.assertIn("a.b/gfx942", why)
-        self.assertIn(G.STATUS_ARCH_ABSENT, why)
+    def test_cell_transition_policy(self):
+        for before, after, expected in (
+            (G.STATUS_OK, G.STATUS_OK, "unchanged"),
+            (G.STATUS_ARCH_ABSENT, G.STATUS_OK, "gain"),
+            (G.STATUS_NAME_ABSENT, G.STATUS_OK, "gain"),
+            (G.STATUS_TOOLCHAIN_CRASH, G.STATUS_OK, "gain"),
+            (G.STATUS_TOOLCHAIN_TIMEOUT, G.STATUS_OK, "gain"),
+            (G.STATUS_TARGET_UNSUPPORTED, G.STATUS_OK, "gain"),
+            (G.STATUS_TOOLCHAIN_CRASH, G.STATUS_ARCH_ABSENT, "improved"),
+            (G.STATUS_TOOLCHAIN_TIMEOUT, G.STATUS_NAME_ABSENT, "improved"),
+            (G.STATUS_ARCH_ABSENT, G.STATUS_TOOLCHAIN_CRASH, "degraded"),
+            (G.STATUS_NAME_ABSENT, G.STATUS_TARGET_UNSUPPORTED, "degraded"),
+            (G.STATUS_TOOLCHAIN_CRASH, G.STATUS_TOOLCHAIN_TIMEOUT, "unknown_changed"),
+            (G.STATUS_NAME_ABSENT, G.STATUS_ARCH_ABSENT, "unavailable_changed"),
+            (G.STATUS_PROBE_ERROR, G.STATUS_OK, "invalid"),
+            (G.STATUS_OK, G.STATUS_PROBE_ERROR, "invalid"),
+            (G.STATUS_OK, "unexpected", "invalid"),
+        ):
+            with self.subTest(before=before, after=after):
+                self.assertEqual(G._cell_transition(before, after), expected)
 
-    def test_a_changed_probe_method_is_drift_even_with_identical_cells(self):
-        """The `-O0` case. Same clang, same cells, different question -- and
-        the cells are identical only because nobody re-ran them yet."""
+    def test_every_loss_of_working_support_fails_and_names_the_cell(self):
+        for status in (
+            G.STATUS_ARCH_ABSENT,
+            G.STATUS_NAME_ABSENT,
+            G.STATUS_TARGET_UNSUPPORTED,
+            G.STATUS_TOOLCHAIN_CRASH,
+            G.STATUS_TOOLCHAIN_TIMEOUT,
+        ):
+            with self.subTest(status=status):
+                self.assertEqual(G._cell_transition(G.STATUS_OK, status), "loss")
+                comparison = G._compare_support(
+                    self._doc(), self._doc(status, clang="other build")
+                )
+                self.assertEqual(len(comparison.failures), 1)
+                self.assertIn(f"a.b/gfx942: ok -> {status}", comparison.failures[0])
+
+    def test_gains_and_measurement_improvements_pass(self):
+        for before, after, category in (
+            (G.STATUS_ARCH_ABSENT, G.STATUS_OK, "gain"),
+            (G.STATUS_NAME_ABSENT, G.STATUS_OK, "gain"),
+            (G.STATUS_TOOLCHAIN_CRASH, G.STATUS_OK, "gain"),
+            (G.STATUS_TOOLCHAIN_CRASH, G.STATUS_ARCH_ABSENT, "improved"),
+        ):
+            with self.subTest(before=before, after=after):
+                comparison = G._compare_support(self._doc(before), self._doc(after))
+                self.assertEqual(comparison.failures, [])
+                self.assertEqual(
+                    comparison.changes[category], [f"a.b/gfx942: {before} -> {after}"]
+                )
+
+    def test_degraded_measurement_is_reported_not_called_support_loss(self):
+        comparison = G._compare_support(
+            self._doc(G.STATUS_ARCH_ABSENT), self._doc(G.STATUS_TOOLCHAIN_CRASH)
+        )
+        self.assertEqual(comparison.failures, [])
+        self.assertEqual(len(comparison.changes["degraded"]), 1)
+        self.assertEqual(
+            comparison.changes["unvalidated"], ["a.b/gfx942: toolchain_crash"]
+        )
+
+    def test_provenance_and_diagnostic_changes_do_not_fail_support(self):
+        for status in (G.STATUS_OK, G.STATUS_ARCH_ABSENT, G.STATUS_TOOLCHAIN_CRASH):
+            with self.subTest(status=status):
+                fresh = json.loads(self._doc(status, clang="other build"))
+                fresh["keys"]["a.b"]["gfx942"]["evidence"] = "different wording"
+                fresh["canonical"] = {"a.b": "llvm.new.canonical.name"}
+                self.assertEqual(
+                    G._compare_support(self._doc(status), json.dumps(fresh)).failures,
+                    [],
+                )
+
+    def test_probe_method_changes_still_fail(self):
         for field, value in (
             ("probe_cflags", ["-nogpulib"]),
             ("probe_timeout_s", 5),
@@ -393,14 +485,92 @@ class DriftTest(unittest.TestCase):
             ("arches", ["gfx950"]),
         ):
             with self.subTest(field=field):
-                why = G._drift(
+                comparison = G._compare_support(
                     self._doc(), self._doc(clang="other build", **{field: value})
                 )
-                self.assertIsNotNone(why, field)
-                self.assertIn("toolchain", why)
+                self.assertIn("toolchain", "; ".join(comparison.failures))
 
-    def test_an_unreadable_column_is_drift_not_a_crash(self):
-        self.assertIn("not valid JSON", G._drift("{oops", self._doc()))
+    def test_missing_or_invalid_answers_still_fail(self):
+        for status in (G.STATUS_OK, G.STATUS_ARCH_ABSENT):
+            for damage in ("cell", "row", "status"):
+                with self.subTest(status=status, damage=damage):
+                    fresh = json.loads(self._doc(status))
+                    if damage == "cell":
+                        del fresh["keys"]["a.b"]["gfx942"]
+                    elif damage == "row":
+                        del fresh["keys"]["a.b"]
+                    else:
+                        fresh["keys"]["a.b"]["gfx942"]["status"] = G.STATUS_PROBE_ERROR
+                    comparison = G._compare_support(
+                        self._doc(status), json.dumps(fresh)
+                    )
+                    self.assertTrue(comparison.failures)
+                    self.assertIn("a.b", "; ".join(comparison.failures))
+
+    def test_invalid_schema_and_structure_fail_not_crash(self):
+        for text in ("{oops", "[]", '{"schema": "wrong"}'):
+            with self.subTest(text=text):
+                self.assertTrue(G._compare_support(text, self._doc()).failures)
+        fresh = json.loads(self._doc())
+        fresh["keys"]["a.b"]["gfx942"] = None
+        self.assertIn(
+            "cell is not a mapping",
+            "; ".join(G._compare_support(self._doc(), json.dumps(fresh)).failures),
+        )
+
+    def test_unmeasured_architectures_cannot_be_reported_as_gains(self):
+        fresh = json.loads(self._doc())
+        fresh["processors"] = {"extra-arch": {"accepted": True}}
+        self.assertIn(
+            "outside probe scope",
+            "; ".join(G._compare_support(self._doc(), json.dumps(fresh)).failures),
+        )
+        both = json.loads(self._doc())
+        both["keys"]["a.b"]["extra-arch"] = {"status": G.STATUS_OK}
+        self.assertIn(
+            "architecture coverage",
+            "; ".join(G._compare_support(json.dumps(both), json.dumps(both)).failures),
+        )
+        both["toolchain"]["arches"] = None
+        self.assertIn(
+            "arches must be a list",
+            "; ".join(G._compare_support(json.dumps(both), json.dumps(both)).failures),
+        )
+
+    def test_probe_witness_changes_still_fail(self):
+        before, after = json.loads(self._doc()), json.loads(self._doc())
+        before["keys"]["a.b"]["gfx942"]["probe_imm"] = 1
+        after["keys"]["a.b"]["gfx942"]["probe_imm"] = 2
+        self.assertIn(
+            "probe witness changed",
+            "; ".join(
+                G._compare_support(json.dumps(before), json.dumps(after)).failures
+            ),
+        )
+
+    def test_processor_acceptance_is_monotonic(self):
+        before, after = json.loads(self._doc()), json.loads(self._doc())
+        before["processors"] = {
+            "gfx942": {"accepted": False, "evidence": "old wording"}
+        }
+        after["processors"] = {"gfx942": {"accepted": True}}
+        comparison = G._compare_support(json.dumps(before), json.dumps(after))
+        self.assertEqual(comparison.failures, [])
+        self.assertEqual(len(comparison.changes["gain"]), 1)
+        self.assertIn(
+            "accepted -> unsupported",
+            "; ".join(
+                G._compare_support(json.dumps(after), json.dumps(before)).failures
+            ),
+        )
+        for invalid in (None, {"accepted": "yes"}):
+            after["processors"]["gfx942"] = invalid
+            self.assertIn(
+                "accepted must be boolean",
+                "; ".join(
+                    G._compare_support(json.dumps(before), json.dumps(after)).failures
+                ),
+            )
 
 
 class NameDiscoveryBatchTest(unittest.TestCase):
@@ -1363,7 +1533,7 @@ for line in open(src):
 
         self.assertEqual(rc, 0)
         self.assertGreater(probe.call_count, 0, "skipped the measurement")
-        self.assertIn("semantically unchanged", stdout.getvalue())
+        self.assertIn("SUPPORT OK", stdout.getvalue())
         self.assertIn("(blessed-build)", stdout.getvalue())
         self.assertIn("this host : AMD clang version 22.0.0git", stdout.getvalue())
         self.assertNotIn("UNVALIDATED", stdout.getvalue())
@@ -1408,6 +1578,74 @@ sys.exit(0)
         self.assertIn("this host : AMD clang version 22.0.0git", stdout.getvalue())
         self.assertNotIn("UNVALIDATED", stdout.getvalue())
         self.assertEqual(out.read_text(), before, "--check changed the baseline")
+
+    def _check_transition_with_stub(self, before_status: str, clang_body: str):
+        out, tools = self._baseline_from_other_compiler()
+        doc = json.loads(out.read_text())
+        doc["keys"]["fabs.f32"]["gfx942"].update(
+            status=before_status, evidence="recorded probe diagnostic"
+        )
+        out.write_text(json.dumps(doc))
+        before = out.read_text()
+        tools["clang"] = self._clang_with_accepting_assembler(clang_body)
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+            mock.patch.object(G, "_probe", wraps=G._probe) as probe,
+        ):
+            rc = self._run(
+                tools,
+                out,
+                "--only",
+                "fabs.f32",
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+        self.assertEqual(rc, 0, stdout.getvalue())
+        self.assertGreater(probe.call_count, 0, "skipped the measurement")
+        self.assertEqual(out.read_text(), before, "--check changed the baseline")
+        return stdout.getvalue()
+
+    def test_ctest_allows_support_gain_from_a_different_compiler_build(self):
+        text = self._check_transition_with_stub(
+            G.STATUS_ARCH_ABSENT, self._CLANG_ACCEPTS
+        )
+        self.assertIn("SUPPORT GAIN: 1 -- fabs.f32/gfx942: arch_absent -> ok", text)
+        self.assertIn("SUPPORT OK", text)
+
+    def test_ctest_allows_unknown_to_unavailable(self):
+        body = """
+import sys
+if "--version" in sys.argv:
+    print("AMD clang version 22.0.0git")
+    sys.exit(0)
+if "@llvm.fabs.f32(" in open(sys.argv[-1]).read():
+    sys.stderr.write("error: Cannot select: intrinsic %llvm.fabs.f32\\n")
+    sys.exit(1)
+sys.exit(0)
+"""
+        text = self._check_transition_with_stub(G.STATUS_TOOLCHAIN_CRASH, body)
+        self.assertIn("MEASUREMENT IMPROVED: 1", text)
+        self.assertIn("toolchain_crash -> arch_absent", text)
+        self.assertIn("SUPPORT OK", text)
+
+    def test_ctest_reports_degraded_negative_measurement(self):
+        body = """
+import sys
+if "--version" in sys.argv:
+    print("AMD clang version 22.0.0git")
+    sys.exit(0)
+if "@llvm.fabs.f32(" in open(sys.argv[-1]).read():
+    sys.stderr.write("PLEASE submit a bug report\\n")
+    sys.exit(1)
+sys.exit(0)
+"""
+        text = self._check_transition_with_stub(G.STATUS_ARCH_ABSENT, body)
+        self.assertIn("MEASUREMENT DEGRADED: 1", text)
+        self.assertIn("NO-DATA (not qualified): 1", text)
+        self.assertIn("SUPPORT OK", text)
 
     def test_ctest_can_translate_a_missing_column_to_a_skip(self):
         """A measured flavor with no baseline is unvalidated, not green."""
