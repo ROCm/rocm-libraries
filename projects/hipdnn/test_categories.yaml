@@ -28,9 +28,14 @@ test_categories:
     test_patterns:
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) quick tier; currently mirrors the quick tier"
+    description: "Fast-feedback mechanism (FFM) quick tier; mirrors the quick tier"
     test_patterns:
       - ".*"
+    # Targets whose ffm-quick suite is generated from test_categories_gtest.yaml (so
+    # it can exclude individual gtests) carry the ffm labels on that suite only.
+    # Labelling the plain entry too would run the excluded tests under -L ffm-quick.
+    exclude_tests:
+      - "hipdnn_backend_tests"
     labels:
       - "ffm-full"
 

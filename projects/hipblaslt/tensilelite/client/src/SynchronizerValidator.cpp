@@ -47,10 +47,10 @@ namespace TensileLite
             return true;
         }
 
-        SynchronizerValidator::SynchronizerValidator(
-            po::variables_map const& args, std::vector<std::shared_ptr<DeviceContext>> devices)
+        SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
             : m_enabled(args["check-synchronizer"].as<bool>())
-            , m_devices(std::move(devices))
+            , m_validateAfterEnqueues(args.count("validate-after-enqueues")
+                                      && args["validate-after-enqueues"].as<bool>())
         {
         }
 
@@ -109,7 +109,7 @@ namespace TensileLite
         {
             try
             {
-                for(auto const& device : m_devices)
+                for(auto const& device : *m_devices)
                     if(active() && device->commFlags != nullptr
                        && !checkRegion(device->deviceId,
                                        device->commFlags,
@@ -141,11 +141,25 @@ namespace TensileLite
                                                     TimingEvents const&        startEvents,
                                                     TimingEvents const&        stopEvents)
         {
+            validateInputs(slots, "warmup");
+        }
+
+        void SynchronizerValidator::validateEnqueues(std::vector<size_t> const& slots,
+                                                     TimingEvents const&        startEvents,
+                                                     TimingEvents const&        stopEvents)
+        {
+            if(m_validateAfterEnqueues)
+                validateInputs(slots, "enqueues");
+        }
+
+        void SynchronizerValidator::validateInputs(std::vector<size_t> const& slots,
+                                                   char const*                stage)
+        {
             try
             {
-                for(auto const& device : m_devices)
+                for(auto const& device : *m_devices)
                     for(size_t slot : slots)
-                        checkInputs(device->deviceId, device->inputArr[slot], "warmup");
+                        checkInputs(device->deviceId, device->inputArr[slot], stage);
             }
             catch(...)
             {

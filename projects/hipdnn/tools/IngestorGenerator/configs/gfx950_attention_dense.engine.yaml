@@ -266,9 +266,11 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
     kmd_fields: [ragged, seqlen_q, num_query_heads, batch]
     guard: >
-      attentionDenseKernelSignature() always returns the 8-arg form
-      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv). Every variant is
-      non-persistent, which enumerate.pin keeps true. use_sinks=False;
+      attentionDenseKernelSignature() always returns the 10-arg form
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads):
+      the runtime-shape grid body reads the shape and both head counts as
+      kernargs. Every variant is non-persistent and on the runtime-shape path,
+      which enumerate.pin and the aligned catalog keep true. use_sinks=False;
       no sink_ptr slot. Validated at prepare() time by
       buildIngestorKernelCode(..., expectedSignature).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseSignature.cpp
