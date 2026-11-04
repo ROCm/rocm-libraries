@@ -535,9 +535,13 @@ mirror check rather than skipping or using a checkout fallback. With no header
 input, standalone SDK tests retain optional provider comparisons.
 
 The complete developer runner also supplies its validated source build to
-`platform/tests/test_engine_linkage.py` through `ROCKE_LINK_TEST_BUILD_DIR`.
-The test installs and relocates that SDK, then compiles and runs C++ and C99
-consumers. An ambient or foreign build is not substituted for the runner's build.
+`platform/tests/test_engine_linkage.py` through `ROCKE_LINK_TEST_BUILD_DIR` and
+its selected `--config` through `ROCKE_LINK_TEST_CONFIG`. The test installs and
+relocates that configuration of the SDK, then compiles and runs C++ and C99
+consumers using CMake's generated executable path. An ambient or foreign build
+or configuration is not substituted for the runner's selection. Manual runs
+may set both variables; without a configuration override, the test uses the
+build's `CMAKE_BUILD_TYPE`, or Release when that cache entry is empty or absent.
 The test remains excluded from installed platform pytest because its CMake
 configuration and installation checks need the source build tree.
 

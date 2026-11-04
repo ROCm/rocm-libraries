@@ -271,14 +271,58 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         )
 
 
+def _relocation_config(build: Path) -> str:
+    """Honor the runner's selection or retain a manual build's default config."""
+    config = os.environ.get("ROCKE_LINK_TEST_CONFIG")
+    if config is not None:
+        if not config:
+            raise ValueError(
+                "ROCKE_LINK_TEST_CONFIG must name a nonempty configuration"
+            )
+        return config
+    for line in (build / "CMakeCache.txt").read_text().splitlines():
+        if line.startswith("CMAKE_BUILD_TYPE:") and "=" in line:
+            build_type = line.split("=", 1)[1]
+            if build_type:
+                return build_type
+    return "Release"
+
+
+@pytest.mark.parametrize("cache_type", ["STRING", "UNINITIALIZED"])
+@pytest.mark.parametrize(
+    ("build_type", "explicit_config", "expected"),
+    [("Debug", None, "Debug"), ("Debug", "Release", "Release"), ("", None, "Release")],
+)
+def test_relocation_config_preserves_manual_build_default(
+    monkeypatch, tmp_path, cache_type, build_type, explicit_config, expected
+):
+    (tmp_path / "CMakeCache.txt").write_text(
+        f"CMAKE_BUILD_TYPE:{cache_type}={build_type}\n"
+    )
+    monkeypatch.delenv("ROCKE_LINK_TEST_CONFIG", raising=False)
+    if explicit_config is not None:
+        monkeypatch.setenv("ROCKE_LINK_TEST_CONFIG", explicit_config)
+    assert _relocation_config(tmp_path) == expected
+
+
+def test_relocation_config_rejects_empty_selection(monkeypatch, tmp_path):
+    monkeypatch.setenv("ROCKE_LINK_TEST_CONFIG", "")
+    with pytest.raises(ValueError, match="ROCKE_LINK_TEST_CONFIG must name a nonempty"):
+        _relocation_config(tmp_path)
+
+
 @pytest.mark.parametrize("consumer", ["cpp_lowerer", "c_mma"])
 def test_relocated_cmake_consumer_links_lowerer(tmp_path, consumer):
     """Compile and run C/C++ consumers of a freshly built, relocated SDK."""
     build = os.environ.get("ROCKE_LINK_TEST_BUILD_DIR")
     if not build:
         pytest.skip("set ROCKE_LINK_TEST_BUILD_DIR to a fresh engine build")
+    config = _relocation_config(Path(build))
     prefix = tmp_path / "install"
-    subprocess.run(["cmake", "--install", build, "--prefix", str(prefix)], check=True)
+    subprocess.run(
+        ["cmake", "--install", build, "--config", config, "--prefix", str(prefix)],
+        check=True,
+    )
     relocated = tmp_path / "relocated"
     prefix.rename(relocated)
     source = tmp_path / "consumer"
@@ -293,6 +337,8 @@ def test_relocated_cmake_consumer_links_lowerer(tmp_path, consumer):
         f"add_executable(consumer main.{'c' if consumer == 'c_mma' else 'cpp'})\n"
         "set_target_properties(consumer PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF LINKER_LANGUAGE CXX)\n"
         "target_link_libraries(consumer PRIVATE ckc::rocke_core)\n"
+        'file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/consumer-path-$<CONFIG>.txt" '
+        'CONTENT "$<TARGET_FILE:consumer>")\n'
     )
     # Taking the API address forces archive extraction without needing a GPU or
     # a valid kernel. The executable must resolve the detector dependencies.
@@ -337,9 +383,73 @@ def test_relocated_cmake_consumer_links_lowerer(tmp_path, consumer):
             "-B",
             str(output),
             f"-DCMAKE_PREFIX_PATH={relocated}",
+            f"-DCMAKE_BUILD_TYPE={config}",
         ],
         check=True,
     )
-    subprocess.run(["cmake", "--build", str(output)], check=True)
-    executable = output / ("consumer.exe" if os.name == "nt" else "consumer")
-    subprocess.run([str(executable)], check=True)
+    subprocess.run(["cmake", "--build", str(output), "--config", config], check=True)
+    executable = (output / f"consumer-path-{config}.txt").read_text()
+    subprocess.run([executable], check=True)
+
+
+@pytest.mark.parametrize("generator", ["Ninja", "Ninja Multi-Config"])
+@pytest.mark.parametrize("config", ["Release", "Debug"])
+@pytest.mark.parametrize("explicit_config", [False, True])
+def test_relocation_consumer_uses_selected_cmake_configuration(
+    monkeypatch, tmp_path, generator, config, explicit_config
+):
+    """Isolate configuration handling with a real, minimal exported SDK."""
+    if not all(shutil.which(tool) for tool in ("cmake", "ninja")):
+        pytest.skip("CMake and Ninja required for relocation configuration regression")
+    source = tmp_path / "sdk"
+    source.mkdir()
+    (source / "rocke").mkdir()
+    (source / "rocke" / "lower_llvm.h").write_text(
+        'extern "C" void rocke_lower_kernel_to_llvm_ex();\n'
+    )
+    (source / "engine.cpp").write_text(
+        'extern "C" void rocke_lower_kernel_to_llvm_ex() {}\n'
+    )
+    (source / "ckcConfig.cmake").write_text(
+        "include(CMakeFindDependencyMacro)\n"
+        "find_dependency(Threads)\n"
+        'include("${CMAKE_CURRENT_LIST_DIR}/ckcTargets.cmake")\n'
+    )
+    (source / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.18)\n"
+        "project(relocation_fixture LANGUAGES CXX)\n"
+        "find_package(Threads REQUIRED)\n"
+        "add_library(rocke_core STATIC engine.cpp)\n"
+        "target_link_libraries(rocke_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})\n"
+        "target_include_directories(rocke_core PUBLIC\n"
+        "  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include>)\n"
+        "install(TARGETS rocke_core EXPORT ckcTargets ARCHIVE DESTINATION lib)\n"
+        "install(DIRECTORY rocke DESTINATION include)\n"
+        "install(EXPORT ckcTargets NAMESPACE ckc:: DESTINATION lib/cmake/ckc)\n"
+        "install(FILES ckcConfig.cmake DESTINATION lib/cmake/ckc)\n"
+    )
+    build = tmp_path / "sdk-build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(source),
+            "-B",
+            str(build),
+            "-G",
+            generator,
+            f"-DCMAKE_BUILD_TYPE={config}",
+        ],
+        check=True,
+    )
+    # Build only the selected engine configuration so a wrong install cannot
+    # accidentally succeed using artifacts left over from another lane.
+    subprocess.run(["cmake", "--build", str(build), "--config", config], check=True)
+    monkeypatch.setenv("CMAKE_GENERATOR", generator)
+    monkeypatch.setenv("ROCKE_LINK_TEST_BUILD_DIR", str(build))
+    monkeypatch.delenv("ROCKE_LINK_TEST_CONFIG", raising=False)
+    if explicit_config:
+        monkeypatch.setenv("ROCKE_LINK_TEST_CONFIG", config)
+    consumer_root = tmp_path / "relocation"
+    consumer_root.mkdir()
+    test_relocated_cmake_consumer_links_lowerer(consumer_root, "cpp_lowerer")

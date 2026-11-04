@@ -547,8 +547,9 @@ def test_configured_portable_ir_artifacts_replace_external_cache(
 
 
 @pytest.mark.parametrize("owned_source", [False, True])
+@pytest.mark.parametrize("config", ["Release", "Debug"])
 def test_relocation_consumers_receive_only_the_owned_source_build(
-    runner, monkeypatch, tmp_path, owned_source
+    runner, monkeypatch, tmp_path, owned_source, config
 ):
     from rocke.portable_ir.src import online
 
@@ -558,17 +559,20 @@ def test_relocation_consumers_receive_only_the_owned_source_build(
     shared.touch()
     replay.touch()
     monkeypatch.setenv("ROCKE_LINK_TEST_BUILD_DIR", str(tmp_path / "stale-build"))
+    monkeypatch.setenv("ROCKE_LINK_TEST_CONFIG", "stale-config")
     monkeypatch.setattr(
         runner, "_cmake_home", lambda _root: runner.ROCKE if owned_source else tmp_path
     )
     validate = Mock(return_value=(("fixture-version", "fixture-id"), "fixture"))
     monkeypatch.setattr(online, "validate_artifact_bundle", validate)
-    env = runner.native_pytest_env(tmp_path, "Release")
+    env = runner.native_pytest_env(tmp_path, config)
     if owned_source:
         assert env["ROCKE_LINK_TEST_BUILD_DIR"] == str(tmp_path.resolve())
+        assert env["ROCKE_LINK_TEST_CONFIG"] == config
         validate.assert_called_once_with(str(shared.resolve()), str(replay.resolve()))
     else:
         assert "ROCKE_LINK_TEST_BUILD_DIR" not in env
+        assert "ROCKE_LINK_TEST_CONFIG" not in env
         validate.assert_not_called()
 
 
