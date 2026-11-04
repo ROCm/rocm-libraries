@@ -1028,28 +1028,76 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_for<0, kKReadAhead, 1>{}(
             [&](auto i) { k_bufs[decltype(i)::value] = k_pre[decltype(i)::value]; });
 
+        // MX: a fragment's K scales (one dword per K128 step) ride the ring too, read just before
+        // its K data, so the wait for a fragment leaves the fragments read after it in flight.
+        using KScales = array<int32_t, kMxKSteps>;
+        [[maybe_unused]] KScales k_scale_bufs[kKReadAhead + 1];
+        [[maybe_unused]] auto read_k_scales = [&](auto i_n) {
+            KScales scales;
+            static_for<0, kMxKSteps, 1>{}([&](auto i_p) { scales(i_p) = k_scale(i_n, i_p); });
+            return scales;
+        };
+        if constexpr(kMx)
+            static_for<0, kKReadAhead, 1>{}(
+                [&](auto i) { k_scale_bufs[decltype(i)::value] = read_k_scales(i); });
+
         static_for<0, kNIter, 1>{}([&](auto i_n) {
-            constexpr index_t n = decltype(i_n)::value;
+            constexpr index_t n    = decltype(i_n)::value;
+            constexpr index_t slot = n % (kKReadAhead + 1);
             if constexpr(n + kKReadAhead < kNIter)
             {
+                constexpr index_t ahead = (n + kKReadAhead) % (kKReadAhead + 1);
+                if constexpr(kMx)
+                    k_scale_bufs[ahead] = read_k_scales(number<n + kKReadAhead>{});
                 move_tile_window(k_frag_window, {kFragN, 0});
-                k_bufs[(n + kKReadAhead) % (kKReadAhead + 1)] = load_tile(k_frag_window);
+                k_bufs[ahead] = load_tile(k_frag_window);
             }
             if constexpr(kMx)
-                Policy::template RunQKMxNIter<Problem>(s_acc,
-                                                       q_tile,
-                                                       k_bufs[n % (kKReadAhead + 1)],
-                                                       i_n,
-                                                       number<0>{},
-                                                       q_scale,
-                                                       k_scale);
+                Policy::template RunQKMxNIter<Problem>(
+                    s_acc,
+                    q_tile,
+                    k_bufs[slot],
+                    i_n,
+                    number<0>{},
+                    q_scale,
+                    [s = k_scale_bufs[slot]](auto, auto i_p) { return s[i_p]; });
             else
-                Policy::template RunQKFragment<Problem>(
-                    s_acc, q_tile, k_bufs[n % (kKReadAhead + 1)], i_n);
+                Policy::template RunQKFragment<Problem>(s_acc, q_tile, k_bufs[slot], i_n);
             // A full fence keeps the fragment order, as in Gemm1ByVFragment.
             __builtin_amdgcn_sched_barrier(0);
         });
         move_tile_window(k_frag_window, {-kFragN * (kNIter - 1), 0});
+    }
+
+    // The main loop's one fp8 gemm0 entry (Gemm1ByVFragment is gemm1's): by K fragment where
+    // kKFragments, else on the whole K tile. MX passes its Q and K scale functors; on a K64 warp
+    // tile it pairs K steps into K128 scaled WMMAs per N iteration (RunQKMxNIter).
+    template <typename SAcc,
+              typename QTile,
+              typename KTile,
+              typename KFragWindow,
+              typename QScale,
+              typename KScale>
+    CK_TILE_DEVICE static void Gemm0Fp8(SAcc& s_acc,
+                                        const QTile& q_tile,
+                                        const KTile& k_tile,
+                                        KFragWindow& k_frag_window,
+                                        const QScale& q_scale,
+                                        const KScale& k_scale)
+    {
+        constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
+        using Gemm0           = remove_cvref_t<decltype(gemm_0)>;
+        if constexpr(kKFragments)
+            Gemm0ByKFragment(s_acc, q_tile, k_tile, k_frag_window, q_scale, k_scale);
+        else if constexpr(kMx && Gemm0::WarpGemm::kK == 128)
+            gemm_0(s_acc, q_tile, k_tile, q_scale, k_scale);
+        else if constexpr(kMx)
+            static_for<0, Gemm0::NIterPerWarp, 1>{}([&](auto i_n) {
+                Policy::template RunQKMxNIter<Problem>(
+                    s_acc, q_tile, k_tile, i_n, i_n, q_scale, k_scale);
+            });
+        else
+            gemm_0(s_acc, q_tile, k_tile);
     }
 
     // Single V, double K LDS buffer path.
@@ -2504,10 +2552,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   decltype(i_n)::value * kWmmaRows + mx_lane,
                                   decltype(i_k)::value);
             };
-            if constexpr(kKFragments)
+            if constexpr(is_any_of<KDataType, fp8_t, bf8_t>::value)
             {
-                static_assert(k0_loops == 1 && kMergedWarBarriers);
-                Gemm0ByKFragment(s_acc, q_tile, k_tile, k_frag_window, mx_q_scale, mx_k_scale);
+                static_assert(k0_loops == 1 && !Problem::kProgressiveDsLoadK);
+                Gemm0Fp8(s_acc, q_tile, k_tile, k_frag_window, mx_q_scale, mx_k_scale);
             }
             else if constexpr(!kStagedKPairs && Problem::kProgressiveDsLoadK)
             {
@@ -2520,17 +2568,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                                    sequence<kM0, k0_loops * kK0>{}),
                     k_tile,
                     [](auto, auto, auto) {});
-            }
-            else if constexpr(kMx && QKGemm::WarpGemm::kK == 128)
-            {
-                gemm_0(s_acc, q_tile, k_tile, mx_q_scale, mx_k_scale);
-            }
-            else if constexpr(kMx)
-            {
-                static_for<0, QKGemm::NIterPerWarp, 1>{}([&](auto i_n) {
-                    Policy::template RunQKMxNIter<Problem>(
-                        s_acc, q_tile, k_tile, i_n, i_n, mx_q_scale, mx_k_scale);
-                });
             }
             else if constexpr(!kStagedKPairs)
             {
