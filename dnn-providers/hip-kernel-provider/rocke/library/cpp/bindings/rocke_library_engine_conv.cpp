@@ -2625,6 +2625,19 @@ void register_conv(py::module_& m)
 
     /* ---- wgrad two-stage family ---- */
     reg3("conv_wgrad", conv_wgrad_lower_llvm, conv_wgrad_serialize_ir, conv_wgrad_verify);
+    m.def(
+        "conv_implicit_gemm_is_valid_spec",
+        [](const py::dict& d, const std::string& arch) -> py::tuple {
+            const char* a = require_arch(arch);
+            std::deque<std::string> store;
+            rocke_implicit_gemm_conv_spec_t s = conv_igemm_build_spec(d, store);
+            char reason[1024] = {0};
+            const bool ok = rocke_implicit_gemm_conv_is_valid_spec(&s, a, reason, sizeof(reason));
+            return py::make_tuple(ok, ok ? std::string("ok") : std::string(reason));
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "C port of the fwd is_valid_spec: (ok, reason), reason 'ok' when accepted.");
     /* ---- dgrad interior-only dX (launch-time dx_interior) ---- */
     reg3("conv_dgrad_halo_zero",
          conv_dgrad_halo_zero_lower_llvm,

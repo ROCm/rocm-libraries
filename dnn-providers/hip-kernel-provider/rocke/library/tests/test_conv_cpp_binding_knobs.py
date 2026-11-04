@@ -97,13 +97,24 @@ def _python_ll(build, spec, arch: str) -> str:
 
 class TestConvBindingForwardsKnobs(unittest.TestCase):
     def test_fwd(self):
-        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
+        from kernels.common.conv_implicit_gemm import (
+            build_implicit_gemm_conv,
+            is_valid_spec,
+        )
         from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         eng = _engine()
         for idx in _FWD:
             spec, arch = _emitter_spec("conv_implicit_gemm_emit", idx)
             with self.subTest(idx=idx):
+                self.assertEqual(
+                    tuple(
+                        eng.conv_implicit_gemm_is_valid_spec(
+                            conv_implicit_gemm_spec_to_dict(spec), arch
+                        )
+                    ),
+                    is_valid_spec(spec, arch),
+                )
                 self.assertEqual(
                     eng.conv_implicit_gemm_lower_llvm(
                         conv_implicit_gemm_spec_to_dict(spec), arch=arch
