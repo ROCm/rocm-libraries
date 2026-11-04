@@ -807,6 +807,7 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  const char* ordering)
 {
     rocke_value_t* ops[3];
+    char value_error[ROCKE_ERR_MSG_CAP];
     rocke_attr_map_t a;
     if(!rocke_i_live(b))
         return NULL;
@@ -818,12 +819,8 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
     if(!rocke_i_ordering_ok(ordering))
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown ordering '%s'", ordering);
-    if(!rocke_i_is_vector(value->type, "bf16", 2))
-        return (rocke_value_t*)rocke_i_set_err(
-            b,
-            ROCKE_ERR_VALUE,
-            "global_atomic_add_pk_bf16 expects <2 x bf16> input, got %s",
-            value->type->name);
+    if(rocke_i_packed_atomic_add_value_error("bf16", value->type, value_error, sizeof value_error))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", value_error);
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
@@ -842,6 +839,7 @@ rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
                                                 const char* ordering)
 {
     rocke_value_t* ops[3];
+    char value_error[ROCKE_ERR_MSG_CAP];
     rocke_attr_map_t a;
     if(!rocke_i_live(b))
         return NULL;
@@ -853,12 +851,8 @@ rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
     if(!rocke_i_ordering_ok(ordering))
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown ordering '%s'", ordering);
-    if(!rocke_i_is_vector(value->type, "f16", 2))
-        return (rocke_value_t*)rocke_i_set_err(
-            b,
-            ROCKE_ERR_VALUE,
-            "global_atomic_add_pk_f16 expects <2 x f16> input, got %s",
-            value->type->name);
+    if(rocke_i_packed_atomic_add_value_error("f16", value->type, value_error, sizeof value_error))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", value_error);
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;

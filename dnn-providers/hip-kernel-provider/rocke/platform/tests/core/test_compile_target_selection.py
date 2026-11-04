@@ -277,3 +277,36 @@ def test_an_unreadable_hipcc_version_is_refused(kernel: KernelDef) -> None:
         pytest.raises(RuntimeError, match="cannot read the LLVM version of hipcc"),
     ):
         compile_module.compile_kernel_via_hipcc(kernel, arch="gfx942")
+
+
+def test_hipcc_accepts_target_maps_the_target_as_the_compile_helpers_do() -> None:
+    """The probe compiles for the target hipcc's own clang is given by the
+    compile helpers: gfx1154 becomes gfx11-generic for a clang-23 hipcc."""
+    with (
+        mock.patch.object(
+            compile_module.subprocess, "run", side_effect=_hipcc(23, "hsaco")
+        ) as run,
+        _falls_back(),
+    ):
+        assert compile_module.hipcc_accepts_target("gfx1154")
+    assert "--offload-arch=gfx11-generic" in run.call_args.args[0]
+
+
+def test_hipcc_accepts_target_refuses_a_target_its_clang_does_not_accept() -> None:
+    """A clang-20 hipcc does not accept gfx1250, so nothing is compiled."""
+    with mock.patch.object(
+        compile_module.subprocess, "run", side_effect=_hipcc(20, "hsaco")
+    ) as run:
+        assert not compile_module.hipcc_accepts_target("gfx1250")
+    assert [call.args[0][1:] for call in run.call_args_list] == [["--version"]]
+
+
+def test_hipcc_accepts_target_is_false_when_the_compile_fails() -> None:
+    def run(args, **kwargs):
+        if args[1:] == ["--version"]:
+            version = "AMD clang version 23.0.0git\n"
+            return subprocess.CompletedProcess(args, 0, stdout=version, stderr="")
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="unknown target")
+
+    with mock.patch.object(compile_module.subprocess, "run", side_effect=run):
+        assert not compile_module.hipcc_accepts_target("gfx942")

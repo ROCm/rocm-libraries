@@ -213,6 +213,28 @@ int rocke_i_buffer_vector_bytes(
  * the Python engine's refusal into `err`. */
 int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap);
 
+/* True when a typed vector buffer store (tile.buffer_store_vN_f16, _bf16,
+ * _f32) admits `dwords` (Python core/ir.py::_TYPED_BUFFER_STORE_DWORDS). */
+bool rocke_i_is_typed_buffer_store_dwords(int64_t dwords);
+
+/* The bytes a built typed buffer store (tile.buffer_store_f16, _bf16, _f32 and
+ * their vN forms) moves: fixed for the scalar forms, four per dword of the
+ * `dwords` attr for the vector forms, after its operand and result counts (four
+ * operands, no result) and its `dwords` attr: serialized IR reaches the HIP
+ * lowerings, which use it, without passing the builder (Python
+ * core/ir.py::_typed_buffer_store_bytes). Otherwise returns 0 and writes the
+ * Python engine's refusal into `err`. */
+int rocke_i_typed_buffer_store_bytes(const rocke_op_t* op, char* err, size_t err_cap);
+
+/* The error for a global_atomic_add_pk_<elem_name> whose value has type
+ * `value_type`, or NULL when it is <2 x elem_name> (Python
+ * core/ir.py::_packed_atomic_add_value_error, same text). The builder and the
+ * HIP lowering use it. A returned error is written to `buf`. */
+const char* rocke_i_packed_atomic_add_value_error(const char* elem_name,
+                                                  const rocke_type_t* value_type,
+                                                  char* buf,
+                                                  size_t cap);
+
 /* The error for a global_ptr_offset whose pointer, offset and (once built,
  * else NULL) result have these types, or NULL when they are valid (Python
  * core/ir.py::_global_ptr_offset_error, same texts): a global pointer, an i64
