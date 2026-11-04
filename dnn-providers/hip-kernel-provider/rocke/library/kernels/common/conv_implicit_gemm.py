@@ -5562,6 +5562,9 @@ def _build_implicit_gemm_conv_impl(
                                     b.mul(p_pW, s_wi)), c_eb)
                 _a_ptr_b = b.global_ptr_offset(A, b.sext(b.sub(c0, _bias), I64))
                 _a_nb = b.add(A_bytes, _bias)
+                # masked A lanes: offset = the buffer's size (out of range
+                # however large A is; 2^31 - 1 need not be)
+                c_oob = _a_nb
 
             def _tap_mask(org, extent):
                 # bit t set <=> 0 <= org + t < extent (t < 31; dilation 1)
@@ -5597,9 +5600,10 @@ def _build_implicit_gemm_conv_impl(
 
             def _wmask(pc, rel, voff):
                 # lane of range row rel: input column pc.w + rel outside -> 0
+                # (offset = the buffer's size: out of range however large A is)
                 if not _xp:
                     return voff
-                return b.select(b.cmp_ult(b.add(pc[2], rel), p_Wi), voff, c_oob)
+                return b.select(b.cmp_ult(b.add(pc[2], rel), p_Wi), voff, _a_nb)
 
             def segs(n_seg):
                 # segment s = j * n_waves + wave; the last round's surplus
@@ -6338,11 +6342,6 @@ def _build_implicit_gemm_conv_impl(
                 c32 = b.const_i32(32)
                 conds += [b.cmp_eq(p_dH, c1), b.cmp_eq(p_dD, c1),
                           b.cmp_lt(p_Y, c32), b.cmp_lt(p_Z, c32)]
-                # the pad-offset A buffer (A_bytes + pad bytes) stays below the
-                # out-of-range lane offset
-                _pb = b.mul(b.add(b.add(b.mul(p_pD, s_di), b.mul(p_pH, s_hi)),
-                                  b.mul(p_pW, s_wi)), b.const_i32(2))
-                conds.append(b.cmp_le(A_bytes, b.sub(b.const_i32(0x7FFFFFFE), _pb)))
             if spec.xh_dpp:
                 # Output row boundaries only at a wave's M extent.
                 conds.append(b.cmp_eq(

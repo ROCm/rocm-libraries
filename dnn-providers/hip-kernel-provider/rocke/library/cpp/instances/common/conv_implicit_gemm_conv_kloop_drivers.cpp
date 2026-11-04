@@ -1925,16 +1925,17 @@ static rocke_value_t* conv_xpd_rsrc(rocke_conv_build_ctx_t* ctx,
     return rocke_b_buffer_rsrc(b, xp->a_ptr_b, nb);
 }
 
-/* lane of range row rel: input column w + rel outside -> out of range */
+/* lane of range row rel: input column w + rel outside -> the buffer's size
+ * (out of range however large A is) */
 static rocke_value_t* conv_xpd_wmask(rocke_conv_build_ctx_t* ctx,
                                      rocke_value_t* w,
                                      rocke_value_t* rel,
                                      rocke_value_t* voff,
-                                     rocke_value_t* c_oob)
+                                     rocke_value_t* oob)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* wr = rocke_b_add(b, w, rel);
-    return rocke_b_select(b, rocke_b_cmp_ult(b, wr, ctx->p_Wi), voff, c_oob);
+    return rocke_b_select(b, rocke_b_cmp_ult(b, wr, ctx->p_Wi), voff, oob);
 }
 
 static void conv_xh_hint_interleave(
@@ -2055,16 +2056,6 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         conds[nc++] = rocke_b_cmp_eq(b, ctx->p_dD, c1);
         conds[nc++] = rocke_b_cmp_lt(b, ctx->p_Y, c32);
         conds[nc++] = rocke_b_cmp_lt(b, ctx->p_Z, c32);
-        /* the pad-offset A buffer (A_bytes + pad bytes) stays below the
-         * out-of-range lane offset */
-        rocke_value_t* pd = rocke_b_mul(b, ctx->p_pD, s_di);
-        rocke_value_t* ph = rocke_b_mul(b, ctx->p_pH, s_hi);
-        rocke_value_t* pdh = rocke_b_add(b, pd, ph);
-        rocke_value_t* pw = rocke_b_mul(b, ctx->p_pW, s_wi);
-        rocke_value_t* pdhw = rocke_b_add(b, pdh, pw);
-        rocke_value_t* pb = rocke_b_mul(b, pdhw, rocke_b_const_i32(b, 2));
-        rocke_value_t* lim = rocke_b_sub(b, rocke_b_const_i32(b, 0x7FFFFFFE), pb);
-        conds[nc++] = rocke_b_cmp_le(b, ctx->A_bytes, lim);
     }
     if(spec->xh_stride_m)
     {
@@ -2434,6 +2425,9 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
         rocke_value_t* nbias = rocke_b_sext(b, rocke_b_sub(b, c0, bias), i64);
         xp.a_ptr_b = rocke_b_global_ptr_offset(b, ctx->A, nbias);
         xp.a_nb = rocke_b_add(b, ctx->A_bytes, bias);
+        /* masked A lanes: offset = the buffer's size (out of range however
+         * large A is; 2^31 - 1 need not be) */
+        c_oob = xp.a_nb;
     }
 
     conv_dma_t a_dma[64];
@@ -2482,7 +2476,7 @@ static rocke_value_t* conv_xh_emit(conv_xh_t* x,
             if(xp.on)
             {
                 rocke_value_t* rr = rocke_b_add(b, rel0, rocke_b_const_i32(b, 4 * j));
-                voff = conv_xpd_wmask(ctx, pc_w[2], rr, voff, c_oob);
+                voff = conv_xpd_wmask(ctx, pc_w[2], rr, voff, xp.a_nb);
             }
             rocke_value_t* sb = rocke_b_mul(b, sg, rocke_b_const_i32(b, 4 * row_bytes));
             rocke_value_t* lds = rocke_b_smem_ptr_add(b, A_addr, rocke_b_zext(b, sb, i64));
@@ -2850,7 +2844,7 @@ static rocke_value_t*
         if(xp->on)
         {
             rocke_value_t* rr = rocke_b_add(b, lp_rel[j % 4], rocke_b_const_i32(b, 4 * j));
-            voff = conv_xpd_wmask(ctx, pc_own[2], rr, voff, y->c_oob);
+            voff = conv_xpd_wmask(ctx, pc_own[2], rr, voff, xp->a_nb);
         }
         own[n_own++] = {'o', j, NULL, NULL, voff};
     }
@@ -2892,7 +2886,7 @@ static rocke_value_t*
             {
                 rocke_value_t* j4b = rocke_b_mul(b, j_s, rocke_b_const_i32(b, 4));
                 rocke_value_t* rj = rocke_b_add(b, rel_v, j4b);
-                voff = conv_xpd_wmask(ctx, pc_ring[cw][2], rj, voff, y->c_oob);
+                voff = conv_xpd_wmask(ctx, pc_ring[cw][2], rj, voff, xp->a_nb);
             }
             ring_v[n_ring] = voff;
             ring_cw[n_ring] = cw;
@@ -2961,7 +2955,7 @@ static rocke_value_t*
             if(xp->on)
             {
                 rocke_value_t* rr = rocke_b_add(b, lp_rel[j % 4], rocke_b_const_i32(b, 4 * j));
-                voff = conv_xpd_wmask(ctx, pc_u[2], rr, voff, y->c_oob);
+                voff = conv_xpd_wmask(ctx, pc_u[2], rr, voff, xp->a_nb);
             }
             own2[n_own2++] = {'u', j, NULL, NULL, voff};
         }
