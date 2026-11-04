@@ -44,6 +44,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
+* [Conv] Added `ConvHipImplicitGemmFma3dFwd`, a forward 3D convolution solver for RDNA (`gfx101X`,
+  `gfx103X`, `gfx110X`, `gfx115X`, `gfx117X`, `gfx120X`). It is an implicit GEMM on plain FMA
+  instructions, so it also runs on targets without WMMA, and covers fp32, fp16 and bf16, NCDHW and
+  NDHWC, and grouped convolutions with at least 16 output channels per group. On gfx1151 it is
+  2.3x to 4.4x faster than `GemmFwdRest` on fp32 3x3x3 convolutions and is selected through Find
+  mode.
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
