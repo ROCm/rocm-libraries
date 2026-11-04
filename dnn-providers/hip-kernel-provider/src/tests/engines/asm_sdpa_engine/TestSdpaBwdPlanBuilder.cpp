@@ -208,22 +208,37 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
                                        DataType::HALF),
                    "compute_data_type = HALF on fp16 tensors"},
          false},
-
-        // Virtual operands have no device buffer; reject inputs and outputs alike.
-        {GraphTest{mutateGraph(createSdpaBwdGraph(),
-                               [](GraphT& graph) { findTensor(graph, "q").virtual_ = true; }),
-                   "virtual q tensor"},
-         false},
-        {GraphTest{mutateGraph(createSdpaBwdGraph(),
-                               [](GraphT& graph) { findTensor(graph, "dq").virtual_ = true; }),
-                   "virtual dq tensor"},
-         false},
     };
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
+    }
+}
+
+// A virtual operand has no device buffer, and execute needs a pointer for every operand. The
+// builder checks them in one data-driven loop, so cover every entry: dropping one must fail here.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsVirtualOperand)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest control{createSdpaBwdGraph(), "unmodified graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const std::string name : {"q", "k", "v", "o", "do", "stats", "dq", "dk", "dv"})
+    {
+        SCOPED_TRACE("virtual " + name);
+        const GraphTest test{
+            mutateGraph(createSdpaBwdGraph(),
+                        [&](GraphT& graph) { findTensor(graph, name).virtual_ = true; }),
+            "virtual " + name};
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
     }
 }
 

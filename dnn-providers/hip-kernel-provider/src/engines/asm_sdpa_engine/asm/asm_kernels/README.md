@@ -36,13 +36,18 @@ reason) any graph outside this contract:
 | dO, dQ, dK, dV | — | same dtype as Q |
 | Stats (LSE) | FP32 (optional output) | FP32 (required input) |
 | Node `compute_data_type` | FLOAT | FLOAT |
+| `mma_core_mode` | UNSET, or HALF/BFLOAT16 for BF16 inputs | — |
+| Descale Q, K, V (FP8 only) | Scalar, non-virtual, non-pass-by-value device tensors | — |
 
 - **Accumulation.** QKᵀ, the online softmax and PV accumulate in fp32 inside the kernels;
   no intermediate tensor is exposed. Backward dQ accumulates through an fp32 workspace by
   default (`a32`). The `sdpa.bwd.accumulator_type=a16` knob opts into the 16-bit path.
 - **Intermediate data type.** Neither builder reads the graph's `intermediate_data_type`.
   The frontend uses it only to type unset virtual tensors, and it is `(cache_ignore)` in
-  `graph.fbs`. Both builders decline any virtual operand tensor instead.
+  `graph.fbs`. These single-node kernels expose no intermediate tensor, so both builders
+  decline a virtual operand tensor instead (forward: Q, K, V, O, Stats and the FP8 descales;
+  backward: every operand). A virtual tensor has no device buffer, and execute needs a pointer
+  for every operand.
 - **Enforcement.** Any other combination is declined in `isApplicable` with a logged reason,
   except the backward O dtype noted in the table.
 

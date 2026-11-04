@@ -248,6 +248,14 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       DataType::BFLOAT16,
+                                      DataType::HALF,
+                                      false,
+                                      true),
+                   "compute_data_type = HALF"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
                                       DataType::FLOAT,
                                       false,
                                       false,
@@ -286,20 +294,41 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       DataType::FLOAT),
                    "mma_core_mode = FLOAT"},
-         false},
-        {GraphTest{mutateGraph(createSdpaFwdGraph(),
-                               [](GraphT& graph) { findTensor(graph, "q").virtual_ = true; }),
-                   "virtual q tensor"},
-         false},
-        {GraphTest{mutateGraph(createSdpaFwdGraph(),
-                               [](GraphT& graph) { findTensor(graph, "o").virtual_ = true; }),
-                   "virtual o tensor"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
+    }
+}
+
+// A virtual operand has no device buffer, and execute needs a pointer for every operand. The
+// builder checks them in one data-driven loop, so cover every entry: dropping one must fail here.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsVirtualOperand)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest control{createSdpaFwdGraph(), "unmodified graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const std::string name : {"q", "k", "v", "o"})
+    {
+        SCOPED_TRACE("virtual " + name);
+        const GraphTest test{
+            mutateGraph(createSdpaFwdGraph(),
+                        [&](GraphT& graph) { findTensor(graph, name).virtual_ = true; }),
+            "virtual " + name};
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
     }
 }
 
@@ -1080,6 +1109,41 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithNonScalarDescale)
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper))
         << "fp8 inputs with non-scalar (per-[B, H_kv]) descales must be rejected";
+}
+
+// The kernel reads each fp8 descale through a device pointer. A virtual descale has no buffer,
+// and a pass-by-value one reaches the kernel as a host pointer (or not at all).
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotADeviceTensor)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const GraphTest control{createSdpaFwdFp8Graph(/*withDescale=*/true), "unmodified fp8 graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    const std::vector<std::pair<std::string, std::function<void(TensorAttributesT&)>>> mutations
+        = {{"virtual", [](TensorAttributesT& tensor) { tensor.virtual_ = true; }},
+           {"pass-by-value",
+            [](TensorAttributesT& tensor) { tensor.is_runtime_pass_by_value = true; }}};
+    for(const std::string name : {"descale_q", "descale_k", "descale_v"})
+    {
+        for(const auto& entry : mutations)
+        {
+            const std::string& mutationName = entry.first;
+            const auto& mutation = entry.second;
+            SCOPED_TRACE(mutationName + " " + name);
+            const GraphTest test{
+                mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
+                            [&](GraphT& graph) { mutation(findTensor(graph, name)); }),
+                mutationName + " " + name};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        }
+    }
 }
 
 // The fp8 kernels run fp8 MFMA, so a 16-bit mma_core_mode (HALF, the cuDNN-frontend

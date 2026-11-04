@@ -2,9 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstddef>
-#include <unordered_map>
+#include <initializer_list>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <string>
 
 #include "engines/asm_sdpa_engine/asm/SdpaFwdKernelArgs.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdArgsBuilder.hpp"
@@ -12,6 +16,30 @@
 using asm_sdpa_engine::buildFwdKernelArgs;
 using asm_sdpa_engine::fmha_fwd_v3_args;
 using asm_sdpa_engine::SdpaFwdParams;
+
+namespace
+{
+// The execute-time buffer array a plan receives: one (uid, pointer) entry per supplied tensor.
+std::vector<hipdnnPluginDeviceBuffer_t>
+    makeBuffers(std::initializer_list<std::pair<int64_t, void*>> entries)
+{
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers;
+    for(const auto& entry : entries)
+    {
+        hipdnnPluginDeviceBuffer_t buffer{};
+        buffer.uid = entry.first;
+        buffer.ptr = entry.second;
+        buffers.push_back(buffer);
+    }
+    return buffers;
+}
+
+fmha_fwd_v3_args buildArgs(const SdpaFwdParams& params,
+                           const std::vector<hipdnnPluginDeviceBuffer_t>& buffers)
+{
+    return buildFwdKernelArgs(params, buffers.data(), static_cast<uint32_t>(buffers.size()));
+}
+} // namespace
 
 // Verify the packed struct has the exact binary layout expected by the
 // pre-compiled ASM kernel.  Each field must sit at the byte offset that
@@ -163,10 +191,9 @@ TEST(TestSdpaFwdKernelArgs, BuildArgsBf16UsesTwoByteStridesAndNoDescale)
     int kBuf = 0;
     int vBuf = 0;
     int oBuf = 0;
-    const std::unordered_map<int64_t, void*> uidToPtrMap{
-        {1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}};
+    const auto buffers = makeBuffers({{1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}});
 
-    const fmha_fwd_v3_args args = buildFwdKernelArgs(params, uidToPtrMap);
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
 
     EXPECT_EQ(args.ptr_q, &qBuf);
     EXPECT_EQ(args.ptr_o, &oBuf);
@@ -196,10 +223,10 @@ TEST(TestSdpaFwdKernelArgs, BuildArgsFp8UsesOneByteInputStridesAndWiresDescales)
     int dqBuf = 0;
     int dkBuf = 0;
     int dvBuf = 0;
-    const std::unordered_map<int64_t, void*> uidToPtrMap{
-        {1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}, {5, &dqBuf}, {6, &dkBuf}, {7, &dvBuf}};
+    const auto buffers = makeBuffers(
+        {{1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}, {5, &dqBuf}, {6, &dkBuf}, {7, &dvBuf}});
 
-    const fmha_fwd_v3_args args = buildFwdKernelArgs(params, uidToPtrMap);
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
 
     // FP8 input strides scaled by 1 byte.
     EXPECT_EQ(args.s_Seqs, params.qStrideSeq * 1u);
@@ -230,10 +257,14 @@ TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeWiresSharedSeqstartsAndZeroBatchSt
     int oBuf = 0;
     int qoSeqstartBuf = 0;
     int kvSeqstartBuf = 0;
-    const std::unordered_map<int64_t, void*> uidToPtrMap{
-        {1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}, {10, &qoSeqstartBuf}, {11, &kvSeqstartBuf}};
+    const auto buffers = makeBuffers({{1, &qBuf},
+                                      {2, &kBuf},
+                                      {3, &vBuf},
+                                      {4, &oBuf},
+                                      {10, &qoSeqstartBuf},
+                                      {11, &kvSeqstartBuf}});
 
-    const fmha_fwd_v3_args args = buildFwdKernelArgs(params, uidToPtrMap);
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
 
     EXPECT_EQ(args.ptr_qseq_padding, &qoSeqstartBuf);
     EXPECT_EQ(args.ptr_qseq, &qoSeqstartBuf);
@@ -247,4 +278,42 @@ TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeWiresSharedSeqstartsAndZeroBatchSt
     EXPECT_EQ(args.s_k_Seqs, params.kStrideSeq * 2u);
     EXPECT_EQ(args.s_v_Seqs, params.vStrideSeq * 2u);
     EXPECT_EQ(args.s_o_Seqs, params.oStrideSeq * 2u);
+}
+
+// A missing buffer must surface as a plugin error that names the uid, not as std::out_of_range.
+TEST(TestSdpaFwdKernelArgs, BuildArgsThrowsPluginErrorNamingTheMissingUid)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.inBytesPerElement = 1;
+    params.descaleUids = SdpaFwdParams::DescaleUids{5, 6, 7};
+
+    int buf = 0;
+    const auto complete = makeBuffers(
+        {{1, &buf}, {2, &buf}, {3, &buf}, {4, &buf}, {5, &buf}, {6, &buf}, {7, &buf}});
+    ASSERT_NO_THROW(buildArgs(params, complete));
+
+    for(int64_t missingUid = 1; missingUid <= 7; ++missingUid)
+    {
+        SCOPED_TRACE("missing uid " + std::to_string(missingUid));
+        std::vector<hipdnnPluginDeviceBuffer_t> buffers;
+        for(const auto& buffer : complete)
+        {
+            if(buffer.uid != missingUid)
+            {
+                buffers.push_back(buffer);
+            }
+        }
+        try
+        {
+            buildArgs(params, buffers);
+            ADD_FAILURE() << "expected a HipdnnPluginException";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+        {
+            EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+            EXPECT_NE(std::string(ex.what()).find("uid: " + std::to_string(missingUid) + " "),
+                      std::string::npos)
+                << ex.what();
+        }
+    }
 }

@@ -430,8 +430,8 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
 
-    // Virtual tensors have no device buffer and take their dtype from the graph's
-    // intermediate_data_type; these kernels only read and write device buffers.
+    // Virtual tensors have no device buffer, and execute needs a device pointer for every
+    // operand.
     for(const auto& [label, tensor] : {std::pair{"q", qTensor},
                                        std::pair{"k", kTensor},
                                        std::pair{"v", vTensor},
@@ -613,6 +613,19 @@ bool SdpaFwdPlanBuilder::isApplicable(
             !isScalarTensor(*qDescale) || !isScalarTensor(*kDescale) || !isScalarTensor(*vDescale),
             "fp8 q/k/v descales must be per-tensor scalars; per-[B, H_kv] descales are not yet "
             "supported");
+
+        // The kernel reads each descale through a device pointer. A virtual descale has no
+        // buffer, and a pass-by-value one is delivered as a host pointer (or not at all).
+        for(const auto& [label, tensor] : {std::pair{"descale_q", qDescale},
+                                           std::pair{"descale_k", kDescale},
+                                           std::pair{"descale_v", vDescale}})
+        {
+            HIP_KERNEL_RETURN_FALSE_IF(
+                tensor->virtual_()
+                    || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor),
+                std::string(label)
+                    + " tensor must be a non-virtual, non-pass-by-value device tensor");
+        }
     }
 
     // Softmax/output (de)quantization is not implemented by the v3 forward kernel

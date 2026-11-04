@@ -582,8 +582,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
         return false;
     }
 
-    // Virtual tensors have no device buffer and take their dtype from the graph's
-    // intermediate_data_type; this kernel only reads and writes device buffers.
+    // Virtual tensors have no device buffer, and execute needs a device pointer for every
+    // operand.
     for(const auto& [label, tensor] : {std::pair{"q", qTensor},
                                        std::pair{"k", kTensor},
                                        std::pair{"v", vTensor},
