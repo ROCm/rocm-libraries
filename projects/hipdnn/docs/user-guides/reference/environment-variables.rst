@@ -148,6 +148,8 @@ A comma-separated list of engine names or IDs, as printed by ``hipdnn_list_engin
 
 Overrides the ``global.benchmarking`` knob for the whole process. ``1``, ``true``, ``on``, ``yes``, ``enable``, and ``enabled`` turn benchmarking on. Recognized false values turn it off. Unrecognized values log a warning and are ignored.
 
+Benchmarking is not supported inside HIP stream capture. See :ref:`capture-hipgraph`.
+
 ``HIPDNN_CACHE_DIR``
 --------------------
 

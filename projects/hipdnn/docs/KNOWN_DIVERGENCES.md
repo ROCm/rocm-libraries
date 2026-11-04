@@ -55,6 +55,8 @@ Notes hipDNN engines report map for both select and deselect. Any other value, i
 | `CUBLASLT_DEPENDENCY` | error | warn | cuDNN only; not equivalent to `EXTERNAL_LIBRARY_DEPENDENCY` |
 | out-of-range value | error | warn | reported by no hipDNN engine |
 
+Engines verified for stream capture report `SUPPORTS_GRAPH_CAPTURE`, so `select_behavior_notes({SUPPORTS_GRAPH_CAPTURE})` keeps only those engines.
+
 ### Determinism
 
 `deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively claim deterministic results; hipDNN engines declare no numerical notes, so a missing claim proves nothing. Until engine metadata carries the claim, the shim keeps its own allowlist, currently `MIOPEN_ENGINE_DETERMINISTIC`.
