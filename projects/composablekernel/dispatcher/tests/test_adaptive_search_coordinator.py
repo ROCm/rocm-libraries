@@ -558,6 +558,26 @@ def test_past_the_cap_a_refill_keeps_the_run_from_stalling(tmp_path):
     assert [ob.trial.origin for ob in made["P2"].told] == ["", "", "", "refill", "refill"]
 
 
+
+def test_refill_ranks_by_relative_latency_on_other_problems(tmp_path):
+    # P1 (best 1 ms) and P2 (best 100 ms) spend the cap in round 1; E fails
+    # verification on P1, so no problem measured it. In round 2 P3 proposes
+    # four kernels that need a build: the refill takes P3's built, untried
+    # kernels by their lowest latency relative to each other problem's best:
+    # C (1.1 on P2), B (1.5 on P1), D (5.0 on P2), then E (unmeasured). By the
+    # worst ratio or by absolute latency B would come before C; unmeasured
+    # first would start with E.
+    lat = {("P1", "A"): 1.0, ("P1", "B"): 1.5, ("P1", "C"): 3.0,
+           ("P2", "A"): 100.0, ("P2", "C"): 110.0, ("P2", "D"): 500.0}
+    ad = FakeAdapter({"P1": list("ABCE"), "P2": list("ACD"), "P3": list("ABCDEFGHI")},
+                     lat=lat, script={("P1", "E"): ["numeric_fail"]})
+    s, made, co = run(tmp_path, ad, {"P1": [list("ABCE")], "P2": [list("ACD")],
+                                     "P3": [["A"], list("FGHI")]},
+                      trials_per_problem=5, new_builds_per_run=5, batch_per_problem=4)
+    assert ad.builds == [list("ABCED")] and s.counts["refilled"] == 4
+    assert [n for p, n in pairs(ad.measured) if p == "P3"] == list("ACBDE")
+
+
 def _cap_grid():
     """144 kernels, the same list for every problem."""
     shapes = itertools.product((32, 64, 128, 256), (32, 64, 128, 256), (32, 64, 128),
