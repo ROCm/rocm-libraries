@@ -634,7 +634,7 @@ TEST(TestMiopenEngine, ReportsNoEstimateWhenItsDeclaredL1ModelIsNotDeployed)
     SKIP_IF_NO_DEVICES();
 
     const MiopenEngine engine(
-        1, "test:miopen", {{"tflops", "0f4d2c8b-6a19-4e73-9d05-8b1746ca3e2f"}});
+        1, "test:miopen", {{"default", {{"tflops", "0f4d2c8b-6a19-4e73-9d05-8b1746ca3e2f"}}}});
 
     auto builder = createValidBatchnormInferenceGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -677,23 +677,43 @@ TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
 }
 
 /// One id shared by two declarations would silently make one answer with the other's model.
-TEST(TestMiopenEngine, EachEngineDeclaresADistinctWellFormedModelIdPerMetric)
+TEST(TestMiopenEngine, EachEngineDeclaresADistinctWellFormedModelIdPerArchAndMetric)
 {
     std::set<std::string> seen;
-    for(const auto* declared : {&MIOPEN_ENGINE_L1_MODELS, &MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS})
+    std::vector<std::set<std::string>> archesPerEngine;
+    for(const auto& declared :
+        {declaredL1Models(MIOPEN_ENGINE_L1_MODELS, MIOPEN_ENGINE_ARCH_L1_MODELS),
+         declaredL1Models(MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS,
+                          MIOPEN_ENGINE_DETERMINISTIC_ARCH_L1_MODELS)})
     {
-        std::set<std::string> metrics;
-        for(const auto& [metric, id] : *declared)
+        std::set<std::string> arches;
+        for(const auto& [arch, byMetric] : declared)
         {
-            // Neither a bad metric nor a malformed UUID literal would fail the build.
-            EXPECT_NE(hipdnn_data_sdk::utilities::findRankingMetric(metric), nullptr) << metric;
-            EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
-                << id;
-            EXPECT_TRUE(seen.insert(id).second) << "id declared twice: " << id;
-            metrics.insert(metric);
+            // A key the loader cannot match would silently ship a model nothing binds.
+            EXPECT_TRUE(arch == "default" || std::regex_match(arch, std::regex("gfx[0-9a-f]+")))
+                << arch;
+            arches.insert(arch);
+            std::set<std::string> metrics;
+            for(const auto& [metric, id] : byMetric)
+            {
+                // Neither a bad metric nor a malformed UUID literal would fail the build.
+                EXPECT_NE(hipdnn_data_sdk::utilities::findRankingMetric(metric), nullptr) << metric;
+                EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
+                    << id;
+                EXPECT_TRUE(seen.insert(id).second) << "id declared twice: " << id;
+                metrics.insert(metric);
+            }
+            // `default` serves operator deployment in either metric; a shipped model is tflops.
+            const std::set<std::string> expected = arch == "default"
+                                                       ? std::set<std::string>{"tflops", "time"}
+                                                       : std::set<std::string>{"tflops"};
+            EXPECT_EQ(metrics, expected) << arch;
         }
-        EXPECT_EQ(metrics, (std::set<std::string>{"tflops", "time"}));
+        EXPECT_TRUE(arches.count("default") != 0);
+        archesPerEngine.push_back(std::move(arches));
     }
+    // The two engines run on the same devices, so neither may lack a model slot the other has.
+    EXPECT_EQ(archesPerEngine.at(0), archesPerEngine.at(1));
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -806,13 +826,45 @@ TEST(TestMiopenEngine, DescriptionNamesTheModelIdDeclaredForTheRequestedMetric)
     const std::string tflopsId = "aceee89e-ae84-4e79-abfd-4cfed80eaf87";
     const std::string timeId = "d318a8c5-dc1c-4a5e-8e4a-13f820ddc2fc";
     HipdnnMiopenHandle handle;
-    const MiopenEngine engine(1, "test:miopen", {{"tflops", tflopsId}, {"time", timeId}});
+    const MiopenEngine engine(
+        1, "test:miopen", {{"default", {{"tflops", tflopsId}, {"time", timeId}}}});
 
     EXPECT_EQ(describedBinding(engine, handle, "tflops").at("uhd_id").get<std::string>(), tflopsId);
     EXPECT_EQ(describedBinding(engine, handle, "time").at("uhd_id").get<std::string>(), timeId);
 
-    const MiopenEngine tflopsOnly(1, "test:miopen", {{"tflops", tflopsId}});
+    const MiopenEngine tflopsOnly(1, "test:miopen", {{"default", {{"tflops", tflopsId}}}});
     EXPECT_FALSE(describedBinding(tflopsOnly, handle, "time").contains("uhd_id"));
+}
+
+/// Collection records the described id as the one to promote under, so a model measured on
+/// this device must be named by the id declared for its architecture, not by `default`.
+TEST(TestMiopenEngine, DescriptionNamesTheIdDeclaredForTheDeviceArchitecture)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string defaultId = "aceee89e-ae84-4e79-abfd-4cfed80eaf87";
+    const std::string archId = "5b0e1f8c-7d43-4a2e-9c61-0f3b8d2e47a1";
+    const std::string otherArchId = "e2c4a7d9-1b5f-4e08-8a36-c9d0f1e2b3a4";
+    HipdnnMiopenHandle handle;
+    const auto arch = describedBinding(MiopenEngine(1, "test:miopen", {}), handle)
+                          .at("arch")
+                          .get<std::string>();
+    const auto baseArch = arch.substr(0, arch.find(':'));
+    // Not a prefix of any real device architecture.
+    const std::string elsewhere = "gfx0";
+
+    const MiopenEngine ownArch(1,
+                               "test:miopen",
+                               {{"default", {{"tflops", defaultId}}},
+                                {baseArch, {{"tflops", archId}}},
+                                {elsewhere, {{"tflops", otherArchId}}}});
+    EXPECT_EQ(describedBinding(ownArch, handle).at("uhd_id").get<std::string>(), archId);
+
+    const MiopenEngine otherArch(
+        1,
+        "test:miopen",
+        {{"default", {{"tflops", defaultId}}}, {elsewhere, {{"tflops", otherArchId}}}});
+    EXPECT_EQ(describedBinding(otherArch, handle).at("uhd_id").get<std::string>(), defaultId);
 }
 
 /// Models are measured with MIOpen's tuning search off; with it on, neither an estimate nor a
@@ -823,7 +875,7 @@ TEST(TestMiopenEngine, DeclinesToPredictWhileBenchmarkingIsEnabled)
 
     HipdnnMiopenHandle handle;
     const MiopenEngine engine(
-        1, "test:miopen", {{"tflops", "aceee89e-ae84-4e79-abfd-4cfed80eaf87"}});
+        1, "test:miopen", {{"default", {{"tflops", "aceee89e-ae84-4e79-abfd-4cfed80eaf87"}}}});
     for(const bool evaluate : {true, false})
     {
         const auto prediction = predictConv(engine, handle, "tflops", evaluate, "1");
@@ -926,7 +978,10 @@ std::string deployedModelScenario()
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter searchPath(
         "HIPDNN_DESCRIPTOR_PATH");
 
-    const MiopenEngine engine(MIOPEN_ENGINE_ID, MIOPEN_ENGINE_NAME, MIOPEN_ENGINE_L1_MODELS);
+    const MiopenEngine engine(
+        MIOPEN_ENGINE_ID,
+        MIOPEN_ENGINE_NAME,
+        declaredL1Models(MIOPEN_ENGINE_L1_MODELS, MIOPEN_ENGINE_ARCH_L1_MODELS));
     const auto tflops = predictConv(engine, handle, "tflops", true);
     expect(tflops.status == PredictionStatus::AVAILABLE,
            "MIOPEN_ENGINE tflops is not AVAILABLE: " + tflops.reason);
@@ -943,13 +998,14 @@ std::string deployedModelScenario()
 
     const MiopenEngine deterministic(MIOPEN_ENGINE_DETERMINISTIC_ID,
                                      MIOPEN_ENGINE_DETERMINISTIC_NAME,
-                                     MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS);
+                                     declaredL1Models(MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS,
+                                                      MIOPEN_ENGINE_DETERMINISTIC_ARCH_L1_MODELS));
     const auto bumped = predictConv(deterministic, handle, "tflops", true);
     expect(bumped.status == PredictionStatus::UNAVAILABLE
                && bumped.reason.find("trained against") != std::string::npos,
            "a model recorded under another selector policy was not refused: " + bumped.reason);
 
-    const MiopenEngine misdeclared(1, "test:miopen", {{"time", misdeployedId}});
+    const MiopenEngine misdeclared(1, "test:miopen", {{"default", {{"time", misdeployedId}}}});
     const auto misdeployed = predictConv(misdeclared, handle, "tflops", true);
     expect(misdeployed.status == PredictionStatus::INVALID
                && misdeployed.reason.find("declared for metric 'time'") != std::string::npos,

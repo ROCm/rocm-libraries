@@ -27,10 +27,23 @@ rebuilding at another commit keeps deployed models valid; the commit remains pro
 only, in the plugin's reported version. Models collected for the removed isolated
 cache-bypass path are not compatible.
 
-Each engine declares one model id per ranking metric (`tflops`, `time`) in
-`MiopenContainer.cpp`, bound for every architecture; the model's `training_arches`
-decides where it answers. A description (`--describe-engine-prediction`) names the id
-declared for the requested metric as the binding's `uhd_id`, which is the id a first
+Each engine declares its model ids in `MiopenContainer.cpp`, keyed by architecture and
+ranking metric:
+
+- One `tflops` id per architecture (`gfx90a`, `gfx942`, `gfx950`, `gfx1030`, `gfx1100`,
+  `gfx1101`, `gfx1102`, `gfx1150`, `gfx1151`, `gfx1201`) for the model the provider ships.
+  `uhd_gen promote --descriptor-tree dnn-providers/miopen-provider/descriptors` writes a model
+  under `heuristics/<engine>/predict_engine/<arch>/<metric>/` there; the build stages that
+  tree beside the plugin under `arch_content/miopen-provider/` and installs it there, and the
+  engine reads it at load.
+- One id per metric (`tflops`, `time`) under `default`, for a model an operator deploys
+  through `HIPDNN_DESCRIPTOR_DIR`. That variable replaces the shipped tree, as it does for
+  every provider; additive roots keep it.
+
+The longest matching architecture wins and `default` answers only where no architecture
+key matches; a model also answers only on the architectures in its `training_arches`. A
+description (`--describe-engine-prediction`) names the id declared for the requested
+metric and the device's architecture as the binding's `uhd_id`, which is the id a first
 model is promoted under.
 See the [UHD generation guide](../../../projects/hipdnn/tools/uhd_gen/README.md)
 for collection, training, promotion, and Mode A/B selection.

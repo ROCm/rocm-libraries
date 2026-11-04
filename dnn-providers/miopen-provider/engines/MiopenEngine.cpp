@@ -27,6 +27,8 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 // Used only to resolve declared L1 models by UUID; nothing else in miopen-provider may
 // depend on the ingestor. Header-only, so no link-time coupling.
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <nlohmann/json.hpp>
@@ -120,17 +122,46 @@ std::string selectorRevision(const std::string& engineName)
            + MIOPEN_SELECTOR_POLICY_REVISION + "/miopen-" + library;
 }
 
-/// Descriptors from the operator-named roots only (MIOpen ships none), parsed once per
-/// process. With no roots every engine reports UNAVAILABLE, which is not an error.
+/// The provider's shipped model tree: HIPDNN_DESCRIPTOR_DIR when an operator names one
+/// (it replaces the tree, as for every provider), else `arch_content/miopen-provider`
+/// beside the loaded plugin, else the configure-time install location.
+std::filesystem::path providerDescriptorTree(std::filesystem::path replacement)
+{
+    if(!replacement.empty())
+    {
+        return replacement;
+    }
+    // Measured from this module rather than a symbol name: every provider exports the
+    // same plugin entry points, so a name lookup can resolve to another provider.
+    try
+    {
+        const auto candidate = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
+                                   reinterpret_cast<const void*>(&providerDescriptorTree))
+                               / MIOPENPROVIDER_DESCRIPTOR_SUBDIR;
+        std::error_code notFound;
+        if(std::filesystem::is_directory(candidate, notFound))
+        {
+            return candidate;
+        }
+    }
+    catch(const std::runtime_error& error)
+    {
+        // Linked straight into an executable (the unit tests): no module to measure from.
+        HIPDNN_PLUGIN_LOG_INFO("miopen: no module-relative descriptor directory ("
+                               << error.what() << "); using the configure-time path");
+    }
+    return MIOPENPROVIDER_DESCRIPTOR_INSTALL_DIR;
+}
+
+/// The shipped tree plus any additive roots the environment names, parsed once per
+/// process. A tree holding no model leaves every engine UNAVAILABLE, which is not an error.
 const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
 {
     static const hipdnn_plugin_sdk::ingestor::DescriptorCatalog s_catalog = [] {
         auto named = hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots();
         std::vector<std::filesystem::path> roots;
-        if(!named.replacement.empty())
-        {
-            roots.push_back(std::move(named.replacement));
-        }
+        roots.reserve(1 + named.additional.size());
+        roots.push_back(providerDescriptorTree(std::move(named.replacement)));
         for(auto& additional : named.additional)
         {
             roots.push_back(std::move(additional));
@@ -141,57 +172,90 @@ const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
     return s_catalog;
 }
 
+/// The id @p l1ModelIds declares for @p metric on device @p arch: the longest matching
+/// architecture key, else `default`, as the binding itself selects. Null when none.
+const std::string* declaredModelId(const L1ModelIds& l1ModelIds,
+                                   const std::string& metric,
+                                   const std::string& arch)
+{
+    const std::string* chosen = nullptr;
+    std::string chosenKey;
+    for(const auto& [key, byMetric] : l1ModelIds)
+    {
+        const auto id = byMetric.find(metric);
+        if(id == byMetric.end())
+        {
+            continue;
+        }
+        if((key == "default" && chosenKey.empty())
+           || (key != "default"
+               && hipdnn_plugin_sdk::archMatches(
+                   arch, key, hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
+               && (chosenKey == "default" || key.size() > chosenKey.size())))
+        {
+            chosen = &id->second;
+            chosenKey = key;
+        }
+    }
+    return chosen;
+}
+
 /// Resolves the declared ids into @p binding. Never throws: missing or invalid models just
 /// mean no estimate. A model whose `score.metric` differs from the metric its id was
 /// declared for is marked unusable rather than bound.
 void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
                           const std::string& engineName,
                           const std::string& selectorRevision,
-                          const std::map<std::string, std::string>& l1ModelIds)
+                          const L1ModelIds& l1ModelIds)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
-    std::vector<ingestor::DescriptorId> ids;
+    std::map<std::string, std::vector<ingestor::DescriptorId>> declared;
     std::map<ingestor::DescriptorId, std::string> declaredMetric;
-    for(const auto& [metric, id] : l1ModelIds)
+    for(const auto& [arch, byMetric] : l1ModelIds)
     {
-        // These guard compiled-in literals; log and skip so one bad id cannot take down
-        // the whole provider.
-        if(hipdnn_data_sdk::utilities::findRankingMetric(metric) == nullptr)
+        for(const auto& [metric, id] : byMetric)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("miopen: engine '" << engineName << "' declares L1 model id '"
-                                                       << id << "' for unregistered metric '"
-                                                       << metric << "'");
-            continue;
-        }
-        try
-        {
-            const auto parsed = hipdnn_flatbuffers_sdk::utilities::parseUuid(id);
-            ids.push_back(parsed);
-            declaredMetric.emplace(parsed, metric);
-        }
-        catch(const std::exception& error)
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("miopen: engine '" << engineName << "' declared L1 model id '"
-                                                       << id << "' for metric '" << metric
-                                                       << "' is not a UUID: " << error.what());
+            // These guard compiled-in literals; log and skip so one bad id cannot take down
+            // the whole provider.
+            if(hipdnn_data_sdk::utilities::findRankingMetric(metric) == nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("miopen: engine '"
+                                        << engineName << "' declares L1 model id '" << id
+                                        << "' for arch '" << arch << "' and unregistered metric '"
+                                        << metric << "'");
+                continue;
+            }
+            try
+            {
+                const auto parsed = hipdnn_flatbuffers_sdk::utilities::parseUuid(id);
+                declared[arch].push_back(parsed);
+                declaredMetric.emplace(parsed, metric);
+            }
+            catch(const std::exception& error)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("miopen: engine '"
+                                        << engineName << "' declared L1 model id '" << id
+                                        << "' for arch '" << arch << "' and metric '" << metric
+                                        << "' is not a UUID: " << error.what());
+            }
         }
     }
-    if(ids.empty())
+    if(declared.empty())
     {
         return;
     }
 
     const auto resolved = ingestor::resolveDeclaredEnginePredictions(
-        descriptorCatalog(), engineName, selectorRevision, {{"default", ids}});
+        descriptorCatalog(), engineName, selectorRevision, declared);
     for(const auto& [metric, byArch] : resolved.byMetric)
     {
         for(const auto& [arch, model] : byArch)
         {
-            if(const auto& declared = declaredMetric.at(model.id); declared != metric)
+            if(const auto& declaredFor = declaredMetric.at(model.id); declaredFor != metric)
             {
                 std::string reason = "model " + ingestor::toString(model.id);
                 reason += " is deployed under the id declared for metric '";
-                reason += declared;
+                reason += declaredFor;
                 reason += "' but its score.metric is '";
                 reason += metric;
                 reason += '\'';
@@ -217,9 +281,7 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
 
 } // namespace
 
-MiopenEngine::MiopenEngine(int64_t id,
-                           std::string name,
-                           std::map<std::string, std::string> l1ModelIds)
+MiopenEngine::MiopenEngine(int64_t id, std::string name, L1ModelIds l1ModelIds)
     : _id(id)
     , _name(std::move(name))
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -341,13 +403,13 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
             _id, _name, _selectorRevision, result.metric, device.gcnArchName, features, evaluate);
         // A description names the declared id even before a model is deployed, so
         // collection knows what to promote a first model under.
-        if(const auto declared = _l1ModelIds.find(result.metric);
-           !evaluate && declared != _l1ModelIds.end() && !prediction.binding_json.empty())
+        if(const auto* declared = declaredModelId(_l1ModelIds, result.metric, device.gcnArchName);
+           !evaluate && declared != nullptr && !prediction.binding_json.empty())
         {
             auto binding = nlohmann::json::parse(prediction.binding_json);
             if(!binding.contains("uhd_id"))
             {
-                binding["uhd_id"] = declared->second;
+                binding["uhd_id"] = *declared;
                 prediction.binding_json = binding.dump();
             }
         }
