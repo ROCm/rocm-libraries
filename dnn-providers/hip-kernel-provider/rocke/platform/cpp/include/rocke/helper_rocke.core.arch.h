@@ -63,15 +63,16 @@ typedef rocke_mma_role_t rocke_arch_mma_role_t;
 /* MmaOp.shape -> (m, n, k). Forwards to rocke_mma_op_shape. */
 void rocke_mmaop_shape(const rocke_mmaop_t* op, int* m, int* n, int* k);
 
-/* Historical MmaOp.a_layout() / b_layout() / c_layout() projections. C is the
- * result/dst map; src2 is available through the canonical indexed
- * API. Missing maps raise ckc::Error with ROCKE_ERR_NOTIMPL, even with b=NULL.
+/* Historical MmaOp.a_layout() / b_layout() / c_layout() projections describe
+ * src0 / src1 / src2. C is the accumulator-input map; result consumers use
+ * rocke_mma_op_dst_layout(). Missing maps raise ckc::Error with
+ * ROCKE_ERR_NOTIMPL, even with b=NULL.
  * An enclosing public builder/lowering boundary translates the exception to
  * status + message; direct C++ callers must catch it. A NULL op returns NULL. */
 const rocke_arch_layout_map_t* rocke_mmaop_a_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_b_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_c_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
-/* MmaOp.acc_layout(): compatibility alias for the result/dst map. */
+/* MmaOp.acc_layout(): compatibility alias for the accumulator-input/src2 map. */
 const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
                                                       rocke_ir_builder_t* b);
 

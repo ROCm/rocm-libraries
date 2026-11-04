@@ -655,6 +655,7 @@ static int test_scale_contracts()
     rocke_layout_map_t src2_layout = {}, dst_layout = {};
     compatibility_op.srcs[2].layout = &src2_layout;
     compatibility_op.dst.layout = &dst_layout;
+    CHECK(rocke_mmaop_c_layout(&compatibility_op, NULL) == &src2_layout);
     CHECK(rocke_mmaop_acc_layout(&compatibility_op, NULL) == &src2_layout);
     CHECK(rocke_mma_op_dst_layout(&compatibility_op, NULL) == &dst_layout);
     // Indexed queries must match both the independent result and both scales.

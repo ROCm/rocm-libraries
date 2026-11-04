@@ -2851,7 +2851,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_atoms = spec->tile_k / spec->warp_tile_k;
 
     /* Accumulators */
-    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->op->srcs[2].frag_len);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs <= 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {

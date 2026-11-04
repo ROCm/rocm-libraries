@@ -3152,7 +3152,7 @@ static rocke_kernel_def_t*
     int num_accs = mfmas_m * mfmas_n;
 
     // ---- accumulators ----
-    rocke_value_t* acc_init = rocke_b_zero_vec_f32(b, c_per_lane);
+    rocke_value_t* acc_init = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
     rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
     char acc_name_bufs[ROCKE_CONV_MAX_ACCS][32];
     for(int i = 0, idx = 0; i < mfmas_m; i++)

@@ -2367,7 +2367,7 @@ def _build_tilde_dgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(c_per_lane)
+    acc_init = b.zero_vec_f32(op.srcs[2].frag_len)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
