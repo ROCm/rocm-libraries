@@ -900,121 +900,53 @@ TEST_P(TestGpuLayernormBwdRef5DBfp16, MatchesCpuRef)
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-// --- Quick tests ---
+// --- Quick tests (fp32) + Standard small-shape reduced precision ---
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuLayernormBwdRef4DFp32,
                          ::testing::ValuesIn(getLayernormSmall4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+
+// P1 (dtype orthogonality): reduced-precision runs use the minimal dtype catalog in the standard
+// tier (small shapes); Quick is fp32-only smoke.
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef4DFp16,
-                         ::testing::ValuesIn(getLayernormSmall4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+                         ::testing::ValuesIn(getLayernormSmall4DDtypeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef4DBfp16,
-                         ::testing::ValuesIn(getLayernormSmall4DTestCases()));
+                         ::testing::ValuesIn(getLayernormSmall4DDtypeTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef4DFp32,
-                         ::testing::ValuesIn(getLayernormMedium4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuLayernormBwdRef4DFp16,
-                         ::testing::ValuesIn(getLayernormMedium4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuLayernormBwdRef4DBfp16,
                          ::testing::ValuesIn(getLayernormMedium4DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuLayernormBwdRef4DFp32,
                          ::testing::ValuesIn(getLayernormLarge4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuLayernormBwdRef4DFp16,
-                         ::testing::ValuesIn(getLayernormLarge4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuLayernormBwdRef4DBfp16,
-                         ::testing::ValuesIn(getLayernormLarge4DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuLayernormBwdRef4DFp32, ::testing::ValuesIn([]() {
-                             auto v = getLayernormSmall4DTestCases();
-                             auto m = getLayernormMedium4DTestCases();
-                             auto l = getLayernormLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuLayernormBwdRef4DFp16, ::testing::ValuesIn([]() {
-                             auto v = getLayernormSmall4DTestCases();
-                             auto m = getLayernormMedium4DTestCases();
-                             auto l = getLayernormLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuLayernormBwdRef4DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getLayernormSmall4DTestCases();
-                             auto m = getLayernormMedium4DTestCases();
-                             auto l = getLayernormLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
 
 // ============================================================================
 // 5D (NCDHW/NDHWC) shape tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          TestGpuLayernormBwdRef5DFp32,
                          ::testing::ValuesIn(getLayernormSmall5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+
+// P1 (dtype orthogonality): reduced-precision runs use the minimal dtype catalog in the standard
+// tier (small shapes); Quick is fp32-only smoke.
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef5DFp16,
-                         ::testing::ValuesIn(getLayernormSmall5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+                         ::testing::ValuesIn(getLayernormSmall5DDtypeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef5DBfp16,
-                         ::testing::ValuesIn(getLayernormSmall5DTestCases()));
+                         ::testing::ValuesIn(getLayernormSmall5DDtypeTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef5DFp32,
-                         ::testing::ValuesIn(getLayernormMedium5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuLayernormBwdRef5DFp16,
-                         ::testing::ValuesIn(getLayernormMedium5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuLayernormBwdRef5DBfp16,
                          ::testing::ValuesIn(getLayernormMedium5DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuLayernormBwdRef5DFp32,
                          ::testing::ValuesIn(getLayernormLarge5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuLayernormBwdRef5DFp16,
-                         ::testing::ValuesIn(getLayernormLarge5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuLayernormBwdRef5DBfp16,
-                         ::testing::ValuesIn(getLayernormLarge5DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuLayernormBwdRef5DFp32, ::testing::ValuesIn([]() {
-                             auto v = getLayernormSmall5DTestCases();
-                             auto m = getLayernormMedium5DTestCases();
-                             auto l = getLayernormLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuLayernormBwdRef5DFp16, ::testing::ValuesIn([]() {
-                             auto v = getLayernormSmall5DTestCases();
-                             auto m = getLayernormMedium5DTestCases();
-                             auto l = getLayernormLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuLayernormBwdRef5DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getLayernormSmall5DTestCases();
-                             auto m = getLayernormMedium5DTestCases();
-                             auto l = getLayernormLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
 
 // ============================================================================
 // Edge case tests with DISABLED_ prefix to avoid running in CI.

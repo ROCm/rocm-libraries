@@ -32,7 +32,7 @@ What this file implements *now*:
   - tile geometries 64..256 x 64..256 x 16..128
   - warp grids 1x1, 2x1, 1x2, 2x2, 4x1, 1x4, 2x4, 4x2, 4x4
   - MFMA atoms 16x16x16, 16x16x32, 32x32x8, 32x32x16 f16; 16x16x4 fp64
-    (gfx942, fp64 accumulation)
+    (gfx90a, gfx942 and gfx950, fp64 accumulation)
   - pipeline `mem` (single buffer, sync), `compv3` (single buffer +
     scheduler hints), `compv4` (double-buffer LDS + sched_group_barrier
     interleave between MFMA/DS_read/DS_write/VMEM)
