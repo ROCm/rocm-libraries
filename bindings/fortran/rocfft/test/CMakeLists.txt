@@ -56,9 +56,6 @@ if(NOT TARGET hip::hip_fortran)
     "bindings were built with this same compiler to build them.")
 endif()
 
-if(NOT TARGET roc::rocfft)
-  find_package(rocfft QUIET)
-endif()
 if(NOT TARGET hip::host)
   find_package(hip QUIET)
 endif()
@@ -66,7 +63,7 @@ if(NOT TARGET roc::rocfft OR NOT TARGET hip::host)
   message(STATUS
     "rocFFT: no roc::rocfft or hip::host target, skipping the Fortran binding "
     "tests (they link librocfft and the HIP runtime). Point CMAKE_PREFIX_PATH "
-    "at an installed ROCm to build them standalone.")
+    "at an installed ROCm.")
   return()
 endif()
 
