@@ -33,7 +33,6 @@ What's hard, and how we handle it:
 from __future__ import annotations
 
 import enum
-import operator
 import os
 import warnings
 from collections.abc import Iterator
@@ -76,6 +75,7 @@ from .ir import (
     _sync_attr,
     _trap_op_error,
     check_cluster_dims,
+    claimed_align,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
     gpu_check_word_symbol,
@@ -84,6 +84,7 @@ from .ir import (
     lane_count,
     split_loc,
     type_bytes,
+    vector_access_align,
 )
 from .mma_operand import (
     MmaOperandRole,
@@ -1421,35 +1422,6 @@ def _lds_access_align(op: Op) -> int | None:
     return None if natural is None else min(natural, SMEM_POOL_ALIGN)
 
 
-def _vector_access_align(vec: int, elem: Type) -> int:
-    """The natural alignment of an access of ``vec`` ``elem`` elements: its
-    byte width when that is a power of two, else the element width (a 96-bit
-    payload such as ``<3 x float>`` guarantees only element alignment)."""
-    elem_bytes = type_bytes(elem)
-    width = vec * elem_bytes
-    return width if (width & (width - 1)) == 0 else elem_bytes
-
-
-def _store_align_attr(op: Op, default: int) -> int:
-    """The ``align`` attribute of an ``smem_store_vN``, refused unless it is an
-    integer power of two. ``default`` applies when the attribute is absent."""
-    value = op.attrs.get("align", default)
-    # bool is an int subclass, so operator.index alone would read True as 1.
-    if isinstance(value, bool):
-        raise TypeError(f"{op.name} failed - align=bool, expected an integer")
-    try:
-        align = operator.index(value)
-    except TypeError:
-        raise TypeError(
-            f"{op.name} failed - align={type(value).__name__}, expected an integer"
-        ) from None
-    if align <= 0 or align & (align - 1):
-        raise ValueError(
-            f"{op.name} failed - align={align}, expected a positive power of two"
-        )
-    return align
-
-
 def _lds_natural_align(op: Op) -> int | None:
     """The natural alignment of ``op``'s LDS access, before the pool cap."""
     name = op.name
@@ -1457,15 +1429,15 @@ def _lds_natural_align(op: Op) -> int | None:
         # One store of the whole value, which may be a vector:
         # smem_store_vN routes n=1 here whatever the value's type.
         stored = op.operands[-1].type
-        return _vector_access_align(lane_count(stored), element_type(stored))
+        return vector_access_align(lane_count(stored), element_type(stored))
     if name == "tile.smem_store_vN":
         vec = int(op.attrs["vec"])
         elem = element_type(op.operands[-1].type)
-        return _store_align_attr(op, _vector_access_align(vec, elem))
+        return claimed_align(op, vec, elem)
     if name == "tile.smem_load_vN":
-        return _vector_access_align(int(op.attrs["vec"]), element_type(op.result.type))
+        return vector_access_align(int(op.attrs["vec"]), element_type(op.result.type))
     if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32"):
-        return _vector_access_align(int(op.attrs["vec"]), F32)
+        return vector_access_align(int(op.attrs["vec"]), F32)
     if name == "tile.smem_load_v4":
         # One scalar load per element.
         return type_bytes(element_type(op.result.type))
@@ -3836,7 +3808,7 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
-        align = int(op.attrs.get("align", vec * 2))
+        align = claimed_align(op, vec, element_type(op.result.type))
         self._current().emit(
             f"  {op.result.name} = load <{vec} x {elem_ty}>, {ptr_ty} {gep}, "
             f"align {align}{self._nontemporal_md(op)}"
@@ -6739,28 +6711,7 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
-        elem_name = (
-            val.type.elem.name if isinstance(val.type, VectorType) else val.type.name
-        )
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "i16": 2,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(elem_name, 2)
-        align = int(op.attrs.get("align", vec * elem_bytes))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_store_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, vec, element_type(val.type))
         ty = _llvm_type(val.type)
         self._current().emit(
             f"  store {ty} {self._operand(val)}, ptr addrspace(1) {gep}, "

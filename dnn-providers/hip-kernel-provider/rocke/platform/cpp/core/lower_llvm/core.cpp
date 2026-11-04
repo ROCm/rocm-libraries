@@ -1323,7 +1323,7 @@ static void
         const rocke_op_t* op = region->ops[i];
         if(!op)
             continue;
-        int align = rocke_ll_lds_access_align(L, op);
+        int align = rocke_ll_lds_access_align(op);
         if(align > 0 && op->num_operands > 0 && op->operands[0])
         {
             const char* gn = ll_val_to_gname(L, op->operands[0]->name);

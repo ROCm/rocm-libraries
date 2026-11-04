@@ -25,6 +25,7 @@ from rocke.helpers.mma_io import (
     pack_fragment_bits,
     storage_ir_type,
 )
+from rocke.tests.engines import assert_both_engines_reject_hip, available_engines
 
 
 CASES = [
@@ -370,15 +371,30 @@ def test_hip_compiler_preserves_fragment_load_alignment(dtype, copy_bytes, align
     assert all(value <= alignment for value in source_alignments), source_alignments
 
 
-@pytest.mark.parametrize("alignment", [0, -1, -16, 3, 24])
-def test_hip_rejects_invalid_vector_load_alignment(alignment):
+@pytest.mark.parametrize(
+    ("alignment", "error_type", "refusal"),
+    [
+        *(
+            (value, ValueError, f"align={value}, expected a positive power of two")
+            for value in (0, -1, -16, 3, 24)
+        ),
+        (True, TypeError, "align=bool, expected an integer"),
+        (16.0, TypeError, "align=float, expected an integer"),
+    ],
+)
+def test_hip_rejects_invalid_vector_load_alignment(alignment, error_type, refusal):
+    """Both engines' HIP lowerings refuse the same ``align`` values with the
+    same text, and never read a bool or a float as an integer alignment."""
     b = IRBuilder("invalid_alignment")
     ptr = b.param("A", PtrType(I8, "global"))
     value = b.global_load_vN(ptr, b.const_i32(0), I8, 16)
     # Serialized/custom IR can bypass the builder's default alignment handling.
     value.op.attrs["align"] = alignment
-    with pytest.raises(ValueError, match="alignment must be a positive power of two"):
+    message = f"memref.global_load_vN failed - {refusal}"
+    with pytest.raises(error_type, match=f"^{re.escape(message)}$"):
         lower_kernel_to_hip(b.kernel, arch="gfx1250")
+    if "cpp" in available_engines():
+        assert_both_engines_reject_hip(b.kernel, "gfx1250", error_type, message)
 
 
 def test_e4m3_alias_serialization_matches_native():

@@ -258,7 +258,6 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
     static const int allowed_64bit[] = {2};
-    int elem_bytes;
     if(!rocke_i_live(b))
     {
         return;
@@ -313,7 +312,6 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
             return;
         }
     }
-    elem_bytes = rocke_i_type_bytes(value->type->elem);
     ops = rocke_build_mem_operands(b, smem, indices, num_indices, value, true, &nops);
     if(!ops)
     {
@@ -323,7 +321,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &attrs, "rank", (int64_t)num_indices);
     rocke_attr_set_str(b, &attrs, "elem_type", elem_name);
     rocke_attr_set_int(b, &attrs, "vec", (int64_t)n);
-    rocke_attr_set_int(b, &attrs, "align", (int64_t)(n * elem_bytes));
+    rocke_attr_set_int(b, &attrs, "align", rocke_i_vector_access_align(n, value->type->elem));
     rocke_i_op0(b, ROCKE_OP_TILE_SMEM_STORE_VN, ops, nops, &attrs);
 }
 

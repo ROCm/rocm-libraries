@@ -25,6 +25,7 @@ Design constraints:
 from __future__ import annotations
 
 import enum
+import operator
 import os
 import sys
 from dataclasses import dataclass, field
@@ -955,6 +956,58 @@ def type_bytes(t: Type) -> int:
             "expected a whole number of bytes"
         )
     return bits // 8
+
+
+def vector_access_align(lanes: int, elem: Type) -> int:
+    """The natural alignment, in bytes, of one access of ``lanes`` ``elem``
+    values: its byte width when that is a power of two, else the element width
+    (a 12-byte ``<3 x float>`` guarantees only element alignment).
+
+    Raises ``ValueError`` through :func:`type_bytes` for an element with no
+    whole-byte width. The C++ engine's twin is ``rocke_i_vector_access_align``.
+    """
+    elem_bytes = type_bytes(elem)
+    width = lanes * elem_bytes
+    return width if (width & (width - 1)) == 0 else elem_bytes
+
+
+def align_attr(op: Op) -> int | None:
+    """The ``align`` attribute of memory op ``op``, in bytes, or ``None`` when
+    the op carries none.
+
+    Raises ``TypeError`` for an attribute that is not an integer (``True`` and
+    ``8.0`` included) and ``ValueError`` for one that is not a positive power
+    of two: converting or capping it would turn an invalid claim into a valid
+    one. The C++ engine's twin is ``rocke_i_align_attr``, which returns 0 for
+    an absent attribute.
+    """
+    if "align" not in op.attrs:
+        return None
+    value = op.attrs["align"]
+    # bool is an int subclass, so operator.index alone would read True as 1.
+    if isinstance(value, bool):
+        raise TypeError(f"{op.name} failed - align=bool, expected an integer")
+    try:
+        align = operator.index(value)
+    except TypeError:
+        raise TypeError(
+            f"{op.name} failed - align={type(value).__name__}, expected an integer"
+        ) from None
+    if align <= 0 or align & (align - 1):
+        raise ValueError(
+            f"{op.name} failed - align={align}, expected a positive power of two"
+        )
+    return align
+
+
+def claimed_align(op: Op, lanes: int, elem: Type) -> int:
+    """The alignment, in bytes, that vector access ``op`` of ``lanes`` ``elem``
+    values claims: its :func:`align_attr` when it carries one, else
+    :func:`vector_access_align`. The C++ engine's twin is
+    ``rocke_i_claimed_align``.
+    """
+    align = align_attr(op)
+    return vector_access_align(lanes, elem) if align is None else align
 
 
 def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
@@ -3907,7 +3960,7 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                "align": n * type_bytes(value.type.elem),
+                "align": vector_access_align(n, value.type.elem),
             },
         )
 

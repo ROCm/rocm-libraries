@@ -198,6 +198,26 @@ int rocke_i_type_bits(const rocke_type_t* t);
  * whole number of bytes" for a width that is not whole bytes. */
 int rocke_i_type_bytes(const rocke_type_t* t);
 
+/* The natural alignment, in bytes, of one access of `lanes` `elem` values
+ * (Python core/ir.py::vector_access_align): its byte width when that is a power
+ * of two, else the element width. Throws through rocke_i_type_bytes for an
+ * element with no whole-byte width. */
+int64_t rocke_i_vector_access_align(int64_t lanes, const rocke_type_t* elem);
+
+/* The `align` attribute of memory op `op`, in bytes, or 0 when the op carries
+ * none (Python core/ir.py::align_attr, which returns None). Throws
+ * ckc::TypeError "<op> failed - align=<kind>, expected an integer" for an
+ * attribute that is not an integer, and ckc::ValueError "<op> failed -
+ * align=<n>, expected a positive power of two" for one that is not a positive
+ * power of two: converting or capping it would turn an invalid claim into a
+ * valid one. */
+int64_t rocke_i_align_attr(const rocke_op_t* op);
+
+/* The alignment, in bytes, that vector access `op` of `lanes` `elem` values
+ * claims (Python core/ir.py::claimed_align): rocke_i_align_attr when the op
+ * carries one, else rocke_i_vector_access_align. */
+int64_t rocke_i_claimed_align(const rocke_op_t* op, int64_t lanes, const rocke_type_t* elem);
+
 /* The bytes one buffer access of `count` `elem` elements moves (Python
  * core/ir.py::_buffer_access_bytes): `elem` is a scalar whose width is whole
  * bytes and the access is 1, 2, 4, 8 or 16 bytes. Otherwise returns 0 and
