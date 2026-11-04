@@ -67,6 +67,14 @@ _SHAPES = {
 # multi_gpu_split_d_dgrad.py's docstring on the -F convention).
 _FILE_ROCKE_MS = {"A": 1.977, "B": 4.026, "C": 1.922}
 
+# Per-shape on-device split-K degree found by a hand sweep (same tile/warp
+# config -- t64x128x64 w1x4 a16, the --tile-*/--warp-* defaults below --
+# for all three): the highest degree that still passed the correctness
+# gate (one degree higher failed it for shape A, rel_err 6.1e-2 > the 5e-2
+# tolerance -- bf16-atomic accumulation is near its error budget at these
+# degrees). Used unless --split-k overrides it for every shape uniformly.
+_SPLIT_K = {"A": 512, "B": 256, "C": 128}
+
 _TOL_BF16 = 5e-2
 _Z = 3
 
@@ -82,14 +90,15 @@ def _parse_args(argv=None):
     ap.add_argument("--tile-m", type=int, default=64)
     ap.add_argument("--tile-n", type=int, default=128)
     ap.add_argument("--tile-k", type=int, default=64)
-    ap.add_argument("--warp-m", type=int, default=2)
-    ap.add_argument("--warp-n", type=int, default=2)
-    ap.add_argument("--warp-tile-mn", type=int, default=32)
+    ap.add_argument("--warp-m", type=int, default=1)
+    ap.add_argument("--warp-n", type=int, default=4)
+    ap.add_argument("--warp-tile-mn", type=int, default=16)
     ap.add_argument("--pipeline", default="mem")
     ap.add_argument("--epilogue", default="cshuffle")
     ap.add_argument(
-        "--split-k", type=int, default=64,
-        help="on-device split-K degree per shard (atomic-add into that shard's own dW; see module docstring)",
+        "--split-k", type=int, default=None,
+        help="on-device split-K degree per shard (atomic-add into that shard's own dW; see module "
+             "docstring). Defaults to _SPLIT_K's per-shape value; set explicitly to override for every shape",
     )
     return ap.parse_args(argv)
 
@@ -167,6 +176,12 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
     from rocke.core.arch import ArchTarget
     from rocke.runtime import time_launches
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    if a.split_k is None:
+        from copy import copy
+
+        a = copy(a)
+        a.split_k = _SPLIT_K.get(shape_name, 128)
 
     tgt = ArchTarget.from_gfx(a.arch)
     family = "wmma" if tgt.wave_size == 32 else "mma"
