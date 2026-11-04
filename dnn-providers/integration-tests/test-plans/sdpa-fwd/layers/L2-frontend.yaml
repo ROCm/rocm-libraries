@@ -52,6 +52,9 @@
 #     PU9  test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp
 #   2026-10-30: PU9 lines re-cited at PR #14358 head 1790cf623f4. The frontend
 #   files did not change between 00d9c566bea and 1790cf623f4, so SA9 / FN9 lines stand.
+# Amended 2026-11-04 (Layer 0 fix), read in code at rocm-libraries @ 91a40bdfd4c: new rules
+#   F-NO-CU-SEQ-LEN and F-BLOCK-MASK-TILE-128; F-SINK-FLOAT-ONLY names every non-FLOAT format;
+#   F-RAGGED-OFFSETS-ARE-LENGTHS states the boundary form and covers independent_starts.
 
 schema_version: 1
 layer: 2
@@ -190,23 +193,23 @@ rules:
 
   - id: F-RAGGED-OFFSETS-ARE-LENGTHS
     kind: frontend
-    reason: "Ragged offsets are B + 1 boundaries that also give each sequence's slot (offset[b + 1] − offset[b]). Sequences stored out of their index order cannot be expressed with B + 1 offsets (it would need decreasing offsets, which are negative lengths), and two sequences cannot overlap. A gap needs live lengths apart from the offsets, so gapped is not stated when the offsets are the only lengths."
+    reason: "hipDNN's ragged form gives each ragged tensor B + 1 non-decreasing boundaries; sequence b holds [offset[b], offset[b + 1]). Under that form a sequence stored before a sequence of lower index, or two sequences that share memory, cannot be stated. When the offsets are the only lengths, a slot is its sequence, so a slot longer than its sequence (gapped, independent_starts) cannot be stated either."
     forbid_any:
       - {ragged_offsets: [out_of_order, overlapping]}
-      - {ragged_offsets: [gapped], sequence_lengths: [uniform]}
+      - {ragged_offsets: [gapped, independent_starts], sequence_lengths: [uniform]}
+      - {ragged_offsets: [gapped, independent_starts], length_form: [start_position_differences]}
     cites:
       - "frontend-surface.yaml axes.ragged_offsets — TA:508; DH:243-262 (checks the offset tensor's own properties only)"
-      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp:89-94 (offsets must not decrease: `if(length < 0)`)"
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/docs/rfcs/0014_RaggedTensors.md:153-155 (offsets start at 0 and do not decrease)"
     why_frontend: >-
-      Layer 0 keeps out_of_order as a layout (sequences stored in another order). hipDNN's ragged
-      form has B + 1 boundaries, so that layout needs decreasing offsets, which give negative
-      lengths. With non-decreasing boundaries sequence b holds exactly [offset[b], offset[b + 1]),
-      so two sequences cannot share memory; Layer 1's D-RAGGED-NO-OVERLAP is moot under this form.
-      A gapped slot is stated with the per-sequence length tensors (cuDNN's ragged + padding form);
-      without them the offsets are the lengths and a slot cannot be longer than its sequence.
+      Layer 1 keeps out_of_order (sequences stored in another order). hipDNN's ragged form defines
+      the offsets as B + 1 non-decreasing boundaries, so a decreasing list states negative lengths,
+      not out-of-order starts, and one sequence ends where the next starts. out_of_order with
+      lengths from seq_len becomes stateable when PR #15080 merges. A gapped or independent slot is stated with the per-sequence length
+      tensors (cuDNN's ragged + padding form); without them the offsets are the lengths.
     evidence: read in code
     debatable: true
-    debatable_reason: "The limit is enforced by the ragged references (test SDK), not by the frontend: the frontend accepts any offset contents (DH:243-262). It is kind frontend because the API's ragged form defines the offsets as boundaries."
+    debatable_reason: "The frontend accepts any offset contents (DH:243-262); the boundary form is the API's stated definition, and the references enforce it. cuDNN's form, start positions with lengths from the length tensors, can state out-of-order and overlapping input sequences. Keeping out_of_order out of the model is a user decision (2026-11-03). The rule does not apply the start-at-0 clause of the same text: leading_gap and independent_starts (offset[0] > 0) stay values."
 
   - id: F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN
     kind: frontend
@@ -260,15 +263,15 @@ rules:
 
   - id: F-SINK-FLOAT-ONLY
     kind: frontend
-    reason: "The frontend takes only a FLOAT sink tensor, so a sink in Q's format cannot be stated unless Q is fp32 (then it is the value fp32)."
+    reason: "The frontend takes only a FLOAT sink tensor, so a sink in any other format cannot be stated."
     label: "refused by frontend, potential deficiency or defect"
-    forbid: {sink_dtype: [as_q]}
+    forbid: {sink_dtype: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
     cites:
       - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:277 `HIPDNN_RETURN_IF_TRUE(effectiveDataType(sink) != DataType::FLOAT,`"
-    why_frontend: "Layer 0 keeps a sink in Q's format (lossy, not meaningless). The node refuses any sink whose type is not FLOAT; an unset type takes the graph's io type and is refused the same way."
+    why_frontend: "Layer 0 keeps a sink in every format (lossy, not meaningless). The node refuses any sink whose type is not FLOAT; an unset type takes the graph's io type and is refused the same way."
     evidence: read in code
     debatable: true
-    debatable_reason: "A validation choice, not an impossibility: an engine that takes sinks in Q's format exists, and no frontend setting can reach it."
+    debatable_reason: "A validation choice, not an impossibility: a sink in any format is a defined logit, and no frontend setting reaches an engine that takes one."
 
   - id: F-NO-NEGATIVE-STRIDE
     kind: frontend
@@ -302,8 +305,29 @@ rules:
     cites:
       - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:298 `HIPDNN_RETURN_IF_TRUE(seqLen->get_data_type() != DataType::INT32,`"
       - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:346 `HIPDNN_RETURN_IF_TRUE(table->get_data_type() != DataType::INT32,`"
-    why_frontend: "Layer 0 keeps any integer format for an index. The node checks the type of each length tensor and each page table."
+    why_frontend: "Layer 0 keeps any integer format for an index. The node checks the type of each length tensor and each page table. It does not check the format of the ragged start positions (ragged_offset_dtype; DH:243-262)."
     evidence: read in code
+
+  - id: F-NO-CU-SEQ-LEN
+    kind: frontend
+    reason: "No API takes cumulative sequence lengths, so lengths given as running totals cannot be stated."
+    forbid: {length_form: [cumulative_lengths]}
+    cites:
+      - "rocm-libraries @ 91a40bdfd4c: no cu_seq_len setter in projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp, node/SdpaFwdNode.hpp or flatbuffers_sdk/schemas/sdpa_attributes.fbs (search for cu_seq_len: 0 hits)"
+    why_frontend: "Layer 0 keeps cumulative lengths (a defined way to state per-sequence lengths). The node has seq_len_q / seq_len_kv tensors of per-sequence lengths and no setter for running totals."
+    evidence: read in code (absence)
+
+  - id: F-BLOCK-MASK-TILE-128
+    kind: frontend
+    reason: "The API's block mask holds one flag per 128 x 128 score tile, so a mask with one flag per score, or with another tile size, cannot be stated."
+    forbid: {block_mask_granularity: [per_element]}
+    forbid_in_model: {block_mask_granularity: [other_tile, per_element]}
+    cites:
+      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs:49-51 (each entry selects whether a 128x128 score tile is computed)"
+    why_frontend: "Layer 0 keeps a flag per score and any tile size. The API fixes the tile size; no setter changes it."
+    evidence: read in code
+    debatable: true
+    debatable_reason: "The tile size is stated in the schema comment; the frontend does not check the block-mask shape against it."
 
   - id: F-LEFT-BOUND-NOT-ZERO
     kind: frontend
@@ -339,8 +363,10 @@ expressibility:
     - {axis: head_dim_v, lost: [zero], rule: F-EXTENT-NONZERO}
     - {axis: alibi_slopes, lost: [other_positive, zero, negative], rule: F-ALIBI-NO-SLOPES}
     - {axis: scale_source, lost: [default], rule: F-SCALE-NO-DEFAULT-SOURCE}
-    - {axis: ragged_offsets, lost: "out_of_order and overlapping; gapped only with sequence_lengths uniform", rule: F-RAGGED-OFFSETS-ARE-LENGTHS}
-    - {axis: sink_dtype, lost: [as_q], rule: F-SINK-FLOAT-ONLY}
+    - {axis: ragged_offsets, lost: "out_of_order and overlapping; gapped and independent_starts when the offsets are the only lengths", rule: F-RAGGED-OFFSETS-ARE-LENGTHS}
+    - {axis: sink_dtype, lost: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], rule: F-SINK-FLOAT-ONLY}
+    - {axis: length_form, lost: [cumulative_lengths], rule: F-NO-CU-SEQ-LEN}
+    - {axis: block_mask_granularity, lost: [per_element], rule: F-BLOCK-MASK-TILE-128}
     - {axis: strides_q, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
     - {axis: strides_k, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
     - {axis: strides_v, lost: [negative], rule: F-NO-NEGATIVE-STRIDE}
@@ -405,6 +431,20 @@ expressibility:
     view_layout: "inherited: the view's strides are its owner's strides (set_stride); the node never compares two tensors' strides. Memory sharing is made by the execute pointers (G:4746-4748)."
     stats_packing: "packed_with_q: set_ragged_offset on the Stats tensor (TA:508). The node only fills Stats dims and strides when they are empty (SdpaFwdNode.hpp:403-415 @ 91a40bdfd4c); it has no ragged check, so no Layer 2 rule removes the value."
     sink_dtype: "the sink tensor's data type (set_data_type); only FLOAT passes (F-SINK-FLOAT-ONLY)."
+    ragged_offset_unit: "tokens: set_ragged_offset_multiplier(sequence stride) on each ragged tensor (TensorAttributes.hpp:545-575 @ 91a40bdfd4c; a multiplier below 1 is refused at 644-647); elements: the default multiplier 1, not sent (DescriptorHelpers.hpp:229-238)."
+    ragged_offset_sharing: "shared_per_side: the same offset tensor passed to set_ragged_offset of each tensor of the side; the descriptor builder finds the tensor already lowered (DescriptorHelpers.hpp:268, createOrFindTensorDesc)."
+    ragged_offset_dtype: "the offset tensor's data type; DescriptorHelpers.hpp:243-275 checks that it is not virtual and not ragged, not its format."
+    o_packing: "own_starts: O's own offset tensor with other contents; padded: no set_ragged_offset on O."
+    length_form: "per_sequence_lengths: seq_len_q / seq_len_kv; start_position_differences: the ragged offsets without length tensors; cumulative_lengths: no setter (F-NO-CU-SEQ-LEN)."
+    block_mask_granularity: "tile: the block-mask tensor of 128 x 128 tiles (FBS:49-51); no setter for another tile size."
+    block_mask_dtype: "the block-mask tensor's data type (set_data_type); the node does not check it (SdpaFwdNode.hpp:34-252)."
+    dropout_mask_dtype: "the dropout-mask tensor's data type (set_data_type); the node does not check it (SdpaFwdNode.hpp:34-252)."
+    rng_state_storage: "by_value: seed and offset tensors with set_value; device_memory: seed and offset tensors in device memory (SdpaAttributes.hpp:377-395); the node does not check where they are held."
+    execution_strategy: "set_implementation (SA:703; T:271-276; FBS:89); unset equals AUTO (PV-ALWAYS-PACKED)."
+    sink_values: "contents of the sink tensor (data)."
+    scale_factor_values: "contents of the descale and scale tensors (data), or the number of a by-value tensor."
+    special_values: "contents of Q, K, V and the bias (data)."
+    value_magnitude: "contents of Q, K, V and the bias (data)."
     index_tensor_dtype: "the data type of the seq_len tensors and the page tables; only INT32 passes (F-INDEX-TENSORS-INT32)."
     left_bound_at_00d9c566bea: "left_bound counts the diagonal key (cuDNN); 0 and < -1 rejected, right_bound < -1 rejected (SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495 validateSdpaDiagonalBand). window_left zero / partial / whole_span = left_bound 1 / S_kv/4 + 1 / S_kv + 1"
 
@@ -420,17 +460,14 @@ path_variants:
 
 # Axes that L0-axes.yaml sets aside "to Layer 2" and that the frontend does carry. They are API
 # settings, not attention-meaning axes. model.yaml decides whether it carries them. They are
-# NOT in the layer counts (layer-counts.md counts the same 80 Layer 0 axes at every layer).
+# NOT in the layer counts.
 api_only_settings:
-  - {id: execution_strategy, values: [AUTO, COMPOSITE, UNIFIED], cite: "SA:703; T:271-276; FBS:89"}
-  - {id: block_mask_size_and_tiling, values: "128×128 per the schema comment", cite: "FBS:49-51"}
-  - {id: ragged_offset_multiplier, values: ">= 1", cite: "TA:562,644-651"}
-  - {id: scalar_by_value_vs_device_memory, values: [device, compile_time_constant, runtime_parameter], cite: "TA:228,278,301,313"}
   - {id: runtime_shape_overrides, values: [off, on], cite: "G:6694,4936-4942,5044-5047"}
   - {id: workspace_memory, values: [none, enough], cite: "G:4678,4746-4748"}
 
-# Debatable count for this layer: 7 of the 15 rules
+# Debatable count for this layer: 8 of the 18 rules
 # (F-ALIBI-NO-SLOPES, F-SCALE-NO-DEFAULT-SOURCE, F-ONE-DIAGONAL, F-RAGGED-OFFSETS-ARE-LENGTHS,
-# F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN, F-SCALE-TENSOR-BY-VALUE, F-SINK-FLOAT-ONLY), plus 2
-# inferred mappings that are not rules (matmul_input_precision native = NOT_SET; window whole_span = −1).
-debatable_count: {rules: 7, mappings: 2}
+# F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN, F-SCALE-TENSOR-BY-VALUE, F-SINK-FLOAT-ONLY,
+# F-BLOCK-MASK-TILE-128), plus 2 inferred mappings that are not rules (matmul_input_precision
+# native = NOT_SET; window whole_span = −1).
+debatable_count: {rules: 8, mappings: 2}

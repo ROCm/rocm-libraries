@@ -2020,8 +2020,9 @@ constexpr const char* EXPORT_REFERENCE_SOURCE
       "test-plans/sdpa-fwd/cases.csv";
 
 // The contents a bundle carries for these graphs: a fixed attn_scale, integer sequence lengths,
-// block masks and dense page tables, and real descale lists and dropout masks. Every other content
-// keeps the row out of bundles; a packed page table has a ragged offset, which is such a content.
+// block masks, dense page tables and device-memory dropout seeds and offsets, and real descale
+// lists and dropout masks. Every other content keeps the row out of bundles; a packed page table
+// has a ragged offset, which is such a content.
 bool isBundleContent(const std::string& name, const sdpa_case_flow::Contents& contents)
 {
     const auto* reals = std::get_if<std::vector<double>>(&contents.values);
@@ -2030,7 +2031,8 @@ bool isBundleContent(const std::string& name, const sdpa_case_flow::Contents& co
         return reals != nullptr && reals->size() == 1;
     }
     if(name == "seq_len_q" || name == "seq_len_kv" || name == "block_mask" || name == "page_table_k"
-       || name == "page_table_v" || name == "page_table_kv")
+       || name == "page_table_v" || name == "page_table_kv" || name == "dropout_seed"
+       || name == "dropout_offset")
     {
         return reals == nullptr;
     }

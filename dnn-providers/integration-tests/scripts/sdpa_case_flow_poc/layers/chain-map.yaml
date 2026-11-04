@@ -8,8 +8,10 @@ model_axis_sources:
   dtype_k_vs_q: {l0_axis: dtype_k, explained_by: CH-DTYPE-MIX-RELATIONSHIP,
                  why: "K's format is carried relative to Q's: same, or one alternative format per Q format"}
   dtype_v_vs_q: {l0_axis: dtype_v, explained_by: CH-DTYPE-MIX-RELATIONSHIP, why: "as dtype_k_vs_q"}
-  implementation: {l0_set_aside: execution_strategy,
-                   why: "an API hint L0 sets aside 'to Layer 2'; the model carries it as an axis (L2 api_only_settings)"}
+  implementation: {l0_axis: execution_strategy,
+                   why: "the API names the Layer 0 axis execution_strategy `implementation` (set_implementation)"}
+  ragged_offset_form: {l0_axis: ragged_offset_unit, explained_by: CH-FOLDED-CHILD-AXES,
+                       why: "one model axis holds the offset unit and the offset sharing (Layer 0 ragged_offset_unit, ragged_offset_sharing)"}
   runtime_shape_override: {l0_set_aside: runtime_shape_overrides,
                            why: "an API opt-in L0 sets aside 'to Layer 2 API-path variants'; the model carries it as an axis"}
 
@@ -36,15 +38,32 @@ l0_axis_fates:
     not_requested: {folded_into: null, explained_by: F-NO-AMAX-QKV, why: "no API; never requested"}
   amax_v:
     not_requested: {folded_into: null, explained_by: F-NO-AMAX-QKV, why: "no API; never requested"}
-  sink_dtype:
-    fp32: {folded_into: [attention_sinks, present], explained_by: F-SINK-FLOAT-ONLY,
-           why: "the only sink format the frontend takes; every sink of the model is FLOAT (class_to_value.sinks)"}
+  ragged_offset_sharing:
+    all_values: {to_model_axis: ragged_offset_form, explained_by: CH-FOLDED-CHILD-AXES,
+                 why: "per_tensor is ragged_offset_form per_tensor_elements; shared_per_side is shared_tokens"}
+  length_form:
+    per_sequence_lengths: {folded_into: [sequence_lengths, variable], explained_by: CH-FOLDED-CHILD-AXES,
+                           why: "sequence_lengths variable and variable_no_flag state per-sequence length tensors"}
+    start_position_differences: {folded_into: [sequence_lengths, lengths_in_offsets], explained_by: CH-FOLDED-CHILD-AXES,
+                                 why: "sequence_lengths lengths_in_offsets: the ragged offsets give each length"}
+  rng_state_storage:
+    by_value: {folded_into: [dropout_rng_state, caller_supplied], explained_by: CH-FOLDED-CHILD-AXES,
+               why: "dropout_rng_state caller_supplied: seed and offset by value"}
+    device_memory: {folded_into: [dropout_rng_state, caller_supplied_device_memory], explained_by: CH-FOLDED-CHILD-AXES,
+                    why: "dropout_rng_state caller_supplied_device_memory: seed and offset in device memory"}
   index_tensor_dtype:
     int32: {folded_into: null, explained_by: F-INDEX-TENSORS-INT32,
             why: "a fixed model setting: the frontend takes only INT32 length tensors and page tables"}
 
-# Layer 0 values of an axis the model carries, but which the model omits (and that L1/L2 keep).
-l0_values_not_in_model: {}
+# Layer 0 values (that L1/L2 keep) of an axis the model carries, with no image in any model row.
+# The entries below are model values that CH-FUZZER-HINTS removes from every row.
+l0_values_not_in_model:
+  scale_value: {non_finite: CH-FUZZER-HINTS}
+  sink_values: {no_sink: CH-FUZZER-HINTS, very_large: CH-FUZZER-HINTS, non_finite: CH-FUZZER-HINTS}
+  scale_factor_values: {one: CH-FUZZER-HINTS, zero: CH-FUZZER-HINTS, non_finite: CH-FUZZER-HINTS}
+  special_values: {infinity: CH-FUZZER-HINTS, nan: CH-FUZZER-HINTS, negative_infinity_bias: CH-FUZZER-HINTS,
+                   subnormal: CH-FUZZER-HINTS, signed_zero: CH-FUZZER-HINTS}
+  value_magnitude: {overflow_prone: CH-FUZZER-HINTS, precision_loss_prone: CH-FUZZER-HINTS}
 # 2026-10-29 round b: the six values CH-NOT-MODELLED-YET held (batch_packing ragged_q_side / ragged_kv_side,
 # page_size_k_vs_v, page_table_storage, descale_* finer, matmul_input_precision fp8, dropout_mask_broadcast) are model
 # values with the Layer 0 ids, so they need no entry here; CH-NOT-MODELLED-YET is removed from rules.yaml.

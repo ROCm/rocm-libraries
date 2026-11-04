@@ -99,6 +99,9 @@ enum class OffsetLayout
     FULL_SLOTS,
     // offset b = (g + sum of the lengths of sequences 0 .. b-1) x stride, g = B x S - all lengths.
     PREFIX_SUM_AFTER_GAP,
+    // offset b = (b x S + S - length b) x stride for b < B, offset B = B x S x stride: each
+    // sequence ends at the end of its full slot.
+    SLOT_END_ALIGNED,
 };
 
 struct SequenceLengthEntry

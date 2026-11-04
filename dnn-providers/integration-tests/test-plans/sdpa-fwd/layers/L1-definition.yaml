@@ -21,6 +21,10 @@
 # D-REL-PAGED-NOT-RAGGED, two structural facts; and, found by the chain check as model-only,
 # D-REL-STRIDE-NEEDS-EXTENT and structural D-S-ONE-DROPOUT-SOURCE; six rejected candidates, three equivalences, and the
 # D-S-VARLEN-NEEDS-LENGTHS wording. Agent's proposal.
+# Amended 2026-11-04 (Layer 0 fix): D-RAGGED-NO-OVERLAP covers inputs and outputs (user decision); independent_starts joins
+# D-REL-RAGGED-ORDER and D-REL-GAPPED-NEEDS-SHORT-LENGTHS; new rules D-REL-O-OWN-STARTS-NOT-SHARED and
+# D-REL-SHARED-PAGES-NEEDS-TWO-SEQUENCES;
+# rejected candidates and equivalences for the added Layer 0 axes.
 #
 # Rule format
 #   id       stable identifier.
@@ -114,7 +118,8 @@ rules:
   - id: D-RAGGED-NO-OVERLAP
     kind: definition
     basis: meaning
-    reason: "The output shares the ragged packing, so overlapping sequences would write two results to one place."
+    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory: its offsets must not decrease (rocm-libraries @ 91a40bdfd4c projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:271-307)."
+    note: "The input half rests on hipDNN's ragged format, not on the definition of attention (user decision 2026-11-04)."
     forbid: {ragged_offsets: [overlapping]}
     source: "axis doc § 10 'Ragged offsets' ('every valid list of starting points')"
 
@@ -229,8 +234,8 @@ rules:
   - id: D-REL-RAGGED-ORDER
     kind: definition
     basis: consistency
-    reason: "Out-of-order or overlapping start positions need at least two sequences."
-    forbid: {batch_size: [zero, one], ragged_offsets: [out_of_order, overlapping]}
+    reason: "Out-of-order, overlapping or independent start positions need at least two sequences."
+    forbid: {batch_size: [zero, one], ragged_offsets: [out_of_order, overlapping, independent_starts]}
     source: "axis doc § 10 'Ragged offsets'"
 
   - id: D-REL-PAGE-SIZE
@@ -262,7 +267,7 @@ rules:
   - id: D-REL-STRIDE-NEEDS-EXTENT
     kind: definition
     basis: consistency
-    reason: "A zero, negative or self-overlapping stride needs a dimension with more than one element; a head-dim stride needs a head size above one."
+    reason: "A zero or negative stride needs a dimension with more than one element, and a self-overlapping stride needs two; a head-dim stride needs a head size above one."
     forbid_any:
       - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], head_dim_qk: [zero, one], strides_q: [zero_broadcast, negative, self_overlapping]}
       - {head_dim_qk: [zero, one], strides_q: [head_dim_strided]}
@@ -275,8 +280,26 @@ rules:
       - {batch_size: [zero, one], v_head_sharing: [mqa], seq_kv: [zero, one], head_dim_v: [zero, one], strides_v: [zero_broadcast, negative, self_overlapping]}
       - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], head_dim_v: [zero, one], strides_o: [negative]}
       - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], strides_stats: [negative]}
-    source: "a stride on a dimension of extent 0 or 1 is never used"
-    attribution: "Added to Layer 1 2026-10-29 (layers redo): it was in model/rules.yaml only (added there 2026-10-27 while writing the class-to-value table), which the chain check (chain_check.py) reported. Here zero extents count as 'no dimension with more than one element'. Open: runner finding R13 says self_overlapping needs TWO dimensions with extent > 1 (a DECISION for the user; not applied)."
+      - {q_heads: [zero, one], seq_q: [zero, one], head_dim_qk: [zero, one], strides_q: [self_overlapping]}
+      - {batch_size: [zero, one], seq_q: [zero, one], head_dim_qk: [zero, one], strides_q: [self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], head_dim_qk: [zero, one], strides_q: [self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_q: [zero, one], strides_q: [self_overlapping]}
+      - {q_heads: [zero, one], seq_kv: [zero, one], head_dim_qk: [zero, one], strides_k: [self_overlapping]}
+      - {k_head_sharing: [mqa], seq_kv: [zero, one], head_dim_qk: [zero, one], strides_k: [self_overlapping]}
+      - {batch_size: [zero, one], seq_kv: [zero, one], head_dim_qk: [zero, one], strides_k: [self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], head_dim_qk: [zero, one], strides_k: [self_overlapping]}
+      - {batch_size: [zero, one], k_head_sharing: [mqa], head_dim_qk: [zero, one], strides_k: [self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_kv: [zero, one], strides_k: [self_overlapping]}
+      - {batch_size: [zero, one], k_head_sharing: [mqa], seq_kv: [zero, one], strides_k: [self_overlapping]}
+      - {q_heads: [zero, one], seq_kv: [zero, one], head_dim_v: [zero, one], strides_v: [self_overlapping]}
+      - {v_head_sharing: [mqa], seq_kv: [zero, one], head_dim_v: [zero, one], strides_v: [self_overlapping]}
+      - {batch_size: [zero, one], seq_kv: [zero, one], head_dim_v: [zero, one], strides_v: [self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], head_dim_v: [zero, one], strides_v: [self_overlapping]}
+      - {batch_size: [zero, one], v_head_sharing: [mqa], head_dim_v: [zero, one], strides_v: [self_overlapping]}
+      - {batch_size: [zero, one], q_heads: [zero, one], seq_kv: [zero, one], strides_v: [self_overlapping]}
+      - {batch_size: [zero, one], v_head_sharing: [mqa], seq_kv: [zero, one], strides_v: [self_overlapping]}
+    source: "a stride on a dimension of extent 0 or 1 is never used; with non-zero strides two different indices reach one element only when two dimensions have extent > 1"
+    attribution: "Added to Layer 1 2026-10-29 (layers redo): it was in model/rules.yaml only (added there 2026-10-27 while writing the class-to-value table), which the chain check (chain_check.py) reported. Here zero extents count as 'no dimension with more than one element'. Amended 2026-11-04 (user decision): self_overlapping needs TWO dimensions with extent > 1 (runner finding R13); the clauses after the strides_stats one state it over the logical dims, and the model also counts the stored page pool of a paged K or V."
 
   - id: D-REL-ALIBI-HEAD-COUNT
     kind: definition
@@ -291,12 +314,12 @@ rules:
   - id: D-REL-GAPPED-NEEDS-SHORT-LENGTHS
     kind: definition
     basis: consistency
-    reason: "A gap needs a slot longer than its live sequence, so some live length on a ragged side must be shorter than its slot. With full slots only, gapped or leading_gap describes spare room that does not exist."
+    reason: "A gap needs a slot longer than its live sequence, so some live length on a ragged side must be shorter than its slot. With full slots only, gapped, leading_gap or independent_starts describes spare room that does not exist."
     forbid_any:
-      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged], per_seq_len_q: [all_full], per_seq_len_kv: [all_full]}
-      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged_q_side], per_seq_len_q: [all_full]}
-      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full]}
-      - {ragged_offsets: [leading_gap], sequence_lengths: [uniform]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged], per_seq_len_q: [all_full], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_q_side], per_seq_len_q: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [leading_gap, independent_starts], sequence_lengths: [uniform]}
     source: "axis doc § 10 'Ragged offsets', 'Per-sequence lengths (varlen)'"
     note: "gapped with sequence_lengths uniform is the Layer 2 rule F-RAGGED-OFFSETS-ARE-LENGTHS: the start positions are then the only lengths."
 
@@ -306,6 +329,20 @@ rules:
     reason: "Stats packed with Q's token boundaries needs a ragged Q; a Q in equal-length slots has no token boundaries to share."
     forbid: {stats_packing: [packed_with_q], batch_packing: [padded, ragged_kv_side]}
     source: "axis doc § 1, § 8"
+
+  - id: D-REL-SHARED-PAGES-NEEDS-TWO-SEQUENCES
+    kind: definition
+    basis: consistency
+    reason: "A page shared by sequences needs at least two sequences; one sequence has nothing to share."
+    forbid: {batch_size: [zero, one], page_table_order: [shared_pages]}
+    source: "axis doc § 10 'Paged KV cache' (shared prefix)"
+
+  - id: D-REL-O-OWN-STARTS-NOT-SHARED
+    kind: definition
+    basis: consistency
+    reason: "One list of start positions shared by Q and O gives O Q's starts, so O cannot start its sequences elsewhere."
+    forbid: {o_packing: [own_starts], ragged_offset_sharing: [shared_per_side]}
+    source: "axis doc § 10 'Ragged offsets'"
 
   - id: D-INPUTS-OVERLAP-VIEW-DTYPE
     kind: definition
@@ -408,6 +445,11 @@ rejected_candidates:
   - {candidate: "rng_dump only with random dropout (D-RNG-DUMP-NEEDS-RANDOM)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RNG-DUMP-NEEDS-PHILOX).", source: "axis doc § 8 'Dropout-pattern output'"}
   - {candidate: "Ragged start positions not on a paged K or V (D-REL-PAGED-NOT-RAGGED)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RAGGED-NOT-ON-PAGED).", source: "axis doc § 1, § 10"}
   - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axis doc § 1, § 10"}
+  - {candidate: "The tensors of one side share one list of start positions, so O starts where Q starts", verdict: library_limit, reason: "Each ragged tensor can carry its own list; O stored at other positions, or in equal-length slots, holds the same rows.", source: "axis doc § 1, § 10"}
+  - {candidate: "Start positions count elements only", verdict: api_limit, reason: "A start position in tokens times the sequence stride names the same element; the unit is how the list is stored.", source: "axis doc § 14"}
+  - {candidate: "Start positions begin at 0 and come in index order", verdict: api_or_reference_limit, reason: "A sequence can start anywhere in its tensor when its length is given apart from the starts.", source: "axis doc § 10 'Ragged offsets'"}
+  - {candidate: "Block-mask flags cover 128 × 128 tiles", verdict: api_limit, reason: "A flag can cover any tile size, or one score; the tile size is how the pattern is stated.", source: "axis doc § 5 'Custom block mask'"}
+  - {candidate: "Sink logits only in fp32", verdict: api_limit, reason: "Storing a logit in any format is lossy at worst, not undefined.", source: "axis doc § 6 'Attention sinks'"}
 
 # Combinations that are meaningful but give the same result as another combination. They are NOT
 # exclusions (rule B). A later choice rule may merge them to save cases.
@@ -425,5 +467,7 @@ equivalences:
   - "bias_broadcast batch_only ≡ batch_or_heads when q_heads = one; heads_only ≡ batch_or_heads when batch_size = one (also dropout_mask_broadcast)."
   - "descale_* per_head ≡ present when batch_size = one and the K/V head count is one, if every factor is the same."
   - "page_table_sharing shared ≡ separate tables with the same contents."
-  - "sink_dtype as_q ≡ fp32 when dtype_q = fp32."
+  - "ragged_offset_unit tokens ≡ elements when the sequence stride is 1."
+  - "rng_state_storage by_value ≡ device_memory when both hold the same numbers."
+  - "scale_factor_values one ≡ no descale or scale tensor."
   - "dim_order_* d_not_innermost ≡ the same order with the head-dim moved innermost when that tensor's head size is one."

@@ -101,11 +101,11 @@ thought about what makes sense or what hipDNN can express. This list is
   `causal_mask` is `present`.
 - A **combination** is one value for every active axis.
 
-Layer 0 has 88 axes and 321 values. That gives about 3.3 × 10⁴¹ combinations.
+Layer 0 has 102 axes and 372 values. That gives about 5.7 × 10⁴⁷ combinations.
 Nobody can run that many cases. So we count **pairs**: two values of two
 different axes, for example `dtype_q = fp16` together with
 `causal_mask = present`. A pair is **valid** when at least one allowed
-combination holds it. Layer 0 has 50,599 valid pairs.
+combination holds it. Layer 0 has 68,021 valid pairs.
 
 **Pairwise testing** puts every valid pair in at least one case. Most defects
 need only one or two settings in a bad state, so pairwise testing finds most of
@@ -132,8 +132,8 @@ or about numbers. Examples:
 - `D-OUTPUT-SELF-ALIAS`: output strides that send two output elements to one
   address cannot hold both results.
 
-Layer 1 has 31 definition rules. They leave about 2.1 × 10³⁶ combinations and
-44,393 valid pairs.
+Layer 1 has 33 definition rules. They leave about 2.9 × 10⁴² combinations and
+60,807 valid pairs.
 
 **Layer 2 removes combinations that hipDNN's frontend cannot express.** These
 are **frontend** rules (ids `F-*`). The frontend is the hipDNN C++ API that
@@ -146,19 +146,23 @@ builds the graph. Examples:
 - `F-SCALE-TENSOR-BY-VALUE`: a scale tensor must be passed by value, so a
   scale in device memory cannot be stated.
 
-Layer 2 has 15 frontend rules. They leave about 1.1 × 10³² combinations and
-36,997 valid pairs.
+Layer 2 has 17 frontend rules. They leave about 1.3 × 10³⁷ combinations and
+49,862 valid pairs.
 
 Some values and combinations have meaning, but the frontend cannot state them,
 refuses them, or is to refuse them. Layer 2 removes them. The model does not hold the values of
-the first two rules. The model holds the values of `F-LEFT-BOUND-NOT-ZERO` and
-`F-NO-NEGATIVE-STRIDE`, and the rule removes them from every row.
-`F-PAGED-NEEDS-SEQ-LENS` removes a combination, not a value:
+`F-INDEX-TENSORS-INT32`. It holds the values of the other rules below, and the rule removes
+them from every row. `F-PAGED-NEEDS-SEQ-LENS` removes a combination, not a value:
 
-- `F-SINK-FLOAT-ONLY`: the frontend takes only an fp32 sink, so a sink in Q's
-  format cannot be stated. This is a possible frontend defect.
+- `F-SINK-FLOAT-ONLY`: the frontend takes only an fp32 sink, so a sink in any
+  other format cannot be stated. This is a possible frontend defect.
 - `F-INDEX-TENSORS-INT32`: the length tensors and the page tables must be
   32-bit integers.
+- `F-NO-CU-SEQ-LEN`: no API takes cumulative sequence lengths (running totals
+  of the lengths).
+- `F-BLOCK-MASK-TILE-128`: the block mask holds one flag per 128 × 128 score
+  tile, so a mask with another tile size, or with one flag per score, cannot be
+  stated.
 - `F-LEFT-BOUND-NOT-ZERO`: a left window bound of 0 is refused.
 - `F-PAGED-NEEDS-SEQ-LENS`: a paged K or V needs both length tensors.
 - `F-NO-NEGATIVE-STRIDE`: a negative stride. The frontend accepts it today, but
@@ -166,9 +170,18 @@ the first two rules. The model holds the values of `F-LEFT-BOUND-NOT-ZERO` and
   enforced yet".
 
 Some combinations are valid but no reference executor can check them. They are
-not Layer 1 or Layer 2 rules. The answer key (section 4) holds them. Examples: a
-scale that is NaN or infinite, the dropout pattern output with a caller-supplied
-mask, and ragged offsets on a paged K or V.
+not Layer 1 or Layer 2 rules. The answer key (section 4) holds them. Examples: the
+dropout pattern output with a caller-supplied mask, ragged offsets on a paged K
+or V, and ragged offsets stored as 64-bit integers.
+
+**Hints for a fuzzer.** Some Layer 0 axes describe the numbers inside tensors:
+special numbers such as NaN or infinity (`special_values`), numbers large
+enough to overflow (`value_magnitude`), sink logits (`sink_values`), descale
+and scale factors (`scale_factor_values`), and a scale that is NaN or infinite
+(`scale_value` = `non_finite`). They are in Layer 0 and in the model, but they
+are not for test-case generation. They are hints for a fuzzer. The choice rule
+`CH-FUZZER-HINTS` keeps every case at the axis's ordinary value (`ordinary` or
+`none`) and never uses `scale_value` = `non_finite`.
 
 A removed combination is not lost. When the frontend accepts a meaningless
 request, that request comes back as a **rejection probe** in
@@ -178,7 +191,7 @@ are not part of this plan's bundles.
 ## 4. The model
 
 The model (`model.yaml`) is the Layer 2 space in a form that a script can
-use. It has 80 axes (29 of them child axes) and 289 values.
+use. It has 91 axes (38 of them child axes) and 335 values.
 
 **Classes, not numbers.** Most size axes hold a **class**, chosen by meaning.
 Example: `batch_size` is `one` or `many`. A **relationship** axis says how two
@@ -284,9 +297,9 @@ Each rule also has a `form`:
 | `setting` | Records a choice about how the model is built. It removes nothing. |
 | `covered` | A policy rule whose requests another rule already removes. |
 
-The model applies 32 exclusion rules: 23 definition, 8 frontend and 1 policy.
-Together they make 5,844 of the 40,951 structurally possible pairs invalid.
-35,107 valid pairs remain.
+The model applies 42 exclusion rules: 28 definition, 12 frontend, 1 policy and
+1 choice. Together they make 13,674 of the 55,080 structurally possible pairs invalid.
+41,406 valid pairs remain.
 
 Example of a `forbid`:
 
@@ -425,10 +438,10 @@ Result for the generated CSV (section 8; times are the summed
 
 | Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
 |---|---|---|---|---|---|
-| quick | 1,612 | 1,612 | 66.4 | 53.6 | 22.1 % |
-| standard | 9,206 | 10,818 | 568.0 | 427.1 | 31.6 % |
-| comprehensive | 4,377 | 15,195 | 2,207.3 | 1,594.2 | 61.3 % |
-| full | 7,177 | 22,372 | 5,394.0 | 3,873.1 | — |
+| quick | 1,690 | 1,690 | 69.2 | 55.8 | 23.1 % |
+| standard | 9,130 | 10,820 | 571.3 | 429.3 | 31.7 % |
+| comprehensive | 4,438 | 15,258 | 2,233.1 | 1,612.3 | 62.0 % |
+| full | 7,237 | 22,495 | 5,392.4 | 3,872.0 | — |
 
 These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
 run plus one reference run. The suite does more work per case, so its times are larger.
@@ -438,9 +451,9 @@ under the rules and the answer-key rules. A seed whose row the references can
 check goes to quick, at shape S. Any other seed goes to full. 14 seeds are in
 quick; `S3b-vllm-fp8kv-paged` is in full, because a K or V format that differs
 from Q has answer key "no". In the CSV a seed row has `origin` `real_world` and
-`detail` `seed:<id>`. One seed (`S10-blockmask-ragged`) matched a row that
-low-change pairwise had already made; that row's `detail` carries the seed
-name.
+`detail` `seed:<id>`. Two seeds (`S10-blockmask-ragged` and
+`S10b-blockmask-paged`) matched rows that low-change pairwise had already made;
+those rows' `detail` carries the seed name.
 
 ## 8. The CSV
 
@@ -459,9 +472,9 @@ timing files or the generator changes the CSV, write the new SHA-256 to that
 file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
 change.
 
-`levels.csv` has one row per case: 22,372 rows. It has no quoted fields. A `-`
-means that a child axis is not active in that row. Each row has 93 columns: 13
-case columns, then 80 axis columns.
+`levels.csv` has one row per case: 22,495 rows. It has no quoted fields. A `-`
+means that a child axis is not active in that row. Each row has 104 columns: 13
+case columns, then 91 axis columns.
 
 **Case columns (13).**
 
@@ -481,8 +494,8 @@ case columns, then 80 axis columns.
 | `case_key` | 16 hex digits: a hash of the tier, the sizes and every axis value. It is unique per row and stays the same when `case_id` values shift. Use it as the key. |
 | `est_seconds_gfx950` | The time of the case on gfx950. |
 
-**Axis columns (80).** One column per model axis, from `batch_packing` to
-`runtime_shape_override`, in the order of `model.yaml`.
+**Axis columns (91).** One column per model axis, from `batch_packing` to
+`value_magnitude`, in the order of `model.yaml`.
 
 ## 9. From rows to bundles
 

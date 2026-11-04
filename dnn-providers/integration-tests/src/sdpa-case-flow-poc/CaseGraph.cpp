@@ -649,6 +649,7 @@ public:
 
     BuiltCase build()
     {
+        requireRealisedContentClasses();
         resolveSizes();
         resolveFormats();
 
@@ -725,6 +726,25 @@ private:
     std::vector<std::string> _notes;
     std::map<std::string, Contents> _contents;
     int64_t _nextUid = 1;
+
+    // Value classes of tensor contents that the builder does not write: every row must hold the
+    // representative class, which a random fill or the class-to-value factors give.
+    void requireRealisedContentClasses() const
+    {
+        for(const auto& [axis, representative] :
+            std::vector<std::pair<std::string, std::string>>{{"sink_values", "ordinary"},
+                                                             {"scale_factor_values", "ordinary"},
+                                                             {"special_values", "none"},
+                                                             {"value_magnitude", "ordinary"}})
+        {
+            if(isActive(_row, axis) && valueOf(_row, axis) != representative)
+            {
+                fail(axis + "=" + valueOf(_row, axis)
+                     + " is a hint for a fuzzer; the case builder writes only " + axis + "="
+                     + representative);
+            }
+        }
+    }
 
     TensorPtr newTensor(const std::string& name)
     {
@@ -1001,29 +1021,123 @@ private:
         {
             if(raggedTensor(letter))
             {
-                tensor->set_ragged_offset(raggedOffsetFor(letter));
+                attachRaggedOffset(*tensor, letter);
                 ragged += letter;
             }
         }
-        if(raggedTensor("O"))
+        if(raggedO())
         {
             ragged += "O";
         }
         if(!ragged.empty())
         {
             _notes.push_back("ragged=" + ragged);
+            if(sharedTokenOffsets())
+            {
+                _notes.push_back("ragged_offset_form=shared_tokens");
+            }
+            if(raggedOffsetType() == DataType::INT64)
+            {
+                _notes.push_back("ragged_offset_dtype=int64");
+            }
+        }
+        if(raggedTensor("O") && oPacking() != "as_q")
+        {
+            _notes.push_back("o_packing=" + oPacking());
         }
     }
 
-    // Each ragged tensor has its own offset tensor: an offset counts that tensor's elements.
+    // A row that leaves a child axis at "-" takes the axis's first value.
+    std::string childValueOr(const std::string& axis, const std::string& fallback) const
+    {
+        return isActive(_row, axis) ? valueOf(_row, axis) : fallback;
+    }
+
+    bool sharedTokenOffsets() const
+    {
+        const auto form = childValueOr("ragged_offset_form", "per_tensor_elements");
+        if(form == "shared_tokens")
+        {
+            return true;
+        }
+        if(form != "per_tensor_elements")
+        {
+            unknownValue("ragged_offset_form", form);
+        }
+        return false;
+    }
+
+    DataType raggedOffsetType() const
+    {
+        const auto id = childValueOr("ragged_offset_dtype", "int32");
+        if(id == "int32")
+        {
+            return DataType::INT32;
+        }
+        if(id == "int64")
+        {
+            return DataType::INT64;
+        }
+        unknownValue("ragged_offset_dtype", id);
+    }
+
+    std::string oPacking() const
+    {
+        const auto id = childValueOr("o_packing", "as_q");
+        if(id != "as_q" && id != "own_starts" && id != "padded")
+        {
+            unknownValue("o_packing", id);
+        }
+        if(id == "own_starts" && sharedTokenOffsets())
+        {
+            fail("o_packing=own_starts needs O's own offset tensor; ragged_offset_form is "
+                 "shared_tokens");
+        }
+        return id;
+    }
+
+    bool raggedO() const
+    {
+        return raggedTensor("O") && oPacking() != "padded";
+    }
+
+    // Per-tensor element offsets: one offset tensor per ragged tensor. Token offsets: one offset
+    // tensor per side, and each tensor's multiplier is its sequence stride.
+    void attachRaggedOffset(TensorAttributes& tensor, const std::string& letter)
+    {
+        tensor.set_ragged_offset(raggedOffsetFor(letter));
+        if(sharedTokenOffsets())
+        {
+            const int64_t stride = tensor.get_stride().at(2);
+            if(stride < 1)
+            {
+                fail("ragged_offset_form=shared_tokens needs a sequence stride of 1 or more on "
+                     + letter + "; it is " + std::to_string(stride));
+            }
+            tensor.set_ragged_offset_multiplier(stride);
+        }
+    }
+
     TensorPtr raggedOffsetFor(const std::string& letter)
     {
         std::string name = "ragged_offset_";
-        for(const char c : letter)
+        if(sharedTokenOffsets())
         {
-            name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            name += letter == "K" || letter == "V" ? "kv_side" : "q_side";
+            const auto it = _named.find(name);
+            if(it != _named.end())
+            {
+                return it->second;
+            }
         }
-        return packedTensor(name, {_b + 1, 1, 1, 1}, DataType::INT32);
+        else
+        {
+            for(const char c : letter)
+            {
+                name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+        }
+        return packedTensor(name, {_b + 1, 1, 1, 1}, raggedOffsetType());
     }
 
     bool raggedTensor(const std::string& letter) const
@@ -1131,6 +1245,10 @@ private:
                 fail("sequence_lengths=lengths_in_offsets needs a ragged tensor");
             }
         }
+        else if(lengths == "cu_seq_len")
+        {
+            fail("sequence_lengths=cu_seq_len: the frontend has no setter for cumulative lengths");
+        }
         else if(lengths != "uniform")
         {
             unknownValue("sequence_lengths", lengths);
@@ -1236,16 +1354,37 @@ private:
         }
     }
 
-    // One bit per 128 x 128 score tile, eight key tiles per byte, least significant bit first; a
-    // clear bit masks the tile.
+    // One bit per 128 x 128 score tile, eight (UINT8) or thirty-two (INT32) key tiles per element,
+    // least significant bit first; a clear bit masks the tile.
     void applyBlockMask(SdpaAttributes& attrs)
     {
+        const auto granularity = childValueOr("block_mask_granularity", "tile_128");
+        if(granularity != "tile_128")
+        {
+            if(granularity == "other_tile" || granularity == "per_element")
+            {
+                fail("block_mask_granularity=" + granularity
+                     + ": the frontend states one flag per 128 x 128 tile");
+            }
+            unknownValue("block_mask_granularity", granularity);
+        }
+        const auto dtypeId = childValueOr("block_mask_dtype", "uint8");
+        if(dtypeId != "uint8" && dtypeId != "int32")
+        {
+            unknownValue("block_mask_dtype", dtypeId);
+        }
+        const DataType maskType = dtypeId == "int32" ? DataType::INT32 : DataType::UINT8;
+        const int64_t bitsPerElement = dtypeId == "int32" ? 32 : 8;
+        if(dtypeId != "uint8")
+        {
+            _notes.push_back("block_mask_dtype=" + dtypeId);
+        }
+
         constexpr int64_t TILE = 128;
         const int64_t rowTiles = ceilDiv(_sq, TILE);
         const int64_t keyTiles = ceilDiv(keyExtent(), TILE);
-        const int64_t bytes = ceilDiv(keyTiles, 8);
-        attrs.set_block_mask(
-            packedTensor("block_mask", {_b, _hq, rowTiles, bytes}, DataType::UINT8));
+        const int64_t bytes = ceilDiv(keyTiles, bitsPerElement);
+        attrs.set_block_mask(packedTensor("block_mask", {_b, _hq, rowTiles, bytes}, maskType));
 
         const auto& pattern = valueOf(_row, "block_mask_pattern");
         const auto allowed = [&](int64_t rowTile, int64_t keyTile) {
@@ -1275,12 +1414,18 @@ private:
             for(int64_t byte = 0; byte < bytes; ++byte)
             {
                 int64_t value = 0;
-                for(int64_t bit = 0; bit < 8 && byte * 8 + bit < keyTiles; ++bit)
+                for(int64_t bit = 0; bit < bitsPerElement && byte * bitsPerElement + bit < keyTiles;
+                    ++bit)
                 {
-                    if(allowed(r, byte * 8 + bit))
+                    if(allowed(r, byte * bitsPerElement + bit))
                     {
                         value |= int64_t{1} << bit;
                     }
+                }
+                // Bit 31 of an INT32 element is its sign bit.
+                if(bitsPerElement == 32 && value > std::numeric_limits<int32_t>::max())
+                {
+                    value -= int64_t{1} << 32;
                 }
                 slice.push_back(value);
             }
@@ -1336,7 +1481,13 @@ private:
         }
         if(valueOf(_row, "attention_sinks") == "present")
         {
-            attrs.set_sink_token(packedTensor("sink", {1, _hq, 1, 1}, DataType::FLOAT));
+            const auto sinkType = childValueOr("sink_dtype", "fp32");
+            attrs.set_sink_token(
+                packedTensor("sink", {1, _hq, 1, 1}, formatOf("sink_dtype", sinkType)));
+            if(sinkType != "fp32")
+            {
+                _notes.push_back("sink_dtype=" + sinkType);
+            }
         }
     }
 
@@ -1456,6 +1607,15 @@ private:
                                   byValueInt64("dropout_seed", _values.dropoutSeed),
                                   byValueInt64("dropout_offset", _values.dropoutOffset));
             }
+            else if(rng == "caller_supplied_device_memory")
+            {
+                attrs.set_dropout(probability,
+                                  packedTensor("dropout_seed", {1, 1, 1, 1}, DataType::INT64),
+                                  packedTensor("dropout_offset", {1, 1, 1, 1}, DataType::INT64));
+                _contents["dropout_seed"] = integerContents({_values.dropoutSeed}, true);
+                _contents["dropout_offset"] = integerContents({_values.dropoutOffset}, true);
+                _notes.push_back("dropout_seed_offset=device_memory");
+            }
             else if(rng == "not_supplied")
             {
                 attrs.set_dropout_probability(probability);
@@ -1467,8 +1627,15 @@ private:
         }
         else if(style == "caller_mask")
         {
-            attrs.set_dropout(packedTensor("dropout_mask", dropoutMaskDims(), DataType::FLOAT),
+            const auto maskType = childValueOr("dropout_mask_dtype", "fp32");
+            attrs.set_dropout(packedTensor("dropout_mask",
+                                           dropoutMaskDims(),
+                                           formatOf("dropout_mask_dtype", maskType)),
                               byValueFloat("dropout_scale", dropoutMaskScale()));
+            if(maskType != "fp32")
+            {
+                _notes.push_back("dropout_mask_dtype=" + maskType);
+            }
             const auto& cycle = classValue(_values.dropoutMaskCycle,
                                            "dropout_mask_pattern",
                                            valueOf(_row, "dropout_mask_pattern"));
@@ -1879,9 +2046,9 @@ private:
         const Dims oDims = {_b, _hq, _sq, _dv};
         o->set_output(true).set_data_type(_fo).set_dim(oDims).set_stride(layoutStrides(oDims, "o"));
         applyAlignment(*o, "alignment_o", valueOf(_row, "alignment_o"), _fo);
-        if(raggedTensor("O"))
+        if(raggedO())
         {
-            o->set_ragged_offset(raggedOffsetFor("O"));
+            attachRaggedOffset(*o, "O");
         }
         _named["o"] = o;
     }
@@ -1910,7 +2077,7 @@ private:
                 fail("stats_packing=" + valueOf(_row, "stats_packing")
                      + " needs a ragged Q; batch_packing is " + valueOf(_row, "batch_packing"));
             }
-            stats->set_ragged_offset(raggedOffsetFor("Stats"));
+            attachRaggedOffset(*stats, "Stats");
         }
         _named["stats"] = stats;
     }
@@ -1925,6 +2092,10 @@ private:
                 fail("override '" + name + "_dims' names a tensor this case does not have");
             }
             it->second->set_dim(dims).set_stride(packedStrides(dims));
+            if(sharedTokenOffsets() && it->second->get_ragged_offset())
+            {
+                it->second->set_ragged_offset_multiplier(it->second->get_stride().at(2));
+            }
             _notes.push_back(name + "_dims=" + dimsText(dims));
         }
     }
@@ -1984,8 +2155,34 @@ private:
         fail("tensor '" + tensorName + "' has a ragged offset but belongs to no sequence side");
     }
 
-    // B + 1 offsets in the tensor's own elements. The stored length is the tensor's sequence
-    // extent and the sequence stride is its stride over that extent.
+    // The stored length that a ragged tensor's offsets count slots of: the tensor's own sequence
+    // extent for per-tensor offsets, the side's stored length for an offset tensor of the side.
+    int64_t offsetStoredLength(const std::string& tensorName, const TensorAttributes& tensor) const
+    {
+        if(!sharedTokenOffsets())
+        {
+            return tensor.get_dim().at(2);
+        }
+        return lengthAxisOf(tensorName) == "per_seq_len_q" ? _sq : _skv;
+    }
+
+    // The offset layout of a ragged tensor: the row's ragged_offsets value, or for O with
+    // o_packing own_starts, full slots beside a Q packed end to end and end to end otherwise.
+    OffsetLayout offsetLayoutOf(const std::string& tensorName) const
+    {
+        const auto& offsetsId = valueOf(_row, "ragged_offsets");
+        const auto layout = classValue(_values.raggedOffsets, "ragged_offsets", offsetsId);
+        if(tensorName == "o" && oPacking() == "own_starts")
+        {
+            return layout == OffsetLayout::PREFIX_SUM ? OffsetLayout::FULL_SLOTS
+                                                      : OffsetLayout::PREFIX_SUM;
+        }
+        return layout;
+    }
+
+    // B + 1 offsets of a ragged tensor. Per-tensor offsets count the tensor's own elements: a
+    // token times the sequence stride. Token offsets count tokens; the multiplier holds the
+    // stride.
     std::vector<int64_t> raggedOffsets(const std::string& tensorName,
                                        const TensorAttributes& tensor) const
     {
@@ -1995,12 +2192,13 @@ private:
         {
             fail("ragged tensor '" + tensorName + "' is not 4-D");
         }
-        const int64_t stored = dims[2];
-        const int64_t stride = strides[2];
+        const bool pageTable = tensorName.rfind("page_table_", 0) == 0;
+        const int64_t stored = pageTable ? dims[2] : offsetStoredLength(tensorName, tensor);
+        const int64_t stride = !pageTable && sharedTokenOffsets() ? 1 : strides[2];
         const std::string what = "ragged offset of '" + tensorName + "'";
 
         std::vector<int64_t> tokens;
-        if(tensorName.rfind("page_table_", 0) == 0)
+        if(pageTable)
         {
             for(int64_t b = 0; b <= _b; ++b)
             {
@@ -2013,8 +2211,7 @@ private:
             {
                 fail("tensor '" + tensorName + "' is ragged but ragged_offsets is '-'");
             }
-            const auto& offsetsId = valueOf(_row, "ragged_offsets");
-            const auto layout = classValue(_values.raggedOffsets, "ragged_offsets", offsetsId);
+            const auto layout = offsetLayoutOf(tensorName);
             const auto lengths = sideLengths(lengthAxisOf(tensorName), stored, _b);
             int64_t total = 0;
             for(const auto length : lengths)
@@ -2033,7 +2230,19 @@ private:
             }
             for(int64_t b = 0; b <= _b; ++b)
             {
-                tokens.push_back(layout == OffsetLayout::FULL_SLOTS ? b * stored : running);
+                if(layout == OffsetLayout::FULL_SLOTS)
+                {
+                    tokens.push_back(b * stored);
+                }
+                else if(layout == OffsetLayout::SLOT_END_ALIGNED)
+                {
+                    tokens.push_back(b < _b ? (b + 1) * stored - lengths[static_cast<size_t>(b)]
+                                            : b * stored);
+                }
+                else
+                {
+                    tokens.push_back(running);
+                }
                 if(b < _b)
                 {
                     running += lengths[static_cast<size_t>(b)];
@@ -2041,12 +2250,14 @@ private:
             }
         }
 
+        const bool narrow = pageTable || raggedOffsetType() == DataType::INT32;
         std::vector<int64_t> offsets;
         for(const auto token : tokens)
         {
             const int64_t offset = checkedProduct(token, stride, what);
-            if(offset > std::numeric_limits<int32_t>::max()
-               || offset < std::numeric_limits<int32_t>::min())
+            if(narrow
+               && (offset > std::numeric_limits<int32_t>::max()
+                   || offset < std::numeric_limits<int32_t>::min()))
             {
                 fail(what + " is " + std::to_string(offset) + ", outside INT32");
             }
@@ -2167,7 +2378,14 @@ private:
             {
                 continue;
             }
-            _contents[offset->get_name()] = integerContents(raggedOffsets(name, *tensor), false);
+            auto offsets = raggedOffsets(name, *tensor);
+            const auto known = _contents.find(offset->get_name());
+            if(known != _contents.end()
+               && std::get<std::vector<int64_t>>(known->second.values) != offsets)
+            {
+                fail("the tensors that share '" + offset->get_name() + "' give different offsets");
+            }
+            _contents[offset->get_name()] = integerContents(std::move(offsets), false);
         }
 
         for(const char* table : {"page_table_k", "page_table_v", "page_table_kv"})
@@ -2443,7 +2661,8 @@ OffsetLayout offsetLayoutAt(const Json& value, const std::string& where)
     static const std::map<std::string, OffsetLayout> LAYOUTS
         = {{"prefix_sum_of_lengths", OffsetLayout::PREFIX_SUM},
            {"full_slots", OffsetLayout::FULL_SLOTS},
-           {"prefix_sum_after_gap", OffsetLayout::PREFIX_SUM_AFTER_GAP}};
+           {"prefix_sum_after_gap", OffsetLayout::PREFIX_SUM_AFTER_GAP},
+           {"slot_end_aligned", OffsetLayout::SLOT_END_ALIGNED}};
     const auto name = stringAt(member(value, "offsets", where), where + ".offsets");
     const auto it = LAYOUTS.find(name);
     if(it == LAYOUTS.end())
@@ -2661,6 +2880,9 @@ const std::vector<std::string>& modelAxisIds()
     static const std::vector<std::string> IDS = {
         "batch_packing",
         "ragged_offsets",
+        "ragged_offset_form",
+        "ragged_offset_dtype",
+        "o_packing",
         "sequence_lengths",
         "per_seq_len_q",
         "per_seq_len_kv",
@@ -2704,12 +2926,16 @@ const std::vector<std::string>& modelAxisIds()
         "window_right",
         "block_mask",
         "block_mask_pattern",
+        "block_mask_granularity",
+        "block_mask_dtype",
         "bias",
         "bias_broadcast",
         "bias_dtype",
         "alibi",
         "alibi_head_count",
         "attention_sinks",
+        "sink_dtype",
+        "sink_values",
         "scale_source",
         "scale_value",
         "dropout",
@@ -2717,6 +2943,7 @@ const std::vector<std::string>& modelAxisIds()
         "dropout_rng_state",
         "dropout_mask_pattern",
         "dropout_mask_broadcast",
+        "dropout_mask_dtype",
         "dropout_pattern_output",
         "stats_output",
         "dtype_stats",
@@ -2729,6 +2956,7 @@ const std::vector<std::string>& modelAxisIds()
         "descale_v",
         "s_quantization",
         "scale_o",
+        "scale_factor_values",
         "paged_kv",
         "page_table_sharing",
         "page_size_k_vs_v",
@@ -2739,6 +2967,8 @@ const std::vector<std::string>& modelAxisIds()
         "max_seq_len_kv",
         "implementation",
         "runtime_shape_override",
+        "special_values",
+        "value_magnitude",
     };
     return IDS;
 }
@@ -2753,6 +2983,10 @@ bool isExecuteLevelAxis(const std::string& axis)
         "block_mask_pattern",
         "dropout_mask_pattern",
         "page_table_order",
+        "sink_values",
+        "scale_factor_values",
+        "special_values",
+        "value_magnitude",
     };
     return EXECUTE_LEVEL.count(axis) != 0;
 }
@@ -2826,6 +3060,8 @@ std::string sharedBaseValue(const std::string& axis)
         {"paged_kv", "absent"},
         {"implementation", "auto"},
         {"runtime_shape_override", "disabled"},
+        {"special_values", "none"},
+        {"value_magnitude", "ordinary"},
     };
     const auto it = BASE.find(axis);
     return it == BASE.end() ? std::string("-") : it->second;

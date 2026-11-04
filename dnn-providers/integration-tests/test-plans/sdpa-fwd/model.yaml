@@ -183,7 +183,7 @@ axes:
     meaning: "How several sequences share one tensor. The query side (Q, O) and the key/value side (K, V) can be packed differently."
     values:
       - {id: padded, meaning: "equal-length slots (plain dims)"}
-      - {id: ragged, meaning: "sequences end to end on Q, K, V and O; each tensor has its own offset tensor that gives each start"}
+      - {id: ragged, meaning: "sequences end to end on Q, K, V and O; offset tensors give each start (ragged_offset_form)"}
       - {id: ragged_q_side, meaning: "Q and O ragged; K and V in equal-length slots or pages (the vLLM serving shape)"}
       - {id: ragged_kv_side, meaning: "K and V ragged; Q and O in equal-length slots"}
     api_paths: [cpp]   # ragged: set_ragged_offset is not bound in Python
@@ -207,16 +207,74 @@ axes:
       - {id: contiguous, meaning: "each sequence starts where the previous one ends"}
       - {id: gapped, meaning: "each slot is a full stored length; the length tensors give shorter live lengths, so a slot is longer than its sequence"}
       - {id: leading_gap, meaning: "the first sequence starts after the start of the tensor: all the spare room is before sequence 0"}
-    not_in_model: "out_of_order (sequences stored in another order: it needs decreasing offsets) and overlapping: frontend rule F-RAGGED-OFFSETS-ARE-LENGTHS. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
+      - {id: independent_starts, meaning: "each sequence starts at a position of its own: it ends at the end of its full slot, so the gap before it is its own spare room and the gaps differ when the lengths differ"}
+    not_in_model: "out_of_order (a sequence stored before a sequence of lower index) and overlapping: frontend rule F-RAGGED-OFFSETS-ARE-LENGTHS. out_of_order with lengths from seq_len becomes stateable when PR #15080 merges. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
     api_paths: [cpp]
-    cite: "TA:508; DH:243-262 (checks the offset tensor's own properties only); @ 91a40bdfd4c RaggedTokenBoundaries.hpp:67-71 (offset[0] must be 0), 89-94 (non-decreasing); RaggedSdpaDensify.hpp:463-477 (live lengths within the packed slots)"
-    note: "leading_gap answer_key no: both references throw at execute when offset[0] is not 0 (@ 91a40bdfd4c RaggedTokenBoundaries.hpp:67-71). gapped needs the length tensors, so it always runs through the dense rewrite (RaggedSdpaFwdSupport.hpp:161-165 declines seq_len tensors; RaggedSdpaDensify.hpp:30-32 reads them as live lengths)."
+    cite: "TA:508; DH:243-262 (checks the offset tensor's own properties only); @ 91a40bdfd4c RaggedTokenBoundaries.hpp:67-71 (offset[0] must be 0), 89-100 (non-decreasing; no slot longer than S_max); RaggedSdpaDensify.hpp:463-477 (live lengths within the packed slots)"
+    note: "leading_gap and independent_starts answer_key no: at 91a40bdfd4c both references take offset[0] = 0 only and throw at execute otherwise (RaggedTokenBoundaries.hpp:67-71), and a slot longer than S_max is refused (95-100). With the class values independent_starts gives slot 0 a length of 1.5 x S (mixed) or 2 x S (some_zero). The labels follow the references, not the meaning: the values stay in the model whatever the references take. Both labels flip when PR #15080 (per-batch origins with lengths from seq_len) merges. gapped needs the length tensors, so it always runs through the dense rewrite (RaggedSdpaFwdSupport.hpp:161-165 declines seq_len tensors; RaggedSdpaDensify.hpp:30-32 reads them as live lengths)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
       contiguous: [common, "yes", "yes"]
       gapped: [rare, "yes", "yes"]
       leading_gap: [fringe, "yes", "no"]
+      independent_starts: [rare, "yes", "no"]
+
+  - id: ragged_offset_form
+    kind: child
+    value_kind: categorical
+    parent: {batch_packing: [ragged, ragged_q_side, ragged_kv_side]}
+    level: graph
+    meaning: "The unit of the ragged offsets and which tensors share an offset tensor (Layer 0 ragged_offset_unit and ragged_offset_sharing, CH-FOLDED-CHILD-AXES)."
+    values:
+      - {id: per_tensor_elements, meaning: "each ragged tensor has its own offset tensor, which counts that tensor's elements (ragged_offset_multiplier 1)"}
+      - {id: shared_tokens, meaning: "one offset tensor per side counts tokens: Q, O and a packed Stats read one, K and V read another; each tensor's ragged_offset_multiplier is its sequence stride"}
+    api_paths: [cpp]   # set_ragged_offset is not bound in Python
+    cite: "TA:508; @ 91a40bdfd4c TensorAttributes.hpp:545-575 (set_ragged_offset_multiplier), 644-651 (a multiplier below 1 is refused); DescriptorHelpers.hpp:229-238 (the multiplier is sent when it is not 1), 268 (an offset tensor already lowered is found again); RaggedTensor.hpp:161 (element offset = stored offset x multiplier); references RaggedSdpaDensify.hpp:207-216, 326-345 (any multiplier of 1 or more)"
+    note: "shared_tokens answer_key yes: the references multiply each stored offset by its tensor's multiplier and then compare token boundaries (RaggedSdpaDensify.hpp:326-345, RaggedTokenBoundaries.hpp:105-128); in runner job 68273158 (gfx942) both references ran and agreed on the 6 sampled shared_tokens rows that hold no other unchecked value; on a seventh, at shape M, the GPU reference ran and the CPU reference is size-gated. Usage common: varlen attention APIs pass one cumulative token list per side (cu_seqlens_q, cu_seqlens_k)."
+    group: G5-batch-heads-kvstorage
+    size_sensitive: ["no", "a unit choice; where the offsets cross tile edges is batch_packing and ragged_offsets"]
+    labels:
+      per_tensor_elements: [common, layout, "yes"]
+      shared_tokens: [common, layout, "yes"]
+
+  - id: ragged_offset_dtype
+    kind: child
+    value_kind: categorical
+    parent: {batch_packing: [ragged, ragged_q_side, ragged_kv_side]}
+    level: graph
+    meaning: "Integer format of the ragged offset tensors."
+    values:
+      - {id: int32, meaning: "INT32"}
+      - {id: int64, meaning: "INT64"}
+    api_paths: [cpp]   # set_ragged_offset is not bound in Python
+    cite: "@ 91a40bdfd4c DescriptorHelpers.hpp:243-275 (no check of the offset tensor's format); RaggedTensor.hpp:142-145 (offsets read as INT32 or INT64); references RaggedSdpaDensify.hpp:204-206 (dense rewrite: INT32 or INT64), RaggedSdpaFwdSupport.hpp:94-98 (native plan: INT32), FlatbufferDatatypeMapping.hpp:107-160 (no INT64 element type: 'Error: Invalid type')"
+    note: "int64 answer_key no: the dense rewrite takes INT64 offsets, but both references then stop with 'Error: Invalid type' because the test SDK's data-type mapping has no INT64 entry (FlatbufferDatatypeMapping.hpp:159; runner job 68273158, gfx942: every sampled INT64 row that no other value declined, 4 rows)."
+    group: G5-batch-heads-kvstorage
+    size_sensitive: ["no", "element format of the offsets, the same at every size"]
+    labels:
+      int32: [common, layout, "yes"]
+      int64: [rare, layout, "no"]
+
+  - id: o_packing
+    kind: child
+    value_kind: categorical
+    parent: {batch_packing: [ragged, ragged_q_side]}
+    level: graph
+    meaning: "How O stores its rows when Q is ragged."
+    values:
+      - {id: as_q, meaning: "O is ragged with Q's start positions"}
+      - {id: own_starts, meaning: "O is ragged with its own offset tensor and other start positions (class_to_value o_packing)"}
+      - {id: padded, meaning: "O is in plain [B, H_q, S_q, D_v] slots while Q is ragged"}
+    api_paths: [cpp]   # set_ragged_offset is not bound in Python
+    cite: "TA:508 (a ragged offset per tensor); @ 91a40bdfd4c references RaggedTokenBoundaries.hpp:105-128 (Q and O must have the same token boundaries), RaggedSdpaDensify.hpp:83-91 (the primaries of a packing group are all ragged or all dense), 441-461 (one length list per packing group)"
+    note: "own_starts and padded answer_key no: at 91a40bdfd4c the references take O only with Q's token boundaries, ragged when Q is ragged."
+    group: G5-batch-heads-kvstorage
+    size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
+    labels:
+      as_q: [common, layout, "yes"]
+      own_starts: [fringe, layout, "no"]
+      padded: [rare, layout, "no"]
 
   - id: sequence_lengths
     kind: categorical
@@ -227,8 +285,9 @@ axes:
       - {id: variable, class: variable, meaning: "padding_mask true + seq_len_q and seq_len_kv tensors"}
       - {id: variable_no_flag, class: variable, meaning: "seq_len_q and seq_len_kv tensors with padding_mask false: the second spelling of per-sequence lengths. hipDNN's references read it as padding (SEM-008); cuDNN refuses it"}
       - {id: lengths_in_offsets, class: variable, meaning: "ragged only: the ragged offsets give each length; no seq_len tensors. The third spelling of per-sequence lengths, the only one the native ragged plan reads"}
+      - {id: cu_seq_len, class: variable, meaning: "cumulative lengths in cu_seq_len_q and cu_seq_len_kv tensors (B + 1 running totals); removed by F-NO-CU-SEQ-LEN"}
     api_paths: [cpp, python]
-    cite: "SA:354,364,602; @ 00d9c566bea SdpaFwdNode.hpp:154-157,283-302 (each tensor checked alone, never against the flag); PlanUtils.hpp:112-157 (references: tensors without the flag are padding)"
+    cite: "SA:354,364,602; @ 00d9c566bea SdpaFwdNode.hpp:154-157,283-302 (each tensor checked alone, never against the flag); PlanUtils.hpp:112-157 (references: tensors without the flag are padding); @ 91a40bdfd4c no cu_seq_len setter"
     group: G1-mask-seq
     size_sensitive: ["yes", "decides which query/key positions exist; at length 64 there is one tile, so per-tile and per-sequence offsets only show at larger lengths"]
     labels:
@@ -236,11 +295,12 @@ axes:
       variable: [common, "yes", "yes"]
       variable_no_flag: [common, "yes", "yes"]
       lengths_in_offsets: [common, "yes", partial]
+      cu_seq_len: [common, "yes", "no"]
 
   - id: per_seq_len_q
     kind: child
     value_kind: class
-    parent: {sequence_lengths: [variable, variable_no_flag, lengths_in_offsets]}
+    parent: {sequence_lengths: [variable, variable_no_flag, lengths_in_offsets, cu_seq_len]}
     level: execute
     meaning: "Contents of seq_len_q, relative to the stored query length. With lengths_in_offsets, the lengths the Q-side offsets give."
     values: &per_seq_len_classes
@@ -265,7 +325,7 @@ axes:
   - id: per_seq_len_kv
     kind: child
     value_kind: class
-    parent: {sequence_lengths: [variable, variable_no_flag, lengths_in_offsets]}
+    parent: {sequence_lengths: [variable, variable_no_flag, lengths_in_offsets, cu_seq_len]}
     level: execute
     meaning: "Contents of seq_len_kv, relative to the stored key/value length. With lengths_in_offsets, the lengths the K/V-side offsets give."
     values: *per_seq_len_classes
@@ -764,6 +824,43 @@ axes:
       some_rows_blocked: [rare, "yes", "yes"]
       all_blocked: [rare, "yes", "yes"]
 
+  - id: block_mask_granularity
+    kind: child
+    value_kind: class
+    parent: {block_mask: [present]}
+    level: graph
+    meaning: "Which scores one flag of the block mask covers."
+    values:
+      - {id: tile_128, class: tile, meaning: "one flag per 128 x 128 score tile"}
+      - {id: other_tile, class: tile, meaning: "one flag per 64 x 64 score tile (removed by F-BLOCK-MASK-TILE-128)"}
+      - {id: per_element, meaning: "one flag per score (removed by F-BLOCK-MASK-TILE-128)"}
+    api_paths: [cpp, python]
+    cite: "FBS:49-51 (one entry per 128 x 128 tile)"
+    group: G1-mask-seq
+    size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
+    labels:
+      tile_128: [common, "yes", "yes"]
+      other_tile: [rare, "yes", "no"]
+      per_element: [common, "yes", "no"]
+
+  - id: block_mask_dtype
+    kind: child
+    value_kind: categorical
+    parent: {block_mask: [present]}
+    level: graph
+    meaning: "Element format that holds the block-mask flags."
+    values:
+      - {id: uint8, meaning: "UINT8: eight key tiles per element, least significant bit first"}
+      - {id: int32, meaning: "INT32: thirty-two key tiles per element, least significant bit first"}
+    api_paths: [cpp, python]
+    cite: "@ 00d9c566bea SdpaFwdNode.hpp:34-252 (no block-mask format check); references @ 91a40bdfd4c PlanUtils.hpp:435 (UINT8 only)"
+    note: "int32 answer_key no: the references take a UINT8 block mask only."
+    group: G1-mask-seq
+    size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
+    labels:
+      uint8: [common, layout, "yes"]
+      int32: [fringe, layout, "no"]
+
   # ------------------------------------------------------------------ extra score terms
   - id: bias
     kind: categorical
@@ -870,6 +967,49 @@ axes:
       absent: [common, "yes", "yes"]
       present: [common, "yes", "yes"]
 
+  - id: sink_dtype
+    kind: child
+    value_kind: categorical
+    parent: {attention_sinks: [present]}
+    level: graph
+    meaning: "Storage format of the sink logits."
+    values: *formats
+    api_paths: [cpp, python]
+    cite: "@ 91a40bdfd4c SdpaFwdNode.hpp:277 (the sink must be FLOAT)"
+    note: "Every format but fp32 is removed by F-SINK-FLOAT-ONLY."
+    group: G2-score-terms
+    size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
+    labels:
+      fp32: [common, "yes", "yes"]
+      fp16: [rare, "yes", "no"]
+      bf16: [rare, "yes", "no"]
+      fp8_e4m3: [fringe, "yes", "no"]
+      fp8_e4m3_fnuz: [fringe, "yes", "no"]
+      fp8_e5m2: [fringe, "yes", "no"]
+      fp8_e5m2_fnuz: [fringe, "yes", "no"]
+
+  - id: sink_values
+    kind: child
+    value_kind: class
+    parent: {attention_sinks: [present]}
+    level: execute
+    meaning: "Contents of the sink tensor. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS keeps every case at ordinary)."
+    values:
+      - {id: ordinary, meaning: "finite logits of ordinary size (a random fill)"}
+      - {id: no_sink, meaning: "−∞: the sink adds nothing to the denominator"}
+      - {id: very_large, meaning: "a logit so large that the sink takes almost all of the weight"}
+      - {id: non_finite, meaning: "+∞ or NaN"}
+    api_paths: [cpp, python]
+    cite: "SA:444"
+    note: "No reference run checks the held-out classes, so their answer_key is no."
+    group: G2-score-terms
+    size_sensitive: ["no", "a fuzzer hint, held out of generation"]
+    labels:
+      ordinary: [common, "yes", "yes"]
+      no_sink: [rare, "yes", "no"]
+      very_large: [rare, "yes", "no"]
+      non_finite: [fringe, "yes", "no"]
+
   # ------------------------------------------------------------------ scale and dropout
   - id: scale_source
     kind: categorical
@@ -902,10 +1042,10 @@ axes:
       - {id: other_positive, meaning: "another positive number"}
       - {id: zero, meaning: "0: every score becomes 0"}
       - {id: negative, meaning: "a negative number"}
-      - {id: non_finite, meaning: "NaN or +/-inf"}
+      - {id: non_finite, meaning: "NaN or +/-inf. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS)"}
     api_paths: [cpp, python]
     cite: "SA:665-669 (any float accepted)"
-    note: "For scale_source = device_tensor the number is tensor contents (execute level). non_finite answer_key partial: the references decline a non-finite scale written into the graph as a number (AK-SCALE-FINITE); a by-value tensor holding NaN or inf passes the gate and every output is NaN (provisional until the reference probe run)."
+    note: "For scale_source = device_tensor the number is tensor contents (execute level). non_finite answer_key no: the references decline a non-finite scale written into the graph as a number (AK-SCALE-FINITE), and with a by-value tensor holding NaN or inf every output is NaN, which no check grades. Whether a NaN scale is meaningful is open (open-questions.md OQ-04)."
     group: G3-precision-scale
     size_sensitive: ["no", "one scalar"]
     labels:
@@ -913,7 +1053,7 @@ axes:
       other_positive: [common, "yes", "yes"]
       zero: [rare, "yes", "yes"]
       negative: [rare, "yes", "yes"]
-      non_finite: [rare, "yes", partial]
+      non_finite: [rare, "yes", "no"]
 
   - id: dropout
     kind: categorical
@@ -963,14 +1103,17 @@ axes:
     level: graph
     meaning: "Whether seed and offset tensors are given."
     values:
-      - {id: caller_supplied, meaning: "seed and offset tensors given"}
+      - {id: caller_supplied, meaning: "seed and offset tensors given by value"}
+      - {id: caller_supplied_device_memory, class: caller_supplied, meaning: "seed and offset tensors given in device memory"}
       - {id: not_supplied, meaning: "no seed or offset (an open question, kept)"}
     api_paths: [cpp, python]
-    cite: "SA:374,384"
+    cite: "SA:374,384; @ 91a40bdfd4c SdpaAttributes.hpp:377-395 (set_seed, set_offset take any tensor); SdpaFwdNode.hpp:34-252 (no check of where they are held)"
+    note: "caller_supplied_device_memory answer_key yes: the references check Philox dropout through rng_dump and need only that a seed and an offset are given (@ 91a40bdfd4c PlanUtils.hpp:519-554); both references ran and agreed on the 3 sampled rows whose other values are checkable (runner job 68273158, gfx942). Usage common: frameworks keep the Philox seed and offset in device memory so that a captured graph can replay them."
     group: G6-dropout
     size_sensitive: ["no", "a scalar or table-format choice"]
     labels:
       caller_supplied: [common, "yes", "yes"]
+      caller_supplied_device_memory: [common, layout, "yes"]
       not_supplied: [rare, "yes", "no"]
 
   - id: dropout_mask_pattern
@@ -1012,6 +1155,27 @@ axes:
       batch_only: [rare, layout, "yes"]
       heads_only: [rare, layout, "yes"]
       batch_and_heads: [rare, layout, "yes"]
+
+  - id: dropout_mask_dtype
+    kind: child
+    value_kind: categorical
+    parent: {dropout: [caller_mask]}
+    level: graph
+    meaning: "Storage format of the caller's dropout mask. 0 and 1 are exact in every format."
+    values: *formats
+    api_paths: [cpp, python]
+    cite: "@ 00d9c566bea SdpaFwdNode.hpp:34-252 (no dropout-mask format check); references @ 91a40bdfd4c PlanUtils.hpp:383 (FLOAT only)"
+    note: "Every format but fp32 answer_key no: the references take a FLOAT mask only."
+    group: G6-dropout
+    size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
+    labels:
+      fp32: [common, layout, "yes"]
+      fp16: [rare, layout, "no"]
+      bf16: [rare, layout, "no"]
+      fp8_e4m3: [fringe, layout, "no"]
+      fp8_e4m3_fnuz: [fringe, layout, "no"]
+      fp8_e5m2: [fringe, layout, "no"]
+      fp8_e5m2_fnuz: [fringe, layout, "no"]
 
   - id: dropout_pattern_output
     kind: child
@@ -1070,10 +1234,10 @@ axes:
     meaning: "How Stats stores its rows when Q is ragged."
     values:
       - {id: dense, meaning: "Stats [B, H, S_q, 1] in equal-length slots"}
-      - {id: packed_with_q, meaning: "Stats packed token by token with Q's token boundaries; its own offset tensor counts Stats elements"}
+      - {id: packed_with_q, meaning: "Stats packed token by token with Q's token boundaries; with per_tensor_elements its own offset tensor counts Stats elements, with shared_tokens it reads Q's token list"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
     cite: "TA:508; @ 91a40bdfd4c SdpaFwdNode.hpp:403-415 (Stats dims and strides filled only when empty; no ragged check); references RaggedSdpaFwdSupport.hpp:245-257 (native plan: FLOAT Stats, dense or packed), RaggedSdpaDensify.hpp:88-111 (dense rewrite: a Stats role in the query packing)"
-    note: "packed_with_q answer_key partial: the packed Stats must be token-major (AK-RAGGED-TOKEN-MAJOR) and FLOAT (dtype_stats). Provisional until the reference probe run. The ASM engine writes Stats with the head stride only (ALMIOPEN-3042 (b)); a packed Stats row is expected to show it."
+    note: "packed_with_q answer_key partial: the packed Stats must be token-major (AK-RAGGED-TOKEN-MAJOR) and FLOAT (dtype_stats). Provisional until the reference probe run."
     group: G7-aux-outputs
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -1135,6 +1299,28 @@ axes:
   - {id: scale_o, kind: categorical, level: graph, meaning: "A scale tensor for O.", values: *presence, api_paths: [cpp, python], cite: "SA:454-511",
      group: G3-precision-scale, size_sensitive: ["no", "one scalar"],
      labels: {absent: [common, "yes", "yes"], present: [rare, "yes", partial]}}
+
+  - id: scale_factor_values
+    kind: child
+    value_kind: class
+    parent: {descale_q: [present, per_head, finer]}
+    level: execute
+    meaning: "The numbers in the descale and scale tensors of the case. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS keeps every case at ordinary)."
+    values:
+      - {id: ordinary, meaning: "the factors of class_to_value descale_and_scale_tensors: powers of two other than 1, different between heads and tokens on per_head and finer"}
+      - {id: one, meaning: "every factor 1"}
+      - {id: zero, meaning: "a factor of 0"}
+      - {id: non_finite, meaning: "NaN or +/-inf"}
+    api_paths: [cpp, python]
+    cite: "SA:454-511"
+    note: "The class exists when descale_q is present and covers the K, V, S and O factors of the case too. No reference run checks the held-out classes, so their answer_key is no."
+    group: G3-precision-scale
+    size_sensitive: ["no", "a fuzzer hint, held out of generation"]
+    labels:
+      ordinary: [common, "yes", "yes"]
+      one: [common, "yes", "no"]
+      zero: [rare, "yes", "no"]
+      non_finite: [rare, "yes", "no"]
 
   # ------------------------------------------------------------------ paged K/V
   - id: paged_kv
@@ -1321,21 +1507,65 @@ axes:
       disabled: [common, "no", "yes"]
       enabled: [rare, "no", "yes"]
 
+  # ------------------------------------------------------------------ tensor contents: hints for a fuzzer
+  # Not for test-case generation. CH-FUZZER-HINTS keeps every case at the first value.
+  - id: special_values
+    kind: categorical
+    level: execute
+    meaning: "Special numbers in the contents of Q, K, V or the bias. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS keeps every case at none)."
+    values:
+      - {id: none, meaning: "only ordinary finite numbers (a random fill)"}
+      - {id: infinity, meaning: "+inf or -inf in an input"}
+      - {id: nan, meaning: "NaN in an input"}
+      - {id: negative_infinity_bias, meaning: "-inf in the bias: the score it meets is masked"}
+      - {id: subnormal, meaning: "numbers below the smallest normal number of the format"}
+      - {id: signed_zero, meaning: "+0 and -0"}
+    api_paths: [cpp, python]
+    cite: "G:4746-4748 (contents are data at execute)"
+    note: "No reference run checks the held-out classes, so their answer_key is no."
+    group: G3-precision-scale
+    size_sensitive: ["no", "a fuzzer hint, held out of generation"]
+    labels:
+      none: [common, "yes", "yes"]
+      infinity: [rare, "yes", "no"]
+      nan: [rare, "yes", "no"]
+      negative_infinity_bias: [common, "yes", "no"]
+      subnormal: [rare, "yes", "no"]
+      signed_zero: [rare, "no", "no"]
+
+  - id: value_magnitude
+    kind: categorical
+    level: execute
+    meaning: "How large the numbers in Q, K, V and the bias are, relative to the format's range. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS keeps every case at ordinary)."
+    values:
+      - {id: ordinary, meaning: "numbers of ordinary size (a random fill)"}
+      - {id: overflow_prone, meaning: "numbers so large that a score, a sum or the output can overflow the format"}
+      - {id: precision_loss_prone, meaning: "numbers so small, or so different in size, that the format loses precision"}
+    api_paths: [cpp, python]
+    cite: "G:4746-4748 (contents are data at execute)"
+    note: "No reference run checks the held-out classes, so their answer_key is no."
+    group: G3-precision-scale
+    size_sensitive: ["no", "a fuzzer hint, held out of generation"]
+    labels:
+      ordinary: [common, "yes", "yes"]
+      overflow_prone: [rare, "yes", "no"]
+      precision_loss_prone: [rare, "yes", "no"]
+
 # Not in the model at all (no axis), with the reason. Text only.
 omitted:
   - {what: "logit soft-capping", reason: "no API (frontend rule F-NO-SOFTCAP)"}
   - {what: "KV-cache append", reason: "no API (frontend rule F-NO-KV-APPEND)"}
   - {what: "amax of Q, K, V", reason: "no API (frontend rule F-NO-AMAX-QKV)"}
   - {what: "ALiBi slope values", reason: "no API (frontend rule F-ALIBI-NO-SLOPES)"}
-  - {what: "tensor contents (value distribution, special values, signs, data seed, scale-tensor values, sink values)", reason: "chosen when classes become concrete test data, after this model"}
+  - {what: "tensor contents: which random draw fills a tensor (value distribution, signs, data seed)", reason: "chosen when classes become concrete test data, after this model. The value classes that decide whether a result exists or is exact are the axes special_values, value_magnitude, sink_values, scale_factor_values and scale_value non_finite: hints for a fuzzer (CH-FUZZER-HINTS)"}
   - {what: "GPU architecture and model, OS, software stack", reason: "where the operation runs; discovery runs per GPU type"}
   - {what: "engine choice, plan policy, autotune, knobs", reason: "engine selection is the driver's job (pin by name)"}
-  - {what: "ragged_offset_multiplier, workspace, block tile size, node name, graph default types, virtual-output flag", reason: "held fixed by choice rule CH-FIXED-API-SETTINGS"}
-  - {what: "deprecated causal flags, the cuDNN-compatibility entry, Python; the alias setters set_is_inference (set_generate_stats(!b)), set_sliding_window_length (set_diagonal_band_left_bound) and _set_mma_core_mode (set_mma_core_mode)", reason: "other API routes to the same request; API-path variants in injections.yaml, or aliases of a modelled setter"}
-  - {what: "a sink in Q's format", reason: "refused by frontend, potential deficiency or defect (frontend rule F-SINK-FLOAT-ONLY); every sink is FLOAT"}
+  - {what: "workspace, node name, graph default types, virtual-output flag", reason: "held fixed by choice rule CH-FIXED-API-SETTINGS"}
+  - {what: "ragged offsets per tensor in tokens, and one element-offset tensor shared by a side", reason: "ragged_offset_form holds per-tensor element offsets and one token list per side (choice rule CH-FOLDED-CHILD-AXES)"}
+  - {what: "deprecated causal flags, Python; the alias setters set_is_inference (set_generate_stats(!b)), set_sliding_window_length (set_diagonal_band_left_bound) and _set_mma_core_mode (set_mma_core_mode)", reason: "other API routes to the same request; API-path variants in injections.yaml, or aliases of a modelled setter"}
+  - {what: "the cuDNN-compatibility entry point", reason: "the same request with matmul_input_precision fp16 when the caller leaves it unset (API-path variant PV-CUDNN-COMPAT)"}
   - {what: "INT64 length tensors and page tables", reason: "the frontend takes INT32 only (frontend rule F-INDEX-TENSORS-INT32)"}
   - {what: "the unfuse-FMA hint (set_unfuse_fma)", reason: "advisory: Graph::sdpa warns and then ignores it (@ 91a40bdfd4c Graph.hpp:6382)"}
-  - {what: "dropout-mask and block-mask element formats", reason: "held at FLOAT and UINT8, the formats the references take (choice rule CH-FIXED-API-SETTINGS)"}
 
 # ---------------------------------------------------------------------------------------------
 # Class-to-value table.
@@ -1449,12 +1679,14 @@ class_to_value:
   dropout_probability: {zero: 0.0, between: 0.1, one: 1.0, negative: -0.5, above_one: 1.5}
   dropout_rng_state:
     caller_supplied: {seed: 1234, offset: 0, tensors: by_value_int64}
+    caller_supplied_device_memory: {seed: 1234, offset: 0, tensors: device_memory_int64,
+                                    note: "INT64 [1, 1, 1, 1] tensors in device memory, filled with the seed and the offset"}
     not_supplied: {seed: null, offset: null, note: "no seed or offset tensors"}
   dropout_mask_pattern:
     keep_all: {pattern: all_ones, cycle: [1.0], scale: 1.0}
     mixed: {pattern: alternating_one_zero, cycle: [1.0, 0.0], scale: 2.0}
     drop_all: {pattern: all_zeros, cycle: [0.0], scale: 1.0}
-    note: "The FLOAT mask repeats `cycle` in element order (the mask is packed)."
+    note: "The mask repeats `cycle` in element order (the mask is packed), in the format dropout_mask_dtype names."
   dropout_mask_broadcast:  # `keys` = max_seq_len_kv with paged K/V, else S_kv (also for rng_dump)
     none: {shape: [B, H_q, S_q, keys]}
     batch_only: {shape: [1, H_q, S_q, keys]}
@@ -1464,9 +1696,20 @@ class_to_value:
   batch_packing:
     ragged_tensors: {padded: [], ragged: [Q, K, V, O], ragged_q_side: [Q, O], ragged_kv_side: [K, V]}
     ragged_stats: {dense: [], packed_with_q: [Stats],
-                   note: "keyed by stats_packing: Stats is ragged on packed_with_q rows. Its offsets follow Q's lengths and the row's ragged_offsets value, in Stats's element units"}
-    offsets: {per_tensor: true, dtype: int32, dims: [{of: B, add: 1}, 1, 1, 1], unit: elements_of_the_tensor, by: ragged_offsets,
-              note: "Each ragged tensor has its own offset tensor: an offset counts elements of that tensor, and tensors with different token widths cannot share one (@ 91a40bdfd4c RaggedTokenBoundaries.hpp:52-58). Q, O and a packed Stats use per_seq_len_q; K and V use per_seq_len_kv. Without per-sequence lengths (sequence_lengths uniform) every length is the stored length. ragged_offsets gives the formula."}
+                   note: "keyed by stats_packing: Stats is ragged on packed_with_q rows. Its offsets follow Q's lengths and the row's ragged_offsets value, in Stats's element units (per_tensor_elements) or as Q's token list (shared_tokens)"}
+    offsets: {dtype: ragged_offset_dtype, dims: [{of: B, add: 1}, 1, 1, 1], form: ragged_offset_form, by: ragged_offsets,
+              note: "Q, O and a packed Stats use per_seq_len_q; K and V use per_seq_len_kv. Without per-sequence lengths (sequence_lengths uniform) every length is the stored length. ragged_offsets gives the formula; ragged_offset_form gives the unit and the sharing."}
+  ragged_offset_form:
+    per_tensor_elements: {tensors: one_per_ragged_tensor, unit: elements, multiplier: 1, stored_length: tensor_sequence_extent,
+                          note: "an offset counts elements of its own tensor: token x the tensor's sequence stride"}
+    shared_tokens: {tensors: {query_side: [Q, O, Stats], key_value_side: [K, V]}, unit: tokens, multiplier: sequence_stride, stored_length: {query_side: S_q, key_value_side: S_kv},
+                    note: "one offset tensor per side holds token counts; each tensor's ragged_offset_multiplier is its own sequence stride, so the same tokens name each tensor's elements"}
+  ragged_offset_dtype: {int32: int32, int64: int64}
+  o_packing:
+    as_q: {o_offsets: as_q}
+    own_starts: {o_offsets: {q_contiguous: full_slots, otherwise: prefix_sum_of_lengths},
+                 note: "O has its own offset tensor: full slots beside a Q packed end to end, end to end beside any other Q layout"}
+    padded: {o_offsets: none, note: "O keeps plain [B, H_q, S_q, D_v] slots"}
   matmul_input_precision:
     native: {mma_core_mode: unset}
     fp32: {mma_core_mode: fp32}
@@ -1480,6 +1723,8 @@ class_to_value:
     variable_no_flag: {seq_len_tensors: [seq_len_q, seq_len_kv], padding_mask: false}
     lengths_in_offsets: {seq_len_tensors: none, padding_mask: false, lengths: ragged_offsets,
                          note: "ragged rows only (D-REL-LENGTHS-IN-OFFSETS): the ragged side's offsets carry per_seq_len_*; a dense side is full"}
+    cu_seq_len: {seq_len_tensors: none, padding_mask: false, cumulative_tensors: [cu_seq_len_q, cu_seq_len_kv],
+                 note: "no API: F-NO-CU-SEQ-LEN removes it; the case builder does not realise it"}
   per_seq_len:  # lengths of sequences 0 .. B-1 repeat `cycle`; S = the stored length (S_q or S_kv)
     all_full: {cycle: [S]}
     all_equal_partial: {cycle: [{of: S, divide: 2}]}
@@ -1494,6 +1739,15 @@ class_to_value:
              note: "offset b = b x S x stride; the length tensors give the live lengths"}
     leading_gap: {offsets: prefix_sum_after_gap, count: {of: B, add: 1}, gap: slack, last: {of: B, multiply: S},
                   note: "per ragged tensor, slack = B x S - the sum of its side's live lengths; the gap g = slack (all the spare room), or 0 on a side with no slack. offset b = (g + sum of the lengths of sequences 0 .. b-1) x stride, so offset[B] = B x S x stride, the end of the tensor. The length tensors, when present, hold the same live lengths. CaseGraph computes it"}
+    independent_starts: {offsets: slot_end_aligned, count: {of: B, add: 1}, last: {of: B, multiply: S},
+                         note: "offset b = (b x S + S - length b) x stride for b < B, and offset[B] = B x S x stride: each sequence ends at the end of its full slot, so the gap before sequence b is S - length b"}
+  block_mask_granularity:
+    tile_128: {tile: [128, 128]}
+    other_tile: {tile: [64, 64]}
+    per_element: {tile: [1, 1]}
+  block_mask_dtype:
+    uint8: {dtype: uint8, key_tiles_per_element: 8}
+    int32: {dtype: int32, key_tiles_per_element: 32, note: "bit 31 is the sign bit, so a word with key tile 31 allowed is negative"}
   block_mask_pattern:
     layout: {tile: [128, 128], dtype: uint8, dims: [B, H_q, {ceil_div: [S_q, 128]}, {ceil_div: [{ceil_div: [S_kv, 128]}, 8]}],
              bits: {per_tile: 1, tiles_per_byte: 8, order: least_significant_first, clear_bit: masks_the_tile},
@@ -1528,7 +1782,14 @@ class_to_value:
                  note: "each sequence's in_order slots in an order drawn from the seed (one Mersenne Twister 64 stream per table, row by row); a row of two or more different pages never keeps the in_order order"}
       shared_pages: {slot_of_page: identity, shares: {sequence: 1, reuses_sequence: 0, page: 0},
                      note: "sequence 1 reuses sequence 0's first page; needs B of 2 or more"}
-  sinks: {shape: [1, H_q, 1, 1], dtype: fp32, values: data_seed, note: "Shape and FLOAT required by the frontend @ 00d9c566bea SdpaFwdNode.hpp:263-281"}
+  sinks: {shape: [1, H_q, 1, 1], dtype: sink_dtype, values: data_seed, note: "Shape [1, H_q, 1, 1] and FLOAT required by the frontend @ 00d9c566bea SdpaFwdNode.hpp:263-281"}
+  # Hints for a fuzzer. The case builder realises only the first value of each (CH-FUZZER-HINTS).
+  sink_values: {ordinary: data_seed, no_sink: -.inf, very_large: 1.0e4, non_finite: [.inf, .nan]}
+  scale_factor_values: {ordinary: descale_and_scale_tensors, one: 1.0, zero: 0.0, non_finite: [.inf, .nan]}
+  special_values: {none: data_seed, infinity: [.inf, -.inf], nan: [.nan], negative_infinity_bias: -.inf,
+                   subnormal: smallest_subnormal_of_the_format, signed_zero: [0.0, -0.0]}
+  value_magnitude: {ordinary: data_seed, overflow_prone: near_the_largest_finite_number_of_the_format,
+                    precision_loss_prone: near_the_smallest_normal_number_of_the_format}
   descale_and_scale_tensors:
     descale_q: 0.5
     descale_k: 0.25
@@ -1610,6 +1871,8 @@ base_cases:
       paged_kv: absent
       implementation: auto
       runtime_shape_override: disabled
+      special_values: none
+      value_magnitude: ordinary
     note: "Engine-specific discovery bases (2-3 per GPU type) are not stored here; they depend on one engine."
 
 # Hints for generator modes that need an axis choice.
@@ -1652,7 +1915,7 @@ level_labels:
     - {id: B13, why: "with extent 1 the dropout-mask broadcast classes coincide",
        a: [dropout_mask_broadcast], b: [batch_size, q_heads]}
     - {id: B14, why: "a packed Stats follows Q's token boundaries", a: [stats_packing],
-       b: [batch_packing, ragged_offsets, sequence_lengths, per_seq_len_q]}
+       b: [batch_packing, ragged_offsets, ragged_offset_form, o_packing, sequence_lengths, per_seq_len_q]}
   # Combinations no reference can check although each value alone can. Same layout as rules.yaml.
   # Used only by levels with `answerable: true`. Every entry cites the reference code; every line
   # number below is at commit 91a40bdfd4c. Paths
@@ -1705,7 +1968,7 @@ level_labels:
     - {id: AK-DROPOUT-NOT-PAGED-K, why: "random (Philox) dropout is checked through rng_dump, whose key extent the references compare with K's dim 2 (PU:549-553 isSdpaPhiloxDropoutWithDump), and K's dim 2 is the page size when K is paged. A caller mask over paged K is checkable: its last dim is compared with the paged key extent max_seq_len_kv (PU:400-415; a mask sized to the page is declined)", forbid_any: [
         {dropout: [random], paged_kv: [present, k_only]}],
        note: "The rng_dump comparison with the page size is a reference gap. The graph builder sizes a paged caller mask max_seq_len_kv wide."}
-    - {id: AK-RAGGED-TOKEN-MAJOR, why: "ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks), but every ragged tensor must be packed token by token, [B, H, S, D] with the sequence stride covering one token's H x D block (RSD:23-31, 202-210; RTB:20-37; SRI:87). Only the ragged side's tensors are held to it", forbid_any: [
+    - {id: AK-RAGGED-TOKEN-MAJOR, why: "the references read a ragged tensor only when it is packed token by token, [B, H, S, D] with the sequence stride covering one token's H x D block; ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks) (RSD:23-31, 202-210; RTB:20-37; SRI:87). A head-major ragged tensor ([H, T]) is a valid request that they do not read; the head-major clauses flip when PR #15080 merges. Only the ragged side's tensors are held to it", forbid_any: [
         {batch_packing: [ragged, ragged_q_side], dim_order_q: [bhsd, other_permutation]}, {batch_packing: [ragged, ragged_kv_side], dim_order_k: [bhsd, other_permutation]},
         {batch_packing: [ragged, ragged_kv_side], dim_order_v: [bhsd, other_permutation]}, {batch_packing: [ragged, ragged_q_side], dim_order_o: [bhsd, other_permutation]},
         {batch_packing: [ragged, ragged_q_side], stats_packing: [packed_with_q], dim_order_stats: [bhsd, other_permutation]},
@@ -1721,7 +1984,7 @@ level_labels:
         {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only, v_only]}]}
     - {id: AK-SCALE-FINITE, why: "both references decline a non-finite scale written into the graph as a number: every output would be NaN (PU:328-332 isSupportedSdpaScaleOperand; native ragged plan RaggedSdpaFwdSupport.hpp:233-238). A one-element by-value or FLOAT scale tensor holding NaN or inf is not checked (PU:333-349)", forbid_any: [
         {scale_value: [non_finite], scale_source: [attribute_value]}],
-       note: "The tensor forms run, and every output is NaN; whether a NaN output can be graded is decided by the reference probe run."}
+       note: "The tensor forms run, and every output is NaN, which no check grades: scale_value non_finite carries answer_key no, and CH-FUZZER-HINTS holds it out of generation."}
     - {id: AK-RNG-DUMP-NEEDS-PHILOX, why: "rng_dump is checkable only with Philox dropout: a caller-supplied mask with rng_dump is declined (PU:681-686: without Philox-with-dump, the gate refuses any rng_dump tensor)", forbid_any: [
         {dropout: [caller_mask], dropout_pattern_output: [requested]}]}
     - {id: AK-RAGGED-ONE-SIDE-NEEDS-LENGTHS, why: "a ragged side beside a dense side runs only through the dense rewrite, which takes the dense side's lengths from seq_len_q / seq_len_kv and declines without them (RSD:268-284). sequence_lengths variable and variable_no_flag state the length tensors; uniform and lengths_in_offsets state none", forbid_any: [

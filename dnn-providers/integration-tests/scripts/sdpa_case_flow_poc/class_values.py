@@ -25,7 +25,25 @@ LAYOUT_AXES = ("strides_q", "strides_k", "strides_v", "strides_o", "strides_stat
 NOTE = "note"
 STORED_LENGTH = "S"
 LENGTH_OPERATIONS = ("divide", "add", "multiply")
-OFFSET_LAYOUTS = ("prefix_sum_of_lengths", "full_slots", "prefix_sum_after_gap")
+OFFSET_LAYOUTS = (
+    "prefix_sum_of_lengths",
+    "full_slots",
+    "prefix_sum_after_gap",
+    "slot_end_aligned",
+)
+# Tables the case builder reads by value id; each must still name every value of its axis.
+COVER_ONLY_TABLES = (
+    "dropout_rng_state",
+    "ragged_offset_form",
+    "ragged_offset_dtype",
+    "o_packing",
+    "block_mask_granularity",
+    "block_mask_dtype",
+    "sink_values",
+    "scale_factor_values",
+    "special_values",
+    "value_magnitude",
+)
 PAGE_SLOT_ORDERS = ("identity", "seeded_permutation")
 
 
@@ -357,6 +375,9 @@ def build(model: Model, model_dir: Path) -> dict:
             raise ModelError(
                 f"class_to_value: ragged_offsets.{k}.offsets is not one of {OFFSET_LAYOUTS}: {layout!r}"
             )
+
+    for axis in COVER_ONLY_TABLES:
+        _covers(_entry(table, axis, "class_to_value"), model, axis, axis)
 
     psl = _entry(table, "per_seq_len", "class_to_value")
     for axis in ("per_seq_len_q", "per_seq_len_kv"):

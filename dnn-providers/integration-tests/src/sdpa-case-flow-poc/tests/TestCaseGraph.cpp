@@ -52,7 +52,8 @@ constexpr const char* CLASS_VALUES_JSON = R"json({
   "ragged_stats": {"dense": [], "packed_with_q": ["Stats"]},
   "ragged_offsets": {"contiguous": {"offsets": "prefix_sum_of_lengths"},
                      "gapped": {"offsets": "full_slots"},
-                     "leading_gap": {"offsets": "prefix_sum_after_gap"}},
+                     "leading_gap": {"offsets": "prefix_sum_after_gap"},
+                     "independent_starts": {"offsets": "slot_end_aligned"}},
   "per_seq_len": {"all_full": ["S"], "all_equal_partial": [{"of": "S", "divide": 2}],
                   "mixed": ["S", {"of": "S", "divide": 2}], "some_zero": ["S", 0],
                   "all_zero": [0], "exceeds_storage": [{"of": "S", "add": 1}, "S"]},
@@ -124,6 +125,12 @@ Row raggedRow(const std::string& packing,
     row["ragged_offsets"] = offsets;
     row["dim_order_q"] = "bshd";
     row["dim_order_o"] = "bshd";
+    return row;
+}
+
+Row withForm(Row row, const std::string& form)
+{
+    row["ragged_offset_form"] = form;
     return row;
 }
 
@@ -902,4 +909,256 @@ TEST(TestCaseGraph, ClassValuesRejectAnUnknownPageOrder)
     const std::string order = "\"seeded_permutation\"";
     text.replace(text.find(order), order.size(), "\"random\"");
     EXPECT_THROW(sdpa_case_flow::parseClassValues(text), sdpa_case_flow::ClassValuesError);
+}
+
+namespace
+{
+
+int raggedTensorsReading(const BuiltCase& built,
+                         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& offset)
+{
+    int count = 0;
+    for(const auto& [name, tensor] : built.graph->getTensorsByName())
+    {
+        count += tensor->get_ragged_offset() == offset ? 1 : 0;
+    }
+    return count;
+}
+
+void expectMultiplierIsSequenceStride(const BuiltCase& built)
+{
+    for(const auto& [name, tensor] : built.graph->getTensorsByName())
+    {
+        if(tensor->get_ragged_offset())
+        {
+            EXPECT_EQ(tensor->get_ragged_offset_multiplier(), tensor->get_stride().at(2)) << name;
+        }
+    }
+}
+
+} // namespace
+
+TEST(TestCaseGraph, SharedTokenOffsetsUseOneTensorPerSide)
+{
+    const auto built
+        = build(withForm(raggedRow("ragged", "contiguous", "mixed", "some_zero"), "shared_tokens"),
+                sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q_side"),
+              (std::vector<int64_t>{0, 64, 96, 160, 192}));
+    EXPECT_EQ(integersOf(built, "ragged_offset_kv_side"),
+              (std::vector<int64_t>{0, 64, 64, 128, 128}));
+    for(const char* perTensor :
+        {"ragged_offset_q", "ragged_offset_k", "ragged_offset_v", "ragged_offset_o"})
+    {
+        EXPECT_EQ(built.contents.count(perTensor), 0u) << perTensor;
+    }
+    const auto tensors = built.graph->getTensorsByName();
+    const auto qOffset = tensors.at("q")->get_ragged_offset();
+    const auto kvOffset = tensors.at("k")->get_ragged_offset();
+    EXPECT_EQ(tensors.at("v")->get_ragged_offset(), kvOffset);
+    EXPECT_NE(qOffset, kvOffset);
+    EXPECT_EQ(raggedTensorsReading(built, qOffset), 2) << "Q and O";
+    EXPECT_EQ(tensors.at("q")->get_ragged_offset_multiplier(), BSHD_SEQUENCE_STRIDE);
+    EXPECT_EQ(tensors.at("k")->get_ragged_offset_multiplier(), BHSD_SEQUENCE_STRIDE);
+    EXPECT_EQ(tensors.at("v")->get_ragged_offset_multiplier(), BHSD_SEQUENCE_STRIDE);
+    expectMultiplierIsSequenceStride(built);
+}
+
+TEST(TestCaseGraph, PerTensorOffsetsKeepMultiplierOne)
+{
+    const auto built
+        = build(raggedRow("ragged", "contiguous", "mixed", "all_full"), sizes(4, 64, 64));
+    int ragged = 0;
+    for(const auto& [name, tensor] : built.graph->getTensorsByName())
+    {
+        if(tensor->get_ragged_offset())
+        {
+            ++ragged;
+            EXPECT_EQ(tensor->get_ragged_offset_multiplier(), 1) << name;
+        }
+    }
+    EXPECT_EQ(ragged, 4);
+}
+
+TEST(TestCaseGraph, SharedTokenOffsetsCoverPackedStats)
+{
+    const auto built
+        = build(withStats(withForm(raggedRow("ragged_q_side", "gapped", "mixed", "all_full"),
+                                   "shared_tokens"),
+                          "packed_with_q"),
+                sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q_side"),
+              (std::vector<int64_t>{0, 64, 128, 192, 256}));
+    const auto qOffset = built.graph->getTensorsByName().at("q")->get_ragged_offset();
+    EXPECT_EQ(raggedTensorsReading(built, qOffset), 3) << "Q, O and Stats";
+    expectMultiplierIsSequenceStride(built);
+}
+
+TEST(TestCaseGraph, SharedTokenOffsetsNeedASequenceStride)
+{
+    auto row = withForm(raggedRow("ragged_q_side", "contiguous", "all_full", "all_full"),
+                        "shared_tokens");
+    row["strides_q"] = "zero_broadcast";
+    EXPECT_THROW(build(row, sizes(4, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, Int64OffsetsPassTheInt32Limit)
+{
+    // The last Q offset is 4 x 2^20 tokens x 1024 elements = 2^32.
+    auto row = raggedRow("ragged_q_side", "contiguous", "all_full", "all_full");
+    row["ragged_offset_dtype"] = "int64";
+    const auto built = build(row, sizes(4, int64_t{1} << 20, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q").back(), int64_t{1} << 32);
+    EXPECT_EQ(built.graph->getTensorsByName().at("q")->get_ragged_offset()->get_data_type(),
+              hipdnn_frontend::DataType::INT64);
+}
+
+TEST(TestCaseGraph, IndependentStartsEndEachSequenceAtItsSlotEnd)
+{
+    // Q lengths 64, 32, 64, 32 and K/V lengths 64, 0, 64, 0 in slots of 64 tokens.
+    const auto built
+        = build(raggedRow("ragged", "independent_starts", "mixed", "some_zero"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({0, 96, 128, 224, 256}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_o"),
+              scaled({0, 96, 128, 224, 256}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({0, 128, 128, 256, 256}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "seq_len_q"), (std::vector<int64_t>{64, 32}));
+}
+
+TEST(TestCaseGraph, OwnStartsGiveOTheOtherLayout)
+{
+    auto contiguous = raggedRow("ragged", "contiguous", "mixed", "all_full");
+    contiguous["o_packing"] = "own_starts";
+    const auto beside = build(contiguous, sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(beside, "ragged_offset_q"),
+              scaled({0, 64, 96, 160, 192}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(beside, "ragged_offset_o"),
+              scaled({0, 64, 128, 192, 256}, BSHD_SEQUENCE_STRIDE));
+
+    auto gapped = raggedRow("ragged", "gapped", "mixed", "all_full");
+    gapped["o_packing"] = "own_starts";
+    const auto besideGapped = build(gapped, sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(besideGapped, "ragged_offset_q"),
+              scaled({0, 64, 128, 192, 256}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(besideGapped, "ragged_offset_o"),
+              scaled({0, 64, 96, 160, 192}, BSHD_SEQUENCE_STRIDE));
+}
+
+TEST(TestCaseGraph, PaddedOHasNoOffset)
+{
+    auto row = raggedRow("ragged_q_side", "contiguous", "mixed", "all_full");
+    row["o_packing"] = "padded";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(built.contents.count("ragged_offset_o"), 0u);
+    EXPECT_EQ(built.contents.count("ragged_offset_q"), 1u);
+    const auto qOffset = built.graph->getTensorsByName().at("q")->get_ragged_offset();
+    EXPECT_EQ(raggedTensorsReading(built, qOffset), 1) << "Q only";
+}
+
+// With every length full, O's own list equals Q's, so only the form check can refuse the row.
+TEST(TestCaseGraph, OwnStartsNeedOsOwnOffsetTensor)
+{
+    auto row = withForm(raggedRow("ragged", "contiguous", "all_full", "all_full"), "shared_tokens");
+    row["o_packing"] = "own_starts";
+    EXPECT_THROW(build(row, sizes(4, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, DeviceMemorySeedAndOffsetAreContents)
+{
+    auto row = baseRow();
+    row["dropout"] = "random";
+    row["dropout_probability"] = "zero";
+    row["dropout_rng_state"] = "caller_supplied_device_memory";
+    row["dropout_pattern_output"] = "not_requested";
+    const auto built = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(integersOf(built, "dropout_seed"), (std::vector<int64_t>{1234}));
+    EXPECT_EQ(integersOf(built, "dropout_offset"), (std::vector<int64_t>{0}));
+    const auto tensors = built.graph->getTensorsByName();
+    for(const char* name : {"dropout_seed", "dropout_offset"})
+    {
+        EXPECT_FALSE(tensors.at(name)->get_is_pass_by_value()) << name;
+        EXPECT_EQ(tensors.at(name)->get_data_type(), hipdnn_frontend::DataType::INT64) << name;
+    }
+
+    row["dropout_rng_state"] = "caller_supplied";
+    const auto byValue = build(row, sizes(2, 64, 64));
+    EXPECT_EQ(byValue.contents.count("dropout_seed"), 0u);
+    EXPECT_TRUE(byValue.graph->getTensorsByName().at("dropout_seed")->get_is_pass_by_value());
+}
+
+TEST(TestCaseGraph, DropoutMaskAndSinkTakeTheirFormats)
+{
+    auto row = baseRow();
+    row["dropout"] = "caller_mask";
+    row["dropout_mask_pattern"] = "mixed";
+    row["dropout_mask_broadcast"] = "none";
+    row["dropout_pattern_output"] = "not_requested";
+    row["dropout_mask_dtype"] = "fp16";
+    row["attention_sinks"] = "present";
+    row["sink_dtype"] = "bf16";
+    const auto built = build(row, sizes(2, 64, 64));
+    const auto tensors = built.graph->getTensorsByName();
+    EXPECT_EQ(tensors.at("dropout_mask")->get_data_type(), hipdnn_frontend::DataType::HALF);
+    EXPECT_EQ(tensors.at("sink")->get_data_type(), hipdnn_frontend::DataType::BFLOAT16);
+}
+
+// Thirty-two key tiles fit one INT32 element; bit 31 is the sign bit.
+TEST(TestCaseGraph, Int32BlockMaskHoldsThirtyTwoKeyTilesPerElement)
+{
+    auto row = baseRow();
+    row["block_mask"] = "present";
+    row["block_mask_pattern"] = "all_open";
+    row["block_mask_dtype"] = "int32";
+    const auto built = build(row, sizes(2, 128, 4096));
+    EXPECT_EQ(integersOf(built, "block_mask"), (std::vector<int64_t>{-1}));
+    const auto mask = built.graph->getTensorsByName().at("block_mask");
+    EXPECT_EQ(mask->get_dim(), (std::vector<int64_t>{2, 8, 1, 1}));
+    EXPECT_EQ(mask->get_data_type(), hipdnn_frontend::DataType::INT32);
+
+    row["block_mask_pattern"] = "mixed";
+    const auto mixed = build(row, sizes(2, 128, 1025));
+    EXPECT_EQ(integersOf(mixed, "block_mask"), (std::vector<int64_t>{341}));
+}
+
+TEST(TestCaseGraph, StatementsTheFrontendLacksThrow)
+{
+    auto blockMask = baseRow();
+    blockMask["block_mask"] = "present";
+    blockMask["block_mask_pattern"] = "all_open";
+    for(const char* granularity : {"other_tile", "per_element"})
+    {
+        blockMask["block_mask_granularity"] = granularity;
+        EXPECT_THROW(build(blockMask, sizes(2, 64, 64)), CaseRealisationError) << granularity;
+    }
+    auto lengths = variableLengthRow("all_full", "all_full");
+    lengths["sequence_lengths"] = "cu_seq_len";
+    EXPECT_THROW(build(lengths, sizes(2, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, FuzzerHintClassesAreNotRealised)
+{
+    auto row = baseRow();
+    row["attention_sinks"] = "present";
+    row["sink_values"] = "ordinary";
+    EXPECT_NO_THROW(build(row, sizes(2, 64, 64)));
+    for(const auto& [axis, value] :
+        std::vector<std::pair<std::string, std::string>>{{"sink_values", "no_sink"},
+                                                         {"special_values", "nan"},
+                                                         {"value_magnitude", "overflow_prone"}})
+    {
+        auto hinted = row;
+        hinted[axis] = value;
+        EXPECT_THROW(build(hinted, sizes(2, 64, 64)), CaseRealisationError) << axis;
+    }
+    auto descale = baseRow();
+    descale["scale_factor_values"] = "zero";
+    EXPECT_THROW(build(descale, sizes(2, 64, 64)), CaseRealisationError);
+    for(const char* axis :
+        {"sink_values", "scale_factor_values", "special_values", "value_magnitude"})
+    {
+        EXPECT_TRUE(sdpa_case_flow::isExecuteLevelAxis(axis)) << axis;
+        EXPECT_FALSE(sdpa_case_flow::isRealisedContentAxis(axis)) << axis;
+    }
 }

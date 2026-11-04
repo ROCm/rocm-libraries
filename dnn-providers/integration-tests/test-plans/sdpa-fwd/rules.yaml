@@ -124,8 +124,9 @@ rules:
     kind: definition
     form: exclusion
     basis: meaning
-    reason: "The output shares the ragged packing, so overlapping sequences would write two results to one place."
-    source: "one memory location holds one value; O uses Q's offsets"
+    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory: its offsets must not decrease."
+    note: "The input half rests on hipDNN's ragged format, not on the definition of attention."
+    source: "one memory location holds one value; @ 91a40bdfd4c projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:271-307 (offsets must not decrease)"
     probe: MV-10
     moot: "Removes nothing. hipDNN's ragged offsets are B + 1 non-decreasing boundaries, so sequences cannot overlap and the value overlapping ({ragged_offsets: [overlapping]}) is not in the model (F-RAGGED-OFFSETS-ARE-LENGTHS). Its probe belongs to the rejection suite."
 
@@ -213,10 +214,10 @@ rules:
     kind: definition
     form: exclusion
     basis: consistency
-    reason: "Overlapping start positions need at least two sequences."
-    source: "an overlap needs two items"
+    reason: "Start positions with gaps between sequences need at least two sequences."
+    forbid: {batch_size: [one], ragged_offsets: [independent_starts]}
+    source: "a gap between items needs two items"
     adapted: "batch class zero dropped (F-EXTENT-NONZERO); values out_of_order and overlapping dropped (F-RAGGED-OFFSETS-ARE-LENGTHS)."
-    moot: "Removes nothing: every value it names ({batch_size: [one], ragged_offsets: [overlapping]}) is outside the model."
 
   - id: D-REL-PAGE-SIZE
     kind: definition
@@ -248,7 +249,7 @@ rules:
     kind: definition
     form: exclusion
     basis: consistency
-    reason: "A zero, negative or self-overlapping stride needs a dimension with more than one element; a head-dim stride needs a head size above one."
+    reason: "A zero or negative stride needs a dimension with more than one element, and a self-overlapping stride needs two; a head-dim stride needs a head size above one."
     forbid_any:
       - {head_dim_qk: [d1], strides_q: [head_dim_strided]}
       - {head_dim_qk: [d1], strides_k: [head_dim_strided]}
@@ -261,8 +262,73 @@ rules:
       - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], strides_v: [zero_broadcast, negative, self_overlapping]}
       - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_v: [d1], strides_o: [negative]}
       - {batch_size: [one], q_heads: [one], seq_q: [one], strides_stats: [negative]}
-    source: "a stride on a dimension of extent 1 is never used"
-    adapted: "The Layer 1 form also counts zero extents. O and Stats list only `negative`: D-OUTPUT-SELF-ALIAS already removes their other two classes. Stats has no head-dim stride class. A view (`inherited`) reads with its owner's strides: the owner's own clause removes the row, and a stride on a view dimension of extent 1 is never used."
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d1, d64, d128, d192, d256], strides_q: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_q: [many], head_dim_qk: [d1], strides_q: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], seq_q: [one], head_dim_qk: [d1], strides_q: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], seq_q: [one], head_dim_qk: [d1], strides_q: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d128, d192, d256], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d128, d192, d256], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one, many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal, larger], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one, many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [larger], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d128, d192, d256], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal, differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one, many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal, larger], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d128, d192, d256], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [whole_sequence], page_size_k_vs_v: [differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal, differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one, many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [larger], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [whole_sequence], page_size_k_vs_v: [differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token], strides_v: [self_overlapping]}
+    source: "a stride on a dimension of extent 1 is never used; with non-zero strides two different indices reach one element only when two dimensions have extent > 1"
+    adapted: "The Layer 1 form also counts zero extents. O and Stats list only `negative`: D-OUTPUT-SELF-ALIAS already removes their other two classes. Stats has no head-dim stride class. A view (`inherited`) reads with its owner's strides: the owner's own clause removes the row, and a stride on a view dimension of extent 1 is never used. The self_overlapping clauses count the dimensions of the stored tensor: K heads are 1 with q_heads one or mqa; a paged K or V is the pool [B x pages, H, page size, D] (class_to_value paging; page_size partial gives two dimensions above 1, and V's pages hold two tokens with page_size_k_vs_v differ); a dense side beside a paged one spans max_seq_len_kv. The class value many is taken as three or more tokens (the shape tiers and the size sweep give 31 or more)."
     evidence: inferred
 
   - id: D-REL-ALIBI-HEAD-COUNT
@@ -281,12 +347,25 @@ rules:
     basis: consistency
     reason: "A gap needs a slot longer than its live sequence, so some live length on a ragged side must be shorter than its slot."
     forbid_any:
-      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged], per_seq_len_q: [all_full], per_seq_len_kv: [all_full]}
-      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged_q_side], per_seq_len_q: [all_full]}
-      - {ragged_offsets: [gapped, leading_gap], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full]}
-      - {ragged_offsets: [leading_gap], sequence_lengths: [uniform]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged], per_seq_len_q: [all_full], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_q_side], per_seq_len_q: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [leading_gap, independent_starts], sequence_lengths: [uniform]}
     source: "a side's slots hold B x the stored length; spare room exists only where a live length is shorter than its slot"
-    note: "gapped with sequence_lengths uniform or lengths_in_offsets is F-RAGGED-OFFSETS-ARE-LENGTHS. A ragged side is the Q side (Q and O) or the K/V side (K and V)."
+    note: "gapped and independent_starts with sequence_lengths uniform or lengths_in_offsets are F-RAGGED-OFFSETS-ARE-LENGTHS. A ragged side is the Q side (Q and O) or the K/V side (K and V)."
+    evidence: inferred
+
+  - id: D-REL-INDEPENDENT-STARTS-NEED-DIFFERENT-LENGTHS
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "independent_starts puts each sequence at the end of its full slot, so the gaps differ in size only when the live lengths on a ragged side differ."
+    forbid_any:
+      - {ragged_offsets: [independent_starts], batch_packing: [ragged], per_seq_len_q: [all_full, all_equal_partial, all_zero], per_seq_len_kv: [all_full, all_equal_partial, all_zero]}
+      - {ragged_offsets: [independent_starts], batch_packing: [ragged_q_side], per_seq_len_q: [all_full, all_equal_partial, all_zero]}
+      - {ragged_offsets: [independent_starts], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full, all_equal_partial, all_zero]}
+    source: "class_to_value.ragged_offsets.independent_starts: the gap before sequence b is S - its live length"
+    adapted: "Model only: Layer 1 asks only for spare room (D-REL-GAPPED-NEEDS-SHORT-LENGTHS); the class value fixes how the spare room is placed."
     evidence: inferred
 
   - id: D-REL-LENGTHS-IN-OFFSETS
@@ -309,6 +388,38 @@ rules:
     reason: "Stats packed with Q's token boundaries needs a ragged Q; a Q in equal-length slots has no token boundaries to share."
     forbid: {stats_packing: [packed_with_q], batch_packing: [padded, ragged_kv_side]}
     source: "Stats shares Q's packing; its offsets follow Q's lengths"
+    evidence: inferred
+
+  - id: D-REL-SHARED-PAGES-NEEDS-TWO-SEQUENCES
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A page shared by sequences needs at least two sequences; one sequence has nothing to share."
+    forbid: {batch_size: [one], page_table_order: [shared_pages]}
+    source: "class_to_value.paging.page_table_order.shared_pages: sequence 1 reuses sequence 0's first page"
+    adapted: "batch class zero dropped (F-EXTENT-NONZERO)."
+    evidence: inferred
+
+  - id: D-REL-O-OWN-STARTS-NOT-SHARED
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "One list of start positions shared by Q and O gives O Q's starts, so O cannot start its sequences elsewhere."
+    forbid: {o_packing: [own_starts], ragged_offset_form: [shared_tokens]}
+    source: "class_to_value.ragged_offset_form.shared_tokens: Q, O and a packed Stats read one offset tensor"
+    adapted: "Layer 1 names ragged_offset_sharing shared_per_side; the model carries the sharing in ragged_offset_form (CH-FOLDED-CHILD-AXES)."
+    evidence: inferred
+
+  - id: D-REL-O-OWN-STARTS-NEED-ROOM
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "O's own list is full slots beside a Q packed end to end, and end to end beside any other Q layout, so the two lists differ only when some query length is shorter than its slot. With the offsets as the only lengths, O's own list would state other lengths than Q's."
+    forbid_any:
+      - {o_packing: [own_starts], per_seq_len_q: [all_full]}
+      - {o_packing: [own_starts], sequence_lengths: [uniform, lengths_in_offsets]}
+    source: "class_to_value.o_packing.own_starts; O has Q's lengths (D-S-OUTPUT-SHAPE)"
+    adapted: "Model only: the class value fixes how O's starts differ from Q's."
     evidence: inferred
 
   - id: D-INPUTS-OVERLAP-VIEW-DTYPE
@@ -478,11 +589,11 @@ rules:
   - id: F-RAGGED-OFFSETS-ARE-LENGTHS
     kind: frontend
     form: exclusion
-    reason: "Ragged offsets are B + 1 boundaries that also give each sequence's slot (offset[b + 1] - offset[b]). Sequences stored out of their index order would need decreasing offsets (negative lengths), and two sequences cannot overlap. A gap needs live lengths apart from the offsets."
-    forbid: {ragged_offsets: [gapped], sequence_lengths: [uniform, lengths_in_offsets]}
+    reason: "hipDNN's ragged form gives each ragged tensor B + 1 non-decreasing boundaries; sequence b holds [offset[b], offset[b + 1]). Under that form a sequence stored before a sequence of lower index, or two sequences that share memory, cannot be stated. When the offsets are the only lengths, a slot is its sequence, so a slot longer than its sequence (gapped, independent_starts) cannot be stated either."
+    forbid: {ragged_offsets: [gapped, independent_starts], sequence_lengths: [uniform, lengths_in_offsets]}
     omits: "ragged_offsets values out_of_order and overlapping"
-    source: "@ 91a40bdfd4c projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp:89-94 (offsets non-decreasing); projects/hipdnn/docs/rfcs/0014_RaggedTensors.md:154 (the offsets are monotonically non-decreasing)"
-    debatable: "Enforced by the references (test SDK), not by the frontend: DH:243-262 checks only the offset tensor's own properties. The rule keeps kind frontend: the API's ragged form defines the offsets as boundaries."
+    source: "@ 91a40bdfd4c projects/hipdnn/docs/rfcs/0014_RaggedTensors.md:153-155 (offsets start at 0 and do not decrease); DH:243-262 (the frontend checks only the offset tensor's own properties)"
+    debatable: "The frontend accepts any offset contents; the boundary form is the API's stated definition, and the references enforce it (@ 91a40bdfd4c RaggedTokenBoundaries.hpp:89-94). cuDNN's form, start positions with lengths from the length tensors, can state out-of-order and overlapping input sequences. Keeping out_of_order out of the model is a user decision (2026-11-03). The rule does not apply the start-at-0 clause of the same text: leading_gap and independent_starts (offset[0] > 0) stay model values."
     evidence: read in code
 
   - id: F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN
@@ -519,13 +630,13 @@ rules:
 
   - id: F-SINK-FLOAT-ONLY
     kind: frontend
-    form: value_list
-    reason: "The frontend takes only a FLOAT sink tensor, so a sink in Q's format cannot be stated unless Q is fp32."
+    form: exclusion
+    reason: "The frontend takes only a FLOAT sink tensor, so a sink in any other format cannot be stated."
     label: "refused by frontend, potential deficiency or defect"
-    shapes_axes: [attention_sinks]
-    omits: "the Layer 0 axis sink_dtype: its value fp32 is every sink of the model (class_to_value.sinks); its value as_q is removed here"
+    forbid: {sink_dtype: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
     source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:277 (validateSinkToken: the sink must be FLOAT)"
-    debatable: "A validation choice, not an impossibility: an engine that takes sinks in Q's format exists, and no frontend setting reaches it."
+    note: "The values stay in the model with their labels so the rejection suite can name them."
+    debatable: "A validation choice, not an impossibility: a sink in any format is a defined logit, and no frontend setting reaches an engine that takes one."
     evidence: read in code
 
   - id: F-INDEX-TENSORS-INT32
@@ -535,6 +646,48 @@ rules:
     shapes_axes: [sequence_lengths, paged_kv]
     omits: "the Layer 0 axis index_tensor_dtype: the model holds every length tensor and page table at INT32"
     source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:298 (seq_len tensors INT32), 346 (page tables INT32)"
+    note: "The ragged offset tensors are not checked (DH:243-262); their format is the model axis ragged_offset_dtype."
+    evidence: read in code
+
+  - id: F-NO-CU-SEQ-LEN
+    kind: frontend
+    form: exclusion
+    reason: "No API takes cumulative sequence lengths, so lengths given as running totals cannot be stated."
+    forbid: {sequence_lengths: [cu_seq_len]}
+    source: "@ 91a40bdfd4c no cu_seq_len setter in projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp, node/SdpaFwdNode.hpp or flatbuffers_sdk/schemas/sdpa_attributes.fbs"
+    note: "The value stays in the model with its labels so the rejection suite can name it."
+    evidence: read in code (absence)
+
+  - id: F-BLOCK-MASK-TILE-128
+    kind: frontend
+    form: exclusion
+    reason: "The API's block mask holds one flag per 128 x 128 score tile, so a mask with one flag per score, or with another tile size, cannot be stated."
+    forbid: {block_mask_granularity: [other_tile, per_element]}
+    source: "@ 91a40bdfd4c projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs:49-51 (each entry selects whether a 128x128 score tile is computed)"
+    note: "The values stay in the model with their labels so the rejection suite can name them."
+    debatable: "The tile size is stated in the schema comment; the frontend does not check the block-mask shape against it."
+    evidence: read in code
+
+  - id: F-RAGGED-MULTIPLIER-AT-LEAST-ONE
+    kind: frontend
+    form: exclusion
+    reason: "A ragged offset multiplier must be 1 or more. Token-unit offsets use the sequence stride as the multiplier, so a ragged tensor whose sequence stride is 0 cannot take them."
+    forbid_any:
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_q_side], seq_q: [many], strides_q: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [one, many], paged_kv: [v_only], max_seq_len_kv: [larger], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [absent], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [present, k_only], page_size: [partial, whole_sequence], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [one], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [differ], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [one, many], paged_kv: [k_only], max_seq_len_kv: [larger], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [absent], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [present], page_size: [one_token, partial, whole_sequence], page_size_k_vs_v: [differ], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [present], page_size: [partial, whole_sequence], page_size_k_vs_v: [equal], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [v_only], page_size: [partial, whole_sequence], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], seq_q: [many], strides_q: [zero_broadcast]}
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:644-647 (a multiplier below 1 is refused)"
+    note: "Model only: the builder puts a zero stride on the sequence dimension when its extent is above 1 (class_to_value strides.zero_broadcast). That dimension is the page of a paged K or V (V's page holds two tokens with page_size_k_vs_v differ) and max_seq_len_kv on a dense side beside a paged one. A view (`inherited`) reads with its owner's strides. O and Stats take no zero stride (D-OUTPUT-SELF-ALIAS); a negative stride is F-NO-NEGATIVE-STRIDE."
     evidence: read in code
 
   - id: F-LEFT-BOUND-NOT-ZERO
@@ -661,9 +814,28 @@ rules:
   - id: CH-FIXED-API-SETTINGS
     kind: choice
     form: setting
-    reason: "Held fixed: ragged_offset_multiplier 1; workspace large enough; block-mask tile 128 x 128; block-mask format UINT8 and dropout-mask format FLOAT (the formats the references take); O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the driver."
+    reason: "Held fixed: workspace large enough; O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the driver."
     applies_to: []
-    source: "TA:562; @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:4855, 1008-1013; FBS:49-51; @ 91a40bdfd4c projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp:383 (dropout mask FLOAT), 435 (block mask UINT8)"
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:4855, 1008-1013"
+
+  - id: CH-FOLDED-CHILD-AXES
+    kind: choice
+    form: setting
+    reason: "Some Layer 0 child axes are carried inside one model axis. ragged_offset_form holds ragged_offset_unit and ragged_offset_sharing: per-tensor lists in elements, or one token list per side; a per-tensor token list and a shared element list are not model values. sequence_lengths holds length_form (variable and variable_no_flag: length tensors; lengths_in_offsets: start-position differences; cu_seq_len: cumulative lengths). dropout_rng_state holds rng_state_storage (caller_supplied: by value; caller_supplied_device_memory: device memory)."
+    applies_to: [ragged_offset_form, sequence_lengths, dropout_rng_state]
+    source: "Layer 0 axes ragged_offset_unit, ragged_offset_sharing, length_form, rng_state_storage"
+
+  - id: CH-FUZZER-HINTS
+    kind: choice
+    form: exclusion
+    reason: "Value classes of tensor contents are hints for a fuzzer, not for test-case generation. Every case holds the representative class of each; the other classes stay in the model with their labels."
+    forbid_any:
+      - {scale_value: [non_finite]}
+      - {sink_values: [no_sink, very_large, non_finite]}
+      - {scale_factor_values: [one, zero, non_finite]}
+      - {special_values: [infinity, nan, negative_infinity_bias, subnormal, signed_zero]}
+      - {value_magnitude: [overflow_prone, precision_loss_prone]}
+    source: "user decision 2026-11-04: the content value classes are left as hints for a fuzzer; a NaN or infinite scale is held out with no answer"
 
   - id: CH-STRATIFY-DTYPE
     kind: choice
@@ -689,7 +861,7 @@ rules:
   - id: CH-KEEP-OPEN-QUESTIONS
     kind: choice
     form: setting
-    reason: "Debatable values stay in the model until they are decided: fully-masked rows, non-finite scale, p = 1, K heads != V heads, random dropout with no seed, output over an input."
+    reason: "Debatable values stay in the model until they are decided: fully-masked rows, non-finite scale (held out of generation by CH-FUZZER-HINTS), p = 1, K heads != V heads, random dropout with no seed, output over an input."
     applies_to: [block_mask_pattern, scale_value, dropout_probability, k_heads_vs_v_heads, dropout_rng_state, tensor_overlap]
     source: "open questions: fully-masked rows, non-finite scale, p = 1, K heads != V heads, random dropout with no seed, output over an input"
 
