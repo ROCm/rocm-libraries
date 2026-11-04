@@ -5182,7 +5182,7 @@ class TestPartitionZeroIssueOrder:
         from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
         from tensilelite.Components.Subtile.InstructionScheduler import (
             _MXFP8_FOLLOWER_SLOTS, _SchedulingRules, _SlotPlacer,
-            _slideVmemBundlesLate)
+            _rightAlignM0AndVmem)
 
         def bundle(tag):
             setup = SMovB32(dst=mgpr(0), src=0, comment=f"m0-{tag}")
@@ -5211,7 +5211,7 @@ class TestPartitionZeroIssueOrder:
         setup, load = bundle(0)
         placer.place(0, (0, setup))
         placer.place(1, (0, load))
-        _slideVmemBundlesLate(placer)
+        _rightAlignM0AndVmem(placer)
         found = positions(placer)
         assert found["m0-0"] == 2 * width
         assert found["gr-0"] == 2 * width + 1
@@ -5228,7 +5228,7 @@ class TestPartitionZeroIssueOrder:
         blocked.place(0, (0, setup))
         blocked.place(1, (0, load))
         blocked.place(2 * width, (0, SBarrier(comment="stop")))
-        _slideVmemBundlesLate(blocked)
+        _rightAlignM0AndVmem(blocked)
         found = positions(blocked)
         assert found["m0-1"] == width
         assert found["gr-1"] == width + 1
@@ -5315,3 +5315,116 @@ class TestPartitionZeroIssueOrder:
             if isinstance(inst, MXMFMAInstruction))
         swap_at = comment_at("swap MXSA LR")
         assert refresh_at < wait_at < use_at < swap_at
+
+    def test_right_align_places_m0_and_vmem_from_the_back(self):
+        import shutil
+        from rocisa import rocIsa
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32, SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SlotPlacer, _rightAlignM0AndVmem)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        dtl = MUBUFModifiers(offen=True, lds=True)
+        extra = SAddU32(
+            dst=mgpr(0), src0=sgpr(20), src1=2048, comment="m0-extra")
+        setups = [
+            SAddU32(
+                dst=mgpr(0), src0=sgpr(20), src1=offset,
+                comment=f"m0-{index}")
+            for index, offset in enumerate((4096, 6144))
+        ]
+        loads = [
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                soffset=0, mubuf=dtl, comment=f"gr-{index}")
+            for index in range(2)
+        ]
+        barrier = SBarrier(comment="stop")
+        placer = _SlotPlacer(
+            4, 1, [[0]], slotsPerInterval=5, maxPerSlot=1,
+            maxInstructionsPerInterval=5)
+        placer._placed[0] = [(0, extra)]
+        placer._placed[1] = [(0, setups[0])]
+        placer._placed[2] = [(0, loads[0])]
+        placer._placed[3] = [(0, setups[1])]
+        placer._placed[4] = [(0, loads[1])]
+        placer._placed[18] = [(0, barrier)]
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert [located[name] for name in (
+            "m0-extra", "m0-0", "gr-0", "m0-1", "gr-1", "stop"
+        )] == [9, 10, 11, 15, 16, 18]
+        assert located["m0-0"] % 5 == 0
+        assert located["gr-0"] == located["m0-0"] + 1
+        assert located["m0-1"] % 5 == 0
+        assert located["gr-1"] == located["m0-1"] + 1
+
+    def test_right_align_keeps_gr_address_updates_with_their_loads(self):
+        import shutil
+        from rocisa import rocIsa
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import (
+            BufferLoadB128, SAddCU32, SAddU32, SBarrier, SXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SlotPlacer, _rightAlignM0AndVmem)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        dtl = MUBUFModifiers(offen=True, lds=True)
+        setups = [
+            SAddU32(
+                dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=offset,
+                comment=f"m0-{index}")
+            for index, offset in enumerate((0, 2048))
+        ]
+        loads = [
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4),
+                soffset=0, mubuf=dtl, comment=f"gr-{index}")
+            for index in range(2)
+        ]
+        address = [
+            SAddU32(
+                dst=sgpr("SrdB"), src0=sgpr("SrdB"), src1=128,
+                comment="srd"),
+            SAddCU32(
+                dst=sgpr("SrdB+1"), src0=sgpr("SrdB+1"), src1=0,
+                comment="carry"),
+            SXorB32(
+                dst=sgpr("LocalWriteBaseAddrB"),
+                src0=sgpr("LocalWriteBaseAddrB"), src1=sgpr("SwapB"),
+                comment="swap"),
+        ]
+        barrier = SBarrier(comment="stop")
+        placer = _SlotPlacer(
+            4, 1, [[0]], slotsPerInterval=5, maxPerSlot=1,
+            maxInstructionsPerInterval=5)
+        placed = [setups[0], loads[0], *address, setups[1], loads[1]]
+        for slot, inst in enumerate(placed):
+            placer._placed[slot] = [(0, inst)]
+        placer._placed[18] = [(0, barrier)]
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert [located[name] for name in (
+            "m0-0", "gr-0", "srd", "carry", "swap", "m0-1", "gr-1", "stop"
+        )] == [10, 11, 12, 13, 14, 15, 16, 18]

@@ -177,6 +177,34 @@ class _SlotPlacer:
                 return loadPos
         return None
 
+    def _forceAtomicDtlPair(self, setupItem, loadItem, limit: int) -> int:
+        """Keep one m0/load pair together after interval capacity is exhausted.
+
+        The load stays in the same MFMA interval as its m0. limit is
+        already past every earlier m0, so this cannot move the setup ahead
+        of a previous direct-to-LDS request.
+        """
+        setupMid, _setupInst = setupItem
+        loadMid, _loadInst = loadItem
+        setupLo, setupHi = self.bounds(setupMid)
+        _loadLo, loadHi = self.bounds(loadMid)
+        setupPos = min(max(limit, setupLo), setupHi, self.totalSlots - 1)
+        intervalEnd = min(
+            self.totalSlots - 1,
+            (setupPos // self.slotsPerInterval + 1)
+            * self.slotsPerInterval - 1,
+        )
+        loadPos = min(intervalEnd, max(setupPos, loadHi))
+        if self.maxPerSlot <= 1 and loadPos <= setupPos:
+            loadPos = min(intervalEnd, setupPos + 1)
+        if loadPos <= setupPos or loadPos >= self.totalSlots:
+            self.place(setupPos, setupItem)
+            self.place(setupPos, loadItem)
+            return setupPos
+        self.place(setupPos, setupItem)
+        self.place(loadPos, loadItem)
+        return loadPos
+
     def placePath(self, pathInsts: List[Tuple[int, object]], reverse: bool = False,
                   multiDU: bool = False, startLimit: Optional[int] = None,
                   overflowToTail: bool = False, atomicDtl: bool = False,
@@ -232,6 +260,9 @@ class _SlotPlacer:
                         and _isDtlLoad(pathInsts[idx + 1][1])):
                     pairEnd = self._placeAtomicDtlPair(
                         item, pathInsts[idx + 1], limit)
+                    if pairEnd is None:
+                        pairEnd = self._forceAtomicDtlPair(
+                            item, pathInsts[idx + 1], limit)
                     if pairEnd is not None:
                         limit = pairEnd + 1
                         idx += 2
@@ -1430,133 +1461,179 @@ def _vmemSlideBlocker(inst, sourceSpans) -> bool:
     return False
 
 
-def _intervalPhysicalCount(placer, interval: int) -> int:
-    begin = interval * placer.slotsPerInterval
-    end = min(placer.totalSlots, begin + placer.slotsPerInterval)
-    return sum(
-        not isinstance(item[1], TextBlock)
-        for pos in range(begin, end)
-        for item in placer._placed[pos]
-    )
+def _liftPlaced(placer, sequence):
+    """Remove each captured item from the slot it currently occupies."""
+    for pos, item in sequence:
+        slot = placer._placed[pos]
+        for index, candidate in enumerate(slot):
+            if candidate is item:
+                del slot[index]
+                break
 
 
-def _chooseLateVmemInterval(
-        placer, earliest, latest, setup, load, sourceSpans):
-    """Pick the latest shadow whose first two slots can hold one bundle.
+def _insertBefore(placer, cursor, items) -> int:
+    """Insert items immediately before an instruction already on the schedule."""
+    for pos, slot in enumerate(placer._placed):
+        for index, candidate in enumerate(slot):
+            if candidate is cursor:
+                for offset, item in enumerate(items):
+                    slot.insert(index + offset, item)
+                return pos
+    raise RuntimeError("right-align cursor is not on the schedule")
 
-    Empty shadows win. A shadow that already holds another instruction is
-    used only when every later legal shadow is full or illegal.
+
+def _firstScheduleBlocker(placer, start: int, sourceSpans) -> int:
+    """Return the first slot at or after start that this instruction must not pass."""
+    for pos in range(max(0, start), placer.totalSlots):
+        if any(
+                _vmemSlideBlocker(inst, sourceSpans)
+                for _mid, inst in placer._placed[pos]):
+            return pos
+    return placer.totalSlots
+
+
+_GR_ADDRESS_NAMES = frozenset((
+    "SrdA", "SrdB", "SrdMXSA", "SrdMXSB",
+    "LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
+    "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
+))
+
+
+def _scalarDestName(inst) -> str:
+    """Return the base name of a scalar destination, without a lane offset."""
+    dst = getattr(inst, "dst", None)
+    if dst is None or getattr(dst, "regType", None) != "s":
+        return ""
+    holder = getattr(dst, "holderName", None)
+    if isinstance(holder, str) and holder:
+        return holder.split("+", 1)[0]
+    regName = getattr(dst, "regName", None)
+    name = getattr(regName, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    if isinstance(regName, str) and regName:
+        return regName.split("+", 1)[0]
+    return ""
+
+
+def _isGrAddressUpdate(inst) -> bool:
+    """Whether inst writes a global-read base or a direct-to-LDS base.
+
+    The SRD advance (and the scale num_records shrink) decides which
+    global address a later buffer_load uses. The LocalWriteBaseAddr xor
+    decides which LDS half a later m0 names. The scale local-read pointer
+    swap writes a VGPR and stays out of this list.
     """
-    width = placer.slotsPerInterval
-
-    def legal(interval, requireEmpty):
-        if interval < earliest or interval > latest:
-            return False
-        slot0 = interval * width
-        slot1 = slot0 + 1
-        if slot1 >= placer.totalSlots:
-            return False
-        if requireEmpty and _intervalPhysicalCount(placer, interval) != 0:
-            return False
-        if (placer.maxInstructionsPerInterval is not None
-                and placer._intervalInstructionCount(slot0) + 2
-                > placer.maxInstructionsPerInterval):
-            return False
-        if not placer._canPlace(slot0, setup) or not placer._canPlace(
-                slot1, load):
-            return False
-        begin = interval * width
-        end = min(placer.totalSlots, begin + width)
-        for pos in range(begin, end):
-            for _mid, inst in placer._placed[pos]:
-                if _vmemSlideBlocker(inst, sourceSpans):
-                    return False
-        return True
-
-    for requireEmpty in (True, False):
-        for interval in range(latest, earliest - 1, -1):
-            if legal(interval, requireEmpty):
-                return interval
-    return None
+    return _scalarDestName(inst) in _GR_ADDRESS_NAMES
 
 
-def _slideVmemBundlesLate(placer):
-    """Move m0 plus its direct-to-LDS load into the latest legal shadow.
+def _bundleEarliestSlot(setupPos: int, width: int) -> int:
+    """Keep an m0 from moving into an earlier slot of its own interval."""
+    earliest = (setupPos // width) * width
+    if earliest < setupPos:
+        earliest = (setupPos // width + 1) * width
+    return earliest
 
-    Local reads, waits, and address updates stay where the forward pass put
-    them. A bundle slides later only while it stays after that pass and
-    before a barrier, a VMEM wait, another load, or a write of a register
-    the bundle reads. m0 occupies slot 0 and the load slot 1.
+
+def _rightAlignM0AndVmem(placer):
+    """Place the direct-to-LDS stream from the back of that list.
+
+    The stream is every m0, every direct-to-LDS load, and every SALU that
+    writes a global-read SRD or a LocalWriteBaseAddr. Local reads and waits
+    stay where the forward pass put them. The list is filled from its last
+    instruction toward its first, and each instruction lands strictly before
+    the one already placed behind it, so an m0 cannot pass another m0 and a
+    load cannot pass the address update that belongs on its other side. A
+    load and the m0 directly before it occupy slot 0 and slot 1 of one
+    interval. Any other instruction in the list takes one slot under the
+    same interval cap. A placement stays at or after the forward pass
+    unless every such slot is already taken, in which case the instruction
+    is inserted immediately before the one behind it. Nothing crosses a
+    barrier, a VMEM wait, or a write of a register it reads.
     """
     width = placer.slotsPerInterval
     if width < 2 or placer.maxPerSlot != 1 or placer.totalSlots < 2:
         return
-    intervalCount = placer.totalSlots // width
-    issued = []
+    sequence = []
     for pos in range(placer.totalSlots):
         for item in placer._placed[pos]:
-            if not isinstance(item[1], TextBlock):
-                issued.append((pos, item))
-    pairs = []
-    index = 0
-    while index < len(issued):
-        setupPos, setupItem = issued[index]
-        if _isM0Update(setupItem[1]):
-            loadAt = next(
-                (candidate for candidate in range(index + 1, len(issued))
-                 if _isDtlLoad(issued[candidate][1][1])),
-                None)
-            # A direct-to-LDS load can already sit across the next MFMA.
-            # Keep the pair together unless another m0 or load is between.
-            if loadAt is not None and not any(
-                    _isM0Update(issued[candidate][1][1])
-                    or _isDtlLoad(issued[candidate][1][1])
-                    for candidate in range(index + 1, loadAt)):
-                loadPos, loadItem = issued[loadAt]
-                pairs.append((setupPos, setupItem, loadPos, loadItem))
-                index = loadAt + 1
+            if isinstance(item[1], TextBlock):
                 continue
-        index += 1
-    if not pairs:
+            if (_isM0Update(item[1]) or _isDtlLoad(item[1])
+                    or _isGrAddressUpdate(item[1])):
+                sequence.append((pos, item))
+    if not sequence:
         return
+    _liftPlaced(placer, sequence)
 
-    for setupPos, setupItem, loadPos, loadItem in pairs:
-        placer._placed[setupPos].remove(setupItem)
-        placer._placed[loadPos].remove(loadItem)
+    def place_single(pos, item, limit):
+        inst = item[1]
+        sources = _vmemSourceSpans(inst, inst)
+        hardLimit = min(limit, _firstScheduleBlocker(placer, pos + 1, sources))
+        for slot in range(hardLimit - 1, pos - 1, -1):
+            if placer._canPlace(slot, inst):
+                placer.place(slot, item)
+                return slot, item
+        return None
 
-    nextInterval = intervalCount
-    for setupPos, setupItem, loadPos, loadItem in reversed(pairs):
-        sources = _vmemSourceSpans(setupItem[1], loadItem[1])
-        # Slot 0 must not move m0 ahead of where it already sits, and the
-        # pair stays behind any instruction the forward pass put between
-        # the setup and the load.
-        earliestSlot = (setupPos // width) * width
-        if earliestSlot < setupPos:
-            earliestSlot = (setupPos // width + 1) * width
-        for pos, _between in issued:
-            if setupPos < pos < loadPos and pos >= earliestSlot:
-                earliestSlot = (pos // width + 1) * width
-        earliest = earliestSlot // width
-        limit = nextInterval * width
-        for pos in range(loadPos + 1, placer.totalSlots):
-            if any(
-                    _vmemSlideBlocker(inst, sources)
-                    for _mid, inst in placer._placed[pos]):
-                limit = min(limit, pos)
-                break
-        latest = (limit - 2) // width if limit >= 2 else -1
-        chosen = _chooseLateVmemInterval(
-            placer, earliest, min(latest, nextInterval - 1),
-            setupItem[1], loadItem[1], sources)
-        if chosen is None:
+    def place_bundle(setupPos, setupItem, loadPos, loadItem, limit):
+        setup = setupItem[1]
+        load = loadItem[1]
+        sources = _vmemSourceSpans(setup, load)
+        hardLimit = min(
+            limit, _firstScheduleBlocker(placer, setupPos + 1, sources))
+        earliest = _bundleEarliestSlot(setupPos, width)
+        latest = (hardLimit - 2) // width if hardLimit >= 2 else -1
+        for interval in range(latest, earliest // width - 1, -1):
+            slot0 = interval * width
+            slot1 = slot0 + 1
+            if slot0 < earliest or slot1 >= hardLimit:
+                continue
+            if (placer.maxInstructionsPerInterval is not None
+                    and placer._intervalInstructionCount(slot0) + 2
+                    > placer.maxInstructionsPerInterval):
+                continue
+            if placer._canPlace(slot0, setup) and placer._canPlace(slot1, load):
+                placer.place(slot0, setupItem)
+                placer.place(slot1, loadItem)
+                return slot0, setupItem
+        if (setupPos < hardLimit and loadPos < hardLimit
+                and setupPos < loadPos
+                and placer._canPlace(setupPos, setup)
+                and placer._canPlace(loadPos, load)):
             placer.place(setupPos, setupItem)
             placer.place(loadPos, loadItem)
-            nextInterval = min(nextInterval, setupPos // width)
+            return setupPos, setupItem
+        return None
+
+    def attach(items):
+        if cursor is None:
+            slot = max(0, limit - 1)
+            for item in items:
+                placer.place(slot, item)
+            return slot, items[0]
+        return _insertBefore(placer, cursor, items), items[0]
+
+    cursor = None
+    limit = placer.totalSlots
+    index = len(sequence) - 1
+    while index >= 0:
+        pos, item = sequence[index]
+        if (index > 0
+                and _isDtlLoad(item[1])
+                and _isM0Update(sequence[index - 1][1][1])):
+            setupPos, setupItem = sequence[index - 1]
+            placed = place_bundle(setupPos, setupItem, pos, item, limit)
+            if placed is None:
+                placed = attach([setupItem, item])
+            limit, cursor = placed
+            index -= 2
             continue
-        slot0 = chosen * width
-        placer.place(slot0, setupItem)
-        placer.place(slot0 + 1, loadItem)
-        nextInterval = chosen
+        placed = place_single(pos, item, limit)
+        if placed is None:
+            placed = attach([item])
+        limit, cursor = placed
+        index -= 1
 
 
 def _orderReadsAroundLiveSourceWrites(pathInsts, earliestWriteShadow, mfmaBase):
@@ -1849,11 +1926,10 @@ def _schedulePartitionZeroIssueOrder(
             rules.resetPath()
             placer.placePath(p0Payload)
 
-    # Pack each direct-to-LDS bundle against the last shadow that is still
-    # after its address setup and before the next wait or barrier. Slot 0
-    # holds m0. Slot 1 holds the load. Another instruction shares that
-    # shadow only when every later legal shadow is already taken.
-    _slideVmemBundlesLate(placer)
+    # Right-align m0, direct-to-LDS loads, and the SALU that writes their
+    # global or LDS address. A load and the m0 directly before it take
+    # slot 0 and slot 1 of one shadow.
+    _rightAlignM0AndVmem(placer)
 
     scheduled = Module()
     _emitPreMfma(scheduled, deferSync=canUseThreePhase)
