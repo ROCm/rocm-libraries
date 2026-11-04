@@ -9,6 +9,8 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/UnifiedAttentionGeometry.hpp"
+
 /**
  * @file Gfx942AttentionUnified3dGeometry.hpp
  * @brief The split rule, tile rule, launch geometry and workspace layout gfx942 unified
@@ -229,27 +231,11 @@ inline int64_t gfx942SplitRuleSegments(int64_t batch,
     return segments;
 }
 
-/// One launch: grid and a 1-D block.
-struct Gfx942AttentionUnified3dLaunch
-{
-    unsigned gridX = 0;
-    unsigned gridY = 0;
-    unsigned gridZ = 0;
-    unsigned blockX = 0;
-
-    friend bool operator==(const Gfx942AttentionUnified3dLaunch& a,
-                           const Gfx942AttentionUnified3dLaunch& b)
-    {
-        return a.gridX == b.gridX && a.gridY == b.gridY && a.gridZ == b.gridZ
-               && a.blockX == b.blockX;
-    }
-};
-
 /// The segment launch and the reduce launch, in launch order.
 struct Gfx942AttentionUnified3dGeometry
 {
-    Gfx942AttentionUnified3dLaunch segment;
-    Gfx942AttentionUnified3dLaunch reduce;
+    UnifiedAttentionLaunchGeometry segment;
+    UnifiedAttentionLaunchGeometry reduce;
 };
 
 /**

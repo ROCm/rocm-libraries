@@ -50,6 +50,7 @@
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dArguments.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dQueryOffsets.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
  * @file Gfx942AttentionUnified3dNative.cpp
@@ -58,7 +59,7 @@
  *
  * The kernels are rocKE's gfx942 split-KV decode pair
  * (`rocke/library/kernels/gfx942/attention_tiled_3d.py`, builder
- * `build_unified_attention_3d_module`), built with `kv_layout="strided"`: a `segment` launch
+ * `build_unified_attention_3d_tiled_module`), built with `kv_layout="strided"`: a `segment` launch
  * writes per-segment partial outputs into the workspace and a `reduce` launch combines them
  * into O. Both live in one packaged module (descriptor `sources` {segment, reduce}).
  *
@@ -112,12 +113,16 @@ constexpr std::string_view O_TOKEN = "gfx942_attention_unified3d.o.uid";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_unified3d.scale_bits";
 
-/// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout.
-constexpr uint32_t BATCH_AXIS = 0;
-constexpr uint32_t HEAD_AXIS = 1;
-constexpr uint32_t SEQ_AXIS = 2;
-constexpr uint32_t HEAD_SIZE_AXIS = 3;
-constexpr uint32_t SDPA_RANK = 4;
+using sdpa_graph::BATCH_AXIS;
+using sdpa_graph::describeOperand;
+using sdpa_graph::findTensor;
+using sdpa_graph::hasSdpaForwardNode;
+using sdpa_graph::HEAD_AXIS;
+using sdpa_graph::HEAD_SIZE_AXIS;
+using sdpa_graph::isWellFormedOperand;
+using sdpa_graph::sdpaNode;
+using sdpa_graph::SDPA_RANK;
+using sdpa_graph::SEQ_AXIS;
 
 /// `kernels/common/attention_kv_cache.py::KvTensorLayout`: the per-head span and the token
 /// stride must stay within the buffer-resource offset range the kernel addresses K/V with
@@ -140,29 +145,6 @@ constexpr int64_t PREFERRED_BLOCK_SIZE = 16;
 // Matching helpers
 // ---------------------------------------------------------------------------
 
-const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
-
-/// The node this engine's matchers read, or nullptr if the graph is not a single
-/// SDPA-forward node.
-const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
-{
-    if(context.graph.nodeCount() != 1)
-    {
-        return nullptr;
-    }
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::SdpaAttributes)
-    {
-        return nullptr;
-    }
-    return &node.attributesAs<data_objects::SdpaAttributes>();
-}
-
 /// The product of @p factors, or nullopt when it does not fit in int64_t.
 std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
 {
@@ -175,27 +157,6 @@ std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
         }
     }
     return product;
-}
-
-/// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
-/// checked before anything indexes an axis.
-bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
-       || strides->size() != SDPA_RANK)
-    {
-        return false;
-    }
-    for(const auto dim : *dims)
-    {
-        if(dim <= 0)
-        {
-            return false;
-        }
-    }
-    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
 }
 
 /**
@@ -328,28 +289,8 @@ std::ostream& operator<<(std::ostream& out, const Declined& declined)
                << declined.cause << "]: ";
 }
 
-bool hasSdpaForwardNode(const MatchContext& context)
-{
-    for(const auto& node : context.graph.nodeWrappers())
-    {
-        if(node->attributesType() == data_objects::NodeAttributes::SdpaAttributes)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-std::string describeOperand(std::string_view role, const data_objects::TensorAttributes& tensor)
-{
-    using hipdnn_data_sdk::utilities::vecToString;
-    using hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector;
-    std::ostringstream out;
-    out << role << " (uid " << tensor.uid() << "): dims "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.dims())) << ", strides "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.strides()));
-    return out.str();
-}
+using Unified3dProblem = sdpa_graph::UnifiedAttentionProblem;
+using sdpa_graph::problemFor;
 
 /// The kernel's dtype spelling (the KMD `dtype` field) for a graph dtype, or nullopt.
 std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType)
@@ -363,32 +304,6 @@ std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType
         return std::string("FP16");
     }
     return std::nullopt;
-}
-
-/// The graph facts the matchers, scorer and prepare() all read, from validated Q and K.
-struct Unified3dProblem
-{
-    int64_t batch = 0;
-    int64_t seqLenQ = 0;
-    int64_t seqLenKv = 0;
-    int64_t numQueryHeads = 0;
-    int64_t numKvHeads = 0;
-    int64_t headSize = 0;
-    data_objects::DataType dataType = data_objects::DataType::UNSET;
-};
-
-Unified3dProblem problemFor(const data_objects::TensorAttributes& q,
-                            const data_objects::TensorAttributes& k)
-{
-    Unified3dProblem problem;
-    problem.batch = q.dims()->Get(BATCH_AXIS);
-    problem.numQueryHeads = q.dims()->Get(HEAD_AXIS);
-    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
-    problem.headSize = q.dims()->Get(HEAD_SIZE_AXIS);
-    problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
-    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
-    problem.dataType = q.data_type();
-    return problem;
 }
 
 /// The problem of a graph graph_match accepted, or nullopt for one it would not have.

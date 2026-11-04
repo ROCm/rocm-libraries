@@ -31,12 +31,12 @@ namespace hip_kernel_provider::kernel_ingestor_engine::testing
 TEST(TestGfx942AttentionUnified3dGeometry, GridsMatchGet3dPipeline)
 {
     const auto g = gfx942AttentionUnified3dGeometry(4, 32, 8, 16);
-    EXPECT_EQ(g.segment, (Gfx942AttentionUnified3dLaunch{4, 8, 16, 64}));
-    EXPECT_EQ(g.reduce, (Gfx942AttentionUnified3dLaunch{4, 32, 1, 64}));
+    EXPECT_EQ(g.segment, (UnifiedAttentionLaunchGeometry{4, 8, 16, 64}));
+    EXPECT_EQ(g.reduce, (UnifiedAttentionLaunchGeometry{4, 32, 1, 64}));
 
     const auto one = gfx942AttentionUnified3dGeometry(1, 32, 8, 64);
-    EXPECT_EQ(one.segment, (Gfx942AttentionUnified3dLaunch{1, 8, 64, 64}));
-    EXPECT_EQ(one.reduce, (Gfx942AttentionUnified3dLaunch{1, 32, 1, 64}));
+    EXPECT_EQ(one.segment, (UnifiedAttentionLaunchGeometry{1, 8, 64, 64}));
+    EXPECT_EQ(one.reduce, (UnifiedAttentionLaunchGeometry{1, 32, 1, 64}));
 }
 
 TEST(TestGfx942AttentionUnified3dGeometry, GridRefusesNonPositiveInputs)
