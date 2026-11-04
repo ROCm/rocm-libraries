@@ -31,43 +31,11 @@
 #endif // no system header
 #include <thrust/detail/execution_policy.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(utility)
-#endif
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 using _THRUST_STD::swap;
-#else
-/*! \p swap assigns the contents of \c a to \c b and the
- *  contents of \c b to \c a. This is used as a primitive operation
- *  by many other algorithms.
- *
- *  \param a The first value of interest. After completion,
- *           the value of b will be returned here.
- *  \param b The second value of interest. After completion,
- *           the value of a will be returned here.
- *
- *  \tparam Assignable is a model of <a
- * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>.
- *
- *  The following code snippet demonstrates how to use \p swap to
- *  swap the contents of two variables.
- *
- *  \code
- *  #include <thrust/swap.h>
- *  ...
- *  int x = 1;
- *  int y = 2;
- *  thrust::swap(x,h);
- *
- *  // x == 2, y == 1
- *  \endcode
- */
-template <typename Assignable1, typename Assignable2>
-THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b);
-#endif
 
 /*! \addtogroup copying
  *  \{

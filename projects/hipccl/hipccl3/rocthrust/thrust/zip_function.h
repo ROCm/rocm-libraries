@@ -37,14 +37,9 @@
 #endif // no system header
 
 #include <thrust/detail/type_deduction.h>
-#include <thrust/tuple.h>
-#include <thrust/type_traits/integer_sequence.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(functional)
-#else
-#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
-#endif
+#include _THRUST_LIBCXX_INCLUDE(functional)
+#include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -56,29 +51,6 @@ THRUST_NAMESPACE_BEGIN
  *  \ingroup function_objects
  *  \{
  */
-
-namespace detail
-{
-namespace zip_detail
-{
-
-// Add workaround for decltype(auto) on C++11-only compilers:
-THRUST_EXEC_CHECK_DISABLE
-template <typename Function, typename Tuple, std::size_t... Is>
-THRUST_HOST_DEVICE decltype(auto) apply_impl(Function&& func, Tuple&& args, index_sequence<Is...>)
-{
-  return func(thrust::get<Is>(THRUST_FWD(args))...);
-}
-
-template <typename Function, typename Tuple>
-THRUST_HOST_DEVICE decltype(auto) apply(Function&& func, Tuple&& args)
-{
-  constexpr auto tuple_size = thrust::tuple_size<_THRUST_STD::decay_t<Tuple>>::value;
-  return apply_impl(THRUST_FWD(func), THRUST_FWD(args), make_index_sequence<tuple_size>{});
-}
-
-} // namespace zip_detail
-} // namespace detail
 
 /*! \p zip_function is a function object that allows the easy use of N-ary
  *  function objects with \p zip_iterators without redefining them to take a
@@ -148,18 +120,14 @@ public:
   //! Default constructs the contained function object.
   zip_function() = default;
 
-  /*! Constructs a \p zip_function with the provided function object \p func. */
   THRUST_HOST_DEVICE zip_function(Function func)
       : func(_THRUST_STD::move(func))
   {}
 
-  /*! Applies the N-ary function object to elements of the tuple \p args. */
-  // Add workaround for decltype(auto) on C++11-only compilers:
-
   template <typename Tuple>
   THRUST_HOST_DEVICE decltype(auto) operator()(Tuple&& args) const
   {
-    return detail::zip_detail::apply(func, THRUST_FWD(args));
+    return _THRUST_STD::apply(func, _THRUST_STD::forward<Tuple>(args));
   }
 
   //! Returns a reference to the underlying function.
@@ -194,17 +162,8 @@ THRUST_HOST_DEVICE zip_function<_THRUST_STD::decay_t<Function>> make_zip_functio
 
 THRUST_NAMESPACE_END
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_LIBCXX_NAMESPACE_BEGIN
-#else
-namespace internal
-{
-#endif
 template <typename F>
 struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::zip_function<F>> : proclaims_copyable_arguments<F>
 {};
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_LIBCXX_NAMESPACE_END
-#else
-} // namespace internal
-#endif

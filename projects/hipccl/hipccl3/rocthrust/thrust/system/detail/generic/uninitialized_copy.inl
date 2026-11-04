@@ -32,11 +32,7 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/uninitialized_copy.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__new/device_new.h)
-#else
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__new/device_new.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic

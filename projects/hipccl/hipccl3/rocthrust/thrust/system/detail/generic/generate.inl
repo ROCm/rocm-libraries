@@ -28,7 +28,8 @@
 
 #include <thrust/for_each.h>
 
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__utility/forward.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic

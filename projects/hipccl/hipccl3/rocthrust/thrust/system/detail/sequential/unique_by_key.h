@@ -30,8 +30,9 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
+
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
@@ -43,7 +44,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
   sequential::execution_policy<DerivedPolicy>&,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -85,11 +86,11 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_
     ++values_output;
   }
 
-  return thrust::make_pair(keys_output, values_output);
+  return _THRUST_STD::make_pair(keys_output, values_output);
 } // end unique_by_key_copy()
 
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
   sequential::execution_policy<DerivedPolicy>& exec,
   ForwardIterator1 keys_first,
   ForwardIterator1 keys_last,

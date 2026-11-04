@@ -20,9 +20,10 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/extrema.h>
-#include <thrust/pair.h>
 #include <thrust/random.h>
 #include <thrust/transform_reduce.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include "include/host_device.h"
 

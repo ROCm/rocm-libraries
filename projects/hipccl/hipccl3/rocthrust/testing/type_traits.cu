@@ -28,7 +28,6 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
-#include <thrust/pair.h>
 #include <thrust/tuple.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
@@ -43,13 +42,7 @@
 
 #include <vector>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(iterator)
-#endif
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_LIBCXX_INCLUDE(iterator)
 
 void TestIsContiguousIterator()
 {
@@ -216,33 +209,27 @@ void TestTriviallyRelocatable()
 #if THRUST_COMPILER(GCC, >=, 7)
   static_assert(thrust::is_trivially_relocatable<thrust::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::complex<float>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<thrust::pair<int, thrust::complex<float>>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<int, thrust::complex<float>>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<int, _THRUST_STD::complex<float>>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<int, thrust::complex<float>, char>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value,
                 "");
 #endif // THRUST_COMPILER(GCC, >=, 7)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   static_assert(thrust::is_trivially_relocatable<
-                  _THRUST_STD::tuple<thrust::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,
+                  _THRUST_STD::tuple<_THRUST_STD::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,
                                      thrust::tuple<_THRUST_STD::pair<int, thrust::tuple<>>, int>>>::value,
                 "");
-#endif
 
-  static_assert(!thrust::is_trivially_relocatable<thrust::pair<int, std::string>>::value, "");
+  static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::pair<int, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::pair<int, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<thrust::tuple<int, float, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, float, std::string>>::value, "");
 
   // test propagation of relocatability through pair and tuple
   static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "");
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  static_assert(thrust::is_trivially_relocatable<thrust::pair<NonTriviallyCopyable, int>>::value, "");
-#endif
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<NonTriviallyCopyable, int>>::value, "");
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<NonTriviallyCopyable, int>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<NonTriviallyCopyable>>::value, "");
-#endif
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
 };
 DECLARE_UNITTEST(TestTriviallyRelocatable);
@@ -313,7 +300,6 @@ struct thrust_make_zip_iterator
   }
 };
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 struct libcxx_make_counting_iterator
 {
   template <typename... Args>
@@ -340,7 +326,6 @@ struct libcxx_make_zip_iterator
     return _THRUST_LIBCXX::make_zip_iterator(_THRUST_STD::forward<Args>(args)...);
   }
 };
-#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename Iterator>
 inline constexpr bool has_random_access_traversal =
@@ -408,7 +393,6 @@ void check_vector_and_any_system_propagation()
 void TestIteratorSystemAndTraversalPropagationAnySystem()
 {
   check_any_system_propagation<thrust_make_counting_iterator, thrust_make_transform_iterator, thrust_make_zip_iterator>();
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   check_any_system_propagation<thrust_make_counting_iterator, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
   check_any_system_propagation<thrust_make_counting_iterator, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
   check_any_system_propagation<thrust_make_counting_iterator, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
@@ -416,7 +400,6 @@ void TestIteratorSystemAndTraversalPropagationAnySystem()
   check_any_system_propagation<libcxx_make_counting_iterator, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
   check_any_system_propagation<libcxx_make_counting_iterator, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
   check_any_system_propagation<libcxx_make_counting_iterator, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
-#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 };
 DECLARE_UNITTEST(TestIteratorSystemAndTraversalPropagationAnySystem);
 
@@ -425,7 +408,6 @@ void TestIteratorSystemAndTraversalPropagationVectors()
   check_vector_propagation<thrust::device_vector<int>, thrust_make_transform_iterator, thrust_make_zip_iterator>();
   check_vector_propagation<thrust::host_vector<int>, thrust_make_transform_iterator, thrust_make_zip_iterator>();
   check_vector_propagation<std::vector<int>, thrust_make_transform_iterator, thrust_make_zip_iterator>();
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   check_vector_propagation<thrust::device_vector<int>, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
   check_vector_propagation<thrust::device_vector<int>, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
   check_vector_propagation<thrust::device_vector<int>, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
@@ -435,7 +417,6 @@ void TestIteratorSystemAndTraversalPropagationVectors()
   check_vector_propagation<std::vector<int>, thrust_make_transform_iterator, libcxx_make_zip_iterator>();
   check_vector_propagation<std::vector<int>, libcxx_make_transform_iterator, thrust_make_zip_iterator>();
   check_vector_propagation<std::vector<int>, libcxx_make_transform_iterator, libcxx_make_zip_iterator>();
-#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 };
 DECLARE_UNITTEST(TestIteratorSystemAndTraversalPropagationVectors);
 
@@ -444,7 +425,6 @@ void TestIteratorSystemAndTraversalPropagationVectorsAndAnySystem()
   check_vector_and_any_system_propagation<thrust::device_vector<int>, thrust_make_counting_iterator, thrust_make_zip_iterator>();
   check_vector_and_any_system_propagation<thrust::host_vector<int>, thrust_make_counting_iterator, thrust_make_zip_iterator>();
   check_vector_and_any_system_propagation<std::vector<int>, thrust_make_counting_iterator, thrust_make_zip_iterator>();
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   check_vector_and_any_system_propagation<thrust::device_vector<int>, thrust_make_counting_iterator, libcxx_make_zip_iterator>();
   check_vector_and_any_system_propagation<thrust::device_vector<int>, libcxx_make_counting_iterator, thrust_make_zip_iterator>();
   check_vector_and_any_system_propagation<thrust::device_vector<int>, libcxx_make_counting_iterator, libcxx_make_zip_iterator>();
@@ -454,6 +434,5 @@ void TestIteratorSystemAndTraversalPropagationVectorsAndAnySystem()
   check_vector_and_any_system_propagation<std::vector<int>, thrust_make_counting_iterator, libcxx_make_zip_iterator>();
   check_vector_and_any_system_propagation<std::vector<int>, libcxx_make_counting_iterator, thrust_make_zip_iterator>();
   check_vector_and_any_system_propagation<std::vector<int>, libcxx_make_counting_iterator, libcxx_make_zip_iterator>();
-#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 };
 DECLARE_UNITTEST(TestIteratorSystemAndTraversalPropagationVectorsAndAnySystem);

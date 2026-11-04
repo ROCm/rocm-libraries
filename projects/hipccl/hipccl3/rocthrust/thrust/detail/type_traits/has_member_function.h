@@ -28,10 +28,10 @@
 
 #include <thrust/detail/type_traits.h>
 
-#include <utility> // for std::declval
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
 
 #define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                          \
   template <typename T, typename Signature, typename = void>                                                           \

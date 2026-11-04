@@ -24,79 +24,84 @@
 #include <thrust/detail/type_traits.h>
 
 #include _THRUST_STD_INCLUDE(cfloat)
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__cmath/abs.h)
+#include _THRUST_STD_INCLUDE(__cmath/hypot.h)
+#include _THRUST_STD_INCLUDE(__cmath/inverse_trigonometric_functions.h)
+#include _THRUST_STD_INCLUDE(__cmath/roots.h)
+#include _THRUST_STD_INCLUDE(__cmath/trigonometric_functions.h)
+#include _THRUST_STD_INCLUDE(__type_traits/common_type.h)
 
 THRUST_NAMESPACE_BEGIN
 
 /* --- Binary Arithmetic Operators --- */
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator+(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x.real() + y.real(), x.imag() + y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator+(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x.real() + y, x.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator+(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x + y.real(), y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator-(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x.real() - y.real(), x.imag() - y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator-(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x.real() - y, x.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator-(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x - y.real(), -y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator*(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x.real() * y.real() - x.imag() * y.imag(), x.real() * y.imag() + x.imag() * y.real());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator*(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x.real() * y, x.imag() * y);
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator*(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x * y.real(), x * y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator/(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   T s     = _THRUST_STD::abs(y.real()) + _THRUST_STD::abs(y.imag());
 
   T oos = T(1.0) / s;
@@ -115,16 +120,16 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const co
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator/(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x.real() / y, x.imag() / y);
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator/(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(x) / y;
 }
 
@@ -199,9 +204,9 @@ THRUST_HOST_DEVICE inline double norm(const complex<double>& z)
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> polar(const T0& m, const T1& theta)
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> polar(const T0& m, const T1& theta)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = _THRUST_STD::common_type_t<T0, T1>;
   return complex<T>(m * _THRUST_STD::cos(theta), m * _THRUST_STD::sin(theta));
 }
 

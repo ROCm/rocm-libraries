@@ -55,7 +55,8 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__cmath/exponential_functions.h)
+#include _THRUST_STD_INCLUDE(__cmath/trigonometric_functions.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail::complex

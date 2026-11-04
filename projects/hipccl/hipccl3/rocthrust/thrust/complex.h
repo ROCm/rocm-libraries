@@ -35,15 +35,12 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__type_traits/common_type.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_reference.h)
 #if !THRUST_COMPILER(NVRTC)
 #  include <complex>
 #  include <sstream>
 #endif // !THRUST_COMPILER(NVRTC)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 #define THRUST_STD_COMPLEX_REAL(z) \
   reinterpret_cast<const typename _THRUST_STD::remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[0]
@@ -396,7 +393,7 @@ THRUST_HOST_DEVICE complex<T> conj(const complex<T>& z);
  *  \param theta The phase of the returned \p complex in radians.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> polar(const T0& m, const T1& theta = T1());
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> polar(const T0& m, const T1& theta = T1());
 
 /*! Returns the projection of a \p complex on the Riemann sphere.
  *  For all finite \p complex it returns the argument. For \p complexs
@@ -419,7 +416,7 @@ THRUST_HOST_DEVICE complex<T> proj(const T& z);
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const complex<T0>& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator+(const complex<T0>& x, const complex<T1>& y);
 
 /*! Adds a scalar to a \p complex number.
  *
@@ -430,7 +427,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const co
  *  \param y The scalar.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const complex<T0>& x, const T1& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator+(const complex<T0>& x, const T1& y);
 
 /*! Adds a \p complex number to a scalar.
  *
@@ -441,7 +438,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const co
  *  \param y The \p complex.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const T0& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator+(const T0& x, const complex<T1>& y);
 
 /*! Subtracts two \p complex numbers.
  *
@@ -452,7 +449,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const T0
  *  \param y The second \p complex (subtrahend).
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const complex<T0>& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator-(const complex<T0>& x, const complex<T1>& y);
 
 /*! Subtracts a scalar from a \p complex number.
  *
@@ -463,7 +460,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const co
  *  \param y The scalar (subtrahend).
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const complex<T0>& x, const T1& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator-(const complex<T0>& x, const T1& y);
 
 /*! Subtracts a \p complex number from a scalar.
  *
@@ -474,7 +471,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const co
  *  \param y The \p complex (subtrahend).
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const T0& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator-(const T0& x, const complex<T1>& y);
 
 /*! Multiplies two \p complex numbers.
  *
@@ -485,7 +482,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const T0
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const complex<T0>& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator*(const complex<T0>& x, const complex<T1>& y);
 
 /*! Multiplies a \p complex number by a scalar.
  *
@@ -493,7 +490,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const co
  *  \param y The scalar.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const complex<T0>& x, const T1& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator*(const complex<T0>& x, const T1& y);
 
 /*! Multiplies a scalar by a \p complex number.
  *
@@ -504,7 +501,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const co
  *  \param y The \p complex.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const T0& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator*(const T0& x, const complex<T1>& y);
 
 /*! Divides two \p complex numbers.
  *
@@ -515,7 +512,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const T0
  *  \param y The denomimator (divisor).
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const complex<T0>& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator/(const complex<T0>& x, const complex<T1>& y);
 
 /*! Divides a \p complex number by a scalar.
  *
@@ -526,7 +523,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const co
  *  \param y The scalar denomimator (divisor).
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const complex<T0>& x, const T1& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator/(const complex<T0>& x, const T1& y);
 
 /*! Divides a scalar by a \p complex number.
  *
@@ -537,7 +534,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const co
  *  \param y The complex denomimator (divisor).
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const T0& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> operator/(const T0& x, const complex<T1>& y);
 
 /* --- Unary Arithmetic operators --- */
 
@@ -590,7 +587,7 @@ THRUST_HOST_DEVICE complex<T> log10(const complex<T>& z);
  *  \param y The exponent.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const complex<T0>& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> pow(const complex<T0>& x, const complex<T1>& y);
 
 /*! Returns a \p complex number raised to a scalar.
  *
@@ -601,7 +598,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const complex<
  *  \param y The exponent.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const complex<T0>& x, const T1& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> pow(const complex<T0>& x, const T1& y);
 
 /*! Returns a scalar raised to a \p complex number.
  *
@@ -612,7 +609,7 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const complex<
  *  \param y The exponent.
  */
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const T0& x, const complex<T1>& y);
+THRUST_HOST_DEVICE complex<_THRUST_STD::common_type_t<T0, T1>> pow(const T0& x, const complex<T1>& y);
 
 /*! Returns the complex square root of a \p complex number.
  *

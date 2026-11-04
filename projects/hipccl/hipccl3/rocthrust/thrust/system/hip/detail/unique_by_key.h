@@ -46,11 +46,14 @@
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/pair.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 
+#  include _THRUST_STD_INCLUDE(__functional/operations.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocPRIM includes
@@ -59,7 +62,7 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
-THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   ForwardIterator1 keys_first,
   ForwardIterator1 keys_last,
@@ -69,7 +72,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -89,7 +92,7 @@ template <typename Derived,
           typename KeyOutputIt,
           typename ValOutputIt,
           typename BinaryPred>
-THRUST_HIP_RUNTIME_FUNCTION pair<KeyOutputIt, ValOutputIt> unique_by_key(
+THRUST_HIP_RUNTIME_FUNCTION _THRUST_STD::pair<KeyOutputIt, ValOutputIt> unique_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -108,7 +111,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeyOutputIt, ValOutputIt> unique_by_key(
 
   if (num_items == 0)
   {
-    return thrust::make_pair(keys_result, values_result);
+    return _THRUST_STD::make_pair(keys_result, values_result);
   }
 
   // Determine temporary device storage requirements.
@@ -163,7 +166,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeyOutputIt, ValOutputIt> unique_by_key(
 
   size_type num_selected = get_value(policy, d_num_selected_out);
 
-  return thrust::make_pair(keys_result + num_selected, values_result + num_selected);
+  return _THRUST_STD::make_pair(keys_result + num_selected, values_result + num_selected);
 }
 
 } // namespace detail
@@ -173,7 +176,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeyOutputIt, ValOutputIt> unique_by_key(
 //-------------------------
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt, class BinaryPred>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -185,7 +188,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<KeyOutputIt, ValOutputIt>
+    THRUST_HOST static _THRUST_STD::pair<KeyOutputIt, ValOutputIt>
     par(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -197,7 +200,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
       return detail::unique_by_key(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
     }
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
+    THRUST_DEVICE static _THRUST_STD::pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -219,7 +222,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt>
-pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
+_THRUST_STD::pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -233,7 +236,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class BinaryPred>
-pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
+_THRUST_STD::pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt keys_first,
   KeyInputIt keys_last,
@@ -243,7 +246,7 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<KeyInputIt, ValInputIt>
+    THRUST_HOST static _THRUST_STD::pair<KeyInputIt, ValInputIt>
     par(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -254,7 +257,7 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
         policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
     }
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<KeyInputIt, ValInputIt>
+    THRUST_DEVICE static _THRUST_STD::pair<KeyInputIt, ValInputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
         KeyInputIt keys_last,
@@ -273,7 +276,7 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt>
-pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE
+_THRUST_STD::pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE
 unique_by_key(execution_policy<Derived>& policy, KeyInputIt keys_first, KeyInputIt keys_last, ValInputIt values_first)
 {
   using key_type = thrust::detail::it_value_t<KeyInputIt>;

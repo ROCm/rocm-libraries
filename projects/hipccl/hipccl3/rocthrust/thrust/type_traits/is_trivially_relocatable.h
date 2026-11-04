@@ -37,18 +37,11 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__fwd/pair.h)
-#  include _THRUST_STD_INCLUDE(__fwd/tuple.h)
-#  include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
-#endif
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
-#  include <tuple>
-#  include <utility>
-#endif
+#include _THRUST_STD_INCLUDE(__fwd/pair.h)
+#include _THRUST_STD_INCLUDE(__fwd/tuple.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_trivially_copyable.h)
 
 THRUST_NAMESPACE_BEGIN
 

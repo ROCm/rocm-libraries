@@ -148,7 +148,7 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::
  *  // allocate storage for 100 ints with thrust::get_temporary_buffer
  *  const int N = 100;
  *
- *  using ptr_and_size_t = thrust::pair<
+ *  using ptr_and_size_t = _THRUST_STD::pair<
  *    thrust::pointer<int,thrust::device_system_tag>,
  *    std::ptrdiff_t
  *  >;
@@ -171,9 +171,9 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::
  */
 template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE
-  thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
-  get_temporary_buffer(const thrust::detail::execution_policy_base<DerivedPolicy>& system,
-                       typename thrust::pointer<T, DerivedPolicy>::difference_type n);
+_THRUST_STD::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
+get_temporary_buffer(const thrust::detail::execution_policy_base<DerivedPolicy>& system,
+                     typename thrust::pointer<T, DerivedPolicy>::difference_type n);
 
 /*! \p free deallocates the storage previously allocated by \p thrust::malloc.
  *
@@ -230,7 +230,7 @@ THRUST_HOST_DEVICE void free(const thrust::detail::execution_policy_base<Derived
  *  // allocate storage for 100 ints with thrust::get_temporary_buffer
  *  const int N = 100;
  *
- *  using ptr_and_size_t = thrust::pair<
+ *  using ptr_and_size_t = _THRUST_STD::pair<
  *    thrust::pointer<int,thrust::device_system_tag>,
  *    std::ptrdiff_t
  *  >;

@@ -31,8 +31,9 @@
 #endif // no system header
 #include <thrust/detail/function.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
+
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
@@ -234,7 +235,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   sequential::execution_policy<DerivedPolicy>&,
   InputIterator first,
   InputIterator last,
@@ -259,7 +260,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
     } // end else
   }
 
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -269,7 +270,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   sequential::execution_policy<DerivedPolicy>&,
   InputIterator1 first,
   InputIterator1 last,
@@ -295,7 +296,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
     } // end else
   }
 
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 } // namespace system::detail::sequential
 THRUST_NAMESPACE_END
