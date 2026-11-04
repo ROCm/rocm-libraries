@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 #include "roclapack_getrs.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
+#include "rocsolver_workspace_helper.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -48,65 +49,51 @@ ROCSOLVER_KERNEL void
     }
 }
 
-template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_geblttrf_npvt_getMemorySize(const rocblas_int nb,
+template <bool BATCHED, bool STRIDED, typename T, typename U>
+void rocsolver_geblttrf_npvt_getMemorySize(rocblas_handle handle,
+                                           const rocblas_int nb,
                                            const rocblas_int nblocks,
+                                           U A,
+                                           const rocblas_int shiftA,
+                                           const rocblas_int inca,
+                                           const rocblas_int lda,
+                                           const rocblas_stride strideA,
+                                           U B,
+                                           const rocblas_int shiftB,
+                                           const rocblas_int incb,
+                                           const rocblas_int ldb,
+                                           const rocblas_stride strideB,
+                                           U C,
+                                           const rocblas_int shiftC,
+                                           const rocblas_int incc,
+                                           const rocblas_int ldc,
+                                           const rocblas_stride strideC,
+                                           rocblas_int* info,
                                            const rocblas_int batch_count,
-                                           size_t* size_scalars,
-                                           size_t* size_work1,
-                                           size_t* size_work2,
-                                           size_t* size_work3,
-                                           size_t* size_work4,
-                                           size_t* size_pivotval,
-                                           size_t* size_pivotidx,
-                                           size_t* size_iipiv,
-                                           size_t* size_iinfo1,
-                                           size_t* size_iinfo2,
-                                           bool* optim_mem,
-                                           const rocblas_int ldb = 1,
-                                           const rocblas_int ldc = 1,
-                                           const rocblas_int incb = 1,
-                                           const rocblas_int incc = 1)
+                                           rocsolver_workspace_helper* work_helper)
 {
     // if quick return, no need of workspace
     if(nb == 0 || nblocks == 0 || batch_count == 0)
-    {
-        *size_scalars = 0;
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *size_pivotval = 0;
-        *size_pivotidx = 0;
-        *size_iipiv = 0;
-        *size_iinfo1 = 0;
-        *size_iinfo2 = 0;
         return;
-    }
 
-    bool unused;
-    size_t a1 = 0, a2 = 0;
-    size_t b1 = 0, b2 = 0;
-    size_t c1 = 0, c2 = 0;
-    size_t d1 = 0, d2 = 0;
-
-    // size requirements for getrf
-    rocsolver_getrf_getMemorySize<BATCHED, STRIDED, T>(
-        nb, nb, false, batch_count, size_scalars, &a1, &b1, &c1, &d1, size_pivotval, size_pivotidx,
-        size_iipiv, size_iinfo1, optim_mem, ldb, incb);
-
-    // size requirements for getrs
-    rocsolver_getrs_getMemorySize<BATCHED, STRIDED, T>(rocblas_operation_none, nb, nb, batch_count,
-                                                       &a2, &b2, &c2, &d2, &unused, ldb, ldc, incb,
-                                                       incc);
-
-    *size_work1 = std::max(a1, a2);
-    *size_work2 = std::max(b1, b2);
-    *size_work3 = std::max(c1, c2);
-    *size_work4 = std::max(d1, d2);
+    work_helper->set_nested_capacity(2);
 
     // size for temporary info storage
-    *size_iinfo2 = sizeof(rocblas_int) * batch_count;
+    size_t size_iinfo = sizeof(rocblas_int) * batch_count;
+
+    // size requirements for getrf
+    rocsolver_workspace_helper* getrf_work = work_helper->add_nested("getrf");
+    rocsolver_getrf_getMemorySize<BATCHED, STRIDED, T>(handle, nb, nb, B, shiftB, incb, ldb,
+                                                       strideB, (rocblas_int*)nullptr, 0, 0, info,
+                                                       batch_count, getrf_work, false);
+
+    // size requirements for getrs
+    rocsolver_workspace_helper* getrs_work = work_helper->add_nested("getrs");
+    rocsolver_getrs_getMemorySize<BATCHED, STRIDED, T>(
+        handle, rocblas_operation_none, nb, nb, B, shiftB, incb, ldb, strideB,
+        (rocblas_int*)nullptr, 0, C, shiftC, incc, ldc, strideC, batch_count, getrs_work, false);
+
+    work_helper->assign_sizes({{"iinfo", size_iinfo}});
 }
 
 template <typename T>
@@ -176,17 +163,7 @@ rocblas_status rocsolver_geblttrf_npvt_template(rocblas_handle handle,
                                                 const rocblas_stride strideC,
                                                 rocblas_int* info,
                                                 const rocblas_int batch_count,
-                                                T* scalars,
-                                                void* work1,
-                                                void* work2,
-                                                void* work3,
-                                                void* work4,
-                                                T* pivotval,
-                                                rocblas_int* pivotidx,
-                                                rocblas_int* iipiv,
-                                                rocblas_int* iinfo1,
-                                                rocblas_int* iinfo2,
-                                                bool optim_mem)
+                                                rocsolver_workspace_helper* work_helper)
 {
     ROCSOLVER_ENTER("geblttrf_npvt", "nb:", nb, "nblocks:", nblocks, "shiftA:", shiftA,
                     "inca:", inca, "lda:", lda, "shiftB:", shiftB, "incb:", incb, "ldb:", ldb,
@@ -199,6 +176,12 @@ rocblas_status rocsolver_geblttrf_npvt_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
+    // prepare workspace
+    rocsolver_workspace_helper* getrf_work = work_helper->get_nested("getrf");
+    rocsolver_workspace_helper* getrs_work = work_helper->get_nested("getrs");
+    rocblas_int* iinfo = (rocblas_int*)(*work_helper)["iinfo"];
+
+    // prepare kernels
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
@@ -213,27 +196,25 @@ rocblas_status rocsolver_geblttrf_npvt_template(rocblas_handle handle,
 
     rocsolver_getrf_template<BATCHED, STRIDED, T>(handle, nb, nb, B, shiftB, incb, ldb, strideB,
                                                   (rocblas_int*)nullptr, 0, 0, info, batch_count,
-                                                  scalars, work1, work2, work3, work4, pivotval,
-                                                  pivotidx, iipiv, iinfo1, optim_mem, false);
+                                                  getrf_work, false);
 
     for(rocblas_int k = 0; k < nblocks - 1; k++)
     {
         rocsolver_getrs_template<BATCHED, STRIDED, T>(
             handle, rocblas_operation_none, nb, nb, B, shiftB + k * bsb, incb, ldb, strideB,
-            (rocblas_int*)nullptr, 0, C, shiftC + k * bsc, incc, ldc, strideC, batch_count, work1,
-            work2, work3, work4, optim_mem, false);
+            (rocblas_int*)nullptr, 0, C, shiftC + k * bsc, incc, ldc, strideC, batch_count,
+            getrs_work, false);
 
         rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, nb, nb, nb, &minone,
                        A, shiftA + k * bsa, inca, lda, strideA, C, shiftC + k * bsc, incc, ldc,
                        strideC, &one, B, shiftB + (k + 1) * bsb, incb, ldb, strideB, batch_count,
                        (T**)nullptr);
 
-        rocsolver_getrf_template<BATCHED, STRIDED, T>(
-            handle, nb, nb, B, shiftB + (k + 1) * bsb, incb, ldb, strideB, (rocblas_int*)nullptr, 0,
-            0, iinfo2, batch_count, scalars, work1, work2, work3, work4, pivotval, pivotidx, iipiv,
-            iinfo1, optim_mem, false);
+        rocsolver_getrf_template<BATCHED, STRIDED, T>(handle, nb, nb, B, shiftB + (k + 1) * bsb,
+                                                      incb, ldb, strideB, (rocblas_int*)nullptr, 0,
+                                                      0, iinfo, batch_count, getrf_work, false);
 
-        ROCSOLVER_LAUNCH_KERNEL(geblttrf_update_info, gridReset, threads, 0, stream, info, iinfo2,
+        ROCSOLVER_LAUNCH_KERNEL(geblttrf_update_info, gridReset, threads, 0, stream, info, iinfo,
                                 (k + 1) * nb, batch_count);
     }
 
