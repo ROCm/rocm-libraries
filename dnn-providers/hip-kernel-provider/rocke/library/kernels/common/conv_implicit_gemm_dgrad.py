@@ -49,6 +49,8 @@ parameter carrying the tilde-decomposition record(s).
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass, field, replace as dc_replace
 from math import gcd as _gcd
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -58,7 +60,9 @@ from rocke.core.ir import (
     F16,
     F32,
     I32,
+    I64,
     IRBuilder,
+    VectorType,
     KernelDef,
     PtrType,
     Type,
@@ -75,6 +79,12 @@ from rocke.helpers.magic_division import (
     do_magic_division_dynamic,
 )
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
+from rocke.helpers.schedule import DS_READ as _SG_DS_READ
+from rocke.helpers.schedule import DS_WRITE as _SG_DS_WRITE
+from rocke.helpers.schedule import MFMA as _SG_MFMA
+from rocke.helpers.schedule import VMEM_READ as _SG_VMEM_READ
+from rocke.helpers.schedule import VALU as _SG_VALU
+from rocke.helpers.schedule import SALU as _SG_SALU
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.spec import ceil_div, kernel_name_join
 from rocke.helpers.tensor_view import make_buffer_resource
@@ -86,6 +96,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
     unmerge_magic_dynamic,
 )
+from kernels.common.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
@@ -107,13 +118,197 @@ from kernels.common._conv_implicit_gemm_common import (
 
 
 # ---------------------------------------------------------------------
+# K-packed transpose-on-store loader for the B (W) tile
+# ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class KPackedRowLoader:
+    """Global -> LDS loader of a ``(rows=n, cols=k)`` tile whose global run
+    lies along ``n`` (``vector_axis="row"``), storing ``kpack`` k values per
+    LDS write instead of one.
+
+    :class:`CoalescedTileLoader` in row mode gives each thread vectors at
+    k values a whole thread-block apart, so the transpose to the row-major
+    ``(n, k)`` LDS tile is one 16-bit store per element. Here a thread's
+    unit is ``kpack`` vectors at consecutive k of one n chunk, and lane
+    ``t`` takes k group ``t % (tile_cols / kpack)``: element ``i`` of the
+    ``kpack`` vectors is one ``kpack``-wide store at ``[n0 + i, k0]``, and
+    the lanes of a store walk consecutive k groups of one row (no bank
+    conflict beyond the store's own width). Same ``load_global`` /
+    ``store_lds`` / ``load`` API as the coalesced loader; the global reads
+    are the same bytes, in another lane order.
+    """
+
+    tile_rows: int
+    tile_cols: int
+    block_size: int
+    load_vec: int
+    kpack: int
+    elem_dtype: Type
+    # Lane order of the units: False = k groups fastest (consecutive lanes
+    # store consecutive k groups of one row); True = n chunks fastest
+    # (consecutive lanes read consecutive load_vec runs of one k row: whole
+    # cache lines per load; the stores then need a row swizzle).
+    n_fast: bool = False
+
+    @staticmethod
+    def fits(tile_rows, tile_cols, block_size, load_vec, kpack) -> bool:
+        if load_vec < 2 or tile_rows % load_vec or tile_cols % kpack:
+            return False
+        units = (tile_rows // load_vec) * (tile_cols // kpack)
+        return units >= block_size and units % block_size == 0
+
+    @classmethod
+    def choose_vec(cls, tile_rows, tile_cols, block_size, max_vec, kpack) -> int:
+        """The widest load width <= ``max_vec`` that fits, or 0 (none)."""
+        v = max_vec
+        while v >= 2:
+            if cls.fits(tile_rows, tile_cols, block_size, v, kpack):
+                return v
+            v //= 2
+        return 0
+
+    def _units(self, b: IRBuilder, tid: Value):
+        k_groups = self.tile_cols // self.kpack
+        units = (self.tile_rows // self.load_vec) * k_groups
+        c_kg = b.const_i32(k_groups)
+        out = []
+        n_chunks = self.tile_rows // self.load_vec
+        for e in range(units // self.block_size):
+            u = b.add(b.const_i32(e * self.block_size), tid)
+            if self.n_fast:
+                kg = b.div(u, b.const_i32(n_chunks))
+                nc = b.sub(u, b.mul(kg, b.const_i32(n_chunks)))
+            else:
+                nc = b.div(u, c_kg)
+                kg = b.sub(u, b.mul(nc, c_kg))
+            out.append(
+                (b.mul(nc, b.const_i32(self.load_vec)), b.mul(kg, b.const_i32(self.kpack)))
+            )
+        return out
+
+    def load_global(self, b: IRBuilder, *, tid: Value, descriptor, rsrc: Value):
+        from rocke.helpers.loads import _ELEM_BYTES
+
+        c_eb = b.const_i32(_ELEM_BYTES[self.elem_dtype.name])
+        c0 = b.const_i32(0)
+        c_oob = b.const_i32((1 << 31) - 1)
+        staged = []
+        for row, col in self._units(b, tid):
+            vs = []
+            for j in range(self.kpack):
+                off, valid = descriptor(b, row, b.add(col, b.const_i32(j)) if j else col)
+                off_b = b.mul(off, c_eb)
+                if valid is not None:
+                    off_b = b.select(valid, off_b, c_oob)
+                vs.append(b.buffer_load_vN(rsrc, off_b, c0, self.elem_dtype, self.load_vec))
+            staged.append((row, col, vs))
+        return staged
+
+    def store_lds(self, b: IRBuilder, *, smem_dst: Value, staged: list) -> None:
+        for row, col, vs in staged:
+            for i in range(self.load_vec):
+                r = b.add(row, b.const_i32(i)) if i else row
+                packed = b.vec_pack(
+                    [b.vec_extract(v, i) for v in vs], self.elem_dtype
+                )
+                b.smem_store_vN(smem_dst, [r, col], packed, self.kpack)
+
+    def load(self, b: IRBuilder, *, tid: Value, smem_dst: Value, descriptor, rsrc):
+        self.store_lds(
+            b,
+            smem_dst=smem_dst,
+            staged=self.load_global(b, tid=tid, descriptor=descriptor, rsrc=rsrc),
+        )
+
+
+@dataclass(frozen=True)
+class XTapKPackLoader:
+    """:class:`KPackedRowLoader` over the ``n_taps`` B (W) tiles of the x-halo
+    loop as one unit space, so the loads stay ``load_vec`` wide when one
+    tile has fewer kpack units than threads: unit ``u`` is tap
+    ``u // units_per_tap``; the last pass leaves whole waves idle (their reads
+    are out of range and their stores go to junk rows past the
+    ``n_taps * tile_rows`` tile rows). Staged rows are rows of that stacked
+    ``(n_taps * tile_rows + load_vec, tile_cols)`` LDS tile.
+    ``descriptor(b, x, row, col)`` gives the offset of tap ``x``.
+    """
+
+    n_taps: int
+    tile_rows: int
+    tile_cols: int
+    block_size: int
+    load_vec: int
+    kpack: int
+    elem_dtype: Type
+
+    @property
+    def units(self) -> int:
+        return self.n_taps * (self.tile_rows // self.load_vec) * (self.tile_cols // self.kpack)
+
+    @staticmethod
+    def fits(n_taps, tile_rows, tile_cols, load_vec, kpack, wave: int = 64) -> bool:
+        if load_vec < 2 or kpack < 2 or tile_rows % load_vec or tile_cols % kpack:
+            return False
+        units = n_taps * (tile_rows // load_vec) * (tile_cols // kpack)
+        return units % wave == 0
+
+    def load_global(self, b: IRBuilder, *, tid: Value, descriptor, rsrc: Value):
+        from rocke.helpers.loads import _ELEM_BYTES
+
+        c_eb = b.const_i32(_ELEM_BYTES[self.elem_dtype.name])
+        c0 = b.const_i32(0)
+        c_oob = b.const_i32((1 << 31) - 1)
+        k_groups = self.tile_cols // self.kpack
+        upt = (self.tile_rows // self.load_vec) * k_groups
+        c_upt = b.const_i32(upt)
+        c_kg = b.const_i32(k_groups)
+        units = self.units
+        staged = []
+        for e in range(-(-units // self.block_size)):
+            u = b.add(b.const_i32(e * self.block_size), tid)
+            partial = (e + 1) * self.block_size > units
+            active = b.cmp_lt(u, b.const_i32(units)) if partial else None
+            if active is not None:
+                u = b.select(active, u, c0)
+            x = b.div(u, c_upt)
+            lu = b.sub(u, b.mul(x, c_upt))
+            nc = b.div(lu, c_kg)
+            kg = b.sub(lu, b.mul(nc, c_kg))
+            row = b.mul(nc, b.const_i32(self.load_vec))
+            col = b.mul(kg, b.const_i32(self.kpack))
+            vs = []
+            for j in range(self.kpack):
+                off, valid = descriptor(b, x, row, b.add(col, b.const_i32(j)) if j else col)
+                off_b = b.mul(off, c_eb)
+                if active is not None:
+                    valid = active if valid is None else b.land(valid, active)
+                if valid is not None:
+                    off_b = b.select(valid, off_b, c_oob)
+                vs.append(b.buffer_load_vN(rsrc, off_b, c0, self.elem_dtype, self.load_vec))
+            srow = b.add(b.mul(x, b.const_i32(self.tile_rows)), row)
+            if active is not None:
+                srow = b.select(active, srow, b.const_i32(self.n_taps * self.tile_rows))
+            staged.append((srow, col, vs))
+        return staged
+
+    def store_lds(self, b: IRBuilder, *, smem_dst: Value, staged: list) -> None:
+        for row, col, vs in staged:
+            for i in range(self.load_vec):
+                r = b.add(row, b.const_i32(i)) if i else row
+                packed = b.vec_pack([b.vec_extract(v, i) for v in vs], self.elem_dtype)
+                b.smem_store_vN(smem_dst, [r, col], packed, self.kpack)
+
+
+# ---------------------------------------------------------------------
 # Dgrad-specific GEMM dimension helpers
 # ---------------------------------------------------------------------
 
 
 def _dg_M(p: ConvProblem) -> int:
     """Dgrad GEMM-M: input spatial positions."""
-    return p.N * p.Hi * p.Wi
+    return p.N * (p.Di if p.is_3d else 1) * p.Hi * p.Wi
 
 
 def _dg_N(p: ConvProblem) -> int:
@@ -123,7 +318,7 @@ def _dg_N(p: ConvProblem) -> int:
 
 def _dg_K(p: ConvProblem) -> int:
     """Dgrad GEMM-K (reduction): filter spatial × output channels (per group)."""
-    return p.Y * p.X * p.kpg
+    return (p.Z if p.is_3d else 1) * p.Y * p.X * p.kpg
 
 
 def dgrad_split_k_available(
@@ -274,6 +469,10 @@ class SubGemmParams:
     gemm_k_padded: int
 
     RECORD_NUM_FIELDS: int = 22
+    # pp_boxes 7 (pixel lists): the record's dX rows, one dX pixel index
+    # (n*Di + d)*Hi*Wi + h*Wi + w per GEMM row. Packed after
+    # the magic table by pack_sub_gemm_buffer; None = rows are a box.
+    row_list: Optional[Tuple[int, ...]] = field(default=None, repr=False, compare=False)
 
     def pack_i32(self) -> List[int]:
         """Pack this record as a list of 22 signed i32 values."""
@@ -347,7 +546,13 @@ def enumerate_sub_gemms(
             if h_tilde_slice <= 0 or w_tilde_slice <= 0:
                 continue
 
-            gemm_m = p.N * h_tilde_slice * w_tilde_slice
+            # 3-D (stride 1 along every axis, see _3d_conflict): every input
+            # depth row is one more slice of the record's rows, so the grid
+            # covers N*Di*Hi*Wi. The reduction stays the record's 2-D one
+            # (its kpg magic pair divides gemm_k by y_dot*x_dot): a 3-D
+            # kernel folds the record and reads its K extent, Z*Y*X*kpg,
+            # from p_dg_K.
+            gemm_m = p.N * (p.Di if p.is_3d else 1) * h_tilde_slice * w_tilde_slice
             gemm_n = p.cpg
             gemm_k = y_dot_slice * x_dot_slice * p.kpg
 
@@ -388,6 +593,313 @@ def enumerate_sub_gemms(
             sub_gemms.append(sg)
 
     return sub_gemms
+
+
+# CU budget of the pp_boxes split-K degrees (MI300A: 228 CUs); override with
+# ROCKE_PP_BOX_CUS.
+PP_BOX_SPLIT_CUS = int(os.environ.get("ROCKE_PP_BOX_CUS", "228"))
+
+
+def pp_box_sub_gemms(
+    p: ConvProblem,
+    tile_m: int,
+    tile_n: int,
+    nclass: int = 5,
+    *,
+    tile_k: int = 32,
+    max_split: int = 1,
+    cus: int = 0,
+) -> List[SubGemmParams]:
+    """The sub-GEMM records of a ``pp_boxes`` binary (stride 1, dilation 1).
+
+    Per spatial axis (H, W) the dX coordinates group into runs that can use
+    the same filter offsets: dX row h reads dY row h + pH - y, so y runs
+    over [h + pH - Ho + 1, h + pH] clamped to [0, Y). ``nclass`` 5 keeps
+    every distinct run (for a 3-tap axis: the two first rows, the interior,
+    the two last rows); 3 merges the leading runs into one and the trailing
+    runs into one (the union of their offsets). One record per (H run, W
+    run) box: rows N*[Di*]hs*ws (n', h - hb, w - wb), the box's filter rows
+    [yb, yb + ys) and columns [xb, xb + xs) (y_dot_slice / b_y_offset,
+    x_dot_slice / b_x_offset), dX row h = htl + hb (d_h_offset); K runs the
+    full depth (Z) of the filter.
+    """
+
+    def runs(n_in, n_out, pad, filt, nclass):
+        rng = []
+        for h in range(n_in):
+            lo = max(0, h + pad - n_out + 1)
+            hi = min(filt - 1, h + pad)
+            rng.append((lo, hi))
+        out = []  # (begin, size, flo, fhi)
+        for h, r in enumerate(rng):
+            if out and (out[-1][2], out[-1][3]) == r and out[-1][0] + out[-1][1] == h:
+                b0, sz, lo, hi = out[-1]
+                out[-1] = (b0, sz + 1, lo, hi)
+            else:
+                out.append((h, 1, r[0], r[1]))
+        if nclass == 1:
+            lo = min(q[2] for q in out)
+            hi = max(q[3] for q in out)
+            return [(0, n_in, lo, hi)]
+        if nclass == 3 and len(out) > 3:
+            # interior = the largest run; merge everything before / after it.
+            k = max(range(len(out)), key=lambda i: out[i][1])
+            merged = []
+            for part in (out[:k], [out[k]], out[k + 1 :]):
+                if not part:
+                    continue
+                b0 = part[0][0]
+                sz = sum(q[1] for q in part)
+                merged.append((b0, sz, min(q[2] for q in part), max(q[3] for q in part)))
+            out = merged
+        return out
+
+    if nclass in (7, 77):
+        return _pp_pixel_list_sub_gemms(
+            p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
+            axis_runs=runs, cheap_tail=nclass == 77,
+        )
+    # Classes per axis (D, H, W): 3 / 5 = (1, n, n); 33 / 55 = (n, n, n);
+    # three digits ``dhw`` = per axis (1 = one run, 3, 5), e.g. 131 = H only.
+    if nclass >= 100:
+        dc, hc, wc = nclass // 100, nclass // 10 % 10, nclass % 10
+    elif nclass >= 10:
+        dc = hc = wc = nclass // 11
+    else:
+        dc, hc, wc = 1, nclass, nclass
+    hr = runs(p.Hi, p.Ho, p.pH, p.Y, hc)
+    wr = runs(p.Wi, p.Wo, p.pW, p.X, wc)
+    if p.is_3d:
+        dr = runs(p.Di, p.Do, p.pD, p.Z, dc)
+    else:
+        dr = [(0, 1, 0, 0)]
+    boxes = [(d, h, w) for d in dr for h in hr for w in wr]
+    # Split-K degree per box (max_split > 1): K slices of the box's tiles,
+    # raised greedily on the box whose slice is longest while the launch
+    # stays within PP_BOX_SPLIT_CUS workgroups (one round).
+    tiles_b, work_b = [], []
+    for (db, ds, zlo, zhi), (hb, hs, ylo, yhi), (wb, ws, xlo, xhi) in boxes:
+        tiles_b.append(ceil_div(p.N * ds * hs * ws, tile_m) * ceil_div(p.cpg, tile_n))
+        work_b.append(
+            (yhi - ylo + 1) * (xhi - xlo + 1) * (zhi - zlo + 1)
+            * ceil_div(p.kpg, tile_k)
+        )
+    split = [1] * len(boxes)
+    budget = cus or PP_BOX_SPLIT_CUS
+    if max_split > 1:
+        total = sum(tiles_b)
+        while True:
+            i = max(range(len(boxes)), key=lambda j: ceil_div(work_b[j], split[j]))
+            if split[i] >= max_split or total + tiles_b[i] > budget:
+                break
+            split[i] += 1
+            total += tiles_b[i]
+    # Longest slices first: the dispatcher hands out blocks in order, so a
+    # budget of several rounds is packed largest-first.
+    order = sorted(
+        range(len(boxes)), key=lambda j: -ceil_div(work_b[j], split[j])
+    )
+    sgs: List[SubGemmParams] = []
+    start = 0
+    for bi in order:
+        (db, ds, zlo, zhi), (hb, hs, ylo, yhi), (wb, ws, xlo, xhi) = boxes[bi]
+        if True:  # noqa: SIM108 (keeps the record build in one block)
+            ys, xs = yhi - ylo + 1, xhi - xlo + 1
+            if ys <= 0 or xs <= 0:
+                raise ValueError("pp_boxes: a dX row has no filter tap")
+            gemm_m = p.N * ds * hs * ws
+            tiles = tiles_b[bi] * split[bi]
+            sgs.append(
+                SubGemmParams(
+                    i_ytilde=0,
+                    i_xtilde=0,
+                    y_dot_slice=ys,
+                    x_dot_slice=xs,
+                    h_tilde_slice_begin=hb,
+                    h_tilde_slice=hs,
+                    w_tilde_slice_begin=wb,
+                    w_tilde_slice=ws,
+                    gemm_m=gemm_m,
+                    gemm_n=p.cpg,
+                    gemm_k=ys * xs * p.kpg,
+                    block_start=start,
+                    block_end=start + tiles,
+                    a_embed_h_coeff=ds,  # pp_boxes: depth run size
+                    a_embed_w_coeff=db,  # pp_boxes: depth run origin
+                    b_y_stride=zlo,  # pp_boxes: first filter depth
+                    b_y_offset=ylo,
+                    b_x_stride=split[bi],  # pp_boxes: the box's split degree
+                    b_x_offset=xlo,
+                    d_h_stride=1,
+                    d_h_offset=hb,
+                    d_w_stride=1,
+                    d_w_offset=wb,
+                    gemm_k_padded=zhi - zlo + 1,  # pp_boxes: filter depths
+                )
+            )
+            start += tiles
+    return sgs
+
+
+def _pp_pixel_list_sub_gemms(
+    p: ConvProblem,
+    tile_m: int,
+    tile_n: int,
+    *,
+    tile_k: int,
+    max_split: int,
+    cus: int,
+    axis_runs,
+    cheap_tail: bool = False,
+) -> List[SubGemmParams]:
+    """``pp_boxes`` 7 (77: ``cheap_tail``): records of M tiles of up to ``tile_m`` dX pixels
+    that need not form a box (their indices ride in the record's row list),
+    running the union of its pixels' filter-offset ranges per axis.
+
+    The dX pixels group into exact classes (per axis: the run of filter
+    offsets the coordinate can use, as pp_boxes 5 along D, H and W). Each
+    class fills whole tiles in pixel order; the class remainders are packed
+    together, each tile grown with the remainder that widens its offset box
+    least. A record is the full dX as a box (origin 0, extents Di, Hi, Wi),
+    so a row's pixel index decodes as a box-local row would; its filter
+    offsets are the tile's union ranges. Split-K degrees and the order are
+    pp_boxes' (longest slice first, within ``cus`` workgroups).
+    """
+    if p.is_3d:
+        dr = axis_runs(p.Di, p.Do, p.pD, p.Z, 5)
+    else:
+        dr = [(0, 1, 0, 0)]
+    hr = axis_runs(p.Hi, p.Ho, p.pH, p.Y, 5)
+    wr = axis_runs(p.Wi, p.Wo, p.pW, p.X, 5)
+    Di = p.Di if p.is_3d else 1
+    hw = p.Hi * p.Wi
+    classes = []  # (pixel list, (zlo, zhi, ylo, yhi, xlo, xhi))
+    for db, ds, zlo, zhi in dr:
+        for hb, hs, ylo, yhi in hr:
+            for wb, ws, xlo, xhi in wr:
+                if zhi < zlo or yhi < ylo or xhi < xlo:
+                    raise ValueError("pp_boxes: a dX row has no filter tap")
+                pix = [
+                    (n * Di + d) * hw + h * p.Wi + w
+                    for n in range(p.N)
+                    for d in range(db, db + ds)
+                    for h in range(hb, hb + hs)
+                    for w in range(wb, wb + ws)
+                ]
+                classes.append((pix, (zlo, zhi, ylo, yhi, xlo, xhi)))
+
+    def taps(r):
+        return (r[1] - r[0] + 1) * (r[3] - r[2] + 1) * (r[5] - r[4] + 1)
+
+    # cheap_tail (pp_boxes 77): the launch's one partial tile (pixels mod
+    # tile_m) takes that many pixels of the class with the fewest filter
+    # offsets that has them, instead of the packer's leftovers: it costs a
+    # whole tile of MFMAs either way, so give it the shortest K.
+    _tail = None
+    _r = sum(len(c[0]) for c in classes) % tile_m
+    if cheap_tail and _r:
+        ci = min(
+            (i for i in range(len(classes)) if len(classes[i][0]) >= _r),
+            key=lambda i: (taps(classes[i][1]), i),
+        )
+        pix, rr = classes[ci]
+        _tail = (pix[:_r], rr)
+        classes[ci] = (pix[_r:], rr)
+
+    def union(a, c):
+        return (
+            min(a[0], c[0]), max(a[1], c[1]), min(a[2], c[2]),
+            max(a[3], c[3]), min(a[4], c[4]), max(a[5], c[5]),
+        )
+
+    tiles = []  # (rows, ranges)
+    rem = []
+    for pix, r in classes:
+        full = len(pix) // tile_m * tile_m
+        for i in range(0, full, tile_m):
+            tiles.append((pix[i : i + tile_m], r))
+        if full < len(pix):
+            rem.append([pix[full:], r])
+    rem.sort(key=lambda x: (-taps(x[1]), x[0][0]))
+    while rem:
+        rows, r = rem.pop(0)
+        rows = list(rows)
+        while len(rows) < tile_m and rem:
+            j = min(
+                range(len(rem)),
+                key=lambda q: (taps(union(r, rem[q][1])), -len(rem[q][0]), q),
+            )
+            take = min(tile_m - len(rows), len(rem[j][0]))
+            rows += rem[j][0][:take]
+            r = union(r, rem[j][1])
+            rem[j][0] = rem[j][0][take:]
+            if not rem[j][0]:
+                rem.pop(j)
+        tiles.append((sorted(rows), r))
+
+    if _tail is not None:
+        tiles.append((sorted(_tail[0]), _tail[1]))
+    # Tiles of one offset box form one record (several M tiles; a partial
+    # tile last), so their workgroups read the same W slices together.
+    groups: Dict[tuple, List[List[int]]] = {}
+    for rows, r in tiles:
+        groups.setdefault(r, []).append(rows)
+    tiles = []
+    for r, lst in groups.items():
+        lst.sort(key=lambda q: (len(q) < tile_m, q[0]))
+        tiles.append(([x for q in lst for x in q], r))
+    nt = ceil_div(p.cpg, tile_n)
+    kt = ceil_div(p.kpg, tile_k)
+    mt = [ceil_div(len(rows), tile_m) for rows, _r in tiles]
+    work = [taps(r) * kt for _rows, r in tiles]
+    split = [1] * len(tiles)
+    budget = cus or PP_BOX_SPLIT_CUS
+    if max_split > 1:
+        total = sum(mt) * nt
+        while True:
+            i = max(range(len(tiles)), key=lambda j: (ceil_div(work[j], split[j]), -j))
+            if split[i] >= max_split or total + mt[i] * nt > budget:
+                break
+            split[i] += 1
+            total += mt[i] * nt
+    order = sorted(range(len(tiles)), key=lambda j: (-ceil_div(work[j], split[j]), j))
+    sgs: List[SubGemmParams] = []
+    start = 0
+    for j in order:
+        rows, (zlo, zhi, ylo, yhi, xlo, xhi) = tiles[j]
+        ys, xs = yhi - ylo + 1, xhi - xlo + 1
+        blocks = mt[j] * nt * split[j]
+        sgs.append(
+            SubGemmParams(
+                i_ytilde=0,
+                i_xtilde=0,
+                y_dot_slice=ys,
+                x_dot_slice=xs,
+                h_tilde_slice_begin=0,
+                h_tilde_slice=p.Hi,
+                w_tilde_slice_begin=0,
+                w_tilde_slice=p.Wi,
+                gemm_m=len(rows),
+                gemm_n=p.cpg,
+                gemm_k=ys * xs * p.kpg,
+                block_start=start,
+                block_end=start + blocks,
+                a_embed_h_coeff=Di,  # the box: all of dX
+                a_embed_w_coeff=0,
+                b_y_stride=zlo,
+                b_y_offset=ylo,
+                b_x_stride=split[j],
+                b_x_offset=xlo,
+                d_h_stride=1,
+                d_h_offset=0,
+                d_w_stride=1,
+                d_w_offset=0,
+                gemm_k_padded=zhi - zlo + 1,
+                row_list=tuple(rows),
+            )
+        )
+        start += blocks
+    return sgs
 
 
 def is_patch_problem(p: ConvProblem) -> bool:
@@ -482,6 +994,20 @@ def pack_sub_gemm_buffer(
         buf.extend(record)
     for sg in sub_gemms:
         buf.extend(sub_gemm_magic_pairs(sg))
+    if any(sg.row_list is not None for sg in sub_gemms):
+        # pp_boxes 7 (pixel lists), after the magic table: one row base per
+        # record, then each record's rows padded to whole M tiles (the
+        # padding repeats the first row: in bounds, never stored).
+        slots = []
+        for sg in sub_gemms:
+            rows = list(sg.row_list or (0,))
+            slots.append(rows + [rows[0]] * (-len(rows) % tile_m))
+        base = 0
+        for rows in slots:
+            buf.append(base)
+            base += len(rows)
+        for rows in slots:
+            buf.extend(rows)
     return buf
 
 
@@ -604,12 +1130,40 @@ def make_dgrad_dx_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescr
     )
 
 
-def make_dgrad_dx_descriptor_dynamic(b: IRBuilder, params: Dict[str, Value]):
-    """AOT counterpart of :func:`make_dgrad_dx_descriptor`: ``(m, c) -> NHWC``.
+def make_dgrad_dx_descriptor_dynamic(
+    b: IRBuilder, params: Dict[str, Value], *, is_3d: bool = False
+):
+    """AOT counterpart of :func:`make_dgrad_dx_descriptor`: ``(m, c) -> N[D]HWC``.
 
-    ``m -> (n, hi, wi)`` peels one extent at a time, so it divides by ``Wi``
-    and then by ``Hi``; the host supplies a magic pair per extent.
+    ``m -> (n, [di,] hi, wi)`` peels one extent at a time, so it divides by
+    ``Wi``, then by ``Hi`` (then by ``Di``); the host supplies a magic pair per
+    extent.
     """
+    if is_3d:
+        return DynamicTensorDescriptor.create(
+            "dX_ndhwc",
+            coord_names=["n", "di", "hi", "wi", "c"],
+            strides=[
+                params["p_dX_stride_n"],
+                params["p_dX_stride_di"],
+                params["p_dX_stride_hi"],
+                params["p_dX_stride_wi"],
+                b.const_i32(1),
+            ],
+        ).transform(
+            unmerge_magic_dynamic(
+                "m",
+                into=["n", "di", "hi", "wi"],
+                magic_triples=[
+                    (
+                        params[f"p_magic_m_{d}_mult"],
+                        params[f"p_magic_m_{d}_shift"],
+                        params[f"p_{d}"],
+                    )
+                    for d in ("Di", "Hi", "Wi")
+                ],
+            ),
+        )
     return DynamicTensorDescriptor.create(
         "dX_nhwc",
         coord_names=["n", "hi", "wi", "c"],
@@ -668,6 +1222,10 @@ def _default_lds_k_pad(tile_k: int) -> int:
     """Row pad of the M-outer LDS tiles when ``lds_k_pad`` is None."""
     return 8 if tile_k >= 16 else 0
 
+
+# tapk_pingpong 4/5: largest filter extent per axis of the straight-line tap
+# mask (see _pp_fast_a).
+_PP_MAX_FILTER = 3
 
 # Upper bound on fp32 accumulators per lane accepted by is_valid_dgrad_spec.
 # Mirrors ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE.
@@ -830,6 +1388,321 @@ class DgradConvSpec:
     # the wave64 MFMA loop, and replaces the loop uniform_k_decode would build
     # (setting both is rejected). Default False; tags the name ``tapk``.
     tap_outer_k: bool = False
+    # Software pipelining of the tap-outer K loop (needs tap_outer_k). The
+    # (tap, chunk) nest runs as one flat loop over its tiles, carrying the next
+    # tile's (k_out chunk, x, y[, z]) as uniform iteration arguments, and each
+    # tile's global reads are issued before the previous tile's MFMAs, so the
+    # load latency hides behind the math instead of stalling every tile.
+    #   1: one LDS buffer; per tile: read tile t+1 into registers, MFMAs of
+    #      tile t, barrier, store tile t+1, barrier.
+    #   2: two LDS buffers (A and B, twice the LDS); the loop body is unrolled
+    #      twice so each phase binds a build-time buffer: read t+1, MFMAs of t
+    #      from one buffer, store t+1 into the other, one barrier per tile. An
+    #      odd tile count zero-fills the trailing phase (its dY reads are
+    #      predicated off).
+    #   3: one LDS buffer, two tiles ahead: tile t+1 is held in registers
+    #      across the loop back edge and tile t+2's reads are issued before
+    #      tile t's MFMAs (twice the staging registers of 1).
+    # Same reduction order as the plain tap-outer loop. Default 0 (off); tags
+    # ``tpf<n>``.
+    tapk_prefetch: int = 0
+    # dY reuse across the filter's x taps in the tap-outer K loop (needs
+    # tap_outer_k and pW == 0). At stride 1 and dilation 1, tap (.., x) of dX
+    # pixel m reads the dY pixel tap (.., 0) of pixel m - x reads, whenever
+    # both lie in one dX row (wi >= x); with pW == 0 a pixel with wi < x has
+    # no dY pixel for tap x at all (wo = wi - x < 0). So the loop runs the
+    # (z, y) taps outer and the chunks inner, stages per iteration the tile's
+    # tap-(z, y, 0) dY rows plus the X-1 rows before it in LDS once, and the X
+    # x taps (unrolled; X is baked) read it at a row shift of -x, a lane with
+    # wi < x reading a trailing all-zero LDS row instead. The X W tiles of the
+    # iteration are staged side by side. X times fewer dY reads and barriers.
+    # Default False; tags ``xh``.
+    tapk_xhalo: bool = False
+    # Store the B (W) tile ``b_kpack`` k values per LDS write (2, 4 or 8; 0 =
+    # off) with KPackedRowLoader, where it would otherwise be transposed on
+    # the store one element at a time (vector_axis "row", M-outer B: every
+    # target without an LDS transpose read). Each thread then loads b_kpack
+    # vectors at consecutive k of one c chunk. The tile must split into
+    # whole units per thread (KPackedRowLoader.fits). Default 0; tags
+    # ``bkp<n>``.
+    b_kpack: int = 0
+    # With tapk_xhalo and tapk_prefetch 1/3: interleave the next tile's
+    # global loads among the MFMAs, one load every ``tapk_ilv`` MFMAs
+    # (sched_group_barrier VMEM_READ 1 / MFMA n), instead of issuing them all
+    # as one block ahead of the MFMAs. Pays on 1-wave/SIMD tiles, where the
+    # in-order wave otherwise stalls on TA back-pressure at every load issue
+    # with no co-resident wave to cover it. Default 0 (block issue); tags
+    # ``ilv<n>``.
+    tapk_ilv: int = 0
+    # With tapk_xhalo: stage exactly tile_m + X - 1 dY rows (the tile's own
+    # rows by whole loader passes plus the X - 1 rows before it on the first
+    # lanes) instead of padding them to whole loader passes. Frees LDS (e.g.
+    # 41 KB -> 32.5 KB at t256 tile_k 32 with kpad 4: 2 WG/CU). Default False;
+    # tags ``xhx``.
+    xhalo_exact: bool = False
+    # XCD count of an XCD-contiguous tile order that also applies to
+    # ungrouped launches (see xcd_tile_order_xcds); 0 = the per-target
+    # default of _XCD_TILE_ORDER_ARCHES (grouped launches only). Tags
+    # ``xcd<n>``.
+    xcd_remap: int = 0
+    # Output-plane band order of the M tiles on top of the XCD tile order:
+    # each XCD's run of tiles walks bands of ``m_band`` tiles of one dX plane
+    # (Hi*Wi pixels) through every plane, so its concurrent tiles' dY rows
+    # stay in its L2 (kernels/common/conv_m_band.py). Needs the XCD tile
+    # order and the folded (stride-1) record. 0 = off. Tags ``mb<n>``.
+    m_band: int = 0
+    # With tapk_xhalo (tapk_lds_ahead / xh_defer emitter, xh_a_k4, xh_epi 1):
+    # M-strided wave rows. Fragment mi's atom row r is tile pixel wave_m0 +
+    # mfmas_per_warp_m * r + mi (instead of wave_m0 + mi * atom_m + r), so
+    # tap x of fragment mi >= 1 reads exactly tap x-1 of fragment mi-1 (the
+    # same registers, no LDS read): per k atom mfmas_m + X - 1 A fragment
+    # reads instead of X * mfmas_m. (Exact because pW == 0, stride and
+    # dilation 1 give Wi - Wo == X - 1: the pixel before a dX row's first
+    # pixel is loaded as zero.) The ak4 slab rows are stored at row ^ ((row
+    # >> 4) & (mfmas_m - 1)) so the strided 16-lane reads stay
+    # conflict-free; the epilogue maps the C rows back. Default False; tags
+    # ``xsm``.
+    xh_stride_m: bool = False
+    # x-halo prefetch loop (xh_a_k4, xhalo_exact, xh_b_wide, xh_b_kpad, two
+    # k atoms per tile): direct-to-LDS A loads (buffer_load_dword ... lds).
+    # 1 = a k-half ring: A and B each as two buffers of one k atom; half-step
+    # j waits + barriers once, then DMAs the dY rows of half-step j+1 into
+    # the other A buffer (no VGPR staging, no ds_write), writes its B tile
+    # (loaded to VGPRs one half-step earlier) and runs the MFMAs of j.
+    # Default 0; tags ``xdl<n>``.
+    xh_dlds: int = 0
+    # xh_epi 1 (x-halo cshuffle epilogue): when the dX pixel strides are
+    # row-major consistent (checked on the kernargs, one uniform branch), a
+    # store's offset is m * stride_w + c -- no per-store (n, d, h, w)
+    # decode (3 magic divisions + 4 stride products) -- and the bf16 pairs
+    # are packed with one v_perm_b32 each. Default False; tag ``xel``.
+    xh_epi_lin: bool = False
+    # x-halo (tapk_xhalo) cshuffle epilogue: its barriers LDS-only (s_waitcnt
+    # lgkmcnt(0) + s_barrier), so the first one does not wait for the K
+    # loop's over-fetched next-tile loads (LLVM still waits before reusing
+    # their registers). Default False; tag ``elb`` (the identity field fwd
+    # uses for the same knob).
+    epi_lds_barriers: bool = False
+    # x-halo prefetch loop with xh_fast_a 1 and xh_b_wide: the tile's tap
+    # offset moves the buffer base (dY rsrc at the (z, y, chunk) tap, W rsrc
+    # at the tile's W slice; scalar ops) instead of being added to every
+    # load's offset, and an A row's validity is a high offset bit (offset =
+    # pix | bad << 30 elements, out of range when set) instead of a select:
+    # 2 VALU per A load (was 4), none per B load (was 1). dY must stay below
+    # 2^30 elements. Default False; tag ``xtr``.
+    xh_tap_rsrc: bool = False
+    # x-halo prefetch loop (tpf 3): the dY rows of the (z, chunk)'s y taps as
+    # an input-row ring. The value is the dX row width Wi it is built for
+    # (tap y + 1 of pixel q is tap y of pixel q - Wi in the same plane): the
+    # y taps run fastest, LDS A slot of tile row a at tap y is
+    # (a - y * Wi) mod P (P = the smallest multiple of Wi holding the
+    # tile_m + X - 1 rows), and taps y > 0 load and store only the Wi new
+    # rows (s1/s2 Wi 130: A loads -33%; Wi 66: -50%). A tile whose rows past
+    # Wi - (X - 1) hold the first row of an (n, d) plane runs it with full loads. Serves
+    # problems of that Wi only. ``+ 1000 * d`` (d >= 2): every y step with
+    # y % d == 0 reloads all rows (fewer shift classes, i.e. address VGPRs:
+    # Wi 66 has three over Y = 3, d = 2 keeps two). Default 0; tag
+    # ``xyr<value>`` (the identity field fwd uses for its ring).
+    xh_yring: int = 0
+    # Keep the MFMA accumulators in arch VGPRs (LLVM "amdgpu-agpr-alloc"=
+    # "0,0"). Default False; tags ``nag``.
+    no_agpr: bool = False
+    # cshuffle epilogue: stage C through LDS in ``cshuffle_m_chunks`` row
+    # slabs (tile_m / m_chunks rows each), so the C staging buffer no longer
+    # sets the kernel's LDS (and occupancy). Default 1; tags ``mch<n>``.
+    cshuffle_m_chunks: int = 1
+    # With tapk_xhalo and tapk_prefetch 1/3: read the LDS fragments of the
+    # MFMA step ``tapk_lds_ahead`` steps ahead (a step = one x tap's k atom),
+    # a software pipeline over the whole tile, so the ds_read latency is
+    # hidden behind MFMAs on 1-wave/SIMD tiles. Default 0 (reads right before
+    # their MFMAs); tags ``lda<n>``.
+    tapk_lds_ahead: int = 0
+    # With tapk_xhalo and tapk_prefetch 1/3: the K loop's two barriers drain
+    # LDS only (s_waitcnt lgkmcnt(0) + s_barrier), not VMEM, so the global
+    # loads of tiles ahead stay in flight across them. Default False; tags
+    # ``lsb``.
+    tapk_lds_barrier: bool = False
+    # With tapk_xhalo and tapk_prefetch 1/3: s_setprio 1 over the loop's load
+    # issue + MFMA block, 0 before its barrier (1); 2 also clusters the phase:
+    # next-tile loads, then all LDS fragment reads, then all MFMAs (Triton's
+    # block-ping-pong loop form; needs tapk_ilv == tapk_lds_ahead == 0).
+    # Default 0; tags ``sp<n>``.
+    tapk_setprio: int = 0
+    # With tapk_xhalo: XOR-swizzle the 16-byte chunks of the unpadded A (dY
+    # halo) and B (W) LDS rows, keyed on the row's 256-byte line (the fixed
+    # fwd lds_xor key), instead of padding the rows (lds_k_pad must be 0).
+    # Default False; tags ``lxor``.
+    lds_xor: bool = False
+    # With tapk_xhalo, tapk_prefetch 1/3 and b_kpack: load the X B (W) tiles
+    # of an x-halo tile as one stacked tile (XTapKPackLoader) at the full
+    # load width, instead of one tile at a time at the width a single tile
+    # admits. Default False; tags ``bw``.
+    xh_b_wide: bool = False
+    # With tapk_xhalo and lds_xor: pad the B (W) LDS rows by this many
+    # elements instead of swizzling them (A stays swizzled): the kpack B
+    # stores of lanes 16 rows apart then fall on different banks. Default 0;
+    # tags ``bpad<n>``.
+    xh_b_kpad: int = 0
+    # With tap_outer_k and tapk_prefetch 1 (the plain loop, no x-halo) and 8
+    # waves: the K loop as a block ping-pong. Per K tile four phases, each
+    # closed by an LDS-only barrier: [mem A] the next tile's global loads and
+    # every LDS fragment read of this tile; [compute A] the first half of the
+    # MFMAs under s_setprio 1; [mem B] the next tile's LDS stores; [compute B]
+    # the other half. The upper four waves run one barrier behind the lower
+    # four (one extra barrier before the loop, the matching one after it), so
+    # the two waves of a SIMD alternate memory and MFMA phases. 1 = that loop;
+    # 2 = the same with kpack-2 fragment reads (one 16-byte read per lane
+    # feeds two k atoms); 3 = 2 with the b_kpack B loads n-chunk-fastest
+    # across lanes (whole cache lines per load; KPackedRowLoader.n_fast) and
+    # the lds_xor key also XOR the row's 8-row group; 4 = 3 with the dY loads
+    # addressed through a per-row tap mask built before the loop (no
+    # per-tile bounds checks; <= 31 filter taps; needs tapk_pp_sched); 5 = 4
+    # with the lower half's [mem A] barrier not draining its LDS reads. With lds_xor the A/B rows are unpadded and their
+    # 16-byte chunks XOR the row index. Default 0; tags ``bpp<n>``.
+    tapk_pingpong: int = 0
+    # With tapk_pingpong: where the next tiles' global loads go. 0: tile
+    # t+1's loads in [mem A]; 1: tile t+2's loads in [mem B] right after tile
+    # t+1's LDS stores, carried in registers across the back edge ([mem A]
+    # is then the fragment reads alone); 2: as 1, but the loads (and their
+    # address math) interleaved with the MFMAs of [compute B]; 3: as 2, in
+    # [compute A] (two staging register sets live there); 4: the A loads in
+    # [compute A], the B loads in [compute B]; 5: the A loads in [mem B] (as
+    # 1), the B loads in [compute B] (as 2); 6: the B loads in [mem B], the
+    # A loads in [compute B]; 11: the B loads in [compute A] (a second B
+    # staging set: the partner half's [mem A] issues no global loads), the A
+    # loads in [mem B]; 12: the B loads in [compute A], the A loads in
+    # [compute B]. Default 0; tags ``pps<n>``.
+    tapk_pp_sched: int = 0
+    # With tapk_pingpong and the cshuffle epilogue (split_k 1, 16x16 bf16):
+    # stage C through LDS with the 16-byte chunks of a row XOR its 4-row
+    # group, so the four 4-row groups of one ds_write_b16 land on different
+    # banks (the default staging has them 4 x 512 B apart: one bank). 1 =
+    # that; 2 = 1 with the MFMA operands swapped (the accumulators hold C
+    # transposed: a lane's 4 values are 4 consecutive channels of one
+    # pixel), so a staging write is one ds_write_b64 per atom instead of
+    # four ds_write_b16, its 16-byte chunks XOR the row's low 3 bits; and
+    # the f32 -> bf16 rounding without the NaN fix-up (_pp_f32_to_bf16).
+    # Default 0; tags ``ppe<n>``.
+    tapk_pp_epi: int = 0
+    # split_k > 1 on the x-halo / ping-pong cshuffle atomic store: one bf16
+    # pair per lane, lanes contiguous along C (CShuffleEpilogue.
+    # atomic_pair_lanes) -- an atomic instruction covers 256 contiguous bytes
+    # instead of 64 pairs at a store_vec stride. Tags ``sapl``.
+    split_atomic_pairs: bool = False
+    # With tapk_pingpong 4/5 (split_k 1, stride 1; launched for groups == 1 only): a persistent
+    # grid. The launch is capped at the CUs' resident workgroups (see
+    # dgrad_persistent_grid); each workgroup walks the tiles bid, bid +
+    # gridDim, ... (the XCD order applied to that walk) and issues the next
+    # tile's first two K tiles' global loads right after its K loop, so
+    # their latency hides behind the epilogue instead of a new workgroup's
+    # prologue. Any grid is correct (the walk strides by the launched
+    # gridDim, read from the dispatch packet). 1 = that. 2 = 1 for the
+    # first floor(tiles / gridDim) * gridDim tiles, then the remaining tiles'
+    # K tiles split evenly over the workgroups (stream-K: a workgroup's
+    # range covers at most two tiles' K slices, each accumulated into dX
+    # with packed bf16 atomics; the launcher zeroes those dX rows first);
+    # needs the cshuffle epilogue and tapk_pp_epi 0. Default 0; tags
+    # ``ppp<n>``.
+    tapk_pp_persist: int = 0
+    # With tapk_pingpong 4/5: the ping-pong loop over x-halo steps (one (z,
+    # y, channel chunk) per loop iteration, the X x taps unrolled as X
+    # ping-pong sub-tiles). The dY tile is loaded once per step as a halo
+    # tile (the tile's tile_m pixels plus the X - 1 before it, at the x = 0
+    # tap) and each x tap reads its fragments X - 1 - x rows down (the zero
+    # row where wi < x), so the dY loads, their LDS stores and their address
+    # work drop X-fold; the W tile is still one per sub-tile. Serves pW == 0
+    # with the filter width baked (filter_w). 1 = the next step's dY loads
+    # (and each next sub-tile's W loads) interleaved with the MFMAs of
+    # [compute B] of the step's first sub-tile, stored in [mem B] of its
+    # last. 2 = the gapped halo: LDS row of pixel m is back + (m - m_base) +
+    # back * (W rows started since m_base), m_base = m0 - back, so the back
+    # rows before every W row's first pixel are zero rows and tap x's
+    # fragment row is the x = 0 row minus x -- one address per row for all
+    # taps, no per-tap select; rows padded by 8 elements (16 B) instead of
+    # swizzled (conflict-free at any row shift). Serves Wi >= 32
+    # (PP_XHALO_GAP_MIN_WI). 3 = 2 with the next step's dY loads in [compute
+    # B] of sub-tile X - 2 (shorter register lifetime). 4 = register-shift
+    # halo: only the x = 0 sub-tile reads its dY fragments from LDS (plus
+    # one extra 16-row atom per wave, below its first row); tap x + 1's
+    # fragments are tap x's moved one row down across the lanes (DPP
+    # row_shr 1, lane 0 from the previous atom's lane 15). Exact because
+    # pW == 0, dW == 1 make Wi - Wo = X - 1: the row before a W row's first
+    # pixel is a masked (zero) pixel. LDS reads of dY drop X-fold too; 16x16
+    # atoms only; loads as 3. Default 0; tags ``ppx<n>``.
+    tapk_pp_xhalo: int = 0
+    # With tapk_pingpong 4/5 (3-D, split_k 1): the K loop runs only the z
+    # taps some row of the tile can use. A tile inside one image whose dX
+    # planes di0..di1 sit at the D border (di + pD - z outside [0, Do) for
+    # every row) skips those z taps' K tiles -- MFMAs on all-zero dY rows
+    # (the halo form's pad waste along D). 1 = that. Default 0; tag ``zt<n>``.
+    tapk_ztrim: int = 0
+    # With tapk_pingpong 3-5 (n-fast kpack-4 B loads) and tapk_pp_sched: the
+    # B (W) LDS tile as K0 slabs of 4-element k groups (slab kg holds n x 4,
+    # row n of slab kg at element (kg * tile_n + n) * 4). The n-fast loader's
+    # lanes (consecutive n, one k group per wave) then store contiguous bytes:
+    # one 16-byte store per 2 rows instead of two 8-byte stores into one
+    # 64-byte column of a row-major tile (4- to 16-way bank conflicts: the
+    # B stores were ~90% of the kernel's LDS bank-conflict cycles on s2/s3).
+    # Each B fragment read becomes two 8-byte reads of consecutive rows of two
+    # slabs (conflict-free). 1 = that; 2 = 1 with the B loads 2 wide, so a
+    # thread's unit is 2 rows (one 16-byte store; tile_n 256 otherwise loads
+    # 4 wide and its 32-byte runs store 2-way conflicted). 3 = 1 with slab
+    # row n stored at n ^ (bit 4 of n << 1): the 4-row units' first and
+    # second 16-byte stores each land on 8 distinct 16-byte slots, and a
+    # fragment read's 16 rows stay one contiguous 128 bytes. Default 0; tag
+    # ``pbs<n>``.
+    tapk_pp_bslab: int = 0
+    # With tapk_xhalo and lds_xor: store the A (dY halo) LDS tile as K0 x Mp x
+    # 4 (slabs of 4-element k groups, Mp rows each) instead of XOR-swizzled
+    # rows. An MFMA operand fetch (16 lanes, 16 consecutive rows, 8 bytes
+    # each) then reads 128 contiguous bytes, conflict-free at every x-tap row
+    # shift (the 32-byte rows of tile_k 16 leave the lxor key 2 phases: a
+    # 2-way conflict on every A fragment read); each 16-byte store becomes
+    # two 8-byte stores, kept conflict-free by the slab pitch Mp (see
+    # xh_a_k4_rows). Default False; tags ``ak4``.
+    xh_a_k4: bool = False
+    # With tapk_xhalo and tapk_prefetch 1/3, bit mask: 1 = issue the next
+    # tile's B (W) loads before its A (dY) loads; 2 = s_waitcnt lgkmcnt(0) at
+    # the loop top (nothing is pending there; it clears a kernarg s_load the
+    # preheader leaves in flight, which otherwise makes LLVM wait lgkmcnt(0)
+    # before the first MFMA of every iteration instead of a partial count).
+    # 4 = (tapk_prefetch 3) two tiles per loop iteration, so the tile loaded
+    # two ahead stays in its registers (a one-tile body copies them at the
+    # latch, after a vmcnt(0) that drains the loads just issued).
+    # Default 0; tags ``xo<n>``.
+    xh_order: int = 0
+    # With tapk_xhalo and tapk_prefetch 1/3: the MFMAs of the last
+    # ``xh_defer`` MFMA steps (a step = one x tap's k atom) of a tile run after
+    # the loop's first barrier, interleaved with the next tile's LDS stores
+    # (their fragments are read before it) -- fwd's defer_mfma. Default 0;
+    # tags ``xdf<n>``.
+    xh_defer: int = 0
+    # With tapk_xhalo (3-D or 2-D, filters <= 3 per axis): the dY halo loads
+    # addressed through per-row values computed once before the K loop --
+    # the row's dY pixel offset at tap (0, 0, 0) and a bit mask of the (z,
+    # y) taps it may read (wi < Wo, m inside the GEMM) -- so a tile's load is
+    # that offset plus the tile's uniform tap offset, valid where the tap's
+    # bit is set: no per-tile pixel decode (three magic divisions) and bounds
+    # checks per load. 1 = that. 2 = 1 with those values computed after
+    # tile 0's loads are issued (the prefetch loops; tile 0 itself loads
+    # through the per-load decode). Default 0; tags ``xfa<n>``.
+    xh_fast_a: int = 0
+    # With tapk_xhalo and the cshuffle epilogue (split_k 1, bf16 dX, 16x16
+    # or 32x32 bf16 atoms): the K loop's MFMAs take their operands swapped,
+    # so the accumulators hold C transposed (a lane's 4-value groups are 4
+    # consecutive channels of one pixel), C is staged with one ds_write_b64
+    # per group (16-byte chunks XOR the row's low 3 bits) instead of one
+    # ds_write_b16 per element, and the f32 -> bf16 rounding skips the NaN
+    # fix-up (as tapk_pp_epi 2). 1 = that. 2 = the transposed groups stored
+    # straight to dX (one 8-byte buffer store each, no LDS staging).
+    # Default 0; tags ``xep<n>``.
+    xh_epi: int = 0
+    # With tapk_xhalo (split_k 1, stride 1; launched for groups == 1): a
+    # persistent grid of n workgroups per CU (dgrad_persistent_grid); each
+    # walks the output tiles bid, bid + gridDim, ... (the XCD order applied
+    # to the walk), running the x-halo K loop and the epilogue (LDS-only
+    # barriers) per tile. n = 1..2. Default 0; tags ``xhp<n>``.
+    xh_persist: int = 0
 
     # XCD-contiguous tile order for grouped stride-1 kernels on the targets in
     # _XCD_TILE_ORDER_ARCHES (see xcd_tile_order_xcds). Default on: the
@@ -874,6 +1747,85 @@ class DgradConvSpec:
     # problem with Wo <= halo_max_wo runs on the same binary. Required (> 0)
     # with dy_halo, 0 otherwise. Tags ``hwo<n>``.
     halo_max_wo: int = 0
+    # Stream-K over a persistent grid of ``pp_streamk`` workgroups (the CU
+    # count of the target, e.g. 228 on MI300A), for the ping-pong loop
+    # (tapk_pingpong) on grids of a few waves. The (output tile, K tile)
+    # iteration space, tile-major, is cut into pp_streamk equal contiguous
+    # ranges; a workgroup walks its range tile by tile (each segment its own
+    # prologue, ping-pong loop and epilogue) and atomically adds every
+    # segment into dX (the cshuffle packed-atomic epilogue: dX is zeroed
+    # before the launch, as for split_k). The workgroup ids are first laid
+    # out XCD-contiguous (xcd_remap XCDs), so the workgroups that share a
+    # tile run on one XCD. Needs split_k 1 and an ungrouped problem. Launch
+    # grid (pp_streamk, 1, 1). Default 0 (off); tags ``psk<n>``.
+    pp_streamk: int = 0
+    # With pp_streamk, bit mask. 1: reduce the split tiles without atomics
+    # -- every segment that covers only part of its tile writes its f32
+    # accumulators to a workspace slot behind the sub-GEMM record table
+    # (sub_gemm_buf, sized by the launcher), the last of a tile's
+    # contributors (a per-tile counter there, reset by it) adds the slots
+    # and stores the tile with the plain cshuffle epilogue; whole tiles are
+    # stored plainly, so dX needs no zeroing. 2 (atomic mode only): when
+    # pp_streamk is a multiple of the M tile count, order the workgroups
+    # slice-major (the workgroups that read one W slice at one time share
+    # an XCD) instead of tile-major. Default 0; tags ``pskm<n>``.
+    pp_sk_mode: int = 0
+    # With tapk_pingpong on a 3-D problem: run only the filter depths z
+    # some row of the M tile can use (the dX planes at the depth borders
+    # read no dY plane for some z, so those K tiles are all-zero rows);
+    # with split_k / pp_streamk the skipped tiles are cut from each
+    # slice / segment. Default False; tags ``pzs``.
+    pp_zskip: bool = False
+    # With tapk_pingpong >= 4 at stride 1: skip the dX rows' zero taps on
+    # the H/W borders. The host splits dX into boxes along H and W by which
+    # filter rows/columns their pixels can use (``pp_boxes`` classes per
+    # axis: 5 = exact, the first two and last two rows of a 3-tap axis
+    # apart; 3 = those border pairs merged) and passes one sub-GEMM record
+    # per box (pp_box_sub_gemms); a tile runs only its box's sub-filter, so
+    # no MFMA multiplies a border pixel's out-of-image taps. The rows of a
+    # box are not contiguous in dX: the epilogue stores through the record's
+    # (h, w) offsets. Needs split_k 1, no pp_streamk / tapk_pp_epi. Default
+    # 0; tags ``pbx<n>``. 7 = pixel lists (_pp_pixel_list_sub_gemms); 77 =
+    # the same binary, the launch's one partial tile filled with pixels of
+    # the cheapest class (host-only difference).
+    pp_boxes: int = 0
+    # With pp_boxes and split_k > 1: the workgroup budget the host fills
+    # with box split-K slices (pp_box_sub_gemms); 0 = PP_BOX_SPLIT_CUS (one
+    # round on MI300A). Launch-time only (the kernel reads each record's
+    # degree): identical binaries. Tags ``pbc<n>``.
+    pp_box_cus: int = 0
+    # With pp_boxes and split_k > 1: the order of a record's blocks. 0 =
+    # (m tile, n tile, K slice), slice fastest; 1 = (n tile, K slice, m tile),
+    # m fastest, so the workgroups that read one W slice are consecutive
+    # (one XCD). Bit 2 (2, 3; needs xcd_remap, any split_k): the XCD-contiguous
+    # tile order per window of PP_BOX_SPLIT_CUS workgroups instead of over
+    # the whole launch, so a launch of several rounds keeps the records'
+    # longest-first order on every XCD (the whole-launch order gives the
+    # first XCDs only the longest boxes' tiles: several full rounds there,
+    # short tiles elsewhere). Default 0; tags ``pbo<n>``.
+    pp_box_order: int = 0
+    # With pp_boxes and split_k > 1 (det-dgrad): deterministic split-K. A
+    # split box's slices do not atomically add into dX: each stores its f32
+    # accumulators, in the MFMA register layout, to its own workspace slot
+    # (one tile per workgroup, slot = the logical block id) behind the record
+    # table (word offset in the header word after the magic table, see
+    # pp_box_det_pack), and a second kernel (conv_dgrad_box_det_reduce) adds
+    # each split tile's slots in slice order and stores dX once in bf16.
+    # Unsplit boxes store as before, dX is not zeroed. Bitwise deterministic;
+    # one f32 sum, one rounding. Needs 16x16 MFMA atoms (4 f32 per lane).
+    # 2: the slots hold bf16 partials (half the workspace traffic; each
+    # partial rounded once, summed in f32 -- still deterministic).
+    # 3 (f32) / 4 (bf16 slots): no second kernel -- the slot stores and
+    # loads are device-coherent (SC1), each slice counts itself in on a
+    # per-tile counter after its stores complete, and the last one loads
+    # the tile's slots in slice order, adds them and stores dX (the counter
+    # resets itself). Sum order fixed, so still bitwise deterministic.
+    # Default 0; tags ``pbd<n>``.
+    pp_box_det: int = 0
+    # (epi_lds_barriers, declared with the x-halo knobs above, also covers
+    # pp_boxes (r5-small): the first epilogue barrier does not wait for the
+    # ping-pong loop's last over-fetched global loads, nor an m-chunk for the
+    # previous chunk's stores / atomics.)
 
     @property
     def block_size(self) -> int:
@@ -894,6 +1846,45 @@ class DgradConvSpec:
         pass_elems = self.block_size * 8
         quantum = pass_elems // _gcd(pass_elems, self.tile_k)
         return -(-rows // quantum) * quantum + 1
+
+    @property
+    def xhalo_lds_rows(self) -> int:
+        """LDS rows of the staged dY tile of ``tapk_xhalo``.
+
+        xhalo_exact: the tile's tile_m pixels, the X - 1 pixels before it, a
+        junk row (written by the lanes the back-row load leaves idle) and a
+        trailing all-zero row. Otherwise tile_m + X - 1 pixels padded to whole
+        loader passes (as dy_halo_lds_rows), plus a trailing all-zero row.
+        """
+        if self.xhalo_exact:
+            return self.tile_m + self.problem.X + 1
+        rows = self.tile_m + self.problem.X - 1
+        pass_elems = self.block_size * 8
+        quantum = pass_elems // _gcd(pass_elems, self.tile_k)
+        return -(-rows // quantum) * quantum + 1
+
+    @property
+    def xh_a_k4_rows(self) -> int:
+        """Rows Mp of one k-group slab of the ``xh_a_k4`` A tile: at least
+        xhalo_lds_rows, with Mp = R/2 (mod 8) for the R rows one 16-lane pass
+        of the 8-byte A stores covers (R = 16 * 8 / tile_k at load width 8),
+        so the two slabs a pass writes start 8 * R bytes apart in the 128-byte
+        bank window."""
+        rows = self.xhalo_lds_rows
+        if self.xh_dlds == 6:
+            # xh_dlds 6: per wave its tile_m / warp_m rows, the X - 1 rows
+            # before them and a zero row, in whole 4-row DMA blocks.
+            wr = self.tile_m // self.warp_m + self.problem.X
+            return self.warp_m * (-(-wr // 4) * 4)
+        if self.xh_dlds in (4, 5):
+            # xh_dlds 4/5: 256-byte DMA blocks of 4 rows x tile_k 32.
+            return -(-rows // 4) * 4
+        if self.xh_dlds:
+            # xh_dlds: whole 256-byte DMA writes per k-half buffer (4 slabs).
+            return -(-rows // 8) * 8
+        r = max(1, 16 * 8 // self.tile_k)
+        want = (r // 2) % 8 if r >= 2 else 1
+        return rows + (want - rows) % 8
 
     @property
     def kouter_b_pad(self) -> int:
@@ -1050,7 +2041,9 @@ class DgradConvSpec:
         atomics: the tilde decomposition guarantees disjoint writes, so
         _emit_dgrad_tilde_direct/cshuffle_epilogue can issue plain buffer_store.
         """
-        return self.split_k > 1
+        return self.split_k > 1 or (
+            self.pp_streamk > 0 and not self.pp_sk_mode & 1
+        )
 
     @property
     def is_strided(self) -> bool:
@@ -1109,6 +2102,43 @@ class DgradConvSpec:
                 and self.lds_k_pad != _default_lds_k_pad(self.tile_k),
                 # A different K-loop body; only tagged when set.
                 "tapk": self.tap_outer_k,
+                f"tpf{self.tapk_prefetch}": self.tapk_prefetch > 0,
+                "xh": self.tapk_xhalo,
+                f"bkp{self.b_kpack}": self.b_kpack > 0,
+                # x-halo loop knobs (see tapk_ilv / xhalo_exact / xcd_remap /
+                # cshuffle_m_chunks): different code, so they reach the name.
+                f"ilv{self.tapk_ilv}": self.tapk_ilv > 0,
+                "xhx": self.xhalo_exact,
+                f"xcd{self.xcd_remap}": self.xcd_remap > 0,
+                f"mb{self.m_band}": self.m_band > 0,
+                f"mch{self.cshuffle_m_chunks}": self.cshuffle_m_chunks > 1,
+                f"lda{self.tapk_lds_ahead}": self.tapk_lds_ahead > 0,
+                "lsb": self.tapk_lds_barrier,
+                f"sp{self.tapk_setprio}": self.tapk_setprio > 0,
+                "lxor": self.lds_xor,
+                "bw": self.xh_b_wide,
+                f"bpad{self.xh_b_kpad}": self.xh_b_kpad > 0,
+                f"bpp{self.tapk_pingpong}": self.tapk_pingpong > 0,
+                f"pps{self.tapk_pp_sched}": self.tapk_pp_sched > 0,
+                f"ppe{self.tapk_pp_epi}": self.tapk_pp_epi > 0,
+                "sapl": self.split_atomic_pairs,
+                f"ppp{self.tapk_pp_persist}": self.tapk_pp_persist > 0,
+                f"ppx{self.tapk_pp_xhalo}": self.tapk_pp_xhalo > 0,
+                f"zt{self.tapk_ztrim}": self.tapk_ztrim > 0,
+                f"pbs{self.tapk_pp_bslab}": self.tapk_pp_bslab > 0,
+                "ak4": self.xh_a_k4,
+                f"xo{self.xh_order}": self.xh_order > 0,
+                f"xdf{self.xh_defer}": self.xh_defer > 0,
+                f"xfa{self.xh_fast_a}": self.xh_fast_a > 0,
+                f"xep{self.xh_epi}": self.xh_epi > 0,
+                f"xhp{self.xh_persist}": self.xh_persist > 0,
+                "xsm": self.xh_stride_m,
+                f"xdl{self.xh_dlds}": self.xh_dlds > 0,
+                "xel": self.xh_epi_lin,
+                "elb": self.epi_lds_barriers and not self.pp_boxes,
+                "xtr": self.xh_tap_rsrc,
+                f"xyr{self.xh_yring}": self.xh_yring > 0,
+                "nag": self.no_agpr,
                 # The launch-order tile walk (A/B knob, see xcd_tile_order).
                 "noxcd": not self.xcd_tile_order,
                 # The dY halo K loop and its knobs (see dy_halo).
@@ -1116,8 +2146,20 @@ class DgradConvSpec:
                 f"hprio{self.dy_halo_setprio}": self.dy_halo_setprio > 0,
                 f"hkp{self.dy_halo_kouter_pad}": self.dy_halo_kouter_pad > 0,
                 f"hwo{self.halo_max_wo}": self.halo_max_wo > 0,
+                f"psk{self.pp_streamk}": self.pp_streamk > 0,
+                f"pskm{self.pp_sk_mode}": self.pp_sk_mode > 0,
+                "pzs": self.pp_zskip,
+                # The box classes and the split budget are host-side only
+                # (pp_box_sub_gemms): one binary, one symbol for all of them.
+                "pbx": self.pp_boxes > 0,
+                # pp_boxes 7: rows from the record's pixel list (own binary)
+                "pbl": self.pp_boxes in (7, 77),
+                f"pbo{self.pp_box_order}": self.pp_box_order > 0,
+                f"pbd{self.pp_box_det}": self.pp_box_det > 0,
             },
-        )
+        ) + ("_elb" if self.epi_lds_barriers and self.pp_boxes else "")
+        # (elb on pp_boxes is named last, as r5-small built it; elsewhere
+        # (x-halo, dense / split-K pp; r5-dlds) after xel, above.)
 
     def validate(self) -> None:
         if self.tile_m % (self.warp_m * self.warp_tile_m) != 0:
@@ -1155,11 +2197,9 @@ class DgradConvSpec:
                     f"got cpg={self.problem.cpg}"
                 )
         p = self.problem
-        if p.is_3d:
-            raise ValueError(
-                "DgradConvSpec: 3-D convolution is not yet supported for the dgrad "
-                "direction (Phase 1 is 2-D only)"
-            )
+        _3d_why = _3d_conflict(self)
+        if _3d_why:
+            raise ValueError(_3d_why)
         if self.lds_k_outer:
             # ds_read_tr16_b64 is a 16-bit transpose read, so only the B side
             # constrains the dtype -- A keeps the ordinary _emit_smem_load.
@@ -1225,7 +2265,7 @@ class DgradConvSpec:
         _patch_why = _patch_conflict(self)
         if _patch_why:
             raise ValueError(_patch_why)
-        _tapk_why = _tap_outer_k_conflict(self)
+        _tapk_why = _tap_outer_k_conflict(self) or _tapk_prefetch_conflict(self)
         if _tapk_why:
             raise ValueError(_tapk_why)
         _halo_why = _dy_halo_conflict(self)
@@ -1288,6 +2328,40 @@ class DgradConvSpec:
         return pipeline != "wavelet"
 
 
+def _3d_conflict(spec: "DgradConvSpec") -> str:
+    """Why a 3-D (NDHWC) ``spec`` cannot be built, or ``""`` if it can.
+
+    3-D dgrad runs on the folded stride-1 record only
+    (``folds_sub_gemm_record``): stride 1 along all three axes. Dilation and
+    padding are free. The depth axis then never splits the GEMM -- every input
+    depth row ``di`` takes filter tap ``z`` from output row
+    ``do = di + pD - z*dD`` -- so the kernel decodes ``m -> (n, di, hi, wi)``
+    and ``k -> (z, y, x, k_out)`` and the tilde records stay 2-D. The K loops
+    that implement it are the plain loop and the tap-outer loop; the
+    ``uniform_k_decode`` loop, the dY halo, ``patch`` and the wavelet
+    pipeline are 2-D only and rejected. Shared by ``validate`` and
+    ``is_valid_dgrad_spec``.
+    """
+    p = spec.problem
+    if not p.is_3d:
+        return ""
+    if p.sD != 1 or p.sH != 1 or p.sW != 1:
+        return (
+            "3-D dgrad needs stride 1 along depth, height and width (the "
+            "folded stride-1 record); got stride "
+            f"({p.sD}, {p.sH}, {p.sW})"
+        )
+    if spec.pipeline == "wavelet":
+        return "3-D dgrad is not supported with pipeline='wavelet'"
+    if spec.uniform_k_decode:
+        return "3-D dgrad does not implement the uniform_k_decode K loop"
+    if spec.dy_halo:
+        return "3-D dgrad does not implement the dY halo K loop"
+    if spec.patch:
+        return "3-D dgrad does not implement patch"
+    return ""
+
+
 def _uniform_k_decode_conflict(spec: "DgradConvSpec") -> str:
     """Why ``spec.uniform_k_decode`` cannot be honoured, or ``""`` if it can.
 
@@ -1343,7 +2417,13 @@ def _tap_outer_k_conflict(spec: DgradConvSpec) -> str:
     if not spec.tap_outer_k:
         return ""
     p = spec.problem
-    if p.sH != 1 or p.sW != 1 or p.dH != 1 or p.dW != 1:
+    if (
+        p.sH != 1
+        or p.sW != 1
+        or p.dH != 1
+        or p.dW != 1
+        or (p.is_3d and (p.sD != 1 or p.dD != 1))
+    ):
         return (
             "tap_outer_k needs stride 1 and dilation 1 (the filter tap is the "
             "plain (y, x) only there)"
@@ -1353,8 +2433,16 @@ def _tap_outer_k_conflict(spec: DgradConvSpec) -> str:
             f"tap_outer_k needs kpg % tile_k == 0 (a K tile must not straddle "
             f"two filter taps); got kpg={p.kpg}, tile_k={spec.tile_k}"
         )
-    if spec.split_k != 1:
+    if spec.split_k != 1 and not (
+        (spec.tapk_xhalo or spec.tapk_pingpong)
+        and spec.tapk_prefetch in (1, 3)
+        and spec.split_k > 1
+    ):  # the x-halo prefetch / ping-pong loops slice whole tiles
         return "tap_outer_k needs split_k == 1 (a K slice could start mid-tap)"
+    if spec.split_k > 1 and spec.epilogue != "cshuffle":
+        # Its packed-atomic store treats dX as a dense (M, C) matrix, which
+        # it is for groups == 1 (identity_supports_problem enforces that).
+        return "x-halo split-K needs the cshuffle epilogue"
     if spec.wave_size != 64 or spec.pipeline == "wavelet":
         return (
             "tap_outer_k is a wave64 MFMA K loop (the wavelet pipeline has its "
@@ -1365,6 +2453,283 @@ def _tap_outer_k_conflict(spec: DgradConvSpec) -> str:
             "tap_outer_k replaces the K loop uniform_k_decode builds; set one "
             "of them"
         )
+    return ""
+
+
+def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
+    """Why ``spec.tapk_pingpong`` cannot be honoured, or ``""``."""
+    if spec.split_atomic_pairs and not (
+        spec.split_k > 1
+        and (spec.tapk_xhalo or spec.tapk_pingpong)
+        # pp_boxes' split store maps rows (atomic_store row_map); the
+        # lane-contiguous pair store takes the map too (r4b).
+        and spec.epilogue == "cshuffle"
+        and spec.data.dtype_d == "bf16"
+        and spec.wave_size == 64
+    ):
+        return "split_atomic_pairs: the split-K x-halo / ping-pong cshuffle bf16 atomic store only"
+    if spec.tapk_pp_epi not in (0, 1, 2) or (
+        spec.tapk_pp_epi
+        and not (
+            spec.tapk_pingpong
+            and spec.epilogue == "cshuffle"
+            and spec.split_k == 1
+            and spec.warp_tile_m == 16
+            and spec.warp_tile_n == 16
+            and spec.data.dtype_d == "bf16"
+        )
+    ):
+        return "tapk_pp_epi 1/2 needs tapk_pingpong, the cshuffle epilogue, split_k 1, 16x16 atoms, bf16 dX"
+    if spec.tapk_pp_sched not in (0, 1, 2, 3, 4, 5, 6, 7, 11, 12) or (spec.tapk_pp_sched and not spec.tapk_pingpong):
+        return "tapk_pp_sched is 0..7, 11 or 12 and needs tapk_pingpong"
+    if spec.tapk_pp_sched == 7 and (spec.tapk_pp_epi or spec.tapk_pingpong == 5):
+        return "tapk_pp_sched 7 (three tiles ahead) does not take tapk_pp_epi or tapk_pingpong 5"
+    if spec.tapk_pp_persist not in (0, 1, 2) or (
+        spec.tapk_pp_persist
+        and not (
+            spec.tapk_pingpong >= 4
+            and spec.split_k == 1
+            and spec.folds_sub_gemm_record
+            and (spec.tapk_pp_persist == 1 or (spec.tapk_pp_epi == 0 and spec.epilogue == "cshuffle"))
+        )
+    ):
+        # (groups == 1 is a launch rule: identity_supports_problem.)
+        return "tapk_pp_persist is 0/1 and needs tapk_pingpong 4/5, split_k 1 and stride 1"
+    if spec.tapk_ztrim not in (0, 1, 2) or (
+        spec.tapk_ztrim == 2 and (spec.tapk_pingpong or not spec.tapk_xhalo)
+    ) or (
+        spec.tapk_ztrim
+        and not (
+            (
+                spec.tapk_pingpong >= 4
+                or (
+                    spec.tapk_xhalo
+                    and spec.tapk_prefetch in (1, 3)
+                    and not spec.tapk_pingpong
+                    and not spec.xh_persist
+                )
+            )
+            and spec.split_k == 1
+            and spec.problem.is_3d
+            and not spec.tapk_pp_persist
+        )
+    ):
+        return (
+            "tapk_ztrim is 0..2 and needs tapk_pingpong 4/5 or the x-halo prefetch loop (tapk_prefetch "
+            "1/3, no xh_persist; 2: x-halo only), split_k 1, no tapk_pp_persist and a 3-D problem"
+        )
+    if spec.tapk_pp_xhalo == 4 and not (
+        spec.warp_tile_m == 16
+        and spec.warp_tile_n == 16
+        and spec.problem.dW == 1
+        and spec.tile_k % 8 == 0
+        and (spec.block_size // (spec.tile_k // 8)) % 32 == 0
+        and (spec.tile_m * (spec.tile_k // 8)) % spec.block_size == 0
+    ):
+        return (
+            "tapk_pp_xhalo 4 needs 16x16 MFMA atoms, dW 1 and whole dY load "
+            "passes of a multiple of 32 rows"
+        )
+    if spec.tapk_pp_xhalo not in (0, 1, 2, 3, 4) or (
+        spec.tapk_pp_xhalo
+        and not (
+            spec.tapk_pingpong >= 4
+            and spec.tapk_pp_sched == 2
+            and spec.split_k == 1
+            and not spec.tapk_pp_persist
+            and spec.folds_sub_gemm_record
+            and spec.problem.pW == 0
+            and 2 <= spec.problem.X <= _PP_MAX_FILTER
+            and spec.data.dtype_a != "fp32"
+        )
+    ):
+        return (
+            "tapk_pp_xhalo is 0..4 and needs tapk_pingpong 4/5 with tapk_pp_sched 2, "
+            "split_k 1, no tapk_pp_persist, stride 1, pW 0, 2 <= X <= 3 and a 16-bit dY"
+        )
+    if spec.tapk_pp_bslab not in (0, 1, 2, 3) or (
+        spec.tapk_pp_bslab
+        and not (
+            spec.tapk_pingpong >= 3
+            and spec.tapk_pp_sched
+            and spec.b_kpack == 4
+            and not spec.lds_k_outer
+            and not spec.tapk_pp_xhalo
+            and not spec.tapk_pp_persist
+            and (spec.split_k == 1 or spec.pp_boxes)
+            and spec.tile_k % 8 == 0
+            and spec.warp_tile_n == 16
+        )
+    ):
+        return (
+            "tapk_pp_bslab is 0..3 and needs tapk_pingpong 3-5 with tapk_pp_sched, "
+            "b_kpack 4, no tapk_pp_xhalo / tapk_pp_persist, split_k 1 (or pp_boxes), 16-wide atoms"
+        )
+    if not spec.tapk_pingpong:
+        return ""
+    if spec.tapk_pingpong not in (1, 2, 3, 4, 5):
+        return f"tapk_pingpong must be 0..5; got {spec.tapk_pingpong}"
+    if spec.tapk_pingpong >= 3 and not spec.b_kpack:
+        return "tapk_pingpong 3/4 (n-fast kpack B loads) needs b_kpack"
+    if spec.tapk_pingpong >= 4:
+        p = spec.problem
+        if max(p.Y, p.X, p.Z if p.is_3d else 1) > _PP_MAX_FILTER:
+            return (
+                f"tapk_pingpong 4/5 builds its tap mask for filters of up to "
+                f"{_PP_MAX_FILTER} per axis"
+            )
+        if not spec.tapk_pp_sched:
+            return "tapk_pingpong 4/5 needs tapk_pp_sched (the two-tiles-ahead loop)"
+    if spec.tapk_pingpong >= 2 and spec.k_atoms_per_tile_k % 2:
+        return "tapk_pingpong 2+ (kpack-2 reads) needs an even number of k atoms per tile"
+    if not (
+        spec.tap_outer_k
+        and spec.tapk_prefetch == 1
+        and not spec.tapk_xhalo
+        and not spec.dy_halo
+        and not spec.lds_k_outer
+        and spec.wave_size == 64
+        and spec.pipeline != "wavelet"
+        and spec.warp_m * spec.warp_n == 8
+        and spec.k_atoms_per_tile_k % 2 == 0
+    ):
+        return (
+            "tapk_pingpong needs the plain tap-outer loop with tapk_prefetch 1 "
+            "(no x-halo / dY halo), 8 waves, the M-outer B tile, "
+            "the wave64 MFMA path and an even number of k atoms per tile"
+        )
+    return ""
+
+
+def pp_streamk_fixup_words(identity, problem) -> int:
+    """i32 words of the sub-GEMM buffer a ``pp_streamk`` fix-up binary
+    (pp_sk_mode bit 1) needs for ``problem``: the record and its magic
+    entry, the 2 * pp_streamk f32 accumulator slots of one tile each, and
+    one counter per output tile (see DgradConvSpec.pp_sk_mode)."""
+    G = int(identity.pp_streamk)
+    tm, tn = int(identity.tile_m), int(identity.tile_n)
+    ws_base = ((_RECORD_FIELDS + _MAGIC_FIELDS) * 4 + 15) // 16 * 16
+    m = int(problem.N) * int(problem.Hi) * int(problem.Wi)
+    if getattr(problem, "is_3d", False):
+        m *= int(problem.Di)
+    tiles = -(-m // tm) * -(-int(problem.C) // tn)
+    return (ws_base + 2 * G * tm * tn * 4) // 4 + tiles
+
+
+def _pp_streamk_conflict(spec: DgradConvSpec) -> str:
+    """Why ``spec.pp_streamk`` cannot be honoured, or ``""``."""
+    if (spec.pp_streamk or spec.pp_boxes or spec.pp_zskip) and (
+        spec.tapk_pp_persist or spec.tapk_pp_xhalo or spec.tapk_ztrim
+    ):
+        # Two ways each of walking / trimming the ping-pong K loop (r4-dgradS:
+        # stream-K, border boxes, z skip; r4-dgradL: persistent grid, x-halo
+        # steps, z trim): the K-loop prologue honours one family.
+        return ("pp_streamk / pp_boxes / pp_zskip do not combine with "
+                "tapk_pp_persist / tapk_pp_xhalo / tapk_ztrim")
+    if spec.pp_zskip and not (spec.tapk_pingpong and spec.problem.is_3d):
+        return "pp_zskip needs tapk_pingpong and a 3-D problem"
+    if spec.pp_boxes and not (
+        (
+            spec.pp_boxes in (3, 5, 33, 55)
+            or (spec.pp_boxes in (7, 77) and not spec.pp_zskip)
+            or (
+                100 <= spec.pp_boxes <= 555
+                and all(c in "135" for c in str(spec.pp_boxes))
+            )
+        )
+        and spec.tapk_pingpong >= 4
+        and spec.split_k >= 1
+        and not spec.pp_streamk
+        and not (spec.tapk_pp_epi and spec.split_k > 1)
+        and spec.pp_box_order in (0, 1, 2, 3)
+        and not (spec.pp_box_order & 1 and spec.split_k == 1)
+        and not (spec.pp_box_order & 2 and not spec.xcd_remap)
+        and spec.epilogue == "cshuffle"
+        and spec.folds_sub_gemm_record
+    ):
+        return (
+            "pp_boxes (3 or 5) needs tapk_pingpong >= 4, the cshuffle epilogue "
+            "(tapk_pp_epi only with split_k 1), no pp_streamk, stride 1"
+        )
+    # (epi_lds_barriers on pp_boxes is admitted by _xhalo_knob_conflict's
+    # _pp_elb_ok: any ping-pong cshuffle epilogue without a persistent loop.)
+    if spec.pp_box_det and not (
+        spec.pp_box_det in (1, 2, 3, 4)
+        and spec.pp_boxes
+        and spec.split_k > 1
+        and spec.wave_size == 64
+        and spec.warp_tile_m == 16
+        and spec.warp_tile_n == 16
+    ):
+        # (a pp_boxes binary serves groups == 1 only, as the split box store)
+        return "pp_box_det is 0..4 and needs pp_boxes, split_k > 1, wave64 16x16 MFMA atoms"
+    if spec.pp_sk_mode and not spec.pp_streamk:
+        return "pp_sk_mode needs pp_streamk"
+    if not spec.pp_streamk:
+        return ""
+    if spec.pp_sk_mode not in (0, 1, 2):
+        return f"pp_sk_mode must be 0, 1 or 2; got {spec.pp_sk_mode}"
+    if spec.pp_streamk < 0:
+        return f"pp_streamk must be >= 0; got {spec.pp_streamk}"
+    if not (
+        spec.tapk_pingpong
+        and spec.split_k == 1
+        and spec.epilogue == "cshuffle"
+        and not spec.tapk_pp_epi
+        and spec.data.dtype_d in ("fp32", "bf16", "fp16")
+        and spec.folds_sub_gemm_record
+    ):
+        return (
+            "pp_streamk needs tapk_pingpong, split_k 1, the cshuffle epilogue "
+            "without tapk_pp_epi, stride 1 and an fp32/bf16/fp16 dX (a grouped "
+            "binary serves groups == 1 only, see identity_supports_problem)"
+        )
+    return ""
+
+
+def _tapk_prefetch_conflict(spec: DgradConvSpec) -> str:
+    """Why ``spec.tapk_prefetch`` / ``tapk_xhalo`` / ``b_kpack`` cannot be honoured."""
+    _pp_why = _tapk_pingpong_conflict(spec) or _pp_streamk_conflict(spec)
+    if _pp_why:
+        return _pp_why
+    if spec.b_kpack:
+        if spec.b_kpack not in (2, 4, 8):
+            return f"b_kpack must be 0, 2, 4 or 8; got {spec.b_kpack}"
+        if spec.lds_k_outer:
+            return "b_kpack applies to the M-outer B tile only (lds_k_outer is set)"
+        if spec.pipeline == "wavelet":
+            return "b_kpack is not supported with pipeline='wavelet'"
+        vb = _dgrad_b_load_vec(spec)
+        if not KPackedRowLoader.choose_vec(
+            spec.tile_n, spec.tile_k, spec.block_size, vb, spec.b_kpack
+        ):
+            return (
+                f"b_kpack={spec.b_kpack} does not split the {spec.tile_n}x"
+                f"{spec.tile_k} B tile into whole units per thread at any load "
+                f"width in [2, {vb}]"
+            )
+    if spec.tapk_xhalo:
+        if not spec.tap_outer_k:
+            return "tapk_xhalo is a mode of the tap-outer K loop; it needs tap_outer_k"
+        if spec.dy_halo:
+            return "tapk_xhalo and dy_halo are exclusive"
+        if spec.tapk_prefetch == 2:
+            return "tapk_xhalo does not implement tapk_prefetch=2 (no LDS ping-pong)"
+        if spec.problem.pW != 0:
+            return (
+                "tapk_xhalo needs pW == 0 (a pixel with wi < x then has no dY "
+                f"pixel for tap x); got pW={spec.problem.pW}"
+            )
+        if spec.problem.X < 2:
+            return "tapk_xhalo needs a filter with X > 1"
+    if spec.tapk_prefetch not in (0, 1, 2, 3):
+        return f"tapk_prefetch must be 0, 1, 2 or 3; got {spec.tapk_prefetch}"
+    if spec.tapk_prefetch == 0:
+        return ""
+    if not spec.tap_outer_k:
+        return "tapk_prefetch pipelines the tap-outer K loop; it needs tap_outer_k"
+    if spec.dy_halo:
+        return "tapk_prefetch does not apply to the dY halo K loop"
     return ""
 
 
@@ -1456,10 +2821,12 @@ def xcd_tile_order_xcds(spec: DgradConvSpec, arch: str) -> int:
     and ``num_wgs >= num_xcds``. A grouped binary serves groups == 1 too, so
     the run-time test is what keeps an ungrouped launch in launch order.
     """
-    num_xcds = _XCD_TILE_ORDER_ARCHES.get(arch, 0)
+    num_xcds = spec.xcd_remap or _XCD_TILE_ORDER_ARCHES.get(arch, 0)
     if not num_xcds or not spec.xcd_tile_order:
         return 0
-    if spec.problem.groups <= 1 or spec.split_k != 1:
+    if (spec.problem.groups <= 1 and not spec.xcd_remap) or spec.split_k != 1:
+        return 0
+    if spec.pp_streamk or spec.pp_boxes:
         return 0
     if not spec.folds_sub_gemm_record:
         return 0
@@ -1467,7 +2834,12 @@ def xcd_tile_order_xcds(spec: DgradConvSpec, arch: str) -> int:
 
 
 def emit_xcd_tile_order(
-    b: IRBuilder, block_x: Value, params: dict[str, Value], *, num_xcds: int
+    b: IRBuilder,
+    block_x: Value,
+    params: dict[str, Value],
+    *,
+    num_xcds: int,
+    ungrouped: bool = False,
 ) -> tuple[Value, Value]:
     """The ``(flat tile id, group)`` of this workgroup under the XCD order.
 
@@ -1490,12 +2862,40 @@ def emit_xcd_tile_order(
         b.cmp_gt(b.mul(params["p_Y"], params["p_X"]), c1),
         b.cmp_gt(params["p_num_pid_n"], c1),
     )
+    # ungrouped (DgradConvSpec.xcd_remap): the order also serves groups == 1.
+    _grp_ok = (
+        b.cmp_ge(params["p_groups"], c1)
+        if ungrouped
+        else b.cmp_gt(params["p_groups"], c1)
+    )
     use_xcd = b.land(
-        b.land(b.cmp_gt(params["p_groups"], c1), shares_rows),
+        b.land(_grp_ok, shares_rows),
         b.cmp_ge(num_wgs, b.const_i32(num_xcds)),
     )
     logical_id = b.select(use_xcd, remapped, linear_id)
     return b.mod(logical_id, flat_tiles), b.div(logical_id, flat_tiles)
+
+
+def dgrad_persistent_grid(
+    blocks: int, persist: int, num_cus: Optional[int], per_cu: int = 1
+) -> int:
+    """Launch size (workgroups along x) of a ``tapk_pp_persist`` binary.
+
+    ``per_cu`` resident workgroups per CU (1 for the 8-wave ping-pong,
+    xh_persist for the x-halo kernel): ``min(blocks, CUs * per_cu)``.
+    The kernel strides its tile walk by the launched gridDim, so any size is
+    correct; this one keeps every CU busy without a second wave of
+    workgroups. ``blocks`` unchanged when ``persist`` is 0 or the CU count is
+    unknown.
+    """
+    if not persist or not num_cus:
+        return blocks
+    num_cus = int(num_cus) * max(1, int(per_cu))
+    # Experiment hook: ROCKE_DGRAD_PERSIST_GRID=<n> launches n workgroups.
+    forced = int(os.environ.get("ROCKE_DGRAD_PERSIST_GRID", "0") or 0)
+    if forced > 0:
+        return max(1, min(int(blocks), forced))
+    return max(1, min(int(blocks), int(num_cus)))
 
 
 def python_xcd_tile_order(
@@ -1527,6 +2927,24 @@ def python_xcd_tile_order(
 # ---------------------------------------------------------------------
 
 
+def _dgrad_b_load_vec(spec: DgradConvSpec) -> int:
+    """The B (W) load width of the M-outer row-mode loader (the builder's)."""
+    _, def_vec_b, _ = DgradConvSpec.default_vector_sizes(
+        spec.problem.cpg, spec.problem.kpg, spec.data.dtype_a
+    )
+    max_vb = def_vec_b if spec.vector_size_b is None else min(def_vec_b, spec.vector_size_b)
+    try:
+        return CoalescedTileLoader.choose_vec(
+            tile_rows=spec.tile_n,
+            tile_cols=spec.tile_k,
+            block_size=spec.block_size,
+            max_vec=max_vb,
+            vector_axis="row",
+        )
+    except ValueError:
+        return 1
+
+
 def _dgrad_lds_charge(spec: DgradConvSpec) -> tuple[int, int, int]:
     """``(a_b_bytes, c_bytes, total_bytes)`` of LDS the builder allocates.
 
@@ -1542,27 +2960,314 @@ def _dgrad_lds_charge(spec: DgradConvSpec) -> tuple[int, int, int]:
     # (dy_halo_lds_rows) from the spec so the charged shape and the allocated
     # shape cannot drift.
     _a_shape = _lds_layout.storage_shape(
-        spec.dy_halo_lds_rows if spec.dy_halo > 0 else spec.tile_m
+        spec.dy_halo_lds_rows
+        if spec.dy_halo > 0
+        else spec.xhalo_lds_rows
+        if spec.tapk_xhalo
+        else spec.tile_m + 8
+        if pp_a_partial(spec)
+        else spec.tile_m
     )
+    if spec.tapk_xhalo and spec.xh_a_k4:
+        # K0 slabs of xh_a_k4_rows rows x 4 elements: tile_k * Mp elements.
+        _a_shape = (spec.xh_a_k4_rows, spec.tile_k)
     _b_shape = (
         (spec.tile_k, spec.tile_n + spec.kouter_b_pad)
         if spec.lds_k_outer
         else _lds_layout.storage_shape(spec.tile_n)
     )
-    # dy_halo=2 double-buffers the B tile.
-    _b_copies = 2 if spec.dy_halo == 2 else 1
+    # dy_halo=2 double-buffers the B tile; tapk_prefetch=2 both tiles.
+    _b_copies = 2 if (spec.dy_halo == 2 or spec.tapk_prefetch == 2) else 1
+    _a_copies = 2 if spec.tapk_prefetch == 2 else 1
+    if spec.tapk_xhalo:
+        _b_copies = spec.problem.X
+    if spec.tapk_xhalo and spec.xh_b_kpad and not spec.lds_k_outer:
+        _b_shape = (_b_shape[0], spec.tile_k + spec.xh_b_kpad)
+    _b_rows = _b_copies * _b_shape[0]
+    if spec.tapk_xhalo and spec.xh_b_wide:
+        # One stacked tile of the X taps plus load_vec junk rows.
+        _b_rows = spec.problem.X * spec.tile_n + _dgrad_b_load_vec(spec)
+    if spec.xh_dlds == 6:
+        # xh_dlds 6: one B buffer of the stacked X taps (no junk rows).
+        _b_rows = spec.problem.X * spec.tile_n
+    elif spec.xh_dlds in (4, 5):
+        # xh_dlds 4/5: one B buffer of the stacked X taps (no junk rows), and
+        # the per-row DMA table (8 bytes per A row) in B elements.
+        _b_rows = spec.problem.X * spec.tile_n
+        _b_rows += -(-spec.xh_a_k4_rows * 8 // (_b_shape[1] * _ab_dtype_bytes))
+    elif spec.xh_dlds:
+        # xh_dlds: two k-half B buffers of the stacked X taps (no junk rows).
+        _b_rows = 2 * spec.problem.X * spec.tile_n
+        _b_shape = (_b_shape[0], spec.tile_k // 2 + spec.xh_b_kpad)
     _ab_bytes = (
-        _a_shape[0] * _a_shape[1] + _b_copies * _b_shape[0] * _b_shape[1]
+        _a_copies * _a_shape[0] * _a_shape[1] + _b_rows * _b_shape[1]
     ) * _ab_dtype_bytes
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
-        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
+        spec.tile_m // max(1, spec.cshuffle_m_chunks) * spec.tile_n * _c_dtype_bytes
+        if spec.epilogue == "cshuffle"
+        else 0
     )
     # wavelet: A/B stay live across both scf_if_else branches, so the LDS pool
     # cannot alias C onto the A/B region even when cshuffle_no_alias=False.
     _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     _total_lds = (_ab_bytes + _c_lds) if _no_alias else max(_ab_bytes, _c_lds)
     return _ab_bytes, _c_lds, _total_lds
+
+
+def _pp_dense_epi(spec: DgradConvSpec) -> bool:
+    """The ping-pong cshuffle epilogue (tapk_pp_epi) on dense dX rows:
+    split_k 1, no boxes / stream-K / persistent loop / x-halo. Round 5
+    admits xh_epi_lin and epi_lds_barriers there too."""
+    return bool(
+        spec.tapk_pp_epi and spec.tapk_pingpong and spec.epilogue == "cshuffle"
+        and spec.split_k == 1 and not spec.tapk_xhalo and not spec.pp_boxes
+        and not spec.pp_streamk and not spec.tapk_pp_persist and not spec.async_dma
+    )
+
+
+def _pp_elb_ok(spec: DgradConvSpec) -> bool:
+    """epi_lds_barriers on the ping-pong cshuffle epilogues (dense, boxes,
+    split-K atomics): no LDS DMA, so an LDS-only barrier is enough before
+    the staging buffer is reused; the loop's over-fetched loads land in
+    VGPRs only."""
+    return bool(
+        spec.tapk_pingpong and spec.epilogue == "cshuffle" and not spec.tapk_xhalo
+        and not spec.pp_streamk and not spec.tapk_pp_persist and not spec.async_dma
+    )
+
+
+def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
+    """Why the x-halo loop knobs (tapk_ilv, xhalo_exact, xcd_remap,
+    cshuffle_m_chunks) do not apply to ``spec``, or ``""``."""
+    if spec.xh_fast_a not in (0, 1, 2) or (
+        spec.xh_fast_a
+        and not (
+            spec.tapk_xhalo
+            and spec.xhalo_exact
+            and spec.split_k == 1
+            and max(spec.problem.Y, spec.problem.Z if spec.problem.is_3d else 1)
+            <= _PP_MAX_FILTER
+        )
+    ):
+        return "xh_fast_a is 0..2 and needs tapk_xhalo with xhalo_exact, split_k 1 and filters <= 3 along y and z"
+    if spec.xh_persist not in (0, 1, 2) or (
+        spec.xh_persist
+        and not (spec.tapk_xhalo and spec.split_k == 1 and spec.folds_sub_gemm_record)
+    ):
+        return "xh_persist is 0..2 and needs tapk_xhalo, split_k 1 and stride 1"
+    if spec.xh_epi not in (0, 1, 2, 3) or (
+        spec.xh_epi == 3
+        and not ((spec.warp_tile_m, spec.warp_tile_n) == (16, 16) and spec.mfmas_per_warp_n % 2 == 0)
+    ) or (
+        spec.xh_epi
+        and not (
+            spec.tapk_xhalo
+            and spec.epilogue == "cshuffle"
+            and spec.split_k == 1
+            and spec.data.dtype_d == "bf16"
+            and spec.data.dtype_a == "bf16"
+            and spec.wave_size == 64
+            and not spec.lds_k_outer
+            and (spec.warp_tile_m, spec.warp_tile_n) in ((16, 16), (32, 32))
+            and spec.mfmas_per_warp_m % max(1, spec.cshuffle_m_chunks) == 0
+            and (spec.tile_m // max(1, spec.cshuffle_m_chunks)) * spec.tile_n
+            % (8 * spec.block_size) == 0
+        )
+    ):
+        return (
+            "xh_epi is 0..3 and needs tapk_xhalo, the cshuffle epilogue, split_k 1, bf16, "
+            "16x16 / 32x32 atoms and a C slab of whole 8-wide vectors per thread "
+            "(3: 16x16 atoms and an even number of MFMAs per wave along N)"
+        )
+    if spec.tapk_ilv < 0 or (
+        spec.tapk_ilv and not (spec.tapk_xhalo and spec.tapk_prefetch in (1, 3))
+    ):
+        return "tapk_ilv needs tapk_xhalo with tapk_prefetch 1 or 3"
+    if spec.tapk_lds_ahead < 0 or (
+        spec.tapk_lds_ahead
+        and not (
+            spec.tapk_xhalo
+            and spec.tapk_prefetch in (1, 3)
+            and not spec.lds_k_outer
+            and spec.wave_size == 64
+        )
+    ):
+        return "tapk_lds_ahead needs tapk_xhalo with tapk_prefetch 1 or 3 (MFMA, M-outer B)"
+    if spec.lds_xor and not (
+        (spec.tapk_xhalo or spec.tapk_pingpong)
+        and spec.lds_k_pad == 0
+        and spec.lds_layout is None
+        and not spec.lds_k_outer
+        and spec.tile_k in (16, 32, 64, 128)
+        and spec.wave_size == 64
+        and spec.pipeline != "wavelet"
+    ):
+        return (
+            "lds_xor needs tapk_xhalo, lds_k_pad 0, the M-outer B tile, "
+            "tile_k in 16..128 and the wave64 MFMA path"
+        )
+    if spec.xh_b_kpad and not (
+        spec.tapk_xhalo and spec.lds_xor and spec.xh_b_kpad in (2, 4, 6, 8)
+    ):
+        return "xh_b_kpad (2/4/6/8) needs tapk_xhalo with lds_xor"
+    if spec.xh_b_wide and not (
+        spec.tapk_xhalo
+        and spec.tapk_prefetch in (1, 3)
+        and spec.b_kpack
+        and not spec.lds_k_outer
+        and XTapKPackLoader.fits(
+            spec.problem.X, spec.tile_n, spec.tile_k, _dgrad_b_load_vec(spec), spec.b_kpack
+        )
+    ):
+        return (
+            "xh_b_wide needs tapk_xhalo, tapk_prefetch 1 or 3, b_kpack, the "
+            "M-outer B tile and whole waves of stacked B units"
+        )
+    if spec.xh_a_k4 and not (
+        spec.tapk_xhalo
+        and spec.lds_xor
+        and spec.tile_k in (16, 32, 64)
+        and spec.warp_tile_m * spec.warp_tile_k // spec.wave_size == 4
+        and spec.warp_tile_n * spec.warp_tile_k // spec.wave_size == 4
+    ):
+        return (
+            "xh_a_k4 needs tapk_xhalo with lds_xor, tile_k 16..64 and an MFMA "
+            "atom of 4 k values per lane"
+        )
+    if spec.xh_order not in range(8) or (
+        spec.xh_order and not (spec.tapk_xhalo and spec.tapk_prefetch in (1, 3))
+    ) or (spec.xh_order & 4 and spec.tapk_prefetch != 3):
+        return (
+            "xh_order is 0..7 and needs tapk_xhalo with tapk_prefetch 1 or 3 "
+            "(bit 4: tapk_prefetch 3)"
+        )
+    if spec.xh_defer:
+        n_steps = spec.problem.X * spec.k_atoms_per_tile_k
+        if not (
+            spec.tapk_xhalo
+            and spec.tapk_prefetch in (1, 3)
+            and spec.tapk_setprio != 2
+            and not spec.lds_k_outer
+            and spec.wave_size == 64
+            and 0 < spec.xh_defer < n_steps
+        ):
+            return (
+                "xh_defer needs tapk_xhalo with tapk_prefetch 1 or 3 (MFMA, "
+                "M-outer B, not tapk_setprio 2) and leaves >= 1 step before the barrier"
+            )
+    if spec.tapk_setprio not in (0, 1, 2) or (
+        spec.tapk_setprio
+        and not (spec.tapk_xhalo and spec.tapk_prefetch in (1, 3))
+    ):
+        return "tapk_setprio is 0, 1 or 2 and needs tapk_xhalo with tapk_prefetch 1 or 3"
+    if spec.tapk_setprio == 2 and (spec.tapk_ilv or spec.tapk_lds_ahead):
+        return "tapk_setprio 2 clusters the phase itself: tapk_ilv / tapk_lds_ahead must be 0"
+    if spec.tapk_lds_barrier and not (
+        spec.tapk_xhalo and spec.tapk_prefetch in (1, 3)
+    ):
+        return "tapk_lds_barrier needs tapk_xhalo with tapk_prefetch 1 or 3"
+    if spec.xhalo_exact and not spec.tapk_xhalo:
+        return "xhalo_exact needs tapk_xhalo"
+    if spec.xcd_remap < 0:
+        return "xcd_remap must be >= 0"
+    if spec.m_band < 0 or (spec.m_band and (
+            not spec.xcd_remap or spec.split_k != 1 or not spec.folds_sub_gemm_record
+            or spec.tapk_pp_persist or spec.xh_persist or spec.pp_boxes or spec.pp_streamk)):
+        # (pp_boxes launches several box records -- no folded record to band;
+        # the persistent / stream-K grids walk the tiles themselves.)
+        return ("m_band needs xcd_remap, split_k 1 and the folded (stride-1) record "
+                "(not with tapk_pp_persist / xh_persist / pp_boxes / pp_streamk)")
+    if spec.xh_stride_m and not (
+            spec.tapk_xhalo and spec.tapk_prefetch in (1, 3)
+            and (spec.tapk_lds_ahead or spec.xh_defer)
+            and spec.xh_a_k4 and spec.xh_epi in (1, 3) and spec.tapk_setprio != 2
+            and spec.split_k == 1 and not spec.xh_persist
+            and spec.mfmas_per_warp_m in (2, 4, 8)
+            and spec.tile_m % (16 * spec.mfmas_per_warp_m) == 0
+            and spec.xhalo_lds_rows - spec.tile_m <= 16
+            and spec.wave_size == 64 and not spec.lds_k_outer):
+        return ("xh_stride_m needs tapk_xhalo (tpf 1/3, tapk_lds_ahead or xh_defer, xh_a_k4, "
+                "xh_epi 1 or 3, not setprio 2 / xh_persist), split_k 1, 2, 4 or 8 MFMAs "
+                "per wave along M, tile_m a multiple of 16 * that")
+    if spec.xh_dlds and not (
+            spec.xh_dlds in (1, 2, 3, 4, 5, 6) and (spec.xh_dlds < 4 or spec.xh_stride_m)
+            and (spec.xh_dlds != 6 or spec.warp_n == 1) and spec.tapk_xhalo and spec.tapk_prefetch in (1, 3)
+            and spec.xh_a_k4 and spec.xhalo_exact and spec.xh_b_wide and spec.xh_b_kpad
+            and spec.b_kpack == 2 and spec.k_atoms_per_tile_k == 2 and spec.warp_tile_k == 16
+            and (spec.xh_defer == 0 or spec.xh_dlds >= 5) and not (spec.xh_order & 4)
+            and spec.tapk_setprio != 2
+            and spec.split_k == 1 and not spec.xh_persist and spec.wave_size == 64
+            and not spec.lds_k_outer and spec.data.dtype_a in ("bf16", "fp16")
+            and spec.xhalo_lds_rows - spec.tile_m <= 8):
+        return ("xh_dlds 1/2 needs the x-halo prefetch loop (tpf 1/3) with xh_a_k4, xhalo_exact, "
+                "xh_b_wide, xh_b_kpad, b_kpack 2, two 16-deep k atoms per tile, no xh_defer / "
+                "xh_order 4 / setprio 2 / xh_persist / split-K, 16-bit data")
+    if spec.epi_lds_barriers and not (
+            (spec.tapk_xhalo and spec.epilogue == "cshuffle" and spec.split_k == 1
+             and not spec.xh_persist) or _pp_elb_ok(spec)):
+        return ("epi_lds_barriers (dgrad) needs the x-halo cshuffle epilogue (split_k 1) or "
+                "a ping-pong cshuffle one (no stream-K / persistent loop / async DMA)")
+    if spec.xh_tap_rsrc and not (
+            spec.tapk_xhalo and spec.tapk_prefetch in (1, 3) and spec.xh_fast_a == 1
+            and spec.xh_b_wide and spec.xhalo_exact and not spec.xh_dlds
+            and not spec.xh_persist and spec.split_k == 1 and not spec.lds_k_outer):
+        return "xh_tap_rsrc needs the x-halo prefetch loop with xh_fast_a 1, xh_b_wide, xhalo_exact"
+    if spec.xh_yring:
+        _yr = xh_yring_geometry(spec)
+        if not (
+                _yr and spec.tapk_xhalo and spec.tapk_prefetch == 3 and spec.xhalo_exact
+                and spec.xh_a_k4 and spec.xh_b_wide and not spec.xh_dlds
+                and not spec.xh_persist and spec.split_k == 1 and spec.tapk_ztrim == 1
+                and not spec.lds_k_outer and spec.tapk_setprio != 2
+                and spec.xh_fast_a in (0, 1)):
+            return ("xh_yring (dgrad) needs the x-halo prefetch loop (tpf 3) with xhalo_exact, "
+                    "xh_a_k4, xh_b_wide, tapk_ztrim 1 (zt0 failed verify on s2), no split-K / "
+                    "xh_persist, and a ring "
+                    "of P = k * Wi >= tile_m + X - 1 rows within the A slab")
+    if spec.xh_epi_lin and not (
+            (spec.tapk_xhalo and spec.xh_epi == 1 and spec.split_k == 1
+             and spec.epilogue == "cshuffle") or _pp_dense_epi(spec)):
+        return ("xh_epi_lin needs the x-halo cshuffle epilogue (xh_epi 1) or the dense "
+                "tapk_pp_epi one, split_k 1")
+    mc = spec.cshuffle_m_chunks
+    if mc != 1:
+        if mc < 1 or spec.epilogue != "cshuffle" or (
+            spec.split_k != 1 and not spec.pp_boxes
+        ):
+            return "cshuffle_m_chunks > 1 needs the cshuffle epilogue and split_k 1"
+        if spec.data.dtype_d != "bf16":
+            return "cshuffle_m_chunks > 1 is bf16 output only"
+        if spec.mfmas_per_warp_m % mc:
+            return (
+                f"cshuffle_m_chunks {mc} must divide mfmas_per_warp_m "
+                f"{spec.mfmas_per_warp_m}"
+            )
+    return ""
+
+
+def xh_yring_geometry(spec: DgradConvSpec):
+    """``(Wi, P, new_main_rows)`` of the dgrad x-halo y-ring (xh_yring), or
+    None where it does not fit: the ring holds P = k * Wi >= tile_m + X - 1
+    rows plus a junk and a zero row inside the A slab (xh_a_k4_rows); a y step
+    loads the Wi new rows (X - 1 back rows + Wi - (X - 1) main rows in whole
+    loader passes)."""
+    wi = spec.xh_yring % 1000
+    if spec.xh_yring // 1000 == 1:
+        return None
+    back = spec.problem.X - 1
+    need = spec.tile_m + back
+    if wi <= back or spec.problem.Y < 2:
+        return None
+    P = -(-need // wi) * wi
+    if P + 2 > spec.xh_a_k4_rows:
+        return None
+    main = wi - back
+    vec = 8
+    rows_per_pass = spec.block_size * vec // spec.tile_k
+    if main <= 0 or main > spec.tile_m or main % rows_per_pass:
+        return None
+    return wi, P, main
 
 
 def dgrad_lds_bytes(spec: DgradConvSpec) -> int:
@@ -1600,6 +3305,38 @@ def _kouter_frag_reason(spec: DgradConvSpec, arch: str) -> str | None:
     return None
 
 
+# tapk_pp_xhalo 2/3 (gapped halo): the smallest image width Wi the LDS tile
+# is sized for (back gap rows before every W row the tile touches).
+PP_XHALO_GAP_MIN_WI = 32
+
+
+def pp_xhalo_gap_rows(spec: DgradConvSpec) -> int:
+    """LDS rows of the gapped x-halo ping-pong dY tile (tapk_pp_xhalo 2/3):
+    ``back`` leading gap rows, the tile_m + back pixels and ``back`` gap
+    rows before each of the at most ceil((tile_m + back) / Wmin) + 1 W-row
+    starts among them (back = X - 1)."""
+    back = spec.problem.X - 1
+    n = spec.tile_m + back
+    starts = -(-n // PP_XHALO_GAP_MIN_WI) + 1
+    return back + n + back * starts
+
+
+def pp_a_partial(spec: DgradConvSpec) -> bool:
+    """Whether the ping-pong dY tile is loaded in partial passes.
+
+    tapk_pingpong 4/5 addresses its dY loads itself (_pp_fast_a), so a tile
+    whose load_vec chunks do not split evenly over the block (e.g. t224x256x32
+    at width 8: 896 chunks on 512 threads) is loaded in ceil passes, the last
+    one with whole idle waves (their loads read nothing, their stores land in
+    8 junk LDS rows past the tile). Only such tiles: the others keep the
+    even split, byte-identical.
+    """
+    if not (spec.tapk_pingpong >= 4 and spec.vector_size_a and spec.split_k <= 1):
+        return False
+    chunks = spec.tile_m * spec.tile_k // spec.vector_size_a
+    return chunks % spec.block_size != 0 and chunks % spec.wave_size == 0
+
+
 def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``."""
     from rocke.core.arch import ArchTarget
@@ -1610,8 +3347,9 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, str(e)
 
     p = spec.problem
-    if p.is_3d:
-        return False, "dgrad only supports 2-D convolution currently"
+    _3d_why = _3d_conflict(spec)
+    if _3d_why:
+        return False, _3d_why
     if spec.max_sub_gemms < 1:
         return False, "max_sub_gemms must be at least 1"
     # Before the record count: a patch record exists for patch problems only.
@@ -1771,12 +3509,15 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _ukd_why = _uniform_k_decode_conflict(spec)
     if _ukd_why:
         return False, _ukd_why
-    _tapk_why = _tap_outer_k_conflict(spec)
+    _tapk_why = _tap_outer_k_conflict(spec) or _tapk_prefetch_conflict(spec)
     if _tapk_why:
         return False, _tapk_why
     _halo_why = _dy_halo_conflict(spec)
     if _halo_why:
         return False, _halo_why
+    _xh_why = _xhalo_knob_conflict(spec)
+    if _xh_why:
+        return False, _xh_why
     if spec.pipeline == "wavelet":
         if spec.num_load_waves < 1:
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
@@ -1849,6 +3590,7 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         spec.pipeline != "wavelet"
         and spec.split_k <= 1
         and spec.vector_size_a is not None
+        and not pp_a_partial(spec)
     ):
         why = coalesced_load_reason(
             "A", spec.tile_m, spec.tile_k, spec.block_size, spec.vector_size_a
@@ -2052,9 +3794,14 @@ def _build_tilde_dgrad(
     b = IRBuilder(spec.kernel_name())
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+    if spec.no_agpr:
+        b.kernel.attrs["agpr_alloc"] = "0,0"
 
     # split_k>1 uses atomic_add; tilde split_k=1 uses direct store — both allow writeonly.
-    _dx_writeonly = spec.split_k <= 1
+    _dx_writeonly = spec.split_k <= 1 and not spec.needs_atomic
+    # pp_streamk fix-up: the workspace and tile counters live behind the
+    # record table, so the buffer is written.
+    _psk_fixup = bool(spec.pp_streamk and spec.pp_sk_mode & 1)
 
     # ---- Runtime problem-dimension parameters (AOT) -------------------------
     # Emitted straight from the ordered ABI list so the kernel's parameter
@@ -2064,7 +3811,7 @@ def _build_tilde_dgrad(
     # library/tests/test_conv_abi.py pins the two together.
     params = emit_param_block(
         b,
-        conv_arg_names(direction="dgrad"),
+        conv_arg_names(direction="dgrad", is_3d=p.is_3d),
         declare_ptr=lambda name, kind: (
             b.param(
                 name,
@@ -2096,7 +3843,9 @@ def _build_tilde_dgrad(
                         name,
                         PtrType(I32, "global"),
                         noalias=True,
-                        readonly=True,
+                        readonly=not (
+                            (_psk_fixup or spec.pp_box_det) and name == "sub_gemm_buf"
+                        ),
                         align=4,
                     )
                 )
@@ -2128,6 +3877,21 @@ def _build_tilde_dgrad(
     p_num_pid_n = params["p_num_pid_n"]
     sub_gemm_buf = params["sub_gemm_buf"]
     num_sub_gemms_param = params["num_sub_gemms"]
+    # 3-D (NDHWC, stride 1 along every axis; see _3d_conflict): the GEMM row
+    # m decodes to (n', hi, wi) by the 2-D record, n' = n*Di + di, and n' then
+    # to (n, di) by the kernarg magic pair; the reduction row (y', x, k_out)
+    # to y' = z*Y + y. dY row do = di + pD - z*dD.
+    is_3d = p.is_3d
+    if is_3d:
+        p_Z = params["p_Z"]
+        p_Do = params["p_Do"]
+        p_pD = params["p_pD"]
+        p_dD = params["p_dD"]
+        di_div = _MagicDiv(
+            params["p_Di"],
+            params["p_magic_m_Di_mult"],
+            params["p_magic_m_Di_shift"],
+        )
     # -------------------------------------------------------------------------
 
     op = _resolve_dgrad_op(spec, arch)
@@ -2153,10 +3917,58 @@ def _build_tilde_dgrad(
     num_xcds = xcd_tile_order_xcds(spec, arch)
     if num_xcds:
         flat_block_id, xcd_group = emit_xcd_tile_order(
-            b, flat_block_id, params, num_xcds=num_xcds
+            b, flat_block_id, params, num_xcds=num_xcds,
+            ungrouped=bool(spec.xcd_remap),
         )
 
-    fold_record = spec.folds_sub_gemm_record
+    fold_record = spec.folds_sub_gemm_record and not spec.pp_boxes
+    if spec.pp_boxes and spec.xcd_remap:
+        # pp_boxes: XCD-contiguous order over the boxes' tiles (the last
+        # record's end is the launch's tile count).
+        _last = b.sub(num_sub_gemms_param, b.const_i32(1))
+        _rb = b.mul(_last, b.const_i32(_RECORD_FIELDS))
+        _tot = b.add(
+            b.global_load_i32(sub_gemm_buf, _rb),
+            b.mul(
+                b.mul(
+                    b.global_load_i32(sub_gemm_buf, b.add(_rb, b.const_i32(1))),
+                    b.global_load_i32(sub_gemm_buf, b.add(_rb, b.const_i32(2))),
+                ),
+                # the record's split-K degree (pp_boxes split-K), else 1
+                b.smax(
+                    b.global_load_i32(sub_gemm_buf, b.add(_rb, b.const_i32(15))),
+                    b.const_i32(1),
+                )
+                if spec.split_k > 1
+                else b.const_i32(1),
+            ),
+        )
+        _nx = b.const_i32(spec.xcd_remap)
+        if spec.pp_box_order & 2:
+            # pp_box_order bit 2: the XCD-contiguous order per window of
+            # PP_BOX_SPLIT_CUS workgroups (one round), so a launch of several
+            # rounds keeps the records' longest-first order round by round
+            # (the whole-launch order hands the first XCDs only the first
+            # records' tiles, i.e. the longest ones).
+            _win = b.const_i32(PP_BOX_SPLIT_CUS)
+            _w0 = b.mul(b.div(flat_block_id, _win), _win)
+            _wt = b.smin(b.sub(_tot, _w0), _win)
+            _loc = b.sub(flat_block_id, _w0)
+            _xw = b.mod(_loc, _nx)
+            _q = b.div(_wt, _nx)
+            _remv = b.sub(_wt, b.mul(_q, _nx))
+            _v = b.add(
+                b.add(b.mul(_xw, _q), b.smin(_xw, _remv)), b.div(_loc, _nx)
+            )
+            flat_block_id = b.add(_w0, b.select(b.cmp_ge(_wt, _nx), _v, _loc))
+        else:
+            _xw = b.mod(flat_block_id, _nx)
+            _q = b.div(_tot, _nx)
+            _remv = b.sub(_tot, b.mul(_q, _nx))
+            _v = b.add(
+                b.add(b.mul(_xw, _q), b.smin(_xw, _remv)), b.div(flat_block_id, _nx)
+            )
+            flat_block_id = b.select(b.cmp_ge(_tot, _nx), _v, flat_block_id)
     if fold_record:
         # Stride 1 (DgradConvSpec.folds_sub_gemm_record): the only sub-GEMM's
         # record is rebuilt from the kernargs, so there is nothing to search
@@ -2248,6 +4060,27 @@ def _build_tilde_dgrad(
         def _ld_magic(j: int) -> Value:
             return b.global_load_i32(sub_gemm_buf, b.add(_magic_base, b.const_i32(j)))
 
+    # pp_boxes 7: a record's rows are its pixel list (after the magic table:
+    # row bases, then the rows, see pack_sub_gemm_buffer); a box-local
+    # row index m becomes the pixel index the full-dX box decodes.
+    _rm_map = None
+    if spec.pp_boxes in (7, 77):
+        _rm_tab = b.add(
+            b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS)),
+            num_sub_gemms_param,
+        )
+        if spec.pp_box_det:
+            # pp_box_det: the header words (workspace and counter offsets)
+            # precede the row tables (pp_box_det_pack).
+            _rm_tab = b.add(_rm_tab, b.const_i32(2))
+        _rm_base = b.add(
+            _rm_tab,
+            b.global_load_i32(sub_gemm_buf, b.add(b.sub(_rm_tab, num_sub_gemms_param), sg_idx)),
+        )
+
+        def _rm_map(b_: IRBuilder, m: Value) -> Value:
+            return b_.global_load_i32(sub_gemm_buf, b_.add(_rm_base, m))
+
     rec_kpg_magic = (_ld_magic(0), _ld_magic(1))
     rec_xdot_magic = (_ld_magic(2), _ld_magic(3))
     rec_hw_magic = (_ld_magic(4), _ld_magic(5))
@@ -2256,8 +4089,49 @@ def _build_tilde_dgrad(
     # Compute local tile indices within this sub-GEMM. The folded record's
     # block_start is 0, so the subtraction is skipped.
     local_flat = flat_block_id if fold_record else b.sub(flat_block_id, rec_block_start)
-    local_m_tile = b.div(local_flat, rec_num_n_tiles)
-    local_n_tile = b.mod(local_flat, rec_num_n_tiles)
+    # pp_boxes, 3-D: a box's rows are (n, d - db, h - hb, w - wb) with
+    # d - db < ds (record fields 11 = ds, 12 = db); its filter depths are
+    # [zb, zb + zs) (fields 13, 21).
+    def _bx_split_d(b_: IRBuilder, nd: Value):
+        """(image, dX depth) of the box-local row index n*ds + (d - db)."""
+        ds = rec_a_embed_h_coeff
+        img = b_.div(nd, ds)
+        return img, b_.add(b_.sub(nd, b_.mul(img, ds)), rec_a_embed_w_coeff)
+
+    def _bx_nval(b_: IRBuilder, nd: Value) -> Value:
+        """The dX row index n*Di + d of the box-local n*ds + (d - db)."""
+        if not is_3d:
+            return nd
+        img, d = _bx_split_d(b_, nd)
+        return b_.add(b_.mul(img, params["p_Di"]), d)
+
+    # pp_boxes split-K: a record's blocks are its tiles x its own split
+    # degree (record field 15), slice fastest.
+    bx_slice = bx_sk = None
+    if spec.pp_boxes and spec.split_k > 1 and spec.pp_box_order & 1:
+        # pp_box_order 1: (n, slice, m) with m fastest -- the workgroups that
+        # read one W slice (same n tile and K slice) are consecutive, so the
+        # XCD order puts them on one L2.
+        bx_sk = b.smax(rec_b_x_stride, b.const_i32(1))
+        local_m_tile = b.mod(local_flat, rec_num_m_tiles)
+        _rest = b.div(local_flat, rec_num_m_tiles)
+        local_n_tile = b.div(_rest, bx_sk)
+        bx_slice = b.sub(_rest, b.mul(local_n_tile, bx_sk))
+    if spec.pp_boxes and spec.split_k > 1 and not spec.pp_box_order & 1:
+        bx_sk = b.smax(rec_b_x_stride, b.const_i32(1))
+        _tl = b.div(local_flat, bx_sk)
+        bx_slice = b.sub(local_flat, b.mul(_tl, bx_sk))
+        local_flat = _tl
+    if not (spec.pp_boxes and spec.split_k > 1 and spec.pp_box_order & 1):
+        local_m_tile = b.div(local_flat, rec_num_n_tiles)
+        local_n_tile = b.mod(local_flat, rec_num_n_tiles)
+
+    if spec.m_band and fold_record:
+        # Output-plane band order (DgradConvSpec.m_band).
+        local_m_tile = emit_m_band_order(
+            b, local_m_tile, num_m_tiles=p_num_pid_m, plane=b.mul(p_Hi, p_Wi),
+            tile_m=block_m, m_band=spec.m_band,
+        )
 
     # Warp grid: bind() emits tid/lane/warp decomposition. We override
     # block_m/n_off with our own local tile offsets (not from block_id_x/y).
@@ -2314,8 +4188,10 @@ def _build_tilde_dgrad(
         c_patch_xc = b.mul(p_X, p_C)
         c_dg_N = b.mul(p_Y, c_patch_xc)
         patch_cols = (c_patch_xc, b.mul(p_Wi, p_C))
-    # dY row count N*Ho*Wo, used by the pointwise fast path's bounds check.
+    # dY row count N*[Do*]Ho*Wo, used by the pointwise fast path's bounds check.
     c_dY_rows = b.mul(b.mul(p_N, p_Ho), p_Wo)
+    if is_3d:
+        c_dY_rows = b.mul(c_dY_rows, p_Do)
 
     grouped = p.groups > 1
     if grouped:
@@ -2344,9 +4220,33 @@ def _build_tilde_dgrad(
     lds_layout = spec.effective_lds_layout()
     # The staged dY halo tile (DgradConvSpec.dy_halo) replaces the A tile; see
     # dy_halo_lds_rows for its shape.
+    _xh_ak4 = spec.tapk_xhalo and spec.xh_a_k4
+    # xh_a_k4: K0 slabs of Mp rows x 4 elements (row k0 * Mp + r).
+    _ak4_mp = spec.xh_a_k4_rows if _xh_ak4 else 0
+    # xh_dlds: A_smem / A_smem_h1 are the two k-half buffers (separate
+    # allocations: separate LDS alias scopes for LLVM's LDS-DMA waits).
+    A_smem_h1 = None
+    if spec.xh_dlds:
+        b.kernel.attrs["lds_alias_scopes"] = True
+    if spec.xh_dlds in (1, 2, 3):
+        A_smem_h1 = b.smem_alloc(
+            ir_dtype_a, (block_k // 8 * _ak4_mp, 4), name_hint="A_smem_h1"
+        )
     A_smem = b.smem_alloc(
         ir_dtype_a,
-        lds_layout.storage_shape(spec.dy_halo_lds_rows if spec.dy_halo else block_m),
+        (block_k // 8 * _ak4_mp, 4)
+        if spec.xh_dlds in (1, 2, 3)
+        else (block_k // 4 * _ak4_mp, 4)
+        if _xh_ak4
+        else lds_layout.storage_shape(
+            spec.dy_halo_lds_rows
+            if spec.dy_halo
+            else spec.xhalo_lds_rows
+            if spec.tapk_xhalo
+            else block_m + 8
+            if pp_a_partial(spec)
+            else block_m
+        ),
         name_hint="A_smem",
     )
     if spec.lds_k_outer:
@@ -2355,11 +4255,60 @@ def _build_tilde_dgrad(
         b_shape = (block_k, block_n + spec.kouter_b_pad)
     else:
         b_shape = lds_layout.storage_shape(block_n)
-    B_smem = b.smem_alloc(ir_dtype_b, b_shape, name_hint="B_smem")
+        if spec.tapk_xhalo and spec.xh_b_kpad:
+            # xh_b_kpad: the B tiles padded (not swizzled) under lds_xor.
+            b_shape = (block_n, block_k + spec.xh_b_kpad)
+    B_smem_h1 = None
+    if spec.xh_dlds in (4, 5, 6):
+        # xh_dlds 4-6: one buffer of the stacked X taps' B tiles (no junk rows).
+        B_smem = b.smem_alloc(
+            ir_dtype_b, (p.X * block_n, block_k + spec.xh_b_kpad), name_hint="B_smem"
+        )
+    elif spec.xh_dlds:
+        # xh_dlds: two k-half buffers of the stacked X taps' B tiles.
+        _bh_shape = (p.X * block_n, block_k // 2 + spec.xh_b_kpad)
+        B_smem = b.smem_alloc(ir_dtype_b, _bh_shape, name_hint="B_smem")
+        B_smem_h1 = b.smem_alloc(ir_dtype_b, _bh_shape, name_hint="B_smem_h1")
+    elif spec.tapk_xhalo and spec.xh_b_wide:
+        # xh_b_wide: the X taps' B tiles stacked (+ load_vec junk rows).
+        B_smem = b.smem_alloc(
+            ir_dtype_b,
+            (p.X * block_n + _dgrad_b_load_vec(spec), b_shape[1]),
+            name_hint="B_smem",
+        )
+    elif spec.tapk_pp_bslab:
+        # tapk_pp_bslab: K0 slabs of tile_n rows x 4 elements.
+        B_smem = b.smem_alloc(
+            ir_dtype_b, (block_k // 4 * block_n, 4), name_hint="B_smem"
+        )
+    else:
+        B_smem = b.smem_alloc(ir_dtype_b, b_shape, name_hint="B_smem")
     # dy_halo=2: the second B buffer of the per-tap double buffer.
     B_smem2 = (
         b.smem_alloc(ir_dtype_b, b_shape, name_hint="B_smem2")
-        if spec.dy_halo == 2
+        if spec.dy_halo == 2 or spec.tapk_prefetch == 2
+        else None
+    )
+    # tapk_xhalo: one B tile per x tap.
+    B_smem_x = (
+        [B_smem] * p.X
+        if spec.tapk_xhalo and spec.xh_b_wide
+        else [B_smem]
+        + [
+            b.smem_alloc(ir_dtype_b, b_shape, name_hint=f"B_smem_x{i}")
+            for i in range(1, p.X)
+        ]
+        if spec.tapk_xhalo
+        else None
+    )
+    # Row of tap x's B tile in its LDS buffer (stacked with xh_b_wide).
+    xh_b_off = [x * block_n if spec.xh_b_wide else 0 for x in range(p.X)]
+    # tapk_prefetch=2: the second A buffer of the ping-pong.
+    A_smem2 = (
+        b.smem_alloc(
+            ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
+        )
+        if spec.tapk_prefetch == 2
         else None
     )
 
@@ -2367,6 +4316,145 @@ def _build_tilde_dgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
+    # lds_xor: the column of tile element (row, col) -- its 16-byte chunk XOR
+    # the row's 256-byte line index (rows of tile_k < 128 share a line; a key
+    # of row % chunks would alias rows r and r + 256/row_bytes).
+    _xor_sh = {16: 3, 32: 2, 64: 1, 128: 0}.get(block_k, 0)
+
+    def xh_swz(b_: IRBuilder, row: Value, col: Value) -> Value:
+        if not spec.lds_xor:
+            return col
+        r = b_.lshr(row, b_.const_i32(_xor_sh)) if _xor_sh else row
+        key = b_.land(r, b_.const_i32(block_k // 8 - 1))
+        return b_.xor(col, b_.shl(key, b_.const_i32(3)))
+
+    def xh_swz_b(b_: IRBuilder, row: Value, col: Value) -> Value:
+        """xh_swz for the B tiles (unswizzled when they are padded)."""
+        return col if spec.xh_b_kpad else xh_swz(b_, row, col)
+
+    _xsm = bool(spec.xh_stride_m)
+
+    def _ak4_row(b_: IRBuilder, row: Value) -> Value:
+        """xh_stride_m: the slab row of A row ``row`` (row ^ ((row >> 4) &
+        (mfmas_m - 1)): a 16-lane read of mfmas_m-strided rows then covers 16
+        distinct 8-byte slots of the 128-byte bank window at any offset)."""
+        if not _xsm:
+            return row
+        return b_.xor(
+            row, b_.land(b_.lshr(row, b_.const_i32(4)), b_.const_i32(mfmas_m - 1))
+        )
+
+    def _dl_slot(b_: IRBuilder, row: Value, k0: Value) -> Value:
+        """xh_dlds: the 8-byte slot (of 4 elements) of ``row``, k group
+        ``k0`` in a k-half A buffer: blocks of 8 rows x 4 k groups (256
+        bytes, one DMA), slot (k0 * 8 + row % 8) ^ (g & 3) ^ ((g >> 2) & 1)
+        * 8 of block g = row / 8 (16 lanes reading 4-strided rows of one k
+        group hit 16 distinct slots of the 128-byte bank window)."""
+        if spec.xh_dlds in (4, 5, 6):
+            # Blocks of 4 rows x 8 k groups (256 bytes, one DMA); in block
+            # g row slot (row % 4) ^ ((g >> 3) & 1), k slot k0 ^ (g & 7): 16
+            # lanes reading 4-strided rows of one k group hit 16 distinct
+            # 8-byte slots of the 128-byte bank window.
+            g4 = b_.lshr(row, b_.const_i32(2))
+            rs = b_.xor(
+                b_.land(row, b_.const_i32(3)),
+                b_.land(b_.lshr(g4, b_.const_i32(3)), b_.const_i32(1)),
+            )
+            ks = b_.xor(k0, b_.land(g4, b_.const_i32(7)))
+            return b_.add(
+                b_.shl(g4, b_.const_i32(5)), b_.add(b_.shl(rs, b_.const_i32(3)), ks)
+            )
+        g = b_.lshr(row, b_.const_i32(3))
+        if spec.xh_dlds == 3:
+            # Row-major 32-byte rows (lane-contiguous DMA, conflicting reads).
+            return b_.add(
+                b_.shl(g, b_.const_i32(5)),
+                b_.add(b_.shl(b_.land(row, b_.const_i32(7)), b_.const_i32(2)), k0),
+            )
+        key = b_.xor(
+            b_.land(g, b_.const_i32(3)),
+            b_.shl(b_.land(b_.lshr(g, b_.const_i32(2)), b_.const_i32(1)), b_.const_i32(3)),
+        )
+        slot = b_.xor(
+            b_.add(b_.shl(k0, b_.const_i32(3)), b_.land(row, b_.const_i32(7))), key
+        )
+        return b_.add(b_.shl(g, b_.const_i32(5)), slot)
+
+    # xh_dlds 4: the slot of (row, k_blk) per fragment row, computed before
+    # the K loop (by row value name); k atom kk reads slot ^ 4 kk.
+    _dl4_base: dict = {}
+
+    def xh_a_read(b_: IRBuilder, smem: Value, row: Value, col: Value, n: int):
+        """One A fragment read (``n`` elements of row ``row`` from column
+        ``col``) in the x-halo A layout (lds_xor swizzle or xh_a_k4 slabs)."""
+        if spec.xh_dlds in (4, 5, 6) and row.name in _dl4_base:
+            r = b_.xor(
+                _dl4_base[row.name],
+                b_.land(b_.lshr(col, b_.const_i32(2)), b_.const_i32(4)),
+            )
+            return _emit_smem_load(b_, smem, r, b_.const_i32(0), n, smem_dtype=_smem_dtype)
+        if spec.xh_dlds:
+            if n != 4:
+                raise ValueError("xh_dlds: A fragments of 4 elements only")
+            r = _dl_slot(b_, row, b_.lshr(col, b_.const_i32(2)))
+            return _emit_smem_load(b_, smem, r, b_.const_i32(0), n, smem_dtype=_smem_dtype)
+        if _xh_ak4:
+            if n != 4:
+                raise ValueError("xh_a_k4: A fragments of 4 elements only")
+            k0 = b_.lshr(col, b_.const_i32(2))
+            r = b_.add(b_.mul(k0, b_.const_i32(_ak4_mp)), _ak4_row(b_, row))
+            return _emit_smem_load(b_, smem, r, b_.const_i32(0), n, smem_dtype=_smem_dtype)
+        return _emit_smem_load(b_, smem, row, xh_swz(b_, row, col), n, smem_dtype=_smem_dtype)
+
+    def xh_store(loader, dst: Value, staged: list, is_b: bool = False) -> None:
+        """``loader.store_lds`` with the lds_xor column swizzle."""
+        if _xh_ak4 and not is_b:
+            # xh_a_k4: each vector as 4-element pieces, one per k-group slab.
+            vec = loader.load_vec
+            if vec % 4:
+                raise ValueError("xh_a_k4: A load width must be a multiple of 4")
+            c_mp = b.const_i32(_ak4_mp)
+            for row, col, v in staged:
+                row = _ak4_row(b, row)
+                k0 = b.lshr(col, b.const_i32(2))
+                for j in range(vec // 4):
+                    kj = b.add(k0, b.const_i32(j)) if j else k0
+                    piece = b.vec_pack(
+                        [b.vec_extract(v, 4 * j + i) for i in range(4)], ir_dtype_a
+                    )
+                    b.smem_store_vN(
+                        dst, [b.add(b.mul(kj, c_mp), row), b.const_i32(0)], piece, 4
+                    )
+            return
+        if not spec.lds_xor or (is_b and spec.xh_b_kpad):
+            loader.store_lds(b, smem_dst=dst, staged=staged)
+            return
+        if isinstance(loader, (KPackedRowLoader, XTapKPackLoader)):
+            for row, col, vs in staged:
+                for i in range(loader.load_vec):
+                    r = b.add(row, b.const_i32(i)) if i else row
+                    packed = b.vec_pack(
+                        [b.vec_extract(v, i) for v in vs], loader.elem_dtype
+                    )
+                    b.smem_store_vN(dst, [r, xh_swz(b, r, col)], packed, loader.kpack)
+            return
+        if getattr(loader, "vector_axis", "col") == "row" and loader.load_vec > 1:
+            if getattr(loader, "row_kpack", 1) != 1:
+                raise ValueError("lds_xor: row_kpack B loads are not swizzled")
+            for row, col, v in staged:
+                for i in range(loader.load_vec):
+                    r = b.add(row, b.const_i32(i)) if i else row
+                    b.smem_store_vN(dst, [r, xh_swz(b, r, col)], b.vec_extract(v, i), 1)
+            return
+        vec = loader.load_vec
+        for row, col, v in staged:
+            b.smem_store_vN(dst, [row, xh_swz(b, row, col)], v, vec)
+
+    # tapk_pp_epi: the ping-pong loop hands its accumulators to the
+    # epilogue already converted to bf16 (see _tapk_pingpong_loop).
+    _pp_state: dict = {}
+    # pp_streamk: the current segment's first K tile and K tile count.
+    _psk_seg: dict = {}
     acc_init = b.zero_vec_f32(c_per_lane)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
@@ -2383,7 +4471,9 @@ def _build_tilde_dgrad(
     # load_vec_a: k_out is innermost in k_dg → consecutive k_sub → consecutive k_out
     # → contiguous in dY (NHWK, last dim K).  Condition: kpg % load_vec_a == 0.
     # For split_k > 1 the slice boundary may not align to K_conv so use 1 there.
-    if spec.split_k <= 1:
+    if spec.split_k <= 1 or (
+        (spec.tapk_xhalo or spec.tapk_pingpong) and spec.tap_outer_k
+    ):
         _safe_vec_a = _choose_load_vec_for(
             block_m, block_n, block_k, threads, spec.data.dtype_a
         )
@@ -2503,6 +4593,15 @@ def _build_tilde_dgrad(
         # Decompose m_sub → (n, htilde_local, wtilde_local)
         n, m_rem = _magic_divmod(b_, m_sub, hw_div)
         htl, wtl = _magic_divmod(b_, m_rem, w_div)
+        do_ok = None
+        if is_3d:
+            # n is n*Di + di; ydot is z*Y + y (the record's y_dot_slice is Y).
+            n, di = _magic_divmod(b_, n, di_div)
+            zdot = b_.div(ydot, c_Y)
+            ydot = b_.sub(ydot, b_.mul(zdot, c_Y))
+            do = b_.sub(b_.add(di, p_pD), b_.mul(zdot, p_dD))
+            do_ok = b_.land(b_.cmp_ge(do, c0), b_.cmp_lt(do, p_Do))
+            n = b_.add(b_.mul(n, p_Do), do)
 
         # ho = htl + h_tilde_slice_begin + ydot * a_embed_h_coeff
         ho = b_.add(
@@ -2517,6 +4616,8 @@ def _build_tilde_dgrad(
         wo_ok = b_.land(b_.cmp_ge(wo, c0), b_.cmp_lt(wo, c_Wo))
         k_ok = b_.cmp_lt(k_out, _kdiv)
         valid = b_.land(b_.land(ho_ok, wo_ok), k_ok)
+        if do_ok is not None:
+            valid = b_.land(valid, do_ok)
 
         # NHWK linear offset: (n * Ho + ho) * Wo * K + wo * K + k_out_abs
         # (the K stride stays total-K; only the channel index carries g*kpg).
@@ -2549,6 +4650,12 @@ def _build_tilde_dgrad(
         ydot, xdot = _magic_divmod(b_, yx_rem, xdot_div)
         k_out_abs = b_.add(k_out, k_out_group_base) if grouped else k_out
 
+        zdot = None
+        if is_3d:
+            # ydot is z*Y + y; the K tail past dg_K lands on z >= Z.
+            zdot = b_.div(ydot, c_Y)
+            ydot = b_.sub(ydot, b_.mul(zdot, c_Y))
+
         # y = ydot * b_y_stride + b_y_offset
         y = b_.add(b_.mul(ydot, rec_b_y_stride), rec_b_y_offset)
         x = b_.add(b_.mul(xdot, rec_b_x_stride), rec_b_x_offset)
@@ -2557,6 +4664,11 @@ def _build_tilde_dgrad(
         valid = b_.land(
             b_.land(b_.cmp_lt(y, c_Y), b_.cmp_lt(x, c_X)), b_.cmp_lt(k_out, _kdiv)
         )
+        if zdot is not None:
+            valid = b_.land(valid, b_.cmp_lt(zdot, p_Z))
+            # KZYXC: the depth tap rides the filter row index.
+            y = b_.add(b_.mul(zdot, c_Y), y)
+            k_out_abs = b_.mul(k_out_abs, p_Z)
 
         # Weight is stored PER-GROUP packed: KYXC == [K, Y, X, cpg] (mirrors the
         # forward make_b_descriptor and the wgrad packed dW output).  The group is
@@ -2594,6 +4706,27 @@ def _build_tilde_dgrad(
         elem_dtype=ir_dtype_b,
         vector_axis=axis_b,
     )
+    if spec.b_kpack:
+        if axis_b != "row" or load_vec_b < 2:
+            raise ValueError(
+                f"b_kpack needs a row-mode B load of width >= 2 (got axis "
+                f"{axis_b!r}, width {load_vec_b})"
+            )
+        # The widest width that gives every thread whole kpack units; a
+        # narrower global read is the price of the packed LDS store.
+        b_sync_loader = KPackedRowLoader(
+            tile_rows=block_n,
+            tile_cols=block_k,
+            block_size=threads,
+            load_vec=KPackedRowLoader.choose_vec(
+                block_n, block_k, threads,
+                min(load_vec_b, 2) if spec.tapk_pp_bslab == 2 else load_vec_b,
+                spec.b_kpack,
+            ),
+            kpack=spec.b_kpack,
+            elem_dtype=ir_dtype_b,
+            n_fast=spec.tapk_pingpong >= 3,
+        )
     if spec.pipeline == "wavelet":
         a_wavelet_loader, b_wavelet_loader = _build_wavelet_loaders(
             num_load_waves=spec.num_load_waves,
@@ -2681,8 +4814,19 @@ def _build_tilde_dgrad(
             b, tid=tid, smem_dst=B_dst, descriptor=_b_desc_fn, rsrc=w_rsrc
         )
 
+    def _xh_mfma(a_frag: Value, b_frag: Value, acc: Value) -> Value:
+        """One MFMA of the shared K-loop emitters; xh_epi swaps the operands
+        (the accumulator then holds C transposed)."""
+        if spec.xh_epi:
+            return _emit_mfma(b, atom, b_frag, a_frag, acc)
+        return _emit_mfma(b, atom, a_frag, b_frag, acc)
+
     def emit_mfma_phase(
-        A_src: Value, B_src: Value, iter_vars: Sequence[Value], a_row_map=None
+        A_src: Value,
+        B_src: Value,
+        iter_vars: Sequence[Value],
+        a_row_map=None,
+        b_row_off: int = 0,
     ) -> List[Value]:
         """One K tile of MMAs. ``a_row_map`` (MFMA only, the dY halo loop)
         rewrites each A fragment row before its LDS read."""
@@ -2767,11 +4911,7 @@ def _build_tilde_dgrad(
                 )
                 if a_row_map is not None:
                     a_row = a_row_map(a_row)
-                a_rows.append(
-                    _emit_smem_load(
-                        b, A_src, a_row, col_base, a_per_lane, smem_dtype=_smem_dtype
-                    )
-                )
+                a_rows.append(xh_a_read(b, A_src, a_row, col_base, a_per_lane))
             b_cols = []
             for ni in range(mfmas_n):
                 if spec.lds_k_outer:
@@ -2787,17 +4927,22 @@ def _build_tilde_dgrad(
                     continue
                 b_row = b.add(
                     warp_n_off,
-                    b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom),
+                    b.add(b.const_i32(ni * spec.warp_tile_n + b_row_off), n_in_atom),
                 )
                 b_cols.append(
                     _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                        b,
+                        B_src,
+                        b_row,
+                        xh_swz_b(b, b_row, col_base),
+                        b_per_lane,
+                        smem_dtype=_smem_dtype,
                     )
                 )
             flat = 0
             for mi in range(mfmas_m):
                 for ni in range(mfmas_n):
-                    acc = _emit_mfma(b, atom, a_rows[mi], b_cols[ni], new_accs[flat])
+                    acc = _xh_mfma(a_rows[mi], b_cols[ni], new_accs[flat])
                     new_accs[flat] = acc
                     flat += 1
             schedule.emit_after_mfma_step(
@@ -2807,7 +4952,216 @@ def _build_tilde_dgrad(
             )
         return new_accs
 
+    def emit_mfma_phases_ahead(
+        phases: Sequence[tuple],
+        iter_vars: Sequence[Value],
+        depth: int = 1,
+        defer: int = 0,
+        deferred: Optional[list] = None,
+        kk_range: Optional[Sequence[int]] = None,
+        after_reads=None,
+        row_cache: Optional[dict] = None,
+    ) -> List[Value]:
+        """``emit_mfma_phase`` over several (A_src, B_src, a_row_map) phases
+        as one software pipeline (MFMA, M-outer LDS only): the fragments of
+        step ``i + depth`` (a step = one phase's kk) are read from LDS before
+        the MFMAs of step ``i``, so the ds_read latency hides behind MFMAs
+        (DgradConvSpec.tapk_lds_ahead). With ``defer`` the MFMAs of the last
+        ``defer`` steps are not emitted: one closure per step (accs -> accs)
+        is appended to ``deferred`` instead (DgradConvSpec.xh_defer)."""
+        decoded = decode_mfma_lanes(b, atom, lane)
+        m_in_atom = decoded.m_in_atom
+        n_in_atom = decoded.n_in_atom
+        k_blk = decoded.k_blk
+        warp_m_off = grid.warp_m_off(b)
+        warp_n_off = grid.warp_n_off(b)
+        steps = [
+            (xi, ph, kk)
+            for xi, ph in enumerate(phases)
+            for kk in (range(k_atoms) if kk_range is None else kk_range)
+        ]
+        a_row_cache: dict = {} if row_cache is None else row_cache
+        # xh_stride_m: the A fragments read so far, by (tap, kk, mi); the
+        # phases are the X taps in order.
+        a_frag_cache: dict = {}
+        if _xsm:
+            _xsm_base = b.add(warp_m_off, b.mul(m_in_atom, b.const_i32(mfmas_m)))
+
+        def reads(step):
+            xi, ph, kk = step
+            A_src, B_src, a_row_map = ph[:3]
+            b_off = ph[3] if len(ph) > 3 else 0
+            col_base = b.add(
+                b.mul(k_blk, b.const_i32(a_per_lane)),
+                b.const_i32(kk * spec.warp_tile_k),
+            )
+            a_rows = []
+            for mi in range(mfmas_m):
+                if _xsm and xi > 0 and mi > 0:
+                    # Tap x of row wave_m0 + S*r + mi = tap x-1 of mi-1.
+                    a_rows.append(a_frag_cache[(xi - 1, kk, mi - 1)])
+                    a_frag_cache[(xi, kk, mi)] = a_rows[-1]
+                    continue
+                key = (id(a_row_map), mi)
+                if key not in a_row_cache:
+                    if _xsm:
+                        a_row = b.add(_xsm_base, b.const_i32(mi)) if mi else _xsm_base
+                    else:
+                        a_row = b.add(
+                            warp_m_off,
+                            b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom),
+                        )
+                    if a_row_map is not None:
+                        a_row = a_row_map(a_row)
+                    a_row_cache[key] = a_row
+                a_rows.append(
+                    xh_a_read(b, A_src, a_row_cache[key], col_base, a_per_lane)
+                )
+                if _xsm:
+                    a_frag_cache[(xi, kk, mi)] = a_rows[-1]
+            b_cols = []
+            for ni in range(mfmas_n):
+                b_row = b.add(
+                    warp_n_off,
+                    b.add(b.const_i32(ni * spec.warp_tile_n + b_off), n_in_atom),
+                )
+                b_cols.append(
+                    _emit_smem_load(
+                        b,
+                        B_src,
+                        b_row,
+                        xh_swz_b(b, b_row, col_base),
+                        b_per_lane,
+                        smem_dtype=_smem_dtype,
+                    )
+                )
+            return a_rows, b_cols
+
+        new_accs: List[Value] = list(iter_vars)
+        frags = [reads(s) for s in steps[:depth]]
+        if after_reads is not None and depth >= len(steps):
+            after_reads()
+        for i in range(len(steps)):
+            if i + depth < len(steps):
+                frags.append(reads(steps[i + depth]))
+                if after_reads is not None and i + depth == len(steps) - 1:
+                    # after_reads: right after the last fragment read.
+                    after_reads()
+            a_rows, b_cols = frags[i]
+            frags[i] = None
+            if defer and i >= len(steps) - defer:
+
+                def _deferred(accs_in, a_rows=a_rows, b_cols=b_cols):
+                    out = list(accs_in)
+                    f_ = 0
+                    for mi_ in range(mfmas_m):
+                        for ni_ in range(mfmas_n):
+                            out[f_] = _xh_mfma(a_rows[mi_], b_cols[ni_], out[f_])
+                            f_ += 1
+                    return out
+
+                deferred.append(_deferred)
+                continue
+            flat = 0
+            for mi in range(mfmas_m):
+                for ni in range(mfmas_n):
+                    new_accs[flat] = _xh_mfma(a_rows[mi], b_cols[ni], new_accs[flat])
+                    flat += 1
+        return new_accs
+
     # ---- epilogue dispatch helper (shared by wavelet and standard paths) ----
+    def _pbd_fixup(fa, box_store) -> None:
+        """pp_box_det 3/4: store this slice's slot (SC1), count in, and the
+        last slice of the tile folds the slots in slice order and stores."""
+        _sc1 = 16  # buffer aux bit 4 = SC1 on gfx94x: device-coherent
+        _eb = 2 if spec.pp_box_det == 4 else 4
+        n_w = spec.warp_m * spec.warp_n
+        tile_elems = block_m * block_n
+        ws = make_buffer_resource(b, sub_gemm_buf, num_bytes=b.const_i32(0x7FFFFFF0))
+        _hdr = b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS))
+        ws_word = b.readfirstlane(b.global_load_i32(sub_gemm_buf, _hdr))
+        cnt_word = b.readfirstlane(b.global_load_i32(sub_gemm_buf, b.add(_hdr, b.const_i32(1))))
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        lane_off = b.mul(b.add(b.mul(wave, b.const_i32(64)), lane), b.const_i32(4 * _eb))
+        acc_stride = n_w * 64 * 4 * _eb
+        ws_bytes0 = b.mul(ws_word, b.const_i32(4))
+
+        def _slot_base(slot):
+            return b.add(b.add(ws_bytes0, b.mul(slot, b.const_i32(tile_elems * _eb))), lane_off)
+
+        base = _slot_base(flat_block_id)
+        for j, acc in enumerate(fa):
+            off = b.add(base, b.const_i32(j * acc_stride))
+            if _eb == 2:
+                b.buffer_store_vN_bf16(ws.rsrc, off, c0, b.vec_trunc_f32_to_bf16(acc), 2, cachepolicy=_sc1)
+            else:
+                b.buffer_store_vN_f32(ws.rsrc, off, c0, acc, 4, aux=_sc1)
+        b.s_waitcnt(vmcnt=0)
+        b.sync()
+        step = rec_num_m_tiles if spec.pp_box_order & 1 else b.const_i32(1)
+        slot0 = b.sub(flat_block_id, b.mul(bx_slice, step))
+        cnt_idx = b.add(cnt_word, slot0)
+        flag = b.smem_alloc(I32, (1,), name_hint="pbd_flag")
+        c1f = b.const_i32(1)
+        with b.scf_if(b.cmp_eq(tid, c0)):
+            old = b.global_atomic_add(sub_gemm_buf, cnt_idx, c1f, ordering="monotonic")
+            b.smem_store_vN(flag, [c0], old, 1)
+        b.sync()
+        old_u = b.readfirstlane(b.vec_extract(b.smem_load_vN(flag, c0, dtype=I32, n=1), 0))
+        with b.scf_if(b.cmp_eq(old_u, b.sub(bx_sk, c1f))):
+            it = [(f"pbd_a{j}", b.zero_vec_f32(4)) for j in range(len(fa))]
+            red = b.scf_for_iter(c0, bx_sk, c1f, it, iv_name="pbs")
+            with red as (sv, accs_s):
+                bs = _slot_base(b.add(slot0, b.mul(sv, step)))
+                new = []
+                for j, a in enumerate(accs_s):
+                    off = b.add(bs, b.const_i32(j * acc_stride))
+                    if _eb == 2:
+                        v = b.buffer_load_vN(ws.rsrc, off, c0, BF16, 4, aux=_sc1)
+                        pv = b.vec_pack([b.cast_to_f32(b.vec_extract(v, i)) for i in range(4)], F32)
+                    else:
+                        pv = b.buffer_load_vN(ws.rsrc, off, c0, F32, 4, aux=_sc1)
+                    new.append(b.fadd(a, pv))
+                b.scf_yield(*new)
+            with b.scf_if(b.cmp_eq(tid, c0)):
+                b.global_store(sub_gemm_buf, cnt_idx, c0, align=4)
+            box_store(list(red.results))
+
+    def _pbd_store_slot(fa) -> None:
+        """pp_box_det: this split slice's f32 accumulators, as the lanes
+        hold them, into workspace slot ``flat_block_id`` (tile_m * tile_n
+        f32; the word offset of slot 0 is the header word after the magic
+        table). conv_dgrad_box_det_reduce adds a tile's slots in slice
+        order with the same warp grid, so the layout never leaves it."""
+        n_w = spec.warp_m * spec.warp_n
+        tile_elems = block_m * block_n
+        _eb = 2 if spec.pp_box_det == 2 else 4  # slot element bytes
+        ws = make_buffer_resource(b, sub_gemm_buf, num_bytes=b.const_i32(0x7FFFFFF0))
+        ws_word = b.readfirstlane(
+            b.global_load_i32(
+                sub_gemm_buf,
+                b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS)),
+            )
+        )
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        lane_off = b.mul(b.add(b.mul(wave, b.const_i32(64)), lane), b.const_i32(4 * _eb))
+        acc_stride = n_w * 64 * 4 * _eb
+        slot_base = b.add(
+            b.mul(ws_word, b.const_i32(4)),
+            b.mul(flat_block_id, b.const_i32(tile_elems * _eb)),
+        )
+        base = b.add(slot_base, lane_off)
+        for j, acc in enumerate(fa):
+            if _eb == 2:
+                b.buffer_store_vN_bf16(
+                    ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0,
+                    b.vec_trunc_f32_to_bf16(acc), 2,
+                )
+            else:
+                b.buffer_store_vN_f32(
+                    ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0, acc, 4
+                )
+
     def _dispatch_dgrad_epilogue(final_accs):
         _tilde_kwargs = dict(
             bounds_m=rec_gemm_m,
@@ -2828,7 +5182,86 @@ def _build_tilde_dgrad(
         use_cshuffle = spec.epilogue == "cshuffle"
         is_wmma = op.family == "wmma"
 
-        if spec.split_k > 1:
+        if (
+            (spec.split_k > 1 or spec.pp_streamk)
+            and (spec.tapk_xhalo or spec.tapk_pingpong)
+            and use_cshuffle
+            and not is_wmma
+        ):
+            # x-halo split-K: stride-1 dX of an ungrouped problem is a dense
+            # (M, C) row-major matrix, so the cshuffle packed-atomic epilogue
+            # (wgrad's) applies with row stride C (identity_supports_problem
+            # serves groups == 1 only).
+            _epi = CShuffleEpilogue.from_grid(
+                atom=spec.atom,
+                grid=grid,
+                max_store_vec=_dgrad_store_vec(spec),
+                out_dtype=spec.data.dtype_d,
+            )
+            if (spec.pp_streamk or spec.pp_boxes) and spec.cshuffle_m_chunks > 1:
+                _epi = dc_replace(_epi, m_chunks=spec.cshuffle_m_chunks)
+            if spec.pp_boxes:
+                # Box rows: dX row of box row m (the record's (h, w) origin).
+                def _box_row(b_, m):
+                    if _rm_map is not None:
+                        m = _rm_map(b_, m)
+                        if spec.split_atomic_pairs:
+                            # Pixel lists (pp_boxes 7/77) with sapl: the
+                            # record is the whole dX (origin 0, extents Di,
+                            # Hi, Wi), so the listed pixel index IS the dX
+                            # row -- no decode / re-encode per atomic.
+                            return m
+                    nv, mr = _magic_divmod(b_, m, hw_div)
+                    nv = _bx_nval(b_, nv)
+                    htl, wtl = _magic_divmod(b_, mr, w_div)
+                    return b_.add(
+                        b_.mul(
+                            b_.add(b_.mul(nv, c_Hi), b_.add(htl, rec_d_h_offset)),
+                            c_Wi,
+                        ),
+                        b_.add(wtl, rec_d_w_offset),
+                    )
+
+                if spec.split_atomic_pairs:
+                    # sapl on boxes: LDS reads of all pairs first, the rows'
+                    # map batched per wave (one vector map, v_readlane per
+                    # atomic), and LDS-only barriers between the m-chunks
+                    # (no drain of the previous chunk's atomics).
+                    _epi = dc_replace(
+                        _epi, atomic_pair_lanes=True, atomic_row_batch=True,
+                        lds_barriers=True,
+                    )
+                with b.scf_if_else(b.cmp_gt(bx_sk, b.const_i32(1))) as (_t, _e):
+                    with _t:
+                        if spec.pp_box_det >= 3:
+                            _pbd_fixup(
+                                final_accs,
+                                lambda accs_: _emit_dgrad_box_cshuffle_epilogue(
+                                    b, spec, atom, grid, accs_, dx_rsrc,
+                                    n_map=_bx_nval, **_tilde_kwargs,
+                                    **({"m_map": _rm_map} if _rm_map is not None else {}),
+                                ),
+                            )
+                        elif spec.pp_box_det:
+                            _pbd_store_slot(final_accs)
+                        else:
+                            _epi.atomic_store(
+                                b, accs=final_accs, dw_ptr=dX, wg_N=c_C,
+                                bounds=(rec_gemm_m, c_dg_N), row_map=_box_row,
+                            )
+                    with _e:
+                        _emit_dgrad_box_cshuffle_epilogue(
+                            b, spec, atom, grid, final_accs, dx_rsrc,
+                            n_map=_bx_nval, **_tilde_kwargs,
+                            **({"m_map": _rm_map} if _rm_map is not None else {}),
+                        )
+            else:
+                if spec.split_atomic_pairs:
+                    _epi = dc_replace(_epi, atomic_pair_lanes=True)
+                _epi.atomic_store(
+                    b, accs=final_accs, dw_ptr=dX, wg_N=c_C, bounds=(rec_gemm_m, c_dg_N)
+                )
+        elif spec.split_k > 1:
             _emit_dgrad_tilde_atomic_epilogue(
                 b,
                 spec,
@@ -2883,6 +5316,31 @@ def _build_tilde_dgrad(
                         params,
                         c_group_base=c_group_base,
                     )
+            elif use_cshuffle and spec.pp_boxes and spec.tapk_pp_epi:
+                _tk = _tilde_kwargs
+
+                def _bx_addr(b_, m_val, n_val):
+                    if _rm_map is not None:
+                        m_val = _rm_map(b_, m_val)
+                    return _tilde_dx_addr_fn(
+                        b_, m_val, n_val, _tk["hw_tilde"], _tk["w_tilde_slice"],
+                        _tk["d_h_stride"], _tk["d_h_offset"], _tk["d_w_stride"],
+                        _tk["d_w_offset"], c_Hi, c_Wi, c_C, c_group_base,
+                        n_map=_bx_nval,
+                    )
+
+                _emit_pp_cshuffle_epilogue(
+                    b, spec, final_accs, grid, dx_rsrc, params,
+                    c_group_base=c_group_base,
+                    addr=(_bx_addr, (rec_gemm_m, c_dg_N)),
+                    **({"pre_bf16": _pp_state["bf16"]} if "bf16" in _pp_state else {}),
+                )
+            elif use_cshuffle and spec.pp_boxes:
+                _emit_dgrad_box_cshuffle_epilogue(
+                    b, spec, atom, grid, final_accs, dx_rsrc, n_map=_bx_nval,
+                    **_tilde_kwargs,
+                    **({"m_map": _rm_map} if _rm_map is not None else {}),
+                )
             elif use_cshuffle:
                 _emit_dgrad_cshuffle_epilogue(
                     b,
@@ -2892,6 +5350,7 @@ def _build_tilde_dgrad(
                     dx_rsrc,
                     params,
                     c_group_base=c_group_base,
+                    **({"pre_bf16": _pp_state["bf16"]} if "bf16" in _pp_state else {}),
                 )
             else:
                 _emit_dgrad_direct_epilogue(
@@ -3081,7 +5540,9 @@ def _build_tilde_dgrad(
         c1 = b.const_i32(1)
         c_kd = c_kpg if grouped else c_K
         c_cs = c_dg_N if grouped else c_C
-        c_taps = b.mul(c_Y, c_X)
+        c_yx = b.mul(c_Y, c_X)
+        # 3-D: taps (z, y, x), KZYXC rows of Z*Y*X*Cs.
+        c_taps = b.mul(p_Z, c_yx) if is_3d else c_yx
         c_yxc = b.mul(c_taps, c_cs)
         tap_cap: dict[str, Value] = {}
 
@@ -3098,6 +5559,15 @@ def _build_tilde_dgrad(
                 b_.land(b_.cmp_ge(ho, c0), b_.cmp_lt(ho, c_Ho)),
                 b_.land(b_.cmp_ge(wo, c0), b_.cmp_lt(wo, c_Wo)),
             )
+            if is_3d:
+                # NDHWK: n -> (n, di); the dY row is n*Do + di (+ dd, which
+                # rides dy_tap), in range when 0 <= di + dd < Do.
+                n, di = _magic_divmod(b_, n, di_div)
+                do = b_.add(di, tap_cap["dd"])
+                valid = b_.land(
+                    valid, b_.land(b_.cmp_ge(do, c0), b_.cmp_lt(do, p_Do))
+                )
+                n = b_.add(b_.mul(n, p_Do), di)
             pix = b_.add(
                 b_.mul(
                     b_.add(b_.mul(b_.add(b_.mul(n, c_Ho), hi), c_Wo), wi),
@@ -3125,12 +5595,21 @@ def _build_tilde_dgrad(
 
         tap_for = b.scf_for_iter(c0, c_taps, c1, accs, iv_name="tap")
         with tap_for as (tap, tap_vars):
-            ydot = b.div(tap, c_X)
-            xdot = b.sub(tap, b.mul(ydot, c_X))
+            if is_3d:
+                zdot = b.div(tap, c_yx)
+                yx = b.sub(tap, b.mul(zdot, c_yx))
+            else:
+                yx = tap
+            ydot = b.div(yx, c_X)
+            xdot = b.sub(yx, b.mul(ydot, c_X))
             tap_cap["dh"] = b.sub(params["p_pH"], ydot)
             tap_cap["dw"] = b.sub(params["p_pW"], xdot)
+            _row_shift = tap_cap["dh"]
+            if is_3d:
+                tap_cap["dd"] = b.sub(p_pD, zdot)
+                _row_shift = b.add(b.mul(tap_cap["dd"], c_Ho), _row_shift)
             tap_cap["dy_tap"] = b.mul(
-                b.add(b.mul(tap_cap["dh"], c_Wo), tap_cap["dw"]), c_K
+                b.add(b.mul(_row_shift, c_Wo), tap_cap["dw"]), c_K
             )
             tap_cs = b.mul(tap, c_cs)
             chunk_accs = [(f"{name}_t", v) for (name, _), v in zip(accs, tap_vars)]
@@ -3154,6 +5633,4050 @@ def _build_tilde_dgrad(
                 b.scf_yield(*new_accs)
             b.scf_yield(*chunk_for.results)
         return list(tap_for.results)
+
+    def _pp_swz(row: Value, col: Value) -> Value:
+        """tapk_pingpong + lds_xor: the 16-byte chunk XOR the row index (one
+        phase per row, Triton's rotating swizzle; tile_k 64 = 128-byte rows,
+        so 8 consecutive rows of one fragment read hit 8 distinct chunks)."""
+        if not spec.lds_xor:
+            return col
+        # 64-byte rows (tile_k 32) pair up in a 128-byte bank window: the
+        # key is row // 2 there, so the 8 rows of one fragment read cover
+        # the window's 8 chunks.
+        r = b.lshr(row, b.const_i32(1)) if block_k == 32 else row
+        if spec.tapk_pingpong >= 3:
+            # Also the row's 8-row group: lanes storing rows 8 apart (the
+            # n-fast B loader) land on different chunks too.
+            r = b.xor(r, b.lshr(row, b.const_i32(3)))
+        key = b.land(r, b.const_i32(block_k // 8 - 1))
+        return b.xor(col, b.shl(key, b.const_i32(3)))
+
+    def _pbs_perm(n: Value) -> Value:
+        """tapk_pp_bslab 3: the slab row of B row n (bit 1 ^= bit 4)."""
+        if spec.tapk_pp_bslab != 3:
+            return n
+        return b.xor(n, b.shl(b.land(b.lshr(n, b.const_i32(4)), b.const_i32(1)), b.const_i32(1)))
+
+    def _pp_store(loader, dst: Value, staged: list) -> None:
+        """loader.store_lds with the _pp_swz column swizzle."""
+        if not spec.lds_xor:
+            loader.store_lds(b, smem_dst=dst, staged=staged)
+            return
+        if isinstance(loader, KPackedRowLoader) and spec.tapk_pp_bslab:
+            # Slab layout: rows row + 2j, row + 2j + 1 of slab col // 4 are
+            # 16 contiguous bytes.
+            c_n = b.const_i32(block_n)
+            for row, col, vs in staged:
+                kgn = b.mul(b.lshr(col, b.const_i32(2)), c_n)
+                base = b.add(kgn, row)
+                for j in range(loader.load_vec // 2):
+                    if spec.tapk_pp_bslab == 3:
+                        r = b.add(row, b.const_i32(2 * j)) if j else row
+                        r = b.add(kgn, _pbs_perm(r))
+                    else:
+                        r = b.add(base, b.const_i32(2 * j)) if j else base
+                    vals = [b.vec_extract(v, 2 * j) for v in vs] + [
+                        b.vec_extract(v, 2 * j + 1) for v in vs
+                    ]
+                    b.smem_store_vN(
+                        dst, [r, b.const_i32(0)], b.vec_pack(vals, loader.elem_dtype), 8
+                    )
+            return
+        if isinstance(loader, KPackedRowLoader):
+            for row, col, vs in staged:
+                for i in range(loader.load_vec):
+                    r = b.add(row, b.const_i32(i)) if i else row
+                    packed = b.vec_pack(
+                        [b.vec_extract(v, i) for v in vs], loader.elem_dtype
+                    )
+                    b.smem_store_vN(dst, [r, _pp_swz(r, col)], packed, loader.kpack)
+            return
+        if getattr(loader, "vector_axis", "col") != "col":
+            raise ValueError("tapk_pingpong lds_xor needs a col-mode or kpack loader")
+        for row, col, v in staged:
+            b.smem_store_vN(dst, [row, _pp_swz(row, col)], v, loader.load_vec)
+
+    def _tapk_pingpong_loop(
+        set_tile, advance, load_tile, store_tile, nxt0, st_names, n_tiles,
+        fast_a=None, pre1=None, sfx="",
+    ) -> list[Value]:
+        """``tapk_pingpong``: the plain tapk_prefetch=1 loop as a block
+        ping-pong over 8 waves (see DgradConvSpec.tapk_pingpong). Every
+        fragment of the tile is read in [mem A], so the partner half's
+        [mem B] stores of the next tile cannot overwrite data still to be
+        read; each phase ends in lgkmcnt(0) + s_barrier."""
+        c1 = b.const_i32(1)
+        n_acc = len(accs)
+        n_st = len(st_names)
+        n_w = spec.warp_m * spec.warp_n
+        decoded = decode_mfma_lanes(b, atom, lane)
+        warp_m_off = grid.warp_m_off(b)
+        warp_n_off = grid.warp_n_off(b)
+        a_idx = [
+            b.add(warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), decoded.m_in_atom))
+            for mi in range(mfmas_m)
+        ]
+        b_idx = [
+            b.add(warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), decoded.n_in_atom))
+            for ni in range(mfmas_n)
+        ]
+        b_idx_slab = [_pbs_perm(r) for r in b_idx] if spec.tapk_pp_bslab else b_idx
+        # 2: kpack-2 fragment reads -- one 2*a_per_lane-wide read feeds the
+        # k atoms 2p and 2p+1 (lane k block j reads k 32p + 8j .. +8, the
+        # first half for atom 2p, the second for 2p+1). A and B use the same
+        # map, so every k meets its partner once: a permutation of the sum.
+        kp = 2 if spec.tapk_pingpong >= 2 else 1
+        k_lane = b.mul(decoded.k_blk, b.const_i32(kp * a_per_lane))
+
+        def _part(v, h, n):
+            if kp == 1:
+                return v
+            return b.vec_pack([b.vec_extract(v, h * n + i) for i in range(n)], _smem_dtype)
+
+        def frag_reads():
+            out = []
+            for pk in range(k_atoms // kp):
+                col = b.add(k_lane, b.const_i32(pk * kp * spec.warp_tile_k))
+                a_w = [
+                    _emit_smem_load(
+                        b, A_smem, r, _pp_swz(r, col), kp * a_per_lane,
+                        smem_dtype=_smem_dtype,
+                    )
+                    for r in a_idx
+                ]
+                if spec.tapk_pp_bslab:
+                    # Slab layout: the lane's kp * b_per_lane k values are
+                    # 4-element runs of consecutive slabs at its row.
+                    kg0 = b.mul(b.lshr(col, b.const_i32(2)), b.const_i32(block_n))
+                    nrun = kp * b_per_lane // 4
+                    b_w = []
+                    for r in b_idx_slab:
+                        runs = [
+                            _emit_smem_load(
+                                b, B_smem,
+                                b.add(b.add(kg0, b.const_i32(q * block_n)), r) if q
+                                else b.add(kg0, r),
+                                b.const_i32(0), 4, smem_dtype=_smem_dtype,
+                            )
+                            for q in range(nrun)
+                        ]
+                        b_w.append(
+                            b.vec_pack(
+                                [b.vec_extract(v, i) for v in runs for i in range(4)],
+                                _smem_dtype,
+                            )
+                        )
+                else:
+                    b_w = [
+                        _emit_smem_load(
+                            b, B_smem, r, _pp_swz(r, col), kp * b_per_lane,
+                            smem_dtype=_smem_dtype,
+                        )
+                        for r in b_idx
+                    ]
+                for h in range(kp):
+                    out.append(
+                        (
+                            [_part(v, h, a_per_lane) for v in a_w],
+                            [_part(v, h, b_per_lane) for v in b_w],
+                        )
+                    )
+            return out
+
+        def mfmas(frags, acc_in):
+            new_accs = list(acc_in)
+            for a_rows, b_cols in frags:
+                flat = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        if spec.tapk_pp_epi == 2:
+                            # C transposed (see DgradConvSpec.tapk_pp_epi).
+                            new_accs[flat] = _emit_mfma(
+                                b, atom, b_cols[ni], a_rows[mi], new_accs[flat]
+                            )
+                        else:
+                            new_accs[flat] = _emit_mfma(
+                                b, atom, a_rows[mi], b_cols[ni], new_accs[flat]
+                            )
+                        flat += 1
+            return new_accs
+
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        upper = b.cmp_ge(wave, b.const_i32(n_w // 2))
+        with b.scf_if(upper):
+            b.sync_lds_only()
+        def _pp_three_ahead(frag_reads, mfmas, wave, half):
+            """tapk_pp_sched 7: pps 2 one tile deeper -- tiles t+1 and t+2
+            ride in two staging register sets across the back edge and tile
+            t+3's loads are interleaved with [compute B], so a load has two
+            iterations to land. The loop runs two tiles per trip so the two
+            sets alternate in place (a loop-carried copy of a pending load
+            would drain vmcnt on the back edge); an odd tile count runs one
+            more guarded tile after it."""
+
+            def flat(parts):
+                out = []
+                for part in parts:
+                    for _row, _col, v in part:
+                        out.extend(v if isinstance(v, list) else [v])
+                return out
+
+            def rebuild(template, vals):
+                vals = list(vals)
+                out = []
+                for part in template:
+                    p_out = []
+                    for row, col, v in part:
+                        if isinstance(v, list):
+                            p_out.append((row, col, vals[: len(v)]))
+                            del vals[: len(v)]
+                        else:
+                            p_out.append((row, col, vals.pop(0)))
+                    out.append(p_out)
+                return out
+
+            def ld():
+                if fast_a is None:
+                    return load_tile()
+                return (fast_a(), load_tile("b")[1])
+
+            def interleave(n_mf, n_vm):
+                first_vm = n_mf // 2
+                left = n_vm
+                for j in range(n_mf):
+                    b.sched_group_barrier(_SG_MFMA, 1, 0)
+                    b.sched_group_barrier(_SG_VALU, 4, 0)
+                    b.sched_group_barrier(_SG_SALU, 2, 0)
+                    if j >= first_vm and left > 0 and (j - first_vm) % 2 == 1:
+                        b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                        left -= 1
+                if left:
+                    b.sched_group_barrier(_SG_VMEM_READ, left, 0)
+
+            n_mf_half = half * mfmas_m * mfmas_n
+
+            def step(acc_in, st, regs_store):
+                """One tile: MFMAs of the LDS tile, store ``regs_store`` (the
+                next tile), issue the loads of the tile at ``st``. Returns
+                (accumulators, the new loads' values, the advanced coord)."""
+                frags = frag_reads()
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                b.s_setprio(1)
+                set_tile(*st)
+                nxt = advance(*st)
+                acc_a = mfmas(frags[:half], list(acc_in))
+                for _j in range(n_mf_half):
+                    b.sched_group_barrier(_SG_MFMA, 1, 0)
+                    b.sched_group_barrier(_SG_SALU, 3, 0)
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+                store_tile(rebuild(staged1, regs_store), A_smem, B_smem)
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                b.s_setprio(1)
+                staged = ld()
+                acc_b = mfmas(frags[half:], acc_a)
+                interleave(n_mf_half, len(flat(staged)))
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+                return acc_b, flat(staged), nxt
+
+            set_tile(*nxt0)
+            staged1 = load_tile()
+            nxt1 = advance(*nxt0)
+            set_tile(*nxt1)
+            staged2 = ld()
+            nxt2 = advance(*nxt1)
+            regs1 = flat(staged1)
+            n_regs = len(regs1)
+            regs2 = flat(staged2)
+            assert len(regs2) == n_regs
+            c2_ = b.const_i32(2)
+            pairs = b.div(n_tiles, c2_)
+            it = (
+                list(accs)
+                + [(f"pp_r{i}", v) for i, v in enumerate(regs1)]
+                + [(f"pp_q{i}", v) for i, v in enumerate(regs2)]
+                + list(zip(st_names, nxt2[:n_st]))
+            )
+            loop = b.scf_for_iter(c0, pairs, c1, it, iv_name="t2")
+            with loop as (_t, iv):
+                x = iv[n_acc : n_acc + n_regs]
+                y = iv[n_acc + n_regs : n_acc + 2 * n_regs]
+                st = list(iv[n_acc + 2 * n_regs :])
+                if not is_3d:
+                    st.append(None)
+                # tile 2t: store X (tile 2t+1), X <- tile 2t+3
+                acc1, x_new, st1 = step(iv[:n_acc], st, x)
+                st1 = list(st1)
+                if not is_3d:
+                    st1 = st1[:3] + [None]
+                # tile 2t+1: store Y (tile 2t+2), Y <- tile 2t+4
+                acc2, y_new, st2 = step(acc1, st1, y)
+                b.scf_yield(*acc2, *x_new, *y_new, *st2[:n_st])
+            res = list(loop.results)
+            accs_f = res[:n_acc]
+            x_f = res[n_acc : n_acc + n_regs]
+            # odd tile count: the last tile (its next tile is X)
+            odd = b.cmp_ne(b.sub(n_tiles, b.mul(pairs, c2_)), c0)
+            st_f = list(res[n_acc + 2 * n_regs :])
+            if not is_3d:
+                st_f.append(None)
+            tail = b.scf_for_iter(
+                c0, b.select(odd, c1, c0), c1,
+                [(f"pp_ta{i}", a) for i, a in enumerate(accs_f)],
+                iv_name="tt",
+            )
+            with tail as (_tt, tv):
+                acc_t, _new, _nst = step(tv, st_f, x_f)
+                b.scf_yield(*acc_t)
+            return _pp_finish(list(tail.results), wave)
+
+        def _pp_two_ahead(frag_reads, mfmas, wave, half):
+            """tapk_pp_sched 1: tile t+2's global loads are issued in [mem B]
+            right after tile t+1's LDS stores and ride in registers across
+            the back edge, so [mem A] is the fragment reads alone and every
+            load has a whole iteration to land."""
+
+            def flat(parts):
+                out = []
+                for part in parts:
+                    for _row, _col, v in part:
+                        out.extend(v if isinstance(v, list) else [v])
+                return out
+
+            def rebuild(template, vals):
+                vals = list(vals)
+                out = []
+                for part in template:
+                    p_out = []
+                    for row, col, v in part:
+                        if isinstance(v, list):
+                            p_out.append((row, col, vals[: len(v)]))
+                            del vals[: len(v)]
+                        else:
+                            p_out.append((row, col, vals.pop(0)))
+                    out.append(p_out)
+                return out
+
+            if pre1 is None and fast_a is not None and pp_a_partial(spec):
+                set_tile(*nxt0)
+                staged1 = (fast_a(), load_tile("b")[1])
+            elif pre1 is None:
+                set_tile(*nxt0)
+                staged1 = load_tile()
+            else:
+                # tapk_pp_persist: tile 1 was loaded before the previous
+                # tile's epilogue.
+                staged1 = pre1
+            nxt1 = advance(*nxt0)
+            regs0 = flat(staged1)
+            n_regs = len(regs0)
+            it = (
+                [(f"{nm}{sfx}", v) for nm, v in accs]
+                + [(f"pp_r{i}{sfx}", v) for i, v in enumerate(regs0)]
+                + [(f"{nm}{sfx}", v) for nm, v in zip(st_names, nxt1[:n_st])]
+            )
+            loop = b.scf_for_iter(c0, n_tiles, c1, it, iv_name=f"t{sfx}")
+            with loop as (_t, iv):
+                regs = iv[n_acc : n_acc + n_regs]
+                st = list(iv[n_acc + n_regs :])
+                if not is_3d:
+                    st.append(None)
+                pps = spec.tapk_pp_sched
+                staged2 = None
+
+                def ld(part=None):
+                    if fast_a is None:
+                        return load_tile(part)
+                    return (
+                        fast_a() if part != "b" else None,
+                        load_tile("b")[1] if part != "a" else None,
+                    )
+
+                def issue_loads():
+                    return ld()
+
+                def interleave(n_mf, n_vm):
+                    # The loads' address math co-issues with the MFMAs; the
+                    # loads go in the phase's second half, one per 2 MFMAs.
+                    first_vm = n_mf // 2
+                    left = n_vm
+                    for j in range(n_mf):
+                        b.sched_group_barrier(_SG_MFMA, 1, 0)
+                        b.sched_group_barrier(_SG_VALU, 4, 0)
+                        b.sched_group_barrier(_SG_SALU, 2, 0)
+                        if j >= first_vm and left > 0 and (j - first_vm) % 2 == 1:
+                            b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                            left -= 1
+                    if left:
+                        b.sched_group_barrier(_SG_VMEM_READ, left, 0)
+
+                n_mf_half = half * mfmas_m * mfmas_n
+                # [mem A]
+                frags = frag_reads()
+                b.sched_barrier(0)
+                if spec.tapk_pingpong == 5:
+                    # Only the upper half's reads race a store (the lower
+                    # half's [mem B] follows it); the lower half's next phase
+                    # is compute A, so its reads may still be in flight
+                    # across this barrier (its MFMAs wait for them).
+                    with b.scf_if(upper):
+                        b.s_waitcnt(lgkmcnt=0)
+                    b.s_barrier_bare()
+                else:
+                    b.sync_lds_only()
+                # [compute A] (pps 3: + tile t+2's loads, pps 4: its A loads,
+                # interleaved). Tile t+2's uniform offsets and the coordinate
+                # advance are scalar work: co-issued with the MFMAs here.
+                b.s_setprio(1)
+                if spec.tapk_pp_epi:
+                    # Tiles t+2 >= n_tiles do not exist: their loads read
+                    # out of range.
+                    set_tile(*st, live=b.cmp_lt(b.add(_t, b.const_i32(2)), n_tiles))
+                else:
+                    set_tile(*st)
+                nxt = advance(*st)
+                if pps == 3:
+                    staged2 = issue_loads()
+                if pps == 4:
+                    a2 = ld("a")[0]
+                if pps in (11, 12):
+                    b2 = ld("b")[1]
+                acc_a = mfmas(frags[:half], list(iv[:n_acc]))
+                if pps == 3:
+                    interleave(n_mf_half, len(flat(staged2)))
+                elif pps == 4:
+                    interleave(n_mf_half, len(flat([a2])))
+                elif pps in (11, 12):
+                    interleave(n_mf_half, len(flat([b2])))
+                else:
+                    for _j in range(n_mf_half):
+                        b.sched_group_barrier(_SG_MFMA, 1, 0)
+                        b.sched_group_barrier(_SG_SALU, 3, 0)
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+                # [mem B]: store tile t+1 (pps 1: and issue tile t+2's loads),
+                # advance the tile coordinate.
+                store_tile(rebuild(staged1, regs), A_smem, B_smem)
+                if pps == 1:
+                    staged2 = issue_loads()
+                if pps in (5, 11):
+                    a2 = ld("a")[0]
+                if pps == 6:
+                    b2 = ld("b")[1]
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                # [compute B] (pps 2: + tile t+2's loads, interleaved)
+                b.s_setprio(1)
+                if pps == 2:
+                    staged2 = issue_loads()
+                if pps in (4, 5):
+                    staged2 = (a2, ld("b")[1])
+                if pps == 6:
+                    staged2 = (ld("a")[0], b2)
+                if pps == 11:
+                    staged2 = (a2, b2)
+                if pps == 12:
+                    staged2 = (ld("a")[0], b2)
+                acc_b = mfmas(frags[half:], acc_a)
+                if pps == 2:
+                    interleave(n_mf_half, len(flat(staged2)))
+                if pps in (4, 5):
+                    interleave(n_mf_half, len(flat([staged2[1]])))
+                if pps in (6, 12):
+                    interleave(n_mf_half, len(flat([staged2[0]])))
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+                b.scf_yield(*acc_b, *flat(staged2), *nxt[:n_st])
+            return _pp_finish(list(loop.results)[:n_acc], wave)
+
+        half = k_atoms // 2
+        if spec.tapk_pp_sched == 7:
+            return _pp_three_ahead(frag_reads, mfmas, wave, half)
+        if spec.tapk_pp_sched:
+            return _pp_two_ahead(frag_reads, mfmas, wave, half)
+        it = list(accs) + list(zip(st_names, nxt0[:n_st]))
+        loop = b.scf_for_iter(c0, n_tiles, c1, it, iv_name="t")
+        with loop as (_t, iv):
+            st = list(iv[n_acc:])
+            if not is_3d:
+                st.append(None)
+            # [mem A]
+            set_tile(*st)
+            staged = load_tile()
+            frags = frag_reads()
+            b.sched_barrier(0)
+            b.sync_lds_only()
+            # [compute A]
+            b.s_setprio(1)
+            acc_a = mfmas(frags[:half], list(iv[:n_acc]))
+            b.sched_barrier(0)
+            b.s_setprio(0)
+            b.sync_lds_only()
+            # [mem B]
+            store_tile(staged, A_smem, B_smem)
+            b.sched_barrier(0)
+            b.sync_lds_only()
+            # [compute B]
+            b.s_setprio(1)
+            acc_b = mfmas(frags[half:], acc_a)
+            b.sched_barrier(0)
+            b.s_setprio(0)
+            b.sync_lds_only()
+            nxt = advance(*st)
+            b.scf_yield(*acc_b, *nxt[:n_st])
+        return _pp_finish(list(loop.results)[:n_acc], wave)
+
+    def _pp_finish(results: list, wave: Value) -> list:
+        """The lower half's matching barrier after the ping-pong loop. With
+        tapk_pp_epi the accumulators are converted to bf16 before it, so the
+        lower half's conversion overlaps the upper half's last MFMA phase."""
+        if spec.tapk_pp_epi and spec.acc_epilogue.is_identity():
+            _pp_state["bf16"] = [_pp_f32_to_bf16(b, spec, a) for a in results]
+        with b.scf_if(b.cmp_lt(wave, b.const_i32(spec.warp_m * spec.warp_n // 2))):
+            b.sync_lds_only()
+        return results
+
+    def _ztrim_range():
+        """``tapk_ztrim``: ``(z_lo, z_count)`` of the z taps the tile's rows
+        can use (uniform). Rows m0 .. m1 decode to planes di0 .. di1 of
+        images n0 .. n1; tap z is valid for plane di iff 0 <= di + pD - z <
+        Do (stride / dilation 1), so over di0..di1 the union is [di0 + pD -
+        Do + 1, di1 + pD] clamped to [0, Z). A tile spanning two images
+        keeps every z."""
+        m0 = block_m_off_v
+        m1 = b.smin(b.add(m0, b.const_i32(block_m - 1)), b.sub(p_dg_M, b.const_i32(1)))
+        q0, _ = _magic_divmod(b, m0, hw_div)
+        q1, _ = _magic_divmod(b, m1, hw_div)
+        n0, di0 = _magic_divmod(b, q0, di_div)
+        n1, di1 = _magic_divmod(b, q1, di_div)
+        c1_ = b.const_i32(1)
+        zmax = b.sub(p_Z, c1_)
+        lo = b.smax(b.add(b.sub(b.add(di0, p_pD), p_Do), c1_), c0)
+        hi = b.smin(b.add(di1, p_pD), zmax)
+        same = b.cmp_eq(n0, n1)
+        lo = b.select(same, lo, c0)
+        hi = b.select(same, hi, zmax)
+        cnt = b.smax(b.add(b.sub(hi, lo), c1_), c0)
+        return b.readfirstlane(lo), b.readfirstlane(cnt)
+
+    def _ytrim_range():
+        """``tapk_ztrim`` 2 (x-halo): ``(y_lo, y_count)`` of the y taps the
+        tile's rows can use (uniform). Rows m0 .. m1 decode to dX rows h0 ..
+        h1 of one (image, plane) q; tap y is valid for row h iff 0 <= h + pH
+        - y < Ho (stride / dilation 1), so the union is [h0 + pH - Ho + 1,
+        h1 + pH] clamped to [0, Y). A tile spanning two planes keeps every
+        y."""
+        m0 = block_m_off_v
+        m1 = b.smin(b.add(m0, b.const_i32(block_m - 1)), b.sub(p_dg_M, b.const_i32(1)))
+        q0, r0 = _magic_divmod(b, m0, hw_div)
+        q1, r1 = _magic_divmod(b, m1, hw_div)
+        h0, _ = _magic_divmod(b, r0, w_div)
+        h1, _ = _magic_divmod(b, r1, w_div)
+        c1_ = b.const_i32(1)
+        ymax = b.sub(c_Y, c1_)
+        p_pH_ = params["p_pH"]
+        lo = b.smax(b.add(b.sub(b.add(h0, p_pH_), c_Ho), c1_), c0)
+        hi = b.smin(b.add(h1, p_pH_), ymax)
+        same = b.cmp_eq(q0, q1)
+        lo = b.select(same, lo, c0)
+        hi = b.select(same, hi, ymax)
+        cnt = b.smax(b.add(b.sub(hi, lo), c1_), c0)
+        return b.readfirstlane(lo), b.readfirstlane(cnt)
+
+    def _pp_xhalo_loop(set_tile, load_tile, make_fast_a, dy_pf):
+        """``tapk_pp_xhalo``: the ping-pong loop over x-halo steps.
+
+        Step s = (z, y, chunk kb) of the flat order (chunk fastest); its X
+        x taps are X ping-pong sub-tiles of the usual four phases. LDS row r
+        of ``A_xh`` holds dX pixel m0 - (X-1) + r's dY row at tap (z, y, 0)
+        (pW == 0: dY pixel (do, ho, wi)); tap x reads fragment row a at
+        r = a + X-1-x, or the zero row (tile_m + X) where wi(a) < x. Row
+        tile_m + X - 1 is unused. A_xh is rewritten only in [mem B] of a
+        step's last sub-tile, after both halves read that sub-tile's
+        fragments (the ping-pong invariant), so one buffer serves the X
+        sub-tiles. Returns the final accumulators.
+        """
+        XB = p.X
+        back = XB - 1
+        c1 = b.const_i32(1)
+        c_kd = c_kpg if grouped else c_K
+        n_kc = b.div(c_kd, c_block_k)
+        c_zy = b.mul(p_Z, c_Y) if is_3d else c_Y
+        z_first = c0 if is_3d else None
+        if spec.tapk_ztrim:
+            z_first, z_cnt = _ztrim_range()
+            c_zy = b.mul(z_cnt, c_Y)
+        n_steps = b.mul(c_zy, n_kc)
+        n_acc = len(accs)
+        n_w = spec.warp_m * spec.warp_n
+        # 4: register-shift x-halo (see DgradConvSpec.tapk_pp_xhalo).
+        rs = spec.tapk_pp_xhalo == 4
+        gap = spec.tapk_pp_xhalo in (2, 3)
+        zr = block_m + XB  # the zero row
+        rows_xh = block_m + XB + 1
+        rs_row_step = threads // (block_k // a_sync_loader.load_vec)
+        if rs:
+            # LDS row of halo pixel m0 - back + j is j + _RS_OFF: the tile's
+            # rows sit at r + 16, the back rows below them, and each wave's
+            # extra atom (16 rows ending at its first row + back - 1) is in
+            # range for wave 0.
+            rows_xh = block_m + 16
+            A_xh = b.smem_alloc(
+                ir_dtype_a, lds_layout.storage_shape(rows_xh), name_hint="A_smem_xh"
+            )
+        elif gap:
+            rows_xh = pp_xhalo_gap_rows(spec)
+            A_xh = b.smem_alloc(ir_dtype_a, (rows_xh, block_k + 8), name_hint="A_smem_xh")
+        else:
+            A_xh = b.smem_alloc(
+                ir_dtype_a, lds_layout.storage_shape(rows_xh), name_hint="A_smem_xh"
+            )
+        c_zr = b.const_i32(zr)
+        c_back = b.const_i32(back)
+        m_base = b.sub(block_m_off_v, c_back)
+
+        def _wrow(m: Value) -> Value:
+            # W-row index of pixel m >= -Wi: (m + Wi) // Wi (one more than
+            # m // Wi; only differences are used).
+            return _magic_divmod(b, b.add(m, c_Wi), w_div)[0]
+
+        h_base = _wrow(m_base) if gap else None
+
+        def _gap_row(rel: Value) -> Value:
+            # LDS row of pixel m_base + rel (rel = tile row + back).
+            m = b.add(m_base, rel)
+            return b.add(
+                b.add(c_back, rel), b.mul(c_back, b.sub(_wrow(m), h_base))
+            )
+
+        _gap_rows_cache: dict = {}
+
+        def _xh_swz(row: Value, col: Value) -> Value:
+            # A_xh rows are read X - 1 - x rows down per x tap: the chunk key
+            # is the row alone (no 8-row-group term, see _pp_swz), so any 8
+            # consecutive rows of a fragment read hit 8 distinct chunks.
+            if rs:
+                return _pp_swz(row, col)
+            if not spec.lds_xor or gap:
+                return col
+            r = b.lshr(row, b.const_i32(1)) if block_k == 32 else row
+            key = b.land(r, b.const_i32(block_k // 8 - 1))
+            return b.xor(col, b.shl(key, b.const_i32(3)))
+
+        def _xh_store(staged) -> None:
+            for row, col, v in staged:
+                if isinstance(col, tuple):
+                    b.smem_store_vN(A_xh, [row, col[1]], v, a_sync_loader.load_vec)
+                    continue
+                b.smem_store_vN(A_xh, [row, _xh_swz(row, col)], v, a_sync_loader.load_vec)
+
+        def _xh_store_main(main_st) -> None:
+            # Main rows: tile row r -> LDS row (gapped) or r + back.
+            out = []
+            r0 = b.add(main_st[0][0], b.const_i32(16)) if rs else None
+            c0_ = _xh_swz(r0, main_st[0][1]) if rs else None
+            for e_, (r, c_, v) in enumerate(main_st):
+                if rs:
+                    # Loader rows are r0 + rs_row_step * e, a multiple of 32
+                    # (validated): one swizzled column for all.
+                    out.append(
+                        (b.add(r0, b.const_i32(e_ * rs_row_step)) if e_ else r0, ("raw", c0_), v)
+                    )
+                elif gap:
+                    key = id(r)
+                    if key not in _gap_rows_cache:
+                        _gap_rows_cache[key] = _gap_row(b.add(r, c_back))
+                    out.append((_gap_rows_cache[key], c_, v))
+                else:
+                    out.append((b.add(r, c_back), c_, v))
+            _xh_store(out)
+
+        decoded = decode_mfma_lanes(b, atom, lane)
+        warp_m_off = grid.warp_m_off(b)
+        warp_n_off = grid.warp_n_off(b)
+        a_idx = [
+            b.add(warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), decoded.m_in_atom))
+            for mi in range(mfmas_m)
+        ]
+        b_idx = [
+            b.add(warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), decoded.n_in_atom))
+            for ni in range(mfmas_n)
+        ]
+        # Fragment rows per x tap (loop invariant).
+        a_rows_x = []
+        wis = []
+        for r in ([] if rs else a_idx):
+            _, rem = _magic_divmod(b, b.add(block_m_off_v, r), hw_div)
+            _, wi = _magic_divmod(b, rem, w_div)
+            wis.append(wi)
+        # Gapped: the lowest row any tap reads (x = X-1), so every tap's row
+        # is it plus a constant (a positive LDS immediate offset).
+        glow = (
+            [b.sub(_gap_row(b.add(r, c_back)), c_back) for r in a_idx] if gap else None
+        )
+        for x in range(0 if rs else XB):
+            sh = b.const_i32(back - x)
+            if gap:
+                a_rows_x.append([b.add(g, sh) if back - x else g for g in glow])
+            elif x == 0:
+                a_rows_x.append([b.add(r, sh) for r in a_idx])
+            else:
+                cx = b.const_i32(x)
+                a_rows_x.append(
+                    [
+                        b.select(b.cmp_ge(wi, cx), b.add(r, sh), c_zr)
+                        for r, wi in zip(a_idx, wis)
+                    ]
+                )
+        kp = 2
+        k_lane = b.mul(decoded.k_blk, b.const_i32(kp * a_per_lane))
+
+        def _part(v, h, n):
+            return b.vec_pack([b.vec_extract(v, h * n + i) for i in range(n)], _smem_dtype)
+
+        if rs:
+            from rocke.core.ir import I32 as _I32, VectorType as _VT
+
+            a_rows_rs = [b.add(r, b.const_i32(16)) for r in a_idx]
+            e_row_rs = a_idx[0]
+            lane0 = b.cmp_eq(b.land(lane, b.const_i32(15)), c0)
+
+            def _rs_shift(cur, prev):
+                # Fragment rows one down: lane l of a 16-lane row takes lane
+                # l - 1's value, lane 0 the previous atom's lane 15.
+                n = cur.type.count
+                nw = n // 2
+                cw = b.vec_bitcast(cur, _VT(_I32, nw))
+                pw = b.vec_bitcast(prev, _VT(_I32, nw)) if prev is not None else None
+                words = []
+
+                def pin(v):
+                    # Through a side-effecting empty asm: the DPP moves
+                    # cannot be scheduled above this [mem A] (the DAG has
+                    # no order for them otherwise), so the shifted copy is
+                    # not live across the previous compute phase.
+                    return b.inline_asm("", "=v,0", [v], _I32, sideeffect=True)
+
+                for i in range(nw):
+                    sv = b.mov_dpp(pin(b.vec_extract(cw, i)), row_shr=1)
+                    if pw is not None:
+                        pv = b.mov_dpp(pin(b.vec_extract(pw, i)), row_shl=15)
+                        sv = b.select(lane0, pv, sv)
+                    words.append(sv)
+                return b.vec_bitcast(b.vec_pack(words, _I32), _VT(_smem_dtype, n))
+
+        _rs_raw: dict = {}
+
+        def frag_reads(x):
+            out = []
+            for pk in range(k_atoms // kp):
+                col = b.add(k_lane, b.const_i32(pk * kp * spec.warp_tile_k))
+                if rs and x == 0:
+                    # The swizzle key has period 32 in the row: rows 32 apart
+                    # share one column, so the fragment addresses are two
+                    # bases plus immediates.
+                    pc = [_xh_swz(r, col) for r in a_rows_rs[:2]]
+                    a_w = [
+                        _emit_smem_load(
+                            b, A_xh,
+                            b.add(a_rows_rs[mi % 2], b.const_i32(32 * (mi // 2)))
+                            if mi >= 2 else a_rows_rs[mi],
+                            pc[mi % 2], kp * a_per_lane,
+                            smem_dtype=_smem_dtype,
+                        )
+                        for mi in range(len(a_rows_rs))
+                    ]
+                    e_w = _emit_smem_load(
+                        b, A_xh, e_row_rs, pc[1] if len(pc) > 1
+                        else _xh_swz(e_row_rs, col), kp * a_per_lane,
+                        smem_dtype=_smem_dtype,
+                    )
+                    _rs_raw[pk] = (a_w, e_w)
+                elif rs:
+                    pa, pe = _rs_raw[pk]
+                    a_w = [
+                        _rs_shift(v, pa[i - 1] if i else pe) for i, v in enumerate(pa)
+                    ]
+                    e_w = _rs_shift(pe, None)
+                    _rs_raw[pk] = (a_w, e_w)
+                else:
+                    a_w = [
+                        _emit_smem_load(
+                            b, A_xh, r, _xh_swz(r, col), kp * a_per_lane,
+                            smem_dtype=_smem_dtype,
+                        )
+                        for r in a_rows_x[x]
+                    ]
+                if rs and len(b_idx) >= 2:
+                    bc = [_pp_swz(r, col) for r in b_idx[:2]]
+                    b_w = [
+                        _emit_smem_load(
+                            b, B_smem,
+                            b.add(b_idx[ni % 2], b.const_i32(32 * (ni // 2)))
+                            if ni >= 2 else b_idx[ni],
+                            bc[ni % 2], kp * b_per_lane,
+                            smem_dtype=_smem_dtype,
+                        )
+                        for ni in range(len(b_idx))
+                    ]
+                else:
+                    b_w = [
+                        _emit_smem_load(
+                            b, B_smem, r, _pp_swz(r, col), kp * b_per_lane,
+                            smem_dtype=_smem_dtype,
+                        )
+                        for r in b_idx
+                    ]
+                for h in range(kp):
+                    out.append(
+                        (
+                            [_part(v, h, a_per_lane) for v in a_w],
+                            [_part(v, h, b_per_lane) for v in b_w],
+                        )
+                    )
+            return out
+
+        def mfmas(frags, acc_in):
+            new_accs = list(acc_in)
+            for a_rows, b_cols in frags:
+                flat_i = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        if spec.tapk_pp_epi == 2:
+                            new_accs[flat_i] = _emit_mfma(
+                                b, atom, b_cols[ni], a_rows[mi], new_accs[flat_i]
+                            )
+                        else:
+                            new_accs[flat_i] = _emit_mfma(
+                                b, atom, a_rows[mi], b_cols[ni], new_accs[flat_i]
+                            )
+                        flat_i += 1
+            return new_accs
+
+        def flat(parts):
+            out = []
+            for part in parts:
+                for _row, _col, v in part:
+                    out.extend(v if isinstance(v, list) else [v])
+            return out
+
+        def rebuild(template, vals):
+            vals = list(vals)
+            out = []
+            for part in template:
+                p_out = []
+                for row, col, v in part:
+                    if isinstance(v, list):
+                        p_out.append((row, col, vals[: len(v)]))
+                        del vals[: len(v)]
+                    else:
+                        p_out.append((row, col, vals.pop(0)))
+                out.append(p_out)
+            return out
+
+        # The back rows: pixels m0 - back .. m0 - 1, one vector per lane for
+        # the first back * tile_k / vec lanes (the others read nothing).
+        lv = a_sync_loader.load_vec
+        span = block_k // lv
+        n_back_vec = back * span
+        c_span = b.const_i32(span)
+        bk_j = b.div(tid, c_span)
+        bk_col = b.mul(b.sub(tid, b.mul(bk_j, c_span)), b.const_i32(lv))
+        bk_ok = b.cmp_lt(tid, b.const_i32(n_back_vec))
+        bk_row = b.sub(bk_j, b.const_i32(back))
+        bk_m_ok = b.land(bk_ok, b.cmp_ge(b.add(block_m_off_v, bk_row), c0))
+        _eb = 4 if ir_dtype_a == F32 else 2
+
+        def load_back():
+            off, valid = dy_pf(b, bk_row, bk_col)
+            valid = b.land(valid, bk_m_ok)
+            off_b = b.select(valid, b.mul(off, b.const_i32(_eb)), b.const_i32((1 << 31) - 1))
+            return b.buffer_load_vN(dy_rsrc, off_b, c0, ir_dtype_a, lv)
+
+        bk_lds = (
+            b.add(bk_j, b.const_i32(16 - back)) if rs else _gap_row(bk_j) if gap else bk_j
+        )
+
+        def store_a(main_st, back_v):
+            _xh_store_main(main_st)
+            with b.scf_if(bk_ok):
+                b.smem_store_vN(A_xh, [bk_lds, _xh_swz(bk_lds, bk_col)], back_v, lv)
+
+        def step_tile(kb, x, y, z, live=None):
+            set_tile(kb, b.const_i32(x), y, z, live=live)
+
+        def advance_step(kb, y, z):
+            nk = b.add(kb, c_block_k)
+            wrap_k = b.cmp_ge(nk, c_kd)
+            nk = b.select(wrap_k, c0, nk)
+            ny = b.add(y, b.select(wrap_k, c1, c0))
+            if not is_3d:
+                return nk, ny, None
+            wrap_y = b.cmp_ge(ny, c_Y)
+            ny = b.select(wrap_y, c0, ny)
+            nz = b.add(z, b.select(wrap_y, c1, c0))
+            return nk, ny, nz
+
+        def interleave(n_mf, n_vm):
+            first_vm = 0
+            left = n_vm
+            per = max(1, (n_mf - first_vm) // max(1, n_vm))
+            for j in range(n_mf):
+                b.sched_group_barrier(_SG_MFMA, 1, 0)
+                b.sched_group_barrier(_SG_VALU, 4, 0)
+                b.sched_group_barrier(_SG_SALU, 2, 0)
+                if left > 0 and j >= first_vm and (j - first_vm) % per == per - 1:
+                    b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                    left -= 1
+            if left:
+                b.sched_group_barrier(_SG_VMEM_READ, left, 0)
+
+        def _rs_loop():
+            """tapk_pp_xhalo 4: A_xh is read in [mem A] of sub-tile 0 only,
+            so the next step's halo tile is stored in [mem B] of sub-tile 0;
+            its loads ride in registers from [compute B] of the previous
+            step's last sub-tile (two steps ahead)."""
+            z0 = z_first
+            step_tile(c0, 0, c0, z0)
+            fast_a = make_fast_a()
+            st_a = fast_a()
+            bk_v = load_back()
+            st_b = load_tile("b")[1]
+            step_tile(c0, 1, c0, z0)
+            st_b1 = load_tile("b")[1]
+            n1 = advance_step(c0, c0, z0)
+            step_tile(n1[0], 0, n1[1], n1[2], live=b.cmp_gt(n_steps, c1))
+            a1 = fast_a()
+            bk1 = load_back()
+            store_a(st_a, bk_v)
+            _pp_store(b_sync_loader, B_smem, st_b)
+            b.sync()
+            wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+            upper = b.cmp_ge(wave, b.const_i32(n_w // 2))
+            with b.scf_if(upper):
+                b.sync_lds_only()
+            half = k_atoms // 2
+            n_mf_half = half * mfmas_m * mfmas_n
+            regs_b = flat([st_b1])
+            n_rb = len(regs_b)
+            a_tmpl = [a1]
+            regs_a = flat(a_tmpl) + [bk1]
+            n_ra = len(regs_a)
+            st_names = ["xs_kb", "xs_y", "xs_z"][: 3 if is_3d else 2]
+            it = (
+                list(accs)
+                + [(f"px_r{i}", v) for i, v in enumerate(regs_b)]
+                + [(f"pa_r{i}", v) for i, v in enumerate(regs_a)]
+                + list(zip(st_names, [c0, c0, z0][: len(st_names)]))
+            )
+            loop = b.scf_for_iter(c0, n_steps, c1, it, iv_name="xs")
+            with loop as (_s, iv):
+                acc = list(iv[:n_acc])
+                b_next = rebuild([st_b1], iv[n_acc : n_acc + n_rb])[0]
+                ra = list(iv[n_acc + n_rb : n_acc + n_rb + n_ra])
+                a_stage = rebuild(a_tmpl, ra[:-1])[0]
+                bk_stage = ra[-1]
+                cur = list(iv[n_acc + n_rb + n_ra :])
+                if not is_3d:
+                    cur.append(None)
+                kb, y, z = cur
+                nk, ny, nz = advance_step(kb, y, z)
+                a_new = bk_new = None
+                for x in range(XB):
+                    # [mem A]
+                    frags = frag_reads(x)
+                    b.sched_barrier(0)
+                    b.sync_lds_only()
+                    # [compute A]
+                    b.s_setprio(1)
+                    acc = mfmas(frags[:half], acc)
+                    for _j in range(n_mf_half):
+                        b.sched_group_barrier(_SG_MFMA, 1, 0)
+                        b.sched_group_barrier(_SG_SALU, 3, 0)
+                    b.sched_barrier(0)
+                    b.s_setprio(0)
+                    b.sync_lds_only()
+                    # [mem B]: the next sub-tile's B (sub-tile 0: and the
+                    # next step's halo tile).
+                    if x == 0:
+                        store_a(a_stage, bk_stage)
+                    _pp_store(b_sync_loader, B_smem, b_next)
+                    b.sched_barrier(0)
+                    b.sync_lds_only()
+                    # [compute B] + the loads of the sub-tile two ahead (last
+                    # sub-tile: and the halo tile of the step two ahead).
+                    b.s_setprio(1)
+                    vm = []
+                    if x == XB - 1:
+                        n2 = advance_step(nk, ny, nz)
+                        step_tile(
+                            n2[0], 0, n2[1], n2[2],
+                            live=b.cmp_lt(b.add(_s, b.const_i32(2)), n_steps),
+                        )
+                        a_new = fast_a()
+                        bk_new = load_back()
+                        vm += flat([a_new]) + [bk_new]
+                    if x + 2 < XB:
+                        step_tile(kb, x + 2, y, z)
+                    else:
+                        step_tile(nk, x + 2 - XB, ny, nz)
+                    b_next = load_tile("b")[1]
+                    vm += flat([b_next])
+                    acc = mfmas(frags[half:], acc)
+                    interleave(n_mf_half, len(vm))
+                    b.sched_barrier(0)
+                    b.s_setprio(0)
+                    b.sync_lds_only()
+                b.scf_yield(
+                    *acc, *flat([b_next]), *flat([a_new]), bk_new,
+                    *[nk, ny, nz][: len(st_names)],
+                )
+            return _pp_finish(list(loop.results)[:n_acc], wave)
+
+        if rs:
+            return _rs_loop()
+        # Prologue: step 0's halo tile, sub-tile 0's B into LDS; sub-tile 1's
+        # B into registers. The zero row is written once.
+        z0 = z_first
+        step_tile(c0, 0, c0, z0)
+        fast_a = make_fast_a()
+        st_a = fast_a()
+        bk_v = load_back()
+        st_b = load_tile("b")[1]
+        step_tile(c0, 1, c0, z0)
+        st_b1 = load_tile("b")[1]
+        zcols = block_k // 8
+        if rs:
+            pass  # no zero row: shifted rows embed the zeros
+        elif gap:
+            # Every gap row is zero; pixel rows are rewritten by the stores
+            # below (after a barrier: other lanes' zeros land first).
+            n_vec = rows_xh * (block_k // 8)
+            c_zc = b.const_i32(block_k // 8)
+            for e in range(-(-n_vec // threads)):
+                idx = b.add(b.const_i32(e * threads), tid)
+                zrow = b.div(idx, c_zc)
+                zc = b.mul(b.sub(idx, b.mul(zrow, c_zc)), b.const_i32(8))
+                with b.scf_if(b.cmp_lt(idx, b.const_i32(n_vec))):
+                    b.smem_store_vN(A_xh, [zrow, zc], b.zero_vec(ir_dtype_a, 8), 8)
+            b.sync_lds_only()
+        else:
+            with b.scf_if(b.cmp_lt(tid, b.const_i32(zcols))):
+                zc = b.mul(tid, b.const_i32(8))
+                b.smem_store_vN(A_xh, [c_zr, _xh_swz(c_zr, zc)], b.zero_vec(ir_dtype_a, 8), 8)
+        store_a(st_a, bk_v)
+        _pp_store(b_sync_loader, B_smem, st_b)
+        b.sync()
+
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        upper = b.cmp_ge(wave, b.const_i32(n_w // 2))
+        with b.scf_if(upper):
+            b.sync_lds_only()
+        half = k_atoms // 2
+        n_mf_half = half * mfmas_m * mfmas_n
+        regs1 = flat([st_b1])
+        n_r = len(regs1)
+        st_names = ["xs_kb", "xs_y", "xs_z"][: 3 if is_3d else 2]
+        nxt0 = advance_step(c0, c0, z0)
+        it = (
+            list(accs)
+            + [(f"px_r{i}", v) for i, v in enumerate(regs1)]
+            + list(zip(st_names, [c0, c0, z0][: len(st_names)]))
+        )
+        loop = b.scf_for_iter(c0, n_steps, c1, it, iv_name="xs")
+        with loop as (_s, iv):
+            acc = list(iv[:n_acc])
+            b_next = rebuild([st_b1], iv[n_acc : n_acc + n_r])[0]
+            cur = list(iv[n_acc + n_r :])
+            if not is_3d:
+                cur.append(None)
+            kb, y, z = cur
+            nk, ny, nz = advance_step(kb, y, z)
+            for x in range(XB):
+                # [mem A]
+                frags = frag_reads(x)
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                # [compute A]
+                b.s_setprio(1)
+                acc = mfmas(frags[:half], acc)
+                for _j in range(n_mf_half):
+                    b.sched_group_barrier(_SG_MFMA, 1, 0)
+                    b.sched_group_barrier(_SG_SALU, 3, 0)
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+                # [mem B]: the next sub-tile's B (and, after the last x, the
+                # next step's halo tile).
+                if x == XB - 1:
+                    store_a(a_next, bk_next)
+                _pp_store(b_sync_loader, B_smem, b_next)
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                # [compute B] + the loads of the sub-tile two ahead.
+                b.s_setprio(1)
+                vm = []
+                if x == (max(0, XB - 2) if spec.tapk_pp_xhalo in (3, 4) else 0):
+                    step_tile(nk, 0, ny, nz)
+                    a_next = fast_a()
+                    bk_next = load_back()
+                    vm += flat([a_next]) + [bk_next]
+                if x + 2 < XB:
+                    step_tile(kb, x + 2, y, z)
+                else:
+                    step_tile(nk, x + 2 - XB, ny, nz)
+                b_next = load_tile("b")[1]
+                vm += flat([b_next])
+                acc = mfmas(frags[half:], acc)
+                interleave(n_mf_half, len(vm))
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+            b.scf_yield(*acc, *flat([b_next]), *[nk, ny, nz][: len(st_names)])
+        return _pp_finish(list(loop.results)[:n_acc], wave)
+
+    def _pp_persistent(
+        set_tile, advance, load_tile, store_tile, s0, n_tiles, make_fast_a
+    ):
+        """``tapk_pp_persist``: the ping-pong kernel over a persistent grid.
+
+        Workgroup ``bid`` walks the output tiles ``bid, bid + gridDim, ...``
+        (the XCD order applied to the walk: with gridDim a multiple of the
+        XCD count, a workgroup stays on its XCD's contiguous range). Each
+        tile's first two K tiles ride in registers into its iteration (the
+        first tile's are loaded before the loop): tile 0 is stored at the top,
+        tile 1 enters the ping-pong loop as its two-ahead staging. Right
+        after the K loop the next output tile's two are issued, so their
+        latency hides behind this tile's epilogue. The body ends in a
+        barrier and rewrites A/B before reading them, so its LDS is aliased
+        per iteration (C staging over A/B, as in the one-tile kernel).
+        Emits the epilogue itself; returns None.
+        """
+        nonlocal block_m_off_v, block_n_off_v, grid
+
+        def flat(parts):
+            out = []
+            for part in parts:
+                for _row, _col, v in part:
+                    out.extend(v if isinstance(v, list) else [v])
+            return out
+
+        def rebuild(template, vals):
+            vals = list(vals)
+            out = []
+            for part in template:
+                p_out = []
+                for row, col, v in part:
+                    if isinstance(v, list):
+                        p_out.append((row, col, vals[: len(v)]))
+                        del vals[: len(v)]
+                    else:
+                        p_out.append((row, col, vals.pop(0)))
+                out.append(p_out)
+            return out
+
+        n_items = b.mul(p_num_pid_m, p_num_pid_n)
+        c_bm = b.const_i32(block_m)
+        c_bn = b.const_i32(block_n)
+
+        def offsets(item):
+            fb = item
+            if num_xcds:
+                fb, _ = emit_xcd_tile_order(
+                    b, item, params, num_xcds=num_xcds, ungrouped=bool(spec.xcd_remap)
+                )
+            mt = b.div(fb, p_num_pid_n)
+            nt = b.sub(fb, b.mul(mt, p_num_pid_n))
+            return b.mul(mt, c_bm), b.mul(nt, c_bn)
+
+        def first_two(offs):
+            nonlocal block_m_off_v, block_n_off_v
+            block_m_off_v, block_n_off_v = offs
+            set_tile(*s0)
+            st0 = load_tile()
+            set_tile(*advance(*s0))
+            st1 = load_tile()
+            return st0, st1
+
+        item0 = b.block_id_x()
+        stride = b.grid_dim("x", spec.launch_block_size)
+        n_full = n_items
+        if spec.tapk_pp_persist == 2:
+            # Whole rounds data-parallel, the rest stream-K (below). The XCD
+            # order covers the data-parallel tiles only, so the stream-K
+            # tiles are the last ones (whole dX rows from tile n_full on).
+            n_full = b.sub(n_items, b.mod(n_items, stride))
+
+            def offsets(item, linear=False):
+                fb = item
+                if num_xcds and not linear:
+                    fb = chiplet_transform_chunked_runtime(
+                        b, item, num_wgs=n_full, num_xcds=num_xcds
+                    )
+                mt = b.div(fb, p_num_pid_n)
+                nt = b.sub(fb, b.mul(mt, p_num_pid_n))
+                return b.mul(mt, c_bm), b.mul(nt, c_bn)
+
+            first = offsets(item0)
+        else:
+            first = (block_m_off_v, block_n_off_v)
+        t0, t1 = first_two(first)
+        n0 = len(flat(t0))
+        regs = flat(t0) + flat(t1)
+        loop = b.scf_for_iter(
+            item0, n_full, stride,
+            [(f"pq_r{i}", v) for i, v in enumerate(regs)],
+            iv_name="wi", elide_trailing_barrier=False, smem_per_iteration=True,
+        )
+        with loop as (item, iv):
+            offs = offsets(item)
+            block_m_off_v, block_n_off_v = offs
+            grid = dc_replace(grid, block_m_off=offs[0], block_n_off=offs[1])
+            st0 = rebuild(t0, iv[:n0])
+            st1 = rebuild(t1, iv[n0:])
+            set_tile(*s0)
+            pp_fast_a = make_fast_a()
+            store_tile(st0, A_smem, B_smem)
+            # LDS-only barriers in the body: a full sync would also drain
+            # the previous tile's dX stores and this tile's tile-1 loads.
+            b.sync_lds_only()
+            n_st = 4 if is_3d else 3
+            st_names = ["pf_kb", "pf_x", "pf_y", "pf_z"][:n_st]
+            accs_out = _tapk_pingpong_loop(
+                set_tile, advance, load_tile, store_tile, advance(*s0), st_names,
+                n_tiles, fast_a=pp_fast_a, pre1=st1,
+            )
+            # The next output tile (this one again past the end: its loads
+            # then hit lines this workgroup just read).
+            nxt = b.add(item, stride)
+            nxt = b.select(b.cmp_lt(nxt, n_full), nxt, item)
+            u0, u1 = first_two(offsets(nxt))
+            block_m_off_v, block_n_off_v = offs
+            final = _apply_accumulator_epilogue(b, spec.acc_epilogue, accs_out)
+            # The epilogue's barriers order LDS staging only (it reads no
+            # global memory): emitted LDS-only, so the next tile's loads
+            # stay in flight across them.
+            b.sync = b.sync_lds_only
+            try:
+                _dispatch_dgrad_epilogue(final)
+            finally:
+                del b.sync
+            b.sync_lds_only()
+            b.scf_yield(*flat(u0), *flat(u1))
+        if spec.tapk_pp_persist == 2:
+            _pp_streamk_tail(
+                set_tile, advance, load_tile, store_tile, n_tiles, make_fast_a,
+                n_items, n_full, stride, offsets, first_two, flat,
+            )
+        return None
+
+    def _pp_streamk_tail(
+        set_tile, advance, load_tile, store_tile, n_k, make_fast_a,
+        n_items, n_full, stride, offsets, first_two, flat,
+    ):
+        """``tapk_pp_persist`` 2: the tiles past the whole rounds, stream-K.
+        Their ``R * n_k`` K tiles are split evenly over the workgroups;
+        workgroup g's range [g T / G, (g+1) T / G) spans at most two output
+        tiles (R < G), each slice is a ping-pong loop over its K tiles from
+        its first (whole K tiles, so a slice may start mid-tap) and an
+        atomic add of its partial sum into dX (zeroed by the launcher).
+        Its own A/B tiles: LDS is aliased by live interval, and one A/B
+        pair used by both phases would stay live over the data-parallel
+        phase's C staging."""
+        nonlocal block_m_off_v, block_n_off_v, grid, A_smem, B_smem
+        A_smem = b.smem_alloc(A_smem.type.elem, A_smem.type.shape, name_hint="A_smem_sk")
+        B_smem = b.smem_alloc(B_smem.type.elem, B_smem.type.shape, name_hint="B_smem_sk")
+        c1 = b.const_i32(1)
+        bid = b.block_id_x()
+        r_items = b.sub(n_items, n_full)
+        total = b.mul(r_items, n_k)
+        lo = b.div(b.mul(bid, total), stride)
+        hi = b.div(b.mul(b.add(bid, c1), total), stride)
+        cnt0 = b.smin(b.sub(n_k, b.mod(lo, n_k)), b.sub(hi, lo))
+        n_seg = b.select(
+            b.cmp_lt(lo, hi), b.select(b.cmp_lt(cnt0, b.sub(hi, lo)), b.const_i32(2), c1), c0
+        )
+        c_kd = c_kpg if grouped else c_K
+        nkc = b.div(c_kd, c_block_k)
+        n_st = 4 if is_3d else 3
+        st_names = ["pf_kb", "pf_x", "pf_y", "pf_z"][:n_st]
+        seg_loop = b.scf_for_iter(
+            c0, n_seg, c1, [("sk_cur", lo)], iv_name="sg",
+            elide_trailing_barrier=False, smem_per_iteration=True,
+        )
+        with seg_loop as (_sg, sv):
+            cur = sv[0]
+            q = b.div(cur, n_k)
+            k0 = b.sub(cur, b.mul(q, n_k))
+            cnt = b.smin(b.sub(n_k, k0), b.sub(hi, cur))
+            item = b.add(n_full, q)
+            offs = offsets(item, linear=True)
+            # The slice's first K tile -> (kb, x, y, z) of the flat order.
+            tap0 = b.div(k0, nkc)
+            kb_0 = b.mul(b.sub(k0, b.mul(tap0, nkc)), c_block_k)
+            yz0 = b.div(tap0, c_X)
+            x_0 = b.sub(tap0, b.mul(yz0, c_X))
+            if is_3d:
+                z_0 = b.div(yz0, c_Y)
+                s0 = (kb_0, x_0, b.sub(yz0, b.mul(z_0, c_Y)), z_0)
+            else:
+                s0 = (kb_0, x_0, yz0, None)
+            block_m_off_v, block_n_off_v = offs
+            set_tile(*s0)
+            st0 = load_tile()
+            set_tile(*advance(*s0))
+            st1 = load_tile()
+            grid = dc_replace(grid, block_m_off=offs[0], block_n_off=offs[1])
+            set_tile(*s0)
+            pp_fast_a = make_fast_a()
+            store_tile(st0, A_smem, B_smem)
+            b.sync_lds_only()
+            accs_out = _tapk_pingpong_loop(
+                set_tile, advance, load_tile, store_tile, advance(*s0), st_names,
+                cnt, fast_a=pp_fast_a, pre1=st1, sfx="_sk",
+            )
+            final = _apply_accumulator_epilogue(b, spec.acc_epilogue, accs_out)
+            b.sync = b.sync_lds_only
+            try:
+                _epi = CShuffleEpilogue.from_grid(
+                    atom=spec.atom,
+                    grid=grid,
+                    max_store_vec=_dgrad_store_vec(spec),
+                    out_dtype=spec.data.dtype_d,
+                )
+                if spec.cshuffle_m_chunks > 1:
+                    _epi = dc_replace(_epi, m_chunks=spec.cshuffle_m_chunks)
+                _epi.atomic_store(
+                    b, accs=final, dw_ptr=dX, wg_N=c_C, bounds=(rec_gemm_m, c_dg_N)
+                )
+            finally:
+                del b.sync
+            b.sync_lds_only()
+            b.scf_yield(b.add(cur, cnt))
+    def _psk_plain_store(fa) -> None:
+        _emit_dgrad_cshuffle_epilogue(
+            b, spec, fa, grid, dx_rsrc, params, c_group_base=c_group_base
+        )
+
+    def _psk_fixup(fa, v, tile, seg, c_I, c_TI, c_G) -> None:
+        """pp_streamk fix-up of a split tile (see DgradConvSpec.pp_sk_mode):
+        write this segment's f32 accumulators to its workspace slot, count
+        the tile's contributors in, and let the last one sum the slots and
+        store the tile."""
+        G = spec.pp_streamk
+        c1f = b.const_i32(1)
+        n_w = spec.warp_m * spec.warp_n
+        tile_elems = block_m * block_n
+        # sub_gemm_buf: [record | magic table] then the 2*G slots of
+        # tile_elems f32 each, then one i32 counter per output tile.
+        ws_base = ((_RECORD_FIELDS + _MAGIC_FIELDS) * 4 + 15) // 16 * 16
+        cnt_base = (ws_base + 2 * G * tile_elems * 4) // 4
+        ws = make_buffer_resource(
+            b, sub_gemm_buf, num_bytes=b.const_i32(0x7FFFFFF0)
+        )
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        lane_off = b.mul(
+            b.add(b.mul(wave, b.const_i32(64)), lane), b.const_i32(16)
+        )
+        acc_stride = n_w * 64 * 16
+
+        def slot_off(slot):
+            return b.add(
+                b.const_i32(ws_base), b.mul(slot, b.const_i32(tile_elems * 4))
+            )
+
+        # The workgroup's first segment is slot 2v, its later one 2v+1
+        # (only the first and the last segment of a range can be partial).
+        my_slot = b.add(
+            b.mul(v, b.const_i32(2)), b.select(b.cmp_gt(seg, c0), c1f, c0)
+        )
+        base = b.add(slot_off(my_slot), lane_off)
+        for j, acc in enumerate(fa):
+            b.buffer_store_vN_f32(
+                ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0, acc, 4
+            )
+        b.fence(scope="agent", ordering="release")
+        b.sync()
+        # Contributors of the tile: the workgroups whose ranges
+        # [floor(u*TI/G), floor((u+1)*TI/G)) meet [tile*I, (tile+1)*I).
+        # The one holding iteration i is floor(((i+1)*G - 1) / TI).
+
+        def owner(i):
+            return b.div(b.sub(b.mul(b.add(i, c1f), c_G), c1f), c_TI)
+
+        t_lo = b.mul(tile, c_I)
+        u_first = owner(t_lo)
+        u_last = owner(b.sub(b.add(t_lo, c_I), c1f))
+        n_c = b.add(b.sub(u_last, u_first), c1f)
+        flag = b.smem_alloc(I32, (1,), name_hint="psk_flag")
+        cnt_idx = b.add(b.const_i32(cnt_base), tile)
+        with b.scf_if(b.cmp_eq(tid, c0)):
+            old = b.global_atomic_add(sub_gemm_buf, cnt_idx, c1f, ordering="monotonic")
+            b.smem_store_vN(flag, [c0], old, 1)
+        b.sync()
+        old_u = b.readfirstlane(b.vec_extract(b.smem_load_vN(flag, c0, dtype=I32, n=1), 0))
+        with b.scf_if(b.cmp_eq(old_u, b.sub(n_c, c1f))):
+            b.fence(scope="agent", ordering="acquire")
+            # Sum every contributor's slot (this one's included).
+            it = [(f"psk_a{j}", b.zero_vec_f32(c_per_lane)) for j in range(len(fa))]
+            red = b.scf_for_iter(u_first, b.add(u_last, c1f), c1f, it, iv_name="u")
+            with red as (u, accs_u):
+                tile_a_u = b.div(b.div(b.mul(u, c_TI), c_G), c_I)
+                slot_u = b.add(
+                    b.mul(u, b.const_i32(2)),
+                    b.select(b.cmp_eq(tile_a_u, tile), c0, c1f),
+                )
+                base_u = b.add(slot_off(slot_u), lane_off)
+                new = []
+                for j, a in enumerate(accs_u):
+                    pv = b.buffer_load_vN(
+                        ws.rsrc, b.add(base_u, b.const_i32(j * acc_stride)),
+                        c0, F32, 4,
+                    )
+                    new.append(b.fadd(a, pv))
+                b.scf_yield(*new)
+            with b.scf_if(b.cmp_eq(tid, c0)):
+                b.global_store(sub_gemm_buf, cnt_idx, c0, align=4)
+            _psk_plain_store(list(red.results))
+
+    def _emit_pp_streamk() -> None:
+        """``pp_streamk``: the persistent stream-K walk. Workgroup w (laid
+        out XCD-contiguous) takes iterations [v*T*I/G, (v+1)*T*I/G) of the
+        tile-major (output tile, K tile) space (T tiles of I K tiles, G =
+        pp_streamk) and runs one ping-pong segment per output tile it
+        touches, each with its own prologue and packed-atomic epilogue."""
+        nonlocal block_m_off_v, block_n_off_v, grid
+        G = spec.pp_streamk
+        c1s = b.const_i32(1)
+        c_G = b.const_i32(G)
+        c_taps_s = b.mul(c_Y, c_X)
+        if is_3d:
+            c_taps_s = b.mul(p_Z, c_taps_s)
+        c_I = b.mul(c_taps_s, b.div(c_K, c_block_k))
+        c_RI = b.mul(rec_num_n_tiles, c_I)
+        c_TI = b.mul(rec_num_m_tiles, c_RI)
+        w = b.block_id_x()
+        nx = spec.xcd_remap
+        if nx and G > nx:
+            # XCD-contiguous: workgroup w runs on XCD w % nx; XCD x takes
+            # the virtual ids [x*q + min(x, rem), ...) in order.
+            c_nx = b.const_i32(nx)
+            xw = b.mod(w, c_nx)
+            v = b.add(
+                b.add(b.mul(xw, b.const_i32(G // nx)), b.smin(xw, b.const_i32(G % nx))),
+                b.div(w, c_nx),
+            )
+        else:
+            v = w
+        # Row-aligned split when G is a multiple of the M tile count: S
+        # workgroups per row of N tiles, every row cut at the same points,
+        # so the workgroups that read one W slice at one time are the S-th
+        # slices of all rows -- consecutive virtual ids (slice-major), one
+        # XCD. Otherwise the plain tile-major split.
+        S = b.div(c_G, rec_num_m_tiles)
+        aligned = b.land(
+            b.cmp_eq(b.mul(S, rec_num_m_tiles), c_G), b.cmp_gt(S, c0)
+        )
+        S1 = b.smax(S, c1s)
+        r_ = b.mod(v, rec_num_m_tiles)
+        c_ = b.div(v, rec_num_m_tiles)
+        if not spec.pp_sk_mode & 2:
+            # Row-major (tile-major) order: the M tiles of an XCD share
+            # their dY rows across the taps.
+            aligned = b.cmp_lt(c_G, c0)
+        row0 = b.mul(r_, c_RI)
+        al_a = b.add(row0, b.div(b.mul(c_, c_RI), S1))
+        al_e = b.add(row0, b.div(b.mul(b.add(c_, c1s), c_RI), S1))
+        it_a = b.select(aligned, al_a, b.div(b.mul(v, c_TI), c_G))
+        it_e = b.select(aligned, al_e, b.div(b.mul(b.add(v, c1s), c_TI), c_G))
+        compact = bool(spec.pp_zskip and is_3d and not spec.pp_sk_mode)
+        if compact:
+            # pp_zskip: partition only the K tiles the M tiles run. Row r's
+            # tiles run nz(r) of the Z depths (see _emit_tap_outer_prefetch_
+            # loop); Q(r) = sum of nz over the rows before r, closed form for
+            # one image (N == 1, dD == 1; otherwise every depth runs):
+            # Q(r) = Z*r - sum_j min(r, lo_j) - sum_j max(0, r - hi_j), j <
+            # Z, lo_j = rows whose last plane d keeps d + pD <= Z-1-j, hi_j =
+            # first row whose first plane d has d + pD - (Do-1) >= j.
+            c_hw = b.mul(c_Hi, c_Wi)
+            c_tm = b.const_i32(block_m)
+            per_z = b.mul(b.mul(c_Y, c_X), b.div(c_K, c_block_k))
+            ok = b.land(b.cmp_eq(p_N, c1s), b.cmp_eq(p_dD, c1s))
+            big = b.const_i32(1 << 30)
+            los, his = [], []
+            for j in (1, 2):
+                live = b.land(ok, b.cmp_lt(b.const_i32(j), p_Z))
+                e1 = b.sub(p_Z, b.add(b.const_i32(j), p_pD))  # (Z-1-j-pD)+1
+                lo_j = b.div(b.mul(b.smax(e1, c0), c_hw), c_tm)
+                los.append(b.select(live, lo_j, c0))
+                g = b.add(b.sub(p_Do, c1s), b.sub(b.const_i32(j), p_pD))
+                hi_j = b.div(
+                    b.add(b.mul(b.smax(g, c0), c_hw), b.sub(c_tm, c1s)), c_tm
+                )
+                his.append(b.select(live, hi_j, big))
+
+            def Q(r):
+                q = b.mul(p_Z, r)
+                for lo_j, hi_j in zip(los, his):
+                    q = b.sub(q, b.smin(r, lo_j))
+                    q = b.sub(q, b.smax(b.sub(r, hi_j), c0))
+                return q
+
+            def zlo(r):
+                z = c0
+                for hi_j in his:
+                    z = b.add(z, b.select(b.cmp_ge(r, hi_j), c1s, c0))
+                return z
+
+            c_rowu = b.mul(rec_num_n_tiles, per_z)
+            TIc = b.mul(c_rowu, Q(rec_num_m_tiles))
+            it_a = b.div(b.mul(v, TIc), c_G)
+            it_e = b.div(b.mul(b.add(v, c1s), TIc), c_G)
+
+            def locate(i):
+                # (tile, compact K offset) of compact iteration i.
+                r = c0
+                for bit in reversed(range(16)):
+                    cand = b.add(r, b.const_i32(1 << bit))
+                    okc = b.land(
+                        b.cmp_lt(cand, rec_num_m_tiles),
+                        b.cmp_le(b.mul(c_rowu, Q(cand)), i),
+                    )
+                    r = b.select(okc, cand, r)
+                o = b.sub(i, b.mul(c_rowu, Q(r)))
+                sp = b.mul(b.sub(Q(b.add(r, c1s)), Q(r)), per_z)
+                sp = b.smax(sp, c1s)
+                n = b.div(o, sp)
+                return b.add(b.mul(r, rec_num_n_tiles), n), b.sub(o, b.mul(n, sp))
+
+            tile_a, koff_a = locate(it_a)
+            tile_l, koff_l = locate(b.sub(it_e, c1s))
+        else:
+            tile_a = b.div(it_a, c_I)
+            tile_l = b.div(b.sub(it_e, c1s), c_I)
+        nseg = b.select(
+            b.cmp_gt(it_e, it_a), b.add(b.sub(tile_l, tile_a), c1s), c0
+        )
+        loop = b.scf_for_iter(
+            c0, nseg, c1s, [], iv_name="seg", elide_trailing_barrier=False
+        )
+        # Each segment rewrites the A/B tiles (prologue) and the C staging
+        # (epilogue) before reading them, and ends in a barrier: the LDS
+        # allocations may alias as in straight-line code.
+        loop.op.attrs["lds_iter_local"] = True
+        with loop as seg:
+            tile = b.add(tile_a, seg)
+            if compact:
+                m_r = b.div(tile, rec_num_n_tiles)
+                sp_t = b.mul(b.sub(Q(b.add(m_r, c1s)), Q(m_r)), per_z)
+                zb = b.mul(zlo(m_r), per_z)
+                kc0 = b.select(b.cmp_eq(seg, c0), koff_a, c0)
+                kc1 = b.select(
+                    b.cmp_eq(seg, b.sub(nseg, c1s)), b.add(koff_l, c1s), sp_t
+                )
+                k0 = b.add(zb, kc0)
+                kend = b.add(zb, kc1)
+            else:
+                base = b.mul(tile, c_I)
+                k0 = b.smax(b.sub(it_a, base), c0)
+                kend = b.smin(b.sub(it_e, base), c_I)
+            m_t = b.div(tile, rec_num_n_tiles)
+            n_t = b.sub(tile, b.mul(m_t, rec_num_n_tiles))
+            block_m_off_v = b.mul(m_t, b.const_i32(block_m))
+            block_n_off_v = b.mul(n_t, b.const_i32(block_n))
+            grid = dc_replace(
+                grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v
+            )
+            _psk_seg["k0"] = k0
+            _psk_seg["cnt"] = b.sub(kend, k0)
+            fa = _emit_tap_outer_prefetch_loop()
+            fa = _apply_accumulator_epilogue(b, spec.acc_epilogue, fa)
+            if not spec.pp_sk_mode & 1:
+                _dispatch_dgrad_epilogue(fa)
+            else:
+                whole = b.land(b.cmp_eq(k0, c0), b.cmp_eq(kend, c_I))
+                with b.scf_if_else(whole) as (then_ctx, else_ctx):
+                    with then_ctx:
+                        _psk_plain_store(fa)
+                    with else_ctx:
+                        _psk_fixup(fa, v, tile, seg, c_I, c_TI, c_G)
+            # The next segment's prologue stores reuse the LDS the
+            # epilogue staged C through.
+            b.sync()
+            b.scf_yield()
+
+    def _emit_tap_outer_prefetch_loop() -> list[Value]:
+        """The pipelined tap-outer K loop (``tapk_prefetch``).
+
+        The (tap, chunk) nest of :func:`_emit_tap_outer_loops` flattened into
+        one loop over its ``taps * kpg / tile_k`` tiles, in the same order. The
+        loop carries the next tile's uniform coordinate (chunk base kb, x, y
+        and, in 3-D, z) and advances it with a compare-and-wrap. Each body
+        issues the next tile's global reads, then the current tile's MFMAs,
+        then stores the reads to LDS; ``sched_barrier`` pins the reads ahead
+        of the MFMAs (left alone, the scheduler sinks them next to their
+        stores and the latency is exposed again).
+        """
+        c1 = b.const_i32(1)
+        c_kd = c_kpg if grouped else c_K
+        c_cs = c_dg_N if grouped else c_C
+        c_yx = b.mul(c_Y, c_X)
+        c_taps = b.mul(p_Z, c_yx) if is_3d else c_yx
+        c_yxc = b.mul(c_taps, c_cs)
+        c_wo_k = b.mul(c_Wo, c_K)
+        c_ho_wo_k = b.mul(c_Ho, c_wo_k)
+        n_tiles = b.mul(c_taps, b.div(c_kd, c_block_k))
+        cap: dict[str, Value] = {}
+        # pp_boxes: the record's box of dX rows runs the filter rows
+        # [yb, yb + ys) and columns [xb, xb + xs) only; the loop walks
+        # (z, y', x', chunk) over that sub-filter, y = yb + y', x = xb + x'.
+        if spec.pp_boxes:
+            bx_ys, bx_xs = rec_y_dot_slice, rec_x_dot_slice
+            bx_yb, bx_xb = rec_b_y_offset, rec_b_x_offset
+            bx_hb, bx_wb = rec_h_tilde_slice_begin, rec_w_tilde_slice_begin
+            _bx_taps = b.mul(bx_ys, bx_xs)
+            if is_3d:
+                bx_zb, bx_zs = rec_b_y_stride, _ld(21)
+                _bx_taps = b.mul(bx_zs, _bx_taps)
+            n_tiles = b.mul(_bx_taps, b.div(c_kd, c_block_k))
+            c_Xl, c_Yl = bx_xs, bx_ys
+        else:
+            c_Xl, c_Yl = c_X, c_Y
+
+        def set_tile(kb0: Value, xd: Value, yd: Value, zd: Value | None, live=None):
+            if spec.pp_boxes:
+                xd = b.add(bx_xb, xd)
+                yd = b.add(bx_yb, yd)
+                if is_3d:
+                    zd = b.add(bx_zb, zd)
+            dh = b.sub(params["p_pH"], yd)
+            dw = b.sub(params["p_pW"], xd)
+            cap["dh"], cap["dw"] = dh, dw
+            tap = b.add(b.mul(yd, c_X), xd)
+            dy_tap = b.add(b.mul(dh, c_wo_k), b.mul(dw, c_K))
+            if is_3d:
+                dd = b.sub(p_pD, zd)
+                cap["dd"] = dd
+                tap = b.add(b.mul(zd, c_yx), tap)
+                dy_tap = b.add(b.mul(dd, c_ho_wo_k), dy_tap)
+            kb = b.add(kb0, k_out_group_base) if grouped else kb0
+            cap["a_off"] = b.add(dy_tap, kb)
+            cap["w_k"] = b.add(b.mul(kb, c_yxc), b.mul(tap, c_cs))
+            cap["live"] = live
+            cap["tap"] = tap
+
+        def advance(kb0, xd, yd, zd):
+            nk = b.add(kb0, c_block_k)
+            wrap_k = b.cmp_ge(nk, c_kd)
+            nk = b.select(wrap_k, c0, nk)
+            nx = b.add(xd, b.select(wrap_k, c1, c0))
+            wrap_x = b.cmp_ge(nx, c_Xl)
+            nx = b.select(wrap_x, c0, nx)
+            ny = b.add(yd, b.select(wrap_x, c1, c0))
+            if not is_3d:
+                return nk, nx, ny, None
+            wrap_y = b.cmp_ge(ny, c_Yl)
+            ny = b.select(wrap_y, c0, ny)
+            nz = b.add(zd, b.select(wrap_y, c1, c0))
+            return nk, nx, ny, nz
+
+        def dy_pf(b_: IRBuilder, row: Value, col: Value):
+            m_sub = b_.add(block_m_off_v, row)
+            if _rm_map is not None:
+                m_sub = _rm_map(b_, m_sub)
+            n, m_rem = _magic_divmod(b_, m_sub, hw_div)
+            hi, wi = _magic_divmod(b_, m_rem, w_div)
+            if spec.pp_boxes:
+                hi = b_.add(hi, bx_hb)
+                wi = b_.add(wi, bx_wb)
+            ho = b_.add(hi, cap["dh"])
+            wo = b_.add(wi, cap["dw"])
+            if spec.tapk_pingpong:
+                # One unsigned compare per axis (a negative coordinate wraps
+                # past the bound): half the mask ops of the signed pair.
+                valid = b_.land(b_.cmp_ult(ho, c_Ho), b_.cmp_ult(wo, c_Wo))
+                if is_3d:
+                    if spec.pp_boxes:
+                        n, di = _bx_split_d(b_, n)
+                    else:
+                        n, di = _magic_divmod(b_, n, di_div)
+                    valid = b_.land(valid, b_.cmp_ult(b_.add(di, cap["dd"]), p_Do))
+                    n = b_.add(b_.mul(n, p_Do), di)
+                pix = b_.add(
+                    b_.mul(b_.add(b_.mul(b_.add(b_.mul(n, c_Ho), hi), c_Wo), wi), c_K),
+                    col,
+                )
+                return b_.add(pix, cap["a_off"]), valid
+            valid = b_.land(
+                b_.land(b_.cmp_ge(ho, c0), b_.cmp_lt(ho, c_Ho)),
+                b_.land(b_.cmp_ge(wo, c0), b_.cmp_lt(wo, c_Wo)),
+            )
+            if is_3d:
+                n, di = _magic_divmod(b_, n, di_div)
+                do = b_.add(di, cap["dd"])
+                valid = b_.land(
+                    valid, b_.land(b_.cmp_ge(do, c0), b_.cmp_lt(do, p_Do))
+                )
+                n = b_.add(b_.mul(n, p_Do), di)
+            if cap["live"] is not None:
+                valid = b_.land(valid, cap["live"])
+            pix = b_.add(
+                b_.mul(b_.add(b_.mul(b_.add(b_.mul(n, c_Ho), hi), c_Wo), wi), c_K),
+                col,
+            )
+            return b_.add(pix, cap["a_off"]), valid
+
+        def w_pf(b_: IRBuilder, row: Value, col: Value):
+            c_val = b_.add(block_n_off_v, row)
+            off = b_.add(b_.add(b_.mul(col, c_yxc), c_val), cap["w_k"])
+            if spec.tapk_pp_epi and cap["live"] is not None:
+                # tapk_pp_epi: the two-ahead loads past the last tile are
+                # sent out of range (no memory traffic, nothing to wait on).
+                return off, cap["live"]
+            return off, None
+
+        if spec.lds_k_outer:
+
+            def w_pf_fn(b_: IRBuilder, row: Value, col: Value):
+                return w_pf(b_, col, row)
+
+        else:
+            w_pf_fn = w_pf
+
+        def load_tile(part=None):
+            # part "a" / "b": that operand's loads only (tapk_pp_sched 4).
+            a_st = (
+                a_sync_loader.load_global(b, tid=tid, descriptor=dy_pf, rsrc=dy_rsrc)
+                if part != "b"
+                else None
+            )
+            b_st = (
+                b_sync_loader.load_global(b, tid=tid, descriptor=w_pf_fn, rsrc=w_rsrc)
+                if part != "a"
+                else None
+            )
+            return a_st, b_st
+
+        def store_tile(st, a_dst, b_dst):
+            if spec.tapk_pingpong:
+                _pp_store(a_sync_loader, a_dst, st[0])
+                _pp_store(b_sync_loader, b_dst, st[1])
+                return
+            a_sync_loader.store_lds(b, smem_dst=a_dst, staged=st[0])
+            b_sync_loader.store_lds(b, smem_dst=b_dst, staged=st[1])
+
+        def _pp_fast_a():
+            """tapk_pingpong 4: the A (dY) tile loads without per-tile masks.
+            Each thread's rows get their pixel offset and a bit mask of the
+            filter taps that leave the image (bit = tap index) once, before
+            the loop; a tile's load is then pixel + the tile's uniform
+            offset, with bit 31 set from the tap's mask bit (an offset past
+            2 GiB, which the buffer resource reads as zero)."""
+            from rocke.helpers.loads import _ELEM_BYTES
+
+            lv = a_sync_loader.load_vec
+            cpv = block_k // lv
+            c_cpv = b.const_i32(cpv)
+            eb_sh = {1: 0, 2: 1, 4: 2}[_ELEM_BYTES[ir_dtype_a.name]]
+            rows, cols, pix, crd = [], [], [], []
+            n_chunks = block_m * block_k // lv
+            idle = []
+            for e in range(-(-n_chunks // threads)):
+                idx = b.add(b.const_i32(e * threads), tid)
+                row = b.div(idx, c_cpv)
+                col = b.mul(b.sub(idx, b.mul(row, c_cpv)), b.const_i32(lv))
+                if (e + 1) * threads > n_chunks:
+                    # pp_a_partial: the last pass's idle lanes (whole waves)
+                    # read nothing and store into the 8 junk rows.
+                    off_ = b.cmp_ge(idx, b.const_i32(n_chunks))
+                    row = b.select(
+                        off_, b.add(b.const_i32(block_m), b.land(tid, b.const_i32(7))), row
+                    )
+                    col = b.select(
+                        off_,
+                        b.mul(b.land(b.lshr(tid, b.const_i32(3)), b.const_i32(cpv - 1)), b.const_i32(lv)),
+                        col,
+                    )
+                    idle.append(off_)
+                else:
+                    idle.append(None)
+                m_sub = b.add(block_m_off_v, row)
+                if _rm_map is not None:
+                    m_sub = _rm_map(b, m_sub)
+                n, m_rem = _magic_divmod(b, m_sub, hw_div)
+                hi, wi = _magic_divmod(b, m_rem, w_div)
+                if spec.pp_boxes:
+                    hi = b.add(hi, bx_hb)
+                    wi = b.add(wi, bx_wb)
+                di = None
+                if is_3d:
+                    if spec.pp_boxes:
+                        n, di = _bx_split_d(b, n)
+                    else:
+                        n, di = _magic_divmod(b, n, di_div)
+                    n = b.add(b.mul(n, p_Do), di)
+                pix.append(
+                    b.add(
+                        b.mul(b.add(b.mul(b.add(b.mul(n, c_Ho), hi), c_Wo), wi), c_K),
+                        col,
+                    )
+                )
+                rows.append(row)
+                cols.append(col)
+                crd.append((hi, wi, di))
+            c1_ = b.const_i32(1)
+            F = _PP_MAX_FILTER
+            # Per axis, the valid filter offsets f of a row form one run:
+            # 0 <= coord + pad - f < out  <=>  f in [coord+pad-out+1,
+            # coord+pad], clamped to [0, F): a run of bits. The tap mask is
+            # their product over (z, y, x), straight-line for filters of up
+            # to F per axis (the validator enforces it).
+
+            def axis_bits(coord, pad, out, ext):
+                # ext: the axis' filter extent (<= F), so no bit spills
+                # into the next tap group of the packed mask.
+                hi_ = b.add(coord, pad)
+                lo_ = b.add(b.sub(hi_, out), c1_)
+                lo_c = b.smin(b.smax(lo_, c0), ext)
+                hi_c = b.smin(hi_, b.sub(ext, c1_))
+                width = b.smax(b.add(b.sub(hi_c, lo_c), c1_), c0)
+                return b.shl(b.sub(b.shl(c1_, width), c1_), lo_c)
+
+            masks = []
+            zs = range(F) if is_3d else range(1)
+            for hi, wi, di in crd:
+                vx = axis_bits(wi, params["p_pW"], c_Wo, c_X)
+                vy = axis_bits(hi, params["p_pH"], c_Ho, c_Y)
+                vz = axis_bits(di, p_pD, p_Do, p_Z) if is_3d else c1_
+                valid = c0
+                for z in zs:
+                    for y in range(F):
+                        ok_u = b.cmp_lt(b.const_i32(y), c_Y)
+                        if is_3d:
+                            ok_u = b.land(ok_u, b.cmp_lt(b.const_i32(z), p_Z))
+                        sh = b.mul(b.add(b.mul(b.const_i32(z), c_Y), b.const_i32(y)), c_X)
+                        sh = b.select(ok_u, sh, c0)
+                        bit = b.land(b.lshr(vy, b.const_i32(y)), c1_)
+                        if is_3d:
+                            bit = b.land(bit, b.lshr(vz, b.const_i32(z)))
+                        part = b.select(ok_u, b.mul(bit, vx), c0)
+                        valid = b.lor(valid, b.shl(part, sh))
+                masks.append(b.xor(valid, b.const_i32(-1)))
+            c_sh = b.const_i32(eb_sh)
+            c31 = b.const_i32(31)
+
+            def load_a():
+                staged = []
+                for e in range(len(rows)):
+                    off = b.add(pix[e], cap["a_off"])
+                    off = b.shl(off, c_sh) if eb_sh else off
+                    bad = b.land(b.lshr(masks[e], cap["tap"]), c1_)
+                    if idle[e] is not None:
+                        bad = b.lor(bad, b.select(idle[e], c1_, c0))
+                    if cap["live"] is not None:
+                        bad = b.lor(bad, b.select(cap["live"], c0, c1_))
+                    off = b.lor(off, b.shl(bad, c31))
+                    v = b.buffer_load_vN(dy_rsrc, off, c0, ir_dtype_a, lv)
+                    staged.append((rows[e], cols[e], v))
+                return staged
+
+            return load_a
+
+        # Prologue: tile 0 into the first buffer.
+        z0 = c0 if is_3d else None
+        s0 = (c0, c0, c0, z0)
+        if spec.tapk_pp_xhalo:
+            return _pp_xhalo_loop(set_tile, load_tile, _pp_fast_a, dy_pf)
+        if spec.tapk_ztrim:
+            z_lo, z_cnt = _ztrim_range()
+            s0 = (c0, c0, c0, z_lo)
+            n_tiles = b.mul(b.mul(z_cnt, c_yx), b.div(c_kd, c_block_k))
+        if spec.tapk_pp_persist:
+            return _pp_persistent(
+                set_tile, advance, load_tile, store_tile, s0, n_tiles, _pp_fast_a
+            )
+        def _decode_t0(t0, z_base=None):
+            nkc = b.div(c_kd, c_block_k)
+            tap0 = b.div(t0, nkc)
+            kb_0 = b.mul(b.sub(t0, b.mul(tap0, nkc)), c_block_k)
+            yz0 = b.div(tap0, c_Xl)
+            x_0 = b.sub(tap0, b.mul(yz0, c_Xl))
+            if is_3d:
+                z_0 = b.div(yz0, c_Yl)
+                return (kb_0, x_0, b.sub(yz0, b.mul(z_0, c_Yl)), z_0)
+            return (kb_0, x_0, yz0, None)
+
+        if spec.pp_zskip:
+            # Only the filter depths z some row of this M tile can use: the
+            # tile's dX planes [d_first, d_last] read dY planes d + pD - z,
+            # so z runs over [d_first + pD - (Do-1), d_last + pD] clamped to
+            # the filter (the whole filter if the tile spans two images or
+            # dD != 1). The K tiles of the other depths are all-zero rows.
+            c_hw = (
+                b.mul(rec_h_tilde_slice, rec_w_tilde_slice)
+                if spec.pp_boxes
+                else b.mul(c_Hi, c_Wi)
+            )
+            _dext = rec_a_embed_h_coeff if spec.pp_boxes else params["p_Di"]
+            c_dhw = b.mul(_dext, c_hw)
+            m_last = b.sub(
+                b.smin(b.add(block_m_off_v, b.const_i32(block_m)), rec_gemm_m), c1
+            )
+            pl_f = b.div(block_m_off_v, c_hw)
+            pl_l = b.div(m_last, c_hw)
+            same = b.land(
+                b.cmp_eq(b.div(block_m_off_v, c_dhw), b.div(m_last, c_dhw)),
+                b.cmp_eq(p_dD, c1),
+            )
+            d_f = b.mod(pl_f, _dext)
+            d_l = b.mod(pl_l, _dext)
+            if spec.pp_boxes:
+                d_f = b.add(d_f, rec_a_embed_w_coeff)
+                d_l = b.add(d_l, rec_a_embed_w_coeff)
+            zmax = b.sub(p_Z, c1)
+            z_lo = b.smax(b.sub(b.add(d_f, p_pD), b.sub(p_Do, c1)), c0)
+            z_hi = b.smin(b.add(d_l, p_pD), zmax)
+            z_lo = b.select(same, z_lo, c0)
+            z_hi = b.select(same, z_hi, zmax)
+            if spec.pp_boxes:
+                # the box's own depth range [zb, zb + zs), local z
+                z_lo = b.sub(b.smax(z_lo, bx_zb), bx_zb)
+                z_hi = b.sub(b.smin(z_hi, b.sub(b.add(bx_zb, bx_zs), c1)), bx_zb)
+            nz = b.smax(b.add(b.sub(z_hi, z_lo), c1), c0)
+            per_z = b.mul(b.mul(c_Yl, c_Xl), b.div(c_kd, c_block_k))
+            zbase = b.mul(z_lo, per_z)
+            span = b.mul(nz, per_z)
+            if spec.pp_streamk:
+                lo = b.smax(_psk_seg["k0"], zbase)
+                hi = b.smin(
+                    b.add(_psk_seg["k0"], _psk_seg["cnt"]), b.add(zbase, span)
+                )
+                t0 = lo
+                n_tiles = b.smax(b.sub(hi, lo), c0)
+            elif spec.split_k > 1:
+                c_sk = bx_sk if bx_sk is not None else b.const_i32(spec.split_k)
+                per = b.div(b.add(span, b.sub(c_sk, c1)), c_sk)
+                t0c = b.mul(bx_slice if bx_slice is not None else b.block_id_z(), per)
+                cnt = b.sub(b.smin(b.add(t0c, per), span), t0c)
+                n_tiles = b.smax(cnt, c0)
+                t0 = b.add(zbase, t0c)
+            else:
+                t0 = zbase
+                n_tiles = span
+            s0 = _decode_t0(t0)
+        elif spec.tapk_pingpong and spec.split_k > 1 and spec.pp_boxes:
+            # pp_boxes split-K: the record's slice of the box's K tiles.
+            per = b.div(b.add(n_tiles, b.sub(bx_sk, c1)), bx_sk)
+            t0 = b.mul(bx_slice, per)
+            cnt = b.sub(b.smin(b.add(t0, per), n_tiles), t0)
+            n_tiles = b.smax(cnt, c0)
+            s0 = _decode_t0(t0)
+        elif spec.tapk_pingpong and spec.split_k > 1:
+            # Split-K (ping-pong): slice z takes tiles [t0, t0 + per) of the
+            # flat (z, y, x, chunk) order -- whole tiles, so no slice starts
+            # mid-tap; its first tile's coordinate is decoded once.
+            c_sk = b.const_i32(spec.split_k)
+            per = b.div(b.add(n_tiles, b.sub(c_sk, c1)), c_sk)
+            t0 = b.mul(b.block_id_z(), per)
+            t_end = b.select(b.cmp_lt(b.add(t0, per), n_tiles), b.add(t0, per), n_tiles)
+            cnt = b.sub(t_end, t0)
+            n_tiles = b.select(b.cmp_gt(cnt, c0), cnt, c0)
+            nkc = b.div(c_kd, c_block_k)
+            tap0 = b.div(t0, nkc)
+            kb_0 = b.mul(b.sub(t0, b.mul(tap0, nkc)), c_block_k)
+            yz0 = b.div(tap0, c_X)
+            x_0 = b.sub(tap0, b.mul(yz0, c_X))
+            if is_3d:
+                z_0 = b.div(yz0, c_Y)
+                s0 = (kb_0, x_0, b.sub(yz0, b.mul(z_0, c_Y)), z_0)
+            else:
+                s0 = (kb_0, x_0, yz0, None)
+        if spec.pp_streamk and not spec.pp_zskip:
+            # Stream-K segment (see _emit_pp_streamk): K tiles [t0, t0 + cnt)
+            # of the flat (z, y, x, chunk) order of one output tile.
+            t0 = _psk_seg["k0"]
+            n_tiles = _psk_seg["cnt"]
+            nkc = b.div(c_kd, c_block_k)
+            tap0 = b.div(t0, nkc)
+            kb_0 = b.mul(b.sub(t0, b.mul(tap0, nkc)), c_block_k)
+            yz0 = b.div(tap0, c_X)
+            x_0 = b.sub(tap0, b.mul(yz0, c_X))
+            if is_3d:
+                z_0 = b.div(yz0, c_Y)
+                s0 = (kb_0, x_0, b.sub(yz0, b.mul(z_0, c_Y)), z_0)
+            else:
+                s0 = (kb_0, x_0, yz0, None)
+        set_tile(*s0)
+        pp_fast_a = None
+        if spec.tapk_pingpong >= 4 and pp_a_partial(spec):
+            # pp_a_partial: the generic loader cannot split the dY tile.
+            pp_fast_a = _pp_fast_a()
+            st0 = (pp_fast_a(), load_tile("b")[1])
+            store_tile(st0, A_smem, B_smem)
+        elif spec.tapk_pingpong >= 4:
+            # The tap masks are built while tile 0's loads are in flight.
+            st0 = load_tile()
+            pp_fast_a = _pp_fast_a()
+            store_tile(st0, A_smem, B_smem)
+        else:
+            store_tile(load_tile(), A_smem, B_smem)
+        b.sync()
+        nxt0 = advance(*s0)
+        n_st = 4 if is_3d else 3
+        st_names = ["pf_kb", "pf_x", "pf_y", "pf_z"][:n_st]
+        n_acc = len(accs)
+
+        if spec.tapk_prefetch == 3:
+            # Two tiles ahead: tile t+1 rides in registers across the back
+            # edge (loop-carried), tile t+2's reads are issued before tile
+            # t's MFMAs, so a read has two tiles of math to land.
+            def flat(st):
+                out = []
+                for part in st:
+                    for _row, _col, v in part:
+                        out.extend(v if isinstance(v, list) else [v])
+                return out
+
+            def rebuild(template, vals):
+                vals = list(vals)
+                out = []
+                for part in template:
+                    p_out = []
+                    for row, col, v in part:
+                        if isinstance(v, list):
+                            n = len(v)
+                            p_out.append((row, col, vals[:n]))
+                            del vals[:n]
+                        else:
+                            p_out.append((row, col, vals.pop(0)))
+                    out.append(p_out)
+                return out
+
+            set_tile(*nxt0)
+            st1 = load_tile()
+            nxt1 = advance(*nxt0)
+            regs0 = flat(st1)
+            n_regs = len(regs0)
+            it = (
+                list(accs)
+                + [(f"pf_r{i}", v) for i, v in enumerate(regs0)]
+                + list(zip(st_names, nxt1[:n_st]))
+            )
+            loop = b.scf_for_iter(c0, n_tiles, c1, it, iv_name="t")
+            with loop as (_t, iv):
+                regs = iv[n_acc : n_acc + n_regs]
+                st = iv[n_acc + n_regs :]
+                set_tile(*st, *([None] if not is_3d else []))
+                staged2 = load_tile()
+                b.sched_barrier(0)
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iv[:n_acc]))
+                b.sync()
+                store_tile(rebuild(staged2, regs), A_smem, B_smem)
+                b.sync()
+                nxt = advance(*st, *([None] if not is_3d else []))
+                b.scf_yield(*new_accs, *flat(staged2), *nxt[:n_st])
+            return list(loop.results)[:n_acc]
+
+        if spec.tapk_pingpong:
+            return _tapk_pingpong_loop(
+                set_tile, advance, load_tile, store_tile, nxt0, st_names, n_tiles,
+                fast_a=pp_fast_a,
+            )
+
+        if spec.tapk_prefetch == 1:
+            it = list(accs) + list(zip(st_names, nxt0[:n_st]))
+            loop = b.scf_for_iter(c0, n_tiles, c1, it, iv_name="t")
+            with loop as (_t, iv):
+                st = iv[n_acc:]
+                set_tile(*st, *([None] if not is_3d else []))
+                staged = load_tile()
+                b.sched_barrier(0)
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iv[:n_acc]))
+                b.sync()
+                store_tile(staged, A_smem, B_smem)
+                b.sync()
+                nxt = advance(*st, *([None] if not is_3d else []))
+                b.scf_yield(*new_accs, *nxt[:n_st])
+            return list(loop.results)[:n_acc]
+
+        # tapk_prefetch == 2: ping-pong over two buffers, two tiles per body.
+        c2 = b.const_i32(2)
+        it = list(accs) + list(zip(st_names, nxt0[:n_st]))
+        loop = b.scf_for_iter(c0, n_tiles, c2, it, iv_name="t2")
+        with loop as (t2, iv):
+            st = list(iv[n_acc:])
+            if not is_3d:
+                st.append(None)
+            # Phase A: read tile t2+1 (predicated: it may not exist), MFMAs of
+            # tile t2 from buffer 0, store into buffer 1.
+            set_tile(*st, live=b.cmp_lt(b.add(t2, c1), n_tiles))
+            staged = load_tile()
+            b.sched_barrier(0)
+            accs_a = emit_mfma_phase(A_smem, B_smem, list(iv[:n_acc]))
+            b.sched_barrier(0)
+            store_tile(staged, A_smem2, B_smem2)
+            b.sync()
+            # Phase B: read tile t2+2 into buffer 0, MFMAs of t2+1.
+            st2 = list(advance(*st))
+            set_tile(*st2)
+            staged = load_tile()
+            b.sched_barrier(0)
+            accs_b = emit_mfma_phase(A_smem2, B_smem2, accs_a)
+            b.sched_barrier(0)
+            store_tile(staged, A_smem, B_smem)
+            b.sync()
+            nxt = advance(*st2)
+            b.scf_yield(*accs_b, *nxt[:n_st])
+        return list(loop.results)[:n_acc]
+
+    def _xh_fast_a_descriptor(halo_loader, cap, slow):
+        """``xh_fast_a``: the halo loader's descriptor through values
+        computed once. The loader is walked once with a recording descriptor
+        (its buffer loads suppressed) to get each call's (row, col); for
+        each, the row's dY pixel offset at tap (0, 0, 0) -- pW == 0, so
+        pixel (n, di, hi, wi) reads ((n Do + di) Ho + hi) Wo + wi + the
+        tap's uniform (pD - z) Ho Wo + (pH - y) Wo -- and a mask with bit
+        z * Y + y set where that tap is in range (and wi < Wo, m in
+        [0, M)). The returned descriptor hands them out in call order (every
+        load_global call issues the same sequence). xh_fast_a 2: until the
+        x-halo prefetch loop arms it (cap["xfa_arm"], right after tile 0's
+        loads are issued, so the per-row work overlaps their latency) it is
+        the ``slow`` descriptor."""
+        rec: list = []
+        c1_ = b.const_i32(1)
+        F = _PP_MAX_FILTER
+
+        def axis_bits(coord, pad, out, ext):
+            hi_ = b.add(coord, pad)
+            lo_ = b.add(b.sub(hi_, out), c1_)
+            lo_c = b.smin(b.smax(lo_, c0), ext)
+            hi_c = b.smin(hi_, b.sub(ext, c1_))
+            width = b.smax(b.add(b.sub(hi_c, lo_c), c1_), c0)
+            return b.shl(b.sub(b.shl(c1_, width), c1_), lo_c)
+
+        def record(b_, row, col):
+            m = b.add(block_m_off_v, row)
+            m_ok = b.land(b.cmp_ge(m, c0), b.cmp_lt(m, p_dg_M))
+            m = b.select(m_ok, m, c0)
+            n, m_rem = _magic_divmod(b, m, hw_div)
+            hi, wi = _magic_divmod(b, m_rem, w_div)
+            di = None
+            if is_3d:
+                n, di = _magic_divmod(b, n, di_div)
+                n = b.add(b.mul(n, p_Do), di)
+            pix = b.add(b.mul(b.add(b.mul(b.add(b.mul(n, c_Ho), hi), c_Wo), wi), c_K), col)
+            vy = axis_bits(hi, params["p_pH"], c_Ho, c_Y)
+            # The (z, y) validity is separable: bit z * Y + y = (vz >> z)
+            # & (vy >> y) & 1, i.e. the y run vy (Y bits) placed at z * Y
+            # for every valid z (axis_bits already clears z >= Z, y >= Y).
+            if is_3d:
+                vz = axis_bits(di, p_pD, p_Do, p_Z)
+                mask = c0
+                for z in range(F):
+                    zb = b.sub(c0, b.land(b.lshr(vz, b.const_i32(z)), c1_))
+                    mask = b.lor(
+                        mask, b.land(zb, b.shl(vy, b.mul(b.const_i32(z), c_Y)))
+                    )
+            else:
+                mask = vy
+            row_ok = b.land(m_ok, b.cmp_lt(wi, c_Wo))
+            mask = b.select(row_ok, mask, c0)
+            rec.append((pix, mask))
+            return c0, b.cmp_lt(c1_, c0)
+
+        armed = [False]
+
+        def arm():
+            b.buffer_load_vN = lambda *a, **k: None
+            try:
+                halo_loader.load_global(b, tid=tid, descriptor=record, rsrc=dy_rsrc)
+            finally:
+                del b.buffer_load_vN
+            armed[0] = True
+
+        if spec.xh_fast_a == 2 and spec.tapk_prefetch:
+            cap["xfa_arm"] = arm
+        else:
+            arm()
+        ctr = [0]
+
+        def fast(b_, row, col):
+            if not armed[0]:
+                return slow(b_, row, col)
+            i = ctr[0] % len(rec)
+            ctr[0] += 1
+            pix, mask = rec[i]
+            if is_3d:
+                z = b_.sub(p_pD, cap["dd"])
+                zy = b_.add(b_.mul(z, c_Y), b_.sub(params["p_pH"], cap["dh"]))
+                tap = b_.add(
+                    b_.mul(b_.add(b_.mul(cap["dd"], c_Ho), cap["dh"]), b_.mul(c_Wo, c_K)),
+                    cap["kb"],
+                )
+            else:
+                zy = b_.sub(params["p_pH"], cap["dh"])
+                tap = b_.add(b_.mul(cap["dh"], b_.mul(c_Wo, c_K)), cap["kb"])
+            if spec.xh_tap_rsrc:
+                # The tap is in the buffer base (cap["a_rsrc"]); out of range
+                # rows get bit 30 (bit 31 of the byte offset). The last call
+                # of a load_global sequence is _HaloLoader's back-row load,
+                # which ands its own lane mask into a valid flag.
+                bad = b_.land(b_.lshr(b_.xor(mask, b_.const_i32(-1)), zy), c1_)
+                off = b_.lor(pix, b_.shl(bad, b_.const_i32(30)))
+                if i == len(rec) - 1:
+                    return off, b_.cmp_lt(c0, c1_)
+                return off, None
+            valid = b_.cmp_ne(b_.land(b_.lshr(mask, zy), c1_), c0)
+            return b_.add(pix, tap), valid
+
+        fast.rec = rec
+        fast.ctr = ctr
+        return fast
+
+    def _xhalo_prefetch(xh_dy, w_xh_fn, halo_loader, row_map, cap) -> list[Value]:
+        """``tapk_xhalo`` with ``tapk_prefetch`` 1 or 3: the (z, y, chunk)
+        nest as one flat loop carrying the next tile's (kb, y, z), each
+        tile's reads (the staged dY rows and the X W tiles) issued one
+        (``1``) or two (``3``, the next tile in loop-carried registers)
+        tiles ahead of its MFMAs. One LDS buffer."""
+        XB = p.X
+        c1 = b.const_i32(1)
+        c_kd = c_kpg if grouped else c_K
+        c_cs = c_dg_N if grouped else c_C
+        c_yx = b.mul(c_Y, c_X)
+        c_taps = b.mul(p_Z, c_yx) if is_3d else c_yx
+        c_zy = b.mul(p_Z, c_Y) if is_3d else c_Y
+        c_yxc = b.mul(c_taps, c_cs)
+        n_tiles = b.mul(c_zy, b.div(c_kd, c_block_k))
+        # tapk_ztrim 2: the y taps some row of the tile can use too.
+        y_lo = y_end = None
+        if spec.tapk_ztrim == 2:
+            y_lo, y_cnt = _ytrim_range()
+            y_end = b.add(y_lo, y_cnt)
+        if spec.xh_b_wide:
+            # xh_b_wide: the X taps' B tiles as one stacked unit space.
+            xh_wide_loader = XTapKPackLoader(
+                n_taps=XB,
+                tile_rows=block_n,
+                tile_cols=block_k,
+                block_size=threads,
+                load_vec=_dgrad_b_load_vec(spec),
+                kpack=spec.b_kpack,
+                elem_dtype=ir_dtype_b,
+            )
+
+            def w_wide_fn(b_: IRBuilder, x: Value, row: Value, col: Value):
+                c_val = b_.add(block_n_off_v, row)
+                if spec.xh_tap_rsrc:
+                    # w_k0 is in the buffer base (cap["w_rsrc"]).
+                    return (
+                        b_.add(b_.add(b_.mul(col, c_yxc), c_val), b_.mul(x, c_cs)),
+                        None,
+                    )
+                return (
+                    b_.add(
+                        b_.add(b_.mul(col, c_yxc), c_val),
+                        b_.add(cap["w_k0"], b_.mul(x, c_cs)),
+                    ),
+                    None,
+                )
+
+        else:
+            xh_wide_loader = None
+            w_wide_fn = None
+
+        def set_tile(kb0, yd, zd):
+            cap["dh"] = b.sub(params["p_pH"], yd)
+            zy = yd
+            if is_3d:
+                cap["dd"] = b.sub(p_pD, zd)
+                zy = b.add(b.mul(zd, c_Y), yd)
+            kb = b.add(kb0, k_out_group_base) if grouped else kb0
+            cap["kb"] = kb
+            cap["w_k0"] = b.add(b.mul(kb, c_yxc), b.mul(b.mul(zy, c_X), c_cs))
+
+        def advance(kb0, yd, zd):
+            nk = b.add(kb0, c_block_k)
+            wrap_k = b.cmp_ge(nk, c_kd)
+            nk = b.select(wrap_k, c0, nk)
+            ny = b.add(yd, b.select(wrap_k, c1, c0))
+            if not is_3d:
+                return nk, ny, None
+            if y_lo is not None:
+                wrap_y = b.cmp_ge(ny, y_end)
+                ny = b.select(wrap_y, y_lo, ny)
+            else:
+                wrap_y = b.cmp_ge(ny, c_Y)
+                ny = b.select(wrap_y, c0, ny)
+            nz = b.add(zd, b.select(wrap_y, c1, c0))
+            return nk, ny, nz
+
+        def load_tile(a_fn=None):
+            dy_rsrc_t, w_rsrc_t = dy_rsrc, w_rsrc
+            if spec.xh_tap_rsrc:
+                # The tile's tap offsets in the buffer bases (scalar).
+                if is_3d:
+                    tap_ = b.add(
+                        b.mul(b.add(b.mul(cap["dd"], c_Ho), cap["dh"]), b.mul(c_Wo, c_K)),
+                        cap["kb"],
+                    )
+                else:
+                    tap_ = b.add(b.mul(cap["dh"], b.mul(c_Wo, c_K)), cap["kb"])
+                ta2 = b.mul(tap_, b.const_i32(2))
+                dy_rsrc_t = b.buffer_rsrc(
+                    b.global_ptr_add(dY, b.sext(ta2, I64)), b.sub(dY_bytes, ta2)
+                )
+                tw2 = b.mul(cap["w_k0"], b.const_i32(2))
+                w_rsrc_t = b.buffer_rsrc(
+                    b.global_ptr_add(W, b.sext(tw2, I64)), b.sub(W_bytes, tw2)
+                )
+            # xh_order bit 1: the (small, L2-resident) B loads first.
+            b_first = bool(spec.xh_order & 1)
+            if a_fn is None:
+
+                def a_fn(r_):
+                    return halo_loader.load_global(b, tid=tid, descriptor=xh_dy, rsrc=r_)
+
+            if not b_first:
+                a_st = a_fn(dy_rsrc_t)
+            if xh_wide_loader is not None:
+                w_st = xh_wide_loader.load_global(
+                    b, tid=tid, descriptor=w_wide_fn, rsrc=w_rsrc_t
+                )
+                if b_first:
+                    a_st = a_fn(dy_rsrc_t)
+                return [a_st, w_st]
+            b_sts = []
+            for x in range(XB):
+                cap["w_k"] = b.add(cap["w_k0"], b.mul(b.const_i32(x), c_cs))
+                b_sts.append(
+                    b_sync_loader.load_global(
+                        b, tid=tid, descriptor=w_xh_fn, rsrc=w_rsrc
+                    )
+                )
+            if b_first:
+                a_st = a_fn(dy_rsrc_t)
+            return [a_st] + b_sts
+
+        def store_tile(st):
+            xh_store(halo_loader, A_smem, st[0])
+            if xh_wide_loader is not None:
+                xh_store(xh_wide_loader, B_smem, st[1], is_b=True)
+                return
+            for x in range(XB):
+                xh_store(b_sync_loader, B_smem_x[x], st[1 + x], is_b=True)
+
+        def mfma(cur, deferred=None, rmap=None):
+            if rmap is None:
+                rmap = row_map
+            if spec.tapk_lds_ahead or spec.xh_defer:
+                return emit_mfma_phases_ahead(
+                    [(A_smem, B_smem_x[x], rmap(x), xh_b_off[x]) for x in range(XB)],
+                    cur,
+                    depth=spec.tapk_lds_ahead,
+                    defer=spec.xh_defer,
+                    deferred=deferred,
+                )
+            for x in range(XB):
+                cur = emit_mfma_phase(
+                    A_smem, B_smem_x[x], cur, a_row_map=rmap(x), b_row_off=xh_b_off[x]
+                )
+            return cur
+
+        def flat(st):
+            out = []
+            for part in st:
+                for _row, _col, v in part:
+                    out.extend(v if isinstance(v, list) else [v])
+            return out
+
+        def rebuild(template, vals):
+            vals = list(vals)
+            out = []
+            for part in template:
+                p_out = []
+                for row, col, v in part:
+                    if isinstance(v, list):
+                        n = len(v)
+                        p_out.append((row, col, vals[:n]))
+                        del vals[:n]
+                    else:
+                        p_out.append((row, col, vals.pop(0)))
+                out.append(p_out)
+            return out
+
+        def _xh_plain(accs, n_tiles):
+            n_st = 3 if is_3d else 2
+            st_names = ["xp_kb", "xp_y", "xp_z"][:n_st]
+            n_acc = len(accs)
+            s0 = (c0, c0, c0 if is_3d else None)
+            if spec.tapk_ztrim:
+                # tapk_ztrim: only the z taps some row of the tile can use.
+                z_lo, z_cnt = _ztrim_range()
+                s0 = (c0, c0, z_lo)
+                n_tiles = b.mul(b.mul(z_cnt, c_Y), b.div(c_kd, c_block_k))
+                if y_lo is not None:
+                    s0 = (c0, y_lo, z_lo)
+                    n_tiles = b.mul(b.mul(z_cnt, y_cnt), b.div(c_kd, c_block_k))
+            if spec.split_k > 1:
+                # Split-K: slice z takes tiles [t0, t0 + per) of the flat
+                # (z, y, chunk) order; whole tiles, so a slice never starts mid-tap.
+                c_sk = b.const_i32(spec.split_k)
+                per = b.div(b.add(n_tiles, b.sub(c_sk, c1)), c_sk)
+                t0 = b.mul(b.block_id_z(), per)
+                t_end = b.select(b.cmp_lt(b.add(t0, per), n_tiles), b.add(t0, per), n_tiles)
+                cnt = b.sub(t_end, t0)
+                n_tiles = b.select(b.cmp_gt(cnt, c0), cnt, c0)
+                nkc = b.div(c_kd, c_block_k)
+                zy0 = b.div(t0, nkc)
+                kb_0 = b.mul(b.sub(t0, b.mul(zy0, nkc)), c_block_k)
+                if is_3d:
+                    z_0 = b.div(zy0, c_Y)
+                    s0 = (kb_0, b.sub(zy0, b.mul(z_0, c_Y)), z_0)
+                else:
+                    s0 = (kb_0, zy0, None)
+            set_tile(*s0)
+            _st0 = load_tile()
+            if cap.get("xfa_arm"):
+                # xh_fast_a 2: its per-row values while tile 0's loads fly.
+                cap.pop("xfa_arm")()
+            store_tile(_st0)
+            b.sync()
+            s1 = advance(*s0)
+            if spec.tapk_prefetch == 3:
+                set_tile(*s1)
+                regs0 = flat(load_tile())
+                s_next = advance(*s1)
+            else:
+                regs0 = []
+                s_next = s1
+            n_regs = len(regs0)
+            it = (
+                list(accs)
+                + [(f"xp_r{i}", v) for i, v in enumerate(regs0)]
+                + list(zip(st_names, s_next[:n_st]))
+            )
+
+            def _xh_body(acc_in, regs, st):
+                """One tile of the loop: next loads, this tile's MFMAs, store."""
+                set_tile(*st)
+                if spec.xh_order & 2:
+                    # Nothing is pending at the loop top but the preheader's
+                    # kernarg s_load: drain it so the first MFMA waits with a
+                    # partial lgkmcnt.
+                    b.s_waitcnt(lgkmcnt=0)
+                sprio = spec.tapk_setprio
+                if sprio:
+                    # tapk_setprio: the wave's load issue + MFMA block at raised
+                    # priority (Triton's phase form), so with 2+ waves per SIMD
+                    # the arbiter favours the wave in its MFMA phase.
+                    b.sched_barrier(0)
+                    b.s_setprio(1)
+                staged = load_tile()
+                ilv = spec.tapk_ilv
+                lda = spec.tapk_lds_ahead
+                if not ilv and not lda and sprio != 2:
+                    # Every load issued as one block ahead of the MFMAs.
+                    b.sched_barrier(0)
+                dfr_fns: list = []
+                new_accs = mfma(list(acc_in), dfr_fns)
+                if sprio == 2:
+                    # Phase-clustered: the next tile's global loads, then every
+                    # LDS fragment read of the tile, then all its MFMAs.
+                    n_mfma = (
+                        XB
+                        * spec.k_atoms_per_tile_k
+                        * spec.mfmas_per_warp_m
+                        * spec.mfmas_per_warp_n
+                    )
+                    n_rd = (
+                        XB
+                        * spec.k_atoms_per_tile_k
+                        * (spec.mfmas_per_warp_m + spec.mfmas_per_warp_n)
+                    )
+                    b.sched_group_barrier(_SG_VMEM_READ, len(flat(staged)), 0)
+                    b.sched_group_barrier(_SG_DS_READ, n_rd, 0)
+                    b.sched_group_barrier(_SG_MFMA, n_mfma, 0)
+                    b.sched_barrier(0)
+                if lda:
+                    # tapk_lds_ahead: one hint sequence for the whole tile. The
+                    # first step's fragment reads go first; then after each MFMA
+                    # ``lda`` reads of a later step (the next step's reads are
+                    # issued under the current step's first MFMAs, not right
+                    # before their own MFMAs) and, with tapk_ilv, one next-tile
+                    # global load every ``ilv`` MFMAs.
+                    n_vmem = len(flat(staged))
+                    per_step = spec.mfmas_per_warp_m * spec.mfmas_per_warp_n
+                    n_steps = XB * spec.k_atoms_per_tile_k
+                    reads = spec.mfmas_per_warp_m + spec.mfmas_per_warp_n
+
+                    def _rd(s_):
+                        # DS reads of step s_ (xh_stride_m: taps x > 0 read one
+                        # A fragment per k atom).
+                        if spec.xh_stride_m and s_ >= spec.k_atoms_per_tile_k:
+                            return 1 + spec.mfmas_per_warp_n
+                        return reads
+
+                    if not ilv:
+                        b.sched_group_barrier(_SG_VMEM_READ, n_vmem, 0)
+                        n_vmem = 0
+                    b.sched_group_barrier(_SG_DS_READ, _rd(0), 0)
+                    left_vmem = n_vmem
+                    n_pre = n_steps - spec.xh_defer
+                    for s_i in range(n_pre):
+                        left_ds = _rd(s_i + 1) if s_i + 1 < n_steps else 0
+                        if spec.xh_defer and s_i == n_pre - 1:
+                            # xh_defer: the deferred steps' reads too.
+                            left_ds = sum(_rd(t) for t in range(s_i + 1, n_steps))
+                        for j in range(per_step):
+                            b.sched_group_barrier(_SG_MFMA, 1, 0)
+                            if left_ds > 0:
+                                k = min(lda, left_ds)
+                                b.sched_group_barrier(_SG_DS_READ, k, 0)
+                                left_ds -= k
+                            g = s_i * per_step + j
+                            if ilv and left_vmem > 0 and g % ilv == ilv - 1:
+                                b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                                left_vmem -= 1
+                    if left_vmem > 0:
+                        b.sched_group_barrier(_SG_VMEM_READ, left_vmem, 0)
+                    if spec.xh_defer and left_ds > 0:
+                        b.sched_group_barrier(_SG_DS_READ, left_ds, 0)
+                    b.sched_barrier(0)
+                elif ilv:
+                    # tapk_ilv: one next-tile load every ``ilv`` MFMAs (CK hot-loop
+                    # style), the rest of the MFMAs after the last load.
+                    n_vmem = len(flat(staged))
+                    n_mfma = (
+                        (XB * spec.k_atoms_per_tile_k - spec.xh_defer)
+                        * spec.mfmas_per_warp_m
+                        * spec.mfmas_per_warp_n
+                    )
+                    used = 0
+                    for _ in range(n_vmem):
+                        b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                        k = min(ilv, n_mfma - used)
+                        if k > 0:
+                            b.sched_group_barrier(_SG_MFMA, k, 0)
+                            used += k
+                    b.sched_barrier(0)
+                # tapk_lds_barrier: LDS-only barriers, so tpf3's next-tile loads
+                # stay in flight across them (sync drains vmcnt too).
+                _bar = b.sync_lds_only if spec.tapk_lds_barrier else b.sync
+                if sprio:
+                    b.sched_barrier(0)
+                    b.s_setprio(0)
+                _bar()
+                if dfr_fns:
+                    # xh_defer: the deferred MFMAs under the next tile's stores,
+                    # 1 ds_write : 2 MFMAs (fwd defer_mfma's measured best).
+                    store_tile(rebuild(staged, regs) if n_regs else staged)
+                    for fn_ in dfr_fns:
+                        new_accs = fn_(new_accs)
+                    n_m = len(dfr_fns) * spec.mfmas_per_warp_m * spec.mfmas_per_warp_n
+                    n_w = len(staged[0]) * (
+                        max(1, halo_loader.load_vec // 4) if _xh_ak4 else 1
+                    ) + sum(len(part) for part in staged[1:]) * _dgrad_b_load_vec(spec)
+                    per_w = min(2, max(1, n_m // max(1, n_w)))
+                    for _ in range(min(n_w, n_m)):
+                        b.sched_group_barrier(_SG_DS_WRITE, 1, 0)
+                        b.sched_group_barrier(_SG_MFMA, per_w, 0)
+                    b.sched_barrier(0)
+                else:
+                    store_tile(rebuild(staged, regs) if n_regs else staged)
+                _bar()
+                nxt = advance(*st)
+                carry = flat(staged) if n_regs else []
+                return new_accs, carry, list(nxt)
+
+            def _xh_iv(iv):
+                st = list(iv[n_acc + n_regs :])
+                if not is_3d:
+                    st.append(None)
+                return list(iv[:n_acc]), iv[n_acc : n_acc + n_regs], st
+
+            # xh_order bit 4 (tapk_prefetch 3): two tiles per iteration, so the
+            # registers of the tile loaded two ahead are carried without the
+            # loop-latch copies (and their vmcnt(0)) a one-tile body needs.
+            unroll2 = bool(spec.xh_order & 4)
+            n_iter = b.div(n_tiles, b.const_i32(2)) if unroll2 else n_tiles
+            loop = b.scf_for_iter(c0, n_iter, c1, it, iv_name="t")
+            with loop as (_t, iv):
+                a_, r_, s_ = _xh_body(*_xh_iv(iv))
+                if unroll2:
+                    a_, r_, s_ = _xh_body(a_, r_, s_)
+                b.scf_yield(*a_, *r_, *s_[:n_st])
+            if not unroll2:
+                return list(loop.results)[:n_acc]
+            # The odd last tile.
+            tail_it = [(f"{name}_t1", v) for (name, _), v in zip(it, loop.results)]
+            tail = b.scf_for_iter(
+                c0, b.sub(n_tiles, b.mul(n_iter, b.const_i32(2))), c1, tail_it, iv_name="t1"
+            )
+            with tail as (_t1, iv):
+                a_, r_, s_ = _xh_body(*_xh_iv(iv))
+                b.scf_yield(*a_, *r_, *s_[:n_st])
+            return list(tail.results)[:n_acc]
+
+        def _xh_yring_dispatch(n_tiles_all):
+            """xh_yring: the y-ring loop (``_yr_mode`` "ring": the tile's
+            reused rows stay in one (n, d) plane) or the same loop with a full
+            load every y step ("full", the other tiles); the caller branches
+            between the two, each with its own epilogue."""
+            geo = xh_yring_geometry(spec)
+            if geo is None or load_vec_a != 8 or XB < 2 or not _xh_ak4:
+                raise ValueError("xh_yring: the ring geometry does not fit this spec")
+            wi, P, n_main = geo
+            back = XB - 1
+            Yn = p.Y
+            _d = spec.xh_yring // 1000
+            fulls = [y == 0 or (_d and y % _d == 0) for y in range(Yn)]
+            shifts = []
+            for y in range(Yn):
+                y_f = max(t for t in range(y + 1) if fulls[t])
+                shifts.append(((y - y_f) * wi) % P)
+            c_junk = b.const_i32(P)
+            c_zrow = b.const_i32(P + 1)
+
+            c_threads = b.const_i32(threads)
+            span = block_k // load_vec_a
+            c_span = b.const_i32(span)
+            c_lv = b.const_i32(load_vec_a)
+            main_ld = CoalescedTileLoader(
+                tile_rows=block_m,
+                tile_cols=block_k,
+                block_size=threads,
+                load_vec=load_vec_a,
+                elem_dtype=ir_dtype_a,
+            )
+            n_full = main_ld.vecs_per_thread
+            rows_per_pass = threads // span
+            n_part = n_main // rows_per_pass
+            n_back_vec = back * span
+            if n_back_vec > threads or n_part * rows_per_pass != n_main:
+                raise ValueError("xh_yring: back rows / ring rows do not fit the loader")
+            fast_d = xh_dy if spec.xh_fast_a == 1 else None
+
+            def _main_slot(e, row, shift):
+                lo = e * rows_per_pass - shift
+                hi = lo + rows_per_pass - 1
+                if shift == 0:
+                    return row
+                if hi < 0:
+                    return b.add(row, b.const_i32(P - shift))
+                if lo >= 0:
+                    return b.sub(row, b.const_i32(shift))
+                v_ = b.sub(row, b.const_i32(shift))
+                return b.select(b.cmp_lt(v_, c0), b.add(v_, b.const_i32(P)), v_)
+
+            def _back_cb(shift):
+                cb = (-back - shift) % P
+                if cb + back > P:
+                    raise ValueError("xh_yring: back rows straddle the ring end")
+                return cb
+
+            def ring_layout(full, shift):
+                out = []
+                for e in range(n_full if full else n_part):
+                    row, col = main_ld._chunk_row_col(
+                        b, e, tid, c_threads=c_threads, c_span=c_span, c_load_vec=c_lv
+                    )
+                    out.append((_main_slot(e, row, shift), col, 0))
+                j = b.div(tid, c_span)
+                col = b.mul(b.mod(tid, c_span), c_lv)
+                lane_ok = b.cmp_lt(tid, b.const_i32(n_back_vec))
+                out.append(
+                    (b.select(lane_ok, b.add(j, b.const_i32(_back_cb(shift))), c_junk), col, 0)
+                )
+                return out
+
+            def ring_load(full, shift, rsrc):
+                ne = n_full if full else n_part
+                k_ = [0]
+
+                def desc(b_, row, col):
+                    if fast_d is not None:
+                        fast_d.ctr[0] = k_[0]
+                    k_[0] += 1
+                    return xh_dy(b_, row, col)
+
+                st = main_ld.load_global(
+                    b, tid=tid, descriptor=desc, rsrc=rsrc, vec_range=(0, ne)
+                )
+                out = [(_main_slot(e, row, shift), col, v) for e, (row, col, v) in enumerate(st)]
+                j = b.div(tid, c_span)
+                col = b.mul(b.mod(tid, c_span), c_lv)
+                lane_ok = b.cmp_lt(tid, b.const_i32(n_back_vec))
+                if fast_d is not None:
+                    fast_d.ctr[0] = len(fast_d.rec) - 1
+                off, valid = xh_dy(b, b.sub(j, b.const_i32(back)), col)
+                valid = b.land(valid, lane_ok)
+                off_b = b.select(
+                    valid,
+                    b.mul(off, b.const_i32(2 if ir_dtype_a != F32 else 4)),
+                    b.const_i32((1 << 31) - 1),
+                )
+                v = b.buffer_load_vN(rsrc, off_b, c0, ir_dtype_a, load_vec_a)
+                out.append(
+                    (b.select(lane_ok, b.add(j, b.const_i32(_back_cb(shift))), c_junk), col, v)
+                )
+                return out
+
+            rmaps: dict = {}
+
+            def ring_rmap(shift):
+                def rm(x):
+                    key = (x, shift)
+                    if key not in rmaps:
+                        tot = x + shift
+                        c_x = b.const_i32(x)
+
+                        def _map(a_row: Value, x=x, tot=tot, c_x=c_x) -> Value:
+                            if tot == 0:
+                                return a_row
+                            v_ = b.sub(a_row, b.const_i32(tot))
+                            slot = b.select(b.cmp_lt(v_, c0), b.add(v_, b.const_i32(P)), v_)
+                            # No zero-row redirect for x > 0: pW == 0 and stride 1
+                            # (Wi = Wo + X - 1), so pixel q - x of a row's first x
+                            # pixels is one of the previous dX row's last X - 1
+                            # pixels (wi >= Wo, loaded as zero) or before the
+                            # tensor (zero).
+                            return slot
+
+                        rmaps[key] = _map
+                    return rmaps[key]
+
+                return rm
+
+            def yr_set(kb, y, z):
+                set_tile(kb, b.const_i32(y), z if is_3d else None)
+
+            ring_on = [True]
+
+            def _sh(y):
+                return shifts[y] if ring_on[0] else 0
+
+            def yr_load(y):
+                full = fulls[y] or not ring_on[0]
+                return load_tile(a_fn=lambda r_: ring_load(full, _sh(y), r_))
+
+            def yr_step(acc_in, y, store_st):
+                """Tile (g, y)'s MFMAs (ring slots of shift y) under the next
+                loads (already pointed at by yr_set), then the store of the
+                following tile -- _xh_body's schedule."""
+                if spec.xh_order & 2 and y == 0:
+                    b.s_waitcnt(lgkmcnt=0)
+                sprio = spec.tapk_setprio
+                if sprio:
+                    b.sched_barrier(0)
+                    b.s_setprio(1)
+                staged = yr_load(y_load[0])
+                ilv = spec.tapk_ilv
+                lda = spec.tapk_lds_ahead
+                if not ilv and not lda:
+                    b.sched_barrier(0)
+                dfr_fns: list = []
+                new_accs = mfma(list(acc_in), dfr_fns, rmap=ring_rmap(_sh(y)))
+                if lda:
+                    n_vmem = len(flat(staged))
+                    per_step = spec.mfmas_per_warp_m * spec.mfmas_per_warp_n
+                    n_steps = XB * spec.k_atoms_per_tile_k
+                    reads = spec.mfmas_per_warp_m + spec.mfmas_per_warp_n
+
+                    def _rd(s_):
+                        if spec.xh_stride_m and s_ >= spec.k_atoms_per_tile_k:
+                            return 1 + spec.mfmas_per_warp_n
+                        return reads
+
+                    if not ilv:
+                        b.sched_group_barrier(_SG_VMEM_READ, n_vmem, 0)
+                        n_vmem = 0
+                    b.sched_group_barrier(_SG_DS_READ, _rd(0), 0)
+                    left_vmem = n_vmem
+                    n_pre = n_steps - spec.xh_defer
+                    left_ds = 0
+                    for s_i in range(n_pre):
+                        left_ds = _rd(s_i + 1) if s_i + 1 < n_steps else 0
+                        if spec.xh_defer and s_i == n_pre - 1:
+                            left_ds = sum(_rd(t) for t in range(s_i + 1, n_steps))
+                        for j_ in range(per_step):
+                            b.sched_group_barrier(_SG_MFMA, 1, 0)
+                            if left_ds > 0:
+                                kk_ = min(lda, left_ds)
+                                b.sched_group_barrier(_SG_DS_READ, kk_, 0)
+                                left_ds -= kk_
+                            g_ = s_i * per_step + j_
+                            if ilv and left_vmem > 0 and g_ % ilv == ilv - 1:
+                                b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                                left_vmem -= 1
+                    if left_vmem > 0:
+                        b.sched_group_barrier(_SG_VMEM_READ, left_vmem, 0)
+                    if spec.xh_defer and left_ds > 0:
+                        b.sched_group_barrier(_SG_DS_READ, left_ds, 0)
+                    b.sched_barrier(0)
+                elif ilv:
+                    n_vmem = len(flat(staged))
+                    n_mfma = (
+                        (XB * spec.k_atoms_per_tile_k - spec.xh_defer)
+                        * spec.mfmas_per_warp_m
+                        * spec.mfmas_per_warp_n
+                    )
+                    used = 0
+                    for _ in range(n_vmem):
+                        b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                        kk_ = min(ilv, n_mfma - used)
+                        if kk_ > 0:
+                            b.sched_group_barrier(_SG_MFMA, kk_, 0)
+                            used += kk_
+                    b.sched_barrier(0)
+                _bar = b.sync_lds_only if spec.tapk_lds_barrier else b.sync
+                if sprio:
+                    b.sched_barrier(0)
+                    b.s_setprio(0)
+                _bar()
+                if callable(store_st):
+                    store_st = store_st(staged)
+                if dfr_fns:
+                    store_tile(store_st)
+                    for fn_ in dfr_fns:
+                        new_accs = fn_(new_accs)
+                    n_m = len(dfr_fns) * spec.mfmas_per_warp_m * spec.mfmas_per_warp_n
+                    n_w = len(store_st[0]) * (
+                        max(1, load_vec_a // 4) if _xh_ak4 else 1
+                    ) + sum(len(part) for part in store_st[1:]) * _dgrad_b_load_vec(spec)
+                    per_w = min(2, max(1, n_m // max(1, n_w)))
+                    for _ in range(min(n_w, n_m)):
+                        b.sched_group_barrier(_SG_DS_WRITE, 1, 0)
+                        b.sched_group_barrier(_SG_MFMA, per_w, 0)
+                    b.sched_barrier(0)
+                else:
+                    store_tile(store_st)
+                _bar()
+                return new_accs, staged
+
+            y_load = [0]
+
+            def _ring_loop(acc_pairs, ring=True):
+                ring_on[0] = ring
+                _pf = "yr" if ring else "yf"
+                if _xh_ak4:
+                    zk0 = b.mod(tid, b.const_i32(block_k // 4))
+                    b.smem_store_vN(
+                        A_smem,
+                        [b.add(b.mul(zk0, b.const_i32(_ak4_mp)), _ak4_row(b, c_zrow)), c0],
+                        b.zero_vec(ir_dtype_a, 4),
+                        4,
+                    )
+                nkc = b.div(c_kd, c_block_k)
+                z0 = c0 if is_3d else None
+                z_cnt_ = p_Z if is_3d else c1
+                if spec.tapk_ztrim and is_3d:
+                    z0, z_cnt_ = _ztrim_range()
+                n_iter = b.mul(z_cnt_, nkc)
+                yr_set(c0, 0, z0)
+                st0 = yr_load(0)
+                store_tile(st0)
+                b.sync()
+                yr_set(c0, 1, z0)
+                st1 = yr_load(1)
+                regs0 = flat(st1)
+                n_regs = len(regs0)
+                n_acc = len(acc_pairs)
+                it = (
+                    list(acc_pairs)
+                    + [(f"{_pf}_r{i}", v) for i, v in enumerate(regs0)]
+                    + [(f"{_pf}_kb", c0)]
+                    + ([(f"{_pf}_z", z0)] if is_3d else [])
+                )
+                loop = b.scf_for_iter(c0, n_iter, c1, it, iv_name=f"{_pf}_t")
+                with loop as (_t, iv):
+                    cur = list(iv[:n_acc])
+                    regs = list(iv[n_acc : n_acc + n_regs])
+                    kb = iv[n_acc + n_regs]
+                    z = iv[n_acc + n_regs + 1] if is_3d else None
+                    nk = b.add(kb, c_block_k)
+                    wrap = b.cmp_ge(nk, c_kd)
+                    kb_n = b.select(wrap, c0, nk)
+                    z_n = b.add(z, b.select(wrap, c1, c0)) if is_3d else None
+                    st_next = None
+                    for y in range(Yn):
+                        if y + 2 < Yn:
+                            yr_set(kb, y + 2, z)
+                            y_load[0] = y + 2
+                        else:
+                            yr_set(kb_n, y + 2 - Yn, z_n)
+                            y_load[0] = y + 2 - Yn
+                        if y == 0:
+                            # Tile (g, 1) from the carried registers: A at its
+                            # ring slots, B with the (row, col) of any B load.
+                            tmpl_a = ring_layout(fulls[1 % Yn] or not ring, _sh(1 % Yn))
+
+                            def st_next(staged_, tmpl_a=tmpl_a):
+                                return rebuild([tmpl_a] + list(staged_[1:]), regs)
+
+                        cur, staged = yr_step(cur, y, st_next)
+                        st_next = staged
+                    b.scf_yield(*cur, *flat(st_next), kb_n, *([z_n] if is_3d else []))
+                return list(loop.results)[:n_acc]
+
+            _ring = _yr_mode[0] == "ring"
+            return _ring_loop(
+                [(f"{nm}_{'yr' if _ring else 'yf'}", v) for nm, v in accs], ring=_ring
+            )
+
+        if spec.xh_yring:
+            return _xh_yring_dispatch(n_tiles)
+
+        return _xh_plain(accs, n_tiles)
+
+    def _xhalo_dlds(row_map, cap) -> list[Value]:
+        """``xh_dlds`` 1: the x-halo prefetch loop as a k-half ring with
+        direct-to-LDS A loads. Half-step j (tile j // 2, k atom j % 2) uses
+        buffers A/B[j % 2]: wait + barrier (half-step j's A DMA and B stores
+        done, every wave past half-step j - 1), DMA the dY rows of half-step
+        j + 1 into A[(j + 1) % 2] (buffer_load_dword ... lds: lane l of DMA q
+        writes bytes 256 q + 4 l of the buffer -- slab-row 32 q + l / 2 of the
+        4 xh_a_k4 slabs, elements 2 (l % 2) .. +1; out-of-range rows load
+        zeros, which also writes the zero row), store half-step j + 1's B tile
+        (loaded to VGPRs during j - 1), load half-step j + 2's B tile, then the
+        MFMAs of j (X taps x one k atom). Returns the final accumulators."""
+        XB = p.X
+        c1 = b.const_i32(1)
+        c_kd = c_kpg if grouped else c_K
+        c_cs = c_dg_N if grouped else c_C
+        c_yx = b.mul(c_Y, c_X)
+        c_taps = b.mul(p_Z, c_yx) if is_3d else c_yx
+        c_zy = b.mul(p_Z, c_Y) if is_3d else c_Y
+        c_yxc = b.mul(c_taps, c_cs)
+        n_tiles = b.mul(c_zy, b.div(c_kd, c_block_k))
+        _sb = spec.xh_dlds in (4, 5)
+        _wp = spec.xh_dlds == 6
+        # k extent of one buffer (xh_dlds 4: the whole tile, one buffer).
+        hk = block_k if (_sb or _wp) else block_k // 2
+        y_lo = y_end = None
+        if spec.tapk_ztrim == 2:
+            y_lo, y_cnt = _ytrim_range()
+            y_end = b.add(y_lo, y_cnt)
+        s0 = (c0, c0, c0 if is_3d else None)
+        if spec.tapk_ztrim:
+            z_lo, z_cnt = _ztrim_range()
+            s0 = (c0, c0, z_lo)
+            n_tiles = b.mul(b.mul(z_cnt, c_Y), b.div(c_kd, c_block_k))
+            if y_lo is not None:
+                s0 = (c0, y_lo, z_lo)
+                n_tiles = b.mul(b.mul(z_cnt, y_cnt), b.div(c_kd, c_block_k))
+
+        def set_tile(kb0, yd, zd):
+            cap["dh"] = b.sub(params["p_pH"], yd)
+            zy = yd
+            if is_3d:
+                cap["dd"] = b.sub(p_pD, zd)
+                zy = b.add(b.mul(zd, c_Y), yd)
+            kb = b.add(kb0, k_out_group_base) if grouped else kb0
+            cap["kb"] = kb
+            cap["zy"] = zy
+            cap["w_k0"] = b.add(b.mul(kb, c_yxc), b.mul(b.mul(zy, c_X), c_cs))
+
+        def advance(kb0, yd, zd):
+            nk = b.add(kb0, c_block_k)
+            wrap_k = b.cmp_ge(nk, c_kd)
+            nk = b.select(wrap_k, c0, nk)
+            ny = b.add(yd, b.select(wrap_k, c1, c0))
+            if not is_3d:
+                return nk, ny, None
+            if y_lo is not None:
+                wrap_y = b.cmp_ge(ny, y_end)
+                ny = b.select(wrap_y, y_lo, ny)
+            else:
+                wrap_y = b.cmp_ge(ny, c_Y)
+                ny = b.select(wrap_y, c0, ny)
+            nz = b.add(zd, b.select(wrap_y, c1, c0))
+            return nk, ny, nz
+
+        # ---- the A DMA slots: per lane, once per tile (row offsets + masks) ----
+        Mp = _ak4_mp
+        e_bytes = 2
+        half_bytes = (hk // 4) * Mp * 4 * e_bytes
+        if half_bytes % 256:
+            raise ValueError("xh_dlds: the A half buffer must be whole 256-byte DMAs")
+        n_q = half_bytes // 256
+        n_waves = threads // 64
+        per_wave = n_q // n_waves
+        tail_qs = list(range(n_waves * per_wave, n_q))
+        c_oob = b.const_i32((1 << 31) - 1)
+        lane_ = b.land(tid, b.const_i32(63))
+        wid = b.readfirstlane(b.lshr(tid, b.const_i32(6)))
+        F = _PP_MAX_FILTER
+        c_main = b.const_i32(block_m)
+        c_rows = b.const_i32(block_m + XB - 1)
+
+        def axis_bits(coord, pad, out, ext):
+            hi_ = b.add(coord, pad)
+            lo_ = b.add(b.sub(hi_, out), c1)
+            lo_c = b.smin(b.smax(lo_, c0), ext)
+            hi_c = b.smin(hi_, b.sub(ext, c1))
+            width = b.smax(b.add(b.sub(hi_c, lo_c), c1), c0)
+            return b.shl(b.sub(b.shl(c1, width), c1), lo_c)
+
+        def row_rec(row):
+            """(dY element offset at tap (0, 0, 0) without k, (z, y) mask) of
+            LDS row ``row`` (xhalo_exact: [0, tile_m) the tile's pixels, then
+            the X - 1 pixels before it; other rows: mask 0)."""
+            m = b.select(
+                b.cmp_lt(row, c_main),
+                b.add(block_m_off_v, row),
+                b.sub(b.add(block_m_off_v, row), c_rows),
+            )
+            m_ok = b.land(
+                b.cmp_lt(row, c_rows),
+                b.land(b.cmp_ge(m, c0), b.cmp_lt(m, p_dg_M)),
+            )
+            m = b.select(m_ok, m, c0)
+            n, m_rem = _magic_divmod(b, m, hw_div)
+            hi, wi = _magic_divmod(b, m_rem, w_div)
+            di = None
+            if is_3d:
+                n, di = _magic_divmod(b, n, di_div)
+                n = b.add(b.mul(n, p_Do), di)
+            pix = b.mul(b.add(b.mul(b.add(b.mul(n, c_Ho), hi), c_Wo), wi), c_K)
+            vy = axis_bits(hi, params["p_pH"], c_Ho, c_Y)
+            if is_3d:
+                vz = axis_bits(di, p_pD, p_Do, p_Z)
+                mask = c0
+                for z in range(F):
+                    zb = b.sub(c0, b.land(b.lshr(vz, b.const_i32(z)), c1))
+                    mask = b.lor(mask, b.land(zb, b.shl(vy, b.mul(b.const_i32(z), c_Y))))
+            else:
+                mask = vy
+            mask = b.select(b.land(m_ok, b.cmp_lt(wi, c_Wo)), mask, c0)
+            return pix, mask
+
+        slots = []
+        c_half_lane = b.lshr(lane_, c1)
+        c_e = b.shl(b.land(lane_, c1), c1)
+        tbl = None
+        if _sb:
+            # Per-row (byte offset, inverted mask) table: each thread decodes
+            # one row (not the 17 its DMA slots touch), then reads its slots'.
+            tbl = b.smem_alloc(I32, (Mp, 2), name_hint="dl_tbl")
+            for e in range(-(-Mp // threads)):
+                r = b.add(tid, b.const_i32(e * threads)) if e else tid
+                if (e + 1) * threads > Mp:
+                    r = b.select(b.cmp_lt(r, b.const_i32(Mp)), r, b.const_i32(Mp - 1))
+                pix, mask = row_rec(r)
+                b.smem_store_vN(
+                    tbl,
+                    [r, c0],
+                    b.vec_pack(
+                        [b.mul(pix, b.const_i32(e_bytes)), b.xor(mask, b.const_i32(-1))],
+                        I32,
+                    ),
+                    2,
+                )
+            b.sync_lds_only()
+        for j in range(0 if _wp else per_wave + len(tail_qs)):
+            if j < per_wave:
+                q = b.add(b.mul(wid, b.const_i32(per_wave)), b.const_i32(j))
+            else:
+                q = b.const_i32(tail_qs[j - per_wave])
+            # DMA q fills block q (rows 8q..8q+7, see _dl_slot): lane l's
+            # slot l / 2 holds (row, k group) with slot ^ key = k0 * 8 + row % 8.
+            key = b.xor(
+                b.land(q, b.const_i32(3)),
+                b.shl(b.land(b.lshr(q, b.const_i32(2)), c1), b.const_i32(3)),
+            )
+            sl = b.xor(c_half_lane, key)
+            k0 = b.lshr(sl, b.const_i32(3))
+            row = b.add(b.shl(q, b.const_i32(3)), b.land(sl, b.const_i32(7)))
+            if spec.xh_dlds == 3:
+                k0 = b.land(c_half_lane, b.const_i32(3))
+                row = b.add(b.shl(q, b.const_i32(3)), b.lshr(c_half_lane, b.const_i32(2)))
+            if _sb:
+                # Block q: rows 4q.., lane l at row slot l / 16, k slot
+                # (l % 16) / 2 (see _dl_slot).
+                rs = b.xor(
+                    b.lshr(lane_, b.const_i32(4)),
+                    b.land(b.lshr(q, b.const_i32(3)), c1),
+                )
+                k0 = b.xor(
+                    b.land(c_half_lane, b.const_i32(7)), b.land(q, b.const_i32(7))
+                )
+                row = b.add(b.shl(q, b.const_i32(2)), rs)
+                ent = b.smem_load_vN(tbl, row, c0, dtype=I32, n=2)
+                col = b.add(b.shl(k0, b.const_i32(2)), c_e)
+                slots.append(
+                    (
+                        b.mul(q, b.const_i32(256)),
+                        b.add(b.vec_extract(ent, 0), b.mul(col, b.const_i32(e_bytes))),
+                        b.vec_extract(ent, 1),
+                    )
+                )
+                continue
+            pix, mask = row_rec(row)
+            col = b.add(b.shl(k0, b.const_i32(2)), c_e)
+            if _sb:
+                # Byte offset at the tile's tap (the tap moves the buffer
+                # base) and the inverted (z, y) mask: lane offset =
+                # pix2 | (bit << 31), out of range where the tap is invalid.
+                slots.append(
+                    (
+                        b.mul(q, b.const_i32(256)),
+                        b.mul(b.add(pix, col), b.const_i32(e_bytes)),
+                        b.xor(mask, b.const_i32(-1)),
+                    )
+                )
+                continue
+            slots.append((b.mul(q, b.const_i32(256)), b.add(pix, col), mask))
+        a_bufs = (A_smem,) if (_sb or _wp) else (A_smem, A_smem_h1)
+        b_bufs = (B_smem,) if (_sb or _wp) else (B_smem, B_smem_h1)
+        a_base = [b.smem_addr_of(a_) for a_ in a_bufs]
+
+        def dma_issue(h):
+            """A of the cap's tile, k atom ``h``, into a_bufs[h]."""
+            tap = b.add(
+                b.add(
+                    b.mul(b.add(b.mul(cap["dd"], c_Ho), cap["dh"]), b.mul(c_Wo, c_K))
+                    if is_3d
+                    else b.mul(cap["dh"], b.mul(c_Wo, c_K)),
+                    cap["kb"],
+                ),
+                b.const_i32(h * hk),
+            )
+            if is_3d:
+                zy = b.add(b.mul(b.sub(p_pD, cap["dd"]), c_Y), b.sub(params["p_pH"], cap["dh"]))
+            else:
+                zy = b.sub(params["p_pH"], cap["dh"])
+            if _sb:
+                tap2 = b.mul(tap, b.const_i32(e_bytes))
+                rs_t = b.buffer_rsrc(
+                    b.global_ptr_add(dY, b.sext(tap2, I64)), b.sub(dY_bytes, tap2)
+                )
+                for qoff, pix2, nmask in slots:
+                    bad = b.land(b.lshr(nmask, zy), c1)
+                    voff = b.lor(pix2, b.shl(bad, b.const_i32(31)))
+                    dst = b.smem_ptr_add(a_base[h], b.zext(qoff, I64))
+                    b.async_buffer_load_lds_addr(rs_t, dst, voff, c0, 1)
+                return
+            for qoff, pix, mask in slots:
+                valid = b.cmp_ne(b.land(b.lshr(mask, zy), c1), c0)
+                voff = b.select(valid, b.mul(b.add(pix, tap), b.const_i32(e_bytes)), c_oob)
+                dst = b.smem_ptr_add(a_base[h], b.zext(qoff, I64))
+                b.async_buffer_load_lds_addr(dy_rsrc, dst, voff, c0, 1)
+
+        # ---- B: the X taps' (tile_n x hk) W tiles of k atom h ----
+        b_vec = _dgrad_b_load_vec(spec)
+        kpk = spec.b_kpack
+        k_groups = hk // kpk
+        upt = (block_n // b_vec) * k_groups
+        b_units = XB * upt
+        n_pass = -(-b_units // threads)
+        if n_pass * threads - b_units > b_units or upt * XB % 64:
+            raise ValueError("xh_dlds: B unit space does not fit the workgroup")
+
+        def b_load(h):
+            staged = []
+            for e in range(n_pass):
+                u = b.add(b.const_i32(e * threads), tid) if e else tid
+                if (e + 1) * threads > b_units:
+                    # Idle lanes repeat a unit of the pass (same data, same row).
+                    u = b.select(
+                        b.cmp_lt(u, b.const_i32(b_units)), u, b.sub(u, b.const_i32(b_units))
+                    )
+                x = b.div(u, b.const_i32(upt))
+                lu = b.sub(u, b.mul(x, b.const_i32(upt)))
+                nc = b.div(lu, b.const_i32(k_groups))
+                kg = b.sub(lu, b.mul(nc, b.const_i32(k_groups)))
+                row = b.mul(nc, b.const_i32(b_vec))
+                col = b.mul(kg, b.const_i32(kpk))
+                vs = []
+                for jj in range(kpk):
+                    kcol = b.add(col, b.const_i32(h * hk + jj))
+                    off = b.add(
+                        b.add(b.mul(kcol, c_yxc), b.add(block_n_off_v, row)),
+                        b.add(cap["w_k0"], b.mul(x, c_cs)),
+                    )
+                    vs.append(
+                        b.buffer_load_vN(
+                            w_rsrc, b.mul(off, b.const_i32(e_bytes)), c0, ir_dtype_b, b_vec
+                        )
+                    )
+                staged.append((b.add(b.mul(x, b.const_i32(block_n)), row), col, vs))
+            return staged
+
+        def b_store(h, staged):
+            for row, col, vs in staged:
+                for i in range(b_vec):
+                    r = b.add(row, b.const_i32(i)) if i else row
+                    packed = b.vec_pack([b.vec_extract(v, i) for v in vs], ir_dtype_b)
+                    b.smem_store_vN(b_bufs[h], [r, col], packed, kpk)
+
+        def flat(st):
+            return [v for _r, _c, vs in st for v in vs]
+
+        def rebuild(template, vals):
+            vals = list(vals)
+            out = []
+            for row, col, vs in template:
+                out.append((row, col, vals[: len(vs)]))
+                del vals[: len(vs)]
+            return out
+
+        def mfma(h, cur):
+            return emit_mfma_phases_ahead(
+                [(a_bufs[h], b_bufs[h], row_map(x), x * block_n) for x in range(XB)],
+                cur,
+                # xh_dlds 2: every fragment of the half-step read up front.
+                depth=XB if spec.xh_dlds >= 2 else max(1, spec.tapk_lds_ahead),
+                kk_range=[0],
+            )
+
+        # xh_dlds 2: DS reads first, then one VMEM (DMA / B load) every
+        # ``ilv`` MFMAs and the B stores spread over the MFMAs, so the LDS
+        # DMA does not compete with the fragment reads.
+        n_rd_half = (
+            XB * (mfmas_m + mfmas_n) - (XB - 1) * (mfmas_m - 1)
+            if _xsm
+            else XB * (mfmas_m + mfmas_n)
+        )
+        n_mfma_half = XB * mfmas_m * mfmas_n
+
+        def sched_half(n_vmem, n_dsw):
+            ilv = spec.tapk_ilv or 2
+            b.sched_group_barrier(_SG_DS_READ, n_rd_half, 0)
+            left_v, left_w = n_vmem, n_dsw
+            for i in range(n_mfma_half):
+                b.sched_group_barrier(_SG_MFMA, 1, 0)
+                if left_v and i % ilv == ilv - 1:
+                    b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                    left_v -= 1
+                elif left_w and i % 2 == 0:
+                    b.sched_group_barrier(_SG_DS_WRITE, 1, 0)
+                    left_w -= 1
+            if left_v:
+                b.sched_group_barrier(_SG_VMEM_READ, left_v, 0)
+            if left_w:
+                b.sched_group_barrier(_SG_DS_WRITE, left_w, 0)
+
+        sprio = spec.tapk_setprio
+
+        def half(h, acc_in, b_regs_tmpl, b_regs, cur_st, nxt_st):
+            """Half-step (tile cur, atom h): A/B of the next half-step into
+            buffers 1 - h, B of the one after into VGPRs."""
+            b.sync()
+            if sprio:
+                b.sched_barrier(0)
+                b.s_setprio(1)
+            if h == 0:
+                # Next half-step: this tile's atom 1; then the next tile's atom 0.
+                dma_issue(1)
+                b_store(1, rebuild(b_regs_tmpl, b_regs))
+                set_tile(*nxt_st)
+                staged = b_load(0)
+            else:
+                dma_issue(0)
+                b_store(0, rebuild(b_regs_tmpl, b_regs))
+                staged = b_load(1)
+            if spec.xh_dlds >= 2:
+                n_vm = len(slots) + len(flat(staged))
+                n_w = len(b_regs_tmpl) * b_vec
+                out = mfma(h, acc_in)
+                sched_half(n_vm, n_w)
+                b.sched_barrier(0)
+                if sprio:
+                    b.s_setprio(0)
+                return out, staged
+            b.sched_barrier(0)
+            out = mfma(h, acc_in)
+            # Keep the MFMAs above the next half-step's wait + barrier (they
+            # are the cover of this half-step's DMA).
+            b.sched_barrier(0)
+            if sprio:
+                b.s_setprio(0)
+            return out, staged
+
+        if _wp:
+            return _xhalo_dlds_wp(
+                s0, n_tiles, set_tile, advance, b_load, b_store, flat, rebuild,
+                b_vec, row_rec, wid, lane_, cap,
+            )
+        if _sb:
+            return _xhalo_dlds_sb(
+                s0, n_tiles, set_tile, advance, dma_issue, b_load, b_store,
+                flat, rebuild, slots, b_vec, row_map,
+            )
+
+        # Prologue: half-step 0 into buffers 0, half-step 1's B into VGPRs.
+        set_tile(*s0)
+        dma_issue(0)
+        b_store(0, b_load(0))
+        tmpl = b_load(1)
+        regs0 = flat(tmpl)
+        n_acc = len(accs)
+        n_regs = len(regs0)
+        n_st = 3 if is_3d else 2
+        st_names = ["xd_kb", "xd_y", "xd_z"][:n_st]
+        it = (
+            list(accs)
+            + [(f"xd_r{i}", v) for i, v in enumerate(regs0)]
+            + list(zip(st_names, s0[:n_st]))
+        )
+        loop = b.scf_for_iter(c0, n_tiles, c1, it, iv_name="t")
+        with loop as (_t, iv):
+            acc_in = list(iv[:n_acc])
+            regs = list(iv[n_acc : n_acc + n_regs])
+            cur = list(iv[n_acc + n_regs :])
+            if not is_3d:
+                cur.append(None)
+            set_tile(*cur)
+            nxt = advance(*cur)
+            acc_mid, st0 = half(0, acc_in, tmpl, regs, cur, nxt)
+            # cap now holds the next tile (set_tile(nxt) in half 0).
+            acc_out, st1 = half(1, acc_mid, st0, flat(st0), cur, nxt)
+            b.scf_yield(*acc_out, *flat(st1), *list(nxt)[:n_st])
+        # The last half-step's DMA / B loads (of a tile past the end) land in
+        # LDS the epilogue may reuse: drain them first.
+        b.sync()
+        return list(loop.results)[:n_acc]
+
+    def _xhalo_dlds_sb(
+        s0, n_tiles, set_tile, advance, dma_issue, b_load, b_store, flat, rebuild,
+        slots, b_vec, row_map,
+    ) -> list[Value]:
+        """``xh_dlds`` 4: one A and one B buffer. Per tile: wait + barrier
+        (the tile's A DMA and B stores done), every A/B fragment of the tile
+        read into VGPRs, LDS-only barrier (every wave done reading), then the
+        next tile's A DMA, its B stores and the B loads of the tile after,
+        spread over the tile's MFMAs (from registers)."""
+        XB = p.X
+        c1 = b.const_i32(1)
+        sprio = spec.tapk_setprio
+        n_steps = XB * spec.k_atoms_per_tile_k
+        n_mfma = n_steps * mfmas_m * mfmas_n
+        n_rd = n_steps * (mfmas_m + mfmas_n) - (
+            (XB - 1) * spec.k_atoms_per_tile_k * (mfmas_m - 1) if _xsm else 0
+        )
+        ilv = spec.tapk_ilv or 2
+        # tapk_lds_ahead here: the first n_pre steps' MFMAs run before the
+        # LDS-only barrier (under the later steps' fragment reads).
+        n_pre = min(spec.tapk_lds_ahead, n_steps - 1)
+        # The fragment rows (and their A slots) once, before the loop.
+        rms = [row_map(x) for x in range(XB)]
+        row_cache: dict = {}
+        if _xsm:
+            dec = decode_mfma_lanes(b, atom, lane)
+            xb = b.add(grid.warp_m_off(b), b.mul(dec.m_in_atom, b.const_i32(mfmas_m)))
+            for x in range(XB):
+                for mi in range(mfmas_m):
+                    if x > 0 and mi > 0:
+                        continue
+                    a_row = b.add(xb, b.const_i32(mi)) if mi else xb
+                    a_row = rms[x](a_row)
+                    row_cache[(id(rms[x]), mi)] = a_row
+                    _dl4_base[a_row.name] = _dl_slot(b, a_row, dec.k_blk)
+
+        def body5(acc_in, tmpl, regs, cur):
+            """xh_dlds 5: A fragments first, LDS-only barrier, A DMA under
+            the B reads + MFMAs, LDS-only barrier, B stores + B loads under
+            the last xh_defer steps' MFMAs."""
+            n_bl = len(flat(tmpl))
+            # The tile's A DMA landed (the B loads issued after it may not).
+            b.s_waitcnt(vmcnt=n_bl)
+            b.sync_lds_only()
+            if sprio:
+                b.sched_barrier(0)
+                b.s_setprio(1)
+            nxt = advance(*cur)
+            dec = decode_mfma_lanes(b, atom, lane)
+            wn = grid.warp_n_off(b)
+            steps = [(x, kk) for x in range(XB) for kk in range(spec.k_atoms_per_tile_k)]
+            afr: dict = {}
+            for x, kk in steps:
+                col = b.add(b.shl(dec.k_blk, b.const_i32(2)), b.const_i32(kk * spec.warp_tile_k))
+                for mi in range(mfmas_m):
+                    if _xsm and x > 0 and mi > 0:
+                        continue
+                    afr[(x, kk, mi)] = xh_a_read(
+                        b, A_smem, row_cache[(id(rms[x]), mi)], col, 4
+                    )
+            for x, kk in steps:
+                for mi in range(mfmas_m):
+                    if (x, kk, mi) not in afr:
+                        afr[(x, kk, mi)] = afr[(x - 1, kk, mi - 1)]
+            b.sched_barrier(0)
+            b.sync_lds_only()
+            set_tile(*nxt)
+            dma_issue(0)
+
+            def b_reads(st):
+                x, kk = st
+                col = b.add(b.shl(dec.k_blk, b.const_i32(2)), b.const_i32(kk * spec.warp_tile_k))
+                out_ = []
+                for ni in range(mfmas_n):
+                    row = b.add(wn, b.add(b.const_i32(ni * 16 + x * block_n), dec.n_in_atom))
+                    out_.append(_emit_smem_load(b, B_smem, row, col, 4, smem_dtype=_smem_dtype))
+                return out_
+
+            dfr = min(spec.xh_defer, len(steps) - 1)
+            accs_ = list(acc_in)
+            bfr = [b_reads(steps[0])]
+            done = []
+            for i, st in enumerate(steps):
+                if i + 1 < len(steps):
+                    bfr.append(b_reads(steps[i + 1]))
+                if i >= len(steps) - dfr:
+                    done.append((st, bfr[i]))
+                    continue
+                x, kk = st
+                f_ = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        accs_[f_] = _xh_mfma(afr[(x, kk, mi)], bfr[i][ni], accs_[f_])
+                        f_ += 1
+            n_main = (len(steps) - dfr) * mfmas_m * mfmas_n
+            left_v = len(slots)
+            b.sched_group_barrier(_SG_DS_READ, mfmas_n, 0)
+            for i in range(n_main):
+                b.sched_group_barrier(_SG_MFMA, 1, 0)
+                if i % (mfmas_m * mfmas_n) == 0:
+                    b.sched_group_barrier(_SG_DS_READ, mfmas_n, 0)
+                if left_v and i % ilv == ilv - 1:
+                    b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                    left_v -= 1
+            if left_v:
+                b.sched_group_barrier(_SG_VMEM_READ, left_v, 0)
+            b.sched_barrier(0)
+            b.sync_lds_only()
+            b_store(0, rebuild(tmpl, regs))
+            set_tile(*advance(*nxt))
+            staged = b_load(0)
+            for (x, kk), bf in done:
+                f_ = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        accs_[f_] = _xh_mfma(afr[(x, kk, mi)], bf[ni], accs_[f_])
+                        f_ += 1
+            n_w = len(tmpl) * b_vec
+            n_d = dfr * mfmas_m * mfmas_n
+            for _ in range(min(n_w, n_d)):
+                b.sched_group_barrier(_SG_DS_WRITE, 1, 0)
+                b.sched_group_barrier(_SG_MFMA, 1, 0)
+            b.sched_barrier(0)
+            if sprio:
+                b.s_setprio(0)
+            return accs_, staged, nxt
+
+        def body(acc_in, tmpl, regs, cur):
+            if spec.xh_dlds == 5:
+                return body5(acc_in, tmpl, regs, cur)
+            b.sync()
+            if sprio:
+                b.sched_barrier(0)
+                b.s_setprio(1)
+            nxt = advance(*cur)
+            out_st: dict = {}
+
+            def after_reads():
+                b.sync_lds_only()
+                set_tile(*nxt)
+                dma_issue(0)
+                b_store(0, rebuild(tmpl, regs))
+                set_tile(*advance(*nxt))
+                out_st["staged"] = b_load(0)
+
+            out = emit_mfma_phases_ahead(
+                [(A_smem, B_smem, rms[x], x * block_n) for x in range(XB)],
+                acc_in,
+                depth=n_steps - n_pre,
+                after_reads=after_reads,
+                row_cache=row_cache,
+            )
+            staged = out_st["staged"]
+            n_vm = len(slots) + len(flat(staged))
+            n_w = len(tmpl) * b_vec
+            left_v, left_w = n_vm, n_w
+            for i in range(n_mfma - n_pre * mfmas_m * mfmas_n):
+                b.sched_group_barrier(_SG_MFMA, 1, 0)
+                if left_v and i % ilv == ilv - 1:
+                    b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                    left_v -= 1
+                elif left_w and i % 2 == 0:
+                    b.sched_group_barrier(_SG_DS_WRITE, 1, 0)
+                    left_w -= 1
+            if left_v:
+                b.sched_group_barrier(_SG_VMEM_READ, left_v, 0)
+            if left_w:
+                b.sched_group_barrier(_SG_DS_WRITE, left_w, 0)
+            b.sched_barrier(0)
+            if sprio:
+                b.s_setprio(0)
+            return out, staged, nxt
+
+        set_tile(*s0)
+        dma_issue(0)
+        b_store(0, b_load(0))
+        s1 = advance(*s0)
+        set_tile(*s1)
+        tmpl = b_load(0)
+        regs0 = flat(tmpl)
+        n_acc = len(accs)
+        n_regs = len(regs0)
+        n_st = 3 if is_3d else 2
+        st_names = ["xs_kb", "xs_y", "xs_z"][:n_st]
+        it = (
+            list(accs)
+            + [(f"xs_r{i}", v) for i, v in enumerate(regs0)]
+            + list(zip(st_names, s0[:n_st]))
+        )
+        loop = b.scf_for_iter(c0, n_tiles, c1, it, iv_name="t")
+        with loop as (_t, iv):
+            acc_in = list(iv[:n_acc])
+            regs = list(iv[n_acc : n_acc + n_regs])
+            cur = list(iv[n_acc + n_regs :])
+            if not is_3d:
+                cur.append(None)
+            acc_out, st, nxt = body(acc_in, tmpl, regs, cur)
+            b.scf_yield(*acc_out, *flat(st), *list(nxt)[:n_st])
+        b.sync()
+        return list(loop.results)[:n_acc]
+
+    def _xhalo_dlds_wp(
+        s0, n_tiles, set_tile, advance, b_load, b_store, flat, rebuild, b_vec,
+        row_rec, wid, lane_, cap,
+    ) -> list[Value]:
+        """``xh_dlds`` 6: wave-private A. Wave w owns LDS region w: its
+        tile_m / warp_m rows, the X - 1 pixels before them and a zero row,
+        in 4-row x 64-byte DMA blocks (XOR slots as xh_dlds 4); the wave
+        DMAs it itself, so A needs no workgroup barrier: per tile the wave
+        reads its A fragments, waits for them (lgkmcnt) and DMAs the next
+        tile's rows, under the B reads + MFMAs. B as xh_dlds 5 (VGPR-staged,
+        two barriers per tile)."""
+        XB = p.X
+        c1 = b.const_i32(1)
+        e_bytes = 2
+        sprio = spec.tapk_setprio
+        ilv = spec.tapk_ilv or 2
+        wrows = block_m // spec.warp_m
+        R6 = spec.xh_a_k4_rows // spec.warp_m
+        n_blk = R6 // 4
+        c_zero_local = b.const_i32(wrows + XB - 1)
+        wave_m0 = b.mul(wid, b.const_i32(wrows))
+        # ---- per-row (byte offset, inverted mask) table in the B buffer ----
+        n_ent = spec.warp_m * R6
+        per_row = (block_k + spec.xh_b_kpad) // 4
+
+        def ent_pos(e):
+            r = b.div(e, b.const_i32(per_row))
+            return r, b.mul(b.sub(e, b.mul(r, b.const_i32(per_row))), b.const_i32(4))
+
+        vt_i = VectorType(I32, 2)
+        vt_b = VectorType(ir_dtype_b, 4)
+        for ps in range(-(-n_ent // threads)):
+            e = b.add(tid, b.const_i32(ps * threads)) if ps else tid
+            if (ps + 1) * threads > n_ent:
+                e = b.select(b.cmp_lt(e, b.const_i32(n_ent)), e, b.const_i32(n_ent - 1))
+            w_e = b.div(e, b.const_i32(R6))
+            loc = b.sub(e, b.mul(w_e, b.const_i32(R6)))
+            # LDS row of the shared x-halo numbering (row_rec): own rows
+            # [0, tile_m); wave 0's X - 1 back pixels at tile_m..; others none.
+            mrow = b.add(b.mul(w_e, b.const_i32(wrows)), b.sub(loc, b.const_i32(XB - 1)))
+            back = b.cmp_lt(mrow, c0)
+            row = b.select(back, b.add(mrow, b.const_i32(block_m + XB - 1)), mrow)
+            row = b.select(
+                b.cmp_lt(loc, b.const_i32(wrows + XB - 1)), row, b.const_i32(block_m + XB)
+            )
+            pix, mask = row_rec(row)
+            r_, c_ = ent_pos(e)
+            b.smem_store_vN(
+                B_smem,
+                [r_, c_],
+                b.vec_bitcast(
+                    b.vec_pack(
+                        [b.mul(pix, b.const_i32(e_bytes)), b.xor(mask, b.const_i32(-1))], I32
+                    ),
+                    vt_b,
+                ),
+                4,
+            )
+        b.sync_lds_only()
+        c_e = b.shl(b.land(lane_, c1), c1)
+        slots = []
+        for j in range(n_blk):
+            rs = b.xor(b.lshr(lane_, b.const_i32(4)), b.const_i32((j >> 3) & 1))
+            k0 = b.xor(b.land(b.lshr(lane_, c1), b.const_i32(7)), b.const_i32(j & 7))
+            loc = b.add(b.const_i32(4 * j), rs)
+            r_, c_ = ent_pos(b.add(b.mul(wid, b.const_i32(R6)), loc))
+            ent = b.vec_bitcast(b.smem_load_vN(B_smem, r_, c_, dtype=ir_dtype_b, n=4), vt_i)
+            col = b.add(b.shl(k0, b.const_i32(2)), c_e)
+            slots.append(
+                (
+                    j,
+                    b.add(b.vec_extract(ent, 0), b.mul(col, b.const_i32(e_bytes))),
+                    b.vec_extract(ent, 1),
+                )
+            )
+        # Every table read done before tile 0's B stores reuse the buffer.
+        b.sync_lds_only()
+        a_wave = b.smem_ptr_add(
+            b.smem_addr_of(A_smem), b.zext(b.mul(wid, b.const_i32(R6 * 64)), I64)
+        )
+
+        def dma_issue():
+            tap = b.add(
+                b.mul(b.add(b.mul(cap["dd"], c_Ho), cap["dh"]), b.mul(c_Wo, c_K))
+                if is_3d
+                else b.mul(cap["dh"], b.mul(c_Wo, c_K)),
+                cap["kb"],
+            )
+            if is_3d:
+                zy = b.add(b.mul(b.sub(p_pD, cap["dd"]), c_Y), b.sub(params["p_pH"], cap["dh"]))
+            else:
+                zy = b.sub(params["p_pH"], cap["dh"])
+            tap2 = b.mul(tap, b.const_i32(e_bytes))
+            rs_t = b.buffer_rsrc(
+                b.global_ptr_add(dY, b.sext(tap2, I64)), b.sub(dY_bytes, tap2)
+            )
+            for j, pix2, nmask in slots:
+                bad = b.land(b.lshr(nmask, zy), c1)
+                voff = b.lor(pix2, b.shl(bad, b.const_i32(31)))
+                dst = b.smem_ptr_add(a_wave, b.const_i64(j * 256)) if j else a_wave
+                b.async_buffer_load_lds_addr(rs_t, dst, voff, c0, 1)
+
+        # The fragment rows' A slots (wave-local), once.
+        dec = decode_mfma_lanes(b, atom, lane)
+        a_loc = b.mul(dec.m_in_atom, b.const_i32(mfmas_m))
+        reg_base = b.mul(wid, b.const_i32(R6 * 8))
+        afr_base: dict = {}
+        for x in range(XB):
+            for mi in range(mfmas_m):
+                if x > 0 and mi > 0:
+                    continue
+                al = b.add(a_loc, b.const_i32(mi)) if mi else a_loc
+                lr = b.add(al, b.const_i32(XB - 1 - x))
+                if x:
+                    _, rem = _magic_divmod(b, b.add(block_m_off_v, b.add(wave_m0, al)), hw_div)
+                    _, wi = _magic_divmod(b, rem, w_div)
+                    lr = b.select(b.cmp_ge(wi, b.const_i32(x)), lr, c_zero_local)
+                afr_base[(x, mi)] = b.add(reg_base, _dl_slot(b, lr, dec.k_blk))
+        wn = grid.warp_n_off(b)
+        steps = [(x, kk) for x in range(XB) for kk in range(spec.k_atoms_per_tile_k)]
+        dfr = min(spec.xh_defer, len(steps) - 1)
+
+        def a_read(x, kk, mi):
+            r = b.xor(afr_base[(x, mi)], b.const_i32(4 * kk)) if kk else afr_base[(x, mi)]
+            return _emit_smem_load(b, A_smem, r, c0, 4, smem_dtype=_smem_dtype)
+
+        def b_reads(st):
+            x, kk = st
+            col = b.add(b.shl(dec.k_blk, b.const_i32(2)), b.const_i32(kk * spec.warp_tile_k))
+            out_ = []
+            for ni in range(mfmas_n):
+                row = b.add(wn, b.add(b.const_i32(ni * 16 + x * block_n), dec.n_in_atom))
+                out_.append(_emit_smem_load(b, B_smem, row, col, 4, smem_dtype=_smem_dtype))
+            return out_
+
+        def body(acc_in, tmpl, regs, cur):
+            n_bl = len(flat(tmpl))
+            # Own A DMA landed (later B loads may not); B stores visible.
+            b.s_waitcnt(vmcnt=n_bl)
+            b.sync_lds_only()
+            if sprio:
+                b.sched_barrier(0)
+                b.s_setprio(1)
+            nxt = advance(*cur)
+            afr: dict = {}
+            for x, kk in steps:
+                for mi in range(mfmas_m):
+                    if x > 0 and mi > 0:
+                        afr[(x, kk, mi)] = afr[(x - 1, kk, mi - 1)]
+                    else:
+                        afr[(x, kk, mi)] = a_read(x, kk, mi)
+            # The wave's A reads done before its DMA overwrites them.
+            b.s_waitcnt(lgkmcnt=0)
+            b.sched_barrier(0)
+            set_tile(*nxt)
+            dma_issue()
+            accs_ = list(acc_in)
+            bfr = [b_reads(steps[0])]
+            done = []
+            for i, st in enumerate(steps):
+                if i + 1 < len(steps):
+                    bfr.append(b_reads(steps[i + 1]))
+                if i >= len(steps) - dfr:
+                    done.append((st, bfr[i]))
+                    continue
+                x, kk = st
+                f_ = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        accs_[f_] = _xh_mfma(afr[(x, kk, mi)], bfr[i][ni], accs_[f_])
+                        f_ += 1
+            n_main = (len(steps) - dfr) * mfmas_m * mfmas_n
+            left_v = len(slots)
+            b.sched_group_barrier(_SG_DS_READ, mfmas_n, 0)
+            for i in range(n_main):
+                b.sched_group_barrier(_SG_MFMA, 1, 0)
+                if i % (mfmas_m * mfmas_n) == 0:
+                    b.sched_group_barrier(_SG_DS_READ, mfmas_n, 0)
+                if left_v and i % ilv == ilv - 1:
+                    b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                    left_v -= 1
+            if left_v:
+                b.sched_group_barrier(_SG_VMEM_READ, left_v, 0)
+            b.sched_barrier(0)
+            b.sync_lds_only()
+            b_store(0, rebuild(tmpl, regs))
+            set_tile(*advance(*nxt))
+            staged = b_load(0)
+            for (x, kk), bf in done:
+                f_ = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        accs_[f_] = _xh_mfma(afr[(x, kk, mi)], bf[ni], accs_[f_])
+                        f_ += 1
+            n_w = len(tmpl) * b_vec
+            n_d = dfr * mfmas_m * mfmas_n
+            for _ in range(min(n_w, n_d)):
+                b.sched_group_barrier(_SG_DS_WRITE, 1, 0)
+                b.sched_group_barrier(_SG_MFMA, 1, 0)
+            b.sched_barrier(0)
+            if sprio:
+                b.s_setprio(0)
+            return accs_, staged, nxt
+
+        set_tile(*s0)
+        dma_issue()
+        b_store(0, b_load(0))
+        s1 = advance(*s0)
+        set_tile(*s1)
+        tmpl = b_load(0)
+        regs0 = flat(tmpl)
+        n_acc = len(accs)
+        n_regs = len(regs0)
+        n_st = 3 if is_3d else 2
+        st_names = ["xw_kb", "xw_y", "xw_z"][:n_st]
+        it = (
+            list(accs)
+            + [(f"xw_r{i}", v) for i, v in enumerate(regs0)]
+            + list(zip(st_names, s0[:n_st]))
+        )
+        loop = b.scf_for_iter(c0, n_tiles, c1, it, iv_name="t")
+        with loop as (_t, iv):
+            acc_in = list(iv[:n_acc])
+            regs = list(iv[n_acc : n_acc + n_regs])
+            cur = list(iv[n_acc + n_regs :])
+            if not is_3d:
+                cur.append(None)
+            acc_out, st, nxt = body(acc_in, tmpl, regs, cur)
+            b.scf_yield(*acc_out, *flat(st), *list(nxt)[:n_st])
+        b.sync()
+        return list(loop.results)[:n_acc]
+
+    def _xh_persistent():
+        """``xh_persist``: the x-halo kernel over a persistent grid. Each
+        workgroup walks the tiles bid, bid + gridDim, ...; per tile the
+        x-halo K loop (its own prologue) and the epilogue, whose barriers
+        are LDS-only (the next tile's loads are not drained by them).
+        Emits the epilogue itself; returns None."""
+        nonlocal block_m_off_v, block_n_off_v, grid
+        nonlocal tid, lane, warp_id, warp_m_idx, warp_n_idx
+        n_items = b.mul(p_num_pid_m, p_num_pid_n)
+        stride = b.grid_dim("x", spec.launch_block_size)
+        c_bm = b.const_i32(block_m)
+        c_bn = b.const_i32(block_n)
+        tid0 = tid
+        loop = b.scf_for(b.block_id_x(), n_items, stride, iv_name="xi")
+        loop.op.attrs["elide_trailing_barrier"] = False
+        loop.op.attrs["smem_per_iteration"] = True
+        with loop as item:
+            # The thread id through an empty asm tied to the tile index:
+            # everything derived from it is rebuilt per tile instead of being
+            # hoisted out of the tile loop (and held live across the K loop).
+            tid = b.inline_asm("", "=v,0,s", [tid0, item], I32, sideeffect=False)
+            c_ws = b.const_i32(spec.wave_size)
+            lane = b.mod(tid, c_ws)
+            warp_id = b.div(tid, c_ws)
+            warp_m_idx = b.div(warp_id, b.const_i32(spec.warp_n))
+            warp_n_idx = b.mod(warp_id, b.const_i32(spec.warp_n))
+            grid = dc_replace(
+                grid, tid=tid, lane=lane, warp_id=warp_id,
+                warp_m_idx=warp_m_idx, warp_n_idx=warp_n_idx,
+            )
+            fb = item
+            if num_xcds:
+                fb, _ = emit_xcd_tile_order(
+                    b, item, params, num_xcds=num_xcds, ungrouped=bool(spec.xcd_remap)
+                )
+            mt = b.div(fb, p_num_pid_n)
+            nt = b.sub(fb, b.mul(mt, p_num_pid_n))
+            block_m_off_v = b.mul(mt, c_bm)
+            block_n_off_v = b.mul(nt, c_bn)
+            grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
+            accs_out = _emit_tap_outer_xhalo_loop()
+            final = _apply_accumulator_epilogue(b, spec.acc_epilogue, accs_out)
+            b.sync = b.sync_lds_only
+            try:
+                _dispatch_dgrad_epilogue(final)
+            finally:
+                del b.sync
+            b.sync_lds_only()
+        return None
+
+    # xh_yring: which loop _emit_tap_outer_xhalo_loop emits ("ring" / "full").
+    _yr_mode = ["ring"]
+
+    def _emit_tap_outer_xhalo_loop() -> list[Value]:
+        """The ``tapk_xhalo`` K loop. Returns the final accumulators.
+
+        (z, y) taps outer, output-channel chunks inner, x taps unrolled. LDS
+        row r of ``A_smem`` holds, for the iteration's (z, y) and chunk, the
+        dY row tap (z, y, 0) reads for dX pixel m0 - (X-1) + r (pW == 0, so
+        that is dY pixel (do, ho, wi)); tap x reads it for fragment row a at
+        r = a + X-1-x, or the trailing zero row where wi(a) < x.
+        """
+        XB = p.X
+        c1 = b.const_i32(1)
+        c_kd = c_kpg if grouped else c_K
+        c_cs = c_dg_N if grouped else c_C
+        c_yx = b.mul(c_Y, c_X)
+        c_taps = b.mul(p_Z, c_yx) if is_3d else c_yx
+        c_zy = b.mul(p_Z, c_Y) if is_3d else c_Y
+        c_yxc = b.mul(c_taps, c_cs)
+        def _xhalo_padded_parts(lds_rows, c_zero_row, cap):
+            """Loader / descriptor / row map of the padded halo: LDS row r
+            holds pixel m0 - (X-1) + r; the rows are padded to whole loader
+            passes (the rows past tile_m + X - 1 load nothing)."""
+            c_real_rows = b.const_i32(block_m + XB - 1)
+            c_back = b.const_i32(XB - 1)
+            loader = CoalescedTileLoader(
+                tile_rows=lds_rows - 1,
+                tile_cols=block_k,
+                block_size=threads,
+                load_vec=load_vec_a,
+                elem_dtype=ir_dtype_a,
+            )
+
+            def dy(b_: IRBuilder, row: Value, col: Value):
+                m = b_.sub(b_.add(block_m_off_v, row), c_back)
+                m_ok = b_.land(
+                    b_.land(b_.cmp_ge(m, c0), b_.cmp_lt(m, p_dg_M)),
+                    b_.cmp_lt(row, c_real_rows),
+                )
+                return _xh_dy_tail(b_, m, m_ok, col, cap)
+
+            def row_map(x: int):
+                shift = b.const_i32(XB - 1 - x)
+                c_x = b.const_i32(x)
+
+                def _map(a_row: Value) -> Value:
+                    row = b.add(a_row, shift)
+                    if x == 0:
+                        return row
+                    _, rem = _magic_divmod(b, b.add(block_m_off_v, a_row), hw_div)
+                    _, wi = _magic_divmod(b, rem, w_div)
+                    return b.select(b.cmp_ge(wi, c_x), row, c_zero_row)
+
+                return _map
+
+            return loader, dy, row_map
+
+        def _xhalo_exact_parts(lds_rows, c_zero_row, cap):
+            """xhalo_exact: LDS rows [0, tile_m) hold the tile's own pixels,
+            [tile_m, tile_m + X-1) the back pixels m0 - (X-1).., then a junk
+            row (idle lanes of the back load write it) and the zero row."""
+            back = XB - 1
+            c_junk_row = b.const_i32(lds_rows - 2)
+            main_loader = CoalescedTileLoader(
+                tile_rows=block_m,
+                tile_cols=block_k,
+                block_size=threads,
+                load_vec=load_vec_a,
+                elem_dtype=ir_dtype_a,
+            )
+            back_span = block_k // load_vec_a
+            n_back_vec = back * back_span
+            if n_back_vec > threads:
+                raise ValueError(
+                    f"xhalo_exact: {n_back_vec} back-row vectors exceed "
+                    f"{threads} threads"
+                )
+
+            class _HaloLoader:
+                """The main tile (exact loader passes) plus the back rows,
+                one vector per lane for the first back*tile_k/vec lanes."""
+
+                load_vec = load_vec_a
+
+                @staticmethod
+                def load_global(b_, *, tid, descriptor, rsrc):
+                    staged = main_loader.load_global(
+                        b_, tid=tid, descriptor=descriptor, rsrc=rsrc
+                    )
+                    c_span = b_.const_i32(back_span)
+                    j = b_.div(tid, c_span)
+                    col = b_.mul(b_.mod(tid, c_span), b_.const_i32(load_vec_a))
+                    lane_ok = b_.cmp_lt(tid, b_.const_i32(n_back_vec))
+                    off, valid = descriptor(b_, b_.sub(j, b_.const_i32(back)), col)
+                    valid = b_.land(valid, lane_ok)
+                    off_b = b_.select(
+                        valid,
+                        b_.mul(off, b_.const_i32(2 if ir_dtype_a != F32 else 4)),
+                        b_.const_i32((1 << 31) - 1),
+                    )
+                    v = b_.buffer_load_vN(rsrc, off_b, c0, ir_dtype_a, load_vec_a)
+                    row = b_.select(
+                        lane_ok, b_.add(j, b_.const_i32(block_m)), c_junk_row
+                    )
+                    return list(staged) + [(row, col, v)]
+
+                @staticmethod
+                def store_lds(b_, *, smem_dst, staged):
+                    for row, col, v in staged:
+                        b_.smem_store_vN(smem_dst, [row, col], v, load_vec_a)
+
+            def dy(b_: IRBuilder, row: Value, col: Value):
+                # row: the pixel's offset from the tile's first pixel m0 (the
+                # back rows pass -back..-1).
+                m = b_.add(block_m_off_v, row)
+                m_ok = b_.land(b_.cmp_ge(m, c0), b_.cmp_lt(m, p_dg_M))
+                return _xh_dy_tail(b_, m, m_ok, col, cap)
+
+            def row_map(x: int):
+                c_x = b.const_i32(x)
+                # Pixel m0 + a - x: main row a - x, or back row a - x + back.
+                c_wrap = b.const_i32(block_m + back - x)
+
+                def _map(a_row: Value) -> Value:
+                    if x == 0:
+                        return a_row
+                    row = b.select(
+                        b.cmp_ge(a_row, c_x), b.sub(a_row, c_x), b.add(a_row, c_wrap)
+                    )
+                    _, rem = _magic_divmod(b, b.add(block_m_off_v, a_row), hw_div)
+                    _, wi = _magic_divmod(b, rem, w_div)
+                    return b.select(b.cmp_ge(wi, c_x), row, c_zero_row)
+
+                return _map
+
+            return _HaloLoader(), dy, row_map
+
+        def _xh_dy_tail(b_: IRBuilder, m: Value, m_ok: Value, col: Value, cap):
+            """dY offset / validity of dX pixel ``m`` at the iteration's tap."""
+            m = b_.select(m_ok, m, c0)
+            n, m_rem = _magic_divmod(b_, m, hw_div)
+            hi, wi = _magic_divmod(b_, m_rem, w_div)
+            ho = b_.add(hi, cap["dh"])
+            valid = b_.land(
+                m_ok,
+                b_.land(
+                    b_.land(b_.cmp_ge(ho, c0), b_.cmp_lt(ho, c_Ho)),
+                    b_.cmp_lt(wi, c_Wo),
+                ),
+            )
+            if is_3d:
+                n, di = _magic_divmod(b_, n, di_div)
+                do = b_.add(di, cap["dd"])
+                valid = b_.land(
+                    valid, b_.land(b_.cmp_ge(do, c0), b_.cmp_lt(do, p_Do))
+                )
+                n = b_.add(b_.mul(n, p_Do), do)
+            pix = b_.add(b_.mul(b_.add(b_.mul(n, c_Ho), ho), c_Wo), wi)
+            offset = b_.add(b_.add(b_.mul(pix, c_K), col), cap["kb"])
+            return offset, valid
+
+        back = XB - 1
+        lds_rows = spec.xhalo_lds_rows
+        c_zero_row = b.const_i32(lds_rows - 1)
+        cap: dict[str, Value] = {}
+        if spec.xhalo_exact:
+            halo_loader, xh_dy, row_map = _xhalo_exact_parts(lds_rows, c_zero_row, cap)
+        else:
+            halo_loader, xh_dy, row_map = _xhalo_padded_parts(lds_rows, c_zero_row, cap)
+        if spec.xh_fast_a:
+            xh_dy = _xh_fast_a_descriptor(halo_loader, cap, xh_dy)
+
+        def w_xh(b_: IRBuilder, row: Value, col: Value):
+            c_val = b_.add(block_n_off_v, row)
+            return b_.add(b_.add(b_.mul(col, c_yxc), c_val), cap["w_k"]), None
+
+        if spec.lds_k_outer:
+
+            def w_xh_fn(b_: IRBuilder, row: Value, col: Value):
+                return w_xh(b_, col, row)
+
+        else:
+            w_xh_fn = w_xh
+
+        if spec.xh_dlds:
+            # The DMA writes the zero row (out-of-range rows load zeros).
+            return _xhalo_dlds(row_map, cap)
+
+        # Zero row: every thread writes the same zeros (benign); the first
+        # barrier orders it before any read, and the loader never writes it.
+        if _xh_ak4:
+            # One 4-element zero piece per k-group slab.
+            zk0 = b.mod(tid, b.const_i32(block_k // 4))
+            b.smem_store_vN(
+                A_smem,
+                [b.add(b.mul(zk0, b.const_i32(_ak4_mp)), _ak4_row(b, c_zero_row)), c0],
+                b.zero_vec(ir_dtype_a, 4),
+                4,
+            )
+        else:
+            zvec = min(8, block_k)
+            zcol = b.mul(b.mod(tid, b.const_i32(block_k // zvec)), b.const_i32(zvec))
+            b.smem_store_vN(A_smem, [c_zero_row, zcol], b.zero_vec(ir_dtype_a, zvec), zvec)
+
+        if spec.tapk_prefetch:
+            return _xhalo_prefetch(xh_dy, w_xh_fn, halo_loader, row_map, cap)
+        if spec.xh_b_wide:
+            raise ValueError("xh_b_wide is built on the x-halo prefetch loop only")
+
+        zy_for = b.scf_for_iter(c0, c_zy, c1, accs, iv_name="zy")
+        with zy_for as (zy, zy_vars):
+            if is_3d:
+                zdot = b.div(zy, c_Y)
+                ydot = b.sub(zy, b.mul(zdot, c_Y))
+                cap["dd"] = b.sub(p_pD, zdot)
+            else:
+                ydot = zy
+            cap["dh"] = b.sub(params["p_pH"], ydot)
+            # Tap (z, y, 0) and the W offset of its x = 0 tile.
+            tap0_cs = b.mul(b.mul(zy, c_X), c_cs)
+            chunk_accs = [(f"{name}_xh", v) for (name, _), v in zip(accs, zy_vars)]
+            chunk_for = b.scf_for_iter(c0, c_kd, c_block_k, chunk_accs, iv_name="kb")
+            with chunk_for as (kb0, iter_vars):
+                kb = b.add(kb0, k_out_group_base) if grouped else kb0
+                cap["kb"] = kb
+                w_k0 = b.add(b.mul(kb, c_yxc), tap0_cs)
+                a_st = halo_loader.load_global(
+                    b, tid=tid, descriptor=xh_dy, rsrc=dy_rsrc
+                )
+                b_sts = []
+                for x in range(XB):
+                    cap["w_k"] = b.add(w_k0, b.mul(b.const_i32(x), c_cs))
+                    b_sts.append(
+                        b_sync_loader.load_global(
+                            b, tid=tid, descriptor=w_xh_fn, rsrc=w_rsrc
+                        )
+                    )
+                xh_store(halo_loader, A_smem, a_st)
+                for x in range(XB):
+                    xh_store(b_sync_loader, B_smem_x[x], b_sts[x], is_b=True)
+                b.sync()
+                cur = list(iter_vars)
+                for x in range(XB):
+                    cur = emit_mfma_phase(A_smem, B_smem_x[x], cur, a_row_map=row_map(x))
+                b.sync()
+                b.scf_yield(*cur)
+            b.scf_yield(*chunk_for.results)
+        return list(zy_for.results)
 
     def _emit_dy_halo_loop() -> list[Value]:
         """The ``dy_halo`` K loop. Returns the final accumulators.
@@ -3370,8 +9893,66 @@ def _build_tilde_dgrad(
         )
         return b.kernel
 
+    if spec.pp_streamk:
+        _emit_pp_streamk()
+        return b.kernel
+
+    def _epilogue_of(final_accs):
+        final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
+        if spec.epi_lds_barriers:
+            # The epilogue's barriers LDS-only (x-halo and pp_boxes; see DgradConvSpec.epi_lds_barriers).
+            b.sync = b.sync_lds_only
+            try:
+                _dispatch_dgrad_epilogue(final_accs)
+            finally:
+                del b.sync
+        else:
+            _dispatch_dgrad_epilogue(final_accs)
+
     if spec.dy_halo:
         final_accs = _emit_dy_halo_loop()
+    elif spec.tap_outer_k and spec.tapk_xhalo and spec.xh_persist:
+        final_accs = _xh_persistent()
+    elif spec.tap_outer_k and spec.tapk_xhalo and spec.xh_yring:
+        # xh_yring: ring tiles run the ring loop, the others the full-load
+        # loop; one epilogue per branch (an if/else keeps each loop's
+        # invariants inside its branch). A reused row a in [Wi - (X - 1),
+        # tile_m) takes its tap y + 1 value from the tap y value of the pixel
+        # one dX row back, which needs a row h != 0: no (n, d) plane may
+        # start in [m0 - (X - 1) + 1, m0 + tile_m) (its first row's Wi pixels
+        # reach the reused rows).
+        _yr_first = b.smax(b.add(block_m_off_v, b.const_i32(2 - p.X)), c0)
+        _yr_q, _yr_r = _magic_divmod(b, _yr_first, hw_div)
+        _yr_next = b.select(
+            b.cmp_eq(_yr_r, c0), _yr_first,
+            b.mul(b.add(_yr_q, b.const_i32(1)), hw_div.value),
+        )
+        _yr_ok = b.readfirstlane(b.select(
+            b.cmp_ge(_yr_next, b.add(block_m_off_v, b.const_i32(block_m))),
+            b.const_i32(1), c0,
+        ))
+        # Each branch has its own A / B (and C) LDS buffers: a buffer used in
+        # both branches would be live across the first branch's epilogue in
+        # the allocator's linear order, so C could not alias A / B there
+        # (LDS 31.4 KB -> 47.8 KB, 1 WG/CU). Per-branch buffers alias.
+        with b.scf_if_else(b.cmp_ne(_yr_ok, c0)) as (then_ctx, else_ctx):
+            for _ctx, _mode in ((then_ctx, "ring"), (else_ctx, "full")):
+                with _ctx:
+                    _yr_mode[0] = _mode
+                    if _mode == "full":
+                        A_smem = b.smem_alloc(
+                            A_smem.type.elem, A_smem.type.shape, name_hint="A_smem_yf"
+                        )
+                        B_smem = b.smem_alloc(
+                            B_smem.type.elem, B_smem.type.shape, name_hint="B_smem_yf"
+                        )
+                        B_smem_x = [B_smem] * p.X
+                    _epilogue_of(_emit_tap_outer_xhalo_loop())
+        return b.kernel
+    elif spec.tap_outer_k and spec.tapk_xhalo:
+        final_accs = _emit_tap_outer_xhalo_loop()
+    elif spec.tap_outer_k and spec.tapk_prefetch:
+        final_accs = _emit_tap_outer_prefetch_loop()
     elif spec.tap_outer_k:
         final_accs = _emit_tap_outer_loops()
     elif spec.uniform_k_decode:
@@ -3392,8 +9973,10 @@ def _build_tilde_dgrad(
     #   is_strided: False → stride-1 descriptor,  True → runtime tilde addr_fn
     # Within each leaf: wmma vs mfma selects the accumulator-layout helper,
     # and epilogue="cshuffle" vs "default" selects LDS-staged vs scalar stores.
-    final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
-    _dispatch_dgrad_epilogue(final_accs)
+    if final_accs is None:
+        # tapk_pp_persist: the epilogue ran inside the persistent loop.
+        return b.kernel
+    _epilogue_of(final_accs)
 
     return b.kernel
 
@@ -3580,7 +10163,9 @@ def _emit_dgrad_direct_epilogue_wmma(
 
     c_M = params["p_dg_M"]
     c_N = params["p_dg_N"]
-    dX_desc = make_dgrad_dx_descriptor_dynamic(b, params)
+    dX_desc = make_dgrad_dx_descriptor_dynamic(
+        b, params, is_3d=spec.problem.is_3d
+    )
     c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
@@ -3735,7 +10320,9 @@ def _dgrad_stride1_dx_addr(
     Both the descriptor and the bounds come from the AOT kernarg block, so
     one compiled kernel serves any shape.
     """
-    dX_desc = make_dgrad_dx_descriptor_dynamic(b, params)
+    dX_desc = make_dgrad_dx_descriptor_dynamic(
+        b, params, is_3d=spec.problem.is_3d
+    )
 
     def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         # n_val is the group-local input channel (< cpg); the absolute NHWC
@@ -3779,8 +10366,15 @@ def _emit_dgrad_cshuffle_epilogue(
     dx_rsrc: Value,
     params: Dict[str, Value],
     c_group_base: Optional[Value] = None,
+    pre_bf16: Optional[Sequence[Value]] = None,
 ) -> None:
     """MFMA cshuffle epilogue for stride=1 dX."""
+    if spec.xh_epi:
+        return _emit_xh_cshuffle_epilogue(b, spec, accs, grid, dx_rsrc, params, c_group_base)
+    if spec.tapk_pp_epi:
+        return _emit_pp_cshuffle_epilogue(
+            b, spec, accs, grid, dx_rsrc, params, c_group_base, pre_bf16=pre_bf16
+        )
     _war_barriers = 2 if spec.pipeline == "wavelet" else 1
     _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
@@ -3791,7 +10385,11 @@ def _emit_dgrad_cshuffle_epilogue(
         out_dtype=spec.data.dtype_d,
         no_alias=_no_alias,
     )
-    _epi = dc_replace(_epi, war_barriers=_war_barriers)
+    _epi = dc_replace(
+        _epi,
+        war_barriers=_war_barriers,
+        m_chunks=spec.cshuffle_m_chunks,
+    )
     _epi.store(
         b,
         accs=accs,
@@ -3799,6 +10397,410 @@ def _emit_dgrad_cshuffle_epilogue(
         d_rsrc=dx_rsrc,
         bounds=bounds,
     )
+
+
+def _pp_f32_to_bf16(b: IRBuilder, spec: "DgradConvSpec", acc: Value) -> Value:
+    """f32 -> bf16 (round to nearest even) of a ping-pong accumulator vector.
+
+    tapk_pp_epi 2 drops the NaN fix-up of the generic conversion: an MFMA
+    accumulator of bf16 operands is NaN only as a propagated bf16 NaN (low
+    16 bits zero) or the canonical quiet NaN, which the rounding add keeps a
+    NaN; infinities and overflow round as RNE does. 2 VALU per element plus
+    one pack per pair instead of ~6."""
+    if spec.tapk_pp_epi != 2:
+        return b.vec_trunc_f32_to_bf16(acc)
+    from rocke.core.ir import I32 as _I32, VectorType as _VT
+
+    n = acc.type.count
+    bits = b.vec_bitcast(acc, _VT(_I32, n))
+    c1 = b.const_i32(1)
+    c16 = b.const_i32(16)
+    bias = b.const_i32(0x7FFF)
+    his = []
+    for i in range(n):
+        x = b.vec_extract(bits, i)
+        lsb = b.land(b.lshr(x, c16), c1)
+        his.append(b.lshr(b.add(b.add(x, bias), lsb), c16))
+    words = [b.lor(his[2 * j], b.shl(his[2 * j + 1], c16)) for j in range(n // 2)]
+    return b.vec_bitcast(b.vec_pack(words, _I32), _VT(BF16, n))
+
+
+def _xh_f32x4_to_bf16(b: IRBuilder, vals: Sequence[Value]) -> Value:
+    """Four f32 -> a <4 x bf16> (round to nearest even, no NaN fix-up: see
+    _pp_f32_to_bf16)."""
+    from rocke.core.ir import I32 as _I32, VectorType as _VT
+
+    c1 = b.const_i32(1)
+    c16 = b.const_i32(16)
+    bias = b.const_i32(0x7FFF)
+    his = []
+    for x in vals:
+        xi = b.bitcast(x, _I32)
+        lsb = b.land(b.lshr(xi, c16), c1)
+        his.append(b.lshr(b.add(b.add(xi, bias), lsb), c16))
+    words = [b.lor(his[2 * j], b.shl(his[2 * j + 1], c16)) for j in range(2)]
+    return b.vec_bitcast(b.vec_pack(words, _I32), _VT(BF16, 4))
+
+
+def _xh_f32x4_to_bf16_perm(b: IRBuilder, vals: Sequence[Value]) -> Value:
+    """``_xh_f32x4_to_bf16`` with the pair packing as one v_perm_b32 (the
+    high halves of the two rounded words): 2.5 instead of 3.5 VALU per
+    element. Same bits."""
+    from rocke.core.ir import I32 as _I32, VectorType as _VT
+
+    c1 = b.const_i32(1)
+    c16 = b.const_i32(16)
+    bias = b.const_i32(0x7FFF)
+    sel = b.const_i32(0x07060302)
+    rs = []
+    for x in vals:
+        xi = b.bitcast(x, _I32)
+        lsb = b.land(b.lshr(xi, c16), c1)
+        rs.append(b.add(b.add(xi, bias), lsb))
+    words = [b.perm_b32(rs[2 * j + 1], rs[2 * j], sel) for j in range(2)]
+    return b.vec_bitcast(b.vec_pack(words, _I32), _VT(BF16, 4))
+
+
+def _emit_xh_cshuffle_epilogue(
+    b: IRBuilder,
+    spec: DgradConvSpec,
+    accs: Sequence[Value],
+    grid: WarpGrid,
+    dx_rsrc: Value,
+    params: Dict[str, Value],
+    c_group_base: Optional[Value] = None,
+) -> None:
+    """``xh_epi``: the cshuffle store of transposed accumulators. A lane's
+    accumulator slots come in groups of 4 consecutive channels of one pixel
+    (16x16: one group, pixel l % 16, channels 4 (l / 16) ..; 32x32: four
+    groups g, pixel l % 32, channels 8 g + 4 (l / 32) ..): one ds_write_b64
+    each into ``cshuffle_m_chunks`` row slabs (16-byte chunks XOR the row's
+    low 3 bits), then 8-wide row reads and buffer stores as the pp
+    epilogue."""
+    from rocke.helpers.tensor_view import make_lds_view
+
+    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
+    atom = spec.atom
+    if spec.xh_epi == 3:
+        # Direct, 16-byte stores: lanes l and l ^ 16 hold 4-channel groups g
+        # and g ^ 1 of the same pixel; each pair of N fragments (2j, 2j+1)
+        # is exchanged (ds_swizzle xor 16) so the even-group lane holds 8
+        # consecutive channels of fragment 2j and the odd-group lane 8 of
+        # fragment 2j+1 -- one 16-byte buffer store each, no LDS staging.
+        from rocke.core.ir import I32 as _I32, VectorType as _VT
+
+        mfmas_m, mfmas_n = spec.mfmas_per_warp_m, spec.mfmas_per_warp_n
+        lane = grid.lane
+        r_l = b.land(lane, b.const_i32(15))
+        g_v = b.lshr(lane, b.const_i32(4))
+        odd_v = b.land(g_v, b.const_i32(1))
+        is_odd = b.cmp_ne(odd_v, b.const_i32(0))
+        n_l = b.add(b.shl(odd_v, b.const_i32(4)), b.shl(b.land(g_v, b.const_i32(2)), b.const_i32(2)))
+        wm = grid.warp_m_off(b)
+        n_base = b.add(grid.block_n_off, b.add(grid.warp_n_off(b), n_l))
+        c_eb2 = b.const_i32(2)
+        oob2 = b.const_i32((1 << 31) - 1)
+        c1 = b.const_i32(1)
+        c16 = b.const_i32(16)
+        bias = b.const_i32(0x7FFF)
+
+        def _words(acc):
+            his = []
+            for j in range(4):
+                xi = b.bitcast(b.vec_extract(acc, j), _I32)
+                lsb = b.land(b.lshr(xi, c16), c1)
+                his.append(b.lshr(b.add(b.add(xi, bias), lsb), c16))
+            return [b.lor(his[2 * k], b.shl(his[2 * k + 1], c16)) for k in range(2)]
+
+        for mi in range(mfmas_m):
+            if spec.xh_stride_m:
+                # fragment mi, atom row r = pixel S * r + mi of the wave
+                row = b.add(b.mul(r_l, b.const_i32(mfmas_m)), b.const_i32(mi))
+            else:
+                row = b.add(b.const_i32(mi * 16), r_l)
+            m_val = b.add(grid.block_m_off, b.add(wm, row))
+            for jp in range(mfmas_n // 2):
+                w0 = _words(accs[mi * mfmas_n + 2 * jp])
+                w1 = _words(accs[mi * mfmas_n + 2 * jp + 1])
+                rc = [b.ds_swizzle_xor(b.select(is_odd, w0[k], w1[k]), 16) for k in range(2)]
+                out = [b.select(is_odd, rc[k], w0[k]) for k in range(2)] + [
+                    b.select(is_odd, w1[k], rc[k]) for k in range(2)
+                ]
+                v = b.vec_bitcast(b.vec_pack(out, _I32), _VT(BF16, 8))
+                n_val = b.add(n_base, b.const_i32(32 * jp))
+                ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=8)
+                off_elems, valid = dx_addr(b, m_val, n_val)
+                if valid is not None:
+                    ok = valid if ok is None else b.land(ok, valid)
+                off_b = b.mul(off_elems, c_eb2)
+                safe = b.select(ok, off_b, oob2) if ok is not None else off_b
+                b.buffer_store_vN_bf16(dx_rsrc, safe, b.const_i32(0), v, 4)
+        return
+    if spec.xh_epi == 2:
+        # Direct: each 4-channel group is 8 contiguous bytes of one pixel.
+        am_, an_ = atom.m, atom.n
+        r_l = b.land(grid.lane, b.const_i32(am_ - 1))
+        nb = b.shl(b.lshr(grid.lane, b.const_i32(4 if am_ == 16 else 5)), b.const_i32(2))
+        wm = grid.warp_m_off(b)
+        wn = grid.warp_n_off(b)
+        c_eb2 = b.const_i32(2)
+        oob2 = b.const_i32((1 << 31) - 1)
+        for mi in range(spec.mfmas_per_warp_m):
+            m_val = b.add(grid.block_m_off, b.add(wm, b.add(b.const_i32(mi * am_), r_l)))
+            for ni in range(spec.mfmas_per_warp_n):
+                acc = accs[mi * spec.mfmas_per_warp_n + ni]
+                for g in range(atom.c_per_lane // 4):
+                    v = _xh_f32x4_to_bf16(b, [b.vec_extract(acc, 4 * g + j) for j in range(4)])
+                    n_val = b.add(
+                        grid.block_n_off,
+                        b.add(wn, b.add(b.const_i32(ni * an_ + 8 * g), nb)),
+                    )
+                    ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=4)
+                    off_elems, valid = dx_addr(b, m_val, n_val)
+                    if valid is not None:
+                        ok = valid if ok is None else b.land(ok, valid)
+                    off_b = b.mul(off_elems, c_eb2)
+                    safe = b.select(ok, off_b, oob2) if ok is not None else off_b
+                    b.buffer_store_vN_bf16(dx_rsrc, safe, b.const_i32(0), v, 2)
+        return
+    mc = max(1, spec.cshuffle_m_chunks)
+    mfmas_m, mfmas_n = spec.mfmas_per_warp_m, spec.mfmas_per_warp_n
+    cm = mfmas_m // mc
+    am, an = atom.m, atom.n
+    rows_c = spec.tile_m // mc
+    tile_n = spec.tile_n
+    threads = spec.block_size
+    sv = 8
+    c_view = make_lds_view(b, dtype=BF16, shape=(rows_c, tile_n), name_hint="C_smem")
+    c_smem = c_view.base
+    c3 = b.const_i32(3)
+
+    def swz(row: Value, col: Value) -> Value:
+        return b.xor(col, b.shl(b.land(row, b.const_i32(7)), c3))
+
+    warp_m_off_c = b.mul(grid.warp_m_idx, b.const_i32(cm * am))
+    warp_n_off = grid.warp_n_off(b)
+    c_threads = b.const_i32(threads)
+    c_tnv = b.const_i32(tile_n // sv)
+    c_slab = b.const_i32(cm * am)
+    c_wrows = b.const_i32(mfmas_m * am)
+    c_eb = b.const_i32(2)
+    oob = b.const_i32((1 << 31) - 1)
+    vecs_per_thread = (rows_c * tile_n // sv) // threads
+    r_lane = b.land(grid.lane, b.const_i32(am - 1))
+    n_blk = b.shl(b.lshr(grid.lane, b.const_i32(4 if am == 16 else 5)), b.const_i32(2))
+    n_groups = atom.c_per_lane // 4
+    lin_ok = None
+    if spec.xh_epi_lin:
+        # Row-major consistent pixel strides: offset(m, c) = m * stride_w + c.
+        sw = params["p_dX_stride_wi"]
+        sh = params["p_dX_stride_hi"]
+        lin_ok = b.cmp_eq(sh, b.mul(sw, params["p_Wi"]))
+        if spec.problem.is_3d:
+            sd = params["p_dX_stride_di"]
+            lin_ok = b.land(lin_ok, b.cmp_eq(sd, b.mul(sh, params["p_Hi"])))
+            lin_ok = b.land(
+                lin_ok, b.cmp_eq(params["p_dX_stride_n"], b.mul(sd, params["p_Di"]))
+            )
+        else:
+            lin_ok = b.land(
+                lin_ok, b.cmp_eq(params["p_dX_stride_n"], b.mul(sh, params["p_Hi"]))
+            )
+
+        def dx_lin(b_: IRBuilder, m_val: Value, n_val: Value):
+            c_ = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
+            return b_.add(b_.mul(m_val, sw), c_), None
+
+    for c in range(mc):
+        b.sync()
+        for mi_l in range(cm):
+            mi = c * cm + mi_l
+            row = b.add(warp_m_off_c, b.add(b.const_i32(mi_l * am), r_lane))
+            for ni in range(mfmas_n):
+                acc = accs[mi * mfmas_n + ni]
+                for g in range(n_groups):
+                    v = (_xh_f32x4_to_bf16_perm if spec.xh_epi_lin else _xh_f32x4_to_bf16)(
+                        b, [b.vec_extract(acc, 4 * g + j) for j in range(4)]
+                    )
+                    col = b.add(
+                        warp_n_off, b.add(b.const_i32(ni * an + 8 * g), n_blk)
+                    )
+                    b.smem_store_vN(c_smem, [row, swz(row, col)], v, 4)
+        b.sync()
+
+        def _store_phase(addr_fn, c=c):
+            for e in range(vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
+                row = b.div(vec_idx, c_tnv)
+                col = b.mul(b.sub(vec_idx, b.mul(row, c_tnv)), b.const_i32(sv))
+                w = b.div(row, c_slab)
+                r_in = b.sub(row, b.mul(w, c_slab))
+                if spec.xh_stride_m:
+                    # Staging row mi_l * am + r holds pixel S * r + mi of the wave.
+                    mi_l_v = b.lshr(r_in, b.const_i32(am.bit_length() - 1))
+                    r_v = b.land(r_in, b.const_i32(am - 1))
+                    mi_v = b.add(mi_l_v, b.const_i32(c * cm)) if c * cm else mi_l_v
+                    g_row = b.add(
+                        b.mul(w, c_wrows), b.add(b.mul(r_v, b.const_i32(mfmas_m)), mi_v)
+                    )
+                else:
+                    g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
+                m_val = b.add(grid.block_m_off, g_row)
+                n_val = b.add(grid.block_n_off, col)
+                ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=sv)
+                off_elems, valid = addr_fn(b, m_val, n_val)
+                if valid is not None:
+                    ok = valid if ok is None else b.land(ok, valid)
+                off_b = b.mul(off_elems, c_eb)
+                safe = b.select(ok, off_b, oob) if ok is not None else off_b
+                vbf = b.smem_load_vN(c_smem, row, swz(row, col), dtype=BF16, n=sv)
+                b.buffer_store_vN_bf16(dx_rsrc, safe, b.const_i32(0), vbf, sv // 2)
+
+        if lin_ok is None:
+            _store_phase(dx_addr)
+        else:
+            with b.scf_if_else(lin_ok) as (then_ctx, else_ctx):
+                with then_ctx:
+                    _store_phase(dx_lin)
+                with else_ctx:
+                    _store_phase(dx_addr)
+
+
+def _dx_lin_addr(b: IRBuilder, spec: DgradConvSpec, params: Dict[str, Value],
+                 c_group_base: Optional[Value] = None):
+    """``(lin_ok, addr_fn)``: whether the dX pixel strides are row-major
+    consistent (uniform kernarg check) and the store offset m * stride_w + c
+    that is exact when they are (xh_epi_lin on the pp epilogue)."""
+    sw = params["p_dX_stride_wi"]
+    sh = params["p_dX_stride_hi"]
+    ok = b.cmp_eq(sh, b.mul(sw, params["p_Wi"]))
+    if spec.problem.is_3d:
+        sd = params["p_dX_stride_di"]
+        ok = b.land(ok, b.cmp_eq(sd, b.mul(sh, params["p_Hi"])))
+        ok = b.land(ok, b.cmp_eq(params["p_dX_stride_n"], b.mul(sd, params["p_Di"])))
+    else:
+        ok = b.land(ok, b.cmp_eq(params["p_dX_stride_n"], b.mul(sh, params["p_Hi"])))
+
+    def dx_lin(b_: IRBuilder, m_val: Value, n_val: Value):
+        c_ = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
+        return b_.add(b_.mul(m_val, sw), c_), None
+
+    return ok, dx_lin
+
+
+def _emit_pp_cshuffle_epilogue(
+    b: IRBuilder,
+    spec: DgradConvSpec,
+    accs: Sequence[Value],
+    grid: WarpGrid,
+    dx_rsrc: Value,
+    params: Dict[str, Value],
+    c_group_base: Optional[Value] = None,
+    pre_bf16: Optional[Sequence[Value]] = None,
+    addr: Optional[tuple] = None,
+) -> None:
+    """``tapk_pp_epi``: the cshuffle store of the ping-pong kernels (16x16
+    atoms, bf16 dX) in ``cshuffle_m_chunks`` row slabs, with the staging
+    rows' 16-byte chunks XOR-swizzled by the row's 4-row group: one
+    ds_write_b16 of a wave writes rows 4*m_blk + i of 16 columns for
+    m_blk = 0..3, which the unswizzled 512-byte rows put on one bank."""
+    from rocke.helpers.tensor_view import make_lds_view
+
+    # addr: (addr_fn, bounds) of rows that are not dense dX rows (pp_boxes).
+    dx_addr, bounds = (
+        addr if addr is not None
+        else _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
+    )
+    atom = spec.atom
+    mc = spec.cshuffle_m_chunks
+    mfmas_m, mfmas_n = spec.mfmas_per_warp_m, spec.mfmas_per_warp_n
+    cm = mfmas_m // mc
+    am, an = atom.m, atom.n
+    rows_c = spec.tile_m // mc
+    tile_n = spec.tile_n
+    threads = spec.block_size
+    sv = 8
+    c_view = make_lds_view(b, dtype=BF16, shape=(rows_c, tile_n), name_hint="C_smem")
+    c_smem = c_view.base
+    c1 = b.const_i32(1)
+    c3 = b.const_i32(3)
+    c4 = b.const_i32(4)
+
+    def swz(row: Value, col: Value) -> Value:
+        if spec.tapk_pp_epi == 2:
+            return b.xor(col, b.shl(b.land(row, b.const_i32(7)), c3))
+        return b.xor(col, b.shl(b.land(b.lshr(row, b.const_i32(2)), c3), c4))
+
+    warp_m_off_c = b.mul(grid.warp_m_idx, b.const_i32(cm * am))
+    warp_n_off = grid.warp_n_off(b)
+    c_threads = b.const_i32(threads)
+    c_tnv = b.const_i32(tile_n // sv)
+    c_slab = b.const_i32(cm * am)
+    c_wrows = b.const_i32(mfmas_m * am)
+    c_eb = b.const_i32(2)
+    oob = b.const_i32((1 << 31) - 1)
+    vecs_per_thread = (rows_c * tile_n // sv) // threads
+    if vecs_per_thread * threads * sv != rows_c * tile_n:
+        raise ValueError("tapk_pp_epi: the C slab does not split into 8-wide vectors per thread")
+    lin = (
+        _dx_lin_addr(b, spec, params, c_group_base)
+        if spec.xh_epi_lin and addr is None else None
+    )
+    for c in range(mc):
+        b.sync()
+        for mi_l in range(cm):
+            mi = c * cm + mi_l
+            for ni in range(mfmas_n):
+                v = (
+                    pre_bf16[mi * mfmas_n + ni]
+                    if pre_bf16 is not None
+                    else _pp_f32_to_bf16(b, spec, accs[mi * mfmas_n + ni])
+                )
+                if spec.tapk_pp_epi == 2:
+                    # Transposed C: lane l holds row l % 16, columns
+                    # 4 * (l / 16) .. +3 of the atom -- one 8-byte write.
+                    r = b.land(grid.lane, b.const_i32(am - 1))
+                    cc = b.shl(b.lshr(grid.lane, c4), b.const_i32(2))
+                    row = b.add(warp_m_off_c, b.add(b.const_i32(mi_l * am), r))
+                    col = b.add(warp_n_off, b.add(b.const_i32(ni * an), cc))
+                    b.smem_store_vN(c_smem, [row, swz(row, col)], v, atom.c_per_lane)
+                    continue
+                for i in range(atom.c_per_lane):
+                    r, cc = atom.lane_to_output(b, grid.lane, i)
+                    row = b.add(warp_m_off_c, b.add(b.const_i32(mi_l * am), r))
+                    col = b.add(warp_n_off, b.add(b.const_i32(ni * an), cc))
+                    b.smem_store_vN(c_smem, [row, swz(row, col)], b.vec_extract(v, i), 1)
+        b.sync()
+
+        def _store_phase(addr_fn, c=c):
+            for e in range(vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
+                row = b.div(vec_idx, c_tnv)
+                col = b.mul(b.sub(vec_idx, b.mul(row, c_tnv)), b.const_i32(sv))
+                w = b.div(row, c_slab)
+                r_in = b.sub(row, b.mul(w, c_slab))
+                g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
+                m_val = b.add(grid.block_m_off, g_row)
+                n_val = b.add(grid.block_n_off, col)
+                ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=sv)
+                off_elems, valid = addr_fn(b, m_val, n_val)
+                if valid is not None:
+                    ok = valid if ok is None else b.land(ok, valid)
+                off_b = b.mul(off_elems, c_eb)
+                safe = b.select(ok, off_b, oob) if ok is not None else off_b
+                vbf = b.smem_load_vN(c_smem, row, swz(row, col), dtype=BF16, n=sv)
+                b.buffer_store_vN_bf16(dx_rsrc, safe, b.const_i32(0), vbf, sv // 2)
+
+        if lin is None:
+            _store_phase(dx_addr)
+        else:
+            # xh_epi_lin: offset m * stride_w + c when the dX strides are
+            # row-major (one uniform branch), the generic decode otherwise.
+            with b.scf_if_else(lin[0]) as (then_ctx, else_ctx):
+                with then_ctx:
+                    _store_phase(lin[1])
+                with else_ctx:
+                    _store_phase(dx_addr)
 
 
 def _tilde_dx_addr_fn(
@@ -3816,6 +10818,7 @@ def _tilde_dx_addr_fn(
     c_C: Value,
     c_group_base: Optional[Value] = None,
     patch_cols: Optional[Tuple[Value, Value]] = None,
+    n_map=None,
 ):
     """Compute NHWC element offset + hi/wi validity for the tilde epilogues.
 
@@ -3839,6 +10842,9 @@ def _tilde_dx_addr_fn(
 
     n_val, m_rem = _magic_divmod(b, m_global, hw_tilde)
     htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
+    if n_map is not None:
+        # pp_boxes: the box-local leading index to the dX one.
+        n_val = n_map(b, n_val)
 
     hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
     wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
@@ -3919,6 +10925,55 @@ def _emit_dgrad_tilde_direct_epilogue(
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
         bounds=(bounds_m, bounds_n),
+    )
+
+
+def _emit_dgrad_box_cshuffle_epilogue(
+    b: IRBuilder,
+    spec: DgradConvSpec,
+    atom: MfmaAtom,
+    grid: WarpGrid,
+    accs: Sequence[Value],
+    dx_rsrc: Value,
+    *,
+    bounds_m: Value,
+    bounds_n: Value,
+    hw_tilde: _MagicDiv,
+    w_tilde_slice: _MagicDiv,
+    d_h_stride: Value,
+    d_h_offset: Value,
+    d_w_stride: Value,
+    d_w_offset: Value,
+    c_Hi: Value,
+    c_Wi: Value,
+    c_C: Value,
+    c_group_base: Optional[Value] = None,
+    patch_cols: Optional[Tuple[Value, Value]] = None,
+    n_map=None,
+    m_map=None,
+) -> None:
+    """pp_boxes: the cshuffle store of a box of dX rows (the tilde
+    address map with the record's (h, w) offsets; cshuffle_m_chunks
+    honoured). ``m_map``: box row -> the row the map decodes (pp_boxes 7)."""
+
+    def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+        if m_map is not None:
+            m_val = m_map(b_, m_val)
+        return _tilde_dx_addr_fn(
+            b_, m_val, n_val, hw_tilde, w_tilde_slice, d_h_stride, d_h_offset,
+            d_w_stride, d_w_offset, c_Hi, c_Wi, c_C, c_group_base, n_map=n_map,
+        )
+
+    epi = CShuffleEpilogue.from_grid(
+        atom=atom,
+        grid=grid,
+        max_store_vec=_dgrad_store_vec(spec),
+        out_dtype=spec.data.dtype_d,
+        no_alias=spec.cshuffle_no_alias,
+    )
+    epi = dc_replace(epi, war_barriers=1, m_chunks=spec.cshuffle_m_chunks)
+    epi.store(
+        b, accs=accs, addr_fn=dx_addr, d_rsrc=dx_rsrc, bounds=(bounds_m, bounds_n)
     )
 
 

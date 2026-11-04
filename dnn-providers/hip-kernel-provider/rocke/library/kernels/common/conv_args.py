@@ -479,11 +479,19 @@ class ConvArgs:
     # ---- the ABI ----
 
     def arg_names(
-        self, *, two_stage: bool = False, streamk: Optional[str] = None
+        self,
+        *,
+        two_stage: bool = False,
+        streamk: Optional[str] = None,
+        split_k: bool = False,
+        split_tail: bool = False,
+        split_flags: bool = False,
+        split_det: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
-        ``streamk`` is the stream-K reduction of a stream-K wgrad kernel.
+        ``streamk`` is the stream-K reduction of a stream-K wgrad kernel;
+        ``split_k`` selects the fwd split-K binary's ABI.
         """
         if self.algorithm == "direct":
             if two_stage or streamk is not None:
@@ -494,6 +502,10 @@ class ConvArgs:
             is_3d=self.geom.is_3d,
             two_stage=two_stage,
             streamk=streamk,
+            split_k=split_k,
+            split_tail=split_tail,
+            **({"split_flags": True} if split_flags else {}),
+            **({"split_det": True} if split_det else {}),
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -712,6 +724,7 @@ class ConvArgs:
         streamk: Optional[StreamKLaunch] = None,
         sk_flags: Optional[int] = None,
         sk_partials: Optional[int] = None,
+        full_tiles: Optional[int] = None,
     ) -> Dict[str, int]:
         """Return the ``values`` dict for ``KernelLauncher.__call__()``.
 
@@ -754,6 +767,25 @@ class ConvArgs:
         abi = self.arg_names(
             two_stage=ws_ptr is not None and streamk is None,
             streamk=streamk.reduction if streamk is not None else None,
+            # The MFMA fwd split-K binary (atomic store into D, no workspace)
+            # is launched at a degree > 1 only (degree 1 is the separate
+            # unsplit binary), so the degree selects its ABI; with a workspace
+            # the launch is the WMMA two-stage split (``two_stage``).
+            split_k=self.direction == "fwd"
+            and self.algorithm == "implicit_gemm"
+            and split_k > 1
+            and ws_ptr is None,
+            # A fwd split_tail binary: passing full_tiles selects its ABI.
+            split_tail=full_tiles is not None,
+            # A fwd split_flag_store binary: passing sk_flags selects its ABI.
+            # ... or a wgrad two-stage ws_fuse binary (its tile counters).
+            split_flags=sk_flags is not None and sk_partials is None and (
+                self.direction == "fwd"
+                or (self.direction == "wgrad" and ws_ptr is not None and streamk is None)
+            ),
+            # A fwd split_det binary: passing sk_partials selects its ABI.
+            **({"split_det": True}
+               if self.direction == "fwd" and sk_partials is not None else {}),
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(
@@ -766,6 +798,7 @@ class ConvArgs:
             "num_sub_gemms": num_sub_gemms,
             "sk_flags": sk_flags,
             "sk_partials": sk_partials,
+            "full_tiles": full_tiles,
         }
         supplied = {k: v for k, v in supplied.items() if v is not None}
         named = self._named_values()

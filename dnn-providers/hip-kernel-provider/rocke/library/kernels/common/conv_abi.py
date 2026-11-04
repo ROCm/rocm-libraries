@@ -183,6 +183,7 @@ def _wgrad_arg_names(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    ws_flags: bool = False,
 ) -> List[ArgSpec]:
     """Weight-gradient conv: ``dY`` (N[D]HWK), ``X`` (N[D]HWC), ``dW`` (K[Z]YXC).
 
@@ -253,6 +254,11 @@ def _wgrad_arg_names(
     out += [("ks", "i32"), ("ks_count", "i32")]
     if streamk in ("linear", "tree"):
         out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
+    if ws_flags:
+        # WgradConvSpec.ws_fuse: the per-tile counters of the fused reduction.
+        if not two_stage:
+            raise ValueError("ws_flags extends the wgrad two-stage ABI only")
+        out += [("sk_flags", "i32*")]
     if streamk is not None:
         out += [(name, "i32") for name in _STREAMK_SCALARS]
     return out
@@ -311,6 +317,10 @@ def conv_arg_names(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    split_k: bool = False,
+    split_tail: bool = False,
+    split_flags: bool = False,
+    split_det: bool = False,
 ) -> List[ArgSpec]:
     """The implicit-GEMM conv kernarg ABI for one direction.
 
@@ -329,7 +339,28 @@ def conv_arg_names(
     ``streamk`` (wgrad only) is the stream-K reduction, or ``None`` for a
     kernel without stream-K. Stream-K partitions K itself, so it excludes the
     two-stage split-K variant.
+
+    ``split_k`` (fwd only) selects the atomic (MFMA) forward split-K binary's
+    ABI: the problem block followed by ``ks`` (slice width, a multiple of
+    tile_k) and ``ks_count`` (slices; gridDim.z = groups * ks_count), no
+    workspace -- the slices add into D. wgrad always carries that pair, so the
+    flag is only meaningful for fwd; the workspace (WMMA) split is
+    ``two_stage``. ``split_tail`` (fwd split-K only) appends ``full_tiles``:
+    the tiles, in launch order, that run the whole reduction unsplit
+    (``ImplicitGemmConvSpec.split_tail``).
     """
+    if split_tail and not (split_k and direction == "fwd"):
+        raise ValueError("split_tail extends the fwd split-K ABI only")
+    if split_k and direction != "fwd":
+        raise ValueError(
+            f"split_k selects the fwd split-K ABI (got direction={direction!r}; "
+            f"wgrad always carries ks/ks_count)"
+        )
+    if split_k and two_stage:
+        raise ValueError(
+            "split_k (the atomic fwd split-K ABI) and two_stage (the workspace "
+            "fwd split-K ABI) are exclusive"
+        )
     if two_stage and direction not in ("wgrad", "fwd"):
         raise ValueError(
             f"two_stage is a wgrad / fwd split-K variant (got direction={direction!r})"
@@ -347,9 +378,30 @@ def conv_arg_names(
         if two_stage:
             raise ValueError("streamk and two_stage are exclusive: both partition K_wg")
     if direction == "fwd":
-        return _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
+        out = _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
+        if split_k:
+            out += [("ks", "i32"), ("ks_count", "i32")]
+        if split_tail:
+            out += [("full_tiles", "i32")]
+        if split_flags:
+            # ImplicitGemmConvSpec.split_flag_store: the per-tile flag pairs.
+            if not split_k:
+                raise ValueError("split_flags extends the fwd split-K ABI only")
+            out += [("sk_flags", "i32*")]
+        if split_det:
+            # ImplicitGemmConvSpec.split_det: the per-tile counters and the
+            # f32 partial-tile slots.
+            if not split_k or split_flags:
+                raise ValueError("split_det extends the fwd split-K ABI only (no split_flags)")
+            out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
+        return out
+    if split_det:
+        raise ValueError("split_det is a fwd-only variant")
     if direction == "wgrad":
-        return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
+        return _wgrad_arg_names(
+            is_3d=is_3d, two_stage=two_stage, streamk=streamk,
+            **({"ws_flags": True} if split_flags else {}),
+        )
     if direction == "dgrad":
         return _dgrad_arg_names(is_3d=is_3d)
     raise ValueError(
@@ -489,6 +541,10 @@ def conv_args_signature(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    split_k: bool = False,
+    split_tail: bool = False,
+    split_flags: bool = False,
+    split_det: bool = False,
 ) -> List[Dict[str, Any]]:
     """Implicit-GEMM conv launch signature for one direction.
 
@@ -504,7 +560,14 @@ def conv_args_signature(
     """
     return _conv_signature(
         conv_arg_names(
-            direction=direction, is_3d=is_3d, two_stage=two_stage, streamk=streamk
+            direction=direction,
+            is_3d=is_3d,
+            two_stage=two_stage,
+            streamk=streamk,
+            split_k=split_k,
+            split_tail=split_tail,
+            split_flags=split_flags,
+            **({"split_det": True} if split_det else {}),
         ),
         dtype,
         dtype_b or dtype,

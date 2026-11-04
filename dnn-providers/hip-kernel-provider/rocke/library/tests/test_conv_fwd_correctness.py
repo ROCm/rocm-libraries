@@ -677,6 +677,10 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
         if not _IS_MFMA:
             self.skipTest(f"{knobs} fwd is MFMA-only; running on {GPU_ARCH}")
         for shape in self._CASES:
+            if knobs.get("uniform_k_decode") and shape.Y * shape.X == 1:
+                # The per-tile filter-tap decode has no pointwise form (the
+                # spec rejects it): only the filtered cases run it.
+                continue
             for dtype in _DTYPES:
                 for epilogue in _EPILOGUES:
                     with self.subTest(shape=shape.id, dtype=dtype, epilogue=epilogue):
@@ -695,6 +699,36 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
 
     def test_unroll_k_odd_tiles(self):
         self._sweep(unroll_k=True)
+
+    # The register-prefetch loops and the per-tile filter-tap decode. C=32
+    # (cpg a multiple of tile_k) takes the uniform-tap loop, C=16 its plain
+    # fallback; 9 and 5 tiles exercise the odd tail of the two-buffer loop.
+    def test_reg_prefetch_one_buffer(self):
+        self._sweep(reg_prefetch=1)
+
+    def test_reg_prefetch_two_buffers(self):
+        self._sweep(reg_prefetch=2)
+
+    def test_uniform_k_decode(self):
+        self._sweep(uniform_k_decode=True)
+
+    def test_uniform_k_decode_reg_prefetch(self):
+        self._sweep(uniform_k_decode=True, reg_prefetch=1)
+        self._sweep(uniform_k_decode=True, reg_prefetch=2)
+
+    def test_lds_xor(self):
+        self._sweep(uniform_k_decode=True, reg_prefetch=1, lds_xor=True)
+        self._sweep(reg_prefetch=2, lds_xor=True)
+
+    def test_a_direct(self):
+        # A straight into the MFMA registers; 9 tiles run the x2-unrolled
+        # loop's odd tail, C=16 the plain fallback loop.
+        self._sweep(uniform_k_decode=True, reg_prefetch=1, a_direct=True)
+        self._sweep(uniform_k_decode=True, reg_prefetch=1, a_direct=True, lds_xor=True)
+
+    def test_xcd_remap(self):
+        self._sweep(xcd_remap=6)
+        self._sweep(xcd_remap=8, uniform_k_decode=True, reg_prefetch=2)
 
 
 if __name__ == "__main__":

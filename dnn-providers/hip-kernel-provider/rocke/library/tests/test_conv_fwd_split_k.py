@@ -13,6 +13,7 @@ partial last K tile and degrees past the K-tile count (empty slices).
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import importlib.util
 import os
 import unittest
@@ -62,7 +63,11 @@ class TestSplitKGate(unittest.TestCase):
         ok, why = is_valid_spec(_spec(split_k=2), "gfx1250")
         self.assertTrue(ok, why)
 
-    def test_mfma_is_rejected(self):
+    def test_mfma_is_the_atomic_split(self):
+        # On wave64 MFMA, split_k > 1 is the atomic split-K forward (the
+        # slices add into the zeroed D; fwd_split_k_conflict), not this
+        # workspace split: the cshuffle spec is valid, the default epilogue
+        # is not, and the cluster form stays WMMA-only.
         spec = _spec(
             split_k=2,
             wave_size=64,
@@ -74,6 +79,13 @@ class TestSplitKGate(unittest.TestCase):
             tile_n=64,
         )
         ok, why = is_valid_spec(spec, "gfx950")
+        self.assertTrue(ok, why)
+        ok, why = is_valid_spec(
+            dataclasses.replace(spec, epilogue="default", vector_size_c=1), "gfx950"
+        )
+        self.assertFalse(ok)
+        self.assertIn("cshuffle epilogue", why)
+        ok, why = is_valid_spec(dataclasses.replace(spec, split_k_cluster=4), "gfx950")
         self.assertFalse(ok)
         self.assertIn("WMMA-only", why)
 

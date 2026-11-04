@@ -104,6 +104,29 @@ DEFAULT_TIMING = "staged"
 BLOCK_TIMING = "block"
 
 
+def apply_hip_device_flags() -> None:
+    """``ROCKE_HIP_DEVICE_FLAGS=<n>`` (opt-in): ``hipSetDeviceFlags(n)`` before
+    the process creates its HIP context (1 spin, 2 yield, 4 blocking sync).
+
+    HIP's default host wait spins a CPU core; on an APU whose CPU and GPU
+    share one socket power cap that spin is power the GPU clock does not get.
+    Staged timing waits on the host after every sample, so it pays it on every
+    call. A harness setting -- compare only with numbers timed under the same
+    flags (Triton / MIOpen re-timed with them).
+    """
+    import os
+
+    v = os.environ.get("ROCKE_HIP_DEVICE_FLAGS", "")
+    if not v:
+        return
+    import ctypes
+
+    from rocke.runtime import hip_module
+
+    rc = hip_module._resolve_hip().hipSetDeviceFlags(ctypes.c_uint(int(v, 0)))
+    print(f"[timing] hipSetDeviceFlags({v}) -> {rc}", flush=True)
+
+
 def add_timing_arg(parser) -> None:
     """Add ``--timing`` to a sweep's parser."""
     parser.add_argument(
@@ -341,6 +364,50 @@ def time_batch_staged(
     return out
 
 
+def time_interleaved_staged(
+    runs: Sequence[Callable[[], None]],
+    *,
+    rounds: int,
+    iters: int,
+    warmup: int = 1,
+    stream: int = 0,
+) -> List[Optional[float]]:
+    """Per-candidate median of staged samples taken in interleaved rounds.
+
+    Staged samples drain the device after every call, so the clock state each
+    sample starts from drifts over a session -- in steps that last a few
+    hundred samples (a small kernel's per-call median moves by up to ~10%
+    between two blocks of ten samples with no change in between). Timing the
+    candidates one block after another, as :func:`time_batch_staged` does,
+    turns that drift into a ranking lottery between close candidates. Here
+    every round visits every candidate once (``warmup`` discarded samples,
+    then ``iters`` kept ones), the visiting order rotated each round, so each
+    candidate sees the same clock states; the result is the median of its
+    ``rounds * iters`` kept samples. ``None`` for a candidate that failed.
+    """
+    from statistics import median
+
+    from rocke.runtime.hip_module import HipError
+    from rocke.runtime.stall_gate import StallTimeout, time_launches_staged
+
+    n = len(runs)
+    samples: List[Optional[list]] = [[] for _ in range(n)]
+    for r in range(max(1, int(rounds))):
+        shift = r % max(1, n)
+        for j in range(n):
+            i = (j + shift) % n
+            if samples[i] is None:
+                continue
+            try:
+                samples[i].extend(
+                    time_launches_staged(runs[i], warmup=warmup, iters=iters, stream=stream)
+                )
+            except (StallTimeout, HipError, RuntimeError) as e:
+                print(f"  [interleaved] candidate {i}: {e}; not ranked", flush=True)
+                samples[i] = None
+    return [median(s) if s else None for s in samples]
+
+
 def rank(
     n: int,
     make_run: Callable[[int], Optional[Callable[[], None]]],
@@ -359,6 +426,13 @@ def rank(
     held_bytes: Optional[Callable[[], int]] = None,
     chunk_bytes: int = 0,
     timing: str = DEFAULT_TIMING,
+    recheck: int = 0,
+    recheck_rounds: int = 5,
+    recheck_iters: int = 4,
+    recheck_window: float = 0.0,
+    reprobe: int = 0,
+    interleave: int = 0,
+    reprobe_staged: bool = False,
 ) -> List[Ranked]:
     """Probe all ``n`` candidates, then time the best ``finalists`` in full.
 
@@ -394,6 +468,25 @@ def rank(
     :func:`time_batch_staged`, so ``ms`` is then a median of single-call
     samples. The probe is the same either way.
 
+    ``reprobe`` (opt-in): after the probe, the best ``reprobe`` candidates by
+    probe time are probed once more in reverse order and keep the lower of
+    their two probe times (a dropped candidate is bound again). With
+    ``reprobe_staged`` the second probe is staged samples instead (one visit,
+    1 discarded + max(2, probe_iters) kept, median), which replace the block
+    probe; candidates outside the re-probed pool cannot become finalists.
+    ``interleave`` (opt-in, staged): round 2 times the finalists with
+    :func:`time_interleaved_staged` over ``interleave`` rounds instead of one
+    block each.
+
+    ``recheck`` (opt-in, staged timing only): after round 2, the best
+    ``recheck`` finalists that passed (and, with ``recheck_window`` > 0, are
+    within that fraction of the best round-2 time) are timed again with
+    :func:`time_interleaved_staged` (``recheck_rounds`` x ``recheck_iters``
+    samples each, interleaved) and their ``ms`` becomes that median. The other
+    finalists' ``ms`` is scaled by the median ratio (recheck / round 2) of the
+    rechecked ones, so the whole table is on one clock footing and a finalist
+    left out of the recheck cannot win on a lucky round-2 block.
+
     Returns one :class:`Ranked` per candidate, in candidate order.
     """
     if timing not in TIMINGS:
@@ -419,50 +512,91 @@ def rank(
         for i in ordered[finalists:]:
             drop(i)
 
-    nxt = 0
-    while nxt < n:
-        runs = []
-        live = []
-        # Bind until the chunk is full by count, or until the caller is holding
-        # more device scratch than it wants to; a chunk always takes at least
-        # one candidate so an oversized one cannot stall the walk.
-        while nxt < n and len(runs) < max(1, chunk):
-            i = nxt
-            nxt += 1
-            run = make_run(i)
-            if run is None:
-                results[i].failed = True
-                drop(i)
+    def probe_pass(indices, combine_min=False, staged_probe=False) -> None:
+        nonlocal primed
+        pos = 0
+        while pos < len(indices):
+            runs = []
+            live = []
+            # Bind until the chunk is full by count, or until the caller is
+            # holding more device scratch than it wants to; a chunk always
+            # takes at least one candidate so an oversized one cannot stall
+            # the walk.
+            while pos < len(indices) and len(runs) < max(1, chunk):
+                i = indices[pos]
+                pos += 1
+                run = kept.get(i)
+                if run is None:
+                    run = make_run(i)
+                if run is None:
+                    results[i].failed = True
+                    drop(i)
+                    if on_probe is not None:
+                        on_probe(results[i])
+                    continue
+                runs.append(run)
+                live.append(i)
+                if chunk_bytes and held_bytes is not None and held_bytes() > chunk_bytes:
+                    break
+            if not runs:
+                continue
+            if not primed:
+                prime_device(runs[0], launches=primer, stream=stream)
+                primed = True
+            if staged_probe:
+                times = time_interleaved_staged(
+                    runs, rounds=1, iters=max(2, probe_iters), warmup=1, stream=stream
+                )
+            else:
+                times = time_batch(
+                    runs, warmup=probe_warmup, iters=probe_iters, stream=stream, chunk=chunk
+                )
+            for i, run, ms in zip(live, runs, times):
+                if ms is None:
+                    results[i].failed = True
+                else:
+                    old = results[i].probe_ms
+                    results[i].probe_ms = (
+                        min(old, ms) if combine_min and old is not None else ms
+                    )
+                    kept[i] = run
                 if on_probe is not None:
                     on_probe(results[i])
-                continue
-            runs.append(run)
-            live.append(i)
-            if chunk_bytes and held_bytes is not None and held_bytes() > chunk_bytes:
-                break
-        if not runs:
-            continue
-        if not primed:
-            prime_device(runs[0], launches=primer, stream=stream)
-            primed = True
-        times = time_batch(
-            runs, warmup=probe_warmup, iters=probe_iters, stream=stream, chunk=chunk
-        )
-        for i, run, ms in zip(live, runs, times):
-            if ms is None:
-                results[i].failed = True
-            else:
-                results[i].probe_ms = ms
-                kept[i] = run
-            if on_probe is not None:
-                on_probe(results[i])
-        # Trim to the best ``finalists`` as we go, so a candidate that cannot
-        # rank gives its launch -- and the caller its scratch -- back at the
-        # end of the chunk that measured it rather than at the end of the case.
-        trim()
-        for i in live:
-            if results[i].failed:
+            # Trim to the best ``finalists`` as we go, so a candidate that
+            # cannot rank gives its launch -- and the caller its scratch --
+            # back at the end of the chunk that measured it rather than at
+            # the end of the case.
+            trim()
+            for i in live:
+                if results[i].failed:
+                    drop(i)
+
+    probe_pass(list(range(n)))
+    if reprobe:
+        # Second probe of the best ``reprobe`` (by their first probe), in
+        # reverse order -- a candidate's chunk neighbours and its place in
+        # the chunk change -- each keeping the lower of its two probes. A
+        # one-shot probe is noisy enough (+-15% on a 0.5 ms kernel) to leave
+        # the true best outside ``finalists``; the noise is one-sided (a
+        # probe is slowed by its neighbours, never sped up), hence the min.
+        pool = sorted(
+            (r.index for r in results if r.probe_ms is not None and not r.failed),
+            key=lambda i: results[i].probe_ms,
+        )[: int(reprobe)]
+        if reprobe_staged:
+            # The pool re-probed with staged samples (the protocol round 2
+            # reports), which replace the block probe; everything outside the
+            # pool is out, so the two scales never compete.
+            probe_pass(pool, staged_probe=True)
+            inpool = set(pool)
+            for i in [i for i in kept if i not in inpool]:
                 drop(i)
+            trim()
+            how = "with staged samples"
+        else:
+            probe_pass(pool[::-1], combine_min=True)
+            how = "in reverse order (min of two)"
+        print(f"  reprobe: {len(pool)} best probes re-probed {how}", flush=True)
 
     # Round 2. The finalists are verified first and then timed as one batch.
     # In block timing a candidate's timed launches start right after the
@@ -476,7 +610,18 @@ def rank(
             # number; the caller reads ``passed`` and keeps it from ranking.
             results[i].passed = on_finalist(i, kept[i])
     finals = [kept[i] for i in order]
-    if timing == "staged":
+    if timing == "staged" and interleave:
+        # Opt-in: every finalist sees the same clock states (see
+        # time_interleaved_staged); ceil(iters / interleave) kept samples per
+        # visit, one discarded warmup sample per visit.
+        times = time_interleaved_staged(
+            finals,
+            rounds=interleave,
+            iters=max(1, -(-iters // interleave)),
+            warmup=1,
+            stream=stream,
+        )
+    elif timing == "staged":
         times = time_batch_staged(finals, warmup=warmup, iters=iters, stream=stream)
     else:
         times = time_batch(
@@ -487,4 +632,44 @@ def rank(
             results[i].failed = True
         else:
             results[i].ms = ms
+    if recheck and timing == "staged":
+        _recheck(results, kept, recheck, recheck_rounds, recheck_iters, recheck_window, stream)
     return results
+
+
+def _recheck(results, kept, n, rounds, iters, window, stream) -> None:
+    """The ``recheck`` step of :func:`rank` (see there)."""
+    from statistics import median
+
+    ok = sorted(
+        (r for r in results if r.ms is not None and r.passed is not False),
+        key=lambda r: r.ms,
+    )
+    if len(ok) < 2:
+        return
+    best = ok[0].ms
+    pick = [r for r in ok[: max(2, n)] if not window or r.ms <= best * (1.0 + window)]
+    if len(pick) < 2:
+        return
+    times = time_interleaved_staged(
+        [kept[r.index] for r in pick], rounds=rounds, iters=iters, stream=stream
+    )
+    ratios = []
+    for r, ms in zip(pick, times):
+        if ms is None:
+            r.failed = True
+            r.ms = None
+            continue
+        ratios.append(ms / r.ms)
+        r.ms = ms
+    print(
+        f"  recheck: {len(pick)} finalist(s) re-timed in {rounds} interleaved "
+        f"rounds x {iters} staged samples",
+        flush=True,
+    )
+    if ratios:
+        scale = median(ratios)
+        done = {r.index for r in pick}
+        for r in results:
+            if r.ms is not None and r.index not in done:
+                r.ms *= scale

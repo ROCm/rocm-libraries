@@ -2393,8 +2393,21 @@ class IRBuilder:
         value: Value,
         *,
         ordering: str = "monotonic",
+        syncscope: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> Value:
         """Packed-bf16 atomic add: two bf16 lanes per transaction.
+
+        ``syncscope`` (``None`` = LLVM's default system scope, which sets SC1
+        on gfx94x and performs the atomic beyond the L2) may name ``"agent"``:
+        device scope, performed in the L2 (SC1 clear). Omitted from the op's
+        attributes when ``None``, so existing kernels are unchanged.
+
+        ``scope`` (default None = LLVM's system scope): the same, recorded as
+        the op's ``scope`` attribute -- e.g. ``"workgroup"``: on gfx942 a
+        narrower scope keeps the atomic in the XCD's L2, which is only
+        correct when every atomic to the address comes from that XCD. Give
+        at most one of the two.
 
         Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2bf16``
         intrinsic (gfx940+); returns the pre-add value. ``value``
@@ -2405,6 +2418,8 @@ class IRBuilder:
         """
         if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
             raise ValueError(f"unknown ordering {ordering!r}")
+        if syncscope is not None and scope:
+            raise ValueError("global_atomic_add_pk_bf16: give syncscope or scope, not both")
         if not isinstance(value.type, VectorType):
             raise ValueError(
                 f"global_atomic_add_pk_bf16 expects <2 x bf16> input, "
@@ -2419,7 +2434,13 @@ class IRBuilder:
             "memref.global_atomic_add_pk_bf16",
             [ptr, idx, value],
             [value.type],
-            attrs={"elem_type": "bf16", "vec": 2, "ordering": ordering},
+            attrs={
+                "elem_type": "bf16",
+                "vec": 2,
+                "ordering": ordering,
+                **({"syncscope": syncscope} if syncscope is not None else {}),
+                **({"scope": scope} if scope else {}),
+            },
             result_name_hint="atom_bf16",
         ).result
 
@@ -2512,8 +2533,12 @@ class IRBuilder:
         expect: Value,
         *,
         scope: str = "agent",
+        ordering: str = "acquire",
     ) -> None:
         """Spin until the i32 flag ``ptr[idx]`` equals ``expect``.
+
+        ``ordering="monotonic"`` spins on relaxed loads (no cache
+        invalidate per poll); the caller then places one acquire fence.
 
         Lowers to a self-contained loop around an ``acquire`` atomic load at
         ``scope``, so global loads issued after the wait observe every store
@@ -2528,10 +2553,13 @@ class IRBuilder:
             )
         if scope not in _FENCE_SCOPES:
             raise ValueError(f"unknown flag scope {scope!r}")
+        if ordering not in ("acquire", "monotonic"):
+            raise ValueError(f"unknown flag wait ordering {ordering!r}")
         self._op(
             "memref.global_flag_wait_eq",
             [ptr, idx, expect],
-            attrs={"scope": scope},
+            attrs={"scope": scope} if ordering == "acquire"
+            else {"scope": scope, "ordering": ordering},
         )
 
     def fp16_zero(self) -> Value:
@@ -2608,6 +2636,17 @@ class IRBuilder:
             attrs={"axis": "z"},
             result_types=[I32],
             result_name_hint="bid",
+        ).result
+
+    def grid_dim(self, axis: str = "x", block_size: int = 1) -> Value:
+        """Workgroups launched along ``axis`` (gridDim): the dispatch
+        packet's grid size (work-items) over ``block_size``, the kernel's
+        workgroup size along that axis (a build-time constant here)."""
+        return self._op(
+            "gpu.grid_dim",
+            attrs={"axis": axis, "block_size": int(block_size)},
+            result_types=[I32],
+            result_name_hint="gdim",
         ).result
 
     # ----- gfx1250 workgroup clusters -----
@@ -5613,7 +5652,8 @@ class IRBuilder:
         ).result
 
     def buffer_load_vN(
-        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type", n: int
+        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type", n: int,
+        aux: int = 0,
     ) -> Value:
         """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
 
@@ -5638,6 +5678,13 @@ class IRBuilder:
         if nbytes >= 4:
             attrs["dwords"] = nbytes // 4
         attrs["elem_type"] = dtype.name
+        if aux:
+            # Cache-policy (AUX) bits of a load of 8 bytes or more, e.g. 16 =
+            # SC1 on gfx942 (an agent-coherent read, as LLVM's agent-scope
+            # atomic loads). 0 (default) adds no attribute.
+            if nbytes < 8:
+                raise ValueError("buffer_load_vN: aux needs dwords >= 2")
+            attrs["aux"] = int(aux)
         return self._op(
             "tile.buffer_load_vN",
             [rsrc, voffset, soffset],
@@ -5838,16 +5885,24 @@ class IRBuilder:
         )
 
     def buffer_store_vN_f32(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, n: int
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, n: int,
+        aux: int = 0,
     ) -> None:
         """Vectorised f32 buffer store. n in {1, 2, 4}; each f32 = 1 dword.
         OOB voffsets are silently dropped (buffer rsrc bounds-check)."""
         if n not in (1, 2, 4):
             raise ValueError(f"buffer_store_vN_f32 n must be 1, 2, or 4 (got {n})")
+        attrs = {"dwords": int(n)}
+        if aux:
+            # Cache-policy (AUX) bits of the n >= 2 store, e.g. 16 = SC1 on
+            # gfx942 (agent-coherent, as LLVM's agent-scope atomic stores).
+            if n == 1:
+                raise ValueError("buffer_store_vN_f32: aux needs n >= 2")
+            attrs["aux"] = int(aux)
         self._op(
             "tile.buffer_store_vN_f32",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(n)},
+            attrs=attrs,
         )
 
     def buffer_store_vN(
@@ -6233,6 +6288,7 @@ class IRBuilder:
         iv_name: str = "k0",
         unroll: bool = False,
         elide_trailing_barrier: bool = True,
+        smem_per_iteration: bool = False,
     ) -> "_ForBuilder":
         """Create a scf.for loop with iteration arguments.
 
@@ -6248,6 +6304,10 @@ class IRBuilder:
         elide_trailing_barrier: Phase 4 optimization (default: True)
         - True: automatically elide trailing sync() in non-final iterations
         - False: preserve all barriers (for manually optimized kernels)
+        smem_per_iteration: no LDS contents live across the back edge (the
+        body ends in a workgroup barrier and rewrites every LDS buffer it
+        reads before reading it), so LDS allocations are aliased by one
+        iteration's liveness instead of the whole loop's. Default False.
 
         No init may be a buffer descriptor (see
         :func:`_loop_carried_descriptor_message`).
@@ -6276,6 +6336,7 @@ class IRBuilder:
                 "num_iter_args": len(iter_args),
                 "unroll": unroll,
                 "elide_trailing_barrier": elide_trailing_barrier,
+                **({"smem_per_iteration": True} if smem_per_iteration else {}),
             },
             results=results,
             regions=[body],
@@ -6471,6 +6532,7 @@ PURE_OP_NAMES = {
     "vector.insert",
     "gpu.thread_id",
     "gpu.block_id",
+    "gpu.grid_dim",
     "gpu.cluster_id",
     "gpu.cluster_workgroup_id",
     "gpu.cluster_workgroup_max_id",
