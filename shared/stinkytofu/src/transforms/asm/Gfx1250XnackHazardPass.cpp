@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,22 +21,17 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardProfile.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250ReplayGroup.hpp"
 
 namespace {
 using namespace stinkytofu;
 
-enum class MemoryGroupKind {
-    None,
-    SMEM,
-    VMEM,
-    Other,
-};
-
-enum class ReplayMode {
-    SingleGroup,
-    MultiGroup,
-};
+using gfx1250::getReplayGroupKind;
+using gfx1250::isScalarPrefetch;
+using MemoryGroupKind = gfx1250::ReplayGroupKind;
+using ReplayMode = gfx1250::ReplayMode;
 
 // This pass currently implements only the single-group policy. Keep the
 // mapping explicit because gfx1250 categorizes tensor memory differently in
@@ -60,19 +55,6 @@ struct GroupState {
         sources.clear();
     }
 };
-
-MemoryGroupKind getMemoryGroupKind(const StinkyInstruction& inst, ReplayMode replayMode) {
-    if (isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic))
-        return MemoryGroupKind::SMEM;
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isFLATLoad(inst) ||
-        isFLATStore(inst) || isFLATAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
-        isGLOBALAtomic(inst))
-        return MemoryGroupKind::VMEM;
-    if (isTensorLoad(inst))
-        return replayMode == ReplayMode::SingleGroup ? MemoryGroupKind::Other
-                                                     : MemoryGroupKind::VMEM;
-    return MemoryGroupKind::None;
-}
 
 bool isAtomic(const StinkyInstruction& inst) {
     return isGlobalMemAtomic(inst);
@@ -108,31 +90,6 @@ bool returnsMultipleDwords(const StinkyInstruction& inst) {
     return dwords > 1;
 }
 
-bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
-    const auto& srcs = inst.getSrcRegs();
-    return srcs.size() == 1 && srcs.front().dataType == StinkyRegister::Type::LiteralInt &&
-           srcs.front().getLiteralInt() == 0;
-}
-
-// A zero-count data wait guarantees translation for the corresponding memory
-// operations. Nonzero waits leave work in flight and are not full drains.
-bool isFullTranslationDrain(const StinkyInstruction& inst) {
-    switch (inst.getUnifiedOpcode()) {
-        case GFX::s_wait_xcnt:
-        case GFX::s_wait_loadcnt:
-        case GFX::s_wait_kmcnt:
-        case GFX::s_wait_dscnt:
-        case GFX::s_wait_loadcnt_dscnt:
-        case GFX::s_wait_tensorcnt:
-        case GFX::s_wait_storecnt:
-        case GFX::s_wait_storecnt_dscnt:
-        case GFX::s_wait_asynccnt:
-            return hasZeroWaitImmediate(inst);
-        default:
-            return false;
-    }
-}
-
 bool isForeverSleep(const StinkyInstruction& inst) {
     if (inst.getUnifiedOpcode() != GFX::s_sleep) {
         return false;
@@ -144,17 +101,16 @@ bool isForeverSleep(const StinkyInstruction& inst) {
     return (static_cast<uint16_t>(srcs.front().getLiteralInt()) & 0x8000U) != 0;
 }
 
-bool isScalarPrefetch(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_prefetch_inst_pc_rel;
-}
-
 bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayMode replayMode) {
     for (auto next = std::next(it); next != bb.end(); ++next) {
         auto* inst = dyn_cast<StinkyInstruction>(next.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) {
             continue;
         }
-        return getMemoryGroupKind(*inst, replayMode) != MemoryGroupKind::None;
+        // Prefetch does not consume VGPR-MSB state, so adjacency to it cannot
+        // make s_set_vgpr_msb safe while a replay group is open.
+        if (isScalarPrefetch(*inst)) return false;
+        return getReplayGroupKind(*inst, replayMode) != MemoryGroupKind::None;
     }
     return false;
 }
@@ -163,7 +119,7 @@ bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayM
 // memory-level parallelism. Report it: a register allocation without the
 // overlap would have kept the group intact.
 void warnGroupBreak(const BasicBlock& bb, const StinkyInstruction& inst, const char* memKind) {
-    std::cerr << "[Gfx1250HazardPass] warning: " << memKind << " instruction in block \""
+    std::cerr << "[Gfx1250XnackHazardPass] warning: " << memKind << " instruction in block \""
               << bb.getLabel()
               << "\" overwrites a replay source of its group; "
                  "inserting s_wait_xcnt 0 to break the group:\n";
@@ -175,7 +131,7 @@ void warnGroupBreak(const BasicBlock& bb, const StinkyInstruction& inst, const c
 // partially complete, and the XNACKed DWORDs then replay with the source
 // already clobbered. Only a different register allocation can fix it.
 void reportUnrepairableSmemSelfOverlap(const BasicBlock& bb, const StinkyInstruction& inst) {
-    std::cerr << "[Gfx1250HazardPass] error: multi-DWORD SMEM instruction in block \""
+    std::cerr << "[Gfx1250XnackHazardPass] error: multi-DWORD SMEM instruction in block \""
               << bb.getLabel()
               << "\" overwrites one of its own source registers; "
                  "s_wait_xcnt cannot repair this register allocation:\n";
@@ -196,19 +152,19 @@ void assertFallthrough(const BasicBlock& previous, const BasicBlock& next) {
            "fall-through successor is missing its predecessor edge");
 }
 
-class Gfx1250HazardPass : public Pass {
+class Gfx1250XnackHazardPass : public Pass {
    public:
     static char ID;
 
-    explicit Gfx1250HazardPass(bool enableXcntDrainProfile)
+    explicit Gfx1250XnackHazardPass(bool enableXcntDrainProfile)
         : enableXcntDrainProfile(enableXcntDrainProfile) {}
 
     const char* getName() const override {
-        return "Gfx1250HazardPass";
+        return "Gfx1250XnackHazardPass";
     }
 
     Pass::ID getPassID() const override {
-        return &Gfx1250HazardPass::ID;
+        return &Gfx1250XnackHazardPass::ID;
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
@@ -252,10 +208,6 @@ class Gfx1250HazardPass : public Pass {
 
         if (isTensorLoad(*inst)) profile.noteTensorLoad();
 
-        if (isFullTranslationDrain(*inst)) {
-            state.clear();
-            return;
-        }
         if (enableXnackReplay) {
             if (isForeverSleep(*inst)) {
                 if (state.hasMemory)
@@ -267,9 +219,10 @@ class Gfx1250HazardPass : public Pass {
             }
 
             // SW-prefetch runs later and owns its hints' XCnt waits; handle only
-            // pre-existing scalar prefetches here.
+            // pre-existing scalar prefetches here. A prefetch joins the SMEM group,
+            // so hardware already drains XCNT when it follows any other group.
             if (isScalarPrefetch(*inst)) {
-                if (state.hasMemory)
+                if (state.hasMemory && state.kind == MemoryGroupKind::SMEM)
                     insertXcntDrain(builder, archId, inst, state, profile,
                                     XcntDrainReason::ScalarPrefetch);
                 state.clear();
@@ -286,10 +239,11 @@ class Gfx1250HazardPass : public Pass {
             }
         }
 
-        const MemoryGroupKind kind = getMemoryGroupKind(*inst, kReplayMode);
+        const MemoryGroupKind kind = getReplayGroupKind(*inst, kReplayMode);
         if (kind == MemoryGroupKind::None) {
             // In single-group mode hardware drains XCNT before every real
-            // non-memory instruction, including control flow.
+            // non-memory instruction, including control flow and s_wait_*
+            // with any immediate value.
             state.clear();
             return;
         }
@@ -374,6 +328,11 @@ class Gfx1250HazardPass : public Pass {
    public:
     static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile,
                               bool enableXnackReplay) {
+        if (enableXnackReplay && gfx1250::mayEnableMultiGroupReplay(func)) {
+            report_fatal_error("Gfx1250XnackHazardPass: '" + func.getName() +
+                               "' may set MODE.REPLAY_MODE (multi-group XNACK replay), but only "
+                               "the single-group replay policy is implemented");
+        }
         profile.beginFunction(func);
 
         GroupState state;
@@ -398,17 +357,17 @@ class Gfx1250HazardPass : public Pass {
     bool enableXcntDrainProfile = false;
 };
 
-char Gfx1250HazardPass::ID = 0;
+char Gfx1250XnackHazardPass::ID = 0;
 
 // Runs the per-function hazard fix under one shared profile so an enabled profile
 // aggregates all functions. Only needed for profiling.
-class Gfx1250HazardModulePass : public ModulePass {
+class Gfx1250XnackHazardModulePass : public ModulePass {
    public:
-    explicit Gfx1250HazardModulePass(bool enableXcntDrainProfile)
+    explicit Gfx1250XnackHazardModulePass(bool enableXcntDrainProfile)
         : enableXcntDrainProfile(enableXcntDrainProfile) {}
 
     const char* getName() const override {
-        return "Gfx1250HazardModulePass";
+        return "Gfx1250XnackHazardModulePass";
     }
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
@@ -422,7 +381,7 @@ class Gfx1250HazardModulePass : public ModulePass {
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
         for (Function* f : M.getFunctions())
             if (f && !f->empty())
-                Gfx1250HazardPass::runOnFunction(*f, archId, *profile, caps.enableXnackReplay);
+                Gfx1250XnackHazardPass::runOnFunction(*f, archId, *profile, caps.enableXnackReplay);
         profile->print();
         return PreservedAnalyses::all();
     }
@@ -433,11 +392,11 @@ class Gfx1250HazardModulePass : public ModulePass {
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createGfx1250HazardPass(bool enableXcntDrainProfile) {
-    return std::make_unique<Gfx1250HazardPass>(enableXcntDrainProfile);
+std::unique_ptr<Pass> createGfx1250XnackHazardPass(bool enableXcntDrainProfile) {
+    return std::make_unique<Gfx1250XnackHazardPass>(enableXcntDrainProfile);
 }
 
-std::unique_ptr<ModulePass> createGfx1250HazardModulePass(bool enableXcntDrainProfile) {
-    return std::make_unique<Gfx1250HazardModulePass>(enableXcntDrainProfile);
+std::unique_ptr<ModulePass> createGfx1250XnackHazardModulePass(bool enableXcntDrainProfile) {
+    return std::make_unique<Gfx1250XnackHazardModulePass>(enableXcntDrainProfile);
 }
 }  // namespace stinkytofu
