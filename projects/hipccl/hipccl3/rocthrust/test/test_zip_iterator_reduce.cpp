@@ -29,7 +29,6 @@ struct TuplePlus
 {
   THRUST_HOST_DEVICE Tuple operator()(Tuple x, Tuple y) const
   {
-    using namespace thrust;
     return _THRUST_STD::make_tuple(
       _THRUST_STD::get<0>(x) + _THRUST_STD::get<0>(y), _THRUST_STD::get<1>(x) + _THRUST_STD::get<1>(y));
   }
@@ -64,14 +63,14 @@ TYPED_TEST(ZipIteratorReduceTests, TestZipIteratorReduce)
       Tuple h_result = thrust::reduce(
         make_zip_iterator(h_data0.begin(), h_data1.begin()),
         make_zip_iterator(h_data0.end(), h_data1.end()),
-        make_tuple<T, T>(0, 0),
+        _THRUST_STD::make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
 
       // run on device
       Tuple d_result = thrust::reduce(
         make_zip_iterator(d_data0.begin(), d_data1.begin()),
         make_zip_iterator(d_data0.end(), d_data1.end()),
-        make_tuple<T, T>(0, 0),
+        _THRUST_STD::make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
 
       ASSERT_EQ(_THRUST_STD::get<0>(h_result), _THRUST_STD::get<0>(d_result));
