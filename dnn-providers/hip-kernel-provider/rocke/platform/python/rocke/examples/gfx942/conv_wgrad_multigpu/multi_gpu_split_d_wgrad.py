@@ -102,6 +102,25 @@ def _build_wgrad_spec(problem, a, tgt, atom):
         is_valid_wgrad_spec,
     )
 
+    # These "deduced" fields are not opt-in experimental knobs -- they are
+    # what benchmark_implicit_gemm_conv.py's own wgrad combo builder
+    # (_build_wgrad_one) always derives per-combo from a policy function,
+    # the same one dispatch would use. Leaving them at the dataclass
+    # defaults (effectively off) measured ~60% slower in a hand sweep:
+    # lds_k_outer/lds_k_pad govern the LDS tile layout for the K-outer
+    # path, and prefetch_addr enables address prefetch in the K loop.
+    lds_k_outer = WgradConvSpec.default_lds_k_outer(
+        arch=a.arch, dtype_a=a.dtype, dtype_b=a.dtype,
+        warp_tile_m=a.warp_tile_mn, warp_tile_n=a.warp_tile_mn, wave_size=tgt.wave_size,
+    )
+    lds_k_pad = WgradConvSpec.default_lds_k_pad(
+        arch=a.arch, tile_k=a.tile_k, dtype_a=a.dtype, dtype_b=a.dtype,
+        lds_k_outer=lds_k_outer, async_dma=False, wave_size=tgt.wave_size,
+    )
+    prefetch_addr = WgradConvSpec.default_prefetch_addr(
+        arch=a.arch, tile_m=a.tile_m, tile_n=a.tile_n, tile_k=a.tile_k,
+        lds_k_outer=lds_k_outer, wave_size=tgt.wave_size, async_dma=False,
+    )
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_mgpu_wgrad",
@@ -118,6 +137,9 @@ def _build_wgrad_spec(problem, a, tgt, atom):
         pipeline=a.pipeline,
         epilogue=a.epilogue,
         split_k=a.split_k,
+        lds_k_outer=lds_k_outer,
+        lds_k_pad=lds_k_pad,
+        prefetch_addr=prefetch_addr,
     )
     ok, why = is_valid_wgrad_spec(spec, a.arch)
     if not ok:
