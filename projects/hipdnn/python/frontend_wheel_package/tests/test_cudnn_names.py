@@ -56,10 +56,16 @@ class TestCudnnTensor:
 
     def test_positional_dim_and_stride_and_flags(self):
         tensor = hipdnn.Graph.tensor(
-            (4, 1), (1, 1), hipdnn.DataType.FLOAT, is_virtual=True, uid=7
+            (4, 1),
+            (1, 1),
+            hipdnn.DataType.FLOAT,
+            is_virtual=True,
+            is_pass_by_value=True,
+            uid=7,
         )
         assert tensor.get_dim() == [4, 1]
         assert tensor.get_is_virtual() is True
+        assert tensor.get_is_pass_by_value() is True
         assert tensor.get_uid() == 7
 
     def test_default_data_type_is_not_set(self):
@@ -101,6 +107,21 @@ class TestDtypeObjects:
         tensor = hipdnn.Tensor.create([1], hipdnn.DataType.NOT_SET)
         assert tensor.set_data_type(dtype) is tensor
         assert tensor.get_data_type() == expected
+
+    @pytest.mark.parametrize("scalar_type", [np.intc, np.longlong, np.int_, np.half])
+    def test_numpy_scalar_type_aliases_map_like_their_dtype(self, scalar_type):
+        # Aliases such as numpy.intc have a class name that is not the canonical
+        # dtype name, so they must resolve through numpy.dtype().
+        expected = hipdnn.Graph.tensor(
+            dim=[1], stride=[1], data_type=np.dtype(scalar_type)
+        ).get_data_type()
+        assert (
+            hipdnn.Graph.tensor(
+                dim=[1], stride=[1], data_type=scalar_type
+            ).get_data_type()
+            == expected
+        )
+        assert hipdnn.Tensor().set_data_type(scalar_type).get_data_type() == expected
 
     def test_numpy_dtype_without_hipdnn_type_raises_value_error(self):
         with pytest.raises(ValueError, match="complex64"):

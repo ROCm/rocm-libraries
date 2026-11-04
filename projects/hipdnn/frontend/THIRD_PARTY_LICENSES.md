@@ -13,8 +13,10 @@ hipDNN contains source code derived from the following third-party project.
   and of `hipdnn_frontend/Types.hpp` and `hipdnn_frontend/Error.hpp` are derived
   from cuDNN frontend. The cuDNN-shim samples (`samples/cudnn_shim/ConvFprop.cpp`,
   `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp`, `Pointwise.cpp`) mirror
-  upstream samples. Each such file carries a "Portions derived from NVIDIA cuDNN
-  frontend" header naming its upstream sources.
+  upstream samples. The causal-mask and diagonal-band argument handling of the
+  Python bindings' keyword `sdpa` (`python/frontend_bindings/src/graph_kwargs_bindings.cpp`)
+  is derived from upstream `python/pygraph/sdpa.cpp`. Each such file carries a
+  "Portions derived from NVIDIA cuDNN frontend" header naming its upstream sources.
 
 ```
 Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.

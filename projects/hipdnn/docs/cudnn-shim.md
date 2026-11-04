@@ -4,7 +4,7 @@ Header-only layer that exposes the NVIDIA cuDNN frontend (FE) v9 graph API on to
 
 - Source compatible, not ABI compatible. Consumers recompile.
 - v9 graph API only. The v0.x / v8 builder and backend-descriptor API is not provided.
-- C++ only. No Python bindings.
+- C++ only. For `cudnn.pygraph` code, see the [cuDNN-style Python API](../python/README.md#cudnn-style-api).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 

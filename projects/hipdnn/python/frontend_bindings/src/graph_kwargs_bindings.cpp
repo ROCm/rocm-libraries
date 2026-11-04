@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   python/pygraph/sdpa.cpp
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: frontend/THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 #include "bindings.hpp"
 #include "cudnn_compat.hpp"
@@ -166,22 +172,14 @@ void setAttnScale(AttributesT& attributes, const std::optional<AttnScale>& attnS
     }
 }
 
-// Forward sdpa only, as in cuDNN: the deprecated causal flags become an alignment
-// plus a zero right bound, so they conflict with an explicit right bound, and
-// sliding_window_length is the deprecated spelling of the left bound.
-struct DiagonalBand
-{
-    DiagonalAlignment alignment;
-    std::optional<int64_t> leftBound;
-    std::optional<int64_t> rightBound;
-};
-
-DiagonalBand resolveDiagonalBand(bool useCausalMask,
-                                 bool useCausalMaskBottomRight,
-                                 std::optional<int64_t> slidingWindowLength,
-                                 DiagonalAlignment diagonalAlignment,
-                                 std::optional<int64_t> leftBound,
-                                 std::optional<int64_t> rightBound)
+// Forward sdpa only, as in cuDNN: the deprecated causal flags set a zero right bound,
+// so they conflict with an explicit right bound, and sliding_window_length is the
+// deprecated spelling of the left bound. cuDNN's backward has no such checks.
+void checkDiagonalBandConflicts(bool useCausalMask,
+                                bool useCausalMaskBottomRight,
+                                std::optional<int64_t> slidingWindowLength,
+                                std::optional<int64_t> leftBound,
+                                std::optional<int64_t> rightBound)
 {
     if(useCausalMask && useCausalMaskBottomRight)
     {
@@ -202,41 +200,33 @@ DiagonalBand resolveDiagonalBand(bool useCausalMask,
     {
         throw std::runtime_error("sliding window and left_bound cannot be set at the same time");
     }
-
-    DiagonalBand band{
-        diagonalAlignment, slidingWindowLength ? slidingWindowLength : leftBound, rightBound};
-    if(useCausalMask)
-    {
-        band.alignment = DiagonalAlignment::TOP_LEFT;
-        band.rightBound = 0;
-    }
-    if(useCausalMaskBottomRight)
-    {
-        band.alignment = DiagonalAlignment::BOTTOM_RIGHT;
-        band.rightBound = 0;
-    }
-    return band;
 }
 
+// Applied in cuDNN's order, so without the forward checks a later bound overrides what
+// a causal flag set.
 template <typename AttributesT>
-void setDiagonalBand(AttributesT& attributes, const DiagonalBand& band)
+void applyDiagonalBand(AttributesT& attributes,
+                       bool useCausalMask,
+                       bool useCausalMaskBottomRight,
+                       std::optional<int64_t> slidingWindowLength,
+                       DiagonalAlignment diagonalAlignment,
+                       std::optional<int64_t> leftBound,
+                       std::optional<int64_t> rightBound)
 {
-    attributes.set_diagonal_alignment(band.alignment);
-    if(band.leftBound)
+    attributes.set_diagonal_alignment(diagonalAlignment)
+        .set_causal_mask(useCausalMask)
+        .set_causal_mask_bottom_right(useCausalMaskBottomRight);
+    if(slidingWindowLength)
     {
-        attributes.set_diagonal_band_left_bound(*band.leftBound);
+        attributes.set_diagonal_band_left_bound(*slidingWindowLength);
     }
-    if(band.rightBound)
+    if(leftBound)
     {
-        attributes.set_diagonal_band_right_bound(*band.rightBound);
+        attributes.set_diagonal_band_left_bound(*leftBound);
     }
-}
-
-void requireNone(const nb::handle& value, const char* parameter)
-{
-    if(!value.is_none())
+    if(rightBound)
     {
-        hipdnn_python::throwUnsupportedParameter(parameter, "None");
+        attributes.set_diagonal_band_right_bound(*rightBound);
     }
 }
 
@@ -290,7 +280,7 @@ void sdpaBindings(nb::class_<graph::Graph>& cls)
            const TensorPtr& scoreSumExp,
            const TensorPtr& sinkToken,
            bool unfuseFma) {
-            requireNone(scoreMod, "score_mod");
+            hipdnn_python::requireNone(scoreMod, "score_mod");
             if(generateStats.has_value() == isInference.has_value())
             {
                 throw std::runtime_error("Exactly one of {generate_stats, is_inference} must be "
@@ -306,13 +296,18 @@ void sdpaBindings(nb::class_<graph::Graph>& cls)
                 .set_compute_data_type(computeDataType)
                 .set_name(name);
             setAttnScale(attributes, attnScale);
-            setDiagonalBand(attributes,
-                            resolveDiagonalBand(useCausalMask,
-                                                useCausalMaskBottomRight,
-                                                slidingWindowLength,
-                                                diagonalAlignment,
-                                                diagonalBandLeftBound,
-                                                diagonalBandRightBound));
+            checkDiagonalBandConflicts(useCausalMask,
+                                       useCausalMaskBottomRight,
+                                       slidingWindowLength,
+                                       diagonalBandLeftBound,
+                                       diagonalBandRightBound);
+            applyDiagonalBand(attributes,
+                              useCausalMask,
+                              useCausalMaskBottomRight,
+                              slidingWindowLength,
+                              diagonalAlignment,
+                              diagonalBandLeftBound,
+                              diagonalBandRightBound);
             if(bias)
             {
                 attributes.set_bias(bias);
@@ -456,8 +451,8 @@ void sdpaBindings(nb::class_<graph::Graph>& cls)
             {
                 hipdnn_python::throwUnsupportedParameter("use_deterministic_algorithm", "False");
             }
-            requireNone(scoreMod, "score_mod");
-            requireNone(scoreModBprop, "score_mod_bprop");
+            hipdnn_python::requireNone(scoreMod, "score_mod");
+            hipdnn_python::requireNone(scoreModBprop, "score_mod_bprop");
             requireNullTensor(sinkToken, "sink_token");
             requireNullTensor(dSinkToken, "dSink_token");
 
@@ -467,23 +462,13 @@ void sdpaBindings(nb::class_<graph::Graph>& cls)
                 .set_compute_data_type(computeDataType)
                 .set_name(name);
             setAttnScale(attributes, attnScale);
-            // cuDNN's backward applies these in order with no conflict checks, so a later
-            // bound overrides what a causal flag set; the forward overload rejects such mixes.
-            attributes.set_diagonal_alignment(diagonalAlignment)
-                .set_causal_mask(useCausalMask)
-                .set_causal_mask_bottom_right(useCausalMaskBottomRight);
-            if(slidingWindowLength)
-            {
-                attributes.set_diagonal_band_left_bound(*slidingWindowLength);
-            }
-            if(diagonalBandLeftBound)
-            {
-                attributes.set_diagonal_band_left_bound(*diagonalBandLeftBound);
-            }
-            if(diagonalBandRightBound)
-            {
-                attributes.set_diagonal_band_right_bound(*diagonalBandRightBound);
-            }
+            applyDiagonalBand(attributes,
+                              useCausalMask,
+                              useCausalMaskBottomRight,
+                              slidingWindowLength,
+                              diagonalAlignment,
+                              diagonalBandLeftBound,
+                              diagonalBandRightBound);
             if(bias)
             {
                 attributes.set_bias(bias);

@@ -9,21 +9,32 @@ UID-tagged tensors; the serialized graphs must match. Dispatch tests pin that
 the attributes overloads keep winning for every call they accepted before.
 """
 
-import json
-
 import numpy as np
 import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import build_all_plans, create_float_graph, execute_zeros
+from .graph_builders import scalar_tensor, unpack
+from .helpers import (
+    build_all_plans,
+    canonical_graph_json,
+    create_float_graph,
+    execute_zeros,
+)
 
-_HAS_SDPA = hasattr(hipdnn, "SdpaAttributes")
+_HAS_SDPA = hasattr(hipdnn.Graph, "sdpa")
 _requires_sdpa = pytest.mark.skipif(
     not _HAS_SDPA, reason="SDPA is compiled out of the bindings"
 )
 
 FLOAT = hipdnn.DataType.FLOAT
+INT32 = hipdnn.DataType.INT32
+INT64 = hipdnn.DataType.INT64
+
+# Parity graphs compute in FLOAT, and validate() gives an op whose compute type
+# is NOT_SET the graph's. Ops are given a different compute type, so an overload
+# that drops compute_data_type changes the serialized node.
+OP_COMPUTE = hipdnn.DataType.HALF
 
 
 class _Tensors:
@@ -46,29 +57,12 @@ class _Tensors:
         return self.adopt(hipdnn.Tensor.create(dim, data_type), name)
 
     def scalar(self, name, value=1e-5):
-        tensor = hipdnn.Tensor.create([1], FLOAT)
-        tensor.set_value(value)
-        return self.adopt(tensor, name)
+        return self.adopt(scalar_tensor(value), name)
 
 
 def _adopt_outputs(tensors, outputs, names, kind):
-    assert isinstance(
-        outputs, kind
-    ), f"expected {kind.__name__}, got {type(outputs).__name__}"
-    assert len(outputs) == len(names)
-    for output, name in zip(outputs, names):
+    for output, name in zip(unpack(outputs, len(names), kind), names):
         tensors.adopt(output, name, output=True)
-
-
-def _canonical_json(graph):
-    """The graph's JSON with tensors ordered by UID, so serializer iteration
-    order cannot mask or fake a difference."""
-    document = json.loads(graph.to_json())
-    if "tensors" in document:
-        document["tensors"] = sorted(
-            document["tensors"], key=lambda tensor: tensor["uid"]
-        )
-    return document
 
 
 def _assert_parity(build):
@@ -77,10 +71,16 @@ def _assert_parity(build):
     for graph in (attributes_graph, keywords_graph):
         status = graph.validate()
         assert status.is_good(), status.get_message()
-    assert _canonical_json(keywords_graph) == _canonical_json(attributes_graph)
+    assert canonical_graph_json(keywords_graph) == canonical_graph_json(
+        attributes_graph
+    )
 
 
 # --- Builders: each takes ``keywords`` and returns an unvalidated graph. ---
+
+
+def _peer_stats(t):
+    return [t.input(f"peer_stats{index}", [2, 8, 1, 1]) for index in range(2)]
 
 
 def _batchnorm(keywords):
@@ -92,9 +92,19 @@ def _batchnorm(keywords):
     running_var = t.input("running_var", [1, 8, 1, 1])
     epsilon = t.scalar("epsilon")
     momentum = t.scalar("momentum", 0.1)
+    peer_stats = _peer_stats(t)
     if keywords:
         outputs = graph.batchnorm(
-            x, scale, bias, running_mean, running_var, epsilon, momentum, name="bn"
+            x,
+            scale,
+            bias,
+            running_mean,
+            running_var,
+            epsilon,
+            momentum,
+            peer_stats=peer_stats,
+            compute_data_type=OP_COMPUTE,
+            name="bn",
         )
     else:
         outputs = graph.batchnorm(
@@ -104,7 +114,9 @@ def _batchnorm(keywords):
             hipdnn.BatchnormAttributes()
             .set_name("bn")
             .set_epsilon(epsilon)
-            .set_previous_running_stats(running_mean, running_var, momentum),
+            .set_previous_running_stats(running_mean, running_var, momentum)
+            .set_peer_stats(peer_stats)
+            .set_compute_data_type(OP_COMPUTE),
         )
     _adopt_outputs(
         t, outputs, ["y", "mean", "inv_variance", "next_mean", "next_var"], list
@@ -119,6 +131,7 @@ def _batchnorm_backward(keywords):
     scale = t.input("scale", [1, 8, 1, 1])
     mean = t.input("mean", [1, 8, 1, 1])
     inv_variance = t.input("inv_variance", [1, 8, 1, 1])
+    peer_stats = _peer_stats(t)
     if keywords:
         outputs = graph.batchnorm_backward(
             grad=dy,
@@ -126,6 +139,8 @@ def _batchnorm_backward(keywords):
             scale=scale,
             mean=mean,
             inv_variance=inv_variance,
+            peer_stats=peer_stats,
+            compute_data_type=OP_COMPUTE,
             name="bnb",
         )
     else:
@@ -135,7 +150,9 @@ def _batchnorm_backward(keywords):
             scale,
             hipdnn.BatchnormBackwardAttributes()
             .set_name("bnb")
-            .set_saved_mean_and_inv_variance(mean, inv_variance),
+            .set_saved_mean_and_inv_variance(mean, inv_variance)
+            .set_peer_stats(peer_stats)
+            .set_compute_data_type(OP_COMPUTE),
         )
     _adopt_outputs(t, outputs, ["dx", "dscale", "dbias"], list)
     return graph
@@ -151,12 +168,14 @@ def _batchnorm_inference(keywords):
         t.input("bias", [1, 8, 1, 1]),
     ]
     if keywords:
-        y = graph.batchnorm_inference(*tensors, compute_data_type=FLOAT, name="bni")
+        y = graph.batchnorm_inference(
+            *tensors, compute_data_type=OP_COMPUTE, name="bni"
+        )
     else:
         attributes = (
             hipdnn.BatchnormInferenceAttributes()
             .set_name("bni")
-            .set_compute_data_type(FLOAT)
+            .set_compute_data_type(OP_COMPUTE)
         )
         y = graph.batchnorm_inference(*tensors, attributes)
     t.adopt(y, "y", output=True)
@@ -180,6 +199,7 @@ def _conv_attributes(cls, pre_padding, post_padding, mode):
         .set_stride(_STRIDE)
         .set_dilation(_DILATION)
         .set_convolution_mode(mode)
+        .set_compute_data_type(OP_COMPUTE)
     )
 
 
@@ -187,7 +207,11 @@ def _conv_kwargs(split, pre_padding, post_padding, mode):
     """cuDNN keywords for either padding shape. The symmetric shape requires
     pre_padding == post_padding."""
     common = dict(
-        stride=_STRIDE, dilation=_DILATION, convolution_mode=mode, name="conv"
+        stride=_STRIDE,
+        dilation=_DILATION,
+        convolution_mode=mode,
+        compute_data_type=OP_COMPUTE,
+        name="conv",
     )
     if split:
         return dict(pre_padding=pre_padding, post_padding=post_padding, **common)
@@ -274,10 +298,12 @@ def _matmul(keywords):
     a = t.input("a", [4, 3])
     b = t.input("b", [3, 5])
     if keywords:
-        c = graph.matmul(A=a, B=b, compute_data_type=FLOAT, name="mm")
+        c = graph.matmul(A=a, B=b, compute_data_type=OP_COMPUTE, name="mm")
     else:
         c = graph.matmul(
-            a, b, hipdnn.MatmulAttributes().set_name("mm").set_compute_data_type(FLOAT)
+            a,
+            b,
+            hipdnn.MatmulAttributes().set_name("mm").set_compute_data_type(OP_COMPUTE),
         )
     t.adopt(c, "c", output=True)
     return graph
@@ -291,7 +317,9 @@ def _layernorm(keywords):
     epsilon = t.scalar("epsilon")
     phase = hipdnn.NormFwdPhase.TRAINING
     if keywords:
-        outputs = graph.layernorm(phase, x, scale, bias, epsilon, name="ln")
+        outputs = graph.layernorm(
+            phase, x, scale, bias, epsilon, compute_data_type=OP_COMPUTE, name="ln"
+        )
     else:
         outputs = graph.layernorm(
             x,
@@ -300,7 +328,8 @@ def _layernorm(keywords):
             hipdnn.LayernormAttributes()
             .set_name("ln")
             .set_epsilon(epsilon)
-            .set_forward_phase(phase),
+            .set_forward_phase(phase)
+            .set_compute_data_type(OP_COMPUTE),
         )
     _adopt_outputs(t, outputs, ["y", "mean", "inv_variance"], tuple)
     return graph
@@ -322,6 +351,7 @@ def _layernorm_backward(with_stats):
                 scale,
                 mean,
                 inv_variance,
+                OP_COMPUTE,
                 name="lnb",
                 epsilon=epsilon,
                 normalized_dim_count=3,
@@ -332,6 +362,7 @@ def _layernorm_backward(with_stats):
                 .set_name("lnb")
                 .set_epsilon(epsilon)
                 .set_normalized_dim_count(3)
+                .set_compute_data_type(OP_COMPUTE)
             )
             if with_stats:
                 attributes.set_saved_mean_and_inv_variance(mean, inv_variance)
@@ -352,14 +383,14 @@ def _rmsnorm(with_bias):
         phase = hipdnn.NormFwdPhase.TRAINING
         if keywords and with_bias:
             # cuDNN's positional order: the required epsilon follows the defaulted bias.
-            outputs = graph.rmsnorm(phase, x, scale, bias, epsilon, FLOAT, "rms")
+            outputs = graph.rmsnorm(phase, x, scale, bias, epsilon, OP_COMPUTE, "rms")
         elif keywords:
             outputs = graph.rmsnorm(
                 norm_forward_phase=phase,
                 input=x,
                 scale=scale,
                 epsilon=epsilon,
-                compute_data_type=FLOAT,
+                compute_data_type=OP_COMPUTE,
                 name="rms",
             )
         else:
@@ -368,7 +399,7 @@ def _rmsnorm(with_bias):
                 .set_name("rms")
                 .set_epsilon(epsilon)
                 .set_forward_phase(phase)
-                .set_compute_data_type(FLOAT)
+                .set_compute_data_type(OP_COMPUTE)
             )
             if with_bias:
                 attributes.set_bias(bias)
@@ -379,24 +410,33 @@ def _rmsnorm(with_bias):
     return build
 
 
-def _rmsnorm_backward(keywords):
-    graph, t = create_float_graph(), _Tensors()
-    dy = t.input("dy", [1, 8, 2, 2])
-    x = t.input("x", [1, 8, 2, 2])
-    scale = t.input("scale", [1, 8, 2, 2])
-    inv_rms = t.input("inv_rms", [1, 1, 1, 1])
-    if keywords:
-        outputs = graph.rmsnorm_backward(dy, x, scale, inv_rms, True, name="rmsb")
-    else:
-        outputs = graph.rmsnorm_backward(
-            dy,
-            x,
-            scale,
-            inv_rms,
-            hipdnn.RMSNormBackwardAttributes().set_name("rmsb").set_compute_dbias(True),
-        )
-    _adopt_outputs(t, outputs, ["dx", "dscale", "dbias"], tuple)
-    return graph
+def _rmsnorm_backward(has_dbias):
+    def build(keywords):
+        graph, t = create_float_graph(), _Tensors()
+        dy = t.input("dy", [1, 8, 2, 2])
+        x = t.input("x", [1, 8, 2, 2])
+        scale = t.input("scale", [1, 8, 2, 2])
+        inv_rms = t.input("inv_rms", [1, 1, 1, 1])
+        if keywords:
+            outputs = graph.rmsnorm_backward(
+                dy, x, scale, inv_rms, has_dbias, OP_COMPUTE, name="rmsb"
+            )
+        else:
+            outputs = graph.rmsnorm_backward(
+                dy,
+                x,
+                scale,
+                inv_rms,
+                hipdnn.RMSNormBackwardAttributes()
+                .set_name("rmsb")
+                .set_compute_dbias(has_dbias)
+                .set_compute_data_type(OP_COMPUTE),
+            )
+        assert (outputs[2] is not None) == has_dbias
+        _adopt_outputs(t, outputs, ["dx", "dscale", "dbias"], tuple)
+        return graph
+
+    return build
 
 
 def _block_scale_dequantize(keywords):
@@ -404,12 +444,23 @@ def _block_scale_dequantize(keywords):
     x = t.input("x", [2, 64, 32, 32])
     scale = t.input("scale", [2, 2, 32, 32])
     if keywords:
-        y = graph.block_scale_dequantize(x, scale, [32], name="dq")
+        y = graph.block_scale_dequantize(
+            x,
+            scale,
+            [32],
+            is_negative_scale=True,
+            compute_data_type=OP_COMPUTE,
+            name="dq",
+        )
     else:
         y = graph.block_scale_dequantize(
             x,
             scale,
-            hipdnn.BlockScaleDequantizeAttributes().set_name("dq").set_block_size([32]),
+            hipdnn.BlockScaleDequantizeAttributes()
+            .set_name("dq")
+            .set_block_size([32])
+            .set_is_negative_scale(True)
+            .set_compute_data_type(OP_COMPUTE),
         )
     # Dequantize is fused-only, so its output stays virtual.
     t.adopt(y, "y")
@@ -420,10 +471,18 @@ def _block_scale_quantize(keywords):
     graph, t = create_float_graph(), _Tensors()
     x = t.input("x", [2, 64, 32, 32])
     if keywords:
-        outputs = graph.block_scale_quantize(x, 32, name="q")
+        outputs = graph.block_scale_quantize(
+            x, 32, axis=1, transpose=True, compute_data_type=OP_COMPUTE, name="q"
+        )
     else:
         outputs = graph.block_scale_quantize(
-            x, hipdnn.BlockScaleQuantizeAttributes().set_name("q").set_block_size(32)
+            x,
+            hipdnn.BlockScaleQuantizeAttributes()
+            .set_name("q")
+            .set_block_size(32)
+            .set_axis(1)
+            .set_transpose(True)
+            .set_compute_data_type(OP_COMPUTE),
         )
     _adopt_outputs(t, outputs, ["y", "scale"], tuple)
     for output in outputs:
@@ -435,114 +494,309 @@ def _reduction(keywords):
     graph, t = create_float_graph(), _Tensors()
     x = t.input("x", [4, 8])
     if keywords:
-        y = graph.reduction(x, hipdnn.ReductionMode.ADD, name="red")
+        y = graph.reduction(
+            x, hipdnn.ReductionMode.ADD, compute_data_type=OP_COMPUTE, name="red"
+        )
     else:
         y = graph.reduction(
             x,
             hipdnn.ReductionAttributes()
             .set_name("red")
-            .set_mode(hipdnn.ReductionMode.ADD),
+            .set_mode(hipdnn.ReductionMode.ADD)
+            .set_compute_data_type(OP_COMPUTE),
         )
     y.set_dim([1, 8]).set_stride([8, 1])
     t.adopt(y, "y", output=True)
     return graph
 
 
-def _moe_grouped_matmul(keywords):
-    graph, t = create_float_graph(), _Tensors()
-    token = t.input("token", [1, 8, 16])
-    weight = t.input("weight", [2, 16, 32])
-    first_token_offset = t.input("first_token_offset", [2, 1, 1], hipdnn.DataType.INT32)
-    token_index = t.input("token_index", [1, 8, 1], hipdnn.DataType.INT32)
-    token_ks = t.input("token_ks", [1, 8, 1], hipdnn.DataType.INT32)
-    mode = hipdnn.MoeGroupedMatmulMode.SCATTER
-    if keywords:
-        # compute_data_type defaults to FLOAT, as in cuDNN.
-        output = graph.moe_grouped_matmul(
-            token,
-            weight,
-            first_token_offset,
-            token_index=token_index,
-            token_ks=token_ks,
-            mode=mode,
-            top_k=2,
-            name="moe",
-        )
-    else:
-        output = graph.moe_grouped_matmul(
-            token,
-            weight,
-            first_token_offset,
-            token_index,
-            token_ks,
-            hipdnn.MoeGroupedMatmulAttributes()
-            .set_name("moe")
-            .set_mode(mode)
-            .set_top_k(2)
-            .set_compute_data_type(FLOAT),
-        )
-    t.adopt(output, "output", output=True)
-    output.set_data_type(FLOAT)
-    return graph
+def _moe_grouped_matmul(compute_data_type):
+    """With compute_data_type None the keyword form keeps its default, which is
+    FLOAT as in cuDNN; the graph then computes in OP_COMPUTE, so a NOT_SET
+    default would not serialize as FLOAT."""
+    expected_compute = FLOAT if compute_data_type is None else compute_data_type
+
+    def build(keywords):
+        graph, t = create_float_graph(), _Tensors()
+        if compute_data_type is None:
+            graph.set_compute_data_type(OP_COMPUTE)
+        token = t.input("token", [1, 8, 16])
+        weight = t.input("weight", [2, 16, 32])
+        first_token_offset = t.input("first_token_offset", [2, 1, 1], INT32)
+        token_index = t.input("token_index", [1, 8, 1], INT32)
+        token_ks = t.input("token_ks", [1, 8, 1], INT32)
+        mode = hipdnn.MoeGroupedMatmulMode.SCATTER
+        if keywords:
+            compute = {}
+            if compute_data_type is not None:
+                compute["compute_data_type"] = compute_data_type
+            output = graph.moe_grouped_matmul(
+                token,
+                weight,
+                first_token_offset,
+                token_index=token_index,
+                token_ks=token_ks,
+                mode=mode,
+                top_k=2,
+                name="moe",
+                **compute,
+            )
+        else:
+            output = graph.moe_grouped_matmul(
+                token,
+                weight,
+                first_token_offset,
+                token_index,
+                token_ks,
+                hipdnn.MoeGroupedMatmulAttributes()
+                .set_name("moe")
+                .set_mode(mode)
+                .set_top_k(2)
+                .set_compute_data_type(expected_compute),
+            )
+        t.adopt(output, "output", output=True)
+        output.set_data_type(FLOAT)
+        return graph
+
+    return build
 
 
-def _sdpa(keywords):
-    graph, t = create_float_graph(), _Tensors()
-    q = t.input("q", [2, 8, 16, 64])
-    k = t.input("k", [2, 8, 32, 64])
-    v = t.input("v", [2, 8, 32, 64])
-    if keywords:
-        outputs = graph.sdpa(
-            q,
-            k,
-            v,
-            is_inference=False,
-            attn_scale=0.125,
-            use_causal_mask=True,
-            name="sdpa",
-        )
-    else:
-        outputs = graph.sdpa(
-            q,
-            k,
-            v,
-            hipdnn.SdpaAttributes()
-            .set_name("sdpa")
-            .set_generate_stats(True)
-            .set_attn_scale(0.125)
-            .set_causal_mask(True),
-        )
-    _adopt_outputs(t, outputs, ["o", "stats"], tuple)
-    return graph
+# SDPA options: each takes the _Tensors factory, creates any tensors it needs
+# and returns (keywords, configure), the cuDNN keywords and a function applying
+# the same settings to the attributes object. unfuse_fma has no case: it is an
+# advisory hint that does not reach to_json(), so parity cannot observe it.
+_SCORE_DIM = [2, 8, 16, 32]
+_STATS_DIM = [2, 8, 16, 1]
+_SEQ_LEN_DIM = [2, 1, 1, 1]
+_SEED_DIM = [1, 1, 1, 1]
 
 
-def _sdpa_backward(keywords):
-    graph, t = create_float_graph(), _Tensors()
-    q = t.input("q", [2, 8, 16, 64])
-    k = t.input("k", [2, 8, 32, 64])
-    v = t.input("v", [2, 8, 32, 64])
-    o = t.input("o", [2, 8, 16, 64])
-    d_o = t.input("do", [2, 8, 16, 64])
-    stats = t.input("stats", [2, 8, 16, 1])
-    if keywords:
-        outputs = graph.sdpa_backward(
-            q, k, v, o, d_o, stats, attn_scale=0.125, use_causal_mask=True, name="sdpab"
-        )
-    else:
-        outputs = graph.sdpa_backward(
-            q,
-            k,
-            v,
-            o,
-            d_o,
-            stats,
-            hipdnn.SdpaBackwardAttributes()
-            .set_name("sdpab")
-            .set_attn_scale(0.125)
-            .set_causal_mask(True),
-        )
-    _adopt_outputs(t, outputs, ["dq", "dk", "dv"], tuple)
-    return graph
+def _causal_mask(t):
+    return (
+        dict(attn_scale=0.125, use_causal_mask=True),
+        lambda a: a.set_attn_scale(0.125).set_causal_mask(True),
+    )
+
+
+def _causal_mask_bottom_right(t):
+    return (
+        dict(use_causal_mask_bottom_right=True),
+        lambda a: a.set_causal_mask_bottom_right(True),
+    )
+
+
+def _sliding_window(t):
+    return (
+        dict(sliding_window_length=7),
+        lambda a: a.set_diagonal_band_left_bound(7),
+    )
+
+
+def _diagonal_band(t):
+    return (
+        dict(
+            diagonal_alignment=hipdnn.DiagonalAlignment.BOTTOM_RIGHT,
+            diagonal_band_left_bound=5,
+            diagonal_band_right_bound=3,
+        ),
+        lambda a: a.set_diagonal_alignment(hipdnn.DiagonalAlignment.BOTTOM_RIGHT)
+        .set_diagonal_band_left_bound(5)
+        .set_diagonal_band_right_bound(3),
+    )
+
+
+def _attn_scale_tensor(t):
+    scale = t.scalar("attn_scale", 0.125)
+    return dict(attn_scale=scale), lambda a: a.set_attn_scale(scale)
+
+
+def _padding_mask(t):
+    seq_len_q = t.input("seq_len_q", _SEQ_LEN_DIM, INT32)
+    seq_len_kv = t.input("seq_len_kv", _SEQ_LEN_DIM, INT32)
+    return (
+        dict(seq_len_q=seq_len_q, seq_len_kv=seq_len_kv, use_padding_mask=True),
+        lambda a: a.set_seq_len_q(seq_len_q)
+        .set_seq_len_kv(seq_len_kv)
+        .set_padding_mask(True),
+    )
+
+
+def _alibi_mask(t):
+    return dict(use_alibi_mask=True), lambda a: a.set_alibi_mask(True)
+
+
+def _sdpa_bias(t):
+    bias = t.input("bias", [1, 8, 16, 32])
+    return dict(bias=bias), lambda a: a.set_bias(bias)
+
+
+def _sdpa_philox_dropout(t):
+    seed = t.input("seed", _SEED_DIM, INT64)
+    offset = t.input("offset", _SEED_DIM, INT64)
+    rng_dump = t.input("rng_dump", _SCORE_DIM)
+    return (
+        dict(dropout=(0.25, seed, offset), rng_dump=rng_dump),
+        lambda a: a.set_dropout(0.25, seed, offset).set_rng_dump(rng_dump),
+    )
+
+
+def _sdpa_mask_dropout(t):
+    mask = t.input("dropout_mask", _SCORE_DIM)
+    scale = t.scalar("dropout_scale", 1.25)
+    return (
+        dict(dropout=(mask, scale)),
+        lambda a: a.set_dropout_mask(mask).set_dropout_scale(scale),
+    )
+
+
+def _block_mask(t):
+    block_mask = t.input("block_mask", [2, 8, 1, 1], hipdnn.DataType.UINT8)
+    return dict(block_mask=block_mask), lambda a: a.set_block_mask(block_mask)
+
+
+def _paged_attention(t):
+    seq_len_keywords, seq_len_configure = _padding_mask(t)
+    k_table = t.input("k_table", [2, 1, 4, 1], INT32)
+    v_table = t.input("v_table", [2, 1, 4, 1], INT32)
+    return (
+        dict(
+            paged_attention_k_table=k_table,
+            paged_attention_v_table=v_table,
+            paged_attention_max_seq_len_kv=32,
+            **seq_len_keywords,
+        ),
+        lambda a: seq_len_configure(a)
+        .set_paged_attention_k_table(k_table)
+        .set_paged_attention_v_table(v_table)
+        .set_paged_attention_max_seq_len_kv(32),
+    )
+
+
+def _score_outputs(t):
+    score_max = t.input("score_max", _STATS_DIM)
+    score_sum_exp = t.input("score_sum_exp", _STATS_DIM)
+    return (
+        dict(score_max=score_max, score_sum_exp=score_sum_exp),
+        lambda a: a.set_logit_max(score_max).set_score_sum_exp(score_sum_exp),
+    )
+
+
+def _sink_token(t):
+    sink_token = t.input("sink_token", [1, 8, 1, 1])
+    return dict(sink_token=sink_token), lambda a: a.set_sink_token(sink_token)
+
+
+def _implementation(t):
+    implementation = hipdnn.AttentionImplementation.COMPOSITE
+    return (
+        dict(implementation=implementation),
+        lambda a: a.set_implementation(implementation),
+    )
+
+
+def _sdpa_backward_bias(t):
+    bias = t.input("bias", [1, 8, 16, 32])
+    dbias = t.input("dbias", [1, 8, 16, 32])
+    return dict(bias=bias, dBias=dbias), lambda a: a.set_bias(bias).set_dbias(dbias)
+
+
+def _sdpa_backward_philox_dropout(t):
+    seed = t.input("seed", _SEED_DIM, INT64)
+    offset = t.input("offset", _SEED_DIM, INT64)
+    return (
+        dict(dropout=(0.25, seed, offset)),
+        lambda a: a.set_dropout(0.25, seed, offset),
+    )
+
+
+def _sdpa_backward_mask_dropout(t):
+    mask = t.input("dropout_mask", _SCORE_DIM)
+    scale = t.scalar("dropout_scale", 1.25)
+    scale_inv = t.scalar("dropout_scale_inv", 0.8)
+    return (
+        dict(dropout=(mask, scale, scale_inv)),
+        lambda a: a.set_dropout_mask(mask)
+        .set_dropout_scale(scale)
+        .set_dropout_scale_inv(scale_inv),
+    )
+
+
+def _sdpa(options):
+    def build(keywords):
+        graph, t = create_float_graph(), _Tensors()
+        q = t.input("q", [2, 8, 16, 64])
+        k = t.input("k", [2, 8, 32, 64])
+        v = t.input("v", [2, 8, 32, 64])
+        option_keywords, configure = options(t)
+        if keywords:
+            outputs = graph.sdpa(
+                q,
+                k,
+                v,
+                is_inference=False,
+                compute_data_type=OP_COMPUTE,
+                name="sdpa",
+                **option_keywords,
+            )
+        else:
+            attributes = (
+                hipdnn.SdpaAttributes()
+                .set_name("sdpa")
+                .set_generate_stats(True)
+                .set_compute_data_type(OP_COMPUTE)
+            )
+            configure(attributes)
+            outputs = graph.sdpa(q, k, v, attributes)
+        _adopt_outputs(t, outputs, ["o", "stats"], tuple)
+        return graph
+
+    return build
+
+
+def _sdpa_backward(options):
+    def build(keywords):
+        graph, t = create_float_graph(), _Tensors()
+        q = t.input("q", [2, 8, 16, 64])
+        k = t.input("k", [2, 8, 32, 64])
+        v = t.input("v", [2, 8, 32, 64])
+        o = t.input("o", [2, 8, 16, 64])
+        d_o = t.input("do", [2, 8, 16, 64])
+        stats = t.input("stats", _STATS_DIM)
+        option_keywords, configure = options(t)
+        if keywords:
+            outputs = graph.sdpa_backward(
+                q,
+                k,
+                v,
+                o,
+                d_o,
+                stats,
+                compute_data_type=OP_COMPUTE,
+                name="sdpab",
+                **option_keywords,
+            )
+        else:
+            attributes = (
+                hipdnn.SdpaBackwardAttributes()
+                .set_name("sdpab")
+                .set_compute_data_type(OP_COMPUTE)
+            )
+            configure(attributes)
+            outputs = graph.sdpa_backward(q, k, v, o, d_o, stats, attributes)
+        _adopt_outputs(t, outputs, ["dq", "dk", "dv"], tuple)
+        return graph
+
+    return build
+
+
+def _sdpa_case(options, case_id):
+    return pytest.param(_sdpa(options), id=f"sdpa-{case_id}", marks=_requires_sdpa)
+
+
+def _sdpa_backward_case(options, case_id):
+    return pytest.param(
+        _sdpa_backward(options), id=f"sdpa_backward-{case_id}", marks=_requires_sdpa
+    )
 
 
 _PARITY_CASES = [
@@ -572,13 +826,40 @@ _PARITY_CASES = [
     ),
     pytest.param(_rmsnorm(with_bias=False), id="rmsnorm"),
     pytest.param(_rmsnorm(with_bias=True), id="rmsnorm-bias"),
-    pytest.param(_rmsnorm_backward, id="rmsnorm_backward"),
+    pytest.param(_rmsnorm_backward(has_dbias=True), id="rmsnorm_backward-dbias"),
+    pytest.param(_rmsnorm_backward(has_dbias=False), id="rmsnorm_backward-no_dbias"),
     pytest.param(_block_scale_dequantize, id="block_scale_dequantize"),
     pytest.param(_block_scale_quantize, id="block_scale_quantize"),
     pytest.param(_reduction, id="reduction"),
-    pytest.param(_moe_grouped_matmul, id="moe_grouped_matmul"),
-    pytest.param(_sdpa, id="sdpa", marks=_requires_sdpa),
-    pytest.param(_sdpa_backward, id="sdpa_backward", marks=_requires_sdpa),
+    pytest.param(_moe_grouped_matmul(OP_COMPUTE), id="moe_grouped_matmul"),
+    pytest.param(
+        _moe_grouped_matmul(None), id="moe_grouped_matmul-default_compute_float"
+    ),
+    _sdpa_case(_causal_mask, "causal_mask"),
+    _sdpa_case(_causal_mask_bottom_right, "causal_mask_bottom_right"),
+    _sdpa_case(_sliding_window, "sliding_window"),
+    _sdpa_case(_diagonal_band, "diagonal_band"),
+    _sdpa_case(_attn_scale_tensor, "attn_scale_tensor"),
+    _sdpa_case(_padding_mask, "padding_mask"),
+    _sdpa_case(_alibi_mask, "alibi_mask"),
+    _sdpa_case(_sdpa_bias, "bias"),
+    _sdpa_case(_sdpa_philox_dropout, "philox_dropout"),
+    _sdpa_case(_sdpa_mask_dropout, "mask_dropout"),
+    _sdpa_case(_block_mask, "block_mask"),
+    _sdpa_case(_paged_attention, "paged_attention"),
+    _sdpa_case(_score_outputs, "score_outputs"),
+    _sdpa_case(_sink_token, "sink_token"),
+    _sdpa_case(_implementation, "implementation"),
+    _sdpa_backward_case(_causal_mask, "causal_mask"),
+    _sdpa_backward_case(_causal_mask_bottom_right, "causal_mask_bottom_right"),
+    _sdpa_backward_case(_sliding_window, "sliding_window"),
+    _sdpa_backward_case(_diagonal_band, "diagonal_band"),
+    _sdpa_backward_case(_attn_scale_tensor, "attn_scale_tensor"),
+    _sdpa_backward_case(_padding_mask, "padding_mask"),
+    _sdpa_backward_case(_alibi_mask, "alibi_mask"),
+    _sdpa_backward_case(_sdpa_backward_bias, "bias_dbias"),
+    _sdpa_backward_case(_sdpa_backward_philox_dropout, "philox_dropout"),
+    _sdpa_backward_case(_sdpa_backward_mask_dropout, "mask_dropout"),
 ]
 
 
@@ -588,12 +869,6 @@ def test_keyword_overload_serializes_like_attributes_overload(build):
 
 
 # --- Dispatch ---
-
-
-def _scalar():
-    tensor = hipdnn.Tensor.create([1], FLOAT)
-    tensor.set_value(1e-5)
-    return tensor
 
 
 class TestDispatch:
@@ -646,7 +921,7 @@ class TestDispatch:
             hipdnn.Tensor.create(channel, FLOAT),
             None,
             None,
-            _scalar(),
+            scalar_tensor(),
             None,
         )
         assert isinstance(outputs, list) and len(outputs) == 5
@@ -677,7 +952,7 @@ class TestDispatch:
             x,
             hipdnn.Tensor.create([1, 8, 2, 2], FLOAT),
             None,
-            _scalar(),
+            scalar_tensor(),
         )
         assert isinstance(outputs, tuple) and len(outputs) == 2
 
@@ -758,15 +1033,37 @@ class TestSdpaDispatch:
         o, stats = graph.sdpa(*self._qkv(), is_inference=False)
         assert stats is not None
 
-    def test_causal_mask_conflicts_with_right_bound(self):
+    @pytest.mark.parametrize(
+        "options, message",
+        [
+            (
+                dict(use_causal_mask=True, diagonal_band_right_bound=0),
+                "use_causal_mask and diagonal_band_right_bound",
+            ),
+            (
+                dict(use_causal_mask=True, use_causal_mask_bottom_right=True),
+                "cannot both be true",
+            ),
+            (
+                dict(use_causal_mask_bottom_right=True, diagonal_band_right_bound=0),
+                "use_causal_mask_bottom_right and diagonal_band_right_bound",
+            ),
+            (
+                dict(sliding_window_length=4, diagonal_band_left_bound=4),
+                "sliding window and left_bound",
+            ),
+        ],
+        ids=[
+            "causal-right_bound",
+            "causal-causal_bottom_right",
+            "causal_bottom_right-right_bound",
+            "sliding_window-left_bound",
+        ],
+    )
+    def test_conflicting_mask_options_raise(self, options, message):
         graph = create_float_graph()
-        with pytest.raises(RuntimeError):
-            graph.sdpa(
-                *self._qkv(),
-                generate_stats=True,
-                use_causal_mask=True,
-                diagonal_band_right_bound=0,
-            )
+        with pytest.raises(RuntimeError, match=message):
+            graph.sdpa(*self._qkv(), generate_stats=True, **options)
 
     def test_optional_inputs_accept_none(self):
         graph = create_float_graph()
@@ -794,7 +1091,7 @@ class TestSdpaDispatch:
 
     def test_attn_scale_accepts_tensor(self):
         graph = create_float_graph()
-        scale = _scalar()
+        scale = scalar_tensor()
         outputs = graph.sdpa(*self._qkv(), generate_stats=True, attn_scale=scale)
         assert isinstance(outputs, tuple) and len(outputs) == 2
 
@@ -845,7 +1142,7 @@ class TestKeywordGraphsExecute:
         scale = hipdnn.Tensor.create([6, 4], FLOAT)
         bias = hipdnn.Tensor.create([6, 4], FLOAT)
         y, mean, inv_variance = graph.layernorm(
-            hipdnn.NormFwdPhase.INFERENCE, x, scale, bias, _scalar()
+            hipdnn.NormFwdPhase.INFERENCE, x, scale, bias, scalar_tensor()
         )
         assert (mean, inv_variance) == (None, None)
         y.set_output(True)
@@ -862,7 +1159,7 @@ class TestKeywordGraphsExecute:
         x = hipdnn.Tensor.create([2, 64, 32, 32], FLOAT)
         scale = hipdnn.Tensor.create([1, 64, 32, 32], FLOAT)
         y, inv_rms = graph.rmsnorm(
-            hipdnn.NormFwdPhase.TRAINING, x, scale, epsilon=_scalar()
+            hipdnn.NormFwdPhase.TRAINING, x, scale, epsilon=scalar_tensor()
         )
         y.set_output(True)
         inv_rms.set_output(True)

@@ -27,8 +27,10 @@
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
+using hipdnn_python::requireNone;
 using hipdnn_python::throwIfBad;
 using hipdnn_python::throwUnsupportedParameter;
+using hipdnn_python::workspacePointer;
 
 namespace
 {
@@ -85,11 +87,6 @@ void rejectOverrides(const OverrideUids& uids,
     {
         throwUnsupportedParameter("override_strides", "None");
     }
-}
-
-void* workspacePointer(const nb::handle& workspace)
-{
-    return workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
 }
 
 // cuDNN's execute skips None keys, so optional tensors a builder returned as None can stay in
@@ -159,15 +156,18 @@ void deserializePy(PyGraph& g, const nb::handle& handle, const nb::handle& pyobj
     std::vector<uint8_t> data;
     if(nb::isinstance<nb::bytes>(pyobj))
     {
-        const auto bytes = nb::borrow<nb::bytes>(pyobj);
-        const auto* ptr = reinterpret_cast<const uint8_t*>(bytes.c_str());
-        data.assign(ptr, ptr + bytes.size());
+        data = hipdnn_python::bytesToVector(nb::borrow<nb::bytes>(pyobj));
     }
     else if(!nb::try_cast(pyobj, data))
     {
         throw nb::type_error("deserialize() expects a str (JSON) or bytes / list[int] (binary)");
     }
     throwIfBad(g.deserialize(g.resolveHandle(handle), data));
+}
+
+void buildPlanAtIndex(PyGraph& g, int64_t index)
+{
+    throwIfBad(g.build_plan_at_index(index));
 }
 
 int64_t workspaceSizePlanAtIndex(const PyGraph& g, int64_t index)
@@ -195,9 +195,13 @@ void pygraphBindings(nb::module_& m)
     nb::class_<PyGraph, graph::Graph>(
         m,
         "pygraph",
-        "hipdnn.Graph with the semantics of cudnn.pygraph: it owns a handle (supplied or created "
-        "on first use) for calls made without one, and methods raise instead of returning "
-        "Error.")
+        "hipdnn.Graph with the semantics of cudnn.pygraph. The methods it defines use the "
+        "graph's handle (supplied, or created on first use) when called without one, and raise "
+        "instead of returning Error. Methods inherited from hipdnn.Graph keep its behaviour: "
+        "autotune, autotune_exhaustive_sweep and execute_timed_ext need a handle, and "
+        "execute_timed_ext returns (Error, ExecutionTiming); get_plan_name, "
+        "get_plan_name_at_index and get_engine_configs called without a handle consult only "
+        "the built-in engine registry.")
         .def(
             "__init__",
             [](PyGraph* self,
@@ -221,14 +225,8 @@ void pygraphBindings(nb::module_& m)
                 {
                     throwUnsupportedParameter("sm_version", "None");
                 }
-                if(!kernelCache.is_none())
-                {
-                    throwUnsupportedParameter("kernel_cache", "None");
-                }
-                if(!deviceProperty.is_none())
-                {
-                    throwUnsupportedParameter("device_property", "None");
-                }
+                requireNone(kernelCache, "kernel_cache");
+                requireNone(deviceProperty, "device_property");
                 if(isDynamicShapeEnabled)
                 {
                     throwUnsupportedParameter("is_dynamic_shape_enabled", "False");
@@ -308,18 +306,15 @@ void pygraphBindings(nb::module_& m)
             "build_plans",
             [](PyGraph& g, BuildPlanPolicy policy) { throwIfBad(g.build_plans(policy)); },
             nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
-            "Finalize execution plans. HEURISTICS_CHOICE compiles only the active plan; ALL "
-            "compiles every plan.")
-        .def(
-            "build_plan_at_index",
-            [](PyGraph& g, int64_t planIndex) { throwIfBad(g.build_plan_at_index(planIndex)); },
-            nb::arg("plan_index"),
-            "Compile if needed and make the plan at this index active.")
-        .def(
-            "build_plan_at_index",
-            [](PyGraph& g, int64_t index) { throwIfBad(g.build_plan_at_index(index)); },
-            nb::arg("index"),
-            "Compile if needed and make the plan at this index active.")
+            "hipdnn.Graph.build_plans(), raising instead of returning a bad Error.")
+        .def("build_plan_at_index",
+             &buildPlanAtIndex,
+             nb::arg("plan_index"),
+             "Compile if needed and make the plan at this index active.")
+        .def("build_plan_at_index",
+             &buildPlanAtIndex,
+             nb::arg("index"),
+             "Compile if needed and make the plan at this index active.")
         .def(
             "build",
             [](PyGraph& g, const std::vector<HeuristicMode>& heurModes) {
@@ -365,18 +360,14 @@ void pygraphBindings(nb::module_& m)
             nb::arg("override_strides") = nb::none(),
             "Workspace size the active plan needs. handle is accepted for cuDNN compatibility "
             "and unused; the override arguments accept only None.")
-        .def(
-            "get_workspace_size_plan_at_index",
-            [](const PyGraph& g, int64_t planIndex) {
-                return workspaceSizePlanAtIndex(g, planIndex);
-            },
-            nb::arg("plan_index"),
-            "Workspace size cached for one compiled plan.")
-        .def(
-            "get_workspace_size_plan_at_index",
-            [](const PyGraph& g, int64_t index) { return workspaceSizePlanAtIndex(g, index); },
-            nb::arg("index"),
-            "Workspace size cached for one compiled plan.")
+        .def("get_workspace_size_plan_at_index",
+             &workspaceSizePlanAtIndex,
+             nb::arg("plan_index"),
+             "Workspace size cached for one compiled plan.")
+        .def("get_workspace_size_plan_at_index",
+             &workspaceSizePlanAtIndex,
+             nb::arg("index"),
+             "Workspace size cached for one compiled plan.")
         .def(
             "get_workspace_size_plan_at_index",
             [](const PyGraph& g,
@@ -543,9 +534,8 @@ void pygraphBindings(nb::module_& m)
         .def(
             "from_binary",
             [](PyGraph& g, const nb::object& handle, const nb::bytes& data) {
-                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
-                const std::vector<uint8_t> vec(ptr, ptr + data.size());
-                throwIfBad(g.deserialize(g.resolveHandle(handle), vec));
+                throwIfBad(
+                    g.deserialize(g.resolveHandle(handle), hipdnn_python::bytesToVector(data)));
             },
             nb::arg("handle").none(),
             nb::arg("data"),
@@ -554,9 +544,7 @@ void pygraphBindings(nb::module_& m)
         .def(
             "from_binary",
             [](PyGraph& g, const nb::bytes& data) {
-                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
-                const std::vector<uint8_t> vec(ptr, ptr + data.size());
-                throwIfBad(g.deserialize(vec));
+                throwIfBad(g.deserialize(hipdnn_python::bytesToVector(data)));
             },
             nb::arg("data"),
             "Deserialize the graph structure from binary without a handle.")

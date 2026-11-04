@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "cudnn_compat.hpp"
+#include "dlpack_adapter.hpp"
 
 #include <nanobind/stl/string.h>
 
@@ -32,20 +33,16 @@ std::optional<DataType> dataTypeFromDtypeName(std::string_view name)
         std::string_view name;
         DataType type;
     };
-    static constexpr std::array<Entry, 18> ENTRIES{{
+    static constexpr std::array<Entry, 14> ENTRIES{{
         {"float16", DataType::HALF},
-        {"half", DataType::HALF},
         {"bfloat16", DataType::BFLOAT16},
         {"float32", DataType::FLOAT},
-        {"float", DataType::FLOAT},
         {"float64", DataType::DOUBLE},
-        {"double", DataType::DOUBLE},
         {"int8", DataType::INT8},
         {"int32", DataType::INT32},
         {"int64", DataType::INT64},
         {"uint8", DataType::UINT8},
         {"bool", DataType::BOOLEAN},
-        {"bool_", DataType::BOOLEAN},
         {"float8_e4m3fn", DataType::FP8_E4M3},
         {"float8_e5m2", DataType::FP8_E5M2},
         {"float8_e8m0fnu", DataType::FP8_E8M0},
@@ -78,6 +75,14 @@ void throwUnsupportedParameter(const char* parameter, const char* accepted)
                                 + parameter + "'; it only accepts " + accepted + ".";
     PyErr_SetString(PyExc_NotImplementedError, message.c_str());
     throw nb::python_error();
+}
+
+void requireNone(const nb::handle& value, const char* parameter)
+{
+    if(!value.is_none())
+    {
+        throwUnsupportedParameter(parameter, "None");
+    }
 }
 
 void throwIfBad(const hipdnn_frontend::Error& error)
@@ -116,12 +121,29 @@ hipdnnHandle_t rawHandleOrNull(const nb::handle& handle)
     return reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 }
 
-std::optional<DataType> dataTypeFromDtypeObject(const nb::handle& dtype)
+void* workspacePointer(const nb::handle& workspace)
 {
-    // Identify torch and numpy dtypes by module so neither library is imported here.
+    return workspace.is_none() ? nullptr : toDataPointer(workspace, "workspace");
+}
+
+std::vector<uint8_t> bytesToVector(const nb::bytes& data)
+{
+    const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
+    return {ptr, ptr + data.size()};
+}
+
+std::optional<DataType> dataTypeFromObject(const nb::handle& value)
+{
+    if(nb::isinstance<DataType>(value))
+    {
+        return nb::cast<DataType>(value);
+    }
+
+    // Identify torch and numpy dtypes by module, so neither library is imported for an
+    // object that did not come from it.
     std::string name;
-    const bool isTypeObject = PyType_Check(dtype.ptr()) != 0;
-    const nb::handle owner = isTypeObject ? dtype : dtype.type();
+    const bool isTypeObject = PyType_Check(value.ptr()) != 0;
+    const nb::handle owner = isTypeObject ? value : value.type();
     if(!nb::hasattr(owner, "__module__"))
     {
         return std::nullopt;
@@ -130,7 +152,7 @@ std::optional<DataType> dataTypeFromDtypeObject(const nb::handle& dtype)
     if(module == "torch" && !isTypeObject)
     {
         // str(torch.float16) == "torch.float16"; torch.half prints the same.
-        name = nb::cast<std::string>(nb::str(dtype));
+        name = nb::cast<std::string>(nb::str(value));
         if(!startsWith(name, "torch."))
         {
             return std::nullopt;
@@ -140,15 +162,26 @@ std::optional<DataType> dataTypeFromDtypeObject(const nb::handle& dtype)
     else if(startsWith(module, "numpy") && isTypeObject)
     {
         // A numpy scalar type such as numpy.float32; numpy.dtype itself is not a dtype.
-        if(!nb::hasattr(dtype, "dtype"))
+        if(!nb::hasattr(value, "dtype"))
         {
             return std::nullopt;
         }
-        name = nb::cast<std::string>(dtype.attr("__name__"));
+        // The dtype's name is canonical, so aliases such as numpy.intc map like
+        // numpy.dtype(numpy.intc). Abstract types such as numpy.floating have no dtype
+        // and keep their class name, which the table rejects.
+        try
+        {
+            name = nb::cast<std::string>(
+                nb::module_::import_("numpy").attr("dtype")(value).attr("name"));
+        }
+        catch(const nb::python_error&)
+        {
+            name = nb::cast<std::string>(value.attr("__name__"));
+        }
     }
-    else if(startsWith(module, "numpy") && nb::hasattr(dtype, "kind") && nb::hasattr(dtype, "name"))
+    else if(startsWith(module, "numpy") && nb::hasattr(value, "kind") && nb::hasattr(value, "name"))
     {
-        name = nb::cast<std::string>(dtype.attr("name"));
+        name = nb::cast<std::string>(value.attr("name"));
     }
     else
     {

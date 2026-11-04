@@ -12,7 +12,7 @@ import pytest
 import hipdnn_frontend as hipdnn
 
 from .graph_builders import build_pointwise_add_graph
-from .helpers import build_all_plans
+from .helpers import NullHandle, build_all_plans
 
 
 class TestGraphConfiguration:
@@ -147,22 +147,11 @@ def _workspace_ptr(graph):
     return buf, buf.ptr()
 
 
-class _NullHandle:
-    """Stand-in for a Handle whose get() yields a null pointer.
-
-    execute_timed_ext() must reject a graph with no compiled plan before it ever
-    dereferences the handle, so this path needs no real device or backend.
-    """
-
-    def get(self):
-        return 0
-
-
 def test_execute_timed_ext_without_compiled_plan_is_a_bad_error():
     """No compiled plan -> the same failure execute() would report; timing stays empty."""
     graph = hipdnn.Graph()
 
-    err, timing = graph.execute_timed_ext(_NullHandle(), {}, 0)
+    err, timing = graph.execute_timed_ext(NullHandle(), {}, 0)
     assert err.is_bad()
     assert not timing.timed_out
     assert timing.elapsed_ms is None

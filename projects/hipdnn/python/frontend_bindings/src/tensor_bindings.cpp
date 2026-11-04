@@ -166,16 +166,12 @@ void tensorBindings(nb::module_& m)
         .def(
             "set_data_type",
             [](TensorAttributes& self, nb::handle dataType) -> TensorAttributes& {
-                if(nb::isinstance<DataType>(dataType))
-                {
-                    return self.set_data_type(nb::cast<DataType>(dataType));
-                }
-                const auto converted = hipdnn_python::dataTypeFromDtypeObject(dataType);
-                if(!converted)
+                const auto type = hipdnn_python::dataTypeFromObject(dataType);
+                if(!type)
                 {
                     throw nb::next_overload();
                 }
-                return self.set_data_type(*converted);
+                return self.set_data_type(*type);
             },
             nb::arg("data_type") = DataType::NOT_SET,
             nb::rv_policy::reference_internal,

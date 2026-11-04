@@ -51,22 +51,6 @@ using namespace hipdnn_frontend;
 namespace
 {
 
-// Unwraps the optional handle taken by the engine-name-reporting bindings. Python cannot
-// overload, so where C++ offers a handle-taking form alongside a handle-free one those
-// bindings take a single trailing handle defaulting to None. None yields a null handle,
-// which Graph resolves from the built-in registry.
-hipdnnHandle_t optionalRawHandle(const nb::object& handle)
-{
-    if(handle.is_none())
-    {
-        return nullptr;
-    }
-
-    auto handlePtr = handle.attr("get")();
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
-}
-
 // Shared body for the autotune() binding. variant_pack keys may be tensor UIDs or
 // tensors, and values take the same kinds as execute(), so the conversion happens
 // here, while the GIL is still held.
@@ -83,8 +67,7 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
     auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-    void* workspacePtr
-        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
+    void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     // Benchmarking touches no Python object: config/settings are native types, and
     // AutotuneConfig::rankingFn (the one field that could call back into Python) is
@@ -134,8 +117,7 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
     auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-    void* workspacePtr
-        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
+    void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     // Same rationale as autotunePy: benchmarking touches no Python object, so the GIL
     // can be released for the duration of what may be a minutes-long call.
@@ -174,8 +156,7 @@ Error executePlanAtIndexPy(const graph::Graph& g,
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
     auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-    void* workspacePtr
-        = workspace.is_none() ? nullptr : hipdnn_python::toDataPointer(workspace, "workspace");
+    void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
 }
@@ -194,7 +175,8 @@ int64_t workspaceSizePlanAtIndexPy(const graph::Graph& g, int64_t planIndex)
 std::string planNameAtIndexPy(const graph::Graph& g, int64_t planIndex, const nb::object& handle)
 {
     std::string name;
-    const auto err = g.get_plan_name_at_index(optionalRawHandle(handle), planIndex, name);
+    const auto err
+        = g.get_plan_name_at_index(hipdnn_python::rawHandleOrNull(handle), planIndex, name);
     if(err.is_bad())
     {
         throw std::runtime_error("Failed to get plan name: " + err.get_message());
@@ -213,7 +195,7 @@ std::shared_ptr<graph::TensorAttributes> tensorLikePy(nb::handle tensor, const s
 }
 
 // cuDNN's pygraph.tensor(). ragged_offset and reordering_type are cuDNN features
-// hipDNN tensors do not have, so only their defaults are accepted.
+// hipDNN tensors do not have, so they accept only None.
 std::shared_ptr<graph::TensorAttributes> cudnnTensorPy(const std::vector<int64_t>& dim,
                                                        const std::vector<int64_t>& stride,
                                                        nb::handle dataType,
@@ -224,25 +206,11 @@ std::shared_ptr<graph::TensorAttributes> cudnnTensorPy(const std::vector<int64_t
                                                        const std::string& name,
                                                        int64_t uid)
 {
-    if(!raggedOffset.is_none())
-    {
-        hipdnn_python::throwUnsupportedParameter("ragged_offset", "None");
-    }
-    if(!reorderingType.is_none())
-    {
-        hipdnn_python::throwUnsupportedParameter("reordering_type", "None");
-    }
+    hipdnn_python::requireNone(raggedOffset, "ragged_offset");
+    hipdnn_python::requireNone(reorderingType, "reordering_type");
 
-    DataType type = DataType::NOT_SET;
-    if(nb::isinstance<DataType>(dataType))
-    {
-        type = nb::cast<DataType>(dataType);
-    }
-    else if(auto converted = hipdnn_python::dataTypeFromDtypeObject(dataType))
-    {
-        type = *converted;
-    }
-    else
+    const auto type = hipdnn_python::dataTypeFromObject(dataType);
+    if(!type)
     {
         throw nb::type_error("data_type must be a hipdnn.DataType or a torch/numpy dtype");
     }
@@ -250,7 +218,7 @@ std::shared_ptr<graph::TensorAttributes> cudnnTensorPy(const std::vector<int64_t
     auto tensor = std::make_shared<graph::TensorAttributes>();
     tensor->set_dim(dim)
         .set_stride(stride)
-        .set_data_type(type)
+        .set_data_type(*type)
         .set_is_virtual(isVirtual)
         .set_is_pass_by_value(isPassByValue)
         .set_name(name);
@@ -376,9 +344,7 @@ void graphBindings(nb::module_& m)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
                 auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-                void* workspacePtr = workspace.is_none()
-                                         ? nullptr
-                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+                void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
                 return g.execute(rawHandle, cppVariantPack, workspacePtr);
             },
@@ -402,9 +368,7 @@ void graphBindings(nb::module_& m)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
                 auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
-                void* workspacePtr = workspace.is_none()
-                                         ? nullptr
-                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+                void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
                 ExecutionTiming timing;
                 Error err;
@@ -441,7 +405,7 @@ void graphBindings(nb::module_& m)
             "get_plan_name",
             [](const graph::Graph& g, const nb::object& handle) {
                 std::string name;
-                const auto err = g.get_plan_name(optionalRawHandle(handle), name);
+                const auto err = g.get_plan_name(hipdnn_python::rawHandleOrNull(handle), name);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get plan name: " + err.get_message());
@@ -486,7 +450,8 @@ void graphBindings(nb::module_& m)
             "get_engine_configs",
             [](graph::Graph& g, const std::vector<HeuristicMode>& modes, const nb::object& handle) {
                 std::vector<EngineConfigInfo> configs;
-                const auto err = g.get_engine_configs(optionalRawHandle(handle), configs, modes);
+                const auto err
+                    = g.get_engine_configs(hipdnn_python::rawHandleOrNull(handle), configs, modes);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get engine configs: " + err.get_message());
@@ -983,9 +948,7 @@ void graphBindings(nb::module_& m)
                 auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
-                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
-                const std::vector<uint8_t> vec(ptr, ptr + data.size());
-                return g.deserialize(rawHandle, vec);
+                return g.deserialize(rawHandle, hipdnn_python::bytesToVector(data));
             },
             nb::arg("handle"),
             nb::arg("data"),
@@ -994,9 +957,7 @@ void graphBindings(nb::module_& m)
         .def(
             "from_binary",
             [](graph::Graph& g, const nb::bytes& data) {
-                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
-                const std::vector<uint8_t> vec(ptr, ptr + data.size());
-                return g.deserialize(vec);
+                return g.deserialize(hipdnn_python::bytesToVector(data));
             },
             nb::arg("data"),
             "Deserialize graph structure from binary without a handle.\n"

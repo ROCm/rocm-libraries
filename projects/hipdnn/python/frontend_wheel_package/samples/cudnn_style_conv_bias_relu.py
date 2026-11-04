@@ -3,10 +3,11 @@
 
 """Convolution + bias + ReLU written the way cuDNN's Python frontend is used.
 
-Apart from the import line and the device buffers, this is the cudnn.pygraph
-API: graph-level data types, keyword op calls, build(), and an execute() keyed
-by tensor that raises on failure. It needs a real engine (for example the MIOpen
-provider), not the test stub, and checks the result against a NumPy reference.
+Apart from the import line, the device buffers and the device synchronization,
+this is the cudnn.pygraph API: graph-level data types, keyword op calls,
+build(), and an execute() keyed by tensor that raises on failure. It needs a
+real engine (for example the MIOpen provider), not the test stub, and checks the
+result against a NumPy reference.
 """
 
 import numpy as np
@@ -46,13 +47,8 @@ def device_buffer(array):
     return buffer
 
 
-def main():
-    rng = np.random.default_rng(0)
-    padding, stride, dilation = [1, 1], [1, 1], [1, 1]
-    x_host = rng.uniform(-1.0, 1.0, (2, 8, 16, 16)).astype(np.float32)
-    w_host = rng.uniform(-1.0, 1.0, (16, 8, 3, 3)).astype(np.float32)
-    b_host = rng.uniform(-1.0, 1.0, (1, 16, 1, 1)).astype(np.float32)
-
+def build_graph(x, w, b, padding, stride, dilation):
+    """Return the graph and its X, W, B and Y tensors, shaped like x, w and b."""
     graph = cudnn.pygraph(
         io_data_type=cudnn.data_type.FLOAT,
         intermediate_data_type=cudnn.data_type.FLOAT,
@@ -60,21 +56,21 @@ def main():
     )
     X = graph.tensor(
         name="X",
-        dim=x_host.shape,
-        stride=strides_of(x_host.shape),
-        data_type=x_host.dtype,
+        dim=x.shape,
+        stride=strides_of(x.shape),
+        data_type=cudnn.data_type.FLOAT,
     )
     W = graph.tensor(
         name="W",
-        dim=w_host.shape,
-        stride=strides_of(w_host.shape),
-        data_type=w_host.dtype,
+        dim=w.shape,
+        stride=strides_of(w.shape),
+        data_type=cudnn.data_type.FLOAT,
     )
     B = graph.tensor(
         name="B",
-        dim=b_host.shape,
-        stride=strides_of(b_host.shape),
-        data_type=b_host.dtype,
+        dim=b.shape,
+        stride=strides_of(b.shape),
+        data_type=cudnn.data_type.FLOAT,
     )
 
     conv_output = graph.conv_fprop(
@@ -83,7 +79,17 @@ def main():
     bias_output = graph.bias(name="bias", input=conv_output, bias=B)
     Y = graph.relu(name="relu", input=bias_output)
     Y.set_output(True).set_data_type(cudnn.data_type.FLOAT)
+    return graph, X, W, B, Y
 
+
+def main():
+    rng = np.random.default_rng(0)
+    padding, stride, dilation = [1, 1], [1, 1], [1, 1]
+    x_host = rng.uniform(-1.0, 1.0, (2, 8, 16, 16)).astype(np.float32)
+    w_host = rng.uniform(-1.0, 1.0, (16, 8, 3, 3)).astype(np.float32)
+    b_host = rng.uniform(-1.0, 1.0, (1, 16, 1, 1)).astype(np.float32)
+
+    graph, X, W, B, Y = build_graph(x_host, w_host, b_host, padding, stride, dilation)
     graph.build([cudnn.heur_mode.FALLBACK])
 
     expected = reference_conv_bias_relu(
@@ -104,7 +110,7 @@ def main():
         expected.shape
     )
     np.testing.assert_allclose(actual, expected, rtol=1e-3, atol=1e-3)
-    print(f"engine: {graph.get_plan_name()}")
+    print(f"plan 0 engine: {graph.get_plan_name_at_index(0)}")
     print(f"max abs error: {np.max(np.abs(actual - expected)):.3e}")
     print("SUCCESS: cuDNN-style conv + bias + relu matches the NumPy reference")
 

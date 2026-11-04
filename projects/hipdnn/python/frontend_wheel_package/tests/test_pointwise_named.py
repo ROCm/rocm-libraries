@@ -8,19 +8,26 @@ the equivalent ``PointwiseAttributes``; serialized graphs are compared to prove 
 Tensor arguments are passed by keyword so the cuDNN parameter names are pinned too.
 """
 
-import json
-
 import numpy as np
 import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import build_all_plans, create_float_graph, execute_zeros
+from .helpers import (
+    build_all_plans,
+    canonical_graph_json,
+    create_float_graph,
+    execute_zeros,
+)
 
 _SHAPE = [2, 3, 4, 5]
 _INPUT_UIDS = (1, 2, 3)
 _OUTPUT_UID = 10
 _FLOAT = hipdnn.DataType.FLOAT
+# The graph computes in FLOAT, and validate() gives an op whose compute type is
+# NOT_SET the graph's, so ops get a different one: a dropped compute_data_type
+# then changes the serialized node.
+_OP_COMPUTE = hipdnn.DataType.HALF
 
 
 def _case(method, mode, tensors, options=None, setters=(), case_id=None):
@@ -147,9 +154,9 @@ _CASES = (
 )
 
 
-def _graph_with_inputs(count):
+def _graph_with_inputs(count, graph_compute_data_type=_FLOAT):
     graph = create_float_graph()
-    graph.set_name("pointwise_named")
+    graph.set_name("pointwise_named").set_compute_data_type(graph_compute_data_type)
     inputs = [
         hipdnn.Tensor.create(_SHAPE, _FLOAT).set_name(f"in{index}").set_uid(uid)
         for index, uid in enumerate(_INPUT_UIDS[:count])
@@ -160,11 +167,18 @@ def _graph_with_inputs(count):
 def _finish(graph, out):
     out.set_name("out").set_uid(_OUTPUT_UID).set_output(True)
     assert graph.validate().is_good()
-    return json.loads(graph.to_json())
+    return canonical_graph_json(graph)
 
 
-def _attributes_graph(mode, arity, setters, compute_data_type=_FLOAT, name="op"):
-    graph, inputs = _graph_with_inputs(arity)
+def _attributes_graph(
+    mode,
+    arity,
+    setters,
+    compute_data_type=_OP_COMPUTE,
+    name="op",
+    graph_compute_data_type=_FLOAT,
+):
+    graph, inputs = _graph_with_inputs(arity, graph_compute_data_type)
     attributes = hipdnn.PointwiseAttributes().set_mode(
         getattr(hipdnn.PointwiseMode, mode)
     )
@@ -180,7 +194,10 @@ def _attributes_graph(mode, arity, setters, compute_data_type=_FLOAT, name="op")
 def _named_graph(method, tensors, options):
     graph, inputs = _graph_with_inputs(len(tensors))
     out = getattr(graph, method)(
-        **dict(zip(tensors, inputs)), **options, compute_data_type=_FLOAT, name="op"
+        **dict(zip(tensors, inputs)),
+        **options,
+        compute_data_type=_OP_COMPUTE,
+        name="op",
     )
     return _finish(graph, out)
 
@@ -221,30 +238,36 @@ class TestNamedPointwiseParity:
         )
 
     def test_defaults_match_bare_attributes(self):
-        """compute_data_type defaults to NOT_SET and name to "" (graph-generated)."""
-        graph, (a, b) = _graph_with_inputs(2)
+        """compute_data_type defaults to NOT_SET, so the op takes the graph's
+        compute type, and name to "" (graph-generated)."""
+        graph, (a, b) = _graph_with_inputs(2, _OP_COMPUTE)
         named = _finish(graph, graph.add(a, b))
 
         assert named == _attributes_graph(
-            "ADD", 2, (), compute_data_type=None, name=None
+            "ADD",
+            2,
+            (),
+            compute_data_type=None,
+            name=None,
+            graph_compute_data_type=_OP_COMPUTE,
         )
 
     def test_relu_positional_order(self):
         graph, (x,) = _graph_with_inputs(1)
-        named = _finish(graph, graph.relu(x, 0.25, 0.5, 6.0, _FLOAT, "op"))
+        named = _finish(graph, graph.relu(x, 0.25, 0.5, 6.0, _OP_COMPUTE, "op"))
 
         assert named == _attributes_graph("RELU_FWD", 1, _RELU_SETTERS)
 
     def test_swish_backward_positional_order(self):
         """cuDNN puts compute_data_type before swish_beta in swish_backward only."""
         graph, (loss, x) = _graph_with_inputs(2)
-        named = _finish(graph, graph.swish_backward(loss, x, _FLOAT, 1.5, "op"))
+        named = _finish(graph, graph.swish_backward(loss, x, _OP_COMPUTE, 1.5, "op"))
 
         assert named == _attributes_graph("SWISH_BWD", 2, (("set_swish_beta", 1.5),))
 
     def test_binary_select_positional_order(self):
         graph, (in0, in1, mask) = _graph_with_inputs(3)
-        named = _finish(graph, graph.binary_select(in0, in1, mask, _FLOAT, "op"))
+        named = _finish(graph, graph.binary_select(in0, in1, mask, _OP_COMPUTE, "op"))
 
         assert named == _attributes_graph("BINARY_SELECT", 3, ())
 
