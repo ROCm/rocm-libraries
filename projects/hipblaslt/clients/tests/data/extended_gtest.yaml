@@ -690,8 +690,8 @@ Tests:
   stride_d: 65536
   batch_count: [2, 4]
 
-# Phase 4.1: Matrix Layout Attributes - Row vs Column Order
-- name: auxiliary_coverage_layout_order
+# Operand orientations selected through the client transpose arguments.
+- name: auxiliary_coverage_operand_transposes
   gpu_arch_exclude: '90a|12|11'
   category: pre_checkin
   function: matmul
@@ -701,14 +701,13 @@ Tests:
   d_type: f32_r
   compute_type: c_f32_r
   scale_type: f32_r
-  transA: N
-  transB: N
+  transA: [N, T]
+  transB: [N, T]
   alpha: 1.0
   beta: 0.0
   M: 128
   N: 128
   K: 64
-  order: [col, row]
   batch_count: 1
 
 # Phase 4.2: Epilogue & Activation - All Epilogue Modes
@@ -734,7 +733,7 @@ Tests:
   M: 512
   N: 512
   K: 256
-  workspace_size: [0, 1048576, 16777216]
+  user_allocated_workspace: [0, 1048576, 16777216]
   batch_count: 1
 
 # Phase 4.3: Algorithm Search with Max Solutions
@@ -755,5 +754,5 @@ Tests:
   M: 256
   N: 256
   K: 128
-  max_solutions: [1, 4, 8]
+  requested_solution_num: [1, 4, 8]
   batch_count: 1
