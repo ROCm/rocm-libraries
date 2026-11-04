@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -103,6 +103,18 @@ const vector<vector<int64_t>> large_matrix_sizeB_range_64 = {
     {100, 0}, {150, 0}, {200, 1}, {524, 1}, {1000, 0},
 };
 
+// for weekly large batch tests
+
+const vector<vector<int>> large_batch_sizeA_range = {
+    {7, 7, 9},
+};
+const vector<vector<int>> large_batch_sizeB_range = {{9, 0}, {9, 1}};
+
+const vector<vector<int64_t>> large_batch_sizeA_range_64 = {
+    {7, 7, 9},
+};
+const vector<vector<int64_t>> large_batch_sizeB_range_64 = {{9, 0}, {9, 1}};
+
 template <typename I>
 Arguments potrs_setup_arguments(potrs_tuple<I> tup)
 {
@@ -128,7 +140,7 @@ Arguments potrs_setup_arguments(potrs_tuple<I> tup)
     return arg;
 }
 
-template <typename I>
+template <typename I, int BATCH_COUNT = 3>
 class POTRS_BASE : public ::TestWithParam<potrs_tuple<I>>
 {
 protected:
@@ -145,7 +157,7 @@ protected:
         if(arg.peek<I>("n") == 0 && arg.peek<I>("nrhs") == 0)
             testing_potrs_bad_arg<BATCHED, STRIDED, T, I>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_potrs<BATCHED, STRIDED, T, I>(arg);
     }
 };
@@ -155,6 +167,18 @@ class POTRS : public POTRS_BASE<rocblas_int>
 };
 
 class POTRS_64 : public POTRS_BASE<int64_t>
+{
+};
+
+// large batch
+
+int constexpr BCOUNT = 64 * 1024 + 1;
+
+class POTRS_LARGE_BATCH : public POTRS_BASE<rocblas_int, BCOUNT>
+{
+};
+
+class POTRS_LARGE_BATCH_64 : public POTRS_BASE<int64_t, BCOUNT>
 {
 };
 
@@ -242,6 +266,48 @@ TEST_P(POTRS_64, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batched tests
+
+TEST_P(POTRS_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(POTRS_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(POTRS_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(POTRS_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 // strided_batched tests
 
 TEST_P(POTRS, strided_batched__float)
@@ -284,6 +350,47 @@ TEST_P(POTRS_64, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large strided_batched tests
+
+TEST_P(POTRS_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(POTRS_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(POTRS_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(POTRS_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(POTRS_LARGE_BATCH_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
 // daily_lapack tests normal execution with medium to large sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          POTRS,
@@ -304,3 +411,14 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          POTRS_64,
                          Combine(ValuesIn(matrix_sizeA_range_64), ValuesIn(matrix_sizeB_range_64)));
+
+// weekly large batch test
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         POTRS_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_sizeA_range),
+                                 ValuesIn(large_batch_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         POTRS_LARGE_BATCH_64,
+                         Combine(ValuesIn(large_batch_sizeA_range_64),
+                                 ValuesIn(large_batch_sizeB_range_64)));

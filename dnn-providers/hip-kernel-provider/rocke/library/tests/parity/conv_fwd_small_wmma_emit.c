@@ -177,6 +177,78 @@ static int make_cfg(int idx,
     case 14:
         k->problem = make_problem(3, 1, 1, 36, 4, "bf16", 32, 40);
         return 1;
+    case 15:
+        k->problem = make_problem(3, 1, 1, 64, 3, "bf16", 32, 40);
+        k->waves_c = 1;
+        k->waves_p = 3;
+        k->tiles_c = 2;
+        k->tiles_p = 3;
+        k->out_h = 6;
+        k->out_w = 16;
+        k->ck = 32;
+        k->prefetch = true;
+        return 1;
+    case 16:
+        k->problem = make_problem(3, 1, 1, 64, 3, "fp16", 32, 40);
+        k->waves_c = 1;
+        k->waves_p = 4;
+        k->tiles_c = 2;
+        k->tiles_p = 4;
+        k->out_h = 6;
+        k->out_w = 30;
+        k->ck = 64;
+        k->prefetch = true;
+        return 1;
+    case 17:
+        k->problem = make_problem(1, 0, 1, 32, 1, "bf16", 1, 300);
+        k->problem.KW = 7;
+        k->problem.pad_w = 3;
+        k->waves_c = 1;
+        k->waves_p = 2;
+        k->tiles_c = 1;
+        k->tiles_p = 2;
+        k->out_h = 1;
+        k->out_w = 58;
+        k->ck = 32;
+        k->prefetch = true;
+        return 1;
+    case 18:
+        k->problem = make_problem(1, 0, 1, 32, 1, "fp16", 1, 300);
+        k->problem.KW = 7;
+        k->problem.pad_w = 3;
+        k->waves_c = 1;
+        k->waves_p = 2;
+        k->tiles_c = 1;
+        k->tiles_p = 4;
+        k->out_h = 1;
+        k->out_w = 122;
+        k->ck = 32;
+        return 1;
+    case 19:
+        k->problem = make_problem(3, 1, 1, 64, 5, "bf16", 32, 40);
+        k->waves_c = 1;
+        k->waves_p = 3;
+        k->tiles_c = 3;
+        k->tiles_p = 3;
+        k->out_h = 6;
+        k->out_w = 16;
+        k->ck = 32;
+        return 1;
+    case 20:
+        k->problem = make_problem(3, 1, 1, 64, 6, "fp16", 32, 40);
+        k->waves_c = 1;
+        k->waves_p = 3;
+        k->tiles_c = 4;
+        k->tiles_p = 3;
+        k->out_h = 6;
+        k->out_w = 16;
+        k->ck = 32;
+        return 1;
+    case 21:
+        k->problem = make_problem(1, 0, 1, 32, 1, "bf16", 1, 300);
+        k->problem.KW = 7;
+        k->problem.pad_w = 7;
+        return 1;
     default:
         return -1;
     }
