@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
@@ -1111,8 +1112,29 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kV1Offset =
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
                               : kV0Offset;
+    // MX: the TDM-loaded E8M0 scales of a KV tile, one byte per 32 K elements, ping-ponged like
+    // K / V: K as [kN0][kK0 / 32], V as [kN1][kK1 / 32]. Q's scales borrow K0's scale region.
+    static constexpr bool kMx = Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+    static constexpr index_t kMxScaleGranularity = 32;
+    static constexpr index_t kMxKScaleBytes =
+        kMx ? Shape::kN0 * Shape::kK0 / kMxScaleGranularity : 0;
+    static constexpr index_t kMxVScaleBytes =
+        kMx ? Shape::kN1 * Shape::kK1 / kMxScaleGranularity : 0;
+    static constexpr index_t kMxKScale0Offset =
+        integer_least_multiple(kV1Offset + kVBytes, kRegionAlignment);
+    static constexpr index_t kMxKScale1Offset =
+        integer_least_multiple(kMxKScale0Offset + kMxKScaleBytes, kRegionAlignment);
+    static constexpr index_t kMxVScale0Offset =
+        integer_least_multiple(kMxKScale1Offset + kMxKScaleBytes, kRegionAlignment);
+    static constexpr index_t kMxVScale1Offset =
+        integer_least_multiple(kMxVScale0Offset + kMxVScaleBytes, kRegionAlignment);
+    static_assert(!kMx || (kUseDoubleKVLdsBuffer && Shape::kM0 <= Shape::kN0));
     static constexpr index_t kArenaBytes = [] {
-        if constexpr(kUseDoubleKVLdsBuffer)
+        if constexpr(kMx)
+        {
+            return integer_least_multiple(kMxVScale1Offset + kMxVScaleBytes, kArenaAlignment);
+        }
+        else if constexpr(kUseDoubleKVLdsBuffer)
         {
             return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
         }

@@ -39,6 +39,7 @@ DTYPE_BITS = {
     "fp8fp32": 8,
     "bf8": 8,
     "mxfp8": 8,
+    "mxfp8bf16": 8,
     "mxfp4": 4,
 }
 
@@ -66,7 +67,9 @@ TDM_K0_MAX_SUBMAX_MAP = {**K0_MAX_SUBMAX_MAP, 96: 96, 160: 160}
 def tdm_dv_submax(dtype: str, bk0max: int, bn1: int) -> int:
     # fp8 qr_tdm checks hdim_v against V's own width (bn1); bk0max is the Q/K head dim and
     # differs at d192/128. Other dtypes keep the bk0max divisor.
-    width = bn1 if dtype in ("fp8", "fp8bf16", "fp8fp32") else bk0max
+    width = (
+        bn1 if dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16") else bk0max
+    )
     return TDM_K0_MAX_SUBMAX_MAP[width]
 
 
@@ -849,6 +852,8 @@ class FmhaFwdKernel:
             "fp8",
             "fp8bf16",
             "fp8fp32",
+            "mxfp8",
+            "mxfp8bf16",
         ):
             return f"ck_tile::kernel_attr_for<{self.F_arch.tag}, ck_tile::kernel_attr<true>>"
         return self.F_arch.tag
@@ -1585,6 +1590,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _DT_FP16_BF16 = ("fp16", "bf16")
     _DT_FP8_FP8BF16 = ("fp8", "fp8bf16")
     _DT_FP8FP32 = ("fp8fp32",)
+    # MXFP8 inputs with an FP32 or BF16 O.
+    _DT_MXFP8 = ("mxfp8", "mxfp8bf16")
 
     # Define scheduled tile configurations once. Codegen inventory and pipeline
     # compatibility share these entries; runtime constraints are attached to copies.
@@ -1603,7 +1610,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
 
     @classmethod
     def supported_dtypes(cls) -> Tuple[str]:
-        return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32
+        return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32 + cls._DT_MXFP8
 
     @classmethod
     def is_tile_supported_by_qr_tdm_sched(
@@ -1690,7 +1697,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         def check_gemm0_k(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
-            if problem_ctx.dtype not in cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32:
+            if (
+                problem_ctx.dtype
+                not in cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32 + cls._DT_MXFP8
+            ):
                 return True
             k0_loops = kernel_ctx.tile.F_bk0max // kernel_ctx.tile.F_bk0
             if kernel_ctx.pipeline.tag == "qr_tdm":
@@ -1821,6 +1831,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (256, 256) : [FmhaFwdTileSize(128, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
                 (512, 512) : [FmhaFwdTileSize( 64, 128, 512, 512, 128,  512,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
+        elif dtype in cls._DT_MXFP8:
+            # The MX scale operand exists only on the K128 WMMA, so MX keeps the fp8 qr_tdm tiles
+            # whose gemm0 is K128: d96 (padded to 128), d128, d256 and d512.
+            fp8_tiles = cls.get_hdim_tile_size_dict("fp8")
+            return {
+                hdims: [
+                    tile
+                    for tile in fp8_tiles[hdims]
+                    if tile.F_wk0 == 128 and tile.F_bk0 == tile.F_bk0max
+                ]
+                for hdims in ((96, 96), (128, 128), (256, 256), (512, 512))
+            }
         elif dtype in cls._DT_FP8FP32:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
@@ -1977,6 +1999,21 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ):
                     pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+        elif dtype in cls._DT_MXFP8:
+            # MX runs on qr_tdm only, with row-major V and without bias.
+            has_causal = mask_impl == "simplified"
+            causal_only = CppConstraint(
+                "a.window_size_left < 0 && a.window_size_right == 0"
+            )
+            tdm_masks = (["causal"] if has_causal else []) + list(
+                get_mask_map(mask_impl)
+            )
+            for mask, lse, sink in itertools.product(tdm_masks, ["f", "t"], ["f", "t"]):
+                constraint = (
+                    causal_only if has_causal and mask == "causal" else CppConstraint()
+                )
+                for spad, dpad in itertools.product(["f", "t"], ["f", "t"]):
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", spad, spad, dpad, dpad, "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=constraint, F_use_double_kv_lds_buffer="t"))  # fmt: skip
         return pipelines
 
 

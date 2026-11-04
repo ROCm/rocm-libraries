@@ -131,6 +131,15 @@ struct TestConfigs<FmhaFwdMxFp8>
     }
 };
 
+// MXFP8 with a BF16 O exists only on gfx125x, which takes row-major V.
+template <>
+struct TestConfigs<FmhaFwdMxFp8Bf16> : TestConfigs<FmhaFwdMxFp8>
+{
+    static constexpr auto HDimValues        = std::array{std::tuple{128, -1}};
+    static constexpr auto IsVRowmajorValues = std::array{true};
+    static constexpr bool def_is_v_rowmajor = true;
+};
+
 template <>
 struct TestConfigs<FmhaFwdMxFp4>
 {
@@ -1781,8 +1790,11 @@ static std::vector<PaddingParam> BuildPaddingParams()
 {
     std::vector<PaddingParam> params;
 
-    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8Bf16, FmhaFwdMxFp8, FmhaFwdMxFp4>::
-                     value)
+    if constexpr(ck_tile::is_any_of<DataTypeConfig,
+                                    FmhaFwdFp8Bf16,
+                                    FmhaFwdMxFp8,
+                                    FmhaFwdMxFp8Bf16,
+                                    FmhaFwdMxFp4>::value)
     {
         return params;
     }

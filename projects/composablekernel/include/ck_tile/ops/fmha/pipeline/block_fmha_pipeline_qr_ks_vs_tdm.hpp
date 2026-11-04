@@ -86,10 +86,11 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr auto QScaleEnum        = Problem::QScaleEnum;
     static constexpr bool kBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
+    static constexpr bool kMx         = QScaleEnum == BlockAttentionQuantScaleEnum::MX;
     static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                                        QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                                       kBlockScale;
-    static constexpr bool kVScaleOnOacc = kQuantized && !kBlockScale;
+                                       kBlockScale || kMx;
+    static constexpr bool kVScaleOnOacc = kQuantized && !kBlockScale && !kMx;
     // P = exp2(s - m) is bounded to (0,1]. Folding 2^kPShift into the exponent puts it in
     // (0,256], the range the dynamic per-block scale already picks for a full-magnitude
     // block (round_up_pow2(1/448) == 2^-8), so the quantization grid is unchanged. The
@@ -101,6 +102,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     // reads first, so the V-ready barrier also frees the K buffer gemm0 read, and the K-ready
     // barrier frees the V buffer gemm1 read. The separate WAR barriers go.
     static constexpr bool kMergedWarBarriers = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    // TDM ops per K or V tile: MX follows each with its scale tile (MxScaleTiles).
+    static constexpr index_t kTdmPerKvTile = kMx ? 2 : 1;
     // fp8 double-buffer K/V loads pack their TDM descriptor in SGPRs (load_tile_tdm_uniform):
     // the strides are taken once before the loop instead of riding a VGPR through it.
     static constexpr bool kUniformTdmLoad = is_any_of<KDataType, fp8_t, bf8_t>::value;
@@ -283,11 +286,11 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
     }
 
-    // Only BLOCKSCALE feeds the scaled MMA a real operand, and only on the B side
-    // (pack_v_scale). A is e8m0_one() unconditionally since the static P scale landed.
-    // PERTENSOR and PERHEAD descale o_acc instead (kVScaleOnOacc), and kPShift is undone
+    // Only BLOCKSCALE and MX feed the scaled MMA a real operand, and only on the B side
+    // (pack_v_scale, the MX V scales). A is e8m0_one() unconditionally since the static P scale
+    // landed. PERTENSOR and PERHEAD descale o_acc instead (kVScaleOnOacc), and kPShift is undone
     // in the softmax row max and in LSE. Everything else was paying for a multiply by one.
-    static constexpr bool kHwGemm1Scale = kBlockScale &&
+    static constexpr bool kHwGemm1Scale = (kBlockScale || kMx) &&
                                           is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
     // k_descale scales whole S columns and is positive, so it commutes with the row max:
@@ -456,6 +459,178 @@ struct BlockFmhaPipelineQRKSVSTdm
         return pin_to_vgpr(static_cast<int32_t>(packed.data()));
     }
 
+    // MX: one E8M0 per 32 elements along each GEMM's K; a K128 WMMA step takes a dword of four.
+    // Lane l passes the scales of WMMA row (A) or column (B) l % 16.
+    static constexpr index_t kMxGranularity = 32;
+    static constexpr index_t kMxKSteps      = kK0 / (kScaleBytes * kMxGranularity);
+
+    // Q/K scales are [seqlen, qk_scales] and V scales [hdim_v, seqlen / 32] per (batch, head),
+    // row-major with the given strides; the kernel has applied the batch and head offsets.
+    struct MxDescale
+    {
+        const e8m0_t* q   = nullptr;
+        const e8m0_t* k   = nullptr;
+        const e8m0_t* v   = nullptr;
+        index_t stride_q  = 0;
+        index_t stride_k  = 0;
+        index_t stride_v  = 0;
+        index_t qk_scales = 0; // scales per Q/K row, ceil(hdim_q / 32)
+        index_t q_rows    = 0; // seqlen_q
+        index_t v_rows    = 0; // hdim_v
+    };
+
+    // MX scales are TDM-loaded like K / V into the arena's scale regions (QrTdmLdsArenaLayout),
+    // each K / V scale tile right after its K / V tile and into the same parity, then read back
+    // one dword (four scales) per WMMA. Every wave loads kRows / warps rows of a tile. Rows and
+    // scales past the tensor load as 0 (2^-127), which only meet zero-filled Q / K / V or P = 0.
+    using MxLayout                    = typename Policy::template LdsArenaLayout<Problem>;
+    static constexpr index_t kMxKCols = kK0 / kMxGranularity; // scale bytes per Q / K row
+    static constexpr index_t kMxVCols = kK1 / kMxGranularity; // scale bytes per V column
+
+    template <index_t kRows, index_t kCols>
+    CK_TILE_DEVICE static auto
+    make_mx_scale_dram_window(const e8m0_t* scales, index_t rows, index_t cols, index_t stride)
+    {
+        constexpr index_t kWarps = kBlockSize / get_warp_size();
+        static_assert(kRows % kWarps == 0, "MX scale rows split evenly across the waves");
+        const auto view = make_naive_tensor_view<address_space_enum::global>(
+            reinterpret_cast<int8_t*>(const_cast<e8m0_t*>(scales)),
+            make_tuple(rows, cols),
+            make_tuple(stride, 1),
+            number<1>{},
+            number<1>{});
+        constexpr auto dstr = make_static_tile_distribution(
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<kWarps, kRows / kWarps>, sequence<kCols>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<1, 2>,
+                                       sequence<1, 0>>{},
+            bool_constant<true>{});
+        return make_tile_window(view, make_tuple(number<kRows>{}, number<kCols>{}), {0, 0}, dstr);
+    }
+
+    template <index_t kRows, index_t kCols>
+    CK_TILE_DEVICE static auto make_mx_scale_lds_window(char* lds)
+    {
+        const auto view = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<int8_t*>(lds),
+            make_naive_tensor_descriptor(make_tuple(number<kRows>{}, number<kCols>{}),
+                                         make_tuple(number<kCols>{}, number<1>{}),
+                                         number<kCols>{},
+                                         number<1>{}));
+        return make_tile_window(view, make_tuple(number<kRows>{}, number<kCols>{}), {0, 0});
+    }
+
+    CK_TILE_DEVICE static char* mx_k_scale_region(char* smem, index_t tile)
+    {
+        return smem + (tile % 2 ? MxLayout::kMxKScale1Offset : MxLayout::kMxKScale0Offset);
+    }
+    CK_TILE_DEVICE static char* mx_v_scale_region(char* smem, index_t tile)
+    {
+        return smem + (tile % 2 ? MxLayout::kMxVScale1Offset : MxLayout::kMxVScale0Offset);
+    }
+
+    // Dword `i` (four scales) of an LDS scale tile.
+    CK_TILE_DEVICE static int32_t read_mx_scales(const char* lds, index_t i)
+    {
+        using lds_int32_t = __attribute__((address_space(3))) const int32_t;
+        return reinterpret_cast<lds_int32_t*>(reinterpret_cast<uintptr_t>(lds))[i];
+    }
+
+    // Q's tile borrows K0's scale region: it is read into VGPRs before tile 0's K scales land.
+    CK_TILE_DEVICE static void load_mx_q_scales(const MxDescale& mx, index_t row0, char* smem)
+    {
+        auto dram =
+            make_mx_scale_dram_window<kM0, kMxKCols>(mx.q, mx.q_rows, mx.qk_scales, mx.stride_q);
+        move_tile_window(dram, {row0, 0});
+        load_tile_tdm(
+            TDMConfig{}, make_mx_scale_lds_window<kM0, kMxKCols>(mx_k_scale_region(smem, 0)), dram);
+    }
+
+    // This lane's Q scales, one dword per (M iteration, K step); S rows run M iteration-outer,
+    // then warp (QKGemm's C distribution).
+    template <typename QKGemm>
+    CK_TILE_DEVICE static auto read_mx_q_scales(const char* smem, index_t lane_row)
+    {
+        constexpr index_t kKIter = QKGemm::KIterPerWarp;
+        array<int32_t, QKGemm::MIterPerWarp * kKIter> scales;
+        static_for<0, QKGemm::MIterPerWarp, 1>{}([&](auto i_m) {
+            const index_t row =
+                (decltype(i_m)::value * QKGemm::MWarp + get_warp_id()) * QKGemm::WarpGemm::kM +
+                lane_row;
+            static_for<0, kKIter, 1>{}([&](auto i_k) {
+                constexpr index_t i = decltype(i_m)::value * kKIter + decltype(i_k)::value;
+                scales(number<i>{}) = read_mx_scales(smem + MxLayout::kMxKScale0Offset,
+                                                     row * kMxKSteps + decltype(i_k)::value);
+            });
+        });
+        return scales;
+    }
+
+    // The K / V scale tiles of a block. Windows and strides are built once; a tile moves the
+    // window and switches the LDS parity, then issues through the uniform TDM path, as K / V.
+    template <typename KDram, typename VDram, typename KLds, typename VLds>
+    struct MxScaleTiles
+    {
+        KDram k_dram;
+        VDram v_dram;
+        KLds k_lds;
+        VLds v_lds;
+        char* smem; // the arena
+        decltype(make_tdm_uniform_strides(std::declval<const KDram&>())) k_strides =
+            make_tdm_uniform_strides(k_dram);
+        decltype(make_tdm_uniform_strides(std::declval<const VDram&>())) v_strides =
+            make_tdm_uniform_strides(v_dram);
+
+        CK_TILE_DEVICE void load_k(index_t tile, index_t kv0)
+        {
+            move_tile_window(k_dram, {kv0 - k_dram.get_window_origin().at(number<0>{}), 0});
+            k_lds.set_bottom_tensor_view_data_ptr(
+                reinterpret_cast<int8_t*>(mx_k_scale_region(smem, tile)));
+            load_tile_tdm_uniform(TDMConfig{}, k_lds, k_dram, k_strides);
+        }
+        CK_TILE_DEVICE void load_v(index_t tile, index_t kv0)
+        {
+            move_tile_window(
+                v_dram, {0, kv0 / kMxGranularity - v_dram.get_window_origin().at(number<1>{})});
+            v_lds.set_bottom_tensor_view_data_ptr(
+                reinterpret_cast<int8_t*>(mx_v_scale_region(smem, tile)));
+            load_tile_tdm_uniform(TDMConfig{}, v_lds, v_dram, v_strides);
+        }
+
+        CK_TILE_DEVICE int32_t k(index_t tile, index_t row, index_t step) const
+        {
+            return read_mx_scales(mx_k_scale_region(smem, tile), row * kMxKSteps + step);
+        }
+        CK_TILE_DEVICE int32_t v(index_t tile, index_t col) const
+        {
+            return read_mx_scales(mx_v_scale_region(smem, tile), col);
+        }
+    };
+
+    // Non-MX pipelines get a placeholder: the windows' first-lane reads would otherwise stay.
+    CK_TILE_DEVICE static auto
+    make_mx_scale_tiles(const MxDescale& mx, index_t seqlen_k, char* smem)
+    {
+        if constexpr(kMx)
+        {
+            const auto k_dram =
+                make_mx_scale_dram_window<kN0, kMxKCols>(mx.k, seqlen_k, mx.qk_scales, mx.stride_k);
+            const auto v_dram = make_mx_scale_dram_window<kN1, kMxVCols>(
+                mx.v, mx.v_rows, integer_divide_ceil(seqlen_k, kMxGranularity), mx.stride_v);
+            const auto k_lds = make_mx_scale_lds_window<kN0, kMxKCols>(smem);
+            const auto v_lds = make_mx_scale_lds_window<kN1, kMxVCols>(smem);
+            return MxScaleTiles<remove_cvref_t<decltype(k_dram)>,
+                                remove_cvref_t<decltype(v_dram)>,
+                                remove_cvref_t<decltype(k_lds)>,
+                                remove_cvref_t<decltype(v_lds)>>{
+                k_dram, v_dram, k_lds, v_lds, smem};
+        }
+        else
+            return ignore;
+    }
+
     template <typename Gemm1>
     CK_TILE_DEVICE static auto make_gemm1_scale([[maybe_unused]] int32_t scale)
     {
@@ -486,11 +661,17 @@ struct BlockFmhaPipelineQRKSVSTdm
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                      QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
+                      QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE || kMx,
                   "qr_tdm pipeline: unsupported quantization granularity");
 
-    static_assert(!kBlockScale || kHwGemm1Scale,
-                  "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
+    static_assert(!(kBlockScale || kMx) || kHwGemm1Scale,
+                  "qr_tdm pipeline: BLOCKSCALE and MX require the scaled MMA in gemm1");
+
+    static_assert(!kMx || (BlockFmhaShape::Gemm0WarpTile::at(number<2>{}) == 128 &&
+                           BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                           Problem::kUseDoubleKVLdsBuffer),
+                  "qr_tdm pipeline: MX needs the K128 scaled WMMA in gemm0, no bias and the "
+                  "double K/V LDS buffer path");
 
     static_assert(!kHwGemm1Scale || kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                   "qr_tdm pipeline: the scaled gemm1 assumes kK1 is one warp-GEMM K step");
@@ -775,6 +956,13 @@ struct BlockFmhaPipelineQRKSVSTdm
             move_tile_window(v_frag_window, {0, kFragN});
             v_bufs[decltype(i_f)::value] = load_tile_transpose(v_frag_window);
         });
+        // MX reads each fragment's V scale (an LDS dword) as far ahead as its V, into its own
+        // VGPR, so the scale read does not wait right before the WMMA.
+        [[maybe_unused]] const auto& v_scale = scales.at(number<1>{});
+        [[maybe_unused]] int32_t v_scale_bufs[kVReadAhead + 1];
+        if constexpr(kMx)
+            static_for<0, kVReadAhead, 1>{}(
+                [&](auto i_f) { v_scale_bufs[decltype(i_f)::value] = v_scale(i_f, number<0>{}); });
 
         static_for<0, kNIter, 1>{}([&](auto i_n) {
             constexpr index_t n = decltype(i_n)::value;
@@ -782,10 +970,23 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 move_tile_window(v_frag_window, {0, kFragN});
                 v_bufs[(n + kVReadAhead) % (kVReadAhead + 1)] = load_tile_transpose(v_frag_window);
+                if constexpr(kMx)
+                    v_scale_bufs[(n + kVReadAhead) % (kVReadAhead + 1)] =
+                        v_scale(number<n + kVReadAhead>{}, number<0>{});
             }
             rescale_o(i_n);
-            Policy::template RunPVFragment<Problem>(
-                o_acc, p_tile, v_bufs[n % (kVReadAhead + 1)], i_n, scales);
+            if constexpr(kMx)
+                Policy::template RunPVFragment<Problem>(
+                    o_acc,
+                    p_tile,
+                    v_bufs[n % (kVReadAhead + 1)],
+                    i_n,
+                    make_tuple(
+                        scales.at(number<0>{}),
+                        [s = v_scale_bufs[n % (kVReadAhead + 1)]](auto, auto) { return s; }));
+            else
+                Policy::template RunPVFragment<Problem>(
+                    o_acc, p_tile, v_bufs[n % (kVReadAhead + 1)], i_n, scales);
             // A full fence keeps the fragment order; a masked one lets later fragments' reads
             // move ahead and V stops being bounded.
             __builtin_amdgcn_sched_barrier(0);
@@ -1658,7 +1859,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* k_descale_ptr,
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
-        float v_descale) const
+        float v_descale,
+        [[maybe_unused]] const MxDescale& mx = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -1842,8 +2044,29 @@ struct BlockFmhaPipelineQRKSVSTdm
         // qr_tdm permits a partial final Q tile even with kPadSeqLenQ=false.
         // Preserve its zero-fill bounds; the full-tile shortcut is K/V-only.
         load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
+        auto* const smem_bytes = static_cast<char*>(smem_arena);
+        if constexpr(kMx)
+            load_mx_q_scales(mx, q_origin.at(I0), smem_bytes);
         s_wait_tensorcnt_barrier<0>();
         auto q_tile = load_tile(q_lds_read_window);
+
+        using QKGemm                = remove_cvref_t<decltype(gemm_0)>;
+        using PVGemm                = remove_cvref_t<decltype(gemm_1)>;
+        constexpr index_t kQKKIter  = QKGemm::KIterPerWarp;
+        constexpr index_t kWmmaRows = QKGemm::WarpGemm::kM;
+        // The WMMA row / column whose scales this lane passes (see kMxGranularity).
+        [[maybe_unused]] const index_t mx_lane = get_lane_id() % kWmmaRows;
+        // Q's scales stay in VGPRs for the whole block.
+        [[maybe_unused]] array<int32_t, QKGemm::MIterPerWarp * kQKKIter> q_scales;
+        if constexpr(kMx)
+        {
+            static_assert(QKGemm::NWarp == 1 && PVGemm::NWarp == 1 &&
+                              QKGemm::WarpGemm::kN == kWmmaRows &&
+                              PVGemm::WarpGemm::kN == kWmmaRows,
+                          "MX scale lanes assume one N warp and 16-wide WMMAs");
+            q_scales = read_mx_q_scales<QKGemm>(smem_bytes, mx_lane);
+        }
+        [[maybe_unused]] auto mx_tiles = make_mx_scale_tiles(mx, mask.GetXTotal(), smem_bytes);
 
         // K tile in LDS (sink-aware start)
         const auto kv_load_start =
@@ -1955,10 +2178,29 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k1_loops);
         const auto k_tdm_strides = make_tdm_uniform_strides(k_dram_window);
         const auto v_tdm_strides = make_tdm_uniform_strides(v_dram_window);
+
+        // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
+        // physical_seqlen_k_start. k_origin below and the blockscale descale index
+        // (make_kv_scale_index, shared by k_descale and v_descale) address the
+        // same tile, so they share this one expression -- a sink-blind index here
+        // trails the loaded column by physical_seqlen_k_start - sink_seq_end.
+        auto kv_tile_start_of = [&](index_t i_loop) {
+            return (num_sink_loop > i_loop)
+                       ? kv_load_start + i_loop * kN0
+                       : physical_seqlen_k_start + (i_loop - num_sink_loop) * kN0;
+        };
+        static_assert(!kMx || (k0_loops == 1 && k1_loops == 1 && kMergedWarBarriers &&
+                               kK1 == kScaleBytes * kMxGranularity && !kKFragments &&
+                               !kStagedKPairs && !Problem::kProgressiveDsLoadK),
+                      "MX scales cover one gemm0 slice and one gemm1 K128 step per tile");
         block_sync_lds<0>();
         LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+        if constexpr(kMx)
+            mx_tiles.load_k(0, kv_tile_start_of(0));
         LoadTdmFullTileOrPadded<true>(
             tdm_config_v, v_lds_write_window, v_dram_window, v_tdm_strides);
+        if constexpr(kMx)
+            mx_tiles.load_v(0, kv_tile_start_of(0));
 
         move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
         // The prologue issues two K prefetches: the first into ptrk0, which
@@ -1981,6 +2223,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
         LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+        if constexpr(kMx) // past the last tile the scales repeat it, as the K / V prefetches do
+            mx_tiles.load_k(1, kv_tile_start_of(min(1, num_total_loop - 1)));
 
         // These feed block_sync_lds<N>, whose N lands in the hardware lgkmcnt field: 6 bits
         // on gfx12, so 63 is the maximum and also the "do not wait" sentinel that
@@ -1997,13 +2241,14 @@ struct BlockFmhaPipelineQRKSVSTdm
             v_lds_access < waitcnt_arg::kMaxLgkmCnt ? v_lds_access : waitcnt_arg::kMaxLgkmCnt;
 
         // drain-to-2: the prologue issued 3 TDM loads (K->ptrk0 above, V, then
-        // K->ptrk1). Wait for the oldest (K->ptrk0) to land so the load_tile
+        // K->ptrk1), each followed by its scale tile under MX (kTdmPerKvTile). Wait for
+        // the oldest (K->ptrk0) to land so the load_tile
         // below can read ptrk0, while ptrk1 and V stay in flight. This count is
         // structurally coupled to the prologue's prefetch sequence: it equals
         // (TDM loads issued in prologue) - (loads that must complete before the
         // first LDS read). If the prologue prefetch count changes, update this
         // value or risk a silent data hazard / unnecessary stall.
-        s_wait_tensorcnt_barrier<2>();
+        s_wait_tensorcnt_barrier<2 * kTdmPerKvTile>();
         auto k_tile = [&]() {
             if constexpr(kKFragments)
                 return load_k_fragments();
@@ -2013,16 +2258,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         __builtin_amdgcn_sched_barrier(0);
 
-        // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
-        // physical_seqlen_k_start. k_origin below and the blockscale descale index
-        // (make_kv_scale_index, shared by k_descale and v_descale) address the
-        // same tile, so they share this one expression -- a sink-blind index here
-        // trails the loaded column by physical_seqlen_k_start - sink_seq_end.
-        auto kv_tile_start_of = [&](index_t i_loop) {
-            return (num_sink_loop > i_loop)
-                       ? kv_load_start + i_loop * kN0
-                       : physical_seqlen_k_start + (i_loop - num_sink_loop) * kN0;
-        };
         // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k;
         // this also keeps the last iteration's prefetch of a tile past the end in bounds
         [[maybe_unused]] const index_t kv_last  = mask.GetXTotal() - 1;
@@ -2069,6 +2304,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                 k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
                 LoadTdmFullTileOrPadded(
                     tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+                if constexpr(kMx)
+                    mx_tiles.load_k(i_total_loops + 2,
+                                    kv_tile_start_of(min(i_total_loops + 2, num_total_loop - 1)));
             };
 
             // move V tile windows
@@ -2091,6 +2329,9 @@ struct BlockFmhaPipelineQRKSVSTdm
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
             LoadTdmFullTileOrPadded<true>(
                 tdm_config_v, v_lds_write_window, v_dram_window, v_tdm_strides);
+            if constexpr(kMx)
+                mx_tiles.load_v(i_total_loops + 1,
+                                kv_tile_start_of(min(i_total_loops + 1, num_total_loop - 1)));
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -2248,6 +2489,21 @@ struct BlockFmhaPipelineQRKSVSTdm
                     k_tile,
                     [](auto, auto, auto) {});
             }
+            else if constexpr(kMx)
+            {
+                gemm_0(
+                    s_acc,
+                    q_tile,
+                    k_tile,
+                    [&](auto i_m, auto i_k) {
+                        return q_scales[decltype(i_m)::value * kQKKIter + decltype(i_k)::value];
+                    },
+                    [&](auto i_n, auto i_k) {
+                        return mx_tiles.k(i_total_loops,
+                                          decltype(i_n)::value * kWmmaRows + mx_lane,
+                                          decltype(i_k)::value);
+                    });
+            }
             else if constexpr(!kStagedKPairs)
             {
                 gemm_0(s_acc,
@@ -2296,16 +2552,17 @@ struct BlockFmhaPipelineQRKSVSTdm
             // Three TDM loads are in flight: last iteration's V and K, plus the V issued
             // above. TENSORcnt retires in issue order (CDNA5 ISA 6241), so <2> retires
             // exactly the oldest -- last iteration's V, what load_tile_transpose reads.
-            // <1> also drained its K, which is not read until a PV gemm later.
+            // <1> also drained its K, which is not read until a PV gemm later. MX counts each
+            // load's scale tile too (kTdmPerKvTile).
             if constexpr(kMergedWarBarriers)
             {
                 // dscnt 0: gemm0's K reads are done in every wave past this barrier.
-                s_wait_tensorcnt_barrier<2, 0>();
+                s_wait_tensorcnt_barrier<2 * kTdmPerKvTile, 0>();
                 prefetch_k();
             }
             else
             {
-                s_wait_tensorcnt_barrier<2>();
+                s_wait_tensorcnt_barrier<2 * kTdmPerKvTile>();
             }
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             v_frag_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
@@ -2593,7 +2850,15 @@ struct BlockFmhaPipelineQRKSVSTdm
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
             auto v_scale = [&](auto i_k1) {
-                if constexpr(kBlockScale)
+                if constexpr(kMx)
+                {
+                    ignore = i_k1;
+                    return [&](auto i_n, auto) {
+                        return mx_tiles.v(i_total_loops,
+                                          decltype(i_n)::value * kWmmaRows + mx_lane);
+                    };
+                }
+                else if constexpr(kBlockScale)
                 {
                     return make_gemm1_scale<decltype(gemm_1)>(v_scale_packed[i_k1]);
                 }
@@ -2661,7 +2926,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             // Mirrors the V wait: in flight are last iteration's K then this one's V and
             // K, so <2> retires that K -- exactly what load_tile below reads. Merged: dscnt
             // 0 also retires gemm1's V reads, which frees the V buffer for the next call.
-            s_wait_tensorcnt_barrier<2, kMergedWarBarriers ? 0 : waitcnt_arg::kMaxLgkmCnt>();
+            s_wait_tensorcnt_barrier<2 * kTdmPerKvTile,
+                                     kMergedWarBarriers ? 0 : waitcnt_arg::kMaxLgkmCnt>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             if constexpr(kKFragments)
             {
@@ -2840,7 +3106,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         const float* k_descale_ptr,
                                         const float* v_descale_ptr,
                                         index_t block_scale_size_kv,
-                                        float v_descale) const
+                                        float v_descale,
+                                        const MxDescale& mx = {}) const
     {
         static_assert(kQuantized,
                       "qr_tdm pipeline: this granularity ignores the descale arguments");
@@ -2858,7 +3125,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             k_descale_ptr,
                                             v_descale_ptr,
                                             block_scale_size_kv,
-                                            v_descale);
+                                            v_descale,
+                                            mx);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                                     k_dram_block_window_tmp,
@@ -2945,7 +3213,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         const float* k_descale_ptr,
                                         const float* v_descale_ptr,
                                         index_t block_scale_size_kv,
-                                        float v_descale) const
+                                        float v_descale,
+                                        const MxDescale& mx = {}) const
     {
         static_assert(kQuantized,
                       "qr_tdm pipeline: this granularity ignores the descale arguments");
@@ -2963,7 +3232,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             k_descale_ptr,
                                             v_descale_ptr,
                                             block_scale_size_kv,
-                                            v_descale);
+                                            v_descale,
+                                            mx);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                                     k_dram_block_window_tmp,

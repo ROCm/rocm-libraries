@@ -7,8 +7,8 @@ function(ck_tile_fmha_fwd_get_source_compile_options fwd_blob_name out_var)
   if(fwd_blob_name MATCHES "^fmha_fwd_d(64|128|192)_(fp16|bf16)_.*_qr_tdm_sched_.*_gfx125\\.cpp$")
     list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode)
   endif()
-  # The fp8 family (fp8, fp8bf16, fp8fp32) qr_tdm instances use the same mode.
-  if(fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_fp8(bf16|fp32)?_.*_qr_tdm_.*_gfx125\\.cpp$")
+  # The fp8 family (fp8, fp8bf16, fp8fp32, mxfp8, mxfp8bf16) qr_tdm instances use the same mode.
+  if(fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_(mx)?fp8(bf16|fp32)?_.*_qr_tdm_.*_gfx125\\.cpp$")
     list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode)
   endif()
   set(${out_var} "${compile_options}" PARENT_SCOPE)

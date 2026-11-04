@@ -3442,6 +3442,35 @@ struct FmhaFwdKernel
                 }
             }
 
+            constexpr bool kMxQScale = QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+            if constexpr(kMxQScale)
+            {
+                descale_offset_q =
+                    static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q_descale;
+                descale_offset_k =
+                    static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_k_descale;
+                descale_offset_v =
+                    static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_v_descale;
+                if constexpr(kIsGroupMode)
+                {
+                    // Q/K scale rows follow the physical token starts, V its own packed starts.
+                    descale_offset_q += static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]) *
+                                        kargs.stride_q_descale;
+                    descale_offset_k += static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]) *
+                                        kargs.stride_k_descale;
+                    descale_offset_v += kargs.seqstart_v_scale_ptr[i_batch];
+                }
+                else
+                {
+                    descale_offset_q +=
+                        static_cast<long_index_t>(i_batch) * kargs.batch_stride_q_descale;
+                    descale_offset_k +=
+                        static_cast<long_index_t>(i_batch) * kargs.batch_stride_k_descale;
+                    descale_offset_v +=
+                        static_cast<long_index_t>(i_batch) * kargs.batch_stride_v_descale;
+                }
+            }
+
             static_assert(kPipelineName == "qr_tdm" ||
                               QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
                           "only qr_tdm implements quantization descales in this branch");
@@ -3480,6 +3509,21 @@ struct FmhaFwdKernel
                 else if constexpr(kPipelineName == "qr_tdm" && kFoldedQScale)
                     return FmhaPipeline{}(
                         static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, v_descale);
+                else if constexpr(kPipelineName == "qr_tdm" && kMxQScale)
+                {
+                    typename FmhaPipeline::MxDescale mx;
+                    mx.q = reinterpret_cast<const e8m0_t*>(kargs.q_descale_ptr) + descale_offset_q;
+                    mx.k = reinterpret_cast<const e8m0_t*>(kargs.k_descale_ptr) + descale_offset_k;
+                    mx.v = reinterpret_cast<const e8m0_t*>(kargs.v_descale_ptr) + descale_offset_v;
+                    mx.stride_q  = kargs.stride_q_descale;
+                    mx.stride_k  = kargs.stride_k_descale;
+                    mx.stride_v  = kargs.stride_v_descale;
+                    mx.qk_scales = integer_divide_ceil(kargs.hdim_q, FmhaPipeline::kMxGranularity);
+                    mx.q_rows    = kargs.seqlen_q;
+                    mx.v_rows    = kargs.hdim_v;
+                    return FmhaPipeline{}(
+                        static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, 1.0f, mx);
+                }
                 else
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...);
             };
