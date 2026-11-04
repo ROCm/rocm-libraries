@@ -126,11 +126,17 @@ class MatchingLibrary:
             properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
         table = []
+        # Rows typically outnumber solutions by orders of magnitude; the wrapper
+        # is immutable, so share one per solution (keeps the pickled result that
+        # workers send back to the parent small).
+        wrappers = {}
 
         for row in origTable:
             try:
                 index = row[1][0]
-                value = IndexSolutionLibrary(solutions[index])
+                value = wrappers.get(index)
+                if value is None:
+                    value = wrappers[index] = IndexSolutionLibrary(solutions[index])
                 key = list([row[0][i] for i in keyOrder])
                 if fusedA2A:
                     key += splitFusedA2ARow(row[0], problemType)[2]
