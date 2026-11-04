@@ -1309,7 +1309,7 @@ class _Roller:
         Builders name a fan's iter-args positionally -- ``acc_m0_n0``,
         ``acc_m0_n1``, ... -- so when every lane `i` is ``<prefix><i>`` the
         roller can carry Python's names through instead of minting synthetic
-        ``__faN_`` ones. The prefix extends to lane counts never sampled, which
+        ``__faN_l<i>`` ones. The prefix extends to lane counts never sampled, which
         is what makes it usable on a parametric fan. Returns None when the names
         are not simply the lane index (a 2-D ``acc_m{m}_n{n}`` fan, say), which
         leaves the synthetic naming in place: still correct, just
@@ -1369,10 +1369,13 @@ class _Roller:
         res_fmt, new_fmt = f"__fr{fid}_", f"__fn{fid}_"
         # The iter-arg names reach the emitted .ll (the loop-carry phis), so
         # prefer Python's own lane naming over a synthetic one. res_/new_ are
-        # internal threading the backend renames, and stay synthetic.
+        # internal threading the backend renames, and stay synthetic. The
+        # synthetic iter-arg names are loop-carried value names, which may not
+        # end in "_" and digits (the form builder names take), hence the "l"
+        # before the lane index.
         acc_fmt = (
             self._lane_prefix([m["name"] for m in iter_a], [m["name"] for m in iter_b])
-            or f"__fa{fid}_"
+            or f"__fa{fid}_l"
         )
         lanes = {"for": {"var": fv, "lo": 0, "hi": count, "step": 1}}
 
