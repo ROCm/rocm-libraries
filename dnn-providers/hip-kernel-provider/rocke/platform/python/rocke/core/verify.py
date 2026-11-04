@@ -43,7 +43,7 @@ from .ir import (
     _assume_range_errors,
     param_fact_errors,
     _buffer_op_bytes,
-    _if_else_branch_yield,
+    _if_else_yields,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _int_add_wrap_error,
@@ -454,9 +454,8 @@ class _Verifier:
                 )
         elif name == "scf.if_else":
             try:
-                for branch in range(2):
-                    _if_else_branch_yield(op, branch)
-            except ValueError as error:
+                _if_else_yields(op)
+            except (TypeError, ValueError) as error:
                 self.err(str(error), op)
         elif name in ("tile.buffer_load_vN", "tile.buffer_store_vN"):
             try:
