@@ -569,7 +569,7 @@ TEST(TestLoadBundleMetadata, EnforcementLevelNonStringThrows)
 
 TEST(TestLoadBundleMetadata, ErrorNamesTheMetaJsonFile)
 {
-    const TempBundle bundle(R"({"format_version": 2})");
+    const TempBundle bundle(R"({"format_version": 3})");
     try
     {
         loadBundleMetadata(bundle.bundleJsonPath());
@@ -601,7 +601,7 @@ TEST(TestParseBundleMetadataJson, ThrowsOnMalformedObjects)
                             R"("metadata")",
                             R"({})",
                             R"({"format_version": "1"})",
-                            R"({"format_version": 2})",
+                            R"({"format_version": 3})",
                             R"({"format_version": 1, "enforcement_level": "FULL"})",
                             R"({"format_version": 1, "enforcement_level": null})"})
     {
@@ -707,6 +707,113 @@ TEST(TestParseBundleMetadataJson, NonBooleanFlagsThrowNamingTheFlag)
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// format_version 2 and input fill specs
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// The BundleMetadataError message for `text`, or "" when it parses.
+std::string metadataError(const std::string& text)
+{
+    try
+    {
+        parseBundleMetadataJson(nlohmann::json::parse(text), "case_0");
+    }
+    catch(const BundleMetadataError& e)
+    {
+        return e.what();
+    }
+    return {};
+}
+
+} // namespace
+
+TEST(TestParseBundleMetadataJson, AcceptsFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "inputs": {"1": {"kind": "free", "lo": 0, "hi": 2},
+                                           "2": {"kind": "fixed", "value": 1}}})"));
+    EXPECT_EQ(meta.formatVersion, 2);
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->size(), 2u);
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnFormatVersion3)
+{
+    const auto error = metadataError(R"({"format_version": 3})");
+    EXPECT_NE(error.find("unsupported format_version 3"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnUnknownFillKind)
+{
+    const auto error
+        = metadataError(R"({"format_version": 1, "inputs": {"7": {"kind": "vaules"}}})");
+    EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << error;
+    EXPECT_NE(error.find("vaules"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnNonStringFillKind)
+{
+    for(const auto* kind : {"1", "null", "true", R"(["free"])"})
+    {
+        const auto error = metadataError(
+            std::string(R"({"format_version": 1, "inputs": {"7": {"kind": )") + kind + "}}}");
+        EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << kind << ": " << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnInputSpecThatIsNotAnObject)
+{
+    const auto error = metadataError(R"({"format_version": 1, "inputs": {"7": "free"}})");
+    EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, SeedOnlyInputStillLoads)
+{
+    const auto meta = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 1, "inputs": {"7": {"seed": 5}}})"));
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->at(7).at("seed").get<int>(), 5);
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnValuesKindInFormatVersion1)
+{
+    const auto error = metadataError(
+        R"({"format_version": 1, "inputs": {"7": {"kind": "values", "values": [64, 32]}}})");
+    EXPECT_NE(error.find("kind values needs format_version 2"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, AcceptsValuesKindInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "inputs": {"7": {"kind": "values", "values": [64, 32], "repeat": true}}})"));
+    EXPECT_EQ(meta.formatVersion, 2);
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->at(7).at("kind").get<std::string>(), "values");
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedValuesSpecInFormatVersion2)
+{
+    for(const auto* spec : {R"({"kind": "values", "values": []})",
+                            R"({"kind": "values", "values": ["64"]})",
+                            R"({"kind": "values", "values": [9223372036854775808]})",
+                            R"({"kind": "values", "values": [1], "repeat": "no"})",
+                            R"({"kind": "values", "values": [1], "count": 4})"})
+    {
+        const auto error
+            = metadataError(std::string(R"({"format_version": 2, "inputs": {"7": )") + spec + "}}");
+        EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << spec << ": " << error;
+    }
+}
+
+TEST(TestLoadBundleMetadata, UnknownFillKindInAFileThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "inputs": {"7": {"kind": "vaules"}}})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
 TEST(TestLoadBundleMetadata, NonBooleanFlagFromAFileThrows)

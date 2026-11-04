@@ -237,12 +237,12 @@ parses it.
 
 | Field | Type | Effect |
 |---|---|---|
-| `format_version` | int | **Required, must be `1`.** Otherwise the whole metadata object is rejected. |
+| `format_version` | int | **Required, `1` or `2`.** Metadata that uses a version-2 feature must use `2`; metadata that uses a version-2 feature with `1` is rejected. A harness rejects a version that it does not know. The only version-2 feature is the `values` [fill kind](#input-fill-specs). |
 | `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. Not applicable to an expected-rejection bundle: `expected_rejection` overrides it. |
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
-| `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, under its scale, diagonal band and additive mask, so an override for them has no effect. A node whose forward the fill cannot derive (ALiBi, padding, sequence lengths, dropout, ragged tensors, mixed or unsupported data types, a scale tensor that is not a pass-by-value scalar, a Q, K, V or mask computed by the graph) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Shapes the CPU reference rejects, such as stats not shaped `[B, H, Sq, 1]`, keep the override, and the CPU reference then fails the bundle. |
+| `inputs` | object | Per-input fill specs keyed by tensor uid as a string (`"3"`). See [Input fill specs](#input-fill-specs). A key that is not a tensor uid rejects the metadata, and so does an entry that is not a valid fill spec. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, under its scale, diagonal band and additive mask, so an override for them has no effect. A node whose forward the fill cannot derive (ALiBi, padding, sequence lengths, dropout, ragged tensors, mixed or unsupported data types, a scale tensor that is not a pass-by-value scalar, a Q, K, V or mask computed by the graph) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Shapes the CPU reference rejects, such as stats not shaped `[B, H, Sq, 1]`, keep the override, and the CPU reference then fails the bundle. |
 | `no_cpu_reference` | bool | Default `false`. `true`: the CPU reference executor is not an oracle for this bundle. A non-boolean value (`"yes"`, `1`, `null`) rejects the metadata. See [Disabling a reference oracle](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference). |
 | `no_gpu_reference` | bool | Default `false`. `true`: the GPU reference executor is not an oracle for this bundle. Same type rule. If both flags are `true`, the bundle must declare golden data (rule R4). |
 | `expected_rejection` | bool | Default `false`. `true`: the graph is invalid on purpose and the engine under test must reject it. The harness never executes or compares it. A non-boolean value rejects the metadata. Overrides `enforcement_level`; `no_cpu_reference`, `no_gpu_reference`, `seed` and `inputs` are ignored. See [Expected-rejection bundles](#expected-rejection-bundles). |
@@ -250,13 +250,82 @@ parses it.
 
 A bundle without its metadata is an error. These fields are required:
 
-- `format_version` (`1`) — the harness rejects the metadata without it.
+- `format_version` (`1` or `2`) — the harness rejects the metadata without it.
 - `generator` and `reference_source`, non-empty — `reference-data-scripts/verify_golden_bundles.py`
   requires them. They show a reviewer where the graph and its expected values
   came from.
 
 Generators can write extra keys (`config`, `input_range`, …). The harness ignores
 keys that it does not know.
+
+### Input fill specs
+
+Each entry of `inputs` is a JSON object that tells the harness how to fill one
+input tensor. The harness fills an input tensor that has no entry with the
+default fill for its operation and data type.
+
+```json
+"inputs": {
+    "3": { "kind": "free", "lo": -2.0, "hi": 2.0, "seed": 17 },
+    "5": { "kind": "fixed", "value": 0.125 },
+    "7": { "kind": "values", "values": [64, 32], "repeat": true },
+    "9": { "seed": 4 }
+}
+```
+
+| `kind` | Keys | Fill |
+|---|---|---|
+| `free` | `lo`, `hi` (numbers, default `-1` and `1`) | Uniform random values in the range. |
+| `fixed` | `value` (number, default `0`) | One value in every element. |
+| `values` | `values` (non-empty array of numbers), `repeat` (boolean, default `true`) | The exact numbers given. Needs `format_version` 2. |
+| absent | — | The default fill. Use this form to set only a `seed`. |
+
+All kinds accept an optional `seed`, an unsigned integer. It replaces the seed
+that the harness derives for this tensor from the metadata `seed`. It has no
+effect on a `values` fill.
+
+A `kind` that is not one of the names above rejects the metadata. A `kind` that is
+not a string rejects the metadata too. The error message names the input uid and
+the problem. The bundle then registers as a failing test.
+
+#### The `values` kind
+
+- Element *i* of the tensor gets `values[i % n]`, where *n* is the list length.
+  *i* counts the elements in logical index order, the last dimension fastest. The
+  strides of the tensor do not change which element gets which value.
+- With `repeat: false`, *n* must be equal to the element count of the tensor.
+  With `repeat: true`, *n* must not be more than the element count.
+- If every number in the list is a JSON integer, the harness keeps the list as
+  exact 64-bit integers. If one number has a fraction or an exponent (`2.5`,
+  `1.0`, `1e3`), the harness keeps the whole list as double-precision numbers.
+  The JSON reader reads an integer of 2^64 or more as a floating-point number, so
+  such an integer also makes the list double-precision.
+- Integer tensors (`INT8`, `UINT8`, `INT32`, `INT64`, `BOOLEAN`) take only an
+  integer list. Each value must be in the range of the data type. `BOOLEAN` takes
+  only `0` and `1`.
+- Floating-point tensors (`FLOAT`, `HALF`, `BFLOAT16`, `DOUBLE` and the 8-bit
+  floating-point types) take any list. The harness rounds each value to the data
+  type. Integers stay exact up to 2^11 in `HALF`, 2^8 in `BFLOAT16`, 2^24 in
+  `FLOAT` and 2^53 in `DOUBLE`. Larger integers round.
+- The harness cannot fill the sub-byte types (`FP4_E2M1`, `FP6_E2M3`,
+  `FP6_E3M2`, `INT4`) with `values`.
+
+These entries reject the metadata: an empty or absent `values` array, a value
+that is not a number (a string, a boolean, `null`, an array or an object), an
+integer from 2^63 to 2^64 - 1, a `repeat` that is not a boolean, and any key other than
+`kind`, `values`, `repeat` and `seed`.
+
+These errors fail the test with a harness failure: a value out of range for the
+data type, a list stored as double-precision numbers on an integer tensor, a list
+longer than the tensor, a `repeat: false` list with the wrong length, and a
+sub-byte tensor. The test does not skip, and the
+engine does not run.
+
+Always set `format_version` to `2` in metadata that uses `values`. The harness
+rejects `values` in version-1 metadata. A harness older than the `values` kind
+reads an unknown kind as `free`. In version-1 metadata it fills the tensor with
+random values and reports no error. Version 2 makes such a harness reject the
+metadata.
 
 ### Disabling a reference oracle — `no_cpu_reference` and `no_gpu_reference`
 
@@ -646,7 +715,7 @@ execution_settings:
 |---|---|---|
 | Graph `.json` | `IntegrationTestBundle.hpp` | Case dropped from registration with an `ERROR` log line; the run stays green with one test fewer |
 | `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph |
-| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. A non-boolean `no_cpu_reference` or `no_gpu_reference` is a wrong field type. Setting both without declared golden data throws it too ([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)); the verifier reports R4 as an error. A non-boolean `expected_rejection` is a wrong field type too, and golden data next to an expected-rejection bundle throws it ([details](#expected-rejection-bundles)). **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
+| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key, an unknown or malformed [fill spec](#input-fill-specs), a version-2 feature in version-1 metadata) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. A non-boolean `no_cpu_reference` or `no_gpu_reference` is a wrong field type. Setting both without declared golden data throws it too ([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)); the verifier reports R4 as an error. A non-boolean `expected_rejection` is a wrong field type too, and golden data next to an expected-rejection bundle throws it ([details](#expected-rejection-bundles)). **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
 | `expected_rejection` bundle or case | `BundleMetadata.hpp` at load; the harness at run time; `reference-data-scripts/verify_golden_bundles.py`; `scripts/verify_support_claims.py` | `enforcement_level` and the oracle fields do not apply (it overrides them). Golden data next to it is a load error (`BundleMetadataError`) and a verifier error. A support claim that names it fails the C++ test and is a verifier error. A bundle that does not load is a red `FailedLoad` test, not a dropped case. [Details](#expected-rejection-bundles) |
 | `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` by hand | Required for new bundles (not for an expected-rejection bundle), but not enforced: a missing sidecar means "no claims" at run time and is not reported by the verifier. A sidecar that does not parse, and a broken claim, fail that bundle's test |
 | Golden `.bin` / `.dvc` | `IntegrationTestBundle.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Falls back to a reference in `auto` mode, except one that the bundle metadata disables; fails in `golden` mode. A blob that is unreadable or has the wrong size fails the test that needs it, when that test runs |

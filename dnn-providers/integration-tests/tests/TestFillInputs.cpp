@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -41,6 +43,11 @@ static void PrintTo(const FillRecipe& f, std::ostream* os)
     if(f.kind == FillRecipe::Kind::FIXED)
     {
         *os << "FIXED(" << f.value << ")";
+        return;
+    }
+    if(f.kind == FillRecipe::Kind::VALUES)
+    {
+        *os << "VALUES(" << (f.repeat ? "repeat" : "exact") << ")";
         return;
     }
     *os << "FREE[" << f.lo << ", " << f.hi << "]";
@@ -1335,6 +1342,332 @@ TEST(TestFillInputs, BlockScaleDequantizeRangesRecordedInMetadata)
     ASSERT_TRUE(inputs.contains("2"));
     EXPECT_FLOAT_EQ(inputs.at("2").at("lo").get<float>(), 0.125f);
     EXPECT_FLOAT_EQ(inputs.at("2").at("hi").get<float>(), 0.5f);
+}
+
+// ── VALUES fill ─────────────────────────────────────────────────────────────
+
+namespace
+{
+
+// uids: x=1 (the tensor under test), y=2 (output). No nodes, so only the recipe
+// decides x's contents.
+GraphResult buildValuesGraph(DataType xType,
+                             const std::vector<int64_t>& dims,
+                             const std::vector<int64_t>& strides)
+{
+    GraphResult r;
+    auto& b = r.builder;
+    const std::vector<int64_t> outDims = {1};
+    const std::vector<int64_t> outStrides = {1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", xType, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "y", DataType::FLOAT, &outStrides, &outDims));
+
+    const std::vector<flatbuffers::Offset<Node>> nodes;
+    auto graph = CreateGraphDirect(
+        b, "values", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+GraphResult buildValuesGraph(DataType xType)
+{
+    return buildValuesGraph(xType, {4, 1, 1, 1}, {1, 1, 1, 1});
+}
+
+struct ValuesFill
+{
+    FillResult result;
+    InputTensorMap inputs;
+};
+
+ValuesFill fillX(const GraphResult& gr, const FillRecipe& recipe)
+{
+    const std::vector<int64_t> leafUids = {1};
+    ValuesFill out{FillResult{}, makeTensorsFromGraph(gr, leafUids)};
+    InputFillRecipes recipes;
+    recipes.set(1, recipe);
+    out.result = fillInputs(*gr.graph, out.inputs, leafUids, recipes, nullptr);
+    return out;
+}
+
+template <class T>
+std::vector<T> logicalElements(InputTensorMap& inputs, int64_t uid)
+{
+    std::vector<T> elements;
+    for(auto* element : *inputs.at(uid))
+    {
+        elements.push_back(*static_cast<T*>(element));
+    }
+    return elements;
+}
+
+FillRecipe ints(std::vector<int64_t> numbers, bool repeat = true)
+{
+    return FillRecipe::values(std::move(numbers), repeat);
+}
+
+FillRecipe doubles(std::vector<double> numbers, bool repeat = true)
+{
+    return FillRecipe::values(std::move(numbers), repeat);
+}
+
+void expectInvalid(const ValuesFill& fill, const std::string& reasonPart)
+{
+    EXPECT_FALSE(fill.result.filled);
+    EXPECT_EQ(fill.result.status, FillResult::Status::INVALID) << fill.result.reason;
+    EXPECT_NE(fill.result.reason.find("uid 1: "), std::string::npos) << fill.result.reason;
+    EXPECT_NE(fill.result.reason.find(reasonPart), std::string::npos) << fill.result.reason;
+}
+
+// uids: x=1 (float), z=3 (gdn output). The GDN node has no input fills registered.
+GraphResult buildUnsupportedOpGraph()
+{
+    GraphResult r;
+    auto& b = r.builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "z", DataType::FLOAT, &kStrides, &kDims));
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "gdn", DataType::FLOAT, NodeAttributes::GdnAttributes, flatbuffers::Offset<void>()));
+
+    auto graph = CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+} // namespace
+
+TEST(TestFillInputs, ValuesFillInt32RepeatsTheList)
+{
+    auto fill = fillX(buildValuesGraph(DataType::INT32), ints({64, 32}));
+
+    ASSERT_TRUE(fill.result.filled) << fill.result.reason;
+    EXPECT_EQ(fill.result.status, FillResult::Status::OK);
+    EXPECT_EQ(logicalElements<int32_t>(fill.inputs, 1), (std::vector<int32_t>{64, 32, 64, 32}));
+}
+
+TEST(TestFillInputs, ValuesFillInt64IsExact)
+{
+    constexpr int64_t K_TWO_TO_53_PLUS_ONE = (int64_t{1} << 53) + 1;
+    auto fill = fillX(buildValuesGraph(DataType::INT64),
+                      ints({K_TWO_TO_53_PLUS_ONE,
+                            -5,
+                            std::numeric_limits<int64_t>::max(),
+                            std::numeric_limits<int64_t>::min()},
+                           false));
+
+    ASSERT_TRUE(fill.result.filled) << fill.result.reason;
+    EXPECT_EQ(logicalElements<int64_t>(fill.inputs, 1),
+              (std::vector<int64_t>{K_TWO_TO_53_PLUS_ONE,
+                                    -5,
+                                    std::numeric_limits<int64_t>::max(),
+                                    std::numeric_limits<int64_t>::min()}));
+}
+
+TEST(TestFillInputs, ValuesFillUint8Int8AndBoolean)
+{
+    auto uint8Fill = fillX(buildValuesGraph(DataType::UINT8), ints({0, 255}));
+    ASSERT_TRUE(uint8Fill.result.filled) << uint8Fill.result.reason;
+    EXPECT_EQ(logicalElements<uint8_t>(uint8Fill.inputs, 1),
+              (std::vector<uint8_t>{0, 255, 0, 255}));
+
+    auto int8Fill = fillX(buildValuesGraph(DataType::INT8), ints({-128, 127}));
+    ASSERT_TRUE(int8Fill.result.filled) << int8Fill.result.reason;
+    EXPECT_EQ(logicalElements<int8_t>(int8Fill.inputs, 1),
+              (std::vector<int8_t>{-128, 127, -128, 127}));
+
+    auto boolFill = fillX(buildValuesGraph(DataType::BOOLEAN), ints({1, 0, 0, 1}, false));
+    ASSERT_TRUE(boolFill.result.filled) << boolFill.result.reason;
+    EXPECT_EQ(logicalElements<bool>(boolFill.inputs, 1),
+              (std::vector<bool>{true, false, false, true}));
+}
+
+TEST(TestFillInputs, ValuesFillFloatingPointTypes)
+{
+    namespace types = hipdnn_data_sdk::types;
+
+    auto floatFill = fillX(buildValuesGraph(DataType::FLOAT), doubles({0.5, -2.25}));
+    ASSERT_TRUE(floatFill.result.filled) << floatFill.result.reason;
+    EXPECT_EQ(logicalElements<float>(floatFill.inputs, 1),
+              (std::vector<float>{0.5f, -2.25f, 0.5f, -2.25f}));
+
+    auto halfFill = fillX(buildValuesGraph(DataType::HALF), doubles({0.5, -2.25}));
+    ASSERT_TRUE(halfFill.result.filled) << halfFill.result.reason;
+    const auto halves = logicalElements<types::half>(halfFill.inputs, 1);
+    ASSERT_EQ(halves.size(), 4u);
+    EXPECT_EQ(static_cast<float>(halves[0]), 0.5f);
+    EXPECT_EQ(static_cast<float>(halves[1]), -2.25f);
+
+    auto bf16Fill = fillX(buildValuesGraph(DataType::BFLOAT16), ints({3, -4}));
+    ASSERT_TRUE(bf16Fill.result.filled) << bf16Fill.result.reason;
+    const auto bf16s = logicalElements<types::bfloat16>(bf16Fill.inputs, 1);
+    ASSERT_EQ(bf16s.size(), 4u);
+    EXPECT_EQ(static_cast<float>(bf16s[2]), 3.0f);
+    EXPECT_EQ(static_cast<float>(bf16s[3]), -4.0f);
+}
+
+TEST(TestFillInputs, ValuesFillDoubleAndFp8)
+{
+    namespace types = hipdnn_data_sdk::types;
+    constexpr int64_t K_TWO_TO_53 = int64_t{1} << 53;
+
+    auto doubleInts = fillX(buildValuesGraph(DataType::DOUBLE), ints({K_TWO_TO_53, -3}));
+    ASSERT_TRUE(doubleInts.result.filled) << doubleInts.result.reason;
+    EXPECT_EQ(logicalElements<double>(doubleInts.inputs, 1),
+              (std::vector<double>{9007199254740992.0, -3.0, 9007199254740992.0, -3.0}));
+
+    auto doubleFractions = fillX(buildValuesGraph(DataType::DOUBLE), doubles({0.1}));
+    ASSERT_TRUE(doubleFractions.result.filled) << doubleFractions.result.reason;
+    EXPECT_EQ(logicalElements<double>(doubleFractions.inputs, 1), std::vector<double>(4, 0.1));
+
+    auto fp8Fill = fillX(buildValuesGraph(DataType::FP8_E4M3), doubles({0.5, -2.0}));
+    ASSERT_TRUE(fp8Fill.result.filled) << fp8Fill.result.reason;
+    const auto fp8s = logicalElements<types::fp8_e4m3>(fp8Fill.inputs, 1);
+    ASSERT_EQ(fp8s.size(), 4u);
+    EXPECT_EQ(static_cast<float>(fp8s[0]), 0.5f);
+    EXPECT_EQ(static_cast<float>(fp8s[1]), -2.0f);
+    EXPECT_EQ(static_cast<float>(fp8s[2]), 0.5f);
+}
+
+// With repeat true, a list longer than the tensor would leave values unused.
+TEST(TestFillInputs, ValuesFillRejectsAListLongerThanTheTensor)
+{
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), ints({1, 2, 3, 4, 5})),
+                  "5 values for 4 elements");
+
+    auto exact = fillX(buildValuesGraph(DataType::INT32), ints({1, 2, 3, 4}));
+    ASSERT_TRUE(exact.result.filled) << exact.result.reason;
+}
+
+// The block-scale default for the scale normalizes against the largest magnitude in
+// the operand's VALUES list: 12 gives e = 3, so the scale range is [0.5, 2] * 2^-3.
+TEST(TestFillInputs, ValuesOperandRenormalizesBlockScale)
+{
+    InputFillRecipes overrides;
+    overrides.set(1, ints({-12, 3}));
+
+    const auto recipes = fillBlockScaleDequantizeMatmul(DataType::FP8_E4M3, overrides);
+
+    EXPECT_EQ(recipes.fill(2), FillRecipe::free(0.0625f, 0.25f));
+}
+
+TEST(TestFillInputs, ValuesFillWithoutRepeatNeedsOneValuePerElement)
+{
+    const auto graph = buildValuesGraph(DataType::FLOAT, kDims, kStrides);
+
+    auto exact = fillX(graph, doubles({0, 1, 2, 3, 4, 5}, false));
+    ASSERT_TRUE(exact.result.filled) << exact.result.reason;
+    EXPECT_EQ(logicalElements<float>(exact.inputs, 1), (std::vector<float>{0, 1, 2, 3, 4, 5}));
+
+    expectInvalid(fillX(graph, doubles({0, 1, 2, 3, 4}, false)), "5 values for 6 elements");
+    expectInvalid(fillX(graph, doubles({0, 1, 2, 3, 4, 5, 6}, false)), "7 values for 6 elements");
+}
+
+// Element i of the list goes to logical element i, whatever the strides, so a
+// column-major x gets the same logical contents as a row-major one.
+TEST(TestFillInputs, ValuesFillFollowsLogicalOrderOnPermutedStrides)
+{
+    const std::vector<int64_t> columnMajor = {1, 2};
+    auto fill = fillX(buildValuesGraph(DataType::INT32, kDims, columnMajor),
+                      ints({0, 1, 2, 3, 4, 5}, false));
+    ASSERT_TRUE(fill.result.filled) << fill.result.reason;
+
+    auto& x = typedTensor<int32_t>(fill.inputs, 1);
+    for(int64_t row = 0; row < kDims[0]; ++row)
+    {
+        for(int64_t col = 0; col < kDims[1]; ++col)
+        {
+            EXPECT_EQ(x.getHostValue(row, col), (row * kDims[1]) + col)
+                << "at (" << row << ", " << col << ")";
+        }
+    }
+}
+
+TEST(TestFillInputs, ValuesFillRejectsWhatTheTensorCannotHold)
+{
+    expectInvalid(fillX(buildValuesGraph(DataType::INT8), ints({128})), "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::UINT8), ints({-1})), "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), ints({int64_t{1} << 31})),
+                  "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::BOOLEAN), ints({2})), "out of range");
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), doubles({2.5})), "non-integer");
+}
+
+// A list that holds any non-integer number is stored as doubles, so even its integers
+// are refused by an integer tensor.
+TEST(TestFillInputs, ValuesFillRejectsAMixedListOnAnIntegerTensor)
+{
+    const auto spec
+        = parseInputFillSpec(nlohmann::json::parse(R"({"kind": "values", "values": [1, 2.5]})"));
+    ASSERT_TRUE(spec.recipe.has_value());
+
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), *spec.recipe), "non-integer");
+    expectInvalid(fillX(buildValuesGraph(DataType::INT32), doubles({1.0, 2.0})), "non-integer");
+}
+
+TEST(TestFillInputs, ValuesFillRejectsSubByteTypes)
+{
+    for(const auto dataType :
+        {DataType::FP4_E2M1, DataType::FP6_E2M3, DataType::FP6_E3M2, DataType::INT4})
+    {
+        expectInvalid(fillX(buildValuesGraph(dataType), ints({1})), EnumNameDataType(dataType));
+    }
+}
+
+TEST(TestFillInputs, InvalidAndUnsupportedFillsStayDistinct)
+{
+    const auto invalid = fillX(buildValuesGraph(DataType::INT8), ints({1000}));
+    EXPECT_EQ(invalid.result.status, FillResult::Status::INVALID);
+
+    const auto gr = buildUnsupportedOpGraph();
+    const auto unsupported = runFill(gr, {3});
+    EXPECT_FALSE(unsupported.filled);
+    EXPECT_EQ(unsupported.status, FillResult::Status::UNSUPPORTED) << unsupported.reason;
+    EXPECT_NE(unsupported.reason.find("no input fill registered"), std::string::npos)
+        << unsupported.reason;
+}
+
+// Every tensor draws its seed in uid order whatever its recipe, so a VALUES tensor
+// leaves the random contents of every other tensor unchanged.
+TEST(TestFillInputs, ValuesFillLeavesOtherTensorsRandomContentsUnchanged)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    ASSERT_EQ(leafUids.size(), 3u);
+
+    auto plainInputs = makeTensors(leafUids);
+    InputFillRecipes plainRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+
+    auto valuesInputs = makeTensors(leafUids);
+    InputFillRecipes valuesRecipes;
+    valuesRecipes.set(2, doubles({7.0}));
+    const auto result = fillInputs(*gr.graph, valuesInputs, leafUids, valuesRecipes, nullptr);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    EXPECT_EQ(logicalElements<float>(valuesInputs, 2),
+              std::vector<float>(static_cast<std::size_t>(kDims[0] * kDims[1]), 7.0f));
+    for(const int64_t uid : {1, 4})
+    {
+        auto& expected = *plainInputs.at(uid);
+        auto& actual = *valuesInputs.at(uid);
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0)
+            << "uid " << uid;
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)

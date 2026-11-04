@@ -5,6 +5,7 @@
 
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -19,6 +20,8 @@
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
 
 #include <nlohmann/json.hpp>
+
+#include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -82,23 +85,58 @@ inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
 /// a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
-/// a non-numeric `inputs` key, a flag combination that contradicts the bundle's
-/// golden data, or (for a .meta.json file) unreadable or not valid JSON. An
-/// authoring error,
-/// never a "metadata not recorded" case, so it must not degrade to defaults.
+/// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, a
+/// feature that needs a higher `format_version`, a flag combination that contradicts
+/// the bundle's golden data, or (for a .meta.json file) unreadable or not valid JSON.
+/// An authoring error, never a "metadata not recorded" case, so it must not degrade
+/// to defaults.
 class BundleMetadataError : public std::runtime_error
 {
 public:
     using std::runtime_error::runtime_error;
 };
 
+namespace bundle_metadata_detail
+{
+
+// A metadata feature that only format_version 2 metadata may use.
+struct FormatVersion2Feature
+{
+    const char* name;
+    bool (*isUsedBy)(const nlohmann::json& metadata);
+};
+
+inline bool usesValuesFillKind(const nlohmann::json& metadata)
+{
+    if(!metadata.contains("inputs") || !metadata["inputs"].is_object())
+    {
+        return false;
+    }
+    for(const auto& item : metadata["inputs"].items())
+    {
+        const auto& spec = item.value();
+        if(spec.is_object() && spec.contains("kind") && spec["kind"] == "values")
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline constexpr std::array<FormatVersion2Feature, 1> K_FORMAT_VERSION_2_FEATURES = {{
+    {"kind values", &usesValuesFillKind},
+}};
+
+} // namespace bundle_metadata_detail
+
 // ---------------------------------------------------------------------------
 /// Parse metadata from a JSON object.
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
-/// `format_version`, carries an unsupported format version, has an invalid
-/// `enforcement_level`, has a reference/rejection flag that is not a boolean, or
-/// has an `inputs` key that is not a tensor UID.
+/// `format_version`, carries a format version other than 1 or 2, has an invalid
+/// `enforcement_level`, has a reference/rejection flag that is not a boolean, has an
+/// `inputs` key that is not a tensor UID or an `inputs` entry that is not a valid fill
+/// spec, or uses a version-2 feature in version 1 metadata.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -119,13 +157,13 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     // Compare the JSON value, not a narrowed copy: get<int>() would truncate
     // 4294967297 (2^32 + 1) to 1 and accept it.
     const auto& version = json["format_version"];
-    if(version != 1)
+    if(version != 1 && version != 2)
     {
         throw BundleMetadataError(where + " has unsupported format_version " + version.dump());
     }
 
     BundleMetadata meta;
-    meta.formatVersion = 1;
+    meta.formatVersion = version.get<int>();
 
     auto readString = [&](const char* key) -> std::optional<std::string> {
         if(json.contains(key) && json[key].is_string())
@@ -232,9 +270,33 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
                 message += '"';
                 throw BundleMetadataError(message);
             }
+            try
+            {
+                parseInputFillSpec(val);
+            }
+            catch(const std::invalid_argument& e)
+            {
+                std::string message = where;
+                message += " input ";
+                message += key;
+                message += ": ";
+                message += e.what();
+                throw BundleMetadataError(message);
+            }
             inputMap[uid] = val;
         }
         meta.inputs = std::move(inputMap);
+    }
+
+    if(meta.formatVersion < 2)
+    {
+        for(const auto& feature : bundle_metadata_detail::K_FORMAT_VERSION_2_FEATURES)
+        {
+            if(feature.isUsedBy(json))
+            {
+                throw BundleMetadataError(where + ": " + feature.name + " needs format_version 2");
+            }
+        }
     }
 
     return meta;
