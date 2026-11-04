@@ -753,6 +753,28 @@ TEST(IndexRangeCpp, IteratesAndComparesByValue) {
     EXPECT_NE(IndexRange(1, 7, 2), IndexRange(1, 8, 2));
 }
 
+template <typename Order>
+constexpr bool acceptsWholeShapeOrder = requires(const Shape& shape, const Order& order) {
+    shape.forEachCoordinate(order, [](std::span<const size_t>) {});
+};
+
+TEST(ShapeVisitationCpp, DistinguishesIndicesFromAxisOrder) {
+    static_assert(acceptsWholeShapeOrder<Permutation>);
+    static_assert(!acceptsWholeShapeOrder<std::vector<size_t>>);
+    static_assert(!acceptsWholeShapeOrder<std::span<const size_t>>);
+    static_assert(!acceptsWholeShapeOrder<std::array<size_t, 3>>);
+
+    const Shape shape{2, 3, 4};
+    // These positions also form a permutation. Omitting the order must fail to
+    // compile instead of interpreting them as axes and visiting all 24 elements.
+    const std::vector<size_t> positions{2, 0, 1};
+    std::vector<std::vector<size_t>> coordinates;
+    shape.forEachCoordinateLastDimensionFastest(positions, [&](std::span<const size_t> at) {
+        coordinates.emplace_back(at.begin(), at.end());
+    });
+    EXPECT_EQ(coordinates, (std::vector<std::vector<size_t>>{{0, 0, 2}, {0, 0, 0}, {0, 0, 1}}));
+}
+
 TEST(ShapeVisitationCpp, WholeShapesExplicitOrdersAndCoordinateOnlyCallbacks) {
     const Shape shape{2, 3};
     std::vector<std::vector<size_t>> lastFastest, firstFastest, explicitOrder;
