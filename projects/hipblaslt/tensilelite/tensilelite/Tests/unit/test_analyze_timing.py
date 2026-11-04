@@ -88,6 +88,14 @@ class TestParseTimingLine:
     def test_record_glued_to_other_text_is_ignored(self):
         assert parse_timing_line("fooTIMING:x:1.0\n") is None
 
+    def test_pytest_captured_log_copy_is_ignored(self):
+        # With -rP pytest prints each record twice: the captured stderr line (counted) and the
+        # captured log line (ignored), so the record is counted once.
+        line = "INFO     tensile.timing:TimingInstrumentation.py:88 TIMING:python_artifact_compress:12.5\n"
+        assert parse_timing_line(line) is None
+        assert parse_timing_line("TIMING:python_artifact_compress:12.5\n") is not None
+
+
     """Tests for parse_timing_line function."""
 
     def test_valid_timing_line(self):

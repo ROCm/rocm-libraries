@@ -911,14 +911,23 @@ def build_staged_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
     return [PhaseNode(ROOT_NAME, None, sum(n.total_ms for n in top), None, top)]
 
 
+# pytest's log-capture format ("%(levelname)-8s %(name)s:%(filename)s:%(lineno)d %(message)s").
+_LOG_CAPTURE_PREFIXES = tuple(f"{level:<8} " for level in
+                              ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"))
+
+
 def parse_timing_line(line: str) -> Optional[TimingRecord]:
     """Parse a TIMING: line and return a TimingRecord.
 
     The record may follow other text after whitespace: with ``pytest -v -s`` the records the test
     harness prints before the Tensile invocation (python_artifact_extract) land on the line of the
-    test id.
+    test id. pytest's log capture (``-rP``, failure reports) repeats every record as
+    ``INFO     tensile.timing:<file>:<line> TIMING:...`` next to the captured stderr copy; those
+    lines are ignored so a record is counted once.
     """
     start_sentinel = 'TIMING:'
+    if line.startswith(_LOG_CAPTURE_PREFIXES):
+        return None
     idx = line.find(start_sentinel)
     if idx < 0 or (idx > 0 and not line[idx - 1].isspace()):
         return None
