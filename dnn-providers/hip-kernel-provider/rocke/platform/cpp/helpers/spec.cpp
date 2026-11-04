@@ -12,6 +12,7 @@
  */
 #include "rocke/helper_rocke.helpers.spec.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -802,6 +803,30 @@ rocke_status_t rocke_ceil_div_grid(const int* totals, const int* tiles, size_t n
 }
 
 /* ------------------------------------------------------------------ *
+ * ceil_div / align_up / floor division
+ * ------------------------------------------------------------------ */
+
+long long rocke_floor_div(long long a, long long b)
+{
+    /* C++ division truncates toward zero; Python's // rounds toward -inf. */
+    long long q = a / b;
+    if((a % b != 0) && ((a < 0) != (b < 0)))
+        --q;
+    return q;
+}
+
+long long rocke_ceil_div(long long a, long long b)
+{
+    /* Python: -(-a // b). */
+    return -rocke_floor_div(-a, b);
+}
+
+long long rocke_align_up(long long n, long long mult)
+{
+    return rocke_ceil_div(n, mult) * mult;
+}
+
+/* ------------------------------------------------------------------ *
  * spec reason-string copy
  * ------------------------------------------------------------------ */
 
@@ -818,4 +843,16 @@ void rocke_spec_set_reason(char* reason, size_t cap, const char* msg)
     }
     memcpy(reason, msg, n);
     reason[n] = '\0';
+}
+
+void rocke_spec_set_reasonf(char* reason, size_t cap, const char* fmt, ...)
+{
+    if(reason == NULL || cap == 0)
+    {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(reason, cap, fmt, ap);
+    va_end(ap);
 }
