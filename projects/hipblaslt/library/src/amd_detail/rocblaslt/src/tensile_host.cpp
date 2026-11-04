@@ -2365,7 +2365,7 @@ namespace
         {
             tensileProblem.setFusedGemmA2A(true);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
-            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+            tensileProblem.setWorld(prob.fused_a2a_world);
         }
 #endif
 
@@ -2669,7 +2669,7 @@ namespace
         {
             tensileProblem.setFusedGemmA2A(true);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
-            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+            tensileProblem.setWorld(prob.fused_a2a_world);
         }
 #endif
 
@@ -4110,6 +4110,12 @@ namespace
         {
             static TuningScratch gInstance;
             return gInstance;
+        }
+
+        ~TuningScratch()
+        {
+            for(const auto& entry : m_slots)
+                static_cast<void>(hipFree(entry.second.ptr));
         }
 
         size_t cap() const
