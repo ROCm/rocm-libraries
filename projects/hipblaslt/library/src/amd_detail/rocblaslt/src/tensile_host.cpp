@@ -8617,10 +8617,32 @@ namespace
         std::unordered_map<int, LocalKernelOrigin> origins;
         // What has been applied of each scope's journal.
         std::map<std::string, uks::JournalCursor> journals;
-        // Saved payloads skipped because their objects did not verify, with
-        // the objects' state then, so they are checked again only once it
-        // changes.
-        std::map<Key, std::string> unverified;
+
+        // A saved payload skipped because its objects did not verify: their
+        // state then, so they are checked again only once it changes, and
+        // where its R record starts, to read its mappings again from there
+        // once it loads.
+        struct Unverified
+        {
+            std::string        state;
+            uks::PayloadRecord record;
+            uint64_t           offset = 0;
+        };
+        std::map<Key, Unverified> unverified;
+        // Where to read a scope's journal again from, because a payload
+        // skipped there has been registered since.
+        std::map<std::string, uint64_t> rewind;
+
+        // Notes that `key` is now registered; requires mutex.
+        void registered(Key const& key)
+        {
+            auto skipped = unverified.find(key);
+            if(skipped == unverified.end())
+                return;
+            auto& from = rewind.try_emplace(key.first, skipped->second.offset).first->second;
+            from       = std::min(from, skipped->second.offset);
+            unverified.erase(skipped);
+        }
 
         // The payload as registered for any scope, or null.
         LocalKernelPayload const* anyScope(uks::PayloadId const& id) const
@@ -8840,7 +8862,7 @@ namespace
         size_t next = 0;
         for(auto const& loaded : payloads)
         {
-            registry.unverified.erase({scope, loaded.record.id});
+            registry.registered({scope, loaded.record.id});
             auto& payload  = registry.payloads[{scope, loaded.record.id}];
             payload.record = loaded.record;
             for(auto const& entry : loaded.solutions)
@@ -8872,36 +8894,77 @@ namespace
     // Reading again from an earlier record therefore leaves each key with the
     // journal's last mapping for it.
     //
-    // The cursor in the registry moves only once the records are applied. It
-    // stays at the first payload whose objects did not verify, which another
-    // process may still be writing or may repair, so the next replay tries it
-    // again once they change. A payload that verified but does not suit the
+    // A payload whose objects did not verify, which another process may
+    // repair, is checked again once their state changes, and the journal is
+    // then read again from its record, as it is once this process registers
+    // that payload itself. A payload that verified but does not suit the
     // device never will, and is passed. A journal that was replaced is read
     // again from the start.
     //
+    // The journal is read without registry.mutex, which device initialization
+    // takes, since the read can wait for another process's lock on it. The
+    // records are applied under it, unless another thread applied the journal
+    // meanwhile, which makes this one read again. With `onlyIfUnread`, a
+    // journal any thread has applied is left alone.
+    //
     // Returns false, applying nothing and leaving the registry's cursor as it
     // was, if the journal cannot be read: a scope with no cursor yet is then
-    // read again when the next device of it is initialized. Requires
-    // registry.mutex.
+    // read again when the next device of it is initialized.
     bool replayLocalKernelJournal(LocalKernelRegistry&       registry,
                                   uks::Store const&          store,
                                   std::string const&         scope,
                                   TensileLite::AMDGPU const& gpu,
                                   LocalKernelLibrary&        localLibrary,
                                   size_t*                    added,
-                                  std::string*               error)
+                                  std::string*               error,
+                                  bool                       onlyIfUnread = false)
     {
-        *added                   = 0;
-        auto const         known = registry.journals.find(scope);
-        uks::JournalCursor cursor
-            = known == registry.journals.end() ? uks::JournalCursor{} : known->second;
+        *added = 0;
+        std::unique_lock<std::mutex>   lock(registry.mutex);
+        uks::JournalCursor             cursor;
         std::vector<uks::JournalEntry> entries;
-        if(!store.read(scope, &cursor, &entries, error))
-            return false;
+        uint64_t                       readFrom = 0;
+        for(int attempt = 0;; ++attempt)
+        {
+            auto const known = registry.journals.find(scope);
+            if(onlyIfUnread && known != registry.journals.end())
+                return true;
+            const bool         had   = known != registry.journals.end();
+            uks::JournalCursor start = had ? known->second : uks::JournalCursor{};
+
+            cursor = start;
+            if(auto from = registry.rewind.find(scope); from != registry.rewind.end())
+                cursor.offset = std::min(cursor.offset, from->second);
+            for(auto const& [key, skipped] : registry.unverified)
+                if(key.first == scope && store.objectState(skipped.record) != skipped.state)
+                    cursor.offset = std::min(cursor.offset, skipped.offset);
+
+            readFrom = cursor.offset;
+
+            // After two reads raced with other threads, the third holds the
+            // lock.
+            const bool unlocked = attempt < 2;
+            if(unlocked)
+                lock.unlock();
+            const bool read = store.read(scope, &cursor, &entries, error);
+            if(unlocked)
+                lock.lock();
+            if(!read)
+                return false;
+
+            auto const now = registry.journals.find(scope);
+            if(onlyIfUnread && now != registry.journals.end())
+                return true;
+            const bool same = (now != registry.journals.end()) == had
+                              && (!had
+                                  || (now->second.journal == start.journal
+                                      && now->second.offset == start.offset));
+            if(same)
+                break;
+        }
 
         std::vector<LoadedPayload> loaded;
         std::set<uks::PayloadId>   seen;
-        uint64_t                   retryFrom = cursor.offset;
         for(auto const& entry : entries)
         {
             if(entry.kind != uks::JournalEntry::Kind::Payload)
@@ -8914,7 +8977,11 @@ namespace
             if(auto const* other = registry.anyScope(id))
             {
                 if(payloadSuits(localLibrary, *other, gpu))
-                    registry.payloads.emplace(key, *other);
+                {
+                    LocalKernelPayload const shared = *other;
+                    registry.payloads.emplace(key, shared);
+                    registry.registered(key);
+                }
                 else
                     std::cerr << "\nrocblaslt warning: skipping saved local kernel payload "
                               << id.datHash << " " << id.coHash << ": not for this device"
@@ -8924,15 +8991,15 @@ namespace
 
             const std::string state  = store.objectState(entry.payload);
             auto              before = registry.unverified.find(key);
+            const bool        known  = before != registry.unverified.end();
             std::string       why;
-            if((before != registry.unverified.end() && before->second == state)
+            if((known && before->second.state == state)
                || !store.verifyObjects(entry.payload, &why))
             {
-                if(before == registry.unverified.end() || before->second != state)
+                if(!known || before->second.state != state)
                     std::cerr << "\nrocblaslt warning: skipping saved local kernel payload "
                               << id.datHash << " " << id.coHash << " for now: " << why << std::endl;
-                registry.unverified[key] = state;
-                retryFrom                = std::min(retryFrom, entry.offset);
+                registry.unverified[key] = {state, entry.payload, entry.offset};
                 continue;
             }
             registry.unverified.erase(key);
@@ -8978,7 +9045,11 @@ namespace
         static_cast<void>(
             localLibrary.setExactMatches(mappings, TensileLite::LocalDeviceClass::of(gpu)));
 
-        cursor.offset            = retryFrom;
+        // A rewind asked for while the journal was read, from an earlier
+        // record, is for the next replay.
+        if(auto from = registry.rewind.find(scope);
+           from != registry.rewind.end() && from->second >= readFrom)
+            registry.rewind.erase(from);
         registry.journals[scope] = cursor;
         return true;
     }
@@ -9055,14 +9126,16 @@ namespace
         if(scope.empty())
             return;
 
-        auto&                       registry = localKernelRegistry();
-        std::lock_guard<std::mutex> lock(registry.mutex);
-        if(registry.journals.count(scope))
-            return;
         size_t      added = 0;
         std::string error;
-        if(!replayLocalKernelJournal(
-               registry, *store, scope, *gpu, *library->localLibrary, &added, &error))
+        if(!replayLocalKernelJournal(localKernelRegistry(),
+                                     *store,
+                                     scope,
+                                     *gpu,
+                                     *library->localLibrary,
+                                     &added,
+                                     &error,
+                                     true))
             std::cerr << "\nrocblaslt warning: cannot load saved local kernels: " << error
                       << std::endl;
     }
@@ -9162,6 +9235,7 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
         std::lock_guard<std::mutex> lock(registry.mutex);
         kernelIndices
             = registry.payloads.try_emplace({scope, record.id}, *other).first->second.indices;
+        registry.registered({scope, record.id});
         return rocblaslt_status_success;
     }
 
@@ -9200,12 +9274,22 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
         return rocblaslt_status_internal_error;
     }
 
-    // Another thread may have registered it since the lookup.
+    // Another thread may have registered it since the lookup, for this scope
+    // or another, whose solutions are shared if they suit.
     std::lock_guard<std::mutex>    lock(registry.mutex);
     const LocalKernelRegistry::Key key{scope, payload.record.id};
-    if(!registry.payloads.count(key)
-       && !publishLocalKernelPayloads(registry, *localLibrary, scope, loaded))
-        return rocblaslt_status_internal_error;
+    if(!registry.payloads.count(key))
+    {
+        auto const* shared = registry.anyScope(payload.record.id);
+        if(shared && payloadSuits(*localLibrary, *shared, *gpu))
+        {
+            LocalKernelPayload const copy = *shared;
+            registry.payloads.emplace(key, copy);
+            registry.registered(key);
+        }
+        else if(!publishLocalKernelPayloads(registry, *localLibrary, scope, loaded))
+            return rocblaslt_status_internal_error;
+    }
     kernelIndices = registry.payloads.at(key).indices;
     return rocblaslt_status_success;
 }
@@ -9277,6 +9361,7 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
         }
         std::lock_guard<std::mutex> lock(registry.mutex);
         registry.payloads.try_emplace({scope, record.id}, *other);
+        registry.registered({scope, record.id});
     }
 
     // Recorded before it is published. It is then published, and the journal
@@ -9293,14 +9378,30 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
         return rocblaslt_status_internal_error;
     }
 
-    std::lock_guard<std::mutex> lock(registry.mutex);
-    if(!localLibrary->setExactMatch(shape, kernelIndex, deviceClass))
-        return rocblaslt_status_invalid_value;
-    size_t added = 0;
-    if(store
-       && !replayLocalKernelJournal(registry, *store, scope, *gpu, *localLibrary, &added, &error))
-        std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << error
-                  << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        if(!localLibrary->setExactMatch(shape, kernelIndex, deviceClass))
+            return rocblaslt_status_invalid_value;
+    }
+
+    // The mapping is saved and applied by now, so a read back that fails, or
+    // throws, is reported but does not fail the call.
+    if(store)
+    {
+        size_t added = 0;
+        try
+        {
+            if(!replayLocalKernelJournal(
+                   registry, *store, scope, *gpu, *localLibrary, &added, &error))
+                std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << error
+                          << std::endl;
+        }
+        catch(std::exception const& e)
+        {
+            std::cerr << "\nrocblaslt warning: cannot read back saved local kernels: " << e.what()
+                      << std::endl;
+        }
+    }
     return rocblaslt_status_success;
 }
 
@@ -9331,11 +9432,10 @@ rocblaslt_status rocblaslt_local_kernel_refresh(rocblaslt_handle handle, size_t*
     if(scope.empty())
         return rocblaslt_status_internal_error;
 
-    auto&                       registry = localKernelRegistry();
-    std::lock_guard<std::mutex> lock(registry.mutex);
-    size_t                      added = 0;
-    std::string                 error;
-    if(!replayLocalKernelJournal(registry, *store, scope, *gpu, *localLibrary, &added, &error))
+    size_t      added = 0;
+    std::string error;
+    if(!replayLocalKernelJournal(
+           localKernelRegistry(), *store, scope, *gpu, *localLibrary, &added, &error))
     {
         log_error(__func__, "cannot read the local kernel library", error);
         return rocblaslt_status_internal_error;
