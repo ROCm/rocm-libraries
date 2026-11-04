@@ -224,6 +224,15 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             install_script = (build / "cmake_install.cmake").read_text()
             assert "attention_sdpa_fwd.graph.json" in install_script
             assert "/tests/library/tests/sdpa/hipdnn" in install_script
+        attention_cpu = next(
+            test
+            for test in tests
+            if test["name"] == "rocke_library_attention_cpu_pytest"
+        )
+        if "--rocke-require-hkp-pack-headers" in attention_cpu["command"]:
+            install_script = (build / "cmake_install.cmake").read_text()
+            assert "Gfx950AttentionUnified3DGeometry.hpp" in install_script
+            assert "/tests/library/tests/hkp_packs" in install_script
         command = pair["command"]
         native = command[command.index("--native") + 1]
         assert native == native_artifact("rocke_optimization_barrier_emit")

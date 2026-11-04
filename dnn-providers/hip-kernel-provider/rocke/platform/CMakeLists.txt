@@ -407,13 +407,17 @@ if(ROCKE_INSTALL_TESTS)
 
       # test_attention_tiled_3d_reduce_lds.py holds the provider's C++ mirror of
       # the split-KV reduce's segment bound to the Python gate; it reads these
-      # headers from tests/hkp_packs in an installed tree.
+      # headers from tests/hkp_packs in an installed tree. When they are
+      # installed, rocke_library_attention_cpu_pytest fails, instead of skipping,
+      # if the copy is missing.
       set(_ROCKE_HKP_PACKS_DIR
           "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engines/kernel_ingestor_engine/packs")
+      set(_ROCKE_HKP_PACK_HEADERS OFF)
       if(EXISTS "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp")
         install(FILES "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionDenseGeometry.hpp"
                       "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp"
                 DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/hkp_packs")
+        set(_ROCKE_HKP_PACK_HEADERS ON)
       endif()
 
       # The SDPA contract tests cross-check from_hipdnn against hipDNN's SDPA
@@ -758,6 +762,9 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
     endforeach()
+    if(_ROCKE_HKP_PACK_HEADERS)
+      string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS " --rocke-require-hkp-pack-headers")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_cpu_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

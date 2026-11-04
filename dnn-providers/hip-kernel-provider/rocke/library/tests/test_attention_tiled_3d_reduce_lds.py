@@ -6,7 +6,9 @@
 ``supports_tiled_reduce_spec`` refuses a ``num_segments`` whose LDS factor cache
 (``split_kv_reduce_lds_bytes``) does not fit ``ArchTarget.lds_capacity_bytes``. These cases hold
 that formula to what comgr actually allocates (the code object's
-``group_segment_fixed_size``), and hold the C++ host's mirror,
+``group_segment_fixed_size``): an upper bound at every count, exact from 2 segments. At 1
+segment a lowerer may allocate the lone 4-byte factor without the 16-byte pool rounding,
+so that case checks the bound only. They also hold the C++ host's mirror,
 ``GFX950_UNIFIED_3D_MAX_SEGMENTS``, to the same arch bound.
 """
 
@@ -34,13 +36,17 @@ _GEOMETRY_HEADERS = (
 )
 
 
-def _packs_dir() -> Path:
+def _packs_dir(config) -> Path:
+    """The headers' directory. Skips when neither copy exists, unless
+    ``--rocke-require-hkp-pack-headers`` is given (the installed CTest entry passes it
+    whenever it installed the copy), so a broken header install fails instead."""
     for d in _PACKS_DIRS:
         if all((d / h).is_file() for h in _GEOMETRY_HEADERS):
             return d
-    pytest.skip(
-        "hip-kernel-provider pack headers are neither installed nor in a checkout"
-    )
+    reason = "hip-kernel-provider pack headers are neither installed nor in a checkout"
+    if config.getoption("--rocke-require-hkp-pack-headers"):
+        pytest.fail(reason)
+    pytest.skip(reason)
 
 
 def _reduce(num_segments: int):
@@ -93,28 +99,41 @@ def test_reduce_lds_formula_is_what_comgr_allocates(num_segments):
     ) == split_kv_reduce_lds_bytes(num_segments)
 
 
-def _cpp_int(header: str, name: str) -> int:
-    text = (_packs_dir() / header).read_text()
+def test_reduce_lds_formula_bounds_one_segment():
+    """At 1 segment the formula is only an upper bound (the lowerer may skip the pool
+    rounding): the gate may then refuse early, but never admits a reduce that does not
+    fit."""
+    from kernels.common.attention_split_kv_reduce import split_kv_reduce_lds_bytes
+
+    assert _compiled_lds_bytes(_reduce(1), "gfx950") <= split_kv_reduce_lds_bytes(1)
+
+
+def _cpp_int(packs: Path, header: str, name: str) -> int:
+    text = (packs / header).read_text()
     match = re.search(rf"inline constexpr int64_t {name} = (\d+);", text)
     assert match, f"{name} not found as a literal in {header}"
     return int(match.group(1))
 
 
-def test_cpp_segment_bound_mirrors_the_arch_bound():
+def test_cpp_segment_bound_mirrors_the_arch_bound(request):
     """The C++ host bound is gfx950's LDS capacity over the reduce's bytes per segment,
     each restated in C++, and equals the Python gate's bound."""
     from rocke.core.arch.target import ArchTarget
 
     from kernels.gfx950.attention_tiled_3d import reduce_max_segments
 
-    cap = _cpp_int("Gfx950AttentionDenseGeometry.hpp", "GFX950_LDS_CAPACITY_BYTES")
+    packs = _packs_dir(request.config)
+    cap = _cpp_int(
+        packs, "Gfx950AttentionDenseGeometry.hpp", "GFX950_LDS_CAPACITY_BYTES"
+    )
     per_segment = _cpp_int(
+        packs,
         "Gfx950AttentionUnified3DGeometry.hpp",
         "GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT",
     )
     assert cap == ArchTarget.from_gfx("gfx950").lds_capacity_bytes
     assert cap // per_segment == reduce_max_segments("gfx950")
-    text = (_packs_dir() / "Gfx950AttentionUnified3DGeometry.hpp").read_text()
+    text = (packs / "Gfx950AttentionUnified3DGeometry.hpp").read_text()
     assert (
         "GFX950_UNIFIED_3D_MAX_SEGMENTS\n"
         "    = GFX950_LDS_CAPACITY_BYTES / GFX950_UNIFIED_3D_REDUCE_LDS_BYTES_PER_SEGMENT;"
