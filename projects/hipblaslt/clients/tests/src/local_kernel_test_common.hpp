@@ -397,8 +397,8 @@ namespace local_kernel_test
         });
     }
 
-    // Runs `algo` on the current device with A and B all ones and D zeroed,
-    // and returns D in `hD`.
+    // Runs `algo` on the current device with A and B all ones and D and the
+    // workspace zeroed, and returns D in `hD`.
     inline void runMatmul(hipblasLtHandle_t            handle,
                           Problem const&               p,
                           hipblasLtMatmulAlgo_t const& algo,
@@ -419,6 +419,10 @@ namespace local_kernel_test
         ASSERT_EQ(hipMemcpy(dB.ptr, hB.data(), hB.size() * 2, hipMemcpyHostToDevice), hipSuccess);
         ASSERT_EQ(hipMemset(dC.ptr, 0, m * N * 2), hipSuccess);
         ASSERT_EQ(hipMemset(dD.ptr, 0, m * N * 2), hipSuccess);
+        // A kernel that splits K leaves partial sums here for a helper kernel
+        // to reduce into D. Freed memory can come back with an earlier run's
+        // sums, which would make a kernel that wrote nothing look correct.
+        ASSERT_EQ(hipMemset(dWs.ptr, 0, MAX_WORKSPACE), hipSuccess);
 
         float alpha = 1.0f, beta = 0.0f;
         ASSERT_EQ(hipblasLtMatmul(handle,
