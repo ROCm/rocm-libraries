@@ -519,6 +519,7 @@ namespace rocblaslt
                         break;
 
                     JournalEntry entry;
+                    entry.offset = offset + start;
                     if(parseLine(text.substr(start, newline - start), &entry))
                         entries->push_back(std::move(entry));
                     start = newline + 1;
@@ -568,57 +569,78 @@ namespace rocblaslt
             /**
              * Opens and flocks a journal: exclusively for appending, creating it
              * if absent, or shared for reading. A missing journal opened for
-             * reading succeeds and leaves `out` empty. Gives up after
-             * kLockTimeout, so a process stopped while holding the lock makes
-             * this one fail instead of waiting for it.
+             * reading succeeds and leaves `out` empty. The lock is on the file
+             * at `path` when this returns. Gives up after kLockTimeout, so a
+             * process stopped while holding the lock makes this one fail
+             * instead of waiting for it.
              */
             bool openJournal(std::string const& path, bool exclusive, Fd* out, std::string* error)
             {
-                const int flags = exclusive ? (O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC)
-                                            : (O_RDONLY | O_CLOEXEC);
-                const int fd    = ::open(path.c_str(), flags, 0644);
-                if(fd < 0)
-                {
-                    if(!exclusive && errno == ENOENT)
-                        return true;
-                    setError(error, errnoText("cannot open", path));
-                    return false;
-                }
-                out->reset(fd);
-
-                struct stat st
-                {
-                };
-                if(::fstat(fd, &st) != 0)
-                {
-                    setError(error, errnoText("cannot stat", path));
-                    return false;
-                }
-                if(!checkStat(path, st, error))
-                    return false;
-
+                const int  flags    = exclusive ? (O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC)
+                                                : (O_RDONLY | O_CLOEXEC);
                 const auto deadline = std::chrono::steady_clock::now() + kLockTimeout;
                 auto       pause    = std::chrono::milliseconds(1);
-                while(::flock(fd, (exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) != 0)
+                auto       timedOut = [&] {
+                    if(std::chrono::steady_clock::now() < deadline)
+                        return false;
+                    setError(error,
+                             path + " stayed locked by another process for "
+                                 + std::to_string(kLockTimeout.count()) + " s");
+                    return true;
+                };
+
+                for(;;)
                 {
-                    if(errno == EINTR)
-                        continue;
-                    if(errno != EWOULDBLOCK)
+                    out->reset(-1);
+                    const int fd = ::open(path.c_str(), flags, 0644);
+                    if(fd < 0)
                     {
-                        setError(error, errnoText("cannot lock", path));
+                        if(!exclusive && errno == ENOENT)
+                            return true;
+                        setError(error, errnoText("cannot open", path));
                         return false;
                     }
-                    if(std::chrono::steady_clock::now() >= deadline)
+                    out->reset(fd);
+
+                    struct stat st
                     {
-                        setError(error,
-                                 path + " stayed locked by another process for "
-                                     + std::to_string(kLockTimeout.count()) + " s");
+                    };
+                    if(::fstat(fd, &st) != 0)
+                    {
+                        setError(error, errnoText("cannot stat", path));
                         return false;
                     }
-                    std::this_thread::sleep_for(pause);
-                    pause = std::min(pause * 2, std::chrono::milliseconds(50));
+                    if(!checkStat(path, st, error))
+                        return false;
+
+                    while(::flock(fd, (exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) != 0)
+                    {
+                        if(errno == EINTR)
+                            continue;
+                        if(errno != EWOULDBLOCK)
+                        {
+                            setError(error, errnoText("cannot lock", path));
+                            return false;
+                        }
+                        if(timedOut())
+                            return false;
+                        std::this_thread::sleep_for(pause);
+                        pause = std::min(pause * 2, std::chrono::milliseconds(50));
+                    }
+
+                    // The journal may have been deleted or replaced while this
+                    // waited, leaving the lock on a file no one reads: open the
+                    // one at `path` again.
+                    struct stat held
+                    {
+                    }, named{};
+                    if(::fstat(fd, &held) == 0 && ::stat(path.c_str(), &named) == 0
+                       && held.st_dev == named.st_dev && held.st_ino == named.st_ino
+                       && held.st_nlink > 0)
+                        return true;
+                    if(timedOut())
+                        return false;
                 }
-                return true;
             }
 
             std::string withChecksum(std::string const& body)
@@ -811,9 +833,7 @@ namespace rocblaslt
                         return false;
                     }
                 }
-                else if(::link(object->temp.c_str(), object->final.c_str()) == 0)
-                    object->created = true;
-                else if(errno != EEXIST
+                else if(::link(object->temp.c_str(), object->final.c_str()) != 0 && errno != EEXIST
                         && ::rename(object->temp.c_str(), object->final.c_str()) != 0)
                 {
                     setError(error, errnoText("cannot publish", object->final));
@@ -826,15 +846,21 @@ namespace rocblaslt
             return true;
         }
 
-        void Store::unpublishObjects(StagedObjects* staged) const
+        std::string Store::objectState(PayloadRecord const& record) const
         {
-            for(auto* object : {&staged->m_shard, &staged->m_co})
-                if(object->created)
+            std::ostringstream state;
+            for(auto const& path : {shardPath(record), codeObjectPath(record.id)})
+            {
+                struct stat st
                 {
-                    static_cast<void>(::unlink(object->final.c_str()));
-                    object->created = false;
-                }
-            syncDirectory(fs::path(m_root) / kObjectsDir);
+                };
+                if(::lstat(path.c_str(), &st) != 0)
+                    state << "missing;";
+                else
+                    state << st.st_dev << ':' << st.st_ino << ':' << st.st_size << ':'
+                          << st.st_mtim.tv_sec << '.' << st.st_mtim.tv_nsec << ';';
+            }
+            return state.str();
         }
 
         bool Store::verifyObjects(PayloadRecord const& record, std::string* error) const

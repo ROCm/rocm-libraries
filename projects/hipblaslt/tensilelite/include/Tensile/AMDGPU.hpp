@@ -310,6 +310,9 @@ namespace TensileLite
                       "LazyFlag must keep the size and alignment of the int it replaced");
         mutable LazyFlag isStandardCUs;
         std::string deviceName;
+        // The runtime's asicRevision, or -1 where unknown. Not part of
+        // operator==: the shipped library tells revisions apart by file name.
+        int asicRevision = -1;
 
         virtual bool   isStandardCU() const;
         virtual bool   runsKernelTargeting(Processor p) const;
