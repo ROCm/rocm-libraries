@@ -361,7 +361,7 @@ def pytest_runtest_makereport(item, call):
 
     TheRock's gfx94X tensilelite job runs ``Tests/unit`` in one native process.
     Characterization tests still ask for gfx1250 assembly. The guard in
-    ``TensileCreateLibrary/Run.py`` raises because that host did not select the
+    ``create_library/run.py`` raises because that host did not select the
     stinkytofu backend. Skipping here leaves the guard a hard error when
     ``ROCISA_BACKEND`` is set and on hosts that report gfx1250.
     """
