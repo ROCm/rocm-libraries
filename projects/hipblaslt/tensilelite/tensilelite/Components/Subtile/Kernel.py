@@ -1558,6 +1558,8 @@ def mainLoop(writer, kernel):
           plr=schedulerPlr,
           doubleBufferTensors=schedulerDoubleBuffer,
           prefetchNextPartition=schedulerPartitionPrefetch,
+          uniformPgrEpoch=(schedulerPartitionPrefetch and schedulerPgr == 2),
+          uniformEpochVmemCohortSize=5,
           partitionOrder=schedulerPartitionOrder,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
