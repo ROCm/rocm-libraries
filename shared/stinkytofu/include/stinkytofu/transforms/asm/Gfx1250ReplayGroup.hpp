@@ -51,18 +51,11 @@ inline ReplayGroupKind getReplayGroupKind(const StinkyInstruction& inst, ReplayM
     return ReplayGroupKind::None;
 }
 
-// Internal-control instructions can co-issue with a neighbour, and s_set_vgpr_msb is known to
-// issue with XCNT != 0 (DEMI400-9920, ROCM-25414), so none of them is trusted to end a group.
+// Ignore instructions that do not prove an earlier SMEM group ended while
+// scanning backward from a software-prefetch insertion point.
 inline bool isReplayGroupTransparent(const StinkyInstruction& inst) {
     if (isPseudoInst(&inst) || isScalarPrefetch(inst)) return true;
-    switch (inst.getUnifiedOpcode()) {
-        case GFX::s_set_vgpr_msb:
-        case GFX::s_delay_alu:
-        case GFX::s_wait_alu:
-            return true;
-        default:
-            return false;
-    }
+    return inst.getUnifiedOpcode() == GFX::s_set_vgpr_msb;
 }
 
 inline bool isCommentOrBlankLine(std::string_view line) {
