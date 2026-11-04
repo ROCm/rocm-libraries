@@ -422,9 +422,13 @@ def run_one(shape_name: str, dims: dict, P: int, a) -> None:
     def halo_exchange():
         for d in range(P - 1):
             # the (Z-1) rows shard d is missing are exactly the first (Z-1)
-            # owned rows of shard d+1.
-            tail = X_dev[d + 1][:, : _Z - 1].to(f"cuda:{d}")
-            X_dev[d][:, chunk:].copy_(tail)
+            # owned rows of shard d+1. Tensor.copy_() does the cross-device
+            # transfer directly (P2P when available); going through
+            # `.to(device)` first allocates a throwaway same-shape tensor on
+            # the destination device and pays the transfer twice (once into
+            # that temporary, once out of it into the real slice) for no
+            # benefit here -- nothing else reads the temporary.
+            X_dev[d][:, chunk:].copy_(X_dev[d + 1][:, : _Z - 1])
 
     def launch_all():
         # KernelLauncher defaults to a *fenced* (synchronous,
