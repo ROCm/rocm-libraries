@@ -309,28 +309,11 @@ struct StreamKKernel
     {
         if constexpr(UniversalGemmKernel::kIsTdmPipeline)
         {
-            // Off gfx125 the TDM instructions compile to no-ops.
+            // Off gfx125 the TDM instructions compile to no-ops. UniversalGemmKernel checks the
+            // rest: the TDM arguments and, with a non-TDM epilogue, the C tail.
             if(!UniversalGemmKernel::IsTdmDeviceSupported("Stream-K GEMM"))
             {
                 return false;
-            }
-            // UniversalGemmKernel skips its tile checks for a TDM pipeline, whose loads clip to
-            // the real extents. A non-TDM epilogue does not clip: a ragged tile along the
-            // contiguous dimension of C would store into the next row (column-major: column).
-            if constexpr(!is_tdm_epilogue_v<EpiloguePipeline>)
-            {
-                constexpr bool kCRowMajor = std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>;
-                if(kCRowMajor ? kargs.N % TilePartitioner::NPerBlock != 0
-                              : kargs.M % TilePartitioner::MPerBlock != 0)
-                {
-                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                    {
-                        CK_TILE_ERROR("Stream-K with a TDM pipeline and a non-TDM epilogue needs "
-                                      "the contiguous dimension of C (N if row-major, M if "
-                                      "column-major) to be a multiple of its block tile!");
-                    }
-                    return false;
-                }
             }
         }
         return UniversalGemmKernel::IsSupportedArgument(kargs);
