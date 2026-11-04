@@ -30,11 +30,12 @@ public:
         size_t golden = 0;
         size_t gpuReference = 0;
         size_t cpuReference = 0;
+        size_t rejected = 0;
         size_t none = 0;
 
         size_t total() const
         {
-            return golden + gpuReference + cpuReference + none;
+            return golden + gpuReference + cpuReference + rejected + none;
         }
     };
 
@@ -50,8 +51,12 @@ public:
     VerifierTally& operator=(VerifierTally&&) = delete;
 
     // Counts `verifier` and writes the "[ VERIFIER ] <verifier>: <bundle>" line
-    // that sits between a test's [ RUN ] and result lines.
-    void record(const std::string& bundlePath, Verifier verifier, std::ostream& os = std::cout)
+    // that sits between a test's [ RUN ] and result lines. A non-empty `detail` is
+    // written in parentheses after the verifier, as "rejected(ranked_list)".
+    void record(const std::string& bundlePath,
+                Verifier verifier,
+                const std::string& detail = {},
+                std::ostream& os = std::cout)
     {
         {
             const std::lock_guard<std::mutex> lock(_mutex);
@@ -66,13 +71,21 @@ public:
             case Verifier::CPU_REFERENCE:
                 ++_counts.cpuReference;
                 break;
+            case Verifier::EXPECTED_REJECTION:
+                ++_counts.rejected;
+                break;
             case Verifier::NONE:
             default:
                 ++_counts.none;
                 break;
             }
         }
-        os << "[ VERIFIER ] " << toString(verifier) << ": " << bundlePath << '\n';
+        os << "[ VERIFIER ] " << toString(verifier);
+        if(!detail.empty())
+        {
+            os << '(' << detail << ')';
+        }
+        os << ": " << bundlePath << '\n';
     }
 
     Counts counts() const

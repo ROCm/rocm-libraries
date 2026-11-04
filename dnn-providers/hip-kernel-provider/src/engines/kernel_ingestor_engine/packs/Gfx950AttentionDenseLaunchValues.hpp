@@ -55,8 +55,17 @@ struct AttentionDenseProblem
     data_objects::DataType dataType = data_objects::DataType::UNSET;
 };
 
+/// Contract v1: the launch passes 8 kernel arguments (q, k, v, o, scale, batch, seqlen_q,
+/// seqlen_kv), for kernels that bake the head counts. Its handler stays registered so plans
+/// saved under it still load.
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
     = "hipkernel.gfx950_attention_dense.dispatch.v1";
+
+/// Contract v2: the same values, and the launch also passes num_query_heads and
+/// num_kv_heads (10 kernel arguments), for kernels that read the head counts at runtime.
+/// New plans are saved under it.
+inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
+    = "hipkernel.gfx950_attention_dense.dispatch.v2";
 
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_Q_UID_VALUE = "q.uid";
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_K_UID_VALUE = "k.uid";
@@ -78,9 +87,9 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE = "
 /// The one stride layout the kernel supports. prepare() refuses every other layout.
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_BSHD_LAYOUT = "bshd";
 
-/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1` contract. `scale` is
-/// stored as a double, which holds every float exactly. `data_type` is the DataType
-/// enumerator name.
+/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1` and `.v2` contracts,
+/// which share one value set. `scale` is stored as a double, which holds every float
+/// exactly. `data_type` is the DataType enumerator name.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
 
@@ -92,14 +101,15 @@ struct Gfx950AttentionDenseLaunchInputs
     int64_t blockM = 0;
 };
 
-/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` contract.
-/// `batch`, `seqlen_q` and `seqlen_kv` must be in [1, INT32_MAX], because the kernel takes
+/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` or `.v2`
+/// contract (one value set; the versions differ only in the kernel arguments the launch
+/// passes). `batch`, `seqlen_q` and `seqlen_kv` must be in [1, INT32_MAX], because the kernel takes
 /// them as 32-bit integers. The head counts and `head_size` must be in [1, INT32_MAX].
 /// `block_m` must be a tile the kernel is built with. `scale` must convert to a float
 /// and back without change. `data_type` must be a type the kernel is built for, and
 /// `stride_layout` must be `bshd`.
 ///
-/// @throws HipdnnPluginException with a load refusal when the dispatch name is not that
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
 ///         contract, or when a value is missing, extra, of another type or out of range.
 Gfx950AttentionDenseLaunchInputs readGfx950AttentionDenseLaunchInputs(
     const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);
