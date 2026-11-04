@@ -88,9 +88,6 @@ typedef struct vscope_entry
 {
     const char* name;
     const rocke_type_t* type;
-    /* An induction variable or carried value of an scf.for whose body is being
-     * checked (or of the loop being entered): its name is taken. */
-    bool is_loop_name;
 } vscope_entry_t;
 
 typedef struct verifier
@@ -99,6 +96,13 @@ typedef struct verifier
     vscope_entry_t* scope; /* growable name->type table */
     int scope_count;
     int scope_cap;
+    /* Python _enclosing_loop_names: the induction-variable and carried-value
+     * names of the scf.for loops whose body is being checked, outermost first,
+     * then those of the loop being entered. Truncated on leaving a loop, like
+     * the scope table. */
+    const char** loop_names;
+    int loop_name_count;
+    int loop_name_cap;
 } verifier_t;
 
 static void v_errf(verifier_t* v, const rocke_op_t* op, const char* fmt, ...)
@@ -138,8 +142,7 @@ static int scope_has(verifier_t* v, const char* name)
     return scope_get(v, name) != NULL;
 }
 
-/* Bring `name` into scope; returns its entry, or NULL when out of memory. */
-static vscope_entry_t* scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
+static void scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
 {
     if(v->scope_count >= v->scope_cap)
     {
@@ -148,52 +151,33 @@ static vscope_entry_t* scope_put(verifier_t* v, const char* name, const rocke_ty
         if(!ne)
         {
             v->db.oom = 1;
-            return NULL;
+            return;
         }
         v->scope = ne;
         v->scope_cap = nc;
     }
     v->scope[v->scope_count].name = name;
     v->scope[v->scope_count].type = t;
-    v->scope[v->scope_count].is_loop_name = false;
-    return &v->scope[v->scope_count++];
+    v->scope_count++;
 }
 
-/* True when `name` is taken by a loop value in scope (see vscope_entry). */
-static bool scope_has_loop_name(const verifier_t* v, const char* name)
+/* Push `name`, an induction variable or carried value of the scf.for being
+ * entered, onto v->loop_names. */
+static void loop_name_push(verifier_t* v, const char* name)
 {
-    for(int i = v->scope_count - 1; i >= 0; --i)
+    if(v->loop_name_count >= v->loop_name_cap)
     {
-        if(v->scope[i].is_loop_name && strcmp(v->scope[i].name, name) == 0)
+        int nc = v->loop_name_cap ? v->loop_name_cap * 2 : 16;
+        const char** grown = (const char**)realloc(v->loop_names, (size_t)nc * sizeof(*grown));
+        if(!grown)
         {
-            return true;
+            v->db.oom = 1;
+            return;
         }
+        v->loop_names = grown;
+        v->loop_name_cap = nc;
     }
-    return false;
-}
-
-/* Bring `name`, an induction variable or carried value of the scf.for `loop`,
- * into scope. Hand-built IR can reuse a loop name the builder and parsers
- * refuse: the first name `loop` reuses -- one of a loop it is nested in, or an
- * earlier one of its own -- is reported with rocke_i_reused_loop_name_message
- * (Python: _first_reused_loop_name), and `*reuse_reported` is set so later
- * names are not. */
-static void scope_put_loop_name(verifier_t* v,
-                                const rocke_op_t* loop,
-                                const char* name,
-                                const rocke_type_t* t,
-                                bool* reuse_reported)
-{
-    if(!*reuse_reported && scope_has_loop_name(v, name))
-    {
-        char msg[ROCKE_ERR_MSG_CAP];
-        v_errf(v, loop, "%s", rocke_i_reused_loop_name_message(name, msg, sizeof msg));
-        *reuse_reported = true;
-    }
-    if(vscope_entry_t* entry = scope_put(v, name, t))
-    {
-        entry->is_loop_name = true;
-    }
+    v->loop_names[v->loop_name_count++] = name;
 }
 
 /* legal pointer address spaces */
@@ -843,9 +827,10 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         }
     }
 
-    /* body scope: snapshot + iv + iter-arg block values */
+    /* body scope: snapshot + iv + iter-arg block values; the same names are
+     * this loop's, pushed onto v->loop_names above the enclosing loops' */
     int saved = v->scope_count;
-    bool reuse_reported = false;
+    const int enclosing_loop_names = v->loop_name_count;
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
@@ -861,7 +846,8 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         {
             t = lower; /* compound / unknown: use the loop bound type */
         }
-        scope_put_loop_name(v, op, iv, t, &reuse_reported);
+        scope_put(v, iv, t);
+        loop_name_push(v, iv);
     }
     if(have_iter_meta && iter_meta_count > 0)
     {
@@ -871,13 +857,30 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             const char* nm = rocke_attr_get_str(iter_meta->u.list.items[i], "name");
             if(nm)
             {
-                scope_put_loop_name(v, op, nm, op->operands[3 + i]->type, &reuse_reported);
+                scope_put(v, nm, op->operands[3 + i]->type);
+                loop_name_push(v, nm);
             }
+        }
+    }
+
+    /* Hand-built IR can reuse a loop name the builder and parsers refuse. */
+    if(!v->db.oom)
+    {
+        const char* reused
+            = rocke_i_first_reused_loop_name(v->loop_names,
+                                             (size_t)enclosing_loop_names,
+                                             v->loop_names + enclosing_loop_names,
+                                             (size_t)(v->loop_name_count - enclosing_loop_names));
+        if(reused)
+        {
+            char msg[ROCKE_ERR_MSG_CAP];
+            v_errf(v, op, "%s", rocke_i_reused_loop_name_message(reused, msg, sizeof msg));
         }
     }
 
     const rocke_region_t* body = op->regions[0];
     check_region(v, body, 0);
+    v->loop_name_count = enclosing_loop_names;
 
     /* body should end in scf.yield matching iter-arg types (if any iter-args) */
     if(num_iter_inits > 0)
@@ -1111,6 +1114,7 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
         }
     }
     free(v.scope);
+    free(v.loop_names);
 
     if(v.db.oom)
     {

@@ -301,6 +301,17 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
  * builder, the IR parser and the verifier use it. */
 const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
 
+/* Mirrors ir._first_reused_loop_name: the first of `names` (the names an
+ * scf.for gives its induction variable and carried values, in that order) that
+ * is already taken, or NULL when all are free. `taken` are the names of the
+ * loops it is nested in; a name is also taken when it repeats an earlier one of
+ * `names`. The builder and the verifier both apply this rule and refuse with
+ * rocke_i_reused_loop_name_message. */
+const char* rocke_i_first_reused_loop_name(const char* const* taken,
+                                           size_t n_taken,
+                                           const char* const* names,
+                                           size_t n_names);
+
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
  * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.

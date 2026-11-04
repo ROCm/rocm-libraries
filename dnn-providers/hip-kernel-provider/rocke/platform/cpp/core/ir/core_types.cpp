@@ -832,6 +832,31 @@ const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t
     return buf;
 }
 
+const char* rocke_i_first_reused_loop_name(const char* const* taken,
+                                           size_t n_taken,
+                                           const char* const* names,
+                                           size_t n_names)
+{
+    for(size_t i = 0; i < n_names; ++i)
+    {
+        for(size_t t = 0; t < n_taken; ++t)
+        {
+            if(strcmp(taken[t], names[i]) == 0)
+            {
+                return names[i];
+            }
+        }
+        for(size_t earlier = 0; earlier < i; ++earlier)
+        {
+            if(strcmp(names[earlier], names[i]) == 0)
+            {
+                return names[i];
+            }
+        }
+    }
+    return NULL;
+}
+
 const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     int i;

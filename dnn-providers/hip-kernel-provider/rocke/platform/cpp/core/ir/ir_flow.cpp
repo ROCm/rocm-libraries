@@ -2275,55 +2275,83 @@ static const rocke_op_t* flow_loop_with_body(const rocke_region_t* region,
     return NULL;
 }
 
-/* Python IRBuilder._enclosing_loop_value_names: true when `name` is the name of
- * the induction variable or of a carried value of an scf.for the builder is
- * emitting inside, at any depth: each region on the stack that is a loop's body
- * (flow_loop_with_body) makes that loop's values visible from here. */
-static bool flow_enclosing_loop_value_named(const rocke_ir_builder_t* b, const char* name)
+/* The names of the induction variable and carried values of the scf.for
+ * `loop`, in that order, stored into `out` when it is non-NULL; returns how
+ * many there are. */
+static int flow_loop_value_names(const rocke_op_t* loop, const char** out)
 {
+    int count = 0;
+    const char* iv = rocke_attr_get_str(&loop->attrs, "iv");
+    if(iv)
+    {
+        if(out)
+            out[count] = iv;
+        ++count;
+    }
+    const rocke_attr_value_t* meta = rocke_attr_get(&loop->attrs, "iter_args");
+    if(!meta || meta->kind != ROCKE_ATTR_LIST)
+        return count;
+    for(int i = 0; i < meta->u.list.count; ++i)
+    {
+        const char* carried
+            = meta->u.list.items[i] ? rocke_attr_get_str(meta->u.list.items[i], "name") : NULL;
+        if(!carried)
+            continue;
+        if(out)
+            out[count] = carried;
+        ++count;
+    }
+    return count;
+}
+
+/* Python IRBuilder._enclosing_loop_value_names: the names of the induction
+ * variables and carried values of every scf.for the builder is emitting inside,
+ * at any depth, as an arena array of *out_count names: each region on the stack
+ * that is a loop's body (flow_loop_with_body) makes that loop's values visible
+ * from here. */
+static const char** flow_enclosing_loop_value_names(rocke_ir_builder_t* b, size_t* out_count)
+{
+    size_t count = 0;
     for(int d = 1; d < b->region_depth; ++d)
     {
         const rocke_op_t* owner = flow_loop_with_body(b->region_stack[d - 1], b->region_stack[d]);
-        if(!owner)
-            continue;
-        const char* iv = rocke_attr_get_str(&owner->attrs, "iv");
-        if(iv && strcmp(iv, name) == 0)
-            return true;
-        const rocke_attr_value_t* meta = rocke_attr_get(&owner->attrs, "iter_args");
-        if(!meta || meta->kind != ROCKE_ATTR_LIST)
-            continue;
-        for(int i = 0; i < meta->u.list.count; ++i)
-        {
-            const char* carried
-                = meta->u.list.items[i] ? rocke_attr_get_str(meta->u.list.items[i], "name") : NULL;
-            if(carried && strcmp(carried, name) == 0)
-                return true;
-        }
+        if(owner)
+            count += (size_t)flow_loop_value_names(owner, NULL);
     }
-    return false;
+    const char** names
+        = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * (count ? count : 1));
+    if(!names)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "scf_for: OOM");
+    }
+    size_t filled = 0;
+    for(int d = 1; d < b->region_depth; ++d)
+    {
+        const rocke_op_t* owner = flow_loop_with_body(b->region_stack[d - 1], b->region_stack[d]);
+        if(owner)
+            filled += (size_t)flow_loop_value_names(owner, names + filled);
+    }
+    *out_count = filled;
+    return names;
 }
 
 /* Python IRBuilder._refuse_taken_loop_names: refuse the names a new scf.for
  * gives its induction variable and carried values (`names`, in that order) when
- * one is taken by a value of a loop the builder is emitting inside, or by an
- * earlier name in `names`. The serialized IR refers to a value by its name, so
- * a reused name inside a nested body is ambiguous and the two engines would
- * read different values. A refusal raises a ValueError (rocke_i_set_err). */
+ * one is taken (rocke_i_first_reused_loop_name) by a value of a loop the
+ * builder is emitting inside, or by an earlier name in `names`. The serialized
+ * IR refers to a value by its name, so a reused name inside a nested body is
+ * ambiguous and the two engines would read different values. A refusal raises
+ * a ValueError (rocke_i_set_err). */
 static void flow_refuse_taken_loop_names(rocke_ir_builder_t* b, const char* const* names, int count)
 {
-    for(int i = 0; i < count; ++i)
+    size_t n_taken = 0;
+    const char** taken = flow_enclosing_loop_value_names(b, &n_taken);
+    const char* reused = rocke_i_first_reused_loop_name(taken, n_taken, names, (size_t)count);
+    if(reused)
     {
-        bool taken = flow_enclosing_loop_value_named(b, names[i]);
-        for(int j = 0; j < i && !taken; ++j)
-            taken = strcmp(names[j], names[i]) == 0;
-        if(taken)
-        {
-            char msg[ROCKE_ERR_MSG_CAP];
-            rocke_i_set_err(b,
-                            ROCKE_ERR_VALUE,
-                            "%s",
-                            rocke_i_reused_loop_name_message(names[i], msg, sizeof msg));
-        }
+        char msg[ROCKE_ERR_MSG_CAP];
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s", rocke_i_reused_loop_name_message(reused, msg, sizeof msg));
     }
 }
 

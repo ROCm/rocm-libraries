@@ -438,11 +438,11 @@ def test_both_parsers_refuse_a_reused_loop_name(reused, inner_name):
     assert str(native.value).endswith(": " + _reuse_message(reused)), str(native.value)
 
 
-def _nested_loops_renaming(inner_name, reused):
+def _nested_loops_renaming(renames):
     """A rolled loop ``k`` over ``acc`` whose body holds a rolled loop ``j``
-    over ``s``, built by the builder; then, past it, the inner loop's value
-    named ``inner_name`` is renamed to ``reused``, in the loop's attrs and in
-    the value every read of it sees."""
+    over ``s``, built by the builder; then, past it, each value of the inner
+    loop named in ``renames`` takes the name it maps to, in the loop's attrs
+    and in the value every read of it sees."""
     b, _, z, lane = _kernel("verify_reuse")
     outer = _inner_loop(b, "k", "acc", lane, unroll=False)
     with outer as (_, (acc,)):
@@ -453,35 +453,43 @@ def _nested_loops_renaming(inner_name, reused):
     b.global_store(z, lane, outer.results[0])
     b.ret()
     loop = inner.op
-    if loop.attrs["iv"] == inner_name:
-        loop.attrs["iv"] = reused
+    loop.attrs["iv"] = renames.get(loop.attrs["iv"], loop.attrs["iv"])
     for meta in loop.attrs["iter_args"]:
-        if meta["name"] == inner_name:
-            meta["name"] = reused
+        meta["name"] = renames.get(meta["name"], meta["name"])
     for value in (j, s):
-        if value.name == inner_name:
-            value.name = reused
+        value.name = renames.get(value.name, value.name)
     return b.kernel
 
 
 @pytest.mark.parametrize(
-    "reused, inner_name",
-    [("%k", "%j"), ("%acc", "%s"), ("%j", "%s")],
-    ids=["outer_induction_variable", "outer_carried_value", "same_loop"],
+    "renames, reported",
+    [
+        ({"%j": "%k"}, "%k"),
+        ({"%s": "%acc"}, "%acc"),
+        ({"%s": "%j"}, "%j"),
+        ({"%j": "%k", "%s": "%acc"}, "%k"),
+    ],
+    ids=[
+        "outer_induction_variable",
+        "outer_carried_value",
+        "same_loop",
+        "both_names_reported_once_by_the_first",
+    ],
 )
-def test_the_verifier_reports_a_reused_loop_name(reused, inner_name):
+def test_the_verifier_reports_a_reused_loop_name(renames, reported):
     """IR built past the builder can reuse a loop name the builder and the
-    parsers refuse. The verifier reports it with their message and nothing
-    else; ``tests/core/test_scf_for_name_reuse.cpp`` checks that the C++
-    verifier reports the same."""
-    diagnostics = verify(_nested_loops_renaming(inner_name, reused))
+    parsers refuse. The verifier reports the loop's first reused name (its
+    induction variable before its carried values) with their message, once,
+    and nothing else; ``tests/core/test_scf_for_name_reuse.cpp`` checks that
+    the C++ verifier reports the same."""
+    diagnostics = verify(_nested_loops_renaming(renames))
     assert [(d.severity, d.message) for d in diagnostics] == [
-        ("error", _reuse_message(reused))
+        ("error", _reuse_message(reported))
     ]
 
 
 def test_the_verifier_accepts_the_names_the_builder_gave():
-    assert verify(_nested_loops_renaming("%s", "%s")) == []
+    assert verify(_nested_loops_renaming({})) == []
 
 
 def test_one_loop_may_not_name_two_of_its_values_alike():

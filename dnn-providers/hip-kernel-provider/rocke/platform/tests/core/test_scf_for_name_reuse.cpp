@@ -245,9 +245,9 @@ std::string diagnostics(const rocke_kernel_def_t* kernel)
 
 /* The diagnostics for a rolled loop "k0" over "acc" whose body holds a rolled
  * loop "j" over "s", built by the builder; then, past it, the inner loop's
- * value named `inner_name` is renamed to `reused`, in the loop's attrs and in
- * the value every read of it sees. */
-std::string diagnostics_renaming(const std::string& inner_name, const char* reused)
+ * induction variable is renamed to `iv_name` and its carried value to
+ * `carried_name`, in the loop's attrs and in the values every read sees. */
+std::string diagnostics_renaming(const char* iv_name, const char* carried_name)
 {
     Kernel k("verify_reuse");
     rocke_for_t outer = k.loop("k0", "acc");
@@ -260,39 +260,43 @@ std::string diagnostics_renaming(const std::string& inner_name, const char* reus
     rocke_b_scf_yield(&k.b, inner.op->results, 1);
     rocke_b_region_leave(&k.b);
     rocke_b_ret(&k.b);
-    if(inner_name == inner.iv->name)
-    {
-        rocke_attr_set_str(&k.b, &inner.op->attrs, "iv", reused);
-        inner.iv->name = reused;
-    }
+    rocke_attr_set_str(&k.b, &inner.op->attrs, "iv", iv_name);
+    inner.iv->name = iv_name;
     rocke_attr_map_t* carried = rocke_attr_get(&inner.op->attrs, "iter_args")->u.list.items[0];
-    if(inner_name == inner.iter_vars[0]->name)
-    {
-        rocke_attr_set_str(&k.b, carried, "name", reused);
-        inner.iter_vars[0]->name = reused;
-    }
+    rocke_attr_set_str(&k.b, carried, "name", carried_name);
+    inner.iter_vars[0]->name = carried_name;
     return diagnostics(rocke_ir_builder_kernel(&k.b));
 }
 
+/* Each case names the inner loop's values and the one name the verifier must
+ * report: the loop's first reused name, its induction variable before its
+ * carried value. */
 void verifier_reports_reused_loop_names()
 {
-    const std::pair<const char*, const char*> cases[] = {
-        {"%k0", "%j"}, /* the outer induction variable */
-        {"%acc", "%s"}, /* the outer carried value */
-        {"%j", "%s"}, /* a value of the same loop */
-    };
-    for(const auto& [reused, inner_name] : cases)
+    struct Case
     {
-        const std::string reported = diagnostics_renaming(inner_name, reused);
-        check(reported == "error: " + message(reused) + "\n",
-              std::string("verifying ") + inner_name + " renamed to " + reused + ": '" + reported
-                  + "'");
+        const char* iv_name;
+        const char* carried_name;
+        const char* reported;
+    };
+    const Case cases[] = {
+        {"%k0", "%s", "%k0"}, /* the outer induction variable */
+        {"%j", "%acc", "%acc"}, /* the outer carried value */
+        {"%j", "%j", "%j"}, /* a value of the same loop */
+        {"%k0", "%acc", "%k0"}, /* both outer names: reported once, by the first */
+    };
+    for(const Case& c : cases)
+    {
+        const std::string reported = diagnostics_renaming(c.iv_name, c.carried_name);
+        check(reported == "error: " + message(c.reported) + "\n",
+              std::string("verifying an inner loop over ") + c.iv_name + " carrying "
+                  + c.carried_name + ": '" + reported + "'");
     }
 }
 
 void verifier_accepts_the_names_the_builder_gave()
 {
-    const std::string reported = diagnostics_renaming("%s", "%s");
+    const std::string reported = diagnostics_renaming("%j", "%s");
     check(reported.empty(), "verifying the verify_reuse kernel: '" + reported + "'");
 }
 
