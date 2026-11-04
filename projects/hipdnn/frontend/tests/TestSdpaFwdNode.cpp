@@ -2,7 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -11,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -834,6 +837,52 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
               error_code_t::INVALID_VALUE)
         << "an unset dtype becomes the io type";
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::FLOAT), error_code_t::OK);
+}
+
+// Through Graph::validate(): an untyped input takes the graph's io type before nodes are checked,
+// so a sink without an explicit FLOAT dtype in a HALF graph is rejected (cuDNN behaves the same
+// way); with FLOAT set, the same graph validates.
+TEST(TestSdpaFwdNode, GraphValidateRejectsUntypedSinkInAHalfGraph)
+{
+    for(const bool setFloat : {false, true})
+    {
+        Graph graph;
+        graph.set_io_data_type(DataType::HALF)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT);
+
+        const auto makeInput = [](int64_t uid, const std::vector<int64_t>& dims) {
+            auto t = std::make_shared<TensorAttributes>();
+            t->set_uid(uid).set_dim(dims).set_stride(
+                hipdnn_data_sdk::utilities::generateStrides(dims));
+            return t;
+        };
+        auto sink = makeInput(4, {1, 8, 1, 1});
+        if(setFloat)
+        {
+            sink->set_data_type(DataType::FLOAT);
+        }
+
+        SdpaAttributes attrs;
+        attrs.set_sink_token(sink);
+        auto [o, stats] = graph.sdpa(makeInput(1, {2, 8, 16, 64}),
+                                     makeInput(2, {2, 8, 32, 64}),
+                                     makeInput(3, {2, 8, 32, 64}),
+                                     attrs);
+        o->set_uid(5).set_output(true);
+
+        const auto err = graph.validate();
+        if(setFloat)
+        {
+            EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+        }
+        else
+        {
+            EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+            EXPECT_NE(err.err_msg.find("sink_token must have FLOAT data type"), std::string::npos)
+                << err.err_msg;
+        }
+    }
 }
 
 TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)

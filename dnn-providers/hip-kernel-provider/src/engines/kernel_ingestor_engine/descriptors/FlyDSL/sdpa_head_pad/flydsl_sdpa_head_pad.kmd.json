@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "49cbfb66-b2f8-5b1b-b409-cee6c953ab00",
+  "name": "flydsl sdpa_head_pad variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}

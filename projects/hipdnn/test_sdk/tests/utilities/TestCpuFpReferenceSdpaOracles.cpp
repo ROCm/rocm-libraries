@@ -959,6 +959,109 @@ TEST(TestCpuFpReferenceSdpaProperty, SinkEqualsExtraZeroValueKey)
     expectAllNear(withSink.lse, extra.lse, TOL, "LSE");
 }
 
+// A sink only adds mass to the denominator, so every row has LSE_sink = logaddexp(LSE, sink) and
+// O_sink = O * exp(LSE - LSE_sink). GQA (H = 4, H_kv = 2) under a causal band: the sink is indexed
+// by the query head, not the KV head. Double compute.
+TEST(TestCpuFpReferenceSdpaProperty, SinkRescalesOutputAndLsePerQueryHead)
+{
+    constexpr int64_t B = 2;
+    constexpr int64_t H = 4;
+    constexpr int64_t SQ = 8;
+    constexpr int64_t DV = 8;
+    Tensor<double> q({B, H, SQ, 16});
+    Tensor<double> k({B, 2, SQ, 16});
+    Tensor<double> v({B, 2, SQ, DV});
+    Tensor<double> o({B, H, SQ, DV});
+    Tensor<double> oSink({B, H, SQ, DV});
+    Tensor<float> lse({B, H, SQ, 1});
+    Tensor<float> lseSink({B, H, SQ, 1});
+    Tensor<float> sink({1, H, 1, 1});
+    q.fillWithRandomValues(-1.0, 1.0, 400);
+    k.fillWithRandomValues(-1.0, 1.0, 401);
+    v.fillWithRandomValues(-1.0, 1.0, 402);
+    const std::vector<float> sinkValues = {-2.0F, 0.0F, 0.75F, 3.0F};
+    for(int64_t h = 0; h < H; ++h)
+    {
+        sink.setHostValue(sinkValues[static_cast<size_t>(h)], 0, h, 0, 0);
+    }
+
+    const auto options = SdpaFwdOptions<double>{}.setScale(0.25F).setBand(-1, 0, true);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, SdpaFwdOptions<double>{options}.setLse(&lse));
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, oSink, SdpaFwdOptions<double>{options}.setSink(&sink).setLse(&lseSink));
+
+    for(int64_t b = 0; b < B; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            const auto s = static_cast<double>(sinkValues[static_cast<size_t>(h)]);
+            for(int64_t sq = 0; sq < SQ; ++sq)
+            {
+                const auto l = static_cast<double>(lse.getHostValue(b, h, sq, 0));
+                const double m = std::max(l, s);
+                const double expectedLse = m + std::log(std::exp(l - m) + std::exp(s - m));
+                EXPECT_NEAR(lseSink.getHostValue(b, h, sq, 0), expectedLse, 1e-5)
+                    << "b=" << b << " h=" << h << " sq=" << sq;
+                const double ratio = std::exp(l - expectedLse);
+                for(int64_t dv = 0; dv < DV; ++dv)
+                {
+                    EXPECT_NEAR(oSink.getHostValue(b, h, sq, dv),
+                                o.getHostValue(b, h, sq, dv) * ratio,
+                                1e-5)
+                        << "b=" << b << " h=" << h << " sq=" << sq << " dv=" << dv;
+                }
+            }
+        }
+    }
+}
+
+// A -inf sink logit adds no mass: O and LSE are bit-identical to the run without a sink.
+TEST(TestCpuFpReferenceSdpaProperty, NegativeInfinitySinkIsNoSink)
+{
+    SdpaRun plain({1, 2, 4, 8}, {1, 2, 4, 8}, {1, 2, 4, 8});
+    plain.q.fillWithRandomValues(-1.0F, 1.0F, 410);
+    plain.k.fillWithRandomValues(-1.0F, 1.0F, 411);
+    plain.v.fillWithRandomValues(-1.0F, 1.0F, 412);
+    SdpaRun withSink({1, 2, 4, 8}, {1, 2, 4, 8}, {1, 2, 4, 8});
+    forEachIndex(plain.q.dims(), [&](const std::vector<int64_t>& i) {
+        withSink.q.setHostValue(plain.q.getHostValue(i), i);
+        withSink.k.setHostValue(plain.k.getHostValue(i), i);
+        withSink.v.setHostValue(plain.v.getHostValue(i), i);
+    });
+    Tensor<float> sink({1, 2, 1, 1});
+    sink.fillWithValue(NEG_INF);
+
+    CpuFpReferenceSdpa::forward(plain.q,
+                                plain.k,
+                                plain.v,
+                                plain.o,
+                                SdpaFwdOptions<float>{}.setScale(0.5F).setLse(&plain.lse));
+    runWithSink(withSink, sink);
+
+    forEachIndex(plain.o.dims(), [&](const std::vector<int64_t>& i) {
+        EXPECT_EQ(withSink.o.getHostValue(i), plain.o.getHostValue(i));
+    });
+    forEachIndex(plain.lse.dims(), [&](const std::vector<int64_t>& i) {
+        EXPECT_EQ(withSink.lse.getHostValue(i), plain.lse.getHostValue(i));
+    });
+}
+
+// The sink must be [1, H_q, 1, 1]: one sized by the KV heads, or of another rank, throws.
+TEST(TestCpuFpReferenceSdpaClosedForm, SinkWithTheWrongShapeThrows)
+{
+    SdpaRun r({1, 4, 2, 2}, {1, 2, 2, 2}, {1, 2, 2, 2});
+    r.q.fillWithValue(1.0F);
+    r.k.fillWithValue(1.0F);
+    r.v.fillWithValue(1.0F);
+    Tensor<float> kvHeadSink({1, 2, 1, 1});
+    kvHeadSink.fillWithValue(0.0F);
+    EXPECT_THROW(runWithSink(r, kvHeadSink), std::invalid_argument);
+    Tensor<float> flatSink({4});
+    flatSink.fillWithValue(0.0F);
+    EXPECT_THROW(runWithSink(r, flatSink), std::invalid_argument);
+}
+
 // cuDNN sdpa_fp8 softmax and output scaling (SEM-024) with one key per row: exp(s - Max) = 1, so
 // P is stored as fp8(scaleS) * descaleS and O = P * V * descaleV exactly. scaleS = 3.3 is not an
 // E4M3 value (it rounds to 3.25), so a reference that skipped the P quantization is caught;
