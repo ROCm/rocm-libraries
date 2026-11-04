@@ -101,3 +101,20 @@ TEST(DeviceContext, SdmaRotateWalksTheEvenXgmiEngines)
     EXPECT_EQ(sdmaRotateEngine(14, 1, 14), 2u);
     EXPECT_THROW(sdmaRotateEngine(3, -1, 14), std::runtime_error);
 }
+
+TEST(DeviceContext, SdmaRotateRejectsOddAndPcieEnginesAtAnyRotate)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_THROW(sdmaRotateEngine(3, 0, 14), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(7, 0, 6), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(0, 0, 14), std::runtime_error);
+    EXPECT_EQ(sdmaRotateEngine(6, 0, 6), 6u);
+}
+
+TEST(DeviceContext, SdmaRotateRequiresFourteenXgmiEngines)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_THROW(sdmaRotateEngine(2, -1, 6), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(2, 1, 0), std::runtime_error);
+    EXPECT_EQ(sdmaRotateEngine(2, 0, 6), 2u);
+}

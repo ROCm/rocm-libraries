@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <cstring>
+#include <limits>
 #include <map>
 #include <string>
 #include <utility>
@@ -527,13 +528,15 @@ namespace
         return result;
     }
 
-    KernelInvocation fusedCustomCall()
+    KernelInvocation fusedCustomCall(FusedA2A mode     = FusedA2A::GemmA2A,
+                                     int      fixedWGM = std::numeric_limits<int>::max())
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::FusedA2ASegment});
+        solution.problemType.fusedA2A = mode;
 
         auto problem = dummyProblem();
-        problem.setFusedA2A(FusedA2A::GemmA2A);
+        problem.setFusedA2A(mode);
         problem.setWorld(2);
         problem.setFusedA2AExtent(256);
 
@@ -546,8 +549,9 @@ namespace
         inputs.fusedA2AMyRank  = 1;
         inputs.fusedA2ADrain   = FUSED_A2A_DRAIN_RECV;
 
-        return solution.generateCustomCall<false>(
-            problem, inputs, probeDevice(), StreamKSettings{});
+        auto device     = probeDevice();
+        device.fixedWGM = fixedWGM;
+        return solution.generateCustomCall<false>(problem, inputs, device, StreamKSettings{});
     }
 }
 
@@ -565,4 +569,11 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedNumCuOffset),
               static_cast<uint32_t>(TensileLite::testing::_SPX_CU));
+}
+
+TEST(CustomKernelTest, A2AGemmRejectsANegativeRuntimeWgm)
+{
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm));
+    EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, -8), std::runtime_error);
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, -8));
 }

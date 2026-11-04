@@ -97,6 +97,14 @@ TEST(FusedA2AProblem, SegmentNeedsOnePeerGroupPerRank)
                  std::runtime_error);
 }
 
+TEST(FusedA2AProblem, SegmentNeedsCuCount)
+{
+    KernelArguments args(false);
+    EXPECT_THROW(
+        appendFusedSegment(args, std::vector<FusedA2APeerFields>(4), nullptr, 0, 4, 0, 2048, 0),
+        std::runtime_error);
+}
+
 namespace
 {
     template <typename T>
