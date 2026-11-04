@@ -51,6 +51,16 @@
 // because nearly all tests reuse them.
 inline constexpr size_t kHostPoolRetainLimit = size_t(1) << 30;
 
+// The capacity the pool pins for a new host buffer of `bytes`: 20% extra so that a slightly
+// larger request can reuse it, unless that would reach kHostPoolRetainLimit. A buffer at the
+// limit is reused only by the same shape in the next test, so the extra would only add pinned
+// memory, and it would make a smaller request's buffer count as large.
+inline size_t host_pool_capacity(size_t bytes)
+{
+    const size_t padded = static_cast<size_t>(bytes * 1.2);
+    return padded < kHostPoolRetainLimit ? padded : bytes;
+}
+
 // A smaller idle pinned host buffer is released once this many consecutive tests have not
 // reused it. The pool reuses a buffer only for requests between half its size and its size, so
 // without this a run of shrinking requests would keep every earlier buffer pinned.
@@ -354,13 +364,12 @@ private:
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
 
-            // Threshold for "huge" allocations — skip 20% extra allocation. hipblaslt-test
-            // reuses a host buffer at the retain limit only for the same shape in the next
-            // test, so for those the extra would only add pinned memory.
+            // Threshold for "huge" allocations — skip 20% extra allocation. A host buffer gets
+            // none either when host_pool_capacity says so.
             const size_t big_thresh = total_device_mem / 4;
             bool huge_request = (bytes >= big_thresh);
             if constexpr(std::is_same_v<M, h_memory>)
-                huge_request = huge_request || bytes >= kHostPoolRetainLimit;
+                huge_request = huge_request || host_pool_capacity(bytes) == bytes;
 
             // remove the (largest) buffer that was too small
             if(it != pool.begin())

@@ -24,13 +24,21 @@ namespace
 
     const size_t kSmall = size_t(1) << 20;
 
+    // A host without that much pinned memory to spare skips the test rather than fails it.
+#define SKIP_UNLESS_PINNED(PTR)                                    \
+    do                                                             \
+    {                                                              \
+        if(!(PTR))                                                 \
+            GTEST_SKIP() << "could not pin " #PTR " on this host"; \
+    } while(0)
+
     TEST(HostMemory_pre_checkin, large_buffer_released_after_a_test_that_does_not_reuse_it)
     {
         memory_pool<h_memory>::ReleaseCached();
         {
             HipHostBuffer large(HIP_R_8I, kHostPoolRetainLimit);
             HipHostBuffer small(HIP_R_8I, kSmall);
-            ASSERT_EQ(large.memcheck(), hipSuccess);
+            SKIP_UNLESS_PINNED(large.buf());
             ASSERT_EQ(small.memcheck(), hipSuccess);
         }
 
@@ -79,7 +87,7 @@ namespace
             GTEST_SKIP() << "the pool on this host frees its idle buffers before every request";
         memory_pool<h_memory>::ReleaseCached();
         auto first = memory_pool<h_memory>::Get(kHostPoolRetainLimit);
-        ASSERT_NE(first.get(), nullptr);
+        SKIP_UNLESS_PINNED(first.get());
         first.get()[0]                        = 42;
         first.get()[kHostPoolRetainLimit - 1] = 43;
         memory_pool<h_memory>::Restore(first);
@@ -105,15 +113,15 @@ namespace
         const size_t step    = kHostPoolRetainLimit / 10;
         auto         earlier = memory_pool<h_memory>::Get(kHostPoolRetainLimit);
         auto         bigger  = memory_pool<h_memory>::Get(kHostPoolRetainLimit + step);
-        ASSERT_NE(earlier.get(), nullptr);
-        ASSERT_NE(bigger.get(), nullptr);
+        SKIP_UNLESS_PINNED(earlier.get());
+        SKIP_UNLESS_PINNED(bigger.get());
         memory_pool<h_memory>::Restore(earlier);
         memory_pool<h_memory>::Restore(bigger);
         end_test();
         ASSERT_GE(memory_pool<h_memory>::CachedBytes(), 2 * kHostPoolRetainLimit);
 
         auto larger = memory_pool<h_memory>::Get(kHostPoolRetainLimit + 2 * step);
-        ASSERT_NE(larger.get(), nullptr);
+        SKIP_UNLESS_PINNED(larger.get());
         EXPECT_EQ(memory_pool<h_memory>::CachedBytes(), 0u);
         memory_pool<h_memory>::Restore(larger);
         memory_pool<h_memory>::ReleaseCached();
@@ -126,7 +134,7 @@ namespace
         // memory.
         memory_pool<h_memory>::ReleaseCached();
         auto large = memory_pool<h_memory>::Get(kHostPoolRetainLimit);
-        ASSERT_NE(large.get(), nullptr);
+        SKIP_UNLESS_PINNED(large.get());
         EXPECT_EQ(large.capacity(), kHostPoolRetainLimit);
         memory_pool<h_memory>::Restore(large);
 
@@ -134,6 +142,14 @@ namespace
         ASSERT_NE(small.get(), nullptr);
         EXPECT_GT(small.capacity(), small.bytes());
         memory_pool<h_memory>::Restore(small);
+        memory_pool<h_memory>::ReleaseCached();
+
+        // The extra would take this one to the limit, where it would count as large.
+        const size_t near  = kHostPoolRetainLimit - kHostPoolRetainLimit / 10;
+        auto         below = memory_pool<h_memory>::Get(near);
+        SKIP_UNLESS_PINNED(below.get());
+        EXPECT_EQ(below.capacity(), near);
+        memory_pool<h_memory>::Restore(below);
         memory_pool<h_memory>::ReleaseCached();
     }
 
