@@ -171,16 +171,12 @@ double get_time_us(void)
 rocsparse_clients::timer::timer(hipStream_t stream)
     : m_stream(stream)
 {
-    auto status = hipEventCreate(&this->m_start);
-    if(status != hipSuccess)
-    {
-        throw status;
-    }
-    status = hipEventCreate(&this->m_stop);
+    CHECK_HIP_THROW_ERROR(hipEventCreate(&this->m_start));
+    const hipError_t status = hipEventCreate(&this->m_stop);
     if(status != hipSuccess)
     {
         rocsparse_clients_log_hip_error("hipEventDestroy", hipEventDestroy(this->m_start));
-        throw status;
+        CHECK_HIP_THROW_ERROR(status);
     }
 }
 
@@ -192,21 +188,9 @@ void rocsparse_clients::timer::start()
 float rocsparse_clients::timer::stop()
 {
     float time;
-    auto  status = hipEventRecord(this->m_stop, this->m_stream);
-    if(status != hipSuccess)
-    {
-        throw status;
-    }
-    status = hipEventSynchronize(this->m_stop);
-    if(status != hipSuccess)
-    {
-        throw status;
-    }
-    status = hipEventElapsedTime(&time, this->m_start, this->m_stop);
-    if(status != hipSuccess)
-    {
-        throw status;
-    }
+    CHECK_HIP_THROW_ERROR(hipEventRecord(this->m_stop, this->m_stream));
+    CHECK_HIP_THROW_ERROR(hipEventSynchronize(this->m_stop));
+    CHECK_HIP_THROW_ERROR(hipEventElapsedTime(&time, this->m_start, this->m_stop));
     return time;
 }
 
