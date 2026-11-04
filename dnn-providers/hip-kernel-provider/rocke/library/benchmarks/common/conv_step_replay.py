@@ -169,6 +169,7 @@ class Case:
         from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         self.key = key
+        self.pin = pin
         self.label = pin["kernel"]
         self.calls = int(pin.get("calls", 1))
         self.ref_ms = pin.get("ms")
@@ -420,6 +421,9 @@ def main(argv=None) -> int:
                     help="add variant 'tied': each layer's calls share their tensors as training does -- dgrad reads "
                          "the forward's W, wgrad reads dgrad's dY and the forward's X (default: every case has its own "
                          "buffers, so the backward pair never finds dY in MALL / L2)")
+    ap.add_argument("--tied-all", action="store_true",
+                    help="with --tied-variant: also add '<name>_tied' for every pins / routes / form variant (its "
+                         "own kernels or routes, its calls' tensors shared as in 'tied')")
     ap.add_argument("--graph-variant", action="store_true",
                     help="step mode: add 'stream' (the step on one non-blocking stream) and 'graph' (that step "
                          "captured once into a hipGraph and replayed with one hipGraphLaunch per step: no host "
@@ -528,23 +532,30 @@ def main(argv=None) -> int:
     if args.tied_variant:
         from types import SimpleNamespace
 
-        tied = {}
-        for k in sorted(need):
-            d, sh = k.split("_s")
-            f, g = cases.get(f"fwd_s{sh}"), cases.get(f"dgrad_s{sh}")
-            sets = []
-            for i, own in enumerate(cases[k].ptr_sets):
-                # fwd (X, W, Y); dgrad (dY, W, dX); wgrad (dY, X, dW)
-                if d == "dgrad" and f is not None:
-                    own = (own[0], f.ptr_sets[i % len(f.ptr_sets)][1], own[2])
-                elif d == "wgrad":
-                    dy = g.ptr_sets[i % len(g.ptr_sets)][0] if g is not None else own[0]
-                    x = f.ptr_sets[i % len(f.ptr_sets)][0] if f is not None else own[1]
-                    own = (dy, x, own[2])
-                sets.append(own)
-            tied[k] = Case(k, pins[k], cache, args.arch, B, rt, None, stage2, args,
-                           share_from=SimpleNamespace(ptr_sets=sets))
-        variants["tied"] = tied
+        def _tied(vc):
+            tied = {}
+            for k in sorted(need):
+                d, sh = k.split("_s")
+                f, g = vc.get(f"fwd_s{sh}"), vc.get(f"dgrad_s{sh}")
+                sets = []
+                for i, own in enumerate(vc[k].ptr_sets):
+                    # fwd (X, W, Y); dgrad (dY, W, dX); wgrad (dY, X, dW)
+                    if d == "dgrad" and f is not None:
+                        own = (own[0], f.ptr_sets[i % len(f.ptr_sets)][1], own[2])
+                    elif d == "wgrad":
+                        dy = g.ptr_sets[i % len(g.ptr_sets)][0] if g is not None else own[0]
+                        x = f.ptr_sets[i % len(f.ptr_sets)][0] if f is not None else own[1]
+                        own = (dy, x, own[2])
+                    sets.append(own)
+                tied[k] = Case(k, vc[k].pin, cache, args.arch, B, rt, None, stage2, args,
+                               share_from=SimpleNamespace(ptr_sets=sets))
+            return tied
+
+        env_names = {v.partition(":")[0] for v in args.variant}  # env variants: bound under their env only
+        others = [n for n in variants if n != "base" and n not in env_names] if args.tied_all else []
+        variants["tied"] = _tied(cases)
+        for n in others:
+            variants[f"{n}_tied"] = _tied(variants[n])
     streams = None
     if args.streams_variant:
         import ctypes
