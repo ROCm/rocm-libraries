@@ -237,16 +237,19 @@ class TestNamedPointwiseParity:
             mode, len(tensors), ()
         )
 
-    def test_defaults_match_bare_attributes(self):
+    @pytest.mark.parametrize("method, mode, tensors, options, setters", _CASES)
+    def test_defaults_match_bare_attributes(
+        self, method, mode, tensors, options, setters
+    ):
         """compute_data_type defaults to NOT_SET, so the op takes the graph's
         compute type, and name to "" (graph-generated)."""
-        graph, (a, b) = _graph_with_inputs(2, _OP_COMPUTE)
-        named = _finish(graph, graph.add(a, b))
+        graph, inputs = _graph_with_inputs(len(tensors), _OP_COMPUTE)
+        out = getattr(graph, method)(**dict(zip(tensors, inputs)), **options)
 
-        assert named == _attributes_graph(
-            "ADD",
-            2,
-            (),
+        assert _finish(graph, out) == _attributes_graph(
+            mode,
+            len(tensors),
+            setters,
             compute_data_type=None,
             name=None,
             graph_compute_data_type=_OP_COMPUTE,

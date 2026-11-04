@@ -37,7 +37,11 @@ class LastCallRecord(ctypes.Structure):
 
 OP_GRAPH_WITH_OVERRIDES = 2
 
+# Plugins load when a handle is created; this one stays alive so the plugin does too.
+handle = hipdnn.create_handle()
+
 # Same loader handle as the one the backend opened, so the record is shared.
+# RTLD_NOLOAD is POSIX-only; on Windows, LoadLibrary returns the loaded module.
 plugin = ctypes.CDLL(
     os.environ["HIPDNN_TEST_PROBE_PLUGIN"], mode=getattr(os, "RTLD_NOLOAD", 0)
 )
@@ -50,6 +54,7 @@ def run(enabled):
         intermediate_data_type=FLOAT,
         compute_data_type=FLOAT,
         is_override_shape_enabled=enabled,
+        handle=handle,
     )
     a = hipdnn.Tensor.create([1, 1, 2, 2], FLOAT)
     a.set_uid(OVERRIDE_UID)
