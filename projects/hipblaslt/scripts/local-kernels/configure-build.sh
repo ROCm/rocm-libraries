@@ -2,9 +2,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Configure the host hipBLASLt library with local kernel registration and build
-# hipblaslt-test. No device kernel library is built: the local kernel tests run
-# over a stub shipped library.
+# Configure hipBLASLt with local kernel registration and build hipblaslt-test.
+# The device library is built from the bf16 TN logic only: the registration
+# tests load its shards as payloads, and the others run over a stub library.
 # Locally, with a ROCm prefix and the virtualenv from install-deps.sh:
 #   export ROCM_PATH=... LOCAL_KERNELS_ARCHITECTURE=gfx942
 #   bash projects/hipblaslt/scripts/local-kernels/configure-build.sh
@@ -27,12 +27,15 @@ cmake -S "${ROOT}/projects/hipblaslt" -B "${LOCAL_KERNELS_BUILD_DIR}" -G Ninja \
     -DPython3_EXECUTABLE="${VENV_DIR}/bin/python" \
     -DGPU_TARGETS="${LOCAL_KERNELS_ARCHITECTURE}" \
     -DHIPBLASLT_ENABLE_LOCAL_KERNELS=ON \
-    -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=OFF \
+    -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=ON \
+    -DTENSILELITE_LOGIC_FILTER='*Alik_Bljk_B[BS]S_BH*' \
+    -DTENSILELITE_BUILD_PARALLEL_LEVEL="${jobs}" \
     -DHIPBLASLT_ENABLE_EXTOPS=OFF -DHIPBLASLT_ENABLE_MATRIX_TRANSFORM=OFF \
     -DHIPBLASLT_ENABLE_CLIENT=ON -DHIPBLASLT_BUILD_TESTING=ON -DHIPBLASLT_ENABLE_SAMPLES=OFF \
     -DHIPBLASLT_ENABLE_BLIS=OFF -DHIPBLASLT_ENABLE_AMD_SMI=OFF \
     -DHIPBLASLT_ENABLE_ROCROLLER=OFF -DHIPBLASLT_ENABLE_MARKER=OFF \
     -DTENSILELITE_BUILD_TESTING=OFF -DTENSILELITE_ENABLE_CLIENT=OFF \
     2>&1 | tee "${LOCAL_KERNELS_LOG_DIR}/configure.log"
-cmake --build "${LOCAL_KERNELS_BUILD_DIR}" --target hipblaslt-test --parallel "${jobs}" \
+cmake --build "${LOCAL_KERNELS_BUILD_DIR}" --target tensilelite-device-libraries hipblaslt-test \
+    --parallel "${jobs}" \
     2>&1 | tee "${LOCAL_KERNELS_LOG_DIR}/build.log"

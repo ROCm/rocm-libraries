@@ -493,61 +493,77 @@ static bool wgrad_streamk_gates(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                 char* reason,
                                 size_t reason_cap)
 {
-#define SK_REJECT(...)                                 \
-    do                                                 \
-    {                                                  \
-        if(reason && reason_cap)                       \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        return false;                                  \
-    } while(0)
     const char* mode = s->streamk ? s->streamk : "off";
     if(strcmp(mode, "off") != 0 && strcmp(arch, "gfx942") != 0 && strcmp(arch, "gfx950") != 0)
-        SK_REJECT("stream-K wgrad supports only gfx942, gfx950 (got %s)", arch);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "stream-K wgrad supports only gfx942, gfx950 (got %s)", arch);
     if(strcmp(mode, "off") != 0 && strcmp(mode, "dp_sk") != 0 && strcmp(mode, "persistent") != 0)
-        SK_REJECT("streamk must be 'off', 'dp_sk' or 'persistent' (got '%s')", mode);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "streamk must be 'off', 'dp_sk' or 'persistent' (got '%s')", mode);
     if(strcmp(mode, "off") == 0)
         return true;
     const char* red = wgrad_streamk_reduction(s);
     if(strcmp(red, "linear") != 0 && strcmp(red, "tree") != 0 && strcmp(red, "atomic") != 0
        && strcmp(red, "workspace") != 0)
-        SK_REJECT("streamk_reduction must be 'linear', 'tree', 'atomic' or 'workspace' "
-                  "(got '%s')",
-                  red);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk_reduction must be 'linear', 'tree', 'atomic' or 'workspace' "
+                        "(got '%s')",
+                        red);
     if(s->streamk_ctas == 0 || s->streamk_ctas < -1)
-        SK_REJECT("streamk_ctas must be -1 (auto) or > 0 (got %d)", s->streamk_ctas);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "streamk_ctas must be -1 (auto) or > 0 (got %d)", s->streamk_ctas);
     if(s->wave_size != 64)
-        SK_REJECT("stream-K wgrad is MFMA wave64 only (got wave_size=%d)", s->wave_size);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "stream-K wgrad is MFMA wave64 only (got wave_size=%d)",
+                        s->wave_size);
     if(s->split_k != 1)
-        SK_REJECT("streamk and split_k both partition K_wg; use split_k=1 with streamk "
-                  "(got split_k=%d)",
-                  s->split_k);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk and split_k both partition K_wg; use split_k=1 with streamk "
+                        "(got split_k=%d)",
+                        s->split_k);
     if(s->two_stage)
-        SK_REJECT("two_stage is the split-K scratch path; use "
-                  "streamk_reduction='workspace' for the stream-K equivalent");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "two_stage is the split-K scratch path; use "
+                        "streamk_reduction='workspace' for the stream-K equivalent");
     if(s->async_dma || s->unroll_k)
-        SK_REJECT("streamk runs one plain K loop per work item; async_dma/unroll_k "
-                  "pipeline the K loop across items");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk runs one plain K loop per work item; async_dma/unroll_k "
+                        "pipeline the K loop across items");
     if(s->prefetch_addr)
-        SK_REJECT("streamk runs its own K loop per work item; prefetch_addr rewrites "
-                  "the data-parallel K loop, which stream-K never reaches");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk runs its own K loop per work item; prefetch_addr rewrites "
+                        "the data-parallel K loop, which stream-K never reaches");
     const char* epi = s->epilogue ? s->epilogue : "default";
     if(strcmp(epi, "default") != 0)
-        SK_REJECT("streamk requires epilogue='default' (got '%s'): the epilogue runs once "
-                  "per tile inside the stream-K tile loop",
-                  epi);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk requires epilogue='default' (got '%s'): the epilogue runs once "
+                        "per tile inside the stream-K tile loop",
+                        epi);
     if(s->chiplet_swizzle)
-        SK_REJECT("chiplet_swizzle remaps the 2-D tile grid; stream-K decodes its tiles "
-                  "from a linear CTA index instead");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "chiplet_swizzle remaps the 2-D tile grid; stream-K decodes its tiles "
+                        "from a linear CTA index instead");
     if(s->group_merge > 1)
-        SK_REJECT("streamk folds conv groups into GEMM-M; use group_merge=1 (got %d)",
-                  s->group_merge);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk folds conv groups into GEMM-M; use group_merge=1 (got %d)",
+                        s->group_merge);
     const char* dd = s->dtype_d ? s->dtype_d : "fp16";
     if(strcmp(red, "atomic") == 0 && strcmp(dd, "fp32") != 0)
-        SK_REJECT("streamk_reduction='atomic' needs dtype_d='fp32' (got '%s'); use "
-                  "'linear', 'tree' or 'workspace'",
-                  dd);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "streamk_reduction='atomic' needs dtype_d='fp32' (got '%s'); use "
+                        "'linear', 'tree' or 'workspace'",
+                        dd);
     return true;
-#undef SK_REJECT
 }
 
 /* Python wgrad_group_merge_available, with byte-identical reason strings.
@@ -556,48 +572,62 @@ static bool wgrad_group_merge_available(const rocke_implicit_gemm_conv_wgrad_spe
                                         char* reason,
                                         size_t reason_cap)
 {
-#define GM_REJECT(...)                                 \
-    do                                                 \
-    {                                                  \
-        if(reason && reason_cap)                       \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        return false;                                  \
-    } while(0)
     const int gm = s->group_merge;
     if(gm == 1)
         return true;
     /* Python _GROUP_MERGE_DEGREES */
     if(gm != 2 && gm != 4 && gm != 8 && gm != 16 && gm != 32 && gm != 64)
-        GM_REJECT("group_merge must be 1 or one of (2, 4, 8, 16, 32, 64); got %d", gm);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge must be 1 or one of (2, 4, 8, 16, 32, 64); got %d",
+                        gm);
     const rocke_conv_problem_t* p = &s->problem;
     if(p->groups % gm != 0)
-        GM_REJECT("group_merge %d does not divide groups %d: a workgroup would own a "
-                  "partial group",
-                  gm,
-                  p->groups);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge %d does not divide groups %d: a workgroup would own a "
+                        "partial group",
+                        gm,
+                        p->groups);
     const int cpg = rocke_conv_problem_cpg(p);
     const int kpg = rocke_conv_problem_kpg(p);
     if(cpg != 1 || kpg != 1)
-        GM_REJECT("group_merge is implemented for depthwise only (cpg == kpg == 1); got "
-                  "cpg=%d kpg=%d. The merged index math is correct for wider groups but is "
-                  "not covered, so it is gated off.",
-                  cpg,
-                  kpg);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge is implemented for depthwise only (cpg == kpg == 1); got "
+                        "cpg=%d kpg=%d. The merged index math is correct for wider groups but is "
+                        "not covered, so it is gated off.",
+                        cpg,
+                        kpg);
     if(s->wave_size != 64)
-        GM_REJECT("group_merge is MFMA-only (wave_size 64); got wave_size=%d", s->wave_size);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge is MFMA-only (wave_size 64); got wave_size=%d",
+                        s->wave_size);
     if(s->split_k > 1 && !s->two_stage)
-        GM_REJECT("group_merge with split_k=%d needs the two-stage path (two_stage=True); "
-                  "the packed-atomic split-K epilogue cannot drop off-diagonal group pairs",
-                  s->split_k);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge with split_k=%d needs the two-stage path (two_stage=True); "
+                        "the packed-atomic split-K epilogue cannot drop off-diagonal group pairs",
+                        s->split_k);
     /* grid_M / grid_N: the merged GEMM extents, kpg*Gm and Z*Y*X*cpg*Gm. */
     const int grid_M = kpg * gm;
     const int grid_N = (p->is_3d ? p->Z : 1) * p->Y * p->X * cpg * gm;
     if(grid_M > s->tile_m)
-        GM_REJECT("merged GEMM-M %d (kpg*%d) exceeds tile_m %d", grid_M, gm, s->tile_m);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "merged GEMM-M %d (kpg*%d) exceeds tile_m %d",
+                        grid_M,
+                        gm,
+                        s->tile_m);
     if(grid_N > s->tile_n)
-        GM_REJECT("merged GEMM-N %d (Z*Y*X*cpg*%d) exceeds tile_n %d", grid_N, gm, s->tile_n);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "merged GEMM-N %d (Z*Y*X*cpg*%d) exceeds tile_n %d",
+                        grid_N,
+                        gm,
+                        s->tile_n);
     return true;
-#undef GM_REJECT
 }
 
 bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
