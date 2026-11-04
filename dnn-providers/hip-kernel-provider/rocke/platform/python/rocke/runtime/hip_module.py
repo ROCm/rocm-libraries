@@ -903,9 +903,15 @@ class Runtime:
 
     def destroy_stream(self, stream: int) -> None:
         """Drain ``stream`` (:meth:`wait_stream`, which also drops what the
-        runtime retained for it) and destroy it (``hipStreamDestroy``)."""
-        self.wait_stream(stream)
-        _check(_hipStreamDestroy(ctypes.c_void_p(int(stream))), "hipStreamDestroy")
+        runtime retained for it) and destroy it (``hipStreamDestroy``).
+
+        The stream is destroyed even when the drain raises :class:`GpuCheckFailed`
+        (a launch on it failed its GPU check); that error is then raised, unless
+        destroying the stream fails too, whose error is raised instead."""
+        try:
+            self.wait_stream(stream)
+        finally:
+            _check(_hipStreamDestroy(ctypes.c_void_p(int(stream))), "hipStreamDestroy")
 
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.

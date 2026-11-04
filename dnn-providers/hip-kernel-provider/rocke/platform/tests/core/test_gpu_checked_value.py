@@ -1100,11 +1100,7 @@ _CHILD = textwrap.dedent(
         # One failing launch on stream a, one passing launch on stream b, both
         # queued before either wait: the shared word cannot say which failed,
         # so both waits raise. Then a launch on a alone is checked afresh.
-        create = hip_module._b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
-        streams = [ctypes.c_void_p(0), ctypes.c_void_p(0)]
-        for stream in streams:
-            assert create(ctypes.byref(stream)) == 0
-        a, b = (int(stream.value) for stream in streams)
+        a, b = runtime.create_stream(), runtime.create_stream()
         for stream, loaded in ((a, 11), (b, 7)):
             y_dev, cu_dev = buffers(1, [loaded])
             runtime.launch(function, (1, 1, 1), (1, 1, 1),
@@ -1115,6 +1111,29 @@ _CHILD = textwrap.dedent(
         args = struct.pack("QQi", y_dev, cu_dev, 10)
         waited("stream a again",
                lambda: runtime.launch_blocking(function, (1, 1, 1), (1, 1, 1), args, stream=a))
+        runtime.destroy_stream(a)
+        runtime.destroy_stream(b)
+    elif case == "destroy_failing":
+        # Destroying a stream whose unread launch failed its check raises that
+        # failure, and HIP destroys the stream all the same. HIP has no query
+        # that is safe on a destroyed handle, so the child records the
+        # hipStreamDestroy calls the runtime makes, each still made for real.
+        stream = runtime.create_stream()
+        y_dev, cu_dev = buffers(1, [11])
+        runtime.launch(function, (1, 1, 1), (1, 1, 1),
+                       struct.pack("QQi", y_dev, cu_dev, 10), stream=stream)
+        hip_stream_destroy = hip_module._hipStreamDestroy
+        destroyed = []
+
+        def recording_stream_destroy(handle):
+            status = hip_stream_destroy(handle)
+            destroyed.append((handle.value, status))
+            return status
+
+        hip_module._hipStreamDestroy = recording_stream_destroy
+        waited("destroy", lambda: runtime.destroy_stream(stream))
+        calls = [(handle == stream, status) for handle, status in destroyed]
+        print(f"hipStreamDestroy calls (this stream, status): {calls}", flush=True)
     elif case == "stale":
         # A launch the runtime never saw sets the word; the next runtime
         # launch, whose value meets the facts, must not be blamed for it.
@@ -1147,27 +1166,26 @@ _CHILD = textwrap.dedent(
     elif case == "capture":
         # A checked kernel launched on a stream that is being captured is
         # refused before anything is queued, and the capture then ends.
-        create = hip_module._b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
         begin = hip_module._b("hipStreamBeginCapture", ctypes.c_void_p, ctypes.c_int)
         end = hip_module._b(
             "hipStreamEndCapture", ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)
         )
         destroy = hip_module._b("hipGraphDestroy", ctypes.c_void_p)
-        stream = ctypes.c_void_p(0)
-        assert create(ctypes.byref(stream)) == 0
+        stream = runtime.create_stream()
         y_dev, cu_dev = buffers(1, [7])
         relaxed = 2  # hipStreamCaptureModeRelaxed
-        assert begin(stream, relaxed) == 0
+        assert begin(ctypes.c_void_p(stream), relaxed) == 0
         waited(
             "launch during capture",
             lambda: runtime.launch(function, (1, 1, 1), (1, 1, 1),
                                    struct.pack("QQi", y_dev, cu_dev, 10),
-                                   stream=int(stream.value)),
+                                   stream=stream),
         )
         graph = ctypes.c_void_p(0)
-        print(f"end capture: {end(stream, ctypes.byref(graph))}", flush=True)
+        print(f"end capture: {end(ctypes.c_void_p(stream), ctypes.byref(graph))}", flush=True)
         if graph.value:
             assert destroy(graph) == 0
+        runtime.destroy_stream(stream)
     else:
         for loaded in [int(v) for v in case.split(",")]:
             print(f"stored: {launch(1, [loaded])[0]}", flush=True)
@@ -1379,6 +1397,20 @@ def test_gpu_two_streams_with_unread_launches_both_see_the_failure(run_gpu_case)
     assert lines[0].startswith(f"stream a: {shared}"), lines
     assert lines[1].startswith(f"stream b: {shared}"), lines
     assert lines[2] == "stream a again: completed", lines
+
+
+def test_gpu_destroying_a_stream_whose_check_failed_raises_and_still_destroys_it(
+    run_gpu_case,
+):
+    """Runtime.destroy_stream drains the stream first; when that drain raises
+    GpuCheckFailed, hipStreamDestroy still runs for the stream, once and
+    successfully, before the error leaves."""
+    lines = run_gpu_case(_RUNTIME_ROUTE, "destroy_failing")
+    assert len(lines) == 2, lines
+    assert lines[0].startswith("destroy: GpuCheckFailed: "), lines
+    assert (
+        lines[1] == "hipStreamDestroy calls (this stream, status): [(True, 0)]"
+    ), lines
 
 
 def test_gpu_a_word_set_by_a_launch_the_runtime_never_saw_is_not_blamed_on_the_next(
