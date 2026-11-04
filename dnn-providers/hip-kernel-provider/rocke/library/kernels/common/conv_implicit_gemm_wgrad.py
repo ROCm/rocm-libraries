@@ -2598,7 +2598,6 @@ def build_implicit_gemm_conv_wgrad(
     axis_a = axis_b = "col"
     load_vec_a = 1
     load_vec_b = 1
-    _free_axis_vec = _wgrad_free_axis_vec
     # gfx1250 async: the per-lane global_load_async_to_lds K loop. It reuses the
     # synchronous K-outer loaders for the slot partition and the descriptors,
     # and only swaps the global->register->LDS hop for one async copy.
@@ -2609,14 +2608,18 @@ def build_implicit_gemm_conv_wgrad(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
-            max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a, spec.vector_size_a),
+            max_vec=_wgrad_free_axis_vec(
+                p_load.kpg, spec.data.dtype_a, spec.vector_size_a
+            ),
             vector_axis="row",
         )
         vb = CoalescedTileLoader.choose_vec(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
-            max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b, spec.vector_size_b),
+            max_vec=_wgrad_free_axis_vec(
+                p_load.cpg, spec.data.dtype_b, spec.vector_size_b
+            ),
             vector_axis="row",
         )
         if va > 1:
@@ -2753,7 +2756,7 @@ def build_implicit_gemm_conv_wgrad(
                 tile_rows=a_tile_rows,
                 tile_cols=a_tile_cols,
                 block_size=threads,
-                max_vec=_free_axis_vec(
+                max_vec=_wgrad_free_axis_vec(
                     p_load.kpg, spec.data.dtype_a, spec.vector_size_a
                 ),
                 vector_axis="col",
@@ -2762,7 +2765,7 @@ def build_implicit_gemm_conv_wgrad(
                 tile_rows=b_tile_rows,
                 tile_cols=b_tile_cols,
                 block_size=threads,
-                max_vec=_free_axis_vec(
+                max_vec=_wgrad_free_axis_vec(
                     p_load.cpg, spec.data.dtype_b, spec.vector_size_b
                 ),
                 vector_axis="col",

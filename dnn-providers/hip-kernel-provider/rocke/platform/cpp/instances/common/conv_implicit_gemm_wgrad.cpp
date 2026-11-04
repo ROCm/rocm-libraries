@@ -3108,7 +3108,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         {
             /* free-axis width: widest of {8,4,2,1} ({4,2,1} for fp32) dividing
              * the channel count, clamped by an explicit vector_size_a/b --
-             * Python _free_axis_vec(kpg/cpg, dtype, spec.vector_size_a/b). */
+             * Python _wgrad_free_axis_vec(kpg/cpg, dtype, spec.vector_size_a/b). */
             const int cap_a = wgrad_free_axis_vec(rocke_conv_problem_kpg(&spec->problem),
                                                   spec->dtype_a,
                                                   spec->has_vector_size_a,

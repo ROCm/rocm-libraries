@@ -772,6 +772,33 @@ class TestLoadWidthCapsDualEngine(unittest.TestCase):
                         eng.conv_wgrad_lower_llvm(_spec_dict(spec), arch), py_ll
                     )
 
+    def test_cap_wider_than_auto_width_keeps_auto_width(self):
+        # kpg=12 autos to 4; a cap of 6 is admissible (it divides 12) but
+        # wider, so the load width stays 4 (the smaller of the two), not 6.
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        eng = _engine()
+        base = self._wmma(problem=replace(self._P, K=12))
+        for label, b in (
+            ("kouter", base),
+            ("mouter", replace(base, lds_k_outer=False)),
+        ):
+            spec = replace(b, vector_size_a=6)
+            with self.subTest(label):
+                self.assertEqual(is_valid_wgrad_spec(spec, "gfx1250"), (True, "ok"))
+                py_ll = _lower_kernel_to_llvm_python(
+                    build_implicit_gemm_conv_wgrad(spec, arch="gfx1250"),
+                    arch="gfx1250",
+                )
+                auto_ll = _lower_kernel_to_llvm_python(
+                    build_implicit_gemm_conv_wgrad(b, arch="gfx1250"),
+                    arch="gfx1250",
+                )
+                self.assertEqual(py_ll, auto_ll)
+                self.assertEqual(
+                    eng.conv_wgrad_lower_llvm(_spec_dict(spec), "gfx1250"), py_ll
+                )
+
     def test_cpp_validity_agrees(self):
         eng = _engine()
         cases = [
