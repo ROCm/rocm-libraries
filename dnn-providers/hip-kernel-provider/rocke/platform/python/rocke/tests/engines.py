@@ -41,27 +41,36 @@ run can drive. The installed wheel has no ``rocke_engine`` binding, so such a
 test runs the Python engine alone there and both engines wherever the binding
 is supplied. ``all_engines_backend`` is the ``backend`` argument that runs those
 same engines through ``compile_kernel`` and similar entry points.
+
+The helpers above drive each engine directly. ``assert_backend_lane_rejects``
+instead checks one refusal through the public ``lower_kernel_to_llvm``
+dispatcher in one row of the source backend matrix (``TESTING.md`` section
+5.1.1, one name per row in :data:`BACKEND_LANES`), asserting the exception that
+row's caller observes.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import sys
 from collections.abc import Callable
 from types import ModuleType
 from typing import Literal
 
 import pytest
 
-from rocke.core.backend import _lower_via_cpp_engine
+from rocke.core.backend import _lower_via_cpp_engine, cpp_fallbacks
 from rocke.core.ir import KernelDef
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 
 __all__ = [
+    "BACKEND_LANES",
     "ENGINES",
     "Engine",
     "all_engines_backend",
+    "assert_backend_lane_rejects",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
     "assert_engine_rejects",
@@ -292,3 +301,79 @@ def assert_both_engines_reject_hip(
         lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
     )
     _assert_native_rejects(lambda: _native_hip(kernel, arch), message, None)
+
+
+# The rows of the source backend matrix in TESTING.md section 5.1.1: each
+# lane's ROCKE_BACKEND and ROCKE_CPP_STRICT (None leaves the variable unset).
+_LANE_ENVIRONMENT: dict[str, tuple[str | None, str | None]] = {
+    "installed-fallback": (None, None),
+    "python": ("python", None),
+    "cpp-permissive": ("cpp", "0"),
+    "cpp-strict": ("cpp", "1"),
+    "both": ("both", "1"),
+}
+
+BACKEND_LANES: tuple[str, ...] = tuple(_LANE_ENVIRONMENT)
+
+
+def assert_backend_lane_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+    kernel: KernelDef,
+    arch: str,
+    error_type: type[Exception],
+    message: str,
+    llvm_flavor: str,
+) -> None:
+    """Assert that ``lower_kernel_to_llvm`` refuses ``kernel`` in backend ``lane``.
+
+    ``lane`` is one of :data:`BACKEND_LANES`. The lane's ``ROCKE_BACKEND`` and
+    ``ROCKE_CPP_STRICT`` are set through ``monkeypatch``, and an inherited value
+    is cleared where the row leaves the variable unset. ``installed-fallback``
+    also hides the ``rocke_engine`` binding, as in the installed wheel; the
+    ``cpp-*`` and ``both`` lanes skip, naming the reason, when it is not built.
+
+    In the ``cpp-strict`` lane the caller sees the C++ engine's own refusal: a
+    ``RuntimeError`` (not a subclass) whose text ends with
+    ``"(status N): " + message``, ``N`` being the status ``error_type`` maps to,
+    as in :func:`assert_engine_rejects`. In every other lane it sees the Python
+    engine's: exactly ``error_type`` (not a subclass) with exactly ``message``.
+    The two fallback lanes must also have fallen back for the expected reason:
+    ``cpp-permissive`` after the C++ engine refused with ``message``,
+    ``installed-fallback`` after the binding failed to import. ``llvm_flavor``
+    is required because the ``cpp`` lanes cannot resolve a flavor without a
+    compiler.
+    """
+    if lane not in _LANE_ENVIRONMENT:
+        raise ValueError(f"lane={lane!r}, expected one of {BACKEND_LANES}")
+    backend, strict = _LANE_ENVIRONMENT[lane]
+    for variable, value in (("ROCKE_BACKEND", backend), ("ROCKE_CPP_STRICT", strict)):
+        if value is None:
+            monkeypatch.delenv(variable, raising=False)
+        else:
+            monkeypatch.setenv(variable, value)
+    # The fallback is asserted below, so its stderr warning would be noise.
+    monkeypatch.setenv("ROCKE_CPP_QUIET_FALLBACK", "1")
+    if lane == "installed-fallback":
+        monkeypatch.setitem(sys.modules, "rocke_engine", None)
+    elif lane != "python":
+        _require_native_engine()
+    fallbacks_before = len(cpp_fallbacks())
+    with pytest.raises(Exception) as refusal:
+        lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=llvm_flavor)
+    fallbacks = [reason for _, reason in cpp_fallbacks()[fallbacks_before:]]
+    if lane == "cpp-strict":
+        suffix = f"(status {_native_status(error_type)}): {message}"
+        assert type(refusal.value) is RuntimeError, repr(refusal.value)
+        assert str(refusal.value).endswith(suffix), str(refusal.value)
+    else:
+        assert type(refusal.value) is error_type, repr(refusal.value)
+        assert str(refusal.value) == message
+    if lane == "cpp-permissive":
+        assert len(fallbacks) == 1 and fallbacks[0].endswith(": " + message), fallbacks
+    elif lane == "installed-fallback":
+        assert len(fallbacks) == 1 and fallbacks[0].startswith(
+            "BackendError: "
+        ), fallbacks
+    else:
+        assert fallbacks == [], fallbacks

@@ -102,6 +102,14 @@ class TestMoeFusedMegaLdsBudget(unittest.TestCase):
                     mega_lds_pool_bytes(_lds_allocs(spec)), low._smem_pool_size
                 )
 
+    def test_every_public_name_resolves(self):
+        # A stale __all__ entry breaks ``from ... import *``.
+        from rocke.instances.common import _moe_fused_mega_lds as budget
+
+        self.assertEqual(
+            [name for name in budget.__all__ if not hasattr(budget, name)], []
+        )
+
     def test_accounting_covers_a_vector_segment_after_a_small_one(self):
         # A 2-byte buffer followed by one read as <4 x float>: the packer
         # aligns the vector segment to 16 bytes (its access claim), not the

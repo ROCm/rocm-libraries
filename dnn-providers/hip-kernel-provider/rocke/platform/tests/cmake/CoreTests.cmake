@@ -612,6 +612,41 @@ if(BUILD_TESTING)
                  rocke_f64_lowering)
   endif()
 
+  # The C++ engine's LDS alignment claims and segment offsets
+  # (tests/core/test_smem_access_alignment.py through the C API).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_smem_access_alignment.cpp")
+    add_executable(rocke_smem_access_alignment core/test_smem_access_alignment.cpp)
+    target_link_libraries(rocke_smem_access_alignment PRIVATE rocke_core)
+    add_test(NAME rocke_smem_access_alignment COMMAND rocke_smem_access_alignment)
+    set_tests_properties(rocke_smem_access_alignment
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_smem_access_alignment)
+    set_target_properties(rocke_smem_access_alignment
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_smem_access_alignment
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_smem_access_alignment)
+  endif()
+
+  # The alignment a global vector load or store claims in the C++ engine's
+  # LLVM and HIP lowerings (tests/core/test_global_access_alignment.py through
+  # the C API).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_global_access_alignment.cpp")
+    add_executable(rocke_global_access_alignment core/test_global_access_alignment.cpp)
+    target_link_libraries(rocke_global_access_alignment PRIVATE rocke_core)
+    add_test(NAME rocke_global_access_alignment COMMAND rocke_global_access_alignment)
+    set_tests_properties(rocke_global_access_alignment
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_global_access_alignment)
+    set_target_properties(rocke_global_access_alignment
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_global_access_alignment
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_global_access_alignment)
+  endif()
+
   # Pins every opcode's value, name and purity: rocke_opcode_t is C ABI.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_opcode_values.cpp")
     add_executable(rocke_opcode_values core/test_opcode_values.cpp)
