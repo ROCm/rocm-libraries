@@ -2790,7 +2790,8 @@ def expand_sweep(
     ``reduction_strategies`` (Stream-K only) replaces the config's
     ``streamk_config.reduction_strategy`` list. It must be applied here rather
     than on the returned configs, because a fixed C width that is illegal for
-    the atomic strategy is legal for linear and tree.
+    the atomic strategy is legal for linear and tree. Unknown strategies, or
+    the argument with another variant, raise ValueError.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2855,6 +2856,14 @@ def expand_sweep(
         reductions = reduction_strategies or _expand_values(
             sk.get("reduction_strategy"), ["atomic"]
         )
+        valid = _codegen_common().STREAMK_REDUCTION_STRATEGIES
+        unknown = sorted(set(reductions) - set(valid))
+        if unknown:
+            raise ValueError(
+                f"Unknown Stream-K reduction strategy {unknown}; valid: {list(valid)}"
+            )
+    elif reduction_strategies:
+        raise ValueError(f"reduction_strategies is Stream-K only, not {variant!r}")
     else:
         reductions = ["atomic"]
 

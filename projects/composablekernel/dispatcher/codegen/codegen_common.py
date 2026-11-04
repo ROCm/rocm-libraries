@@ -811,6 +811,7 @@ _VEC_ELEMENT_BYTES = {
 }
 # Smallest C store, in bytes, that Stream-K's atomic reduction can add into C.
 _STREAMK_ATOMIC_MIN_C_BYTES = 4
+STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
 
 
 def streamk_atomic_c_reject_reason(
@@ -822,9 +823,10 @@ def streamk_atomic_c_reject_reason(
     at least 4 bytes per store (a narrower atomic C does not compile). Linear and
     tree reduce the partials in the accumulator-type workspace and store C with a
     plain store (StreamKTilePartitionerBase::MemoryOperation is ``set``), so any
-    width works for them. ``vector_size_c`` of 0 means native.
+    width works for them. ``vector_size_c`` of 0 means native, and a None strategy
+    defers the check to the caller. An unknown strategy gets the atomic rules.
     """
-    if reduction_strategy != "atomic" or not vector_size_c:
+    if reduction_strategy in (None, "linear", "tree") or not vector_size_c:
         return None
     if vector_size_c * _VEC_ELEMENT_BYTES[dtype_c] < _STREAMK_ATOMIC_MIN_C_BYTES:
         return (

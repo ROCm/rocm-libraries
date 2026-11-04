@@ -243,14 +243,15 @@ class TestResolution(unittest.TestCase):
 
     def test_stream_k_c_rule_follows_reduction_strategy(self):
         # Only atomic adds partial tiles into C and needs >= 4 bytes; linear and tree
-        # store C with a plain store, and None defers the check to the caller.
+        # store C with a plain store, None defers the check to the caller, and an
+        # unknown strategy fails closed.
         for strategy, dtype_c, width in itertools.product(
-            ("atomic", "linear", "tree", None),
+            ("atomic", "linear", "tree", None, "unknown"),
             ("bf16", "fp16", "fp32", "int32"),
             (0, 1, 2),
         ):
             narrow = width == 1 and dtype_c in ("bf16", "fp16")  # 2 bytes
-            rejected = strategy == "atomic" and narrow
+            rejected = strategy in ("atomic", "unknown") and narrow
             with self.subTest(strategy=strategy, dtype_c=dtype_c, width=width):
                 reason = streamk_atomic_c_reject_reason(strategy, width, dtype_c)
                 self.assertEqual(reason is not None, rejected)
@@ -770,6 +771,16 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
         self.assertEqual({c.reduction_strategy for c in configs}, {"linear"})
         fixed = {c.effective_vector_sizes for c in configs if any(c.vector_sizes)}
         self.assertIn((8, 1, 1), fixed)
+
+    def test_strategy_override_is_validated(self):
+        from gemm_utils import expand_sweep
+
+        for variant, strategies in (("stream_k", ["linaer"]), ("standard", ["linear"])):
+            with self.subTest(variant=variant), self.assertRaises(ValueError):
+                expand_sweep(
+                    str(self.CONFIG), "gfx1250", dtype="bf16", variant=variant,
+                    reduction_strategies=strategies,
+                )
 
 
 class TestExpandSweep(unittest.TestCase):
