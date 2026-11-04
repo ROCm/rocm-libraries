@@ -25,6 +25,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <mutex>
 #include <hip/atomic>
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
 #include <hip/std/atomic>
@@ -403,6 +405,44 @@ static __host__ T readDeviceWord(const T *src) {
     return *const_cast<volatile T *>(slot);
 }
 
+static __global__ void writeDeviceBytesKernel(const unsigned char *src, unsigned char *dst, size_t bytes) {
+    const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (((reinterpret_cast<uintptr_t>(dst) | bytes) & 7U) == 0) {
+        if (i < bytes / 8) {
+            reinterpret_cast<uint64_t *>(dst)[i] = reinterpret_cast<const uint64_t *>(src)[i];
+        }
+    } else if (i < bytes) {
+        dst[i] = src[i];
+    }
+}
+
+// Copies host memory to device memory while threading_main is running, and returns once it has landed. A host-to-device
+// hipMemcpyAsync is a blit kernel with 512-lane workgroups, which never fit beside a scheduler that has filled a WGP's
+// registers, so the host would wait forever. Single-wave blocks each fit in any free slot.
+static __host__ void writeDeviceBytes(void *dst, const void *src, size_t bytes) {
+    // Never freed: hipHostFree waits for all running kernels, threading_main included.
+    static unsigned char *staging = nullptr;
+    static size_t capacity = 0;
+    static ::std::mutex stagingMutex;
+
+    ::std::lock_guard<::std::mutex> lock(stagingMutex);
+    if (bytes > capacity) {
+        const size_t newCapacity = ::std::max<size_t>(bytes, 2 * capacity);
+        void *temp;
+        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(&temp, newCapacity, hipHostMallocMapped | hipHostMallocCoherent));
+        staging = static_cast<unsigned char *>(temp);
+        capacity = newCapacity;
+    }
+    ::std::memcpy(staging, src, bytes);
+
+    constexpr uint32_t waveLanes = 32;
+    const size_t lanes = ((reinterpret_cast<uintptr_t>(dst) | bytes) & 7U) == 0 ? bytes / 8 : bytes;
+    const uint32_t blocks = static_cast<uint32_t>((lanes + waveLanes - 1) / waveLanes);
+    hipLaunchKernelGGL(writeDeviceBytesKernel, dim3(blocks), dim3(waveLanes), 0, getEnqueingStream(), staging,
+                       static_cast<unsigned char *>(dst), bytes);
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+}
+
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
@@ -483,10 +523,7 @@ __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::se
     this->link_to_self = new_location;
 
     ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(hip::malloc(this->worknodeSize)));
-    __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), this, this->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
-    hipEvent_t copyFinished;
-    __LIBHIPTHREADS_HIP_CHECK__(hipEventCreate(&copyFinished));
-    __LIBHIPTHREADS_HIP_CHECK__(hipEventRecord(copyFinished, getEnqueingStream()));
+    writeDeviceBytes(worknode_d.get(), this, this->worknodeSize);
 
     // *new_location = worknode_d.get();
     __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue64(getEnqueingStream(), new_location, reinterpret_cast<uintptr_t>(worknode_d.get()), 0));
@@ -504,7 +541,6 @@ __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::se
 
     // __LIBHIPTHREADS_HIP_CHECK__(hipMemsetAsync(new_location, (reinterpret_cast<uintptr_t>(worknode_d.get()) & 0xFF) | 0x1, 1, getEnqueingStream()));
 
-    __LIBHIPTHREADS_HIP_CHECK__(hipEventSynchronize(copyFinished));
     return worknode_d;
 }
 __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU() {
