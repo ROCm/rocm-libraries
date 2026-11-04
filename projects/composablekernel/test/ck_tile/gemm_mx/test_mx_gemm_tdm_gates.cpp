@@ -299,7 +299,8 @@ const std::vector<index_t> kKTailKs{2, 24, 80, 90, 92, 160, 240, 296, 488, 1840}
 // K values with a partial last K tile for pk_fp6x16_t, which packs 16 elements along K: each is a
 // multiple of 16 and none of 128, so none is a multiple of any K tile of the FP6 TDM gtests (128 to
 // 384); 16 to 112 are below one 128-deep K tile; all but 96 and 160 leave a partial last
-// 32-element scale block; with a 128-deep K tile the K loop runs 1, 2, 4, 5 or 15 times.
+// 32-element scale block; with a 128-deep K tile the K loop runs 1, 2, 4, 5 or 15 times. Keep in
+// sync with kF6KTailKs of test_mx_gemm_tdm_k_tail.cpp, which runs these K.
 const std::vector<index_t> kF6KTailKs{16, 48, 96, 112, 144, 160, 240, 400, 528, 1840};
 
 TEST(MxGemmTdmGates, AcceptsTestedShapes)
