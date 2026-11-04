@@ -49,6 +49,7 @@ from codegen_common import (
     gemm_vector_size_suffix,
     resolve_gemm_vector_sizes,
     streamk_c_reject_reason,
+    STREAMK_REDUCTION_STRATEGIES,
     normalize_gfx_arch,
     is_preshuffle_config_valid,  # noqa: F401 (re-exported)
     warp_size_for_arch,
@@ -1699,7 +1700,7 @@ class UnifiedGemmCodegen:
             },
             "streamk_config": {
                 # Each reduction strategy compiles to a separate kernel binary.
-                "reduction_strategy": ["atomic", "linear", "tree"],
+                "reduction_strategy": list(STREAMK_REDUCTION_STRATEGIES),
             },
         }
 

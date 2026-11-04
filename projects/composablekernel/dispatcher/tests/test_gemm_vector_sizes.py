@@ -50,6 +50,7 @@ from codegen_common import (  # noqa: E402
     gemm_vector_size_sweep,
     resolve_gemm_vector_sizes,
     streamk_c_reject_reason,
+    STREAMK_REDUCTION_STRATEGIES,
 )
 from unified_gemm_codegen import (  # noqa: E402
     CKTileKernelGenerator,
@@ -678,7 +679,7 @@ class TestStreamKMisalignedShapes(unittest.TestCase):
         DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "gemm_streamk" / "configs"
         / "gfx1250_config.json"
     )
-    ALL_STRATEGIES = ["atomic", "linear", "tree"]
+    ALL_STRATEGIES = list(STREAMK_REDUCTION_STRATEGIES)
 
     @contextlib.contextmanager
     def _config(self, strategies, codegen_json=None):
