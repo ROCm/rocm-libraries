@@ -385,7 +385,12 @@ generator writes the UED too, so record the same binding in the config, or the n
 regeneration drops it (and the regeneration gate's byte compare fails):
 
 1. Run `uhd_gen promote` on the bundle. It prints the arch and the model's UHD id.
-2. Add them to `engine.heuristics`, in the order promote added them:
+2. Add them to `engine.heuristics`, in the order promote added them. For a registry-driven
+   engine put them in the manifest's `engine` block (`configs/<bundle>.engine.yaml`) **and**
+   the selection (`configs/<bundle>.yaml`): `registry_enumerator.py` copies the manifest's
+   `engine` into every config it writes, and regeneration gate g4 requires the selection's
+   engine to equal it, so a binding only in the selection fails g4 and the next
+   enumeration drops it.
 
    ```yaml
    engine:
